@@ -15,3 +15,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0008](0008-adapter-abi.md) | Adapter ABI surface | Accepted |
 | [0009](0009-source-revisions-and-id-rendering.md) | Source revisions, dedup policy and id rendering | Accepted; §3–§5 amended by 0010 |
 | [0010](0010-lossless-local-locations.md) | Lossless local locations: raw names, symlinks, absences | Accepted |
+| [0011](0011-knowledge-json-and-types.md) | `Knowledge[T]`: JSON shape, Python types, provenance slot | Accepted |
