@@ -56,12 +56,15 @@ bottom line up front (BLUF):
 | `Closes MVL-N` | 1 line | links the issue |
 | **TL;DR** | 1 line | what now exists that didn't before |
 | **Decided** | ≤5 bullets, ≤15 words each | decisions and trade-offs, not files |
-| **Your call** | ≤3 bullets | where the maintainer's judgment is needed; "none" if none |
 | **Progress** | 1 line | milestone count + next issue, e.g. `M1 3/9 · next: MVL-40` |
 | Details (collapsed) | — | acceptance checklist, `make check` result, docs/ADRs touched, follow-ups |
 
 No paragraphs in the visible part. Design depth belongs in ADRs and docs, linked rather than pasted. An
 unticked acceptance box means the PR stays a draft. Linear comments on status changes follow the same shape.
+
+There is no "Your call" section. Agents make every decision with their best judgement and state it under
+**Decided**, with an ADR when it is architectural. PRs, Linear comments and reports never ask the maintainer
+to choose; the maintainer can still overrule anything in review.
 
 **Architecture change.** `ARCHITECTURE.md` is a single diagram, never prose. After each PR, ask whether it
 changes a box, an arrow, which box owns a responsibility, or a box's built/partial/not-built styling. If it
