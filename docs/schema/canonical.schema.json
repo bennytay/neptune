@@ -1,0 +1,6065 @@
+{
+  "$defs": {
+    "AdapterLocator": {
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean"
+        ]
+      },
+      "properties": {
+        "kind": {
+          "pattern": "^[a-z][a-z0-9_.\\-]*:[a-z][a-z0-9_]*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "AssertionKind": {
+      "enum": [
+        "observed",
+        "stated"
+      ]
+    },
+    "Asset": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string"
+          },
+          "type": "array"
+        },
+        "category": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "asset"
+        },
+        "location": {
+          "$ref": "#/$defs/Knowledge_GeodeticPosition"
+        },
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "parent": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        }
+      },
+      "required": [
+        "aliases",
+        "category",
+        "id",
+        "identifiers",
+        "kind",
+        "location",
+        "name",
+        "parent",
+        "provenance",
+        "schema_version",
+        "site"
+      ],
+      "type": "object"
+    },
+    "AxisConvention": {
+      "enum": [
+        "enu",
+        "ned",
+        "nwu",
+        "flu",
+        "frd",
+        "rdf",
+        "rub",
+        "ruf",
+        "fru"
+      ]
+    },
+    "BlockRole": {
+      "enum": [
+        "heading",
+        "paragraph",
+        "list_item",
+        "table",
+        "figure",
+        "caption",
+        "code",
+        "quote",
+        "formula",
+        "header",
+        "footer",
+        "footnote"
+      ]
+    },
+    "BuildId": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "build_id"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ByteRange": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "byte_range"
+        },
+        "length": {
+          "type": "integer"
+        },
+        "offset": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "length",
+        "offset"
+      ],
+      "type": "object"
+    },
+    "Calibration": {
+      "additionalProperties": false,
+      "properties": {
+        "extrinsics": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        },
+        "hardware_revision": {
+          "$ref": "#/$defs/Knowledge_DeclaredVersion"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "calibration"
+        },
+        "machine": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "parameters": {
+          "items": {
+            "$ref": "#/$defs/CalibrationParameter"
+          },
+          "type": "array"
+        },
+        "performed": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "subject": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "valid_from": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        }
+      },
+      "required": [
+        "extrinsics",
+        "hardware_revision",
+        "id",
+        "kind",
+        "machine",
+        "parameters",
+        "performed",
+        "provenance",
+        "schema_version",
+        "subject",
+        "valid_from",
+        "valid_until"
+      ],
+      "type": "object"
+    },
+    "CalibrationParameter": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        },
+        "value": {
+          "$ref": "#/$defs/Knowledge_string_or_list_of_number_or_NonFinite"
+        }
+      },
+      "required": [
+        "name",
+        "unit",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Capture": {
+      "additionalProperties": false,
+      "properties": {
+        "device_identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "device_manufacturer": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "device_model": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "position": {
+          "$ref": "#/$defs/Knowledge_GeodeticPosition"
+        },
+        "time": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        }
+      },
+      "required": [
+        "device_identifiers",
+        "device_manufacturer",
+        "device_model",
+        "position",
+        "time"
+      ],
+      "type": "object"
+    },
+    "ClockRole": {
+      "enum": [
+        "receive",
+        "publish",
+        "sample",
+        "document"
+      ]
+    },
+    "ComponentCategory": {
+      "enum": [
+        "link",
+        "joint",
+        "sensor",
+        "actuator",
+        "computer",
+        "power",
+        "payload",
+        "tool"
+      ]
+    },
+    "ConfigHash": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "ContainerImageDigest": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "container_image_digest"
+        }
+      },
+      "required": [
+        "digest",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ContentId": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "CrsCode": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "authority",
+        "code"
+      ],
+      "type": "object"
+    },
+    "DeclaredVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "declared_version"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
+    "DocumentBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "document": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "document_block"
+        },
+        "level": {
+          "$ref": "#/$defs/Knowledge_integer"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "region": {
+          "$ref": "#/$defs/Knowledge_EvidenceRef"
+        },
+        "role": {
+          "$ref": "#/$defs/Knowledge_BlockRole"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "text": {
+          "$ref": "#/$defs/Knowledge_string"
+        }
+      },
+      "required": [
+        "document",
+        "id",
+        "kind",
+        "level",
+        "order",
+        "provenance",
+        "region",
+        "role",
+        "schema_version",
+        "text"
+      ],
+      "type": "object"
+    },
+    "DocumentPage": {
+      "additionalProperties": false,
+      "properties": {
+        "height": {
+          "$ref": "#/$defs/Knowledge_number"
+        },
+        "label": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "rotation": {
+          "$ref": "#/$defs/Knowledge_integer"
+        },
+        "width": {
+          "$ref": "#/$defs/Knowledge_number"
+        }
+      },
+      "required": [
+        "height",
+        "label",
+        "rotation",
+        "width"
+      ],
+      "type": "object"
+    },
+    "DocumentRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "document_record"
+        },
+        "pages": {
+          "items": {
+            "$ref": "#/$defs/DocumentPage"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "title": {
+          "$ref": "#/$defs/Knowledge_string"
+        }
+      },
+      "required": [
+        "format",
+        "id",
+        "kind",
+        "pages",
+        "provenance",
+        "schema_version",
+        "title"
+      ],
+      "type": "object"
+    },
+    "Duration": {
+      "additionalProperties": false,
+      "properties": {
+        "domain_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "ticks": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "domain_id",
+        "ticks"
+      ],
+      "type": "object"
+    },
+    "Epoch": {
+      "enum": [
+        "unix",
+        "gps",
+        "boot",
+        "first_sample",
+        "simulation_start"
+      ]
+    },
+    "EulerAngles": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "euler_angles"
+        },
+        "mode": {
+          "$ref": "#/$defs/Knowledge_EulerMode"
+        },
+        "sequence": {
+          "$ref": "#/$defs/Knowledge_EulerSequence"
+        },
+        "unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        },
+        "values": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "mode",
+        "sequence",
+        "unit",
+        "values"
+      ],
+      "type": "object"
+    },
+    "EulerMode": {
+      "enum": [
+        "intrinsic",
+        "extrinsic"
+      ]
+    },
+    "EulerSequence": {
+      "enum": [
+        "XYZ",
+        "XZY",
+        "YXZ",
+        "YZX",
+        "ZXY",
+        "ZYX",
+        "XYX",
+        "XZX",
+        "YXY",
+        "YZY",
+        "ZXZ",
+        "ZYZ"
+      ]
+    },
+    "EvidenceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "locator": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ByteRange"
+              },
+              {
+                "$ref": "#/$defs/RecordRange"
+              },
+              {
+                "$ref": "#/$defs/Page"
+              },
+              {
+                "$ref": "#/$defs/PageRegion"
+              },
+              {
+                "$ref": "#/$defs/Span"
+              },
+              {
+                "$ref": "#/$defs/Row"
+              },
+              {
+                "$ref": "#/$defs/RowCell"
+              },
+              {
+                "$ref": "#/$defs/ImageRegion"
+              },
+              {
+                "$ref": "#/$defs/VideoFrame"
+              },
+              {
+                "$ref": "#/$defs/JsonPointer"
+              },
+              {
+                "$ref": "#/$defs/FrameLocator"
+              },
+              {
+                "$ref": "#/$defs/ObjectLocator"
+              },
+              {
+                "$ref": "#/$defs/AdapterLocator"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentId"
+            },
+            {
+              "$ref": "#/$defs/ExternalObjectRef"
+            }
+          ]
+        }
+      },
+      "required": [
+        "locator",
+        "source"
+      ],
+      "type": "object"
+    },
+    "ExternalObjectRef": {
+      "additionalProperties": false,
+      "properties": {
+        "connector_id": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "external"
+        },
+        "object_id": {
+          "type": "string"
+        },
+        "revision_token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connector_id",
+        "kind",
+        "object_id",
+        "revision_token"
+      ],
+      "type": "object"
+    },
+    "FindingCategory": {
+      "enum": [
+        "corrupt",
+        "unsupported",
+        "unrepresentable",
+        "missing",
+        "ambiguous",
+        "inconsistent",
+        "skipped",
+        "limit",
+        "failed"
+      ]
+    },
+    "FirmwareVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "firmware_version"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Fraction": {
+      "additionalProperties": false,
+      "properties": {
+        "denominator": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "numerator": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "denominator",
+        "numerator"
+      ],
+      "type": "object"
+    },
+    "Frame": {
+      "additionalProperties": false,
+      "properties": {
+        "axes": {
+          "$ref": "#/$defs/Knowledge_AxisConvention"
+        },
+        "handedness": {
+          "$ref": "#/$defs/Knowledge_Handedness"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "frame"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "ref": {
+          "$ref": "#/$defs/FrameRef"
+        },
+        "schema_version": {
+          "const": 0
+        }
+      },
+      "required": [
+        "axes",
+        "handedness",
+        "id",
+        "kind",
+        "provenance",
+        "ref",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "FrameGraph": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "frame_graph"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "scope": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "provenance",
+        "schema_version",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "FrameLocator": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "frame"
+        },
+        "ref": {
+          "$ref": "#/$defs/FrameRef"
+        }
+      },
+      "required": [
+        "kind",
+        "ref"
+      ],
+      "type": "object"
+    },
+    "FrameRef": {
+      "additionalProperties": false,
+      "properties": {
+        "frame_graph_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "frame_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame_graph_id",
+        "frame_id"
+      ],
+      "type": "object"
+    },
+    "FrameTransform": {
+      "additionalProperties": false,
+      "properties": {
+        "child": {
+          "$ref": "#/$defs/FrameRef"
+        },
+        "direction": {
+          "$ref": "#/$defs/Knowledge_TransformDirection"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "frame_transform"
+        },
+        "parent": {
+          "$ref": "#/$defs/FrameRef"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "validity": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "static"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "stamped"
+                },
+                "stamp": {
+                  "$ref": "#/$defs/Timestamp"
+                }
+              },
+              "required": [
+                "kind",
+                "stamp"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pose"
+            },
+            {
+              "$ref": "#/$defs/HomogeneousMatrix"
+            }
+          ]
+        }
+      },
+      "required": [
+        "child",
+        "direction",
+        "id",
+        "kind",
+        "parent",
+        "provenance",
+        "schema_version",
+        "validity",
+        "value"
+      ],
+      "type": "object"
+    },
+    "GeodeticPosition": {
+      "additionalProperties": false,
+      "properties": {
+        "angle_unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        },
+        "crs": {
+          "$ref": "#/$defs/Knowledge_CrsCode"
+        },
+        "height": {
+          "$ref": "#/$defs/Knowledge_number"
+        },
+        "height_reference": {
+          "$ref": "#/$defs/Knowledge_HeightReference"
+        },
+        "height_unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        },
+        "latitude": {
+          "type": "number"
+        },
+        "longitude": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "angle_unit",
+        "crs",
+        "height",
+        "height_reference",
+        "height_unit",
+        "latitude",
+        "longitude"
+      ],
+      "type": "object"
+    },
+    "GitCommit": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "git_commit"
+        },
+        "sha": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "sha"
+      ],
+      "type": "object"
+    },
+    "Handedness": {
+      "enum": [
+        "right",
+        "left"
+      ]
+    },
+    "HardwareComponent": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/ComponentCategory"
+        },
+        "configuration": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "frame": {
+          "$ref": "#/$defs/Knowledge_FrameRef"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "hardware_component"
+        },
+        "model": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        }
+      },
+      "required": [
+        "category",
+        "configuration",
+        "frame",
+        "id",
+        "identifiers",
+        "kind",
+        "model",
+        "name",
+        "provenance",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "HardwareConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "hardware_configuration"
+        },
+        "machine": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "revision": {
+          "$ref": "#/$defs/Knowledge_DeclaredVersion"
+        },
+        "schema_version": {
+          "const": 0
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "machine",
+        "name",
+        "provenance",
+        "revision",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "HashAlgorithm": {
+      "enum": [
+        "md5",
+        "sha1",
+        "sha256",
+        "sha384",
+        "sha512"
+      ]
+    },
+    "HeightReference": {
+      "enum": [
+        "ellipsoid",
+        "mean_sea_level",
+        "home",
+        "ground"
+      ]
+    },
+    "HomogeneousMatrix": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "homogeneous_matrix"
+        },
+        "layout": {
+          "$ref": "#/$defs/Knowledge_MatrixLayout"
+        },
+        "translation_unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        },
+        "values": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "layout",
+        "translation_unit",
+        "values"
+      ],
+      "type": "object"
+    },
+    "Image": {
+      "additionalProperties": false,
+      "properties": {
+        "capture": {
+          "$ref": "#/$defs/Capture"
+        },
+        "encoding": {
+          "type": "string"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "image"
+        },
+        "orientation": {
+          "$ref": "#/$defs/Knowledge_integer"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "width": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "capture",
+        "encoding",
+        "height",
+        "id",
+        "kind",
+        "orientation",
+        "provenance",
+        "schema_version",
+        "width"
+      ],
+      "type": "object"
+    },
+    "ImageRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "image_region"
+        },
+        "x0": {
+          "type": "integer"
+        },
+        "x1": {
+          "type": "integer"
+        },
+        "y0": {
+          "type": "integer"
+        },
+        "y1": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "x0",
+        "x1",
+        "y0",
+        "y1"
+      ],
+      "type": "object"
+    },
+    "IngestFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/FindingCategory"
+        },
+        "code": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "ingest_finding"
+        },
+        "message": {
+          "type": "string"
+        },
+        "records": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "evidence"
+                },
+                "ref": {
+                  "$ref": "#/$defs/EvidenceRef"
+                }
+              },
+              "required": [
+                "kind",
+                "ref"
+              ],
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/LocalPath"
+            },
+            {
+              "$ref": "#/$defs/RawLocalPath"
+            },
+            {
+              "$ref": "#/$defs/ExternalObjectRef"
+            }
+          ]
+        },
+        "transform": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "category",
+        "code",
+        "details",
+        "id",
+        "kind",
+        "message",
+        "records",
+        "related",
+        "schema_version",
+        "severity",
+        "subject",
+        "transform"
+      ],
+      "type": "object"
+    },
+    "JsonPointer": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "json_pointer"
+        },
+        "pointer": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "pointer"
+      ],
+      "type": "object"
+    },
+    "Knowledge_AxisConvention": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/AxisConvention"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/AxisConvention"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_BlockRole": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/BlockRole"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/BlockRole"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_BuildId": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/BuildId"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/BuildId"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_ClockRole": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/ClockRole"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/ClockRole"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_CrsCode": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/CrsCode"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/CrsCode"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_DeclaredVersion": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/DeclaredVersion"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/DeclaredVersion"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_Duration": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/Duration"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/Duration"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_Epoch": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/Epoch"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/Epoch"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_EulerMode": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/EulerMode"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/EulerMode"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_EulerSequence": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/EulerSequence"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/EulerSequence"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_EvidenceRef": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/EvidenceRef"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/EvidenceRef"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_Fraction": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/Fraction"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/Fraction"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_FrameRef": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/FrameRef"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/FrameRef"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_GeodeticPosition": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/GeodeticPosition"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/GeodeticPosition"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_GitCommit": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/GitCommit"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/GitCommit"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_Handedness": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/Handedness"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/Handedness"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_HeightReference": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/HeightReference"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/HeightReference"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_LogicalId": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/LogicalId"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/LogicalId"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_MatrixLayout": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/MatrixLayout"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/MatrixLayout"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_ModelCheckpointHash_or_ContainerImageDigest": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelCheckpointHash"
+                },
+                {
+                  "$ref": "#/$defs/ContainerImageDigest"
+                }
+              ]
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/ModelCheckpointHash"
+                      },
+                      {
+                        "$ref": "#/$defs/ContainerImageDigest"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_QuaternionConvention": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/QuaternionConvention"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/QuaternionConvention"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_QuaternionOrder": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/QuaternionOrder"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/QuaternionOrder"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_SemanticVersion_or_DeclaredVersion_or_FirmwareVersion": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SemanticVersion"
+                },
+                {
+                  "$ref": "#/$defs/DeclaredVersion"
+                },
+                {
+                  "$ref": "#/$defs/FirmwareVersion"
+                }
+              ]
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/SemanticVersion"
+                      },
+                      {
+                        "$ref": "#/$defs/DeclaredVersion"
+                      },
+                      {
+                        "$ref": "#/$defs/FirmwareVersion"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_Timescale": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/Timescale"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/Timescale"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_Timestamp": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/Timestamp"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/Timestamp"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_TransformDirection": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/TransformDirection"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/TransformDirection"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_Unit": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "$ref": "#/$defs/Unit"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/Unit"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_boolean": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_integer": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_list_of_string": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_number": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_string": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_string_or_integer_or_boolean_or_number_or_NonFinite": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "$ref": "#/$defs/NonFinite"
+                }
+              ]
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/NonFinite"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_string_or_list_of_number_or_NonFinite": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/NonFinite"
+                      }
+                    ]
+                  },
+                  "type": "array"
+                }
+              ]
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "$ref": "#/$defs/NonFinite"
+                            }
+                          ]
+                        },
+                        "type": "array"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LocalPath": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "local"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    "LogicalId": {
+      "additionalProperties": false,
+      "properties": {
+        "namespace": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "namespace",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Machine": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "machine"
+        },
+        "manufacturer": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "model": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        }
+      },
+      "required": [
+        "id",
+        "identifiers",
+        "kind",
+        "manufacturer",
+        "model",
+        "provenance",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "MatrixLayout": {
+      "enum": [
+        "row_major",
+        "column_major"
+      ]
+    },
+    "ModelCheckpointHash": {
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "$ref": "#/$defs/HashAlgorithm"
+        },
+        "digest": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "model_checkpoint_hash"
+        }
+      },
+      "required": [
+        "algorithm",
+        "digest",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "NonFinite": {
+      "additionalProperties": false,
+      "properties": {
+        "non_finite": {
+          "enum": [
+            "nan",
+            "inf",
+            "-inf"
+          ]
+        }
+      },
+      "required": [
+        "non_finite"
+      ],
+      "type": "object"
+    },
+    "ObjectLocator": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "object"
+        },
+        "object_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "object_id"
+      ],
+      "type": "object"
+    },
+    "Page": {
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer"
+        },
+        "kind": {
+          "const": "page"
+        }
+      },
+      "required": [
+        "index",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "PageRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "page_region"
+        },
+        "page": {
+          "type": "integer"
+        },
+        "x0": {
+          "type": "number"
+        },
+        "x1": {
+          "type": "number"
+        },
+        "y0": {
+          "type": "number"
+        },
+        "y1": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "page",
+        "x0",
+        "x1",
+        "y0",
+        "y1"
+      ],
+      "type": "object"
+    },
+    "Pose": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "pose"
+        },
+        "rotation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Quaternion"
+            },
+            {
+              "$ref": "#/$defs/RotationMatrix"
+            },
+            {
+              "$ref": "#/$defs/EulerAngles"
+            },
+            {
+              "$ref": "#/$defs/RotationVector"
+            }
+          ]
+        },
+        "translation": {
+          "$ref": "#/$defs/Translation"
+        }
+      },
+      "required": [
+        "kind",
+        "rotation",
+        "translation"
+      ],
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion_kind": {
+          "$ref": "#/$defs/AssertionKind"
+        },
+        "evidence": {
+          "$ref": "#/$defs/EvidenceRef"
+        },
+        "transform": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "assertion_kind",
+        "evidence",
+        "transform"
+      ],
+      "type": "object"
+    },
+    "Quaternion": {
+      "additionalProperties": false,
+      "properties": {
+        "convention": {
+          "$ref": "#/$defs/Knowledge_QuaternionConvention"
+        },
+        "kind": {
+          "const": "quaternion"
+        },
+        "order": {
+          "$ref": "#/$defs/Knowledge_QuaternionOrder"
+        },
+        "values": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "convention",
+        "kind",
+        "order",
+        "values"
+      ],
+      "type": "object"
+    },
+    "QuaternionConvention": {
+      "enum": [
+        "hamilton",
+        "jpl"
+      ]
+    },
+    "QuaternionOrder": {
+      "enum": [
+        "xyzw",
+        "wxyz"
+      ]
+    },
+    "RawLocalPath": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "local_raw"
+        },
+        "path_hex": {
+          "pattern": "^([0-9a-f]{2})+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path_hex"
+      ],
+      "type": "object"
+    },
+    "RecordId": {
+      "pattern": "^rec:sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "RecordRange": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "type": "string"
+        },
+        "domain_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "end": {
+          "type": "integer"
+        },
+        "kind": {
+          "const": "record_range"
+        },
+        "start": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "channel",
+        "domain_id",
+        "end",
+        "kind",
+        "start"
+      ],
+      "type": "object"
+    },
+    "RotationMatrix": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "rotation_matrix"
+        },
+        "layout": {
+          "$ref": "#/$defs/Knowledge_MatrixLayout"
+        },
+        "values": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "layout",
+        "values"
+      ],
+      "type": "object"
+    },
+    "RotationVector": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "rotation_vector"
+        },
+        "unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        },
+        "values": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "unit",
+        "values"
+      ],
+      "type": "object"
+    },
+    "Row": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "row"
+        },
+        "row": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "row"
+      ],
+      "type": "object"
+    },
+    "RowCell": {
+      "additionalProperties": false,
+      "properties": {
+        "column": {
+          "type": "integer"
+        },
+        "column_name": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "row_cell"
+        },
+        "row": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "column",
+        "kind",
+        "row"
+      ],
+      "type": "object"
+    },
+    "Run": {
+      "additionalProperties": false,
+      "properties": {
+        "first": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "run"
+        },
+        "last": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "logical_id": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "machine": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        }
+      },
+      "required": [
+        "first",
+        "id",
+        "kind",
+        "last",
+        "logical_id",
+        "machine",
+        "provenance",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "SemanticVersion": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "semver"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "type": "object"
+    },
+    "SeriesProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "assertion_kind": {
+          "$ref": "#/$defs/AssertionKind"
+        },
+        "locator": {
+          "items": {
+            "$ref": "#/$defs/StepTemplate"
+          },
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/ContentId"
+        }
+      },
+      "required": [
+        "assertion_kind",
+        "locator",
+        "source"
+      ],
+      "type": "object"
+    },
+    "Severity": {
+      "enum": [
+        "error",
+        "warning",
+        "info"
+      ]
+    },
+    "Site": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "site"
+        },
+        "location": {
+          "$ref": "#/$defs/Knowledge_GeodeticPosition"
+        },
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "parent": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        }
+      },
+      "required": [
+        "aliases",
+        "id",
+        "identifiers",
+        "kind",
+        "location",
+        "name",
+        "parent",
+        "provenance",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "SoftwareConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "software_configuration"
+        },
+        "machine": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "software": {
+          "items": {
+            "$ref": "#/$defs/SoftwareItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "machine",
+        "provenance",
+        "schema_version",
+        "software"
+      ],
+      "type": "object"
+    },
+    "SoftwareItem": {
+      "additionalProperties": false,
+      "properties": {
+        "build": {
+          "$ref": "#/$defs/Knowledge_BuildId"
+        },
+        "commit": {
+          "$ref": "#/$defs/Knowledge_GitCommit"
+        },
+        "device": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "digest": {
+          "$ref": "#/$defs/Knowledge_ModelCheckpointHash_or_ContainerImageDigest"
+        },
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "release": {
+          "$ref": "#/$defs/Knowledge_SemanticVersion_or_DeclaredVersion_or_FirmwareVersion"
+        }
+      },
+      "required": [
+        "build",
+        "commit",
+        "device",
+        "digest",
+        "name",
+        "release"
+      ],
+      "type": "object"
+    },
+    "SourceAbsence": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "source_absence"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LocalPath"
+            },
+            {
+              "$ref": "#/$defs/RawLocalPath"
+            },
+            {
+              "$ref": "#/$defs/ExternalObjectRef"
+            }
+          ]
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "supersedes": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "location",
+        "schema_version",
+        "supersedes"
+      ],
+      "type": "object"
+    },
+    "SourceArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "chunk_size": {
+          "type": "integer"
+        },
+        "chunks": {
+          "items": {
+            "$ref": "#/$defs/ContentId"
+          },
+          "type": "array"
+        },
+        "content_id": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "kind": {
+          "const": "source_artifact"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "chunk_size",
+        "chunks",
+        "content_id",
+        "kind",
+        "schema_version",
+        "size"
+      ],
+      "type": "object"
+    },
+    "SourceRevision": {
+      "additionalProperties": false,
+      "properties": {
+        "content_id": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "source_revision"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LocalPath"
+            },
+            {
+              "$ref": "#/$defs/RawLocalPath"
+            },
+            {
+              "$ref": "#/$defs/ExternalObjectRef"
+            }
+          ]
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "supersedes": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "content_id",
+        "id",
+        "kind",
+        "location",
+        "schema_version",
+        "supersedes"
+      ],
+      "type": "object"
+    },
+    "Span": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "type": "integer"
+        },
+        "kind": {
+          "const": "span"
+        },
+        "start": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "end",
+        "kind",
+        "start"
+      ],
+      "type": "object"
+    },
+    "SpatialArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/SpatialCategory"
+        },
+        "crs": {
+          "$ref": "#/$defs/Knowledge_CrsCode"
+        },
+        "frame": {
+          "$ref": "#/$defs/Knowledge_FrameRef"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "spatial_artifact"
+        },
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        }
+      },
+      "required": [
+        "category",
+        "crs",
+        "frame",
+        "id",
+        "kind",
+        "name",
+        "provenance",
+        "schema_version",
+        "unit"
+      ],
+      "type": "object"
+    },
+    "SpatialCategory": {
+      "enum": [
+        "mesh",
+        "cad",
+        "point_cloud",
+        "raster_map",
+        "vector_map",
+        "scene"
+      ]
+    },
+    "StepTemplate": {
+      "additionalProperties": false,
+      "properties": {
+        "fixed": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "per_row": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "fixed",
+        "kind",
+        "per_row"
+      ],
+      "type": "object"
+    },
+    "Stream": {
+      "additionalProperties": false,
+      "properties": {
+        "clocks": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        },
+        "first": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "stream"
+        },
+        "last": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "message_count": {
+          "$ref": "#/$defs/Knowledge_integer"
+        },
+        "message_encoding": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "run": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "schema_definition": {
+          "$ref": "#/$defs/Knowledge_EvidenceRef"
+        },
+        "schema_encoding": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "schema_name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "series": {
+          "$ref": "#/$defs/SeriesProvenance"
+        },
+        "topic": {
+          "$ref": "#/$defs/Knowledge_string"
+        }
+      },
+      "required": [
+        "clocks",
+        "first",
+        "id",
+        "kind",
+        "last",
+        "message_count",
+        "message_encoding",
+        "metadata",
+        "provenance",
+        "run",
+        "schema_definition",
+        "schema_encoding",
+        "schema_name",
+        "schema_version",
+        "series",
+        "topic"
+      ],
+      "type": "object"
+    },
+    "StructuredRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "cells": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string_or_integer_or_boolean_or_number_or_NonFinite"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "structured_record"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "row": {
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "table": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "cells",
+        "id",
+        "kind",
+        "provenance",
+        "row",
+        "schema_version",
+        "table"
+      ],
+      "type": "object"
+    },
+    "StructuredTable": {
+      "additionalProperties": false,
+      "properties": {
+        "header": {
+          "$ref": "#/$defs/Knowledge_list_of_string"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "structured_table"
+        },
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        }
+      },
+      "required": [
+        "header",
+        "id",
+        "kind",
+        "name",
+        "provenance",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "Timescale": {
+      "enum": [
+        "utc",
+        "tai",
+        "gps",
+        "posix",
+        "monotonic",
+        "simulated"
+      ]
+    },
+    "Timestamp": {
+      "additionalProperties": false,
+      "properties": {
+        "domain_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "ticks": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "domain_id",
+        "ticks"
+      ],
+      "type": "object"
+    },
+    "TimestampDomain": {
+      "additionalProperties": false,
+      "properties": {
+        "declared_monotonic": {
+          "$ref": "#/$defs/Knowledge_boolean"
+        },
+        "epoch": {
+          "$ref": "#/$defs/Knowledge_Epoch"
+        },
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "timestamp_domain"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "resolution": {
+          "$ref": "#/$defs/Knowledge_Fraction"
+        },
+        "role": {
+          "$ref": "#/$defs/Knowledge_ClockRole"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "scope": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "timescale": {
+          "$ref": "#/$defs/Knowledge_Timescale"
+        }
+      },
+      "required": [
+        "declared_monotonic",
+        "epoch",
+        "field",
+        "id",
+        "kind",
+        "provenance",
+        "resolution",
+        "role",
+        "schema_version",
+        "scope",
+        "timescale"
+      ],
+      "type": "object"
+    },
+    "TransformDirection": {
+      "enum": [
+        "child_to_parent",
+        "parent_to_child"
+      ]
+    },
+    "TransformRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter_id": {
+          "type": "string"
+        },
+        "adapter_version": {
+          "type": "string"
+        },
+        "config": {
+          "type": "object"
+        },
+        "config_hash": {
+          "$ref": "#/$defs/ConfigHash"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "transform_record"
+        },
+        "libraries": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "upstream": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "adapter_id",
+        "adapter_version",
+        "config",
+        "config_hash",
+        "id",
+        "kind",
+        "libraries",
+        "schema_version",
+        "upstream"
+      ],
+      "type": "object"
+    },
+    "Translation": {
+      "additionalProperties": false,
+      "properties": {
+        "unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        },
+        "values": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "unit",
+        "values"
+      ],
+      "type": "object"
+    },
+    "Unit": {
+      "description": "a catalogued unit's canonical symbol (ADR 0013)",
+      "type": "string"
+    },
+    "Video": {
+      "additionalProperties": false,
+      "properties": {
+        "capture": {
+          "$ref": "#/$defs/Capture"
+        },
+        "clock": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "duration": {
+          "$ref": "#/$defs/Knowledge_Duration"
+        },
+        "encoding": {
+          "type": "string"
+        },
+        "frame_count": {
+          "$ref": "#/$defs/Knowledge_integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "video"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "track": {
+          "type": "integer"
+        },
+        "width": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "capture",
+        "clock",
+        "duration",
+        "encoding",
+        "frame_count",
+        "height",
+        "id",
+        "kind",
+        "provenance",
+        "schema_version",
+        "track",
+        "width"
+      ],
+      "type": "object"
+    },
+    "VideoFrame": {
+      "additionalProperties": false,
+      "properties": {
+        "domain_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "index": {
+          "type": "integer"
+        },
+        "kind": {
+          "const": "video_frame"
+        },
+        "pts": {
+          "type": "integer"
+        },
+        "track": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "domain_id",
+        "index",
+        "kind",
+        "pts",
+        "track"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:neptune:schema:canonical:0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/SourceArtifact"
+    },
+    {
+      "$ref": "#/$defs/SourceRevision"
+    },
+    {
+      "$ref": "#/$defs/SourceAbsence"
+    },
+    {
+      "$ref": "#/$defs/TransformRecord"
+    },
+    {
+      "$ref": "#/$defs/IngestFinding"
+    },
+    {
+      "$ref": "#/$defs/TimestampDomain"
+    },
+    {
+      "$ref": "#/$defs/FrameGraph"
+    },
+    {
+      "$ref": "#/$defs/Frame"
+    },
+    {
+      "$ref": "#/$defs/FrameTransform"
+    },
+    {
+      "$ref": "#/$defs/Run"
+    },
+    {
+      "$ref": "#/$defs/Stream"
+    },
+    {
+      "$ref": "#/$defs/Machine"
+    },
+    {
+      "$ref": "#/$defs/HardwareConfiguration"
+    },
+    {
+      "$ref": "#/$defs/HardwareComponent"
+    },
+    {
+      "$ref": "#/$defs/SoftwareConfiguration"
+    },
+    {
+      "$ref": "#/$defs/Calibration"
+    },
+    {
+      "$ref": "#/$defs/Site"
+    },
+    {
+      "$ref": "#/$defs/Asset"
+    },
+    {
+      "$ref": "#/$defs/SpatialArtifact"
+    },
+    {
+      "$ref": "#/$defs/Image"
+    },
+    {
+      "$ref": "#/$defs/Video"
+    },
+    {
+      "$ref": "#/$defs/DocumentRecord"
+    },
+    {
+      "$ref": "#/$defs/DocumentBlock"
+    },
+    {
+      "$ref": "#/$defs/StructuredTable"
+    },
+    {
+      "$ref": "#/$defs/StructuredRecord"
+    }
+  ],
+  "description": "One line of a Neptune ingest package's record tables (ADR 0002, ADR 0017). Generated from neptune.model; the Python readers are stricter (ADR 0021).",
+  "title": "Neptune canonical record, schema version 0"
+}
