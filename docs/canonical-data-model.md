@@ -39,10 +39,13 @@ a bug, not a value.
 - JSON: `{"knowledge": "<state>", ...}`, e.g. `{"knowledge":"known","value":30}`. Full shape: ADR 0011.
 - No confidence scores on evidence; uncertainty is `Ambiguous` / `Unknown` / `NotCovered` (ADR 0004 §6).
 
-## Time (ADR 0005, MVL-4)
+## Time (ADR 0005, ADR 0012; `model/time.py`)
 
-- `TimestampDomain` is an entity: clock identity, epoch/reference, resolution, monotonicity, source evidence.
-- `Timestamp = (ticks: int, domain_id)`. Never floats. Never bare.
+- `Timestamp = (ticks: int, domain_id)`: signed 64-bit, never floats, never bare. `Duration` carries its
+  domain too. Ordering and subtraction across domains raise; `==` is record equality, not simultaneity.
+- `TimestampDomain` is an entity: structural `field` + `scope` (where the ticks are read, verbatim) and
+  `Knowledge`-wrapped `role` (receive / publish / sample / document), `resolution` (exact `Fraction`
+  seconds per tick), `epoch`, `timescale`, `declared_monotonic`.
 - MCAP `log_time` and `publish_time`, ROS `header.stamp` and receive time, PX4 boot-time and GPS time are
   separate domains. Mappings between domains are `ClockAlignment` records produced in MVL-36 with method,
   evidence and error bounds.
