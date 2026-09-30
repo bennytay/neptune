@@ -41,8 +41,8 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class CAN,K1 built
-  class DISC,K2 partial
-  class RT,AD,PKG,VAL,DER,K3 todo
+  class DISC,PKG,K2 partial
+  class RT,AD,VAL,DER,K3 todo
   class RAW,MEM,RET,USE ext
   style N fill:#8b949e0f,stroke:#8b949e
   style D fill:none,stroke:#8b949e,stroke-dasharray:2 3

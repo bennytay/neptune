@@ -22,7 +22,8 @@ domains.
 | `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord` | `model/world.py` (ADR 0020) |
 | `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
 
-`IngestReceipt` is the package-level account of an ingest run, not a record table. Its layout belongs to MVL-5.
+`IngestReceipt` is the package-level account of an ingest run, not a record table: one document per package,
+beside `PackageManifest` and the volatile `ReceiptEnvelope` (`model/package.py`, ADR 0022).
 
 Naming decisions: `IngestFinding` (not `IntegrityFinding`). No `ProvenanceEdge` entity in v0 — provenance is
 embedded on each record. `EpisodeCandidate` / `Observation` are **reserved names, not modelled**: they are the
@@ -202,6 +203,21 @@ a bug, not a value.
   one row, cells in their source's types (a CSV's text stays text). Blank is `Unknown`; a defined
   "none" is `KnownAbsent` citing the definition. A row cited as `Row(r)` hoists its cells' citations:
   cell `c` is `RowCell(r, c, header[c])` (`cell_evidence`).
+
+## The package and its receipt (ADR 0022; `model/package.py`, `store/`)
+
+- A package is a directory: `manifest.json`, `receipt.json`, `receipt.md`, `records/<kind>.jsonl` (every kind; empty
+  file = none), `series/<stream hex>.parquet`, `blobs/sha256/<2>/<64>`, and `volatile/receipt-envelope.json`.
+- `PackageManifest`: the receipt's id, record counts per kind, a handle per source (content id, size, referenced
+  or materialised), every file's size and sha256, and the store's settings. The package id is the manifest's
+  sha256.
+- `IngestReceipt`, the deterministic core, is computed from the package's own records: sources and which
+  transforms read them, transforms (the replay inputs), counts, clocks, runs and streams with their declared
+  coverage, entities with their ids, findings most severe first, and every ambiguous field. Its id hashes the
+  rest; readers recompute it and refuse a receipt that differs. `receipt.md` renders it without converting any
+  time.
+- `ReceiptEnvelope` holds the job id, wall clock, host, ingest root and durations, outside the manifest, so it
+  never changes the package id. Sources are referenced by default; materialising is opt-in.
 
 ## Serialization (ADR 0002)
 

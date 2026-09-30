@@ -15,7 +15,7 @@ Status: stage contract agreed; runtime implementation is M2 (MVL-6, MVL-9, MVL-1
 | 7 | ingest | per-chunk pure parse → canonical records + findings; runtime skips committed chunks (resume) and cached ones | runtime + adapters | MVL-6, MVL-9 |
 | 8 | store | write records (JSON Lines), time-series (Parquet), blobs (CAS) into the ingest package | store | MVL-5, MVL-16 |
 | 9 | validate | cross-source integrity checks over the store; findings, not exceptions | validate | MVL-41 |
-| 10 | receipt | deterministic core + volatile envelope; human and machine renderings | runtime | MVL-5 |
+| 10 | receipt | core computed from the package's records (store); volatile envelope (runtime); human and machine renderings | store + runtime | MVL-5, MVL-6 |
 
 Alignment (clocks, frames, identities, bindings) is a separate pass after ingestion (M7); it produces new
 records with their own provenance and never rewrites what stages 1–10 produced.
