@@ -63,9 +63,9 @@ bottom line up front (BLUF):
 No paragraphs in the visible part. Design depth belongs in ADRs and docs, linked rather than pasted. An
 unticked acceptance box means the PR stays a draft. Linear comments on status changes follow the same shape.
 
-**Architecture change.** After each PR, ask whether it changes `ARCHITECTURE.md`: a box, an arrow, which box
-owns a responsibility, or a box's built/partial/not-built state. If it does, update the file in the same PR and
-add the template's *Architecture change* section. Phrase it conceptually ("added this box", "moved
+**Architecture change.** `ARCHITECTURE.md` is a single diagram, never prose. After each PR, ask whether it
+changes a box, an arrow, which box owns a responsibility, or a box's built/partial/not-built styling. If it
+does, update the diagram in the same PR and add the template's *Architecture change* section. Phrase it conceptually ("added this box", "moved
 responsibility X → Y"), with a tiny before → after Mermaid diagram if that helps. If it does not, touch neither.
 
 ## Review checklist (self-review before requesting review)

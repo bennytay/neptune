@@ -110,8 +110,9 @@ dependencies as `blockedBy`; do not start an issue whose blockers are not Done.
 ## Documentation and ADRs
 
 - Docs describe the system as it is; if a PR changes a contract, the same PR updates the doc.
-- `ARCHITECTURE.md` is the maintainer's 2-minute mental model: one diagram, no class names, no prose.
-  Keep it short. Simplify it rather than grow it. `docs/architecture.md` holds the engineering detail.
+- `ARCHITECTURE.md` is one evolving Mermaid diagram and nothing else: no tables, lists or prose. Build
+  status is box styling plus the in-diagram key. Keep the soft palette (translucent fills, muted borders,
+  grey edges) so it reads in light and dark mode. `docs/architecture.md` holds the engineering detail.
 - Architecture decisions go in `docs/adr/NNNN-title.md` using `docs/adr/0000-template.md`.
   Decisions are superseded by a new ADR, never edited in place.
 - Milestone gates (`docs/reviews/`) stop feature work: no M(n+1) issue starts before the M(n) gate is Done.
