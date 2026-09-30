@@ -19,6 +19,22 @@
       ],
       "type": "object"
     },
+    "AmbiguousField": {
+      "additionalProperties": false,
+      "properties": {
+        "pointer": {
+          "type": "string"
+        },
+        "record": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "pointer",
+        "record"
+      ],
+      "type": "object"
+    },
     "AssertionKind": {
       "enum": [
         "observed",
@@ -1188,6 +1204,106 @@
         "severity",
         "subject",
         "transform"
+      ],
+      "type": "object"
+    },
+    "IngestReceipt": {
+      "additionalProperties": false,
+      "properties": {
+        "absent": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/LocalPath"
+              },
+              {
+                "$ref": "#/$defs/RawLocalPath"
+              },
+              {
+                "$ref": "#/$defs/ExternalObjectRef"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "ambiguous": {
+          "items": {
+            "$ref": "#/$defs/AmbiguousField"
+          },
+          "type": "array"
+        },
+        "clocks": {
+          "items": {
+            "$ref": "#/$defs/ReceiptClock"
+          },
+          "type": "array"
+        },
+        "entities": {
+          "items": {
+            "$ref": "#/$defs/ReceiptEntity"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/ReceiptFinding"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "ingest_receipt"
+        },
+        "records": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/ReceiptRun"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/ReceiptSource"
+          },
+          "type": "array"
+        },
+        "streams": {
+          "items": {
+            "$ref": "#/$defs/ReceiptStream"
+          },
+          "type": "array"
+        },
+        "transforms": {
+          "items": {
+            "$ref": "#/$defs/ReceiptTransform"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "absent",
+        "ambiguous",
+        "clocks",
+        "entities",
+        "findings",
+        "id",
+        "kind",
+        "records",
+        "runs",
+        "schema_version",
+        "sources",
+        "streams",
+        "transforms"
       ],
       "type": "object"
     },
@@ -4876,6 +4992,71 @@
       ],
       "type": "object"
     },
+    "PackageFile": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size"
+      ],
+      "type": "object"
+    },
+    "PackageManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/PackageFile"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "package_manifest"
+        },
+        "receipt": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceHandle"
+          },
+          "type": "array"
+        },
+        "store": {
+          "type": "object"
+        },
+        "tables": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "files",
+        "kind",
+        "receipt",
+        "schema_version",
+        "sources",
+        "store",
+        "tables"
+      ],
+      "type": "object"
+    },
     "Page": {
       "additionalProperties": false,
       "properties": {
@@ -5030,6 +5211,273 @@
       "required": [
         "kind",
         "path_hex"
+      ],
+      "type": "object"
+    },
+    "ReceiptClock": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "scope": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "field",
+        "id",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "ReceiptEntity": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/LogicalId"
+          },
+          "type": "array"
+        },
+        "record_kind": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "identifiers",
+        "record_kind"
+      ],
+      "type": "object"
+    },
+    "ReceiptEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "durations": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "finished": {
+          "type": "string"
+        },
+        "host": {
+          "type": "string"
+        },
+        "job": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "ingest_receipt_envelope"
+        },
+        "receipt": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "root": {
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 0
+        },
+        "started": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "durations",
+        "finished",
+        "host",
+        "job",
+        "kind",
+        "receipt",
+        "root",
+        "schema_version",
+        "started"
+      ],
+      "type": "object"
+    },
+    "ReceiptFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/FindingCategory"
+        },
+        "code": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "message": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        }
+      },
+      "required": [
+        "category",
+        "code",
+        "id",
+        "message",
+        "severity"
+      ],
+      "type": "object"
+    },
+    "ReceiptRun": {
+      "additionalProperties": false,
+      "properties": {
+        "first": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "last": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "logical_id": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "machine": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "streams": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "first",
+        "id",
+        "last",
+        "logical_id",
+        "machine",
+        "streams"
+      ],
+      "type": "object"
+    },
+    "ReceiptSource": {
+      "additionalProperties": false,
+      "properties": {
+        "content_id": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LocalPath"
+            },
+            {
+              "$ref": "#/$defs/RawLocalPath"
+            },
+            {
+              "$ref": "#/$defs/ExternalObjectRef"
+            }
+          ]
+        },
+        "read_by": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        },
+        "size": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "content_id",
+        "location",
+        "read_by",
+        "size"
+      ],
+      "type": "object"
+    },
+    "ReceiptStream": {
+      "additionalProperties": false,
+      "properties": {
+        "clocks": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        },
+        "first": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "last": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "message_count": {
+          "$ref": "#/$defs/Knowledge_integer"
+        },
+        "run": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "topic": {
+          "$ref": "#/$defs/Knowledge_string"
+        }
+      },
+      "required": [
+        "clocks",
+        "first",
+        "id",
+        "last",
+        "message_count",
+        "run",
+        "topic"
+      ],
+      "type": "object"
+    },
+    "ReceiptTransform": {
+      "additionalProperties": false,
+      "properties": {
+        "adapter_id": {
+          "type": "string"
+        },
+        "adapter_version": {
+          "type": "string"
+        },
+        "config_hash": {
+          "$ref": "#/$defs/ConfigHash"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "libraries": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "upstream": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "adapter_id",
+        "adapter_version",
+        "config_hash",
+        "id",
+        "libraries",
+        "upstream"
       ],
       "type": "object"
     },
@@ -5429,6 +5877,26 @@
       ],
       "type": "object"
     },
+    "SourceHandle": {
+      "additionalProperties": false,
+      "properties": {
+        "content_id": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "size": {
+          "type": "integer"
+        },
+        "storage": {
+          "$ref": "#/$defs/Storage"
+        }
+      },
+      "required": [
+        "content_id",
+        "size",
+        "storage"
+      ],
+      "type": "object"
+    },
     "SourceRevision": {
       "additionalProperties": false,
       "properties": {
@@ -5586,6 +6054,12 @@
         "per_row"
       ],
       "type": "object"
+    },
+    "Storage": {
+      "enum": [
+        "referenced",
+        "materialised"
+      ]
     },
     "Stream": {
       "additionalProperties": false,
@@ -6060,6 +6534,6 @@
       "$ref": "#/$defs/StructuredRecord"
     }
   ],
-  "description": "One line of a Neptune ingest package's record tables (ADR 0002, ADR 0017). Generated from neptune.model; the Python readers are stricter (ADR 0021).",
+  "description": "One line of a Neptune ingest package's record tables (ADR 0002, ADR 0017). The package's manifest, receipt and receipt envelope are #/$defs/PackageManifest, #/$defs/IngestReceipt and #/$defs/ReceiptEnvelope (ADR 0022). Generated from neptune.model; the Python readers are stricter (ADR 0021).",
   "title": "Neptune canonical record, schema version 0"
 }

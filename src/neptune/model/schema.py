@@ -28,79 +28,31 @@ from typing import Any, Final
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ConfigHash, ContentId, ExternalObjectRef, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.model.kinds import RECORD_KINDS as _KINDS
 from neptune.model.knowledge import Known
-from neptune.model.machine import (
-    Calibration,
-    HardwareComponent,
-    HardwareConfiguration,
-    Machine,
-    SoftwareConfiguration,
-)
+from neptune.model.package import IngestReceipt, PackageManifest, ReceiptEnvelope
 from neptune.model.provenance import (
     AdapterLocator,
     EvidenceRef,
     Provenance,
     RecordRange,
     RowCell,
-    TransformRecord,
     VideoFrame,
 )
 from neptune.model.record import SCHEMA_VERSION
-from neptune.model.reference import Frame, FrameGraph, FrameTransform, TimestampDomain
-from neptune.model.run import Run, Stream
+from neptune.model.reference import FrameTransform
 from neptune.model.scalars import NonFinite
-from neptune.model.source import (
-    LocalPath,
-    RawLocalPath,
-    SourceAbsence,
-    SourceArtifact,
-    SourceRevision,
-)
+from neptune.model.source import LocalPath, RawLocalPath
 from neptune.model.time import Timestamp
 from neptune.model.units import Unit
-from neptune.model.world import (
-    Asset,
-    DocumentBlock,
-    DocumentRecord,
-    Image,
-    Site,
-    SpatialArtifact,
-    StructuredRecord,
-    StructuredTable,
-    Video,
-)
 
 DIALECT: Final = "https://json-schema.org/draft/2020-12/schema"
 SCHEMA_ID: Final = f"urn:neptune:schema:canonical:{SCHEMA_VERSION}"
 
 # Every record kind a package's tables hold, in the order of ADR 0017's families.
-RECORD_KINDS: Final[tuple[type, ...]] = (
-    SourceArtifact,
-    SourceRevision,
-    SourceAbsence,
-    TransformRecord,
-    IngestFinding,
-    TimestampDomain,
-    FrameGraph,
-    Frame,
-    FrameTransform,
-    Run,
-    Stream,
-    Machine,
-    HardwareConfiguration,
-    HardwareComponent,
-    SoftwareConfiguration,
-    Calibration,
-    Site,
-    Asset,
-    SpatialArtifact,
-    Image,
-    Video,
-    DocumentRecord,
-    DocumentBlock,
-    StructuredTable,
-    StructuredRecord,
-)
+RECORD_KINDS: Final[tuple[type, ...]] = tuple(cls for cls, _ in _KINDS.values())
+# The package's own documents (ADR 0022): one file each, with the records' envelope.
+DOCUMENT_KINDS: Final[tuple[type, ...]] = (PackageManifest, IngestReceipt, ReceiptEnvelope)
 
 _SHA256: Final = "sha256:[0-9a-f]{64}"
 _STRING: Final[JsonObject] = {"type": "string"}
@@ -228,7 +180,7 @@ class _Builder:
         kind = getattr(cls, "kind", None)
         if isinstance(kind, str) and "kind" not in properties:
             properties["kind"] = _const(kind)
-        if hasattr(cls, "family"):  # a record: the envelope (ADR 0017 §2)
+        if hasattr(cls, "family") or cls in DOCUMENT_KINDS:  # the envelope (ADR 0017 §2)
             properties["schema_version"] = _const_int(SCHEMA_VERSION)
         return _obj(properties)
 
@@ -393,14 +345,18 @@ def canonical_schema() -> JsonObject:
     """The whole contract: any one line of any record table, and each kind by name."""
     builder = _Builder()
     kinds = [builder.schema(kind) for kind in RECORD_KINDS]
+    for document in DOCUMENT_KINDS:  # validated by name: #/$defs/IngestReceipt
+        builder.schema(document)
     return {
         "$defs": dict(sorted(builder.defs.items())),
         "$id": SCHEMA_ID,
         "$schema": DIALECT,
         "anyOf": kinds,
         "description": (
-            "One line of a Neptune ingest package's record tables (ADR 0002, ADR 0017). "
-            "Generated from neptune.model; the Python readers are stricter (ADR 0021)."
+            "One line of a Neptune ingest package's record tables (ADR 0002, ADR 0017). The "
+            "package's manifest, receipt and receipt envelope are #/$defs/PackageManifest, "
+            "#/$defs/IngestReceipt and #/$defs/ReceiptEnvelope (ADR 0022). Generated from "
+            "neptune.model; the Python readers are stricter (ADR 0021)."
         ),
         "title": f"Neptune canonical record, schema version {SCHEMA_VERSION}",
     }
