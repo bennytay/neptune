@@ -34,5 +34,6 @@ check: lint type test ## Everything CI runs; must pass before opening a PR
 schema: ## Regenerate docs/schema/canonical.schema.json from the model's types
 > $(UV) run python -m neptune.model.schema docs/schema/canonical.schema.json
 
-examples: ## Regenerate the worked examples under tests/fixtures/model/
+examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/fixtures/model/make_examples.py
+> $(UV) run python tests/golden/packages/make_packages.py
