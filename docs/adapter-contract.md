@@ -49,6 +49,8 @@ class Adapter(Protocol):
 | a value that fails to parse | an `IngestFinding` | a guessed state |
 
 For text fields use `from_text(raw, parse, absent_tokens={token: definition})`. Token matching is exact.
+For unit text use `unit_from_text(raw, provenance=…)` (ADR 0013); never a private alias table. A unit stated
+only by the format spec is `Known` citing the spec; community convention (REP-103) is not a declaration.
 
 ## What the runtime owns (and adapters must not reimplement)
 
