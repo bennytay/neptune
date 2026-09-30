@@ -65,10 +65,14 @@ a bug, not a value.
 `FrameRef = (frame_id, frame_graph_id)`. No assumed ENU / NED / REP-103. Transforms are `TransformRecord`s
 with parent, child, domain and provenance. Frame-graph alignment is MVL-37.
 
-## Versions and software identity (MVL-4, MVL-27)
+## Versions and software identity (ADR 0014; `model/versions.py`)
 
-Git SHA, semver, build id, firmware version, model checkpoint hash, container digest are distinct typed
-primitives, each `Knowledge`-wrapped on `SoftwareConfiguration`.
+- One type per kind: `GitCommit`, `SemanticVersion`, `DeclaredVersion`, `BuildId`, `FirmwareVersion`,
+  `ModelCheckpointHash`, `ContainerImageDigest`. Each is `Knowledge`-wrapped on `SoftwareConfiguration`.
+- Kinds never compare equal and never sort together. Only `SemanticVersion` is ordered (SemVer precedence).
+- Stored verbatim: no `v` stripping, no case folding. Semver prerelease and build are views of the full text.
+- A value takes a kind because the source says so, never because it looks like one. Otherwise it is a
+  `DeclaredVersion`. JSON: `{"kind":"semver","value":"1.2.3-rc.1"}`.
 
 ## Serialization (ADR 0002)
 
