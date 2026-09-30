@@ -7,10 +7,13 @@
 - Images, geometry, trajectories and time series stay records of their own structure.
 """
 
+import calendar
 import csv
 import importlib.util
 import io
 import json
+import re
+import struct
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -334,3 +337,47 @@ def test_trajectories_and_video_frames_are_streams_of_samples() -> None:
     for stream in (*poses, *camera):
         assert len(stream.clocks) == 3  # log time, publish time and header.stamp, none chosen
         assert stream.series.locator[0].per_row == ("length", "offset")
+
+
+# --- Declared values are what the bytes say ----------------------------------------------------
+
+
+def _record(example: str, kind: str) -> Any:
+    (record,) = [r for k, _, r in records(example) if k == kind]
+    return record
+
+
+def _cited(example: str, provenance: Any) -> bytes:
+    """The bytes a provenance's first step names, in the committed file."""
+    files = {content_id(data): data for data in source_files(example).values()}
+    step = provenance.evidence.locator[0]
+    assert isinstance(step, ByteRange)
+    data = files[provenance.evidence.source]
+    return data[step.offset : step.offset + step.length]
+
+
+def test_declared_times_are_what_the_bytes_say() -> None:
+    # The drone's run starts at the ULog header's timestamp, in microseconds.
+    run = _record("drone", "run")
+    header = _cited("drone", run.provenance)
+    assert run.first.value.ticks == struct.unpack_from("<Q", header, 8)[0]
+    # The manipulator's run spans the MCAP statistics' first and last log time.
+    run = _record("manipulator", "run")
+    statistics = _cited("manipulator", run.first.provenance)
+    start, end = struct.unpack_from("<QQ", statistics, 9 + 8 + 2 + 4 * 4)
+    assert (run.first.value.ticks, run.last.value.ticks) == (start, end)
+    # The quadruped's run starts at rosbag2's starting_time and lasts its duration.
+    run = _record("quadruped", "run")
+    info = json.loads(source_files("quadruped")["bag/metadata.yaml"])["rosbag2_bagfile_information"]
+    start = info["starting_time"]["nanoseconds_since_epoch"]
+    assert (run.first.value.ticks, run.last.value.ticks) == (
+        start,
+        start + info["duration"]["nanoseconds"],
+    )
+    # The photo's capture time counts EXIF's zone-less civil fields as POSIX does (ADR 0023 §2).
+    image = _record("mobile_robot", "image")
+    exif = _cited("mobile_robot", image.capture.time.provenance)
+    match = re.search(rb"(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2}):(\d{2})\x00", exif)
+    assert match is not None
+    fields = [int(group) for group in match.groups()]
+    assert image.capture.time.value.ticks == calendar.timegm((*fields, 0, 0, 0))

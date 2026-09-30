@@ -11,6 +11,7 @@ are records, and what a source does not say stays ``Unknown`` or ``NotCovered``.
 not written: a stream's samples are Parquet, which the store writes (MVL-5, MVL-16).
 """
 
+import calendar
 import io
 import sys
 from collections.abc import Callable
@@ -525,7 +526,8 @@ def quadruped() -> Example:
             machine=NotCovered(),  # rosbag2 metadata has no field for the robot
             first=Known(Timestamp(T0, started.id), yaml("/starting_time")),
             # rosbag2 defines duration as last minus first message time: last = start + duration.
-            last=Known(Timestamp(T0 + 45 * MS, started.id), yaml("/duration")),
+            # A value read from two fields cites the smallest part holding both (ADR 0023 §3).
+            last=Known(Timestamp(T0 + 45 * MS, started.id), yaml("")),
         )
     )
     statistics = ex.at("rosbag2", bag, "statistics")
@@ -925,6 +927,12 @@ def mobile_robot() -> Example:
         epoch=Known(Epoch.UNIX),
     )
 
+    def civil_seconds(text: str) -> int:
+        """EXIF's "YYYY:MM:DD HH:MM:SS", counted as POSIX counts (ADR 0023 §2)."""
+        date, time = text.split(" ")
+        fields = [int(part) for part in (*date.split(":"), *time.split(":"))]
+        return calendar.timegm((*fields, 0, 0, 0))
+
     def degrees(dms: tuple[tuple[int, int], ...], ref: str, negative: str) -> float:
         value = sum(Fraction(n, d) / 60**i for i, (n, d) in enumerate(dms))
         return float(-value if ref == negative else value)
@@ -939,7 +947,7 @@ def mobile_robot() -> Example:
             encoding="png",
             orientation=Unknown(exif_at),  # EXIF could state it; this file does not
             capture=Capture(
-                time=Known(Timestamp(1_790_766_012, taken.id), tag(0x9003)),
+                time=Known(Timestamp(civil_seconds(DOCK_EXIF.taken), taken.id), tag(0x9003)),
                 position=Known(
                     GeodeticPosition(
                         # EXIF states degrees, minutes and seconds and a hemisphere; the adapter

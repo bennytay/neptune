@@ -34,7 +34,7 @@ from formats import (
 )
 
 MS: Final = 10**6  # nanoseconds
-T0: Final = 1_790_762_400 * 10**9  # 2026-09-30T20:00:00Z, the ROS recordings' zero, ns
+T0: Final = 1_790_762_400 * 10**9  # 2026-09-30T10:00:00Z, the ROS recordings' zero, ns
 
 
 @dataclass(frozen=True)
