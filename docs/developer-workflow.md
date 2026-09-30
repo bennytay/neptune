@@ -25,7 +25,9 @@ Todo ──(branch created, first commit)──▶ In Progress ──(PR open, a
 ## Branching and merging
 
 - Trunk-based. `main` is protected: PR required, CI (`check`) green, linear history, no force-push, no deletion.
-- One branch per issue; rebase on `main` before opening the PR; squash-merge. PR title = issue title.
+- One branch per issue; rebase on `main` before opening the PR. PR title = issue title.
+- **Only the maintainer merges** (squash-merge). Agents open the PR, move the issue to In Review, and stop —
+  no merging, approving, or auto-merge, even on green CI.
 - Tags: `m1-gate`, `m2-gate`, … at review gates; semver `v0.x.y` from M3 onward.
 
 ## Commits
@@ -45,8 +47,11 @@ Attribution trailers required by the tooling in use are appended after `Refs:`.
 
 ## Pull requests
 
-Use the template. `Closes MVL-N` on the first line. Tick every acceptance criterion; untick = draft. Paste the
-`make check` summary. Say what docs/ADRs changed or why none were needed.
+Use the template. `Closes MVL-N` on the first line, then a **Design summary** — the part the maintainer reads
+first. It states what was designed and decided (types, contracts, invariants, trade-offs) concisely enough
+that the design can be reconstructed without the diff. It is not a file list; the file list goes under
+"What changed". Tick every acceptance criterion; untick = draft. Paste the `make check` summary. Say what
+docs/ADRs changed or why none were needed.
 
 ## Review checklist (self-review before requesting review)
 
@@ -66,7 +71,7 @@ Mechanics, host-agnostic (Zed threads, Claude Code, Codex):
 1. One git worktree per agent: `git worktree add ../neptune-mvl-17 -b <gitBranchName>`.
 2. One issue per agent. Prompt: "Implement MVL-N. Follow AGENTS.md." Everything else is in the repo.
 3. Agents never touch `main`, never edit `AGENTS.md`/`architecture.md`/ADRs in feature PRs.
-4. A coordinator picks unblocked issues, assigns, reviews, squash-merges in dependency order.
+4. A coordinator picks unblocked issues and assigns them; the maintainer reviews and merges in dependency order.
 5. Practical ceiling is review bandwidth: ~4 concurrent agents per reviewer.
 
 ## Gates

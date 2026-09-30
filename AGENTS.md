@@ -76,16 +76,20 @@ dependencies as `blockedBy`; do not start an issue whose blockers are not Done.
 4. Implement. Separate parsing from normalisation. Errors are structured findings, not exceptions.
 5. Tests: unit + malformed input + boundary + idempotence/determinism. Prefer real small fixtures over mocks.
 6. `make check` green. Update docs whose contracts changed. Add/supersede ADRs for decisions.
-7. Open a PR using the template. Body starts with `Closes MVL-N`; tick each acceptance criterion.
-8. Move the issue to **In Review** only when every acceptance criterion is demonstrably met.
-9. **Done** happens on merge, never on "code exists". Comment the merge SHA on the issue.
+7. Open a PR using the template. Body starts with `Closes MVL-N`, then a concise **Design summary**:
+   what was designed and decided (types, contracts, invariants, trade-offs), not a file list. A reader
+   must be able to reconstruct the design without opening the diff. Tick each acceptance criterion.
+8. Move the issue to **In Review** only when every acceptance criterion is demonstrably met and CI is green.
+9. **Stop. Never merge.** The maintainer reviews and merges every PR personally. **Done** happens on
+   merge, never on "code exists"; after merge, comment the merge SHA on the issue.
 
 Before starting any work, check Linear for issues already **In Progress**; do not duplicate a live issue.
 
 ## Git
 
 - `main` is protected: PR required, CI green, linear history, no force-push. Never commit to `main`.
-- Branch per issue (name above). Rebase on `main` before opening a PR. Squash-merge; PR title = issue title.
+- Branch per issue (name above). Rebase on `main` before opening a PR. PR title = issue title.
+- Agents never merge, approve, or enable auto-merge. The maintainer squash-merges.
 - Conventional commits with package scope: `feat(model): add TimestampDomain`, `docs(adr): 0005 timestamps`,
   `test(identity): chunked hash determinism`. Trailer line: `Refs: MVL-N`.
 - Never force-push a shared branch. Never rewrite `main` history.
