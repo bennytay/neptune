@@ -1,6 +1,6 @@
 # 0009 — Source revisions, dedup policy and id rendering
 
-- Status: Accepted
+- Status: Accepted; §3–§5 amended by [0010](0010-lossless-local-locations.md)
 - Date: 2026-10-01
 - Issue: MVL-2
 

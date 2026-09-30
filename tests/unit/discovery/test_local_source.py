@@ -10,9 +10,10 @@ from neptune.discovery.source import (
     SkipReason,
     SourceAccessError,
     SourceEntry,
+    SymlinkEntry,
 )
 from neptune.model.ids import ExternalObjectRef
-from neptune.model.source import LocalPath
+from neptune.model.source import LocalPath, RawLocalPath
 
 
 def write(path: Path, data: bytes = b"x") -> None:
@@ -25,8 +26,8 @@ def files(source: LocalSource) -> dict[str, int]:
     found = {}
     for entry in source.walk():
         if isinstance(entry, SourceEntry):
-            assert isinstance(entry.location, LocalPath)
-            found[entry.location.path] = entry.size
+            assert isinstance(entry.location, (LocalPath, RawLocalPath))
+            found[os.fsdecode(entry.location.raw)] = entry.size
     return found
 
 
@@ -72,10 +73,21 @@ def test_symlinks_are_reported_not_followed(tmp_path: Path) -> None:
     (root / "loop").symlink_to(root / "loop")
     source = LocalSource(root)
     assert entries(source) == ["real/file"]
-    assert skips(source) == {
-        name: SkipReason.SYMLINK
-        for name in [b"dangling", b"dir_link", b"escape", b"file_link", b"loop"]
+    assert skips(source) == {}
+    links = {e.location.raw: e.target for e in source.walk() if isinstance(e, SymlinkEntry)}
+    assert links == {
+        b"dangling": os.fsencode(tmp_path / "nowhere"),
+        b"dir_link": os.fsencode(root / "real"),
+        b"escape": os.fsencode(outside),
+        b"file_link": os.fsencode(root / "real/file"),
+        b"loop": os.fsencode(root / "loop"),
     }
+
+
+def test_symlink_target_is_byte_exact_and_unresolved(tmp_path: Path) -> None:
+    (tmp_path / "link").symlink_to(os.fsdecode(b"../../weird\xff/./target"))
+    [entry] = LocalSource(tmp_path).walk()
+    assert entry == SymlinkEntry(LocalPath("link"), b"../../weird\xff/./target")
 
 
 def test_root_may_be_a_symlink(tmp_path: Path) -> None:
@@ -94,7 +106,7 @@ def test_special_files_are_skipped(tmp_path: Path) -> None:
         }
 
 
-def test_undecodable_names_are_skipped_with_raw_bytes(tmp_path: Path) -> None:
+def test_undecodable_names_are_ingested_by_their_bytes(tmp_path: Path) -> None:
     raw_file = os.fsencode(tmp_path) + b"/bad\xff"
     raw_dir = os.fsencode(tmp_path) + b"/dir\xfe"
     try:
@@ -105,11 +117,24 @@ def test_undecodable_names_are_skipped_with_raw_bytes(tmp_path: Path) -> None:
     Path(os.fsdecode(raw_dir + b"/inner")).write_bytes(b"x")
     write(tmp_path / "ok")
     source = LocalSource(tmp_path)
-    assert entries(source) == ["ok"]
-    assert skips(source) == {
-        b"bad\xff": SkipReason.UNDECODABLE_NAME,
-        b"dir\xfe": SkipReason.UNDECODABLE_NAME,
-    }
+    locations = [e.location for e in source.walk() if isinstance(e, SourceEntry)]
+    assert locations == [
+        RawLocalPath(b"bad\xff"),
+        RawLocalPath(b"dir\xfe/inner"),
+        LocalPath("ok"),
+    ]
+    assert skips(source) == {}
+    with source.open(RawLocalPath(b"bad\xff")) as stream:
+        assert stream.read() == b"x"
+
+
+def test_siblings_sort_by_name_bytes(tmp_path: Path) -> None:
+    try:
+        for raw in (b"\xff", b"\xc3\xa9", b"z"):
+            Path(os.fsdecode(os.fsencode(tmp_path) + b"/" + raw)).write_bytes(b"x")
+    except OSError:
+        pytest.skip("filesystem rejects non-UTF-8 names")
+    assert entries(LocalSource(tmp_path)) == [os.fsdecode(n) for n in (b"z", b"\xc3\xa9", b"\xff")]
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores permissions")

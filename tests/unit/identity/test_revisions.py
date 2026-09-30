@@ -4,9 +4,9 @@ import pytest
 
 from neptune.identity import canonical_json
 from neptune.identity.hashing import digest_stream
-from neptune.identity.revisions import SourceLedger, revision_id
+from neptune.identity.revisions import SourceLedger, absence_id, revision_id
 from neptune.model.ids import ExternalObjectRef, RecordId
-from neptune.model.source import LocalPath, SourceArtifact, SourceRevision
+from neptune.model.source import LocalPath, SourceAbsence, SourceArtifact, SourceRevision
 
 A = digest_stream(io.BytesIO(b"version A"))
 B = digest_stream(io.BytesIO(b"version B"))
@@ -159,3 +159,40 @@ def test_reload_rejects_dangling_supersedes() -> None:
     )
     with pytest.raises(ValueError, match="supersedes unknown"):
         SourceLedger((A,), [orphan])
+
+
+def test_absence_then_reappearance() -> None:
+    ledger = SourceLedger()
+    present = ledger.observe(RUN, A).revision
+    absence = ledger.mark_absent(RUN)
+    assert absence is not None and absence.supersedes == (present.id,)
+    assert absence.id == absence_id(RUN, (present.id,))
+    assert ledger.head(RUN) == absence
+    assert ledger.mark_absent(RUN) is None  # idempotent
+    back = ledger.observe(RUN, A)
+    assert back.new_revision and not back.new_artifact
+    assert back.revision.supersedes == (absence.id,)
+    assert present in ledger.revisions() and ledger.absences() == (absence,)
+
+
+def test_absence_of_never_seen_location_is_not_asserted() -> None:
+    assert SourceLedger().mark_absent(RUN) is None
+
+
+def test_reload_with_absences_continues_history() -> None:
+    ledger = SourceLedger()
+    ledger.observe(RUN, A)
+    ledger.mark_absent(RUN)
+    reloaded = SourceLedger(ledger.artifacts(), ledger.revisions(), ledger.absences())
+    assert reloaded.head(RUN) == ledger.head(RUN)
+    assert reloaded.heads() == ledger.heads()
+
+
+def test_reload_rejects_absence_superseding_absence() -> None:
+    ledger = SourceLedger()
+    ledger.observe(RUN, A)
+    first = ledger.mark_absent(RUN)
+    assert first is not None
+    second = SourceAbsence(absence_id(RUN, (first.id,)), RUN, (first.id,))
+    with pytest.raises(ValueError, match="another absence"):
+        SourceLedger(ledger.artifacts(), ledger.revisions(), [first, second])

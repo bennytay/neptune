@@ -1,4 +1,4 @@
-"""Source revisions and deduplication (ADR 0009).
+"""Source revisions and deduplication (ADR 0009, amended by ADR 0010).
 
 Policy, in one place:
 
@@ -8,17 +8,22 @@ Policy, in one place:
 - A location seen holding different bytes gets a new ``SourceRevision`` that supersedes the
   previous one. Nothing earlier is mutated or removed.
 - A rename or move is a new location holding known bytes: a new revision for that location, no new
-  artifact, so every record keyed by the content id is unchanged.
+  artifact, so every record keyed by the content id is unchanged. The old location gets a
+  ``SourceAbsence`` if the scan could see that it is gone (``neptune.discovery.scan``).
+- Bytes reappearing at an absent location are a new revision superseding the absence.
 - For external objects the revision token is observational: a new token over identical bytes is
   not a new revision.
 """
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import TypeAlias
 
 from neptune.identity.ids import record_id
 from neptune.model.ids import ContentId, RecordId
-from neptune.model.source import SourceArtifact, SourceLocation, SourceRevision
+from neptune.model.source import SourceAbsence, SourceArtifact, SourceLocation, SourceRevision
+
+ChainEntry: TypeAlias = SourceRevision | SourceAbsence
 
 
 def revision_id(
@@ -27,6 +32,12 @@ def revision_id(
     return record_id(
         "source_revision",
         {"content_id": content, "location": location.to_json(), "supersedes": list(supersedes)},
+    )
+
+
+def absence_id(location: SourceLocation, supersedes: tuple[RecordId, ...]) -> RecordId:
+    return record_id(
+        "source_absence", {"location": location.to_json(), "supersedes": list(supersedes)}
     )
 
 
@@ -40,27 +51,30 @@ class Observation:
 
 
 class SourceLedger:
-    """Append-only record of which bytes exist and where they were seen.
+    """Append-only record of which bytes exist, where they were seen, and where they are gone.
 
     Pure and in-memory; persisting it between ingest runs belongs to the store. Construct it from a
-    previous run's ``artifacts()`` and ``revisions()`` to continue that history.
+    previous run's ``artifacts()``, ``revisions()`` and ``absences()`` to continue that history.
     """
 
     def __init__(
-        self, artifacts: Iterable[SourceArtifact] = (), revisions: Iterable[SourceRevision] = ()
+        self,
+        artifacts: Iterable[SourceArtifact] = (),
+        revisions: Iterable[SourceRevision] = (),
+        absences: Iterable[SourceAbsence] = (),
     ) -> None:
         self._artifacts: dict[ContentId, SourceArtifact] = {}
-        self._revisions: dict[RecordId, SourceRevision] = {}
-        self._heads: dict[tuple[str, ...], SourceRevision] = {}
+        self._entries: dict[RecordId, ChainEntry] = {}
+        self._heads: dict[tuple[str, ...], ChainEntry] = {}
         for artifact in artifacts:
             self._add_artifact(artifact)
-        self._load_revisions(list(revisions))
+        self._load([*revisions, *absences])
 
     def observe(self, location: SourceLocation, artifact: SourceArtifact) -> Observation:
         """Record that ``location`` currently holds ``artifact``'s bytes."""
         new_artifact = self._add_artifact(artifact)
         head = self._heads.get(location.key)
-        if head is not None and head.content_id == artifact.content_id:
+        if isinstance(head, SourceRevision) and head.content_id == artifact.content_id:
             return Observation(head, new_artifact=new_artifact, new_revision=False)
         supersedes = (head.id,) if head is not None else ()
         revision = SourceRevision(
@@ -69,13 +83,27 @@ class SourceLedger:
             content_id=artifact.content_id,
             supersedes=supersedes,
         )
-        self._revisions[revision.id] = revision
-        self._heads[location.key] = revision
+        self._append(revision)
         return Observation(revision, new_artifact=new_artifact, new_revision=True)
 
-    def head(self, location: SourceLocation) -> SourceRevision | None:
-        """The latest revision at ``location``, or ``None`` if it has never been observed."""
+    def mark_absent(self, location: SourceLocation) -> SourceAbsence | None:
+        """Record that ``location`` holds no bytes. ``None`` if nothing was there to begin with."""
+        head = self._heads.get(location.key)
+        if not isinstance(head, SourceRevision):
+            return None
+        absence = SourceAbsence(
+            id=absence_id(location, (head.id,)), location=location, supersedes=(head.id,)
+        )
+        self._append(absence)
+        return absence
+
+    def head(self, location: SourceLocation) -> ChainEntry | None:
+        """The latest entry at ``location``, or ``None`` if it has never been observed."""
         return self._heads.get(location.key)
+
+    def heads(self) -> tuple[ChainEntry, ...]:
+        """The latest entry at every location ever observed, sorted by id."""
+        return tuple(sorted(self._heads.values(), key=lambda entry: entry.id))
 
     def artifact(self, content: ContentId) -> SourceArtifact | None:
         return self._artifacts.get(content)
@@ -86,7 +114,15 @@ class SourceLedger:
 
     def revisions(self) -> tuple[SourceRevision, ...]:
         """All revisions, sorted by id."""
-        return tuple(self._revisions[key] for key in sorted(self._revisions))
+        return tuple(e for _, e in sorted(self._entries.items()) if isinstance(e, SourceRevision))
+
+    def absences(self) -> tuple[SourceAbsence, ...]:
+        """All absences, sorted by id."""
+        return tuple(e for _, e in sorted(self._entries.items()) if isinstance(e, SourceAbsence))
+
+    def _append(self, entry: ChainEntry) -> None:
+        self._entries[entry.id] = entry
+        self._heads[entry.location.key] = entry
 
     def _add_artifact(self, artifact: SourceArtifact) -> bool:
         existing = self._artifacts.get(artifact.content_id)
@@ -101,28 +137,33 @@ class SourceLedger:
         # Same bytes. Chunk hashes may differ only by chunk size; the first digest is kept.
         return False
 
-    def _load_revisions(self, revisions: list[SourceRevision]) -> None:
-        for revision in revisions:
-            expected = revision_id(revision.location, revision.content_id, revision.supersedes)
-            if revision.id != expected:
-                raise ValueError(f"revision {revision.id} does not match its fields ({expected})")
-            if revision.content_id not in self._artifacts:
-                raise ValueError(f"revision {revision.id} references unknown {revision.content_id}")
-            if revision.id in self._revisions:
-                raise ValueError(f"duplicate revision {revision.id}")
-            self._revisions[revision.id] = revision
+    def _load(self, entries: list[ChainEntry]) -> None:
+        for entry in entries:
+            if isinstance(entry, SourceRevision):
+                expected = revision_id(entry.location, entry.content_id, entry.supersedes)
+                if entry.content_id not in self._artifacts:
+                    raise ValueError(f"revision {entry.id} references unknown {entry.content_id}")
+            else:
+                expected = absence_id(entry.location, entry.supersedes)
+            if entry.id != expected:
+                raise ValueError(f"{entry.id} does not match its fields ({expected})")
+            if entry.id in self._entries:
+                raise ValueError(f"duplicate chain entry {entry.id}")
+            self._entries[entry.id] = entry
         superseded: set[RecordId] = set()
-        for revision in revisions:
-            for previous_id in revision.supersedes:
-                previous = self._revisions.get(previous_id)
-                if previous is None or previous.location.key != revision.location.key:
-                    raise ValueError(f"revision {revision.id} supersedes unknown {previous_id}")
+        for entry in entries:
+            for previous_id in entry.supersedes:
+                previous = self._entries.get(previous_id)
+                if previous is None or previous.location.key != entry.location.key:
+                    raise ValueError(f"{entry.id} supersedes unknown {previous_id}")
+                if isinstance(entry, SourceAbsence) and isinstance(previous, SourceAbsence):
+                    raise ValueError(f"absence {entry.id} supersedes another absence")
                 if previous_id in superseded:
                     raise ValueError(f"history forks: {previous_id} is superseded twice")
                 superseded.add(previous_id)
-        for revision in revisions:
-            if revision.id in superseded:
+        for entry in entries:
+            if entry.id in superseded:
                 continue
-            if revision.location.key in self._heads:
-                raise ValueError(f"location {revision.location.key} has more than one head")
-            self._heads[revision.location.key] = revision
+            if entry.location.key in self._heads:
+                raise ValueError(f"location {entry.location.key} has more than one head")
+            self._heads[entry.location.key] = entry

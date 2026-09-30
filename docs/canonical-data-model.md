@@ -8,7 +8,7 @@ MVL-1 merges.
 
 | Family | Entities |
 |---|---|
-| Source | `SourceArtifact`, `SourceRevision` (implemented in `model/source.py`, ADR 0009) |
+| Source | `SourceArtifact`, `SourceRevision`, `SourceAbsence` (implemented in `model/source.py`, ADRs 0009, 0010) |
 | Run / experience | `Run`, `Stream`, `TimestampDomain` |
 | Machine | `Machine`, `HardwareConfiguration`, `SoftwareConfiguration`, `Calibration` |
 | World / record | `Site`, `Asset`, `SpatialArtifact`, `StructuredRecord`, `DocumentRecord` |
