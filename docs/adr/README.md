@@ -7,7 +7,7 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 |---|---|---|
 | [0001](0001-language-and-runtime.md) | Language and runtime | Accepted |
 | [0002](0002-serialization-and-ingest-package.md) | Canonical serialization and ingest-package layout | Accepted |
-| [0003](0003-identity-tiers.md) | Identity tiers and parser-upgrade survival | Accepted |
+| [0003](0003-identity-tiers.md) | Identity tiers and parser-upgrade survival | Accepted; golden-diff rule amended by 0017 |
 | [0004](0004-epistemic-states.md) | Epistemic states and the field-scope rule | Accepted |
 | [0005](0005-timestamp-domains.md) | Timestamp domains | Accepted |
 | [0006](0006-provenance-and-locators.md) | Provenance and locator model | Accepted |
@@ -21,3 +21,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0014](0014-version-primitives.md) | Version primitives: one type per kind, stored verbatim | Accepted |
 | [0015](0015-frame-rotation-and-transform-types.md) | Frames, rotations and frame transforms: types and named conventions | Accepted |
 | [0016](0016-evidence-refs-locator-paths-and-transform-lineage.md) | Evidence refs, locator paths and transform lineage | Accepted |
+| [0017](0017-canonical-records-envelope-and-schema-version.md) | Canonical records: envelope, families, schema version and findings | Accepted |

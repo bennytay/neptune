@@ -47,6 +47,7 @@ from neptune.model.provenance import (
     provenance_from_json,
     transform_record_from_json,
 )
+from neptune.model.record import SCHEMA_VERSION
 from neptune.model.time import INT64_MAX, Timestamp
 
 SOURCE = content_id(b"a small source")
@@ -309,7 +310,9 @@ TRANSFORM_JSON: dict[str, JsonValue] = {
     "config": {"delimiter": ","},
     "config_hash": CONFIG_HASH,
     "id": TRANSFORM,
+    "kind": "transform_record",
     "libraries": {"neptune.units-catalogue": "1"},
+    "schema_version": SCHEMA_VERSION,
     "upstream": [],
 }
 
@@ -319,7 +322,8 @@ def test_transform_record_json_round_trips_and_hashes_by_id() -> None:
     assert record.to_json() == TRANSFORM_JSON
     assert record.libraries == (("neptune.units-catalogue", "1"),)
     assert hash(record) == hash(TRANSFORM)
-    assert "id" not in record.content_json()
+    # The id covers the content only: neither the id itself nor the envelope.
+    assert {"id", "kind", "schema_version"}.isdisjoint(record.content_json())
 
 
 @pytest.mark.parametrize(
@@ -333,6 +337,8 @@ def test_transform_record_json_round_trips_and_hashes_by_id() -> None:
         ("upstream", [TRANSFORM]),
         ("upstream", ["sha256:" + "0" * 64]),
         ("hostname", "ci-runner-7"),
+        ("kind", "transform"),
+        ("schema_version", SCHEMA_VERSION + 1),
     ],
 )
 def test_malformed_transform_records_are_rejected(key: str, value: JsonValue) -> None:

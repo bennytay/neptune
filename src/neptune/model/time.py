@@ -4,26 +4,19 @@ A ``Timestamp`` is ``(ticks, domain_id)``. Nothing here converts ticks to second
 timescale or another resolution. Ordering and arithmetic are defined only within one domain;
 mixing domains raises ``DomainMismatchError``. Relating two domains is a ``ClockAlignment``
 record (MVL-36), never an operator.
+
+The ``TimestampDomain`` record that names a clock and says what its ticks mean is in
+``neptune.model.reference``: a record carries provenance, and provenance's locators use these types.
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from fractions import Fraction
 from typing import Final, overload
 
-from neptune.model._fields import (
-    check_type,
-    enum_decoder,
-    exact_object,
-    is_int,
-    json_bool,
-    json_str,
-    values_of,
-)
-from neptune.model.ids import RecordId, check_text, parse_record_id
+from neptune.model._fields import exact_object, is_int, json_str
+from neptune.model.ids import RecordId, parse_record_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.knowledge import Grounding, Knowledge, from_json, to_json
 
 INT64_MIN: Final = -(2**63)
 INT64_MAX: Final = 2**63 - 1
@@ -183,85 +176,6 @@ class Timescale(StrEnum):
     POSIX = "posix"  # UTC without leap seconds, as Unix time counts
     MONOTONIC = "monotonic"  # a steady local counter with no civil meaning
     SIMULATED = "simulated"
-
-
-@dataclass(frozen=True)
-class TimestampDomain:
-    """One clock of one source (ADR 0005 §2, §3): where its ticks come from and what they mean.
-
-    ``field`` and ``scope`` say which time field of which part of the source the ticks are read
-    from, verbatim: ``field="log_time"``, ``scope=("/imu",)``; ``scope=()`` for the whole source.
-    The adapter always knows these, so they are structural. Everything that interprets the ticks
-    is ``Knowledge``-wrapped and filled only from evidence. Record provenance and
-    ``schema_version`` arrive with the entity envelope (MVL-1, MVL-3).
-    """
-
-    id: RecordId
-    field: str
-    scope: tuple[str, ...]
-    role: Knowledge[ClockRole]
-    resolution: Knowledge[Fraction]  # seconds per tick, exact and positive
-    epoch: Knowledge[Epoch]
-    timescale: Knowledge[Timescale]
-    declared_monotonic: Knowledge[bool]  # as declared; observed violations are findings
-
-    def __post_init__(self) -> None:
-        parse_record_id(self.id)
-        check_text("field", self.field)
-        for part in self.scope:
-            check_text("scope part", part)
-        check_type("role", self.role, ClockRole)
-        check_type("resolution", self.resolution, Fraction)
-        if any(value <= 0 for value in values_of(self.resolution)):
-            raise ValueError(f"resolution must be positive: {self.resolution}")
-        check_type("epoch", self.epoch, Epoch)
-        check_type("timescale", self.timescale, Timescale)
-        check_type("declared_monotonic", self.declared_monotonic, bool)
-
-    def to_json(self) -> JsonObject:
-        return {
-            "declared_monotonic": to_json(self.declared_monotonic),
-            "epoch": to_json(self.epoch, str),
-            "field": self.field,
-            "id": self.id,
-            "resolution": to_json(self.resolution, resolution_to_json),
-            "role": to_json(self.role, str),
-            "scope": list(self.scope),
-            "timescale": to_json(self.timescale, str),
-        }
-
-
-def timestamp_domain_from_json(
-    data: JsonValue, decode_provenance: Callable[[JsonObject], Grounding]
-) -> TimestampDomain:
-    """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
-    obj = exact_object(
-        data,
-        "timestamp domain",
-        {
-            "declared_monotonic",
-            "epoch",
-            "field",
-            "id",
-            "resolution",
-            "role",
-            "scope",
-            "timescale",
-        },
-    )
-    scope = obj["scope"]
-    if not isinstance(scope, list | tuple) or not all(isinstance(p, str) for p in scope):
-        raise ValueError("scope must be an array of strings")
-    return TimestampDomain(
-        id=parse_record_id(json_str(obj["id"], "id")),
-        field=json_str(obj["field"], "field"),
-        scope=tuple(scope),
-        role=from_json(obj["role"], enum_decoder(ClockRole), decode_provenance),
-        resolution=from_json(obj["resolution"], resolution_from_json, decode_provenance),
-        epoch=from_json(obj["epoch"], enum_decoder(Epoch), decode_provenance),
-        timescale=from_json(obj["timescale"], enum_decoder(Timescale), decode_provenance),
-        declared_monotonic=from_json(obj["declared_monotonic"], json_bool, decode_provenance),
-    )
 
 
 def resolution_to_json(resolution: Fraction) -> JsonObject:
