@@ -1,6 +1,6 @@
 # Provenance and identity
 
-Status: identity implemented (MVL-2, ADR 0009); provenance agreed (ADR 0006), implementation in MVL-3.
+Status: identity implemented (MVL-2, MVL-59; ADRs 0009, 0010); provenance agreed (ADR 0006), implementation in MVL-3.
 
 ## Three identity tiers — never conflated
 
@@ -34,17 +34,22 @@ anything not byte-canonical.
 - `SourceArtifact` = one distinct byte string: content id, size, 8 MiB chunk hashes.
 - `SourceRevision` = one location seen holding one artifact. Revisions of a location form a hash chain via
   `supersedes`; nothing is ever mutated or removed.
+- `SourceAbsence` = a location that held bytes observed holding none; it supersedes the last revision.
 - `identity.revisions.SourceLedger` applies the policy: same bytes anywhere ⇒ one artifact; same location
-  and bytes ⇒ nothing new; changed bytes ⇒ new revision; rename ⇒ new location, no new artifact.
-- Locations are `LocalPath` (relative to the ingest root) or `ExternalObjectRef`
-  `(connector id, object id, revision token)` for object stores (MVL-45). A new token over identical bytes is
-  not a new revision.
+  and bytes ⇒ nothing new; changed bytes ⇒ new revision; rename ⇒ new location, no new artifact, and the old
+  location becomes absent; bytes reappearing ⇒ new revision superseding the absence.
+- Locations are `LocalPath` (relative to the ingest root), `RawLocalPath` (the same, for names that are not
+  valid UTF-8, kept as exact bytes) or `ExternalObjectRef` `(connector id, object id, revision token)` for
+  object stores (MVL-45). A new token over identical bytes is not a new revision.
 
 ## Walking local sources
 
-`discovery.source.LocalSource` implements the `Source` protocol (`walk`, `open`). It yields regular files only,
-never follows symlinks, never opens FIFOs/sockets/devices, and reports everything it skips as a
-`SkippedEntry` with a reason. Details: ADR 0009 §5.
+`discovery.source.LocalSource` implements the `Source` protocol (`walk`, `open`). It yields every regular file
+(including non-UTF-8 names), yields each symlink with its byte-exact target without following it, never opens
+FIFOs/sockets/devices, and reports everything else as a `SkippedEntry` with a reason.
+
+`discovery.scan.scan()` is one pass: walk, digest, record, then mark absent only the locations the scan could
+see are gone — never under an unreadable directory or a symlinked ancestor. Details: ADR 0010.
 
 ## Provenance record
 
