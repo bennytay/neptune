@@ -13,3 +13,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0006](0006-provenance-and-locators.md) | Provenance and locator model | Accepted |
 | [0007](0007-coordinate-frames.md) | Coordinate-frame semantics | Accepted |
 | [0008](0008-adapter-abi.md) | Adapter ABI surface | Accepted |
+| [0009](0009-source-revisions-and-id-rendering.md) | Source revisions, dedup policy and id rendering | Accepted |
