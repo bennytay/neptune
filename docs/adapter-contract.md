@@ -29,7 +29,8 @@ class Adapter(Protocol):
 1. **Purity.** `ingest` depends only on `(source bytes, chunk, config, adapter version)`. No wall-clock,
    randomness, environment, or network. Violations are bugs.
 2. **Determinism of `plan`.** Chunk ids are stable across runs; this is what makes resume and caching work.
-3. **Findings, not exceptions.** Recoverable problems are `IngestFinding`s in `ChunkOutput`. An uncaught
+3. **Findings, not exceptions.** Recoverable problems are `IngestFinding`s in `ChunkOutput`, built with
+   `identity.findings.ingest_finding` and a documented `<adapter id>.<name>` code (ADR 0017 §9). An uncaught
    exception is treated by the runtime as a crash: the chunk is quarantined with a finding; the job continues.
 4. **Leaf packages.** Adapters import `model/` and `identity/`; never each other, never `runtime/`.
 5. **Locators are exact.** Every emitted record carries an `EvidenceRef` that resolves to the bytes it came from.
@@ -52,7 +53,13 @@ class Adapter(Protocol):
 
 For text fields use `from_text(raw, parse, absent_tokens={token: definition})`. Token matching is exact.
 For unit text use `unit_from_text(raw, provenance=…)` (ADR 0013); never a private alias table. A unit stated
-only by the format spec is `Known` citing the spec; community convention (REP-103) is not a declaration.
+only by the format spec is `Known` citing the spec: the bytes that establish the format (magic, header, root
+element) plus your transform, or the definition itself when the source carries it (ADR 0017 §6). Community
+convention (REP-103) is not a declaration.
+
+Every record you emit carries one record-level `Provenance`, and its id is
+`evidence_record_id(kind, provenance.evidence, transform)`. Two records of one kind from one piece of evidence
+need finer locators (an adapter step if necessary), never a counter.
 
 ## What the runtime owns (and adapters must not reimplement)
 

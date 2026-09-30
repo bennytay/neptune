@@ -12,6 +12,9 @@ column headers, object ids) are verbatim, and may be empty when the source's nam
 A ``TransformRecord`` describes what produced records: an adapter at one version and resolved
 config, or a normaliser applied to another transform's output (``upstream``). Build and verify
 one with ``neptune.identity.provenance``; this module only holds the shapes.
+
+Every evidence record embeds one record-level ``Provenance`` beside its id (ADR 0017 §5); the
+helpers at the end check and serialise that pair the same way for every record kind.
 """
 
 import math
@@ -35,6 +38,8 @@ from neptune.model.ids import (
 )
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import AssertionKind
+from neptune.model.record import Family, envelope, record_object
+from neptune.model.source import external_object_ref_from_json
 from neptune.model.time import INT64_MAX, Timestamp
 
 # --- Field guards ------------------------------------------------------------------------------
@@ -505,6 +510,8 @@ class TransformRecord:
     ``config_hash``. Treat ``config`` as immutable.
     """
 
+    kind: ClassVar[str] = "transform_record"
+    family: ClassVar[Family] = Family.LINEAGE
     id: RecordId
     adapter_id: str
     adapter_version: str
@@ -548,7 +555,7 @@ class TransformRecord:
         }
 
     def to_json(self) -> JsonObject:
-        return {**self.content_json(), "id": self.id}
+        return envelope(self.kind, {**self.content_json(), "id": self.id})
 
 
 # --- JSON --------------------------------------------------------------------------------------
@@ -653,20 +660,11 @@ def _adapter_locator_from_json(kind: str, data: Mapping[str, JsonValue]) -> Adap
 def evidence_ref_from_json(data: JsonValue) -> EvidenceRef:
     obj = exact_object(data, "evidence ref", {"locator", "source"})
     source = obj["source"]
-    parsed: EvidenceSource
-    if isinstance(source, str):
-        parsed = parse_content_id(source)
-    else:
-        ext = exact_object(
-            source, "external source", {"connector_id", "kind", "object_id", "revision_token"}
-        )
-        if ext["kind"] != "external":
-            raise ValueError(f"unknown evidence source kind: {ext['kind']!r}")
-        parsed = ExternalObjectRef(
-            json_str(ext["connector_id"], "connector_id"),
-            json_str(ext["object_id"], "object_id"),
-            json_str(ext["revision_token"], "revision_token"),
-        )
+    parsed: EvidenceSource = (
+        parse_content_id(source)
+        if isinstance(source, str)
+        else external_object_ref_from_json(source)
+    )
     steps = obj["locator"]
     if not isinstance(steps, list | tuple):
         raise ValueError("locator must be an array of steps")
@@ -688,9 +686,9 @@ def provenance_from_json(data: JsonValue) -> Provenance:
 
 def transform_record_from_json(data: JsonValue) -> TransformRecord:
     """Parse the shape strictly; ``identity.provenance.check_transform_record`` checks hashes."""
-    obj = exact_object(
+    obj = record_object(
         data,
-        "transform record",
+        TransformRecord.kind,
         {"adapter_id", "adapter_version", "config", "config_hash", "id", "libraries", "upstream"},
     )
     config = obj["config"]
@@ -712,4 +710,36 @@ def transform_record_from_json(data: JsonValue) -> TransformRecord:
             sorted((name, json_str(version, name)) for name, version in libraries.items())
         ),
         upstream=tuple(parse_record_id(json_str(u, "upstream")) for u in upstream),
+    )
+
+
+# --- Evidence records (ADR 0017 §5) ------------------------------------------------------------
+
+
+def check_evidence_record(record_id: RecordId, provenance: Provenance) -> None:
+    """An evidence record's envelope: a tier-2 id and one canonical, record-level provenance."""
+    parse_record_id(record_id)
+    if not isinstance(provenance, Provenance):
+        raise TypeError(
+            f"record provenance must be a Provenance (observed or stated), got {provenance!r};"
+            " inferred records belong in derived/"
+        )
+
+
+def evidence_record_json(
+    kind: str, record_id: RecordId, provenance: Provenance, body: Mapping[str, JsonValue]
+) -> JsonObject:
+    """An evidence record's JSON: its fields plus ``id``, ``provenance`` and the envelope."""
+    return envelope(kind, {**body, "id": record_id, "provenance": provenance.to_json()})
+
+
+def evidence_record_object(
+    data: JsonValue, kind: str, keys: set[str]
+) -> tuple[Mapping[str, JsonValue], RecordId, Provenance]:
+    """Check an evidence record's JSON strictly; return its object, id and provenance."""
+    obj = record_object(data, kind, keys | {"id", "provenance"})
+    return (
+        obj,
+        parse_record_id(json_str(obj["id"], "id")),
+        provenance_from_json(obj["provenance"]),
     )

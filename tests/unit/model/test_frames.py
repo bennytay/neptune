@@ -14,9 +14,7 @@ from neptune.model.frames import (
     EulerAngles,
     EulerMode,
     EulerSequence,
-    Frame,
     FrameRef,
-    FrameTransform,
     Handedness,
     HomogeneousMatrix,
     MatrixLayout,
@@ -27,12 +25,12 @@ from neptune.model.frames import (
     Rotation,
     RotationMatrix,
     RotationVector,
-    TransformDirection,
     Translation,
-    frame_from_json,
     frame_ref_from_json,
-    frame_transform_from_json,
     rotation_from_json,
+    transform_value_from_json,
+    validity_from_json,
+    validity_to_json,
 )
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import (
@@ -83,18 +81,6 @@ def tf_pose(rotation: Rotation | None = None) -> Pose:
         Translation((0.1, 0.0, -0.0), M),
         rotation or Quaternion((0.0, 0.0, 0.0, 1.0), XYZW, HAMILTON),
     )
-
-
-def tf_transform(**overrides: Any) -> FrameTransform:
-    fields: dict[str, Any] = {
-        "parent": base_link(frame_id="odom"),
-        "child": base_link(),
-        "direction": Known(TransformDirection.CHILD_TO_PARENT, Cite("tf2 docs")),
-        "value": tf_pose(),
-        "validity": Timestamp(1_700_000_000_000_000_000, CLOCK),
-    }
-    fields.update(overrides)
-    return FrameTransform(**fields)
 
 
 def round_trip(value: Any, decode: Any) -> None:
@@ -161,40 +147,6 @@ def test_handedness_matches_the_axis_directions(convention: AxisConvention) -> N
     assert convention.handedness is (Handedness.RIGHT if cross == z else Handedness.LEFT)
 
 
-def test_a_frame_has_no_default_convention() -> None:
-    with pytest.raises(TypeError):
-        Frame(base_link())  # type: ignore[call-arg]
-    frame = Frame(base_link(), Unknown(), Unknown())
-    assert frame.axes == Unknown()
-
-
-def test_handedness_can_be_declared_without_axes() -> None:
-    frame = Frame(base_link(), Unknown(), Known(Handedness.LEFT, Cite("engine docs")))
-    assert frame.handedness == Known(Handedness.LEFT, Cite("engine docs"))
-
-
-def test_contradictory_axes_and_handedness_are_rejected() -> None:
-    Frame(base_link(), Known(AxisConvention.NED), Known(Handedness.RIGHT))
-    with pytest.raises(ValueError, match="right-handed"):
-        Frame(base_link(), Known(AxisConvention.NED), Known(Handedness.LEFT))
-
-
-def test_conflicting_declarations_are_ambiguous_not_resolved() -> None:
-    axes: Ambiguous[AxisConvention] = Ambiguous(
-        (
-            Candidate(AxisConvention.FLU, Cite("urdf comment")),
-            Candidate(AxisConvention.FRD, Cite("px4 params")),
-        )
-    )
-    frame = Frame(base_link(), axes, Unknown())
-    round_trip(frame, lambda d: frame_from_json(d, cite))
-
-
-def test_frame_rejects_bare_strings_for_enums() -> None:
-    with pytest.raises(ValueError, match="AxisConvention"):
-        Frame(base_link(), Known("enu"), Unknown())  # type: ignore[arg-type]
-
-
 # --- Acceptance: nothing is normalised at construction ----------------------------------------
 
 
@@ -220,11 +172,6 @@ def test_units_are_kept_as_declared() -> None:
     assert EulerAngles((0.0, 0.0, 90.0), Known(EulerSequence.XYZ), Known(EulerMode.EXTRINSIC), DEG)
 
 
-def test_direction_is_kept_as_declared() -> None:
-    parent_to_child = Known(TransformDirection.PARENT_TO_CHILD, Cite("calib.yaml"))
-    assert tf_transform(direction=parent_to_child).direction == parent_to_child
-
-
 # --- Acceptance: undeclared is Unknown / Ambiguous, and the numbers survive -----------------------
 
 
@@ -241,17 +188,6 @@ def test_undeclared_quaternion_order_keeps_the_numbers() -> None:
         round_trip(rotation, lambda d: rotation_from_json(d, cite))
 
 
-def test_undeclared_direction_is_ambiguous_with_both_readings() -> None:
-    direction: Ambiguous[TransformDirection] = Ambiguous(
-        (
-            Candidate(TransformDirection.CHILD_TO_PARENT, Cite("calib.yaml: T_cam_imu")),
-            Candidate(TransformDirection.PARENT_TO_CHILD, Cite("calib.yaml: T_cam_imu")),
-        )
-    )
-    transform = tf_transform(direction=direction, validity=STATIC)
-    round_trip(transform, lambda d: frame_transform_from_json(d, cite))
-
-
 def test_unknown_units_and_layouts_are_representable() -> None:
     euler = EulerAngles((1.0, 2.0, 3.0), Unknown(), Unknown(), Unknown())
     matrix = HomogeneousMatrix(IDENTITY_4X4, Unknown(), Unknown())
@@ -259,7 +195,7 @@ def test_unknown_units_and_layouts_are_representable() -> None:
     vector = RotationVector((0.0, 0.0, 1.5), ambiguous_unit)
     for rotation in (euler, vector):
         round_trip(rotation, lambda d: rotation_from_json(d, cite))
-    round_trip(tf_transform(value=matrix), lambda d: frame_transform_from_json(d, cite))
+    round_trip(matrix, lambda d: transform_value_from_json(d, cite))
 
 
 # --- Malformed input and boundaries ------------------------------------------------------------
@@ -305,50 +241,12 @@ def test_a_bare_unit_string_is_rejected() -> None:
         Translation((0.0, 0.0, 0.0), Known("m"))  # type: ignore[arg-type]
 
 
-def test_transform_between_graphs_is_alignment_not_a_transform() -> None:
-    with pytest.raises(ValueError, match="different frame graphs"):
-        tf_transform(parent=base_link(URDF, "odom"))
-
-
-def test_a_frame_cannot_be_its_own_parent() -> None:
-    with pytest.raises(ValueError, match="own parent"):
-        tf_transform(parent=base_link())
-    tf_transform(parent=base_link(frame_id="/base_link"))  # verbatim names differ
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("parent", "odom"),
-        ("value", Quaternion((0.0, 0.0, 0.0, 1.0), XYZW, HAMILTON)),
-        ("validity", 1_700_000_000),
-        ("direction", Known("child_to_parent")),
-    ],
-)
-def test_transform_rejects_wrong_types(field: str, value: Any) -> None:
-    with pytest.raises((TypeError, ValueError)):
-        tf_transform(**{field: value})
-
-
 def test_pose_rejects_a_translation_in_place_of_a_rotation() -> None:
     with pytest.raises(TypeError):
         Pose(Translation((0.0, 0.0, 0.0), M), Translation((0.0, 0.0, 0.0), M))  # type: ignore[arg-type]
 
 
 # --- JSON: shape, round trip, strictness, determinism -----------------------------------------
-
-
-def test_transform_json_shape() -> None:
-    data = canonical_json.dumps(tf_transform(validity=STATIC).to_json())
-    assert data.startswith(b'{"child":{"frame_graph_id":"rec:sha256:')
-    assert (
-        b'"direction":{"knowledge":"known","provenance":{"where":"tf2 docs"},'
-        b'"value":"child_to_parent"}' in data
-    )
-    assert b'"validity":{"kind":"static"}' in data
-    assert (
-        b'"translation":{"unit":{"knowledge":"known","value":"m"},"values":[0.1,0.0,-0.0]}' in data
-    )
 
 
 @pytest.mark.parametrize(
@@ -364,55 +262,21 @@ def test_transform_json_shape() -> None:
 )
 def test_every_rotation_round_trips(rotation: Rotation) -> None:
     round_trip(tf_pose(rotation), lambda d: tf_pose(rotation_from_json(d["rotation"], cite)))
-    round_trip(tf_transform(value=tf_pose(rotation)), lambda d: frame_transform_from_json(d, cite))
+    round_trip(tf_pose(rotation), lambda d: transform_value_from_json(d, cite))
 
 
-def test_stamped_and_static_transforms_round_trip() -> None:
-    for validity in (STATIC, Timestamp(-1, CLOCK)):
-        round_trip(tf_transform(validity=validity), lambda d: frame_transform_from_json(d, cite))
+def test_validity_is_static_or_stamped() -> None:
+    assert validity_to_json(STATIC) == {"kind": "static"}
+    stamp = Timestamp(-1, CLOCK)
+    assert validity_to_json(stamp) == {"kind": "stamped", "stamp": stamp.to_json()}
+    for validity in (STATIC, stamp):
+        data = canonical_json.loads(canonical_json.dumps(validity_to_json(validity)))
+        assert validity_from_json(data) == validity
+    bad: list[JsonValue] = [{"kind": "interval"}, {"kind": "static", "stamp": 1}, "static"]
+    for data in bad:
+        with pytest.raises(ValueError):
+            validity_from_json(data)
     round_trip(base_link(), frame_ref_from_json)
-
-
-def test_same_transform_gives_the_same_bytes() -> None:
-    assert canonical_json.dumps(tf_transform().to_json()) == canonical_json.dumps(
-        tf_transform().to_json()
-    )
-
-
-def _mutate(data: JsonValue, path: tuple[str, ...], change: Any) -> JsonValue:
-    obj = dict(data)  # type: ignore[arg-type]
-    if len(path) == 1:
-        change(obj, path[0])
-    else:
-        obj[path[0]] = _mutate(obj[path[0]], path[1:], change)
-    return obj
-
-
-def _set(value: Any) -> Any:
-    return lambda obj, key: obj.__setitem__(key, value)
-
-
-@pytest.mark.parametrize(
-    ("path", "change"),
-    [
-        (("extra",), _set(1)),
-        (("direction",), lambda obj, key: obj.pop(key)),
-        (("value", "kind"), _set("twist")),
-        (("value", "rotation", "kind"), _set("axis_angle")),
-        (("value", "rotation", "values"), _set([0, 0, 0, 1])),
-        (("value", "rotation", "values"), _set([0.0, 0.0, 1.0])),
-        (("value", "rotation", "order"), _set({"knowledge": "known", "value": "zyxw"})),
-        (("value", "translation", "unit"), _set({"knowledge": "known", "value": "rad"})),
-        (("value", "translation", "confidence"), _set(0.9)),
-        (("validity", "kind"), _set("interval")),
-        (("child", "frame_graph_id"), _set(URDF)),
-        (("parent",), _set("odom")),
-    ],
-)
-def test_json_parsing_is_strict(path: tuple[str, ...], change: Any) -> None:
-    data = _mutate(tf_transform(validity=STATIC).to_json(), path, change)
-    with pytest.raises((TypeError, ValueError)):
-        frame_transform_from_json(data, cite)
 
 
 finite = st.floats(allow_nan=False, allow_infinity=False)
@@ -427,4 +291,4 @@ def test_any_finite_pose_round_trips_exactly(
     values: tuple[float, ...], order: QuaternionOrder, translation: tuple[float, ...]
 ) -> None:
     pose = Pose(Translation(translation, MM), Quaternion(values, Known(order), NotApplicable()))
-    round_trip(tf_transform(value=pose), lambda d: frame_transform_from_json(d, cite))
+    round_trip(pose, lambda d: transform_value_from_json(d, cite))

@@ -2,12 +2,12 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from typing import Final
+from typing import ClassVar, Final, Protocol
 
 from neptune.identity.ids import adapter_record_id, config_hash, record_id
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.provenance import EvidenceRef, TransformRecord
+from neptune.model.provenance import EvidenceRef, Provenance, TransformRecord
 
 TRANSFORM_RECORD_KIND: Final = "transform_record"
 
@@ -82,3 +82,23 @@ def evidence_record_id(kind: str, evidence: EvidenceRef, transform: TransformRec
             "upstream": list(transform.upstream),
         },
     )
+
+
+class EvidenceRecord(Protocol):
+    """Any record with an id and one record-level provenance (ADR 0017 §3)."""
+
+    kind: ClassVar[str]
+
+    @property
+    def id(self) -> RecordId: ...
+
+    @property
+    def provenance(self) -> Provenance: ...
+
+
+def check_evidence_record_id(record: EvidenceRecord, transform: TransformRecord) -> None:
+    """Verify the id rule (ADR 0017 §5): the id derives from the record-level evidence."""
+    if record.provenance.transform != transform.id:
+        raise ValueError(f"{record.kind} {record.id} was not produced by transform {transform.id}")
+    if record.id != evidence_record_id(record.kind, record.provenance.evidence, transform):
+        raise ValueError(f"{record.kind} {record.id}: id does not match its evidence and transform")

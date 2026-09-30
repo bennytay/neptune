@@ -1,6 +1,7 @@
 # Provenance and identity
 
-Status: identity implemented (MVL-2, MVL-59; ADRs 0009, 0010); provenance implemented (MVL-3; ADRs 0006, 0016).
+Status: identity implemented (MVL-2, MVL-59; ADRs 0009, 0010); provenance implemented (MVL-3; ADRs 0006, 0016);
+record envelope and findings implemented (MVL-66; ADR 0017).
 
 ## Three identity tiers — never conflated
 
@@ -24,6 +25,8 @@ Consequences:
 | content id, chunk hash | `sha256:<64 hex>` | `identity.hashing.digest_stream`, `content_id` |
 | config hash | `sha256:<64 hex>` of the resolved config's canonical JSON | `identity.ids.config_hash` |
 | record id | `rec:sha256:<64 hex>` | `identity.ids.adapter_record_id`, `record_id` |
+| evidence record id | record id over kind + record-level evidence + transform | `identity.provenance.evidence_record_id`, `check_evidence_record_id` |
+| transform / finding id | record id over the record's own content | `identity.provenance.transform_record`, `identity.findings.ingest_finding` |
 | logical id | `{"namespace", "value"}` | `model.ids.LogicalId` |
 
 Canonical JSON (ADR 0002) is `identity.canonical_json`; `dumps` for hashing and storage, `loads` rejects
@@ -66,6 +69,12 @@ Provenance
 - `stated`: the source explicitly asserts it about something else (a register row says asset A has defect D).
 - `inferred`: produced by a model or heuristic. Only `derived.provenance.InferredProvenance` can say so, and
   neither mypy nor the runtime lets it onto a canonical `Knowledge` state.
+
+Record-level provenance cites exactly one `EvidenceRef`: the evidence that declares the record. The record's id
+is `evidence_record_id(kind, provenance.evidence, transform)` (ADR 0017 §5). A value that a format specification
+defines, such as MCAP `log_time` being nanoseconds, cites the bytes that establish the format (magic, header,
+root element) with the transform that applies the spec, or the definition itself when the source carries it
+(ADR 0017 §6).
 
 `TransformRecord(id, adapter_id, adapter_version, config_hash, config, libraries, upstream)` holds nothing
 host-specific. `upstream` names the transforms whose output it consumed, so a normalised value's chain is

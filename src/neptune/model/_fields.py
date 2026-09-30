@@ -73,6 +73,18 @@ def json_str(value: JsonValue, what: str) -> str:
     return value
 
 
+def json_int(value: JsonValue, what: str) -> int:
+    if not is_int(value):
+        raise ValueError(f"{what} must be an integer, got {value!r}")
+    return value
+
+
+def json_array(value: JsonValue, what: str) -> tuple[JsonValue, ...]:
+    if not isinstance(value, list | tuple):
+        raise ValueError(f"{what} must be an array, got {type(value).__name__}")
+    return tuple(value)
+
+
 def json_bool(value: JsonValue) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"expected a boolean, got {type(value).__name__}")

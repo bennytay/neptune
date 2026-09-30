@@ -8,6 +8,9 @@ Rotation and pose values keep their numbers as declared, in the source's order, 
 interpretation (component order, matrix layout, Euler sequence, units, transform direction) in
 ``Knowledge``. An undeclared order is ``Unknown`` or ``Ambiguous`` and the numbers are still kept.
 Nothing here reorders, normalises, inverts, converts or composes: those are derived transforms.
+
+The records built from these values (``FrameGraph``, ``Frame``, ``FrameTransform``) live in
+``neptune.model.reference``: a record carries provenance, whose locators use ``FrameRef``.
 """
 
 import math
@@ -26,7 +29,7 @@ from neptune.model._fields import (
 )
 from neptune.model.ids import RecordId, check_text, parse_record_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.knowledge import Grounding, Knowledge, Known, from_json, to_json
+from neptune.model.knowledge import Grounding, Knowledge, from_json, to_json
 from neptune.model.time import Timestamp, timestamp_from_json
 from neptune.model.units import Dimension, Unit, unit_from_json
 
@@ -112,44 +115,6 @@ _HANDEDNESS: Final[Mapping[AxisConvention, Handedness]] = {
     AxisConvention.RUF: Handedness.LEFT,
     AxisConvention.FRU: Handedness.LEFT,
 }
-
-
-@dataclass(frozen=True)
-class Frame:
-    """What the evidence says about one frame's axes (ADR 0007 §4). There is no default.
-
-    ``handedness`` may be declared without a named convention. When both are ``Known`` they must
-    agree: a source that contradicts itself is a finding, and the adapter records ``Ambiguous``.
-    """
-
-    ref: FrameRef
-    axes: Knowledge[AxisConvention]
-    handedness: Knowledge[Handedness]
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.ref, FrameRef):
-            raise TypeError(f"ref must be a FrameRef, got {type(self.ref).__name__}")
-        check_type("axes", self.axes, AxisConvention)
-        check_type("handedness", self.handedness, Handedness)
-        match self.axes, self.handedness:
-            case Known(value=axes), Known(value=handedness) if axes.handedness != handedness:
-                raise ValueError(f"{axes} is {axes.handedness}-handed, not {handedness}-handed")
-
-    def to_json(self) -> JsonObject:
-        return {
-            "axes": to_json(self.axes, str),
-            "handedness": to_json(self.handedness, str),
-            "ref": self.ref.to_json(),
-        }
-
-
-def frame_from_json(data: JsonValue, decode_provenance: Callable[[JsonObject], Grounding]) -> Frame:
-    obj = exact_object(data, "frame", {"axes", "handedness", "ref"})
-    return Frame(
-        ref=frame_ref_from_json(obj["ref"]),
-        axes=from_json(obj["axes"], enum_decoder(AxisConvention), decode_provenance),
-        handedness=from_json(obj["handedness"], enum_decoder(Handedness), decode_provenance),
-    )
 
 
 # --- Rotations ---------------------------------------------------------------------------------
@@ -389,51 +354,11 @@ STATIC = Static()
 Validity: TypeAlias = Static | Timestamp
 
 
-@dataclass(frozen=True)
-class FrameTransform:
-    """One transform between two frames of one graph, exactly as declared (ADR 0007 §3).
-
-    ``parent`` and ``child`` are the roles the source gives the frames (tf's ``header.frame_id``
-    and ``child_frame_id``, a URDF joint's links). Where the source has no hierarchy, the adapter's
-    descriptor documents which named frame fills which slot, and ``direction`` still says which way
-    the values map; if the source does not say, it is ``Ambiguous`` or ``Unknown``, never guessed.
-    Relating frames of two graphs is an alignment record (MVL-37), not a transform. Record
-    provenance arrives with the entity envelope (MVL-1, MVL-3).
-    """
-
-    parent: FrameRef
-    child: FrameRef
-    direction: Knowledge[TransformDirection]
-    value: TransformValue
-    validity: Validity
-
-    def __post_init__(self) -> None:
-        for name, ref in (("parent", self.parent), ("child", self.child)):
-            if not isinstance(ref, FrameRef):
-                raise TypeError(f"{name} must be a FrameRef, got {type(ref).__name__}")
-        if self.parent.frame_graph_id != self.child.frame_graph_id:
-            raise ValueError("parent and child are in different frame graphs; that is alignment")
-        if self.parent == self.child:
-            raise ValueError(f"a frame cannot be its own parent: {self.parent.frame_id!r}")
-        check_type("direction", self.direction, TransformDirection)
-        if not isinstance(self.value, Pose | HomogeneousMatrix):
-            raise TypeError(f"value must be a Pose or HomogeneousMatrix, got {self.value!r}")
-        if not isinstance(self.validity, Static | Timestamp):
-            raise TypeError(f"validity must be STATIC or a Timestamp, got {self.validity!r}")
-
-    def to_json(self) -> JsonObject:
-        validity: JsonObject = (
-            self.validity.to_json()
-            if isinstance(self.validity, Static)
-            else {"kind": "stamped", "stamp": self.validity.to_json()}
-        )
-        return {
-            "child": self.child.to_json(),
-            "direction": to_json(self.direction, str),
-            "parent": self.parent.to_json(),
-            "validity": validity,
-            "value": self.value.to_json(),
-        }
+def validity_to_json(validity: Validity) -> JsonObject:
+    """``{"kind":"static"}`` or ``{"kind":"stamped","stamp":{…}}``."""
+    if isinstance(validity, Static):
+        return validity.to_json()
+    return {"kind": "stamped", "stamp": validity.to_json()}
 
 
 # --- JSON --------------------------------------------------------------------------------------
@@ -520,20 +445,6 @@ def transform_value_from_json(data: JsonValue, decode_provenance: _Decode) -> Tr
     )
 
 
-def _validity_from_json(data: JsonValue) -> Validity:
+def validity_from_json(data: JsonValue) -> Validity:
     obj = _kind(data, "validity", {"static": {"kind"}, "stamped": {"kind", "stamp"}})
     return STATIC if obj["kind"] == "static" else timestamp_from_json(obj["stamp"])
-
-
-def frame_transform_from_json(data: JsonValue, decode_provenance: _Decode) -> FrameTransform:
-    """Parse strictly: unexpected or missing keys, unknown kinds and ints for floats are errors."""
-    obj = exact_object(
-        data, "frame transform", {"child", "direction", "parent", "validity", "value"}
-    )
-    return FrameTransform(
-        parent=frame_ref_from_json(obj["parent"]),
-        child=frame_ref_from_json(obj["child"]),
-        direction=from_json(obj["direction"], enum_decoder(TransformDirection), decode_provenance),
-        value=transform_value_from_json(obj["value"], decode_provenance),
-        validity=_validity_from_json(obj["validity"]),
-    )
