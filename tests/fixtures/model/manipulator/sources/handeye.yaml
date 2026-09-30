@@ -1,0 +1,16 @@
+{
+  "eye_on_hand": true,
+  "robot_base_frame": "base_link",
+  "robot_effector_frame": "tool0",
+  "tracking_base_frame": "wrist_camera",
+  "tracking_marker_frame": "aruco_marker_42",
+  "transformation": {
+    "qw": 0.7071067811865476,
+    "qx": 0.0,
+    "qy": 0.0,
+    "qz": 0.7071067811865476,
+    "x": 0.032,
+    "y": -0.011,
+    "z": 0.071
+  }
+}
