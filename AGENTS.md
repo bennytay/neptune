@@ -79,6 +79,9 @@ dependencies as `blockedBy`; do not start an issue whose blockers are not Done.
 7. Open a PR using the template, BLUF style: `Closes MVL-N`, a one-line **TL;DR**, ≤5 **Decided**
    bullets, ≤3 **Your call** bullets, a **Progress** line. Everything else sits in the collapsed
    details block. Visible part ≤12 lines, no paragraphs; depth goes in ADRs/docs, linked.
+   If the PR materially changes the architecture (a box, an arrow, an owner, or a box's built/partial state),
+   update `ARCHITECTURE.md` in the same PR and fill the template's **Architecture change** section.
+   Otherwise leave both untouched.
 8. Move the issue to **In Review** only when every acceptance criterion is demonstrably met and CI is green.
 9. **Stop. Never merge.** The maintainer reviews and merges every PR personally. **Done** happens on
    merge, never on "code exists"; after merge, comment the merge SHA on the issue.
@@ -107,6 +110,8 @@ dependencies as `blockedBy`; do not start an issue whose blockers are not Done.
 ## Documentation and ADRs
 
 - Docs describe the system as it is; if a PR changes a contract, the same PR updates the doc.
+- `ARCHITECTURE.md` is the maintainer's 2-minute mental model: one diagram, no class names, no prose.
+  Keep it short. Simplify it rather than grow it. `docs/architecture.md` holds the engineering detail.
 - Architecture decisions go in `docs/adr/NNNN-title.md` using `docs/adr/0000-template.md`.
   Decisions are superseded by a new ADR, never edited in place.
 - Milestone gates (`docs/reviews/`) stop feature work: no M(n+1) issue starts before the M(n) gate is Done.
