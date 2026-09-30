@@ -6,22 +6,24 @@ mixing domains raises ``DomainMismatchError``. Relating two domains is a ``Clock
 record (MVL-36), never an operator.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from fractions import Fraction
-from typing import Any, Final, TypeGuard, TypeVar, overload
+from typing import Final, overload
 
+from neptune.model._fields import (
+    check_type,
+    enum_decoder,
+    exact_object,
+    is_int,
+    json_bool,
+    json_str,
+    values_of,
+)
 from neptune.model.ids import RecordId, check_text, parse_record_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.knowledge import (
-    Ambiguous,
-    Grounding,
-    Knowledge,
-    Known,
-    from_json,
-    to_json,
-)
+from neptune.model.knowledge import Grounding, Knowledge, from_json, to_json
 
 INT64_MIN: Final = -(2**63)
 INT64_MAX: Final = 2**63 - 1
@@ -31,9 +33,6 @@ SECOND: Final = Fraction(1)
 MILLISECOND: Final = Fraction(1, 10**3)
 MICROSECOND: Final = Fraction(1, 10**6)
 NANOSECOND: Final = Fraction(1, 10**9)
-
-T = TypeVar("T")
-E = TypeVar("E", bound=StrEnum)
 
 
 class DomainMismatchError(TypeError):
@@ -211,13 +210,13 @@ class TimestampDomain:
         check_text("field", self.field)
         for part in self.scope:
             check_text("scope part", part)
-        _check_type("role", self.role, ClockRole)
-        _check_type("resolution", self.resolution, Fraction)
-        if any(value <= 0 for value in _values(self.resolution)):
+        check_type("role", self.role, ClockRole)
+        check_type("resolution", self.resolution, Fraction)
+        if any(value <= 0 for value in values_of(self.resolution)):
             raise ValueError(f"resolution must be positive: {self.resolution}")
-        _check_type("epoch", self.epoch, Epoch)
-        _check_type("timescale", self.timescale, Timescale)
-        _check_type("declared_monotonic", self.declared_monotonic, bool)
+        check_type("epoch", self.epoch, Epoch)
+        check_type("timescale", self.timescale, Timescale)
+        check_type("declared_monotonic", self.declared_monotonic, bool)
 
     def to_json(self) -> JsonObject:
         return {
@@ -236,7 +235,7 @@ def timestamp_domain_from_json(
     data: JsonValue, decode_provenance: Callable[[JsonObject], Grounding]
 ) -> TimestampDomain:
     """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
-    obj = _exact_object(
+    obj = exact_object(
         data,
         "timestamp domain",
         {
@@ -254,14 +253,14 @@ def timestamp_domain_from_json(
     if not isinstance(scope, list | tuple) or not all(isinstance(p, str) for p in scope):
         raise ValueError("scope must be an array of strings")
     return TimestampDomain(
-        id=parse_record_id(_str(obj["id"], "id")),
-        field=_str(obj["field"], "field"),
+        id=parse_record_id(json_str(obj["id"], "id")),
+        field=json_str(obj["field"], "field"),
         scope=tuple(scope),
-        role=from_json(obj["role"], _enum_decoder(ClockRole), decode_provenance),
+        role=from_json(obj["role"], enum_decoder(ClockRole), decode_provenance),
         resolution=from_json(obj["resolution"], resolution_from_json, decode_provenance),
-        epoch=from_json(obj["epoch"], _enum_decoder(Epoch), decode_provenance),
-        timescale=from_json(obj["timescale"], _enum_decoder(Timescale), decode_provenance),
-        declared_monotonic=from_json(obj["declared_monotonic"], _bool, decode_provenance),
+        epoch=from_json(obj["epoch"], enum_decoder(Epoch), decode_provenance),
+        timescale=from_json(obj["timescale"], enum_decoder(Timescale), decode_provenance),
+        declared_monotonic=from_json(obj["declared_monotonic"], json_bool, decode_provenance),
     )
 
 
@@ -271,9 +270,9 @@ def resolution_to_json(resolution: Fraction) -> JsonObject:
 
 def resolution_from_json(data: JsonValue) -> Fraction:
     """Exact seconds per tick. Must be positive and in lowest terms, so its bytes are canonical."""
-    obj = _exact_object(data, "resolution", {"denominator", "numerator"})
+    obj = exact_object(data, "resolution", {"denominator", "numerator"})
     numerator, denominator = obj["numerator"], obj["denominator"]
-    if not _is_int(numerator) or not _is_int(denominator) or numerator <= 0 or denominator <= 0:
+    if not is_int(numerator) or not is_int(denominator) or numerator <= 0 or denominator <= 0:
         raise ValueError(f"resolution needs positive integers: {numerator!r}/{denominator!r}")
     resolution = Fraction(numerator, denominator)
     if resolution.numerator != numerator:
@@ -281,62 +280,9 @@ def resolution_from_json(data: JsonValue) -> Fraction:
     return resolution
 
 
-# --- Helpers ---------------------------------------------------------------------------------
-
-
-def _values(knowledge: Knowledge[T]) -> list[T]:
-    """Every value a state asserts or offers: Known's value, each Ambiguous candidate's."""
-    match knowledge:
-        case Known(value=value):
-            return [value]
-        case Ambiguous(candidates=candidates):
-            return [candidate.value for candidate in candidates]
-        case _:
-            return []
-
-
-def _check_type(field: str, knowledge: Knowledge[Any], kind: type) -> None:
-    """Runtime guard: a float resolution or a bare-string epoch must not slip past the hints."""
-    for value in _values(knowledge):
-        if not isinstance(value, kind):
-            raise ValueError(f"{field} must be a {kind.__name__}, got {value!r}")
-
-
-def _enum_decoder(enum: type[E]) -> Callable[[JsonValue], E]:
-    def decode(data: JsonValue) -> E:
-        return enum(_str(data, enum.__name__))
-
-    return decode
-
-
 def _ticks_and_domain(data: JsonValue, what: str) -> tuple[int, RecordId]:
-    obj = _exact_object(data, what, {"domain_id", "ticks"})
+    obj = exact_object(data, what, {"domain_id", "ticks"})
     ticks = obj["ticks"]
-    if not _is_int(ticks):
+    if not is_int(ticks):
         raise ValueError(f"{what} ticks must be an integer, got {ticks!r}")
-    return ticks, parse_record_id(_str(obj["domain_id"], "domain_id"))
-
-
-def _exact_object(data: JsonValue, what: str, keys: set[str]) -> Mapping[str, JsonValue]:
-    if not isinstance(data, Mapping):
-        raise ValueError(f"{what} must be a JSON object, got {type(data).__name__}")
-    if data.keys() != keys:
-        missing, extra = keys - data.keys(), data.keys() - keys
-        raise ValueError(f"bad {what}: missing {sorted(missing)}, unexpected {sorted(extra)}")
-    return data
-
-
-def _is_int(value: JsonValue) -> TypeGuard[int]:
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _str(value: JsonValue, what: str) -> str:
-    if not isinstance(value, str):
-        raise ValueError(f"{what} must be a string, got {type(value).__name__}")
-    return value
-
-
-def _bool(value: JsonValue) -> bool:
-    if not isinstance(value, bool):
-        raise ValueError(f"expected a boolean, got {type(value).__name__}")
-    return value
+    return ticks, parse_record_id(json_str(obj["domain_id"], "domain_id"))
