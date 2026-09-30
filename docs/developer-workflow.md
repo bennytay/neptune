@@ -17,7 +17,8 @@ make check
 Todo ──(branch created, first commit)──▶ In Progress ──(PR open, acceptance met)──▶ In Review ──(merged)──▶ Done
 ```
 
-- Start only issues whose `blockedBy` are all Done. Check for issues already In Progress first.
+- Start only issues whose `blockedBy` are all Done. Check for issues already In Progress first. The selection
+  rule for "implement the next MVL issue" is in `AGENTS.md` under *Picking the next issue*.
 - Branch name = the issue's `gitBranchName` (`benjamintay07/mvl-N-slug`). Linear's GitHub integration links
   PRs by this name and transitions status on merge; enable it once in Linear → Settings → Integrations.
 - Comment on the issue when moving to In Review: PR link + acceptance checklist. On Done: merge SHA.

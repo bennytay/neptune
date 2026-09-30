@@ -83,7 +83,14 @@ dependencies as `blockedBy`; do not start an issue whose blockers are not Done.
 9. **Stop. Never merge.** The maintainer reviews and merges every PR personally. **Done** happens on
    merge, never on "code exists"; after merge, comment the merge SHA on the issue.
 
-Before starting any work, check Linear for issues already **In Progress**; do not duplicate a live issue.
+**Picking the next issue** (when told "implement the next MVL issue"):
+1. If any issue is **In Progress**, resume it. Never start a second one alongside it.
+2. Otherwise, consider only **Todo** issues whose `blockedBy` issues are all **Done**. The previous milestone's
+   gate issue must also be Done.
+3. Take the lowest milestone first. Within a milestone, follow the order in `docs/audit-2026-09-30.md` §7.
+4. If nothing qualifies because blockers are **In Review**, say which PRs are waiting for a merge. If there is
+   still a tie, ask; don't guess.
+5. Name the chosen issue before starting work.
 
 ## Git
 
