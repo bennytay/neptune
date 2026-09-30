@@ -51,6 +51,8 @@ from neptune.model.reference import (
     frame_transform_from_json,
     timestamp_domain_from_json,
 )
+from neptune.model.run import Run, Stream, run_from_json, stream_from_json
+from neptune.model.series import SeriesProvenance, step_template
 from neptune.model.source import (
     LocalPath,
     SourceAbsence,
@@ -60,7 +62,7 @@ from neptune.model.source import (
     source_artifact_from_json,
     source_revision_from_json,
 )
-from neptune.model.time import NANOSECOND, ClockRole
+from neptune.model.time import NANOSECOND, ClockRole, Timestamp
 from neptune.model.units import unit_from_json
 
 URDF_BYTES = b"<robot name='arm'><link name='base_link'/><link name='tool0'/></robot>"
@@ -96,6 +98,27 @@ def evidence_record(build: Callable[..., R], kind: str, where: Provenance, **fie
 
 
 GRAPH = evidence_record(FrameGraph, "frame_graph", at(0, len(URDF_BYTES)), scope=())
+STAMP = evidence_record(
+    TimestampDomain,
+    "timestamp_domain",
+    at(0, 6),
+    field="stamp",
+    scope=(),
+    role=Known(ClockRole.SAMPLE),
+    resolution=Known(NANOSECOND),
+    epoch=Unknown(),
+    timescale=Unknown(),
+    declared_monotonic=Unknown(),
+)
+RUN = evidence_record(
+    Run,
+    "run",
+    at(0, len(URDF_BYTES)),
+    logical_id=Unknown(),
+    machine=Unknown(),
+    first=Known(Timestamp(0, STAMP.id)),
+    last=Unknown(),
+)
 M = Known(unit_from_json("m"))
 POSE = Pose(Translation((0.0, 0.0, 0.1), M), Quaternion((0.0, 0.0, 0.0, 1.0), Unknown(), Unknown()))
 REVISION, ABSENCE = ledger()
@@ -108,21 +131,7 @@ def samples() -> list[tuple[Any, Callable[[JsonValue], Any]]]:
         (REVISION, source_revision_from_json),
         (ABSENCE, source_absence_from_json),
         (ADAPTER, transform_record_from_json),
-        (
-            evidence_record(
-                TimestampDomain,
-                "timestamp_domain",
-                at(0, 6),
-                field="stamp",
-                scope=(),
-                role=Known(ClockRole.SAMPLE),
-                resolution=Known(NANOSECOND),
-                epoch=Unknown(),
-                timescale=Unknown(),
-                declared_monotonic=Unknown(),
-            ),
-            timestamp_domain_from_json,
-        ),
+        (STAMP, timestamp_domain_from_json),
         (GRAPH, frame_graph_from_json),
         (
             evidence_record(
@@ -147,6 +156,29 @@ def samples() -> list[tuple[Any, Callable[[JsonValue], Any]]]:
                 validity=STATIC,
             ),
             frame_transform_from_json,
+        ),
+        (RUN, run_from_json),
+        (
+            evidence_record(
+                Stream,
+                "stream",
+                at(6, 12),
+                run=RUN.id,
+                topic=Known("/joint_states"),
+                schema_name=Unknown(),
+                schema_encoding=Unknown(),
+                schema_definition=Unknown(),
+                message_encoding=Unknown(),
+                metadata=(),
+                clocks=(STAMP.id,),
+                message_count=Unknown(),
+                first=Unknown(),
+                last=Unknown(),
+                series=SeriesProvenance(
+                    URDF, (step_template("row", per_row=["row"]),), AssertionKind.OBSERVED
+                ),
+            ),
+            stream_from_json,
         ),
         (
             ingest_finding(
@@ -206,7 +238,7 @@ def test_the_envelope_is_checked_strictly(sample: Any, decode: Any) -> None:
         {**data, "schema_version": "0"},
         {**data, "schema_version": True},
         {**data, "schema_version": -1},
-        {**data, "kind": "stream"},
+        {**data, "kind": next(kind for kind in IDS if kind != sample.kind)},
         {**data, "kind": sample.kind.upper()},
         {**data, "confidence": 0.9},
     ):
@@ -229,6 +261,8 @@ def test_kinds_are_unique_tokens_and_each_has_one_family() -> None:
         "frame_graph": Family.REFERENCE,
         "frame": Family.REFERENCE,
         "frame_transform": Family.REFERENCE,
+        "run": Family.RUN,
+        "stream": Family.RUN,
         "ingest_finding": Family.FINDING,
     }
 
@@ -238,7 +272,7 @@ def test_the_four_design_contract_domains_are_families() -> None:
 
 
 def test_evidence_records_carry_provenance_and_ledger_records_do_not() -> None:
-    evidence = {TimestampDomain, FrameGraph, Frame, FrameTransform}
+    evidence = {TimestampDomain, FrameGraph, Frame, FrameTransform, Run, Stream}
     for sample, _ in SAMPLES:
         assert ("provenance" in sample.to_json()) is (type(sample) in evidence)
     ledger_kinds = {SourceArtifact, SourceRevision, SourceAbsence, TransformRecord, IngestFinding}

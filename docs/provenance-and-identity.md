@@ -1,7 +1,7 @@
 # Provenance and identity
 
 Status: identity implemented (MVL-2, MVL-59; ADRs 0009, 0010); provenance implemented (MVL-3; ADRs 0006, 0016);
-record envelope and findings implemented (MVL-66; ADR 0017).
+record envelope and findings implemented (MVL-66; ADR 0017); series row provenance implemented (MVL-67; ADR 0018).
 
 ## Three identity tiers — never conflated
 
@@ -81,6 +81,13 @@ host-specific. `upstream` names the transforms whose output it consumed, so a no
 `adapter → normaliser`, hash-linked. Build and verify records with `identity.provenance.transform_record` /
 `check_transform_record`, and derive tier-2 ids with `evidence_record_id(kind, evidence, transform)`: ADR 0003's
 formula, plus `upstream` for chained transforms.
+
+## Series rows (ADR 0018)
+
+A series row carries no `Provenance` of its own. Its `Stream` hoists what every row shares: the source, the
+assertion kind and a locator template, with the stream's own transform. The row's `locator/<i>/<field>`
+columns fill the template, so `Stream.row_provenance(row)` rebuilds the row's full provenance exactly. A
+series file's metadata holds the `Stream` line, so the file alone is enough.
 
 ## Locators
 
