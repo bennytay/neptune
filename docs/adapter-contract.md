@@ -61,6 +61,23 @@ Every record you emit carries one record-level `Provenance`, and its id is
 `evidence_record_id(kind, provenance.evidence, transform)`. Two records of one kind from one piece of evidence
 need finer locators (an adapter step if necessary), never a counter.
 
+## Streams and series (ADR 0018)
+
+For formats with timestamped samples (logs, bags, flight logs, telemetry tables, video):
+
+- One `Stream` per channel declaration, citing it, with `run` set to the `Run` your source declares.
+  A topic split across files is one stream per file.
+- `clocks` lists every clock a sample carries, first the one the source orders or indexes by. Never
+  drop a clock or pick a "real" one; each is its own `TimestampDomain`.
+- One row per sample, in source order: `seq`, one `time/<i>` per clock, `value/<name>` columns, and
+  `locator/<i>/<field>` columns that fill the `SeriesProvenance` template on the stream. Your descriptor
+  documents the value column names and the templates.
+- A column that can be blank or hold a sentinel your format's spec defines is wrapped: add
+  `state/<column>` and leave the value null where the state is not `known`. `KnownAbsent` and `Ambiguous`
+  do not fit one cell: write `unknown` plus a finding.
+- A payload you do not decode still gets its rows (times and locators) plus a finding.
+- Tests check every row with `Stream.check_row` and resolve `Stream.row_provenance` back to the bytes.
+
 ## What the runtime owns (and adapters must not reimplement)
 
 | Concern | Runtime mechanism |

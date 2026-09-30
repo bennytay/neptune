@@ -1,8 +1,8 @@
 # Canonical data model
 
-Status: **draft**. Primitives are specified by MVL-2 / MVL-40 / MVL-4 / MVL-3, and the record envelope by
-MVL-66 (ADR 0017). Domain entities are specified by MVL-67 / MVL-68 / MVL-69. This page becomes authoritative
-when MVL-1 closes.
+Status: **draft**. Primitives are specified by MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66
+(ADR 0017), and runs, streams and series by MVL-67 (ADR 0018). Machine and world entities are specified by
+MVL-68 / MVL-69. This page becomes authoritative when MVL-1 closes.
 
 ## Record kinds (v0)
 
@@ -15,7 +15,7 @@ domains.
 | `lineage` | `TransformRecord` | `model/provenance.py` (ADR 0016) |
 | `finding` | `IngestFinding` | `model/finding.py` |
 | `reference` | `TimestampDomain`, `FrameGraph`, `Frame`, `FrameTransform` | `model/reference.py` |
-| `run` | `Run`, `Stream` | MVL-67 |
+| `run` | `Run`, `Stream` | `model/run.py`, series contract in `model/series.py` (ADR 0018) |
 | `machine` | `Machine`, `HardwareConfiguration`, `SoftwareConfiguration`, `Calibration` | MVL-68 |
 | `world` | `Site`, `Asset`, `SpatialArtifact`, images, `DocumentRecord`, `StructuredRecord` | MVL-69 |
 | `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
@@ -130,11 +130,37 @@ a bug, not a value.
 - A value takes a kind because the source says so, never because it looks like one. Otherwise it is a
   `DeclaredVersion`. JSON: `{"kind":"semver","value":"1.2.3-rc.1"}`.
 
+## Runs, streams and series (ADR 0018; `model/run.py`, `model/series.py`)
+
+- `Run`: a session one piece of evidence declares (a recording, a rosbag2 `metadata.yaml`, a manifest entry).
+  `logical_id` and `machine` are declared ids; `first` / `last` are inclusive and separate, because a source
+  may state only one. Heuristic groupings are derived (MVL-13 / MVL-34).
+- `Stream`: one channel as declared. It holds `run`, `topic`, `schema_name` / `schema_encoding` /
+  `schema_definition`, `message_encoding`, `metadata`, `clocks`, and the source's declared `message_count` /
+  `first` / `last`, plus `series`. A topic split across files is several streams of one run.
+- Every clock a sample carries is its own domain and its own `time/<i>` column. Clock 0, the one the source
+  orders or indexes by, only orders the stored rows; it is not the stream's time.
+- Series: one Parquet file per stream, one row per sample.
+
+  | Column | Type | Holds |
+  |---|---|---|
+  | `seq` | int64 | the sample's position in source order |
+  | `time/<i>` | int64 | ticks on `clocks[i]`; never Parquet's TIMESTAMP type |
+  | `locator/<i>/<field>` | int64, UTF-8 or double | the fields of locator step `i` that vary per row |
+  | `value/<name>` | as decoded | decoded fields, named by the adapter (MVL-21 standardises the mapping) |
+  | `state/<column>` | dictionary UTF-8 | `known` / `unknown` / `not_covered` / `not_applicable`; the column is null exactly where not `known` |
+
+- Row provenance: the `Stream` hoists the source, the assertion kind and a locator template, and the
+  stream's transform applies. The row's `locator/` columns fill the template. `Stream.row_provenance(row)`
+  rebuilds it, and the file's metadata holds the `Stream` line under `neptune.stream`.
+- Rows are sorted by their clock-0 ticks (unknown last), then `seq`.
+
 ## Serialization (ADR 0002)
 
 - Entities: JSON Lines, one table per entity kind, canonical JSON (sorted keys, fixed number formatting) so
   bytes are hashable and diffable.
-- Time-series: Parquet, row groups sized for range queries, sorted by (domain, ticks).
+- Time-series: Parquet, one file per stream, row groups sized for range queries, rows sorted by clock-0
+  ticks, then source order (ADR 0018).
 - Raw evidence: content-addressed blobs, byte-identical to source.
 - Every record carries `kind` and `schema_version` (ADR 0017 §2, §7).
 - NaN and ±Infinity never appear in JSON. A record field that may hold them is typed `Real`, and a non-finite

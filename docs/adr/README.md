@@ -22,3 +22,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0015](0015-frame-rotation-and-transform-types.md) | Frames, rotations and frame transforms: types and named conventions | Accepted |
 | [0016](0016-evidence-refs-locator-paths-and-transform-lineage.md) | Evidence refs, locator paths and transform lineage | Accepted |
 | [0017](0017-canonical-records-envelope-and-schema-version.md) | Canonical records: envelope, families, schema version and findings | Accepted |
+| [0018](0018-runs-streams-and-series-layout.md) | Runs, streams and the series layout | Accepted |
