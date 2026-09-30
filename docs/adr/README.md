@@ -17,3 +17,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0010](0010-lossless-local-locations.md) | Lossless local locations: raw names, symlinks, absences | Accepted |
 | [0011](0011-knowledge-json-and-types.md) | `Knowledge[T]`: JSON shape, Python types, provenance slot | Accepted |
 | [0012](0012-time-types-and-clock-roles.md) | Time types: `Timestamp`, `Duration`, `TimestampDomain`, clock roles | Accepted |
+| [0013](0013-unit-catalogue-and-si-normalisation.md) | Units: declared-unit catalogue and exact SI normalisation | Accepted |
