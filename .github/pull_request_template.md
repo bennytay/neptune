@@ -1,23 +1,29 @@
 Closes MVL-
 
-## Design summary
-<!-- Read first by the maintainer. What was designed and decided: types, contracts, invariants,
-     trade-offs. Concise bullets; enough to reconstruct the design without opening the diff.
-     Not a file list. -->
+**TL;DR:** <!-- one line: what now exists that didn't before -->
 
-## What changed
-<!-- Files/packages touched, briefly. -->
+**Decided**
+<!-- ≤5 bullets, ≤15 words each. Decisions, not files. -->
+-
 
-## Acceptance criteria
-<!-- Copy each criterion from the Linear issue and tick it. Unticked boxes mean this PR stays a draft. -->
+**Your call**
+<!-- ≤3 bullets: where the maintainer's judgment is needed. Write "none" if none. -->
+-
+
+**Progress:** <!-- e.g. M1 3/9 · next: MVL-40 -->
+
+<details><summary>Details: acceptance · tests · docs · follow-ups</summary>
+
+**Acceptance** <!-- copy each criterion from the issue; any unticked box = draft -->
 - [ ]
 
-## Tests run
-<!-- Paste the `make check` summary. Say explicitly if anything was skipped. -->
+**Tests:** <!-- `make check` result, one line; say if anything was skipped -->
 
-## Docs / ADRs
-<!-- Which docs changed, or "none needed" and why. Contract changes require an ADR. -->
+**Docs/ADRs:** <!-- changed files, or "none needed" + why -->
 
-## Follow-ups / concerns
+**Follow-ups:**
 
-<!-- Agents: do not merge. The maintainer merges every PR. -->
+</details>
+
+<!-- Rules: visible part ≤12 lines, no paragraphs. Depth lives in ADRs/docs, linked, not pasted.
+     Agents: do not merge. The maintainer merges every PR. -->

@@ -47,11 +47,20 @@ Attribution trailers required by the tooling in use are appended after `Refs:`.
 
 ## Pull requests
 
-Use the template. `Closes MVL-N` on the first line, then a **Design summary** — the part the maintainer reads
-first. It states what was designed and decided (types, contracts, invariants, trade-offs) concisely enough
-that the design can be reconstructed without the diff. It is not a file list; the file list goes under
-"What changed". Tick every acceptance criterion; untick = draft. Paste the `make check` summary. Say what
-docs/ADRs changed or why none were needed.
+Use the template. The maintainer reads the visible part in about 30 seconds and skips the rest, so write
+bottom line up front (BLUF):
+
+| Section | Limit | Contents |
+|---|---|---|
+| `Closes MVL-N` | 1 line | links the issue |
+| **TL;DR** | 1 line | what now exists that didn't before |
+| **Decided** | ≤5 bullets, ≤15 words each | decisions and trade-offs, not files |
+| **Your call** | ≤3 bullets | where the maintainer's judgment is needed; "none" if none |
+| **Progress** | 1 line | milestone count + next issue, e.g. `M1 3/9 · next: MVL-40` |
+| Details (collapsed) | — | acceptance checklist, `make check` result, docs/ADRs touched, follow-ups |
+
+No paragraphs in the visible part. Design depth belongs in ADRs and docs, linked rather than pasted. An
+unticked acceptance box means the PR stays a draft. Linear comments on status changes follow the same shape.
 
 ## Review checklist (self-review before requesting review)
 
