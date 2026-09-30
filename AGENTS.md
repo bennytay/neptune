@@ -72,13 +72,14 @@ dependencies as `blockedBy`; do not start an issue whose blockers are not Done.
 2. Move the issue to **In Progress**. Create the branch using the issue's `gitBranchName`
    (`benjamintay07/mvl-N-slug`).
 3. Write a short plan in the issue as a comment if the work is non-trivial. Identify any decision that
-   needs an ADR before implementing it.
+   needs an ADR before implementing it. Make every decision yourself with your best judgement and record
+   it; never hand one back to the maintainer.
 4. Implement. Separate parsing from normalisation. Errors are structured findings, not exceptions.
 5. Tests: unit + malformed input + boundary + idempotence/determinism. Prefer real small fixtures over mocks.
 6. `make check` green. Update docs whose contracts changed. Add/supersede ADRs for decisions.
 7. Open a PR using the template, BLUF style: `Closes MVL-N`, a one-line **TL;DR**, ≤5 **Decided**
-   bullets, ≤3 **Your call** bullets, a **Progress** line. Everything else sits in the collapsed
-   details block. Visible part ≤12 lines, no paragraphs; depth goes in ADRs/docs, linked.
+   bullets, a **Progress** line. Everything else sits in the collapsed details block. Visible part
+   ≤12 lines, no paragraphs; depth goes in ADRs/docs, linked. No "Your call" list: state decisions.
    If the PR materially changes the architecture (a box, an arrow, an owner, or a box's built/partial state),
    update `ARCHITECTURE.md` in the same PR and fill the template's **Architecture change** section.
    Otherwise leave both untouched.
@@ -92,7 +93,7 @@ dependencies as `blockedBy`; do not start an issue whose blockers are not Done.
    gate issue must also be Done.
 3. Take the lowest milestone first. Within a milestone, follow the order in `docs/audit-2026-09-30.md` §7.
 4. If nothing qualifies because blockers are **In Review**, say which PRs are waiting for a merge. If there is
-   still a tie, ask; don't guess.
+   still a tie, pick one with your best judgement and say why.
 5. Name the chosen issue before starting work.
 
 ## Git

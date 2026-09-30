@@ -3,11 +3,8 @@ Closes MVL-
 **TL;DR:** <!-- one line: what now exists that didn't before -->
 
 **Decided**
-<!-- ≤5 bullets, ≤15 words each. Decisions, not files. -->
--
-
-**Your call**
-<!-- ≤3 bullets: where the maintainer's judgment is needed. Write "none" if none. -->
+<!-- ≤5 bullets, ≤15 words each. Decisions, not files. Decide everything yourself; never ask the
+     maintainer to choose. -->
 -
 
 **Progress:** <!-- e.g. M1 3/9 · next: MVL-40 -->
