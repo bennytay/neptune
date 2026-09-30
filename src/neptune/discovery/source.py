@@ -1,16 +1,17 @@
 """The ``Source`` interface and its local-filesystem implementation.
 
-Walking policy (ADR 0009, ``docs/security.md``):
+Walking policy (ADR 0009 §5 as amended by ADR 0010, ``docs/security.md``):
 
-- Only regular files are yielded. Symlinks are never followed, whether they point inside or outside
-  the root. Sockets, FIFOs and devices are never opened.
-- Every entry that is not yielded is reported as a ``SkippedEntry`` with a reason; nothing is
-  dropped silently.
+- Regular files are yielded as ``SourceEntry``. Names that are not valid UTF-8 are yielded too,
+  located by their exact bytes (``RawLocalPath``).
+- Symlinks are never followed, whether they point inside or outside the root. Each is yielded as a
+  ``SymlinkEntry`` with its target exactly as stored; resolving it is interpretation, not walking.
+- Sockets, FIFOs and devices are never opened. They, and anything the walk could not examine, are
+  reported as a ``SkippedEntry`` with a reason; nothing is dropped silently.
 - Directories are opened component by component relative to the root with ``O_NOFOLLOW``, so a
   directory swapped for a symlink mid-walk cannot redirect the walk or ``open`` outside the root.
-- Names that are not valid UTF-8 cannot be canonical strings (ADR 0002). They are skipped and
-  reported with their raw bytes; an undecodable directory name skips its whole subtree.
-- Order is deterministic: depth-first, siblings in code-point order of their names.
+- Order is deterministic: depth-first, siblings in byte order of their names (which is code-point
+  order for UTF-8 names).
 """
 
 import errno
@@ -20,15 +21,14 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import BinaryIO, Protocol, TypeAlias
 
-from neptune.model.source import LocalPath, SourceLocation
+from neptune.model.source import LocalPath, RawLocalPath, SourceLocation, local_location
 
 
 class SkipReason(StrEnum):
     SYMLINK = "symlink"
     NOT_REGULAR_FILE = "not_regular_file"
-    UNDECODABLE_NAME = "undecodable_name"
     MISSING = "missing"
     UNREADABLE = "unreadable"
 
@@ -42,12 +42,23 @@ class SourceEntry:
 
 
 @dataclass(frozen=True)
+class SymlinkEntry:
+    """A symlink found by a walk. ``target`` is the link's contents, byte-exact and unresolved."""
+
+    location: LocalPath | RawLocalPath
+    target: bytes
+
+
+@dataclass(frozen=True)
 class SkippedEntry:
     """Something a walk saw and did not yield. ``raw_path`` is relative to the root, undecoded."""
 
     raw_path: bytes
     reason: SkipReason
     detail: str
+
+
+WalkEntry: TypeAlias = SourceEntry | SymlinkEntry | SkippedEntry
 
 
 class SourceAccessError(Exception):
@@ -63,7 +74,7 @@ class SourceAccessError(Exception):
 class Source(Protocol):
     """Where source bytes come from. Local filesystem now; object stores implement this later."""
 
-    def walk(self) -> Iterator[SourceEntry | SkippedEntry]:
+    def walk(self) -> Iterator[WalkEntry]:
         """Enumerate candidate sources in a deterministic order."""
         ...
 
@@ -74,7 +85,7 @@ class Source(Protocol):
 
 @dataclass(frozen=True)
 class _Directory:
-    parts: tuple[str, ...]
+    parts: tuple[bytes, ...]
 
 
 class LocalSource:
@@ -88,8 +99,8 @@ class LocalSource:
         if not Path(self._root).is_dir():
             raise NotADirectoryError(self._root)
 
-    def walk(self) -> Iterator[SourceEntry | SkippedEntry]:
-        stack: list[Iterator[SourceEntry | SkippedEntry | _Directory]] = [iter(self._list(()))]
+    def walk(self) -> Iterator[WalkEntry]:
+        stack: list[Iterator[WalkEntry | _Directory]] = [iter(self._list(()))]
         while stack:
             item = next(stack[-1], None)
             if item is None:
@@ -100,9 +111,9 @@ class LocalSource:
                 yield item
 
     def open(self, location: SourceLocation) -> BinaryIO:
-        if not isinstance(location, LocalPath):
+        if not isinstance(location, (LocalPath, RawLocalPath)):
             raise TypeError(f"LocalSource cannot open {type(location).__name__}")
-        *directories, name = location.parts
+        *directories, name = location.raw.split(b"/")
         try:
             dir_fd = self._open_directory(tuple(directories))
         except _WalkError as exc:
@@ -114,49 +125,53 @@ class LocalSource:
             raise SourceAccessError(location, reason, exc.strerror or str(exc)) from exc
         finally:
             os.close(dir_fd)
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        try:
+            is_regular = stat.S_ISREG(os.fstat(fd).st_mode)
+        except OSError:
+            os.close(fd)
+            raise
+        if not is_regular:
             os.close(fd)
             raise SourceAccessError(location, SkipReason.NOT_REGULAR_FILE, "not a regular file")
         os.set_blocking(fd, True)
         return os.fdopen(fd, "rb")
 
-    def _list(self, parts: tuple[str, ...]) -> list[SourceEntry | SkippedEntry | _Directory]:
+    def _list(self, parts: tuple[bytes, ...]) -> list[WalkEntry | _Directory]:
         try:
             dir_fd = self._open_directory(parts)
         except _WalkError as exc:
-            return [SkippedEntry(_raw(parts), exc.reason, exc.detail)]
+            return [SkippedEntry(_join(parts), exc.reason, exc.detail)]
         try:
             with os.scandir(dir_fd) as scan:
-                entries = sorted(scan, key=lambda entry: entry.name)
-            return [self._classify_entry(parts, entry) for entry in entries]
+                names = sorted(os.fsencode(entry.name) for entry in scan)
+            return [self._classify_entry(dir_fd, (*parts, name)) for name in names]
         except OSError as exc:
-            return [SkippedEntry(_raw(parts), SkipReason.UNREADABLE, exc.strerror or str(exc))]
+            return [SkippedEntry(_join(parts), SkipReason.UNREADABLE, exc.strerror or str(exc))]
         finally:
             os.close(dir_fd)
 
-    def _classify_entry(
-        self, parts: tuple[str, ...], entry: os.DirEntry[str]
-    ) -> SourceEntry | SkippedEntry | _Directory:
-        child = (*parts, entry.name)
+    def _classify_entry(self, dir_fd: int, child: tuple[bytes, ...]) -> WalkEntry | _Directory:
+        raw = _join(child)
         try:
-            entry.name.encode("utf-8")
-        except UnicodeEncodeError:
-            return SkippedEntry(_raw(child), SkipReason.UNDECODABLE_NAME, "name is not UTF-8")
-        try:
-            mode = entry.stat(follow_symlinks=False)
+            info = os.stat(child[-1], dir_fd=dir_fd, follow_symlinks=False)
         except FileNotFoundError:
-            return SkippedEntry(_raw(child), SkipReason.MISSING, "vanished during walk")
+            return SkippedEntry(raw, SkipReason.MISSING, "vanished during walk")
         except OSError as exc:
-            return SkippedEntry(_raw(child), SkipReason.UNREADABLE, exc.strerror or str(exc))
-        if stat.S_ISLNK(mode.st_mode):
-            return SkippedEntry(_raw(child), SkipReason.SYMLINK, "symlinks are not followed")
-        if stat.S_ISDIR(mode.st_mode):
+            return SkippedEntry(raw, SkipReason.UNREADABLE, exc.strerror or str(exc))
+        mode = info.st_mode
+        if stat.S_ISLNK(mode):
+            try:
+                target = os.readlink(child[-1], dir_fd=dir_fd)
+            except OSError as exc:
+                return SkippedEntry(raw, SkipReason.UNREADABLE, exc.strerror or str(exc))
+            return SymlinkEntry(local_location(raw), target)
+        if stat.S_ISDIR(mode):
             return _Directory(child)
-        if stat.S_ISREG(mode.st_mode):
-            return SourceEntry(LocalPath("/".join(child)), mode.st_size)
-        return SkippedEntry(_raw(child), SkipReason.NOT_REGULAR_FILE, stat.filemode(mode.st_mode))
+        if stat.S_ISREG(mode):
+            return SourceEntry(local_location(raw), info.st_size)
+        return SkippedEntry(raw, SkipReason.NOT_REGULAR_FILE, stat.filemode(mode))
 
-    def _open_directory(self, parts: tuple[str, ...]) -> int:
+    def _open_directory(self, parts: tuple[bytes, ...]) -> int:
         """Open root/parts as a directory fd, refusing any symlink along the way."""
         try:
             fd = os.open(self._root, os.O_RDONLY | os.O_DIRECTORY)
@@ -181,7 +196,7 @@ class _WalkError(Exception):
         self.detail = detail
 
 
-def _classify(exc: OSError, name: str, dir_fd: int) -> SkipReason:
+def _classify(exc: OSError, name: bytes, dir_fd: int) -> SkipReason:
     """Map a failed ``O_NOFOLLOW`` open to a reason.
 
     Linux reports ``O_DIRECTORY | O_NOFOLLOW`` on a symlink as ENOTDIR, so the entry is re-checked.
@@ -197,5 +212,5 @@ def _classify(exc: OSError, name: str, dir_fd: int) -> SkipReason:
     return SkipReason.UNREADABLE
 
 
-def _raw(parts: tuple[str, ...]) -> bytes:
-    return os.fsencode("/".join(parts)) if parts else b"."
+def _join(parts: tuple[bytes, ...]) -> bytes:
+    return b"/".join(parts) if parts else b"."
