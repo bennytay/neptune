@@ -7,7 +7,7 @@ Status: decisions agreed (ADR 0003, ADR 0006); implementation in MVL-2 and MVL-3
 | Tier | Identifies | Derived from | Survives parser upgrade? |
 |---|---|---|---|
 | 1. Content id | source bytes | sha256 of bytes; per-chunk hashes for large files | yes |
-| 2. Derived-record id | one canonical record | (source id, locator, adapter id, adapter version, config hash) | **no — by design**; new parser ⇒ new lineage |
+| 2. Derived-record id | one canonical record | (record kind, source id, locator, adapter id, adapter version, config hash) | **no — by design**; new parser ⇒ new lineage |
 | 3. Logical id | a real thing across sources (this robot, this site) | declared: serial number, manifest entry, explicit alias | yes |
 
 Consequences:
@@ -45,7 +45,7 @@ Provenance
 |---|---|
 | `ByteRange` | offset, length |
 | `RecordRange` | topic/channel, first ticks, last ticks, domain |
-| `Page` / `Span` | page, bbox / char offsets |
+| `Page` / `Span` | page, bbox / code-point offsets |
 | `RowCell` | row index, column |
 | `ImageRegion` | bbox, coordinate convention |
 | `VideoFrame` | frame index, ticks, domain |
@@ -53,7 +53,9 @@ Provenance
 | `Frame` | frame id, graph id |
 | `Object` | mesh/spatial object id |
 
-Adapters may add variants; they may not reuse an existing one with different semantics.
+All indices are 0-based and ranges half-open; image regions use the stored raster orientation (no EXIF
+rotation). Adapters may add variants namespaced `<adapter id>:<name>`; they may not reuse an existing one with
+different semantics. Full rules: ADR 0006.
 
 ## Explaining a value
 

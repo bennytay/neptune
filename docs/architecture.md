@@ -76,7 +76,7 @@ Details and milestone ownership of each stage: `ingestion-pipeline.md`.
 | 0007 | `FrameRef` = (frame id, frame-graph id); no default convention |
 | 0008 | Four-method adapter ABI; runtime owns resume, validation, explanation |
 
-ADRs are written in MVL-55; until then this table is the authoritative summary.
+Full context, alternatives and consequences: `docs/adr/`. Where this table and an ADR differ, the ADR governs.
 
 ## Scale posture
 

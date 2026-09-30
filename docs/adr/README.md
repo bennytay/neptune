@@ -5,11 +5,11 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 
 | ADR | Title | Status |
 |---|---|---|
-| 0001 | Language and runtime | planned (MVL-55) |
-| 0002 | Canonical serialization and ingest-package layout | planned (MVL-55) |
-| 0003 | Identity tiers and parser-upgrade survival | planned (MVL-55) |
-| 0004 | Epistemic states and the field-scope rule | planned (MVL-55) |
-| 0005 | Timestamp domains | planned (MVL-55) |
-| 0006 | Provenance and locator model | planned (MVL-55) |
-| 0007 | Coordinate-frame semantics | planned (MVL-55) |
-| 0008 | Adapter ABI surface | planned (MVL-55) |
+| [0001](0001-language-and-runtime.md) | Language and runtime | Accepted |
+| [0002](0002-serialization-and-ingest-package.md) | Canonical serialization and ingest-package layout | Accepted |
+| [0003](0003-identity-tiers.md) | Identity tiers and parser-upgrade survival | Accepted |
+| [0004](0004-epistemic-states.md) | Epistemic states and the field-scope rule | Accepted |
+| [0005](0005-timestamp-domains.md) | Timestamp domains | Accepted |
+| [0006](0006-provenance-and-locators.md) | Provenance and locator model | Accepted |
+| [0007](0007-coordinate-frames.md) | Coordinate-frame semantics | Accepted |
+| [0008](0008-adapter-abi.md) | Adapter ABI surface | Accepted |
