@@ -110,37 +110,44 @@ def json_bool(value: JsonValue) -> bool:
     return value
 
 
-# --- Declared identifiers (ADR 0019 §2) ----------------------------------------------------------
+# --- Stated lists: declared identifiers and names (ADR 0019 §2, ADR 0020 §1) --------------------
 
 # The tier-3 ids one declaration gives one real-world thing (a machine, a sensor, a site, an asset),
 # each with its own citation: ``Known``, or ``Ambiguous`` where the evidence gives conflicting
 # readings of one id. Sorted by (namespace, value), first candidate first; no id repeats.
 Identifiers: TypeAlias = tuple[Knowledge[LogicalId], ...]
+# The other names a declaration gives a thing (aliases), under the same rules, sorted by text.
+Names: TypeAlias = tuple[Knowledge[str], ...]
 
 
-def _identifier_key(knowledge: Knowledge[LogicalId]) -> tuple[str, str]:
-    first = values_of(knowledge)[0]
-    return (first.namespace, first.value)
+def _check_stated(
+    field: str,
+    items: tuple[Knowledge[T], ...],
+    kind: type,
+    key: Callable[[T], tuple[str, ...]],
+) -> None:
+    """Stated values only (``Known`` or ``Ambiguous``), each once, sorted by ``key``."""
+    if not isinstance(items, tuple):
+        raise TypeError(f"{field} must be a tuple, got {type(items).__name__}")
+    seen: list[T] = []
+    for knowledge in items:
+        if not isinstance(knowledge, Known | Ambiguous):
+            raise ValueError(
+                f"{field} lists what the evidence states, Known or Ambiguous; got {knowledge!r}"
+            )
+        check_type(field, knowledge, kind)
+        for value in values_of(knowledge):
+            if value in seen:
+                raise ValueError(f"{field} repeat {value!r}")
+            seen.append(value)
+    keys = [key(values_of(knowledge)[0]) for knowledge in items]
+    if keys != sorted(keys):
+        raise ValueError(f"{field} must be sorted: {keys}")
 
 
 def check_identifiers(field: str, identifiers: Identifiers) -> None:
     """Runtime guard for ``Identifiers``: stated ids only, each once, in canonical order."""
-    if not isinstance(identifiers, tuple):
-        raise TypeError(f"{field} must be a tuple, got {type(identifiers).__name__}")
-    seen: set[LogicalId] = set()
-    for knowledge in identifiers:
-        if not isinstance(knowledge, Known | Ambiguous):
-            raise ValueError(
-                f"{field} lists the ids the evidence states, Known or Ambiguous; got {knowledge!r}"
-            )
-        check_type(field, knowledge, LogicalId)
-        for value in values_of(knowledge):
-            if value in seen:
-                raise ValueError(f"{field} repeat {value}")
-            seen.add(value)
-    keys = [_identifier_key(knowledge) for knowledge in identifiers]
-    if keys != sorted(keys):
-        raise ValueError(f"{field} must be sorted by namespace, then value: {keys}")
+    _check_stated(field, identifiers, LogicalId, lambda value: (value.namespace, value.value))
 
 
 def identifiers_to_json(identifiers: Identifiers) -> list[JsonValue]:
@@ -153,4 +160,23 @@ def identifiers_from_json(
     return tuple(
         from_json(item, logical_id_from_json, decode_provenance)
         for item in json_array(data, "identifiers")
+    )
+
+
+def check_names(field: str, names: Names) -> None:
+    """Runtime guard for ``Names``: stated, non-empty names, each once, sorted by text."""
+    _check_stated(field, names, str, lambda value: (value,))
+    for knowledge in names:
+        check_text_values(field, knowledge)
+
+
+def names_to_json(names: Names) -> list[JsonValue]:
+    return [to_json(knowledge) for knowledge in names]
+
+
+def names_from_json(
+    data: JsonValue, what: str, decode_provenance: Callable[[JsonObject], Grounding]
+) -> Names:
+    return tuple(
+        from_json(item, text_decoder(what), decode_provenance) for item in json_array(data, what)
     )
