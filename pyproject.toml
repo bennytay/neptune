@@ -1,0 +1,57 @@
+[project]
+name = "neptune"
+version = "0.0.1"
+description = "Robotics-native ingestion fabric: canonical, provenance-preserving representation of physical-AI evidence."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "hypothesis>=6.100",
+  "mypy>=1.13",
+  "pre-commit>=4.0",
+  "pytest>=8.3",
+  "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neptune"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+# Docs contain illustrative code sketches; ruff must not reformat them.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ANN", "TC", "PTH", "ERA", "T20"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["neptune"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+xfail_strict = true
+markers = [
+  "integration: exercises multiple components against real fixtures",
+  "slow: takes more than a few seconds; excluded by `make test-fast`",
+]
