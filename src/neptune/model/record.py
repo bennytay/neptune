@@ -23,10 +23,12 @@ from typing import Final
 from neptune.model._fields import exact_object, is_int
 from neptune.model.jsonvalue import JsonObject, JsonValue
 
-# The version of the canonical model that writes records. It is 0 until the M1 gate, and shapes
-# may still change without a bump. From 1 on, any change to a record's JSON shape or meaning bumps
-# it through an ADR, with a migration from the previous version (ADR 0017 §7).
-SCHEMA_VERSION: Final = 0
+# The version of the canonical model that writes records. It became 1 at the M1 gate (ADR 0023).
+# From then on the model only grows: a newer version adds record kinds, enum members or locator
+# steps, through an ADR, and never changes an existing field. A record of any version from
+# OLDEST_READABLE_VERSION on is therefore valid as it is: its migration is the identity.
+SCHEMA_VERSION: Final = 1
+OLDEST_READABLE_VERSION: Final = 1
 ENVELOPE_KEYS: Final = frozenset({"kind", "schema_version"})
 
 
@@ -75,14 +77,14 @@ def record_object(data: JsonValue, kind: str, keys: set[str]) -> Mapping[str, Js
 
 
 def check_schema_version(version: JsonValue) -> None:
-    """This reader reads only ``SCHEMA_VERSION``. Migrations arrive with the first bump."""
+    """This reader reads every version from the M1 gate to its own; the model only grows."""
     if not is_int(version) or version < 0:
         raise ValueError(f"schema_version must be a non-negative integer, got {version!r}")
     if version > SCHEMA_VERSION:
         raise SchemaVersionError(
             f"record schema version {version} is newer than this reader's {SCHEMA_VERSION}"
         )
-    if version < SCHEMA_VERSION:
+    if version < OLDEST_READABLE_VERSION:
         raise SchemaVersionError(
-            f"record schema version {version} has no migration to {SCHEMA_VERSION}"
+            f"record schema version {version} predates the M1 gate; drafts were never persisted"
         )

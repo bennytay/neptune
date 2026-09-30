@@ -78,7 +78,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "site": {
           "$ref": "#/$defs/Knowledge_LogicalId"
@@ -198,7 +198,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "subject": {
           "$ref": "#/$defs/Knowledge_string"
@@ -381,7 +381,7 @@
           "$ref": "#/$defs/Knowledge_BlockRole"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "text": {
           "$ref": "#/$defs/Knowledge_string"
@@ -447,7 +447,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "title": {
           "$ref": "#/$defs/Knowledge_string"
@@ -701,7 +701,7 @@
           "$ref": "#/$defs/FrameRef"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         }
       },
       "required": [
@@ -728,7 +728,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "scope": {
           "items": {
@@ -800,7 +800,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "validity": {
           "anyOf": [
@@ -950,7 +950,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         }
       },
       "required": [
@@ -989,7 +989,7 @@
           "$ref": "#/$defs/Knowledge_DeclaredVersion"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         }
       },
       "required": [
@@ -1072,7 +1072,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "width": {
           "type": "integer"
@@ -1153,7 +1153,7 @@
           "type": "array"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "severity": {
           "$ref": "#/$defs/Severity"
@@ -1269,7 +1269,7 @@
           "type": "array"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "sources": {
           "items": {
@@ -4920,7 +4920,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         }
       },
       "required": [
@@ -5028,7 +5028,7 @@
           "$ref": "#/$defs/RecordId"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "sources": {
           "items": {
@@ -5288,7 +5288,7 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "started": {
           "type": "string"
@@ -5623,7 +5623,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         }
       },
       "required": [
@@ -5718,7 +5718,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         }
       },
       "required": [
@@ -5750,7 +5750,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "software": {
           "items": {
@@ -5824,7 +5824,7 @@
           ]
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "supersedes": {
           "items": {
@@ -5861,7 +5861,7 @@
           "const": "source_artifact"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "size": {
           "type": "integer"
@@ -5923,7 +5923,7 @@
           ]
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "supersedes": {
           "items": {
@@ -5987,7 +5987,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "unit": {
           "$ref": "#/$defs/Knowledge_Unit"
@@ -6110,7 +6110,7 @@
           "$ref": "#/$defs/Knowledge_string"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "series": {
           "$ref": "#/$defs/SeriesProvenance"
@@ -6161,7 +6161,7 @@
           "type": "integer"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "table": {
           "$ref": "#/$defs/RecordId"
@@ -6197,7 +6197,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         }
       },
       "required": [
@@ -6264,7 +6264,7 @@
           "$ref": "#/$defs/Knowledge_ClockRole"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "scope": {
           "items": {
@@ -6325,7 +6325,7 @@
           "type": "object"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "upstream": {
           "items": {
@@ -6401,7 +6401,7 @@
           "$ref": "#/$defs/Provenance"
         },
         "schema_version": {
-          "const": 0
+          "const": 1
         },
         "track": {
           "type": "integer"
@@ -6455,7 +6455,7 @@
       "type": "object"
     }
   },
-  "$id": "urn:neptune:schema:canonical:0",
+  "$id": "urn:neptune:schema:canonical:1",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
     {
@@ -6535,5 +6535,5 @@
     }
   ],
   "description": "One line of a Neptune ingest package's record tables (ADR 0002, ADR 0017). The package's manifest, receipt and receipt envelope are #/$defs/PackageManifest, #/$defs/IngestReceipt and #/$defs/ReceiptEnvelope (ADR 0022). Generated from neptune.model; the Python readers are stricter (ADR 0021).",
-  "title": "Neptune canonical record, schema version 0"
+  "title": "Neptune canonical record, schema version 1"
 }

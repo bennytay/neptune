@@ -25,6 +25,7 @@ from neptune.model.frames import (
     Translation,
 )
 from neptune.model.jsonvalue import JsonValue
+from neptune.model.kinds import RECORD_KINDS
 from neptune.model.knowledge import AssertionKind, Known, Unknown
 from neptune.model.provenance import (
     ByteRange,
@@ -220,13 +221,20 @@ def test_a_newer_record_is_refused_with_a_version_error(sample: Any, decode: Any
 
 
 @pytest.mark.parametrize(("sample", "decode"), SAMPLES, ids=IDS)
-def test_an_older_record_without_a_migration_is_refused(
+def test_an_older_record_reads_as_it_is(
     sample: Any, decode: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The model only grows (ADR 0023): a newer reader reads an older record unchanged.
     data = sample.to_json()
     monkeypatch.setattr(record, "SCHEMA_VERSION", SCHEMA_VERSION + 1)
-    with pytest.raises(SchemaVersionError, match="no migration"):
-        decode(data)
+    assert decode(data) == sample
+
+
+@pytest.mark.parametrize(("sample", "decode"), SAMPLES, ids=IDS)
+def test_a_record_from_before_the_gate_is_refused(sample: Any, decode: Any) -> None:
+    draft = {**sample.to_json(), "schema_version": 0}
+    with pytest.raises(SchemaVersionError, match="predates the M1 gate"):
+        decode(draft)
 
 
 @pytest.mark.parametrize(("sample", "decode"), SAMPLES, ids=IDS)
@@ -247,23 +255,39 @@ def test_the_envelope_is_checked_strictly(sample: Any, decode: Any) -> None:
 
 
 def test_kinds_are_unique_tokens_and_each_has_one_family() -> None:
-    kinds = [cls.kind for cls in KINDS]
-    assert len(set(kinds)) == len(kinds)
-    for cls in KINDS:
+    classes: list[Any] = [cls for cls, _ in RECORD_KINDS.values()]
+    kinds = [cls.kind for cls in classes]
+    assert len(set(kinds)) == len(kinds) and set(KINDS) <= set(classes)
+    for cls in classes:
         assert cls.kind == cls.kind.lower() and " " not in cls.kind
         assert isinstance(cls.family, Family)
-    assert {cls.kind: cls.family for cls in KINDS} == {
-        "source_artifact": Family.SOURCE,
-        "source_revision": Family.SOURCE,
-        "source_absence": Family.SOURCE,
-        "transform_record": Family.LINEAGE,
-        "timestamp_domain": Family.REFERENCE,
-        "frame_graph": Family.REFERENCE,
-        "frame": Family.REFERENCE,
-        "frame_transform": Family.REFERENCE,
-        "run": Family.RUN,
-        "stream": Family.RUN,
-        "ingest_finding": Family.FINDING,
+    families = {cls.kind: str(cls.family) for cls in classes}
+    assert families == {
+        "source_artifact": "source",
+        "source_revision": "source",
+        "source_absence": "source",
+        "transform_record": "lineage",
+        "ingest_finding": "finding",
+        "timestamp_domain": "reference",
+        "frame_graph": "reference",
+        "frame": "reference",
+        "frame_transform": "reference",
+        "run": "run",
+        "stream": "run",
+        "machine": "machine",
+        "hardware_configuration": "machine",
+        "hardware_component": "machine",
+        "software_configuration": "machine",
+        "calibration": "machine",
+        "site": "world",
+        "asset": "world",
+        "spatial_artifact": "world",
+        "image": "world",
+        "video": "world",
+        "document_record": "world",
+        "document_block": "world",
+        "structured_table": "world",
+        "structured_record": "world",
     }
 
 
@@ -280,17 +304,22 @@ def test_evidence_records_carry_provenance_and_ledger_records_do_not() -> None:
 
 
 def test_envelope_keys_cannot_be_record_fields() -> None:
-    assert envelope("frame", {"ref": 1}) == {"kind": "frame", "ref": 1, "schema_version": 0}
+    assert envelope("frame", {"ref": 1}) == {
+        "kind": "frame",
+        "ref": 1,
+        "schema_version": SCHEMA_VERSION,
+    }
     for key in ENVELOPE_KEYS:
         with pytest.raises(ValueError, match="envelope"):
             envelope("frame", {key: 1})
 
 
 def test_record_object_reports_the_version_before_the_keys() -> None:
-    assert record_object({"kind": "frame", "schema_version": 0, "ref": 1}, "frame", {"ref"})
+    frame: dict[str, JsonValue] = {"kind": "frame", "schema_version": SCHEMA_VERSION, "ref": 1}
+    assert record_object(frame, "frame", {"ref"})
     with pytest.raises(SchemaVersionError):
         record_object({"kind": "frame_v2", "schema_version": 5, "other": 1}, "frame", {"ref"})
     with pytest.raises(ValueError, match="kind"):
-        record_object({"kind": "frames", "schema_version": 0, "ref": 1}, "frame", {"ref"})
+        record_object({**frame, "kind": "frames"}, "frame", {"ref"})
     with pytest.raises(ValueError, match="JSON object"):
         record_object([{"kind": "frame"}], "frame", {"ref"})
