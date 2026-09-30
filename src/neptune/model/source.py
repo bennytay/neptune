@@ -1,6 +1,6 @@
 """Source entities: which bytes exist and where they were seen.
 
-Semantics and the dedup policy are in ADR 0009 and ``docs/provenance-and-identity.md``.
+Semantics and the dedup policy are in ADRs 0009 and 0010 and ``docs/provenance-and-identity.md``.
 """
 
 from dataclasses import dataclass
@@ -45,11 +45,60 @@ class LocalPath:
     def key(self) -> tuple[str, ...]:
         return ("local", self.path)
 
+    @property
+    def raw(self) -> bytes:
+        return self.path.encode("utf-8")
+
     def to_json(self) -> JsonObject:
         return {"kind": "local", "path": self.path}
 
 
-SourceLocation: TypeAlias = LocalPath | ExternalObjectRef
+@dataclass(frozen=True)
+class RawLocalPath:
+    """A ``LocalPath`` whose name is not valid UTF-8, kept as its exact bytes (ADR 0010).
+
+    Same component rules as ``LocalPath``. A path that decodes as UTF-8 must be a ``LocalPath``, so
+    each location has exactly one representation. Serialised as lowercase hex.
+    """
+
+    path: bytes
+
+    def __post_init__(self) -> None:
+        if not self.path:
+            raise ValueError("path must be non-empty")
+        if b"\x00" in self.path:
+            raise ValueError(f"path contains NUL: {self.path!r}")
+        if any(part in (b"", b".", b"..") for part in self.path.split(b"/")):
+            raise ValueError(
+                f"path must be relative with no '', '.' or '..' components: {self.path!r}"
+            )
+        try:
+            self.path.decode("utf-8")
+        except UnicodeDecodeError:
+            return
+        raise ValueError(f"path is valid UTF-8; use LocalPath: {self.path!r}")
+
+    @property
+    def key(self) -> tuple[str, ...]:
+        return ("local_raw", self.path.hex())
+
+    @property
+    def raw(self) -> bytes:
+        return self.path
+
+    def to_json(self) -> JsonObject:
+        return {"kind": "local_raw", "path_hex": self.path.hex()}
+
+
+def local_location(raw: bytes) -> LocalPath | RawLocalPath:
+    """The one representation of a root-relative path given as bytes."""
+    try:
+        return LocalPath(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        return RawLocalPath(raw)
+
+
+SourceLocation: TypeAlias = LocalPath | RawLocalPath | ExternalObjectRef
 
 
 @dataclass(frozen=True)
@@ -95,8 +144,9 @@ class SourceRevision:
     """One location observed holding one artifact's bytes.
 
     Revisions of a location form an append-only chain: ``supersedes`` is empty for the first
-    revision seen at a location and otherwise holds exactly the id of the previous one. ``id`` is
-    derived from the other three fields by ``neptune.identity.revisions.revision_id``.
+    revision seen at a location and otherwise holds exactly the id of the previous revision or
+    absence. ``id`` is derived from the other three fields by
+    ``neptune.identity.revisions.revision_id``.
     """
 
     id: RecordId
@@ -117,6 +167,35 @@ class SourceRevision:
     def to_json(self) -> JsonObject:
         return {
             "content_id": self.content_id,
+            "id": self.id,
+            "location": self.location.to_json(),
+            "supersedes": list(self.supersedes),
+        }
+
+
+@dataclass(frozen=True)
+class SourceAbsence:
+    """A location that held bytes is observed to hold none (ADR 0010).
+
+    Asserted only where the scan could see: never under an unreadable directory or a symlinked
+    ancestor. Always supersedes exactly one revision; bytes reappearing supersede the absence.
+    ``id`` is derived by ``neptune.identity.revisions.absence_id``.
+    """
+
+    id: RecordId
+    location: SourceLocation
+    supersedes: tuple[RecordId, ...]
+
+    def __post_init__(self) -> None:
+        parse_record_id(self.id)
+        if len(self.supersedes) != 1:
+            raise ValueError(f"an absence supersedes exactly one revision: {self.supersedes}")
+        parse_record_id(self.supersedes[0])
+        if self.supersedes[0] == self.id:
+            raise ValueError(f"absence cannot supersede itself: {self.id}")
+
+    def to_json(self) -> JsonObject:
+        return {
             "id": self.id,
             "location": self.location.to_json(),
             "supersedes": list(self.supersedes),

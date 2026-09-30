@@ -8,7 +8,14 @@ from neptune.model.ids import (
     parse_content_id,
     parse_record_id,
 )
-from neptune.model.source import LocalPath, SourceArtifact, SourceRevision
+from neptune.model.source import (
+    LocalPath,
+    RawLocalPath,
+    SourceAbsence,
+    SourceArtifact,
+    SourceRevision,
+    local_location,
+)
 
 CID = ContentId("sha256:" + "a" * 64)
 RID = RecordId("rec:sha256:" + "b" * 64)
@@ -89,3 +96,32 @@ def test_revision_supersedes_at_most_one_other() -> None:
         SourceRevision(RID, LocalPath("a"), CID, (other, other))
     with pytest.raises(ValueError, match="itself"):
         SourceRevision(RID, LocalPath("a"), CID, (RID,))
+
+
+def test_raw_local_path_is_only_for_non_utf8() -> None:
+    raw = RawLocalPath(b"runs/r\xff.mcap")
+    assert raw.to_json() == {"kind": "local_raw", "path_hex": "72756e732f72ff2e6d636170"}
+    assert raw.key != LocalPath("runs/r�.mcap").key
+    with pytest.raises(ValueError, match="use LocalPath"):
+        RawLocalPath(b"runs/ok.mcap")
+
+
+@pytest.mark.parametrize(
+    "raw", [b"", b"/\xff", b"\xff/", b"a//\xff", b"./\xff", b"\xff/../b", b"\xff\x00"]
+)
+def test_raw_local_path_rejects_unsafe(raw: bytes) -> None:
+    with pytest.raises(ValueError):
+        RawLocalPath(raw)
+
+
+def test_local_location_picks_the_one_representation() -> None:
+    assert local_location(b"a/\xc3\xa9") == LocalPath("a/é")
+    assert local_location(b"a/\xe9") == RawLocalPath(b"a/\xe9")
+
+
+def test_absence_supersedes_exactly_one() -> None:
+    SourceAbsence(RID, LocalPath("a"), (RecordId("rec:sha256:" + "c" * 64),))
+    with pytest.raises(ValueError, match="exactly one"):
+        SourceAbsence(RID, LocalPath("a"), ())
+    with pytest.raises(ValueError, match="itself"):
+        SourceAbsence(RID, LocalPath("a"), (RID,))
