@@ -33,8 +33,22 @@ class KnowledgeState(StrEnum):
     AMBIGUOUS = "ambiguous"
 
 
+class AssertionKind(StrEnum):
+    """How evidence-layer grounding relates to its source (ADR 0006 §5).
+
+    There is no ``inferred``: inferred grounding lives in ``derived/`` and does not satisfy
+    ``Grounding``, so the type checker keeps it off canonical records (ADR 0016 §6).
+    """
+
+    OBSERVED = "observed"  # a decoding of what the source bytes themselves encode
+    STATED = "stated"  # the source's authored assertion about another entity
+
+
 class Grounding(Protocol):
-    """Where a state comes from. MVL-3's ``Provenance`` is the implementation; this is its shape."""
+    """Where a state comes from. ``neptune.model.provenance.Provenance`` is the implementation."""
+
+    @property
+    def assertion_kind(self) -> AssertionKind: ...
 
     def to_json(self) -> JsonObject: ...
 
@@ -65,6 +79,7 @@ class Known(Generic[T]):
 
     def __post_init__(self) -> None:
         _check_value(self.value)
+        _check_grounding(self.provenance)
 
     @property
     def state(self) -> KnowledgeState:
@@ -90,6 +105,7 @@ class KnownAbsent:
     def __post_init__(self) -> None:
         if isinstance(self.provenance, Inherited):
             raise ValueError("KnownAbsent needs explicit provenance for what defines the absence")
+        _check_grounding(self.provenance)
 
     @property
     def state(self) -> KnowledgeState:
@@ -111,6 +127,9 @@ class Unknown:
 
     provenance: ProvenanceSlot = INHERITED
 
+    def __post_init__(self) -> None:
+        _check_grounding(self.provenance)
+
     @property
     def state(self) -> KnowledgeState:
         return KnowledgeState.UNKNOWN
@@ -127,6 +146,9 @@ class NotCovered:
     """The evidence could not have said: it does not record this (e.g. a sentinel "no estimate")."""
 
     provenance: ProvenanceSlot = INHERITED
+
+    def __post_init__(self) -> None:
+        _check_grounding(self.provenance)
 
     @property
     def state(self) -> KnowledgeState:
@@ -163,6 +185,7 @@ class Candidate(Generic[T]):
 
     def __post_init__(self) -> None:
         _check_value(self.value)
+        _check_grounding(self.provenance)
 
 
 @dataclass(frozen=True)
@@ -197,6 +220,17 @@ class Ambiguous(Generic[T]):
 
 Knowledge: TypeAlias = Known[T] | KnownAbsent | Unknown | NotCovered | NotApplicable | Ambiguous[T]
 _STATES = (Known, KnownAbsent, Unknown, NotCovered, NotApplicable, Ambiguous)
+
+
+def _check_grounding(provenance: object) -> None:
+    """Runtime twin of the ``Grounding`` protocol, for callers the type checker does not see."""
+    if isinstance(provenance, Inherited):
+        return
+    if not isinstance(getattr(provenance, "assertion_kind", None), AssertionKind):
+        raise TypeError(
+            f"provenance must be observed or stated evidence-layer grounding, got {provenance!r};"
+            " inferred provenance belongs in derived/ (ADR 0006 §5)"
+        )
 
 
 def _check_value(value: object) -> None:

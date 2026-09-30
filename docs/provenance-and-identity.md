@@ -1,6 +1,6 @@
 # Provenance and identity
 
-Status: identity implemented (MVL-2, MVL-59; ADRs 0009, 0010); provenance agreed (ADR 0006), implementation in MVL-3.
+Status: identity implemented (MVL-2, MVL-59; ADRs 0009, 0010); provenance implemented (MVL-3; ADRs 0006, 0016).
 
 ## Three identity tiers — never conflated
 
@@ -51,40 +51,51 @@ FIFOs/sockets/devices, and reports everything else as a `SkippedEntry` with a re
 `discovery.scan.scan()` is one pass: walk, digest, record, then mark absent only the locations the scan could
 see are gone — never under an unreadable directory or a symlinked ancestor. Details: ADR 0010.
 
-## Provenance record
+## Provenance record (`model/provenance.py`, ADR 0016)
 
-Every canonical record embeds:
+Every canonical record embeds, and any `Knowledge` state may carry:
 
 ```
 Provenance
-  evidence:       EvidenceRef            (source id + Locator)
-  transform:      TransformRecord id     (adapter id, version, config hash, tool versions)
-  assertion_kind: observed | stated | inferred
+  evidence:       EvidenceRef            (source content id + locator path)
+  transform:      TransformRecord id
+  assertion_kind: observed | stated
 ```
 
 - `observed`: directly decoded from the source (a message field, a URDF joint).
 - `stated`: the source explicitly asserts it about something else (a register row says asset A has defect D).
-- `inferred`: produced by a model or heuristic. Lives in `derived/`, never in `model/`.
+- `inferred`: produced by a model or heuristic. Only `derived.provenance.InferredProvenance` can say so, and
+  neither mypy nor the runtime lets it onto a canonical `Knowledge` state.
+
+`TransformRecord(id, adapter_id, adapter_version, config_hash, config, libraries, upstream)` holds nothing
+host-specific. `upstream` names the transforms whose output it consumed, so a normalised value's chain is
+`adapter → normaliser`, hash-linked. Build and verify records with `identity.provenance.transform_record` /
+`check_transform_record`, and derive tier-2 ids with `evidence_record_id(kind, evidence, transform)`: ADR 0003's
+formula, plus `upstream` for chained transforms.
 
 ## Locators
 
-`Locator` is a tagged union; each variant has one meaning:
+A locator is a **path** of steps, outermost first. Step 0 addresses the source's stored bytes; each later step
+addresses inside what the transform decoded from the previous one, e.g. `[ByteRange(gzip), JsonPointer]` or
+`[Page(3), Span(10, 40)]`. A whole source is `ByteRange(0, size)`.
 
-| Variant | Fields |
+| Step (JSON kind) | Fields |
 |---|---|
-| `ByteRange` | offset, length |
-| `RecordRange` | topic/channel, first ticks, last ticks, domain |
-| `Page` / `Span` | page, bbox / code-point offsets |
-| `RowCell` | row index, column |
-| `ImageRegion` | bbox, coordinate convention |
-| `VideoFrame` | frame index, ticks, domain |
-| `JsonPointer` | RFC 6901 pointer |
-| `Frame` | frame id, graph id |
-| `Object` | mesh/spatial object id |
+| `ByteRange` (`byte_range`) | offset, length |
+| `RecordRange` (`record_range`) | channel, start, end, domain_id |
+| `Page` (`page`) | index (document order, not the label) |
+| `PageRegion` (`page_region`) | page, x0 y0 x1 y1 in the page's stored coordinate system |
+| `Span` (`span`) | start, end code points of the transform's extracted text |
+| `Row` (`row`) / `RowCell` (`row_cell`) | row (header rows counted), column, column_name (verbatim, omitted if no header) |
+| `ImageRegion` (`image_region`) | x0 y0 x1 y1 pixels, stored orientation |
+| `VideoFrame` (`video_frame`) | track, index (presentation order), pts, domain_id |
+| `JsonPointer` (`json_pointer`) | RFC 6901 pointer |
+| `FrameLocator` (`frame`) | `FrameRef` |
+| `ObjectLocator` (`object`) | object_id |
 
 All indices are 0-based and ranges half-open; image regions use the stored raster orientation (no EXIF
-rotation). Adapters may add variants namespaced `<adapter id>:<name>`; they may not reuse an existing one with
-different semantics. Full rules: ADR 0006.
+rotation). Adapters may add steps namespaced `<adapter id>:<name>` with flat scalar fields (`adapter_locator`);
+they may not reuse a core step with different semantics. Full rules: ADRs 0006, 0016.
 
 ## Explaining a value
 

@@ -12,6 +12,7 @@ from neptune.model import time
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import (
     Ambiguous,
+    AssertionKind,
     Candidate,
     Known,
     KnownAbsent,
@@ -40,9 +41,10 @@ from neptune.model.time import (
 
 @dataclass(frozen=True)
 class Cite:
-    """Stand-in for MVL-3's Provenance: anything with ``to_json``."""
+    """Stand-in for ``Provenance``: any evidence-layer ``Grounding``."""
 
     where: str
+    assertion_kind: AssertionKind = AssertionKind.OBSERVED
 
     def to_json(self) -> JsonObject:
         return {"where": self.where}

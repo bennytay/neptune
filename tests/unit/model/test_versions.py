@@ -7,7 +7,7 @@ from hypothesis import strategies as st
 
 from neptune.identity import canonical_json
 from neptune.model.jsonvalue import JsonObject
-from neptune.model.knowledge import Known, Unknown, from_json, from_text, to_json
+from neptune.model.knowledge import AssertionKind, Known, Unknown, from_json, from_text, to_json
 from neptune.model.versions import (
     MAX_TEXT_LENGTH,
     BuildId,
@@ -29,9 +29,10 @@ SHA256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 
 @dataclass(frozen=True)
 class Cite:
-    """Stand-in for MVL-3's Provenance: anything with ``to_json``."""
+    """Stand-in for ``Provenance``: any evidence-layer ``Grounding``."""
 
     where: str
+    assertion_kind: AssertionKind = AssertionKind.OBSERVED
 
     def to_json(self) -> JsonObject:
         return {"where": self.where}

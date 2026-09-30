@@ -33,6 +33,8 @@ class Adapter(Protocol):
    exception is treated by the runtime as a crash: the chunk is quarantined with a finding; the job continues.
 4. **Leaf packages.** Adapters import `model/` and `identity/`; never each other, never `runtime/`.
 5. **Locators are exact.** Every emitted record carries an `EvidenceRef` that resolves to the bytes it came from.
+   Nested evidence is a locator path from the outermost source inward (ADR 0016); build the transform with
+   `identity.provenance.transform_record` and tier-2 ids with `evidence_record_id`.
 6. **Declared, not assumed.** Units, frames, clocks are emitted as the source declares them; unknown stays
    `Unknown`.
 7. **Cheap before expensive.** `probe` reads a bounded head; `inspect` must not decode payloads.

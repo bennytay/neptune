@@ -1,0 +1,3 @@
+joint,max_velocity,velocity_unit
+shoulder,90,deg/s
+elbow,120,deg/s
