@@ -20,3 +20,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0013](0013-unit-catalogue-and-si-normalisation.md) | Units: declared-unit catalogue and exact SI normalisation | Accepted |
 | [0014](0014-version-primitives.md) | Version primitives: one type per kind, stored verbatim | Accepted |
 | [0015](0015-frame-rotation-and-transform-types.md) | Frames, rotations and frame transforms: types and named conventions | Accepted |
+| [0016](0016-evidence-refs-locator-paths-and-transform-lineage.md) | Evidence refs, locator paths and transform lineage | Accepted |

@@ -39,6 +39,15 @@ a bug, not a value.
 - JSON: `{"knowledge": "<state>", ...}`, e.g. `{"knowledge":"known","value":30}`. Full shape: ADR 0011.
 - No confidence scores on evidence; uncertainty is `Ambiguous` / `Unknown` / `NotCovered` (ADR 0004 §6).
 
+## Provenance (ADR 0006, ADR 0016; `model/provenance.py`)
+
+- `Provenance(evidence: EvidenceRef, transform: TransformRecord id, assertion_kind: observed | stated)` fills
+  every `Knowledge` provenance slot. `inferred` exists only in `derived/` and is rejected on canonical states.
+- `EvidenceRef(source content id | external object, locator path)`: steps outermost first, each inside what the
+  transform decoded from the previous one. Details and the step table: `provenance-and-identity.md`.
+- `TransformRecord.upstream` hash-links a normaliser to the transform it consumed, so a normalised value cites
+  the same evidence as its input and its chain is `adapter → normaliser`.
+
 ## Time (ADR 0005, ADR 0012; `model/time.py`)
 
 - `Timestamp = (ticks: int, domain_id)`: signed 64-bit, never floats, never bare. `Duration` carries its
