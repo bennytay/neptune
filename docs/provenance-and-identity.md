@@ -1,6 +1,6 @@
 # Provenance and identity
 
-Status: decisions agreed (ADR 0003, ADR 0006); implementation in MVL-2 and MVL-3.
+Status: identity implemented (MVL-2, ADR 0009); provenance agreed (ADR 0006), implementation in MVL-3.
 
 ## Three identity tiers — never conflated
 
@@ -17,10 +17,34 @@ Consequences:
 - Two robots with byte-identical URDFs are two robots. Logical identity is never inferred from content equality;
   conservative resolution with explicit unresolved state is MVL-35.
 
-## External sources
+## Id strings (ADR 0009)
 
-Object-store and connector sources carry `(connector id, external object id, revision/etag/version)` in
-addition to a content hash when bytes are fetched. `SourceRevision` records a change; history is never mutated.
+| Id | Rendering | Code |
+|---|---|---|
+| content id, chunk hash | `sha256:<64 hex>` | `identity.hashing.digest_stream`, `content_id` |
+| config hash | `sha256:<64 hex>` of the resolved config's canonical JSON | `identity.ids.config_hash` |
+| record id | `rec:sha256:<64 hex>` | `identity.ids.adapter_record_id`, `record_id` |
+| logical id | `{"namespace", "value"}` | `model.ids.LogicalId` |
+
+Canonical JSON (ADR 0002) is `identity.canonical_json`; `dumps` for hashing and storage, `loads` rejects
+anything not byte-canonical.
+
+## Sources, revisions and dedup
+
+- `SourceArtifact` = one distinct byte string: content id, size, 8 MiB chunk hashes.
+- `SourceRevision` = one location seen holding one artifact. Revisions of a location form a hash chain via
+  `supersedes`; nothing is ever mutated or removed.
+- `identity.revisions.SourceLedger` applies the policy: same bytes anywhere ⇒ one artifact; same location
+  and bytes ⇒ nothing new; changed bytes ⇒ new revision; rename ⇒ new location, no new artifact.
+- Locations are `LocalPath` (relative to the ingest root) or `ExternalObjectRef`
+  `(connector id, object id, revision token)` for object stores (MVL-45). A new token over identical bytes is
+  not a new revision.
+
+## Walking local sources
+
+`discovery.source.LocalSource` implements the `Source` protocol (`walk`, `open`). It yields regular files only,
+never follows symlinks, never opens FIFOs/sockets/devices, and reports everything it skips as a
+`SkippedEntry` with a reason. Details: ADR 0009 §5.
 
 ## Provenance record
 
