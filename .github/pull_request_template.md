@@ -12,6 +12,13 @@ Closes MVL-
 
 **Progress:** <!-- e.g. M1 3/9 · next: MVL-40 -->
 
+<!-- Only if the PR changes ARCHITECTURE.md (a box, an arrow, an owner, a box's status); otherwise delete.
+**Architecture change**
+- Added: e.g. "added the validation box"
+- Changed: e.g. "runtime → package arrow now carries receipts"
+- Removed:
+-->
+
 <details><summary>Details: acceptance · tests · docs · follow-ups</summary>
 
 **Acceptance** <!-- copy each criterion from the issue; any unticked box = draft -->
