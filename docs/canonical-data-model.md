@@ -60,10 +60,19 @@ a bug, not a value.
 - `to_si` is exact (`rational × π^k`) and used by derived transforms only; the SI value is a separate
   record. `CATALOGUE_VERSION` is an output-affecting library version.
 
-## Frames (ADR 0007, MVL-4)
+## Frames and spatial references (ADR 0007, ADR 0015; `model/frames.py`, `model/spatial.py`)
 
-`FrameRef = (frame_id, frame_graph_id)`. No assumed ENU / NED / REP-103. Transforms are `TransformRecord`s
-with parent, child, domain and provenance. Frame-graph alignment is MVL-37.
+- `FrameRef = (frame_id verbatim, frame_graph_id)`; graphs are source-scoped tier-2 records. `Frame` holds
+  `Knowledge`-wrapped `axes` (named conventions `enu ned nwu flu frd rdf rub ruf fru`) and `handedness`.
+  No default; REP-103 is not evidence.
+- Rotations (`Quaternion`, `RotationMatrix`, `EulerAngles`, `RotationVector`), `Translation`, `Pose` and
+  `HomogeneousMatrix` keep their float components in source order. Order, layout, Euler sequence/mode,
+  quaternion algebra and units are separate `Knowledge` fields, so "undeclared" keeps the numbers.
+- `FrameTransform(parent, child, direction, value, validity)`: one graph, `direction` `Knowledge`-wrapped
+  (`Ambiguous` when a calibration file does not say), validity `STATIC` or a `Timestamp`. Not to be confused
+  with `TransformRecord`, the provenance record. Composition and graph alignment are MVL-37.
+- `GeodeticPosition`: latitude/longitude as declared, `Knowledge`-wrapped height, `CrsCode`, units and
+  `HeightReference` (`ellipsoid`, `mean_sea_level`, `home`, `ground`).
 
 ## Versions and software identity (ADR 0014; `model/versions.py`)
 

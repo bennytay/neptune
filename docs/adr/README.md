@@ -19,3 +19,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0012](0012-time-types-and-clock-roles.md) | Time types: `Timestamp`, `Duration`, `TimestampDomain`, clock roles | Accepted |
 | [0013](0013-unit-catalogue-and-si-normalisation.md) | Units: declared-unit catalogue and exact SI normalisation | Accepted |
 | [0014](0014-version-primitives.md) | Version primitives: one type per kind, stored verbatim | Accepted |
+| [0015](0015-frame-rotation-and-transform-types.md) | Frames, rotations and frame transforms: types and named conventions | Accepted |
