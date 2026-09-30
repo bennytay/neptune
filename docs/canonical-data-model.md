@@ -50,9 +50,15 @@ a bug, not a value.
   separate domains. Mappings between domains are `ClockAlignment` records produced in MVL-36 with method,
   evidence and error bounds.
 
-## Units (MVL-4)
+## Units (ADR 0013; `model/units.py`)
 
-Stored as declared by the source, or `Unknown`. SI normalisation is a derived transform with provenance.
+- `Knowledge[Unit]`, stored as declared (`mm` stays `mm`) or `Unknown`; nothing defaults to SI.
+- `Unit` = canonical product of catalogued, optionally prefixed atoms: JSON `"km.h^-1"`.
+  `Dimension` adds plane and solid angle to the SI bases, so rad/s ≠ Hz.
+- Declared text goes through `unit_from_text` only: one reading ⇒ `Known`, several (`g`, `C`) ⇒ `Ambiguous`,
+  unreadable ⇒ finding + `Unknown`.
+- `to_si` is exact (`rational × π^k`) and used by derived transforms only; the SI value is a separate
+  record. `CATALOGUE_VERSION` is an output-affecting library version.
 
 ## Frames (ADR 0007, MVL-4)
 
