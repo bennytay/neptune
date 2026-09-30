@@ -20,6 +20,7 @@ helpers at the end check and serialise that pair the same way for every record k
 import math
 import re
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import ClassVar, Final, TypeAlias
 
@@ -32,6 +33,7 @@ from neptune.model.ids import (
     RecordId,
     check_text,
     check_token,
+    check_verbatim,
     parse_config_hash,
     parse_content_id,
     parse_record_id,
@@ -56,14 +58,6 @@ def _index(field: str, value: int) -> None:
 def _range(what: str, start: int, end: int) -> None:
     if start > end:
         raise ValueError(f"{what} is half-open [start, end) and needs start <= end: {start}, {end}")
-
-
-def _verbatim(field: str, value: str) -> None:
-    """A name exactly as the source writes it: any valid Unicode, including empty."""
-    if not isinstance(value, str):
-        raise TypeError(f"{field} must be a str, got {type(value).__name__}")
-    if value:
-        check_text(field, value)
 
 
 def _coordinate(field: str, value: float) -> None:
@@ -117,7 +111,7 @@ class RecordRange:
     end: Timestamp
 
     def __post_init__(self) -> None:
-        _verbatim("channel", self.channel)
+        check_verbatim("channel", self.channel)
         _same_domain("record range", self.start, self.end)
         _range("record range", self.start.ticks, self.end.ticks)
 
@@ -238,7 +232,7 @@ class RowCell:
         _index("row", self.row)
         _index("column", self.column)
         if not isinstance(self.column_name, NoHeader):
-            _verbatim("column_name", self.column_name)
+            check_verbatim("column_name", self.column_name)
 
     def to_json(self) -> JsonObject:
         out: dict[str, JsonValue] = {"column": self.column, "kind": self.kind, "row": self.row}
@@ -309,7 +303,7 @@ class JsonPointer:
     pointer: str
 
     def __post_init__(self) -> None:
-        _verbatim("pointer", self.pointer)
+        check_verbatim("pointer", self.pointer)
         if not _JSON_POINTER.fullmatch(self.pointer):
             raise ValueError(f"not an RFC 6901 JSON pointer: {self.pointer!r}")
 
@@ -348,7 +342,7 @@ class ObjectLocator:
     object_id: str
 
     def __post_init__(self) -> None:
-        _verbatim("object_id", self.object_id)
+        check_verbatim("object_id", self.object_id)
 
     def to_json(self) -> JsonObject:
         return {"kind": self.kind, "object_id": self.object_id}
@@ -382,7 +376,7 @@ class AdapterLocator:
             if not isinstance(value, str | int | float):
                 raise TypeError(f"field {name} must be a JSON scalar, got {type(value).__name__}")
             if isinstance(value, str):
-                _verbatim(name, value)
+                check_verbatim(name, value)
             elif isinstance(value, float) and not math.isfinite(value):
                 raise ValueError(f"field {name} {value!r} is not finite")
 
@@ -594,6 +588,19 @@ _STEP_KEYS: Final[Mapping[str, set[str]]] = {
 }
 
 
+def step_keys(kind: str, present: AbstractSet[str]) -> set[str]:
+    """The JSON keys a core step of ``kind`` has, ``kind`` included; unknown kinds raise.
+
+    ``present`` only matters for ``row_cell``, whose ``column_name`` is omitted when the table has
+    no header (``NO_HEADER``).
+    """
+    if kind == RowCell.kind:
+        return {"column", "kind", "row"} | ({"column_name"} & present)
+    if kind not in _STEP_KEYS:
+        raise ValueError(f"unknown locator kind: {kind!r}")
+    return set(_STEP_KEYS[kind])
+
+
 def locator_from_json(data: JsonValue) -> Locator:
     """Parse one step strictly: unknown kinds, missing or extra keys and wrong types are errors."""
     if not isinstance(data, Mapping):
@@ -603,14 +610,10 @@ def locator_from_json(data: JsonValue) -> Locator:
         raise ValueError(f"locator step needs a string kind, got {kind!r}")
     if ":" in kind:
         return _adapter_locator_from_json(kind, data)
+    obj = exact_object(data, kind, step_keys(kind, data.keys()))
     if kind == RowCell.kind:
-        keys = {"column", "kind", "row"} | ({"column_name"} if "column_name" in data else set())
-        obj = exact_object(data, kind, keys)
         name = json_str(obj["column_name"], "column_name") if "column_name" in obj else NO_HEADER
         return RowCell(_int(obj, "row"), _int(obj, "column"), name)
-    if kind not in _STEP_KEYS:
-        raise ValueError(f"unknown locator kind: {kind!r}")
-    obj = exact_object(data, kind, _STEP_KEYS[kind])
     match kind:
         case ByteRange.kind:
             return ByteRange(_int(obj, "offset"), _int(obj, "length"))

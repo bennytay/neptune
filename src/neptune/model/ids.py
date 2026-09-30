@@ -6,10 +6,11 @@ functions below or from the derivation functions in ``neptune.identity``, never 
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import NewType
 
-from neptune.model.jsonvalue import JsonObject
+from neptune.model.jsonvalue import JsonObject, JsonValue
 
 # Tier 1: sha256 of a source's complete bytes, e.g. "sha256:9f86d0…". Also used for chunk hashes.
 ContentId = NewType("ContentId", str)
@@ -60,6 +61,15 @@ def check_text(field: str, value: str) -> str:
     return value
 
 
+def check_verbatim(field: str, value: str) -> str:
+    """Validate text exactly as the source writes it: any valid Unicode, including empty."""
+    if not isinstance(value, str):
+        raise TypeError(f"{field} must be a str, got {type(value).__name__}")
+    if value:
+        check_text(field, value)
+    return value
+
+
 @dataclass(frozen=True)
 class LogicalId:
     """Tier 3: a real-world thing across sources, e.g. ``LogicalId("serial", "SPOT-1234")``.
@@ -77,6 +87,16 @@ class LogicalId:
 
     def to_json(self) -> JsonObject:
         return {"namespace": self.namespace, "value": self.value}
+
+
+def logical_id_from_json(data: JsonValue) -> LogicalId:
+    """Parse strictly: exactly ``namespace`` and ``value``, both strings."""
+    if not isinstance(data, Mapping) or data.keys() != {"namespace", "value"}:
+        raise ValueError(f"a logical id is exactly {{namespace, value}}, got {data!r}")
+    namespace, value = data["namespace"], data["value"]
+    if not isinstance(namespace, str) or not isinstance(value, str):
+        raise ValueError(f"logical id namespace and value must be strings, got {data!r}")
+    return LogicalId(namespace, value)
 
 
 @dataclass(frozen=True)
