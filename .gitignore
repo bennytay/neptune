@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+htmlcov/
+
+# Neptune runtime artifacts (never commit ingest output or caches)
+.neptune/
+*.neptune-cache/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Claude Code worktrees
+.claude/worktrees/
