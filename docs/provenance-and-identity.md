@@ -17,8 +17,8 @@ Consequences:
 - Downstream references must point at tier 1, tier 3, or `EvidenceRef`s — never at tier-2 ids.
 - Two robots with byte-identical URDFs are two robots. Logical identity is never inferred from content equality;
   conservative resolution with explicit unresolved state is MVL-35.
-- A declaration's ids for one thing are kept together, each cited, as `identifiers` on `Machine` and
-  `HardwareComponent` (ADR 0019 §2). They are the evidence MVL-35 links by.
+- A declaration's ids for one thing are kept together, each cited, as `identifiers` on `Machine`,
+  `HardwareComponent`, `Site` and `Asset` (ADRs 0019 §2, 0020 §1). They are the evidence MVL-35 links by.
 
 ## Id strings (ADR 0009)
 
@@ -90,6 +90,12 @@ A series row carries no `Provenance` of its own. Its `Stream` hoists what every 
 assertion kind and a locator template, with the stream's own transform. The row's `locator/<i>/<field>`
 columns fill the template, so `Stream.row_provenance(row)` rebuilds the row's full provenance exactly. A
 series file's metadata holds the `Stream` line, so the file alone is enough.
+
+## Table cells (ADR 0020 §5)
+
+A register row cited as `Row(r)` hoists its cells' citations the way a series hoists its rows': cell `c`
+is `RowCell(r, c, header[c])`, rebuilt by `StructuredRecord.cell_evidence`. A row cited any other way
+gives each cell its own provenance.
 
 ## Locators
 

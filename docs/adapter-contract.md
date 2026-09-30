@@ -95,6 +95,22 @@ For sources that describe machines (manifests, robot descriptions, flight logs, 
   numbers in source order, and extrinsics as `FrameTransform`s in the calibration file's own graph,
   direction `Ambiguous` unless the format says which way they map.
 
+## World and record context (ADR 0020)
+
+For registers, geometry, photos, video files and documents:
+
+- Tables: one `StructuredTable` and one `StructuredRecord` per row, citing the row as `Row(r)` so each
+  cell's place is its `RowCell`. Keep cells as the source types them; never infer a CSV cell's type.
+  Blank is `Unknown`; only a token the source or its spec defines as none is `KnownAbsent`.
+- A `Site` or `Asset` per row or feature that names one, with its ids and names each citing its cell or
+  span. Don't copy the rest of the row into it.
+- Geometry: a `SpatialArtifact` per file, unit / CRS / frame as declared (`NotCovered` where the format
+  has no place), objects cited by `ObjectLocator`.
+- Media: an `Image` per still, a `Video` per video track, `capture` from EXIF / XMP / container metadata.
+  Never apply EXIF orientation, never caption.
+- Documents: one `DocumentRecord`, then `DocumentBlock`s in reading order with the text of each exact
+  span and its page region. Document your block rule. Set `role` only where the format declares it.
+
 ## What the runtime owns (and adapters must not reimplement)
 
 | Concern | Runtime mechanism |
