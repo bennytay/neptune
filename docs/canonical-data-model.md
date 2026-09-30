@@ -19,7 +19,7 @@ Naming decisions: `IngestFinding` (not `IntegrityFinding`). No `ProvenanceEdge` 
 embedded on each record. `EpisodeCandidate` / `Observation` are **reserved names, not modelled**: they are the
 boundary to the memory learner.
 
-## Epistemic states — `Knowledge[T]` (ADR 0004, MVL-40)
+## Epistemic states — `Knowledge[T]` (ADR 0004, ADR 0011; `model/knowledge.py`)
 
 ```
 Known(value)              the source asserts this value
@@ -33,6 +33,11 @@ Ambiguous(candidates)     the source supports more than one reading
 Scope rule: fields with epistemic weight — units, clocks, frames, versions, calibration, identities, coverage —
 use the wrapper. Purely structural fields (the list of streams found) do not. A `None` in a canonical record is
 a bug, not a value.
+
+- Provenance: states hold `INHERITED` (the record's provenance, omitted from JSON) or their own. `KnownAbsent`
+  always cites what defines the absence.
+- JSON: `{"knowledge": "<state>", ...}`, e.g. `{"knowledge":"known","value":30}`. Full shape: ADR 0011.
+- No confidence scores on evidence; uncertainty is `Ambiguous` / `Unknown` / `NotCovered` (ADR 0004 §6).
 
 ## Time (ADR 0005, MVL-4)
 

@@ -37,6 +37,19 @@ class Adapter(Protocol):
    `Unknown`.
 7. **Cheap before expensive.** `probe` reads a bounded head; `inspect` must not decode payloads.
 
+## Blank, default and sentinel fields (ADR 0004 §5, ADR 0011)
+
+| Source shows | Emit | Never |
+|---|---|---|
+| missing key, empty or whitespace-only cell | `Unknown` | a default, `""`, `0`, "none" |
+| a token the source or its format spec defines as "none" | `KnownAbsent(provenance=<that definition>)` | `KnownAbsent` without a citation |
+| a spec-defined sentinel (e.g. ROS covariance `[0] == -1`) | the state the spec gives it, e.g. `NotCovered` | the sentinel as a `Known` number |
+| any other value, however implausible | `Known(value)` | "fixing" it; plausibility is `validate/` |
+| two conflicting readings | `Ambiguous` with each candidate cited | picking one |
+| a value that fails to parse | an `IngestFinding` | a guessed state |
+
+For text fields use `from_text(raw, parse, absent_tokens={token: definition})`. Token matching is exact.
+
 ## What the runtime owns (and adapters must not reimplement)
 
 | Concern | Runtime mechanism |
