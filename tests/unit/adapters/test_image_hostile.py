@@ -53,7 +53,7 @@ def png_with(data: bytes, width: int, height: int) -> bytes:
     return bytes(out)
 
 
-# --- The damaged-file corpus -----------------------------------------------------------------------
+# --- The damaged-file corpus ------------------------------------------
 
 CORPUS: Final = {
     # name: (findings it must make, images it still yields)
@@ -98,7 +98,7 @@ def test_an_unreadable_image_is_an_error_and_partial_damage_a_warning() -> None:
     }
 
 
-# --- Truncation at every length, and mutation ----------------------------------------------------
+# --- Truncation at every length, and mutation ------------------------------------------
 
 
 @pytest.mark.parametrize("name", VALID)
@@ -121,7 +121,9 @@ def test_bytes_overwritten_at_random_never_raise(name: str) -> None:
     for _ in range(60):
         mutated = bytearray(data)
         for _ in range(rng.choice((1, 2, 4, 16))):
-            mutated[rng.randrange(len(mutated))] = rng.choice((0x00, 0xFF, 0x7F, rng.randrange(256)))
+            mutated[rng.randrange(len(mutated))] = rng.choice(
+                (0x00, 0xFF, 0x7F, rng.randrange(256))
+            )
         run(bytes(mutated))
 
 
@@ -133,7 +135,7 @@ def test_a_header_followed_by_noise_never_raises(name: str) -> None:
         run(data[:length] + rng.randbytes(300))
 
 
-# --- Lying dimensions --------------------------------------------------------------------------------
+# --- Lying dimensions ------------------------------------------
 
 
 def test_a_jpeg_frame_header_of_65535_by_65535_is_recorded_with_a_pixel_limit_finding() -> None:
@@ -192,7 +194,7 @@ def test_a_riff_size_that_lies_is_a_truncation_or_an_unreadable_file() -> None:
     assert "image.unreadable" in codes(run(bytes(webp)))
 
 
-# --- Decompression bombs -------------------------------------------------------------------------------
+# --- Decompression bombs ------------------------------------------
 
 
 def test_a_zlib_bomb_costs_at_most_max_metadata_bytes() -> None:
@@ -227,7 +229,7 @@ def test_a_png_declaring_a_giant_chunk_is_a_truncation_not_a_read() -> None:
     assert codes(output) & {"image.truncated", "image.malformed"}
 
 
-# --- Bad offsets and loops ---------------------------------------------------------------------------
+# --- Bad offsets and loops ------------------------------------------
 
 
 def test_a_tiff_whose_first_ifd_is_past_the_end_has_no_image_and_a_bad_offset() -> None:
@@ -287,7 +289,7 @@ def test_a_date_that_is_not_a_date_is_unknown_never_a_guess() -> None:
     assert "image.value_unreadable" in codes(output)
 
 
-# --- The limits -------------------------------------------------------------------------------------------
+# --- The limits ------------------------------------------
 
 
 def test_max_pixels_is_exact_at_the_boundary() -> None:

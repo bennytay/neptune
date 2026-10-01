@@ -13,7 +13,7 @@ import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from neptune.adapters.image import _blocks
+import neptune.adapters.image._blocks as _blocks
 from neptune.adapters.image._context import Context
 from neptune.adapters.image._emit import (
     ICC_UNREADABLE,

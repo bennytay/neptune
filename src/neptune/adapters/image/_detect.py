@@ -13,8 +13,9 @@ import zlib
 from dataclasses import dataclass
 from typing import Final
 
+import neptune.adapters.image._bmp as _bmp
+import neptune.adapters.image._pnm as _pnm
 from neptune.adapters.contract import SIGNATURE, STRUCTURE, VERIFIED
-from neptune.adapters.image import _bmp, _pnm
 from neptune.adapters.image._png import SIGNATURE as PNG_SIGNATURE
 
 PNG: Final = "png"

@@ -20,9 +20,9 @@ from neptune.identity.canonical_json import dumps
 from neptune.model.finding import Severity
 from neptune.model.knowledge import Known, NotCovered, Unknown
 from neptune.model.provenance import ByteRange, EvidenceRef, ImageRegion
+from neptune.model.reference import TimestampDomain
 from neptune.model.time import Timescale
 from neptune.model.units import unit_from_text
-from neptune.model.reference import TimestampDomain
 from neptune.model.world import Image, StructuredRecord, StructuredTable
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures" / "image"
@@ -53,7 +53,7 @@ def known(state: Any) -> Any:
     return state.value
 
 
-# --- What each format yields ---------------------------------------------------------------------
+# --- What each format yields ------------------------------------------
 
 EXPECTED: Final = {
     "crawler_inspection.jpg": [("jpeg", 64, 48)],
@@ -118,7 +118,7 @@ def test_a_region_is_the_images_citation_then_an_image_region_of_the_stored_rast
             assert EvidenceRef(evidence.source, (*evidence.locator, full)) != ref
 
 
-# --- Declared metadata, as declared --------------------------------------------------------------
+# --- Declared metadata, as declared ------------------------------------------
 
 
 def test_exif_orientation_is_kept_and_never_applied() -> None:
@@ -132,7 +132,9 @@ def test_a_capture_time_with_a_stated_offset_is_an_exact_instant() -> None:
     stamp = known(image.capture.time)
     # 2026:09:14 10:21:07.042 at +10:00 is 00:21:07.042 UTC: the offset the file states, to ms.
     assert stamp.ticks == (calendar.timegm((2026, 9, 14, 0, 21, 7)) * 1000) + 42
-    (domain,) = [r for r in run("crawler_inspection.jpg").records() if isinstance(r, TimestampDomain)]
+    (domain,) = [
+        r for r in run("crawler_inspection.jpg").records() if isinstance(r, TimestampDomain)
+    ]
     assert stamp.domain_id == domain.id
     assert known(domain.timescale) is Timescale.POSIX
     assert domain.field == "DateTimeOriginal"
@@ -183,9 +185,7 @@ def test_a_dng_records_its_preview_and_its_raw_raster_with_the_cameras_serial() 
 
 def test_the_color_profile_is_a_cited_table_of_the_profiles_own_fields() -> None:
     output = run("amr_dock.png")
-    names = {
-        known(t.name): t for t in output.records() if isinstance(t, StructuredTable)
-    }
+    names = {known(t.name): t for t in output.records() if isinstance(t, StructuredTable)}
     assert {"IHDR", "ICC header", "ICC tags", "XMP", "IFD0", "Exif"} <= set(names)
     header = names["ICC header"]
     assert known(header.header)[:2] == ("size", "cmm")
@@ -213,7 +213,7 @@ def test_netpbm_headers_are_read_as_the_specification_names_them() -> None:
     assert (pgm["width"], pgm["height"], pgm["maxval"]) == (16, 12, 65535)
 
 
-# --- The adapter's own contract ------------------------------------------------------------------
+# --- The adapter's own contract ------------------------------------------
 
 
 def test_each_source_is_one_chunk_and_inspect_summarises_without_records() -> None:
@@ -251,7 +251,7 @@ def test_every_finding_code_the_adapter_makes_is_documented_with_its_severity() 
         assert all(f.severity in set(Severity) for f in output.findings())
 
 
-# --- Determinism -----------------------------------------------------------------------------------
+# --- Determinism ------------------------------------------
 
 
 @pytest.mark.parametrize("name", sorted(EXPECTED))

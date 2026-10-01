@@ -63,7 +63,7 @@ def called(table: StructuredTable, name: str) -> bool:
 
 def stored(row: list[Any]) -> list[Any]:
     """An IFD row's values as the oracle lists them: rationals as Fractions."""
-    tag, kind, _, *values = row
+    _, kind, _, *values = row
     if kind in RATIONAL:
         return [Fraction(n, d) for n, d in zip(values[::2], values[1::2], strict=True)]
     return values
@@ -76,7 +76,7 @@ def oracle_values(kind: int, value: Any) -> list[Any]:
     return list(value) if isinstance(value, list) else [value]
 
 
-# --- The committed files are the generator's ------------------------------------------------------
+# --- The committed files are the generator's ------------------------------------------
 
 
 def test_every_committed_fixture_is_what_the_generator_writes() -> None:
@@ -104,7 +104,7 @@ def test_every_fixture_is_small_and_the_robots_vary() -> None:
     assert len(makers) == 3  # a pipe crawler, an ROV, a field rover: three makers
 
 
-# --- Agreement with Pillow --------------------------------------------------------------------------
+# --- Agreement with Pillow ------------------------------------------
 
 
 @pytest.mark.parametrize("name", sorted(ORACLE))

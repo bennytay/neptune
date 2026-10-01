@@ -259,7 +259,7 @@ def test_options_are_the_runtimes_job_options(home: Path) -> None:
 @pytest.mark.parametrize(
     ("config", "message"),
     [
-        ({"mcap": {}}, "not registered"),
+        ({"nonesuch": {}}, "not registered"),
         ({"text": {"nope": 1}}, "nope"),
         ({"text": {"block_rule": "sentence"}}, "sentence"),
         ({"text": {"max_block_bytes": "big"}}, "max_block_bytes"),

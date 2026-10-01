@@ -10,7 +10,7 @@ raster the file cannot hold is ``image.raster_truncated``; the strips are never 
 
 from typing import Final
 
-from neptune.adapters.image import _blocks
+import neptune.adapters.image._blocks as _blocks
 from neptune.adapters.image._capture import Tags
 from neptune.adapters.image._context import Context
 from neptune.adapters.image._emit import MALFORMED, RASTER_TRUNCATED, UNREADABLE

@@ -12,7 +12,7 @@ for capture metadata or orientation: both are ``NotCovered``.
 import struct
 from typing import Final
 
-from neptune.adapters.image import _blocks
+import neptune.adapters.image._blocks as _blocks
 from neptune.adapters.image._context import Context
 from neptune.adapters.image._emit import BAD_OFFSET, RASTER_TRUNCATED, UNREADABLE
 from neptune.adapters.image._space import Space

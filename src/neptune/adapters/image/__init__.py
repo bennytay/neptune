@@ -29,6 +29,12 @@ bound what one source may walk and emit. Every problem is a finding.
 
 from typing import TYPE_CHECKING, Final
 
+import neptune.adapters.image._bmp as _bmp
+import neptune.adapters.image._jpeg as _jpeg
+import neptune.adapters.image._png as _png
+import neptune.adapters.image._pnm as _pnm
+import neptune.adapters.image._tiff_file as _tiff_file
+import neptune.adapters.image._webp as _webp
 from neptune.adapters.contract import (
     ABI_VERSION,
     PROBE_HEAD_SIZE,
@@ -49,7 +55,6 @@ from neptune.adapters.contract import (
     SourceReader,
     make_chunk,
 )
-from neptune.adapters.image import _bmp, _jpeg, _png, _pnm, _tiff_file, _webp
 from neptune.adapters.image._context import Context
 from neptune.adapters.image._detect import BMP, JPEG, PNG, PNM, TIFF, WEBP, detect
 from neptune.adapters.image._emit import FINDINGS, UNREADABLE, Emitter

@@ -38,13 +38,13 @@ def test_store_imports_only_model_and_identity() -> None:
 
 
 def test_format_adapters_are_leaves() -> None:
-    """A format subpackage sees only the model, identity and the contract (ADR 0008 §4)."""
+    """A format subpackage sees only the model, identity, the contract and itself (ADR 0008 §4)."""
     adapters = Path(neptune.__file__).parent / "adapters"
-    base = ("neptune.model", "neptune.identity", "neptune.adapters.contract")
     formats = [path for path in adapters.iterdir() if path.is_dir() and path.name != "__pycache__"]
     assert formats, "the reference adapter is a subpackage"
     for package in formats:
-        allowed = (*base, f"neptune.adapters.{package.name}")  # a format may import its own parts
+        own = f"neptune.adapters.{package.name}."  # its own modules, never another adapter
+        allowed = ("neptune.model", "neptune.identity", "neptune.adapters.contract", own)
         for path in package.rglob("*.py"):
             for node in ast.walk(ast.parse(path.read_text())):
                 if isinstance(node, ast.Import):

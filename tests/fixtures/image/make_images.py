@@ -25,7 +25,7 @@ from typing import Any, Final
 
 HERE: Final = Path(__file__).parent
 
-# --- TIFF / EXIF -----------------------------------------------------------------------------------
+# --- TIFF / EXIF ------------------------------------------
 
 BYTE, ASCII, SHORT, LONG, RATIONAL = 1, 2, 3, 4, 5
 UNDEFINED, SSHORT, SLONG, SRATIONAL, FLOAT, DOUBLE = 7, 8, 9, 10, 11, 12
@@ -111,7 +111,9 @@ class TiffLayout:
             out += (b"II" if self.little else b"MM") + struct.pack(order + "HHHQ", 43, 8, 0, 0)[0:0]
             out += struct.pack(order + "HHHQ", 43, 8, 0, offsets[self.first])
         else:
-            out += (b"II" if self.little else b"MM") + struct.pack(order + "HI", 42, offsets[self.first])
+            out += (b"II" if self.little else b"MM") + struct.pack(
+                order + "HI", 42, offsets[self.first]
+            )
         for name, directory in self.directories.items():
             start = offsets[name]
             values_at = start + count_size + entry_size * len(directory.entries) + tail
@@ -168,7 +170,7 @@ def exif_block(
     return TiffLayout(directories, "ifd0", little=little).build()
 
 
-# --- ICC and XMP -----------------------------------------------------------------------------------
+# --- ICC and XMP ------------------------------------------
 
 
 def icc_profile() -> bytes:
@@ -245,7 +247,7 @@ XMP_BOMB: Final = b"""<?xml version="1.0"?>
 <rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>&lol3;</dc:title>
 </rdf:Description></rdf:RDF></x:xmpmeta>"""
 
-# --- JPEG ------------------------------------------------------------------------------------------
+# --- JPEG ------------------------------------------
 
 
 def segment(marker: int, payload: bytes) -> bytes:
@@ -284,7 +286,7 @@ def icc_segments(profile: bytes, parts: int) -> list[bytes]:
     ]
 
 
-# --- PNG -------------------------------------------------------------------------------------------
+# --- PNG ------------------------------------------
 
 
 def chunk(kind: bytes, data: bytes, crc: int | None = None) -> bytes:
@@ -303,7 +305,8 @@ def png(
     """An 8-bit RGB PNG of a horizontal gradient, ``before`` and ``after`` its image data."""
     if idat is None:
         rows = b"".join(
-            b"\x00" + b"".join(bytes([x * 255 // max(1, width - 1), y * 8 % 256, 96]) for x in range(width))
+            b"\x00"
+            + b"".join(bytes([x * 255 // max(1, width - 1), y * 8 % 256, 96]) for x in range(width))
             for y in range(height)
         )
         idat = zlib.compress(rows, 9)
@@ -318,7 +321,7 @@ def png(
     )
 
 
-# --- WebP ------------------------------------------------------------------------------------------
+# --- WebP ------------------------------------------
 
 # The smallest lossless and lossy 1 x 1 bitstreams, as libwebp writes them.
 VP8L_1X1: Final = bytes.fromhex("2f0000001007101111888 8fe0700".replace(" ", ""))
@@ -334,7 +337,7 @@ def webp(chunks: Sequence[bytes], declared: int | None = None) -> bytes:
     return b"RIFF" + struct.pack("<I", len(body) if declared is None else declared) + body
 
 
-# --- The fixtures ----------------------------------------------------------------------------------
+# --- The fixtures ------------------------------------------
 
 CRAWLER_IFD0: Final = [
     Tag(271, ASCII, ascii_value("Ridgeback Robotics")),
@@ -624,7 +627,7 @@ def pam() -> bytes:
     return header + bytes(range(4 * 3 * 4))
 
 
-# --- Damaged and hostile files ---------------------------------------------------------------------
+# --- Damaged and hostile files ------------------------------------------
 
 
 def exif_loop_jpeg() -> bytes:
@@ -787,7 +790,7 @@ VALID: Final = (
 # Pillow reads Netpbm P1-P6 and no P7; the PAM header is checked against the specification by hand.
 NOT_IN_PILLOW: Final = ("gripper.pam",)
 
-# --- The oracle ------------------------------------------------------------------------------------
+# --- The oracle ------------------------------------------
 
 
 def _plain(value: Any) -> Any:
@@ -805,7 +808,7 @@ def _plain(value: Any) -> Any:
 
 def oracle() -> dict[str, Any]:
     """What Pillow reads from every valid fixture: size, mode, frames, EXIF, GPS, ICC, XMP."""
-    from PIL import Image  # noqa: PLC0415 - the oracle runs with Pillow, the fixtures without
+    from PIL import Image
 
     found: dict[str, Any] = {}
     for name in VALID:

@@ -6,7 +6,8 @@ JPEG APP1 segment, a PNG ``eXIf`` chunk or a WebP ``EXIF`` chunk becomes the sam
 
 from collections.abc import Callable
 
-from neptune.adapters.image import _icc, _xmp
+import neptune.adapters.image._icc as _icc
+import neptune.adapters.image._xmp as _xmp
 from neptune.adapters.image._capture import Tags
 from neptune.adapters.image._context import Context
 from neptune.adapters.image._emit import LIMIT_EXCEEDED
