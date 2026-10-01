@@ -4,10 +4,11 @@
 # Only these GitHub author associations may cast a review verdict.
 def trusted_author: IN("OWNER", "MEMBER", "COLLABORATOR");
 
-# The lines of a comment body that are neither quoted (`>`) nor inside a ``` or ~~~ fence, nor
-# indented as a code block: a verdict quoted from elsewhere must not count.
+# The lines of a comment body, HTML comments (`<!-- -->`, or an unclosed `<!--` to the end) removed,
+# that are neither quoted (`>`) nor inside a ``` or ~~~ fence, nor indented as a code block: a
+# verdict that is hidden or quoted from elsewhere must not count.
 def _live_lines:
-  reduce (split("\n")[] | sub("\r$"; "")) as $line ({fence: null, out: []};
+  reduce (gsub("<!--[\\s\\S]*?(-->|\\z)"; "") | split("\n")[] | sub("\r$"; "")) as $line ({fence: null, out: []};
     ([$line | capture("^ {0,3}(?<f>`{3,}|~{3,})") | .f] | first) as $mark
     | if .fence != null then
         (if $mark != null and ($mark[:1] == .fence[:1]) and ($mark | length) >= (.fence | length)
@@ -21,8 +22,8 @@ def _live_lines:
 # Output: the verdict (upper-cased, e.g. MERGE or REVISE) of the latest `Review: <VERDICT> @ <sha>`
 # line by a trusted author whose SHA (7-40 hex digits, ending at a non-alphanumeric) prefixes $head,
 # or nothing. A later verdict overrides an earlier one, so a REVISE posted after a MERGE blocks the
-# merge. Bold or italic emphasis around the line is tolerated; quoted, fenced, indented or
-# inline-code lines are ignored.
+# merge. Bold or italic emphasis around the line is tolerated; hidden (HTML comment), quoted,
+# fenced, indented or inline-code lines are ignored.
 def verdict($head):
   [ .[]
     | select(.association | trusted_author)

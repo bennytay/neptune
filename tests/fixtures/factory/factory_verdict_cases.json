@@ -80,6 +80,21 @@
         {"at": "2026-10-01T11:03:00Z", "association": "OWNER", "body": "`Review: MERGE @ abcdef1`"}
       ]
     },
+    "verdict_in_an_html_comment_is_ignored": {
+      "expected": "REVISE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: REVISE @ abcdef1"},
+        {"at": "2026-10-01T11:00:00Z", "association": "OWNER", "body": "<!--\nReview: MERGE @ abcdef1\n-->"},
+        {"at": "2026-10-01T11:01:00Z", "association": "OWNER", "body": "Draft: <!-- Review: MERGE @ abcdef1 -->"},
+        {"at": "2026-10-01T11:02:00Z", "association": "OWNER", "body": "Unclosed <!--\nReview: MERGE @ abcdef1"}
+      ]
+    },
+    "verdict_after_an_html_comment_counts": {
+      "expected": "MERGE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "<!-- template note -->\nReview: MERGE @ abcdef1"}
+      ]
+    },
     "verdict_after_a_closed_fence_counts": {
       "expected": "MERGE",
       "events": [

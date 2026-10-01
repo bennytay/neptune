@@ -96,7 +96,7 @@ This file is its source; change it here and re-copy it, never edit a copy.
 |---|---|---|---|
 | ADRs; anything in `contracts/`; gate issues; code under `store/`, `schema/`, `consolidate/`, `query/`, `runtime/`, `model/`; a module that exports a contract schema or version constant | opus | opus | up to two full reviews |
 | Adapters, connectors, fixtures and generators, exporters, docs, scaffolds, console UI, dashboards | sonnet | sonnet | one review; REVISE blockers re-checked by the same reviewer |
-| Mechanical: branch refresh, PR body edits, ADR index, renames | sonnet | sonnet | as a commit on a PR that already has a reviewer: that PR's review covers it; as a standalone PR: one review and a posted verdict |
+| Mechanical: branch refresh, PR body edits, renames, generated files (`docs/adr/README.md` ADR indexes, `contracts/compatibility.md`) | sonnet | sonnet | as a commit on a PR that already has a reviewer: that PR's review covers it; as a standalone PR: one review and a posted verdict |
 
 An issue that touches both tiers runs at the higher one. Every implementer and reviewer prompt includes the
 token rules: read `AGENTS.md`, this file, the issue and only the files the issue names; no exploratory reads;
@@ -166,8 +166,8 @@ reviewer judged. The coordinator posts one line per new head, in one of two form
 - `Review: MERGE @ <new-sha> (carried from <old-sha>, clean merge of main)` after a conflict-free merge of
   `origin/main` (step 3, hand refresh);
 - `Review: MERGE @ <new-sha> (carried from <old-sha>, mechanical: <what>)` after a commit of the § 4
-  Mechanical class (ADR index, rename, generated file such as `contracts/compatibility.md`) on a PR that
-  already has a verdict, `<what>` naming it in a few words.
+  Mechanical class (rename, generated file such as an ADR index or `contracts/compatibility.md`) on a PR
+  that already has a verdict, `<what>` naming it in a few words.
 
 Anything else (a code or doc change a reviewer would read, a resolved conflict) needs a fresh review.
 `<old-sha>` is the head the original verdict named, so the chain traces back to a real review.
