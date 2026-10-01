@@ -9,6 +9,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -48,6 +51,8 @@ jobs:
         run: make setup
       - name: Lint, type-check, test
         run: make check PKG=neptune
+      - name: Contracts (owner rule)
+        run: make contracts-check PKG=neptune
 
   package:
     needs: plan
@@ -68,7 +73,13 @@ jobs:
       - name: Install workspace and dev tools
         run: make setup
       - name: Lint, type-check, test
-        run: make check PKG=${{ matrix.package }}
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: make check PKG="$PACKAGE"
+      - name: Contracts (lock, owner rule, upstream contract tests)
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: make contracts-check PKG="$PACKAGE"
 
   template:
     needs: plan
@@ -87,6 +98,8 @@ jobs:
         run: make setup
       - name: Check the generated package
         run: make check PKG=ci-template-smoke
+      - name: Contracts check of the generated package
+        run: make contracts-check PKG=ci-template-smoke
 
   check:
     needs: [plan, neptune, package, template]
