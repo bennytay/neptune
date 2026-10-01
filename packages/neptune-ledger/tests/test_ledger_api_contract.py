@@ -345,6 +345,20 @@ def test_thread_ids_separate_kinds_and_never_fold_case() -> None:
     assert len(ids) == 4
 
 
+def test_anchored_thread_keys_are_hashable() -> None:
+    same = EvidenceAnchor(ANCHOR.source, ({"offset": 0, "length": 4, "kind": "byte_range"},))
+    assert {ThreadKey("stream", ANCHOR), ThreadKey("stream", same)} == {ThreadKey("stream", same)}
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["sha256:" + "a" * 64 + "\n", "sha256:" + "a" * 63 + "\uff11", "SHA256:" + "a" * 64],
+)
+def test_patterns_match_whole_ascii_strings(value: str) -> None:
+    with pytest.raises(CodecError):
+        to_json(EvidenceAnchor(value, ANCHOR.locator))
+
+
 def test_declared_and_anchored_keys_decode_unambiguously() -> None:
     for key in (ThreadKey("machine", DECLARED), ThreadKey("stream", ANCHOR)):
         assert from_json(ThreadKey, to_json(key)) == key

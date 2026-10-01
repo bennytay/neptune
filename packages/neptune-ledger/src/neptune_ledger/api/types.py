@@ -163,7 +163,10 @@ class TransactionKey:
     """
 
     tx_seq: TxSeq
-    tx_time: Annotated[str, Constraint(pattern=r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$")]
+    tx_time: Annotated[
+        str,
+        Constraint(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z$"),
+    ]
 
 
 @dataclass(frozen=True)
@@ -198,6 +201,10 @@ class EvidenceAnchor:
 
     source: ContentId
     locator: Locator
+
+    def __hash__(self) -> int:
+        # Locator steps are JSON objects (dicts); hash their canonical bytes, as equality compares.
+        return hash((self.source, canonical_json.dumps(list(self.locator))))
 
 
 @dataclass(frozen=True)

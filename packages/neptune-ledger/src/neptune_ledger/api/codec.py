@@ -123,7 +123,9 @@ def _tag(cls: type) -> tuple[str, str] | None:
 
 def _check(value: Any, constraints: tuple[Constraint, ...], where: str) -> None:
     for c in constraints:
-        if c.pattern is not None and not re.search(c.pattern, value):
+        # fullmatch + ASCII: Python's ``$`` also matches before a final newline and ``\d`` takes
+        # any Unicode digit; JSON Schema (ECMA-262) does neither. Every pattern is anchored.
+        if c.pattern is not None and not re.fullmatch(c.pattern, value, re.ASCII):
             raise CodecError(f"{where}: {value!r} does not match {c.pattern}")
         if c.enum is not None and value not in c.enum:
             raise CodecError(f"{where}: {value!r} is not one of the allowed values")
