@@ -50,7 +50,7 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
    | `split_sequence` | one recording: parts `<prefix>_<n>` of one extension whose prefix states a start time (rosbag1 `--split`); missing indices are listed | 0.8 |
    | `recording_file` | one recording: any other `.mcap`, `.bag`, `.ulg`, `.db3` | 0.7 |
    | `session_directory` | a session: a directory named with a date-time or a keyword and number, holding everything below it | 0.6 |
-   | `shared_stem` | a context file whose base is a member's (`flight_03.yaml` beside `flight_03.ulg`) | 0.6 |
+   | `shared_stem` | a context file whose base is a member's (`flight_03.yaml` beside `flight_03.ulg`); it joins every contested reading holding that member | 0.6 |
    | `shared_name_time` | one session: loose recordings or files whose names state the same time | 0.5 |
    | `sole_session_in_directory` | a context file beside the only loose session in its directory | 0.4 |
    | `numbered_sequence`, `name_time_clusters`, `name_time_proximity` | contested readings (§4) | 0.3 |
@@ -76,7 +76,8 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
      started in steps, or several;
    - a session directory holding exactly one session-named directory and files of its own: the
      outer directory, or the readings inside it;
-   - two declared sessions claiming one file.
+   - two declared sessions claiming one file (two claiming exactly the same files are one
+     proposal whose reasons name both).
 
    A context file that several loose sessions could each hold is a `session_unassigned` record,
    `ambiguous`, naming them as candidates, with one `neptune.grouping.ambiguous_member` finding per

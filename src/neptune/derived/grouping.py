@@ -869,12 +869,20 @@ class _Proposer:
         for index in here:
             for stem in self.drafts[index].stems:
                 by_stem[stem].append(index)
+        same_recording: dict[tuple[int, ...], bool] = {}
         for path in pending:
             if path in joined:
                 continue
             stems = by_stem.get(self._sig(path).base, [])
-            if len(stems) == 1:
-                self.drafts[stems[0]].add(path, Role.CONTEXT, Rule.SHARED_STEM)
+            if stems and len(stems) > 1:
+                key = tuple(stems)
+                if key not in same_recording:
+                    same_recording[key] = self._overlap(stems)
+            if len(stems) == 1 or (stems and same_recording[tuple(stems)]):
+                # One session, or competing readings that all hold the same file: the sidecar
+                # goes with that file in every reading, as a file matched by name time does.
+                for index in stems:
+                    self.drafts[index].add(path, Role.CONTEXT, Rule.SHARED_STEM)
             elif stems:
                 self._ambiguous(path, SEVERAL_STEMS, stems)
             elif len(here) == 1:
@@ -883,6 +891,14 @@ class _Proposer:
                 self._ambiguous(path, SEVERAL_SESSIONS, here)
             else:
                 self.unassigned[path] = (NO_SESSION, [])
+
+    def _overlap(self, indices: list[int]) -> bool:
+        """Whether some file is a member of every one of these drafts: they are readings of it."""
+        smallest = min(indices, key=lambda index: len(self.drafts[index].members))
+        others = [self.drafts[index].members for index in indices if index != smallest]
+        return any(
+            all(path in members for members in others) for path in self.drafts[smallest].members
+        )
 
     def _ambiguous(self, path: bytes, reason: str, candidates: list[int]) -> None:
         if len(candidates) > _LISTED:
@@ -957,7 +973,13 @@ class _Proposer:
             )
         first: dict[RecordId, int] = {}
         for index, record in enumerate(ids):
-            first.setdefault(record, index)
+            kept = first.setdefault(record, index)
+            if kept != index:
+                # The same proposal reached twice (two declarations of one set of files): one
+                # proposal, keeping every reason either gave, so no declaration goes unsaid.
+                keep, again = self.drafts[kept], self.drafts[index]
+                keep.reasons.extend(r for r in again.reasons if r not in keep.reasons)
+                keep.links |= again.links
         # Two proposals contest each other exactly when they share a file: each reading that
         # holds a file another reading also holds was offered beside it, and none was chosen.
         # A finding names each connected set of such readings once.

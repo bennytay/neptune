@@ -488,6 +488,38 @@ def test_a_bad_config_is_refused(make: object, error: str) -> None:
         make()  # type: ignore[operator]
 
 
+def test_two_declarations_of_the_same_files_are_one_proposal_naming_both() -> None:
+    config = GroupingConfig(
+        sessions=(
+            DeclaredSession("A", ("x",)),
+            DeclaredSession("B", ("x/a.bag", "x/b.bag")),
+        )
+    )
+    grouping = LayoutGrouper(config).propose(synthetic(b"x/a.bag", b"x/b.bag"))
+    [proposal] = grouping.proposals
+    names = [r.details["name"] for r in proposal.reasons if r.rule == Rule.DECLARED]
+    assert names == ["A", "B"] and proposal.status is Status.PROPOSED
+
+
+def test_a_sidecar_goes_with_its_recording_in_every_reading() -> None:
+    grouping = LayoutGrouper().propose(
+        synthetic(b"d/patrol_1.bag", b"d/patrol_2.bag", b"d/patrol_1.yaml")
+    )
+    holding = [p for p in grouping.proposals if LocalPath("d/patrol_1.yaml") in locations(p)]
+    assert sorted(p.rule for p in holding) == [Rule.NUMBERED_SEQUENCE, Rule.RECORDING_FILE]
+    assert grouping.unassigned == ()
+    # Two different recordings sharing a stem are not readings of one file: still ambiguous.
+    apart = LayoutGrouper().propose(synthetic(b"d/run.mcap", b"d/run.bag", b"d/run.yaml"))
+    assert [(u.placement, u.reason) for u in apart.unassigned] == [
+        (Placement.AMBIGUOUS, "several_stems")
+    ]
+    assert all(p.status is Status.PROPOSED for p in apart.proposals)
+
+
+def locations(proposal: SessionProposal) -> set[LocalPath | RawLocalPath]:
+    return {member.location for member in proposal.members}
+
+
 def test_a_config_round_trips_and_its_order_never_shows() -> None:
     config = GroupingConfig(30, (DeclaredSession("b", ("z", "a")), DeclaredSession("a", ("q",))))
     same = GroupingConfig(30, (DeclaredSession("a", ("q",)), DeclaredSession("b", ("a", "z"))))
