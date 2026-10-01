@@ -9,6 +9,9 @@ A robotics-native ingestion fabric — a "data compiler" that turns messy roboti
 flight logs, URDF, calibration, configs, PDFs, images, geometry, site records, task briefs) into a canonical,
 provenance-preserving, multimodal representation that later memory / retrieval / training systems consume
 without ever re-parsing raw data.
+Neptune serves **every type of robot**: manipulators, mobile bases, legged platforms, humanoids, aerial, marine,
+autonomous vehicles and multi-robot fleets. Never assume a flight controller, a single vehicle or one morphology;
+keep fixtures and worked examples spread across embodiments.
 
 This project builds ONLY ingestion + canonical representation. Do not build the memory learner, retrieval,
 capability reasoning, eval generation, simulation orchestration, or fine-tuning. Do not turn Neptune into
