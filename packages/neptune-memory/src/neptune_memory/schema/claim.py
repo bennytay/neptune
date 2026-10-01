@@ -202,6 +202,21 @@ def object_type(obj: ClaimObject) -> NodeType | ValueType:
 
 
 @dataclass(frozen=True)
+class ModelRef:
+    """The model a ``derived/`` consolidator runs (ADR 0006 §3). Deterministic claims have none."""
+
+    model_id: str
+    model_version: str
+
+    def __post_init__(self) -> None:
+        check_text("model_id", self.model_id)
+        check_text("model_version", self.model_version)
+
+    def to_json(self) -> JsonObject:
+        return {"model_id": self.model_id, "model_version": self.model_version}
+
+
+@dataclass(frozen=True)
 class ClaimProvenance:
     """What a claim rests on and what produced it.
 
@@ -209,6 +224,9 @@ class ClaimProvenance:
     - ``records``: the Ledger records (Episode tier) the consolidator read, unique and sorted.
     - ``consolidator_id`` / ``consolidator_version`` / ``config_hash``: the transform. The id
       ``memory.supersede`` is reserved for the resolver's closure versions (``supersede.py``).
+    - ``model``: the model behind an inferred claim, and ``None`` exactly when the claim is
+      observed or stated (ADR 0006 §3; ``Claim`` enforces the pairing). It is hashed into the
+      claim id. A closure version carries its original assertion's model.
     """
 
     evidence: tuple[EvidenceRef, ...]
@@ -216,6 +234,7 @@ class ClaimProvenance:
     consolidator_id: str
     consolidator_version: str
     config_hash: ConfigHash
+    model: ModelRef | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.evidence, tuple) or not self.evidence:
@@ -234,15 +253,21 @@ class ClaimProvenance:
         check_token("consolidator_id", self.consolidator_id)
         check_text("consolidator_version", self.consolidator_version)
         parse_config_hash(self.config_hash)
+        if self.model is not None and not isinstance(self.model, ModelRef):
+            raise TypeError(f"model must be a ModelRef or None: {self.model!r}")
 
     def to_json(self) -> JsonObject:
-        return {
+        """``model`` appears only when set, so a deterministic claim's id does not mention it."""
+        out: dict[str, JsonValue] = {
             "config_hash": self.config_hash,
             "consolidator_id": self.consolidator_id,
             "consolidator_version": self.consolidator_version,
             "evidence": [ref.to_json() for ref in self.evidence],
             "records": list(self.records),
         }
+        if self.model is not None:
+            out["model"] = self.model.to_json()
+        return out
 
 
 # --- The claim --------------------------------------------------------------------------------
@@ -297,6 +322,11 @@ class Claim:
         _check_confidence(self.assertion_kind, self.confidence)
         if not isinstance(self.provenance, ClaimProvenance):
             raise TypeError(f"provenance must be a ClaimProvenance: {self.provenance!r}")
+        if is_inferred(self.assertion_kind) != (self.provenance.model is not None):
+            raise ValueError(
+                "an inferred claim names its model in provenance, and an observed or stated"
+                f" claim names none: {self.assertion_kind} with model {self.provenance.model!r}"
+            )
         if not isinstance(self.supersedes, tuple):
             raise TypeError("supersedes must be a tuple of claim ids")
         for claim_id in self.supersedes:

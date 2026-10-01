@@ -1,0 +1,12 @@
+{
+  "board_id": 140,
+  "magic": "APJFWv1",
+  "description": "Firmware for a STM32H743xx board",
+  "image": "eNpjYKAMAAAAQAAB",
+  "summary": "CubeOrange",
+  "version": "0.1",
+  "image_size": 64,
+  "git_identity": "17d0c3b2",
+  "board_revision": 0,
+  "USBID": "0x2DAE/0x1016"
+}

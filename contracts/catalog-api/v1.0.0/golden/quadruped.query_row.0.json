@@ -1,0 +1,14 @@
+{
+  "assertion_kind": "observed",
+  "kind": "run",
+  "line": 1,
+  "package_id": "sha256:44b4309877e2ce74d1a82d2c872eaafec8f07325b299637dae59d8f07dfa76b1",
+  "record_id": "rec:sha256:5bf3bccba577623acf6104e6d71ed1cf1dc7c0a383a97791f700564511548557",
+  "registration_seq": 4,
+  "source_content_id": "sha256:4b9a6b056ea0d9b9af3f3960afa75caca42063479c9b6d0768b7a175ef9e6da9",
+  "source_locator": "[{\"kind\":\"byte_range\",\"length\":1818,\"offset\":0},{\"kind\":\"json_pointer\",\"pointer\":\"/rosbag2_bagfile_information\"}]",
+  "transform_id": "rec:sha256:3b71f1d5e3ff1d93422c9779e890a374547b3412ea02c7ace78100729e6dd526",
+  "world_clock": "rec:sha256:1e3d871df8a74f4227f096710ce3683b5b2f7642102d12471a8bbc89f6aeb0fd",
+  "world_first": 1790762400000000000,
+  "world_last": 1790762400045000000
+}

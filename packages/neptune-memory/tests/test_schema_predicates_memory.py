@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from memory_schema_builders import INFERRED, OBSERVED, STATED, claim, node, provenance
+from memory_schema_builders import INFERRED, MODEL, OBSERVED, STATED, claim, node, provenance
 from neptune.identity.ids import record_id
 from neptune.model.knowledge import AssertionKind, Known
 from neptune.model.units import unit_from_text
@@ -37,7 +37,7 @@ def codes(found: tuple[SchemaViolation, ...]) -> set[ViolationCode]:
 
 
 def test_core_vocabulary_is_versioned_sorted_and_covers_every_node_type() -> None:
-    assert VOCABULARY_VERSION == 1
+    assert VOCABULARY_VERSION == 2
     names = [spec.name for spec in CORE_PREDICATES.specs]
     assert names == sorted(set(names))
     covered = set().union(*(spec.domain for spec in CORE_PREDICATES.specs))
@@ -80,7 +80,12 @@ def test_people_are_declared_only() -> None:
     assert violations(declared, CORE_PREDICATES) == ()
     observed = replace(declared, assertion_kind=OBSERVED)
     assert violations(observed, CORE_PREDICATES) == ()
-    inferred = replace(declared, assertion_kind=INFERRED, confidence=Known(0.9))
+    inferred = replace(
+        declared,
+        assertion_kind=INFERRED,
+        confidence=Known(0.9),
+        provenance=replace(cited, model=MODEL),
+    )
     assert codes(violations(inferred, CORE_PREDICATES)) == {ViolationCode.DECLARED_ONLY}
 
 
@@ -92,7 +97,9 @@ def test_observed_and_stated_claims_name_people_only_by_a_declared_record(
     base = replace(claim(RUN, "operated_by", OPERATOR, 0, tx=0, kind=STATED), provenance=cited)
     base = replace(base, assertion_kind=kind)
     uncited = replace(base, provenance=provenance(0))  # no Ledger record declares the person
-    for name in ("operator-badge-4411", ":4411", "Badge:4411", "badge:"):
+    # ADR 0006 §9: a blank or whitespace-padded value is not a declared identifier.
+    padded = ("badge: 4411", "badge:4411 ", "badge: ", "badge:\t", "badge:\u00a04411")
+    for name in ("operator-badge-4411", ":4411", "Badge:4411", "badge:", *padded):
         undeclared = replace(base, object=node(NodeType.PERSON, name))
         assert codes(violations(undeclared, CORE_PREDICATES)) == {ViolationCode.UNDECLARED_PERSON}
     assert codes(violations(uncited, CORE_PREDICATES)) == {ViolationCode.UNDECLARED_PERSON}

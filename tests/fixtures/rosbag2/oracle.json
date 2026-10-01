@@ -1,0 +1,381 @@
+{
+ "_mcap": {
+  "mobile_base_mcap_0.mcap": {
+   "channels": [
+    "/battery_voltage",
+    "/cmd_vel",
+    "/status"
+   ],
+   "messages": 18
+  }
+ },
+ "mobile_base_mcap": {
+  "connections": [
+   {
+    "count": 5,
+    "msgtype": "std_msgs/msg/Float32",
+    "qos_profiles": 1,
+    "qos_reliability": "RELIABLE",
+    "serialization_format": "cdr",
+    "topic": "/battery_voltage"
+   },
+   {
+    "count": 10,
+    "msgtype": "geometry_msgs/msg/Twist",
+    "qos_profiles": 1,
+    "qos_reliability": "RELIABLE",
+    "serialization_format": "cdr",
+    "topic": "/cmd_vel"
+   },
+   {
+    "count": 3,
+    "msgtype": "std_msgs/msg/String",
+    "qos_profiles": 1,
+    "qos_reliability": "RELIABLE",
+    "serialization_format": "cdr",
+    "topic": "/status"
+   }
+  ],
+  "duration": 900000001,
+  "message_count": 18,
+  "messages": [
+   [
+    "/cmd_vel",
+    1700000000000000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000005000000,
+    8
+   ],
+   [
+    "/status",
+    1700000000007000000,
+    13
+   ],
+   [
+    "/cmd_vel",
+    1700000000100000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000200000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000205000000,
+    8
+   ],
+   [
+    "/cmd_vel",
+    1700000000300000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000400000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000405000000,
+    8
+   ],
+   [
+    "/status",
+    1700000000407000000,
+    16
+   ],
+   [
+    "/cmd_vel",
+    1700000000500000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000600000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000605000000,
+    8
+   ],
+   [
+    "/cmd_vel",
+    1700000000700000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000800000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000805000000,
+    8
+   ],
+   [
+    "/status",
+    1700000000807000000,
+    16
+   ],
+   [
+    "/cmd_vel",
+    1700000000900000000,
+    52
+   ]
+  ],
+  "start": 1700000000000000000
+ },
+ "mobile_base_sqlite3": {
+  "connections": [
+   {
+    "count": 5,
+    "msgtype": "std_msgs/msg/Float32",
+    "qos_profiles": 1,
+    "qos_reliability": "RELIABLE",
+    "serialization_format": "cdr",
+    "topic": "/battery_voltage"
+   },
+   {
+    "count": 10,
+    "msgtype": "geometry_msgs/msg/Twist",
+    "qos_profiles": 1,
+    "qos_reliability": "RELIABLE",
+    "serialization_format": "cdr",
+    "topic": "/cmd_vel"
+   },
+   {
+    "count": 3,
+    "msgtype": "std_msgs/msg/String",
+    "qos_profiles": 1,
+    "qos_reliability": "RELIABLE",
+    "serialization_format": "cdr",
+    "topic": "/status"
+   }
+  ],
+  "duration": 900000001,
+  "message_count": 18,
+  "messages": [
+   [
+    "/cmd_vel",
+    1700000000000000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000005000000,
+    8
+   ],
+   [
+    "/status",
+    1700000000007000000,
+    13
+   ],
+   [
+    "/cmd_vel",
+    1700000000100000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000200000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000205000000,
+    8
+   ],
+   [
+    "/cmd_vel",
+    1700000000300000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000400000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000405000000,
+    8
+   ],
+   [
+    "/status",
+    1700000000407000000,
+    16
+   ],
+   [
+    "/cmd_vel",
+    1700000000500000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000600000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000605000000,
+    8
+   ],
+   [
+    "/cmd_vel",
+    1700000000700000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000800000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000805000000,
+    8
+   ],
+   [
+    "/status",
+    1700000000807000000,
+    16
+   ],
+   [
+    "/cmd_vel",
+    1700000000900000000,
+    52
+   ]
+  ],
+  "start": 1700000000000000000
+ },
+ "split_sqlite3": {
+  "connections": [
+   {
+    "count": 5,
+    "msgtype": "std_msgs/msg/Float32",
+    "qos_profiles": 1,
+    "qos_reliability": "RELIABLE",
+    "serialization_format": "cdr",
+    "topic": "/battery_voltage"
+   },
+   {
+    "count": 10,
+    "msgtype": "geometry_msgs/msg/Twist",
+    "qos_profiles": 1,
+    "qos_reliability": "RELIABLE",
+    "serialization_format": "cdr",
+    "topic": "/cmd_vel"
+   },
+   {
+    "count": 3,
+    "msgtype": "std_msgs/msg/String",
+    "qos_profiles": 1,
+    "qos_reliability": "RELIABLE",
+    "serialization_format": "cdr",
+    "topic": "/status"
+   }
+  ],
+  "duration": 900000001,
+  "message_count": 18,
+  "messages": [
+   [
+    "/cmd_vel",
+    1700000000000000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000005000000,
+    8
+   ],
+   [
+    "/status",
+    1700000000007000000,
+    13
+   ],
+   [
+    "/cmd_vel",
+    1700000000100000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000200000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000205000000,
+    8
+   ],
+   [
+    "/cmd_vel",
+    1700000000300000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000400000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000405000000,
+    8
+   ],
+   [
+    "/status",
+    1700000000407000000,
+    16
+   ],
+   [
+    "/cmd_vel",
+    1700000000500000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000600000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000605000000,
+    8
+   ],
+   [
+    "/cmd_vel",
+    1700000000700000000,
+    52
+   ],
+   [
+    "/cmd_vel",
+    1700000000800000000,
+    52
+   ],
+   [
+    "/battery_voltage",
+    1700000000805000000,
+    8
+   ],
+   [
+    "/status",
+    1700000000807000000,
+    16
+   ],
+   [
+    "/cmd_vel",
+    1700000000900000000,
+    52
+   ]
+  ],
+  "start": 1700000000000000000
+ }
+}

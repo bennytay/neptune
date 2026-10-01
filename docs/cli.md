@@ -18,7 +18,7 @@ could not read, or chose not to, is a finding in the receipt, not a failure.
 ## Usage
 
 ```
-neptune ingest SOURCE (--out DEST | --dry-run) [options]
+neptune ingest SOURCE (--out DEST | --dry-run | --explain) [options]
 python -m neptune.cli ingest ...        # the same command
 ```
 
@@ -27,6 +27,7 @@ python -m neptune.cli ingest ...        # the same command
 | `SOURCE` | a folder or one regular file; a path or a `file:` URI. Other schemes (`s3://`, …) are refused while the workspace is local-only (exit 9) |
 | `-o, --out DEST` | where the package is written. Must not exist and must not be inside the source. Required unless `--dry-run` |
 | `-n, --dry-run` | discover, fingerprint, probe and plan only; no package. The plans are kept, so the ingest that follows plans nothing again |
+| `--explain` | a dry run that also prints its explanation (ADR 0044): every file, each adapter's verdict and why, the proposed sessions, the work left, what would be left out. Implies `--dry-run`; `--out` with it is a usage error (exit 2) |
 | `--resume` | continue earlier work on this source in the workspace (an interrupted ingest or a dry run); exit 7 if there is none. A plain rerun reuses that work too; `--resume` only refuses to start from nothing |
 | `--attempts N` | tries per adapter call before its source is quarantined (default 2) |
 | `-w, --workspace DIR` | the workspace (cache and checkpoints). Default `$NEPTUNE_HOME`, else `$XDG_CACHE_HOME/neptune`, else `~/.cache/neptune` |
@@ -45,7 +46,8 @@ python -m neptune.cli ingest ...        # the same command
 
 A folder may carry an optional `neptune.yaml` ([manifest](manifest.md), ADR 0047): declared runs,
 machines, sites, tasks and software, and which adapter reads which paths. `neptune ingest`
-applies it automatically. A manifest that cannot be used (a syntax or schema error, unknown keys,
+applies it automatically, and so do `--dry-run` and `--explain` (the explanation shows the
+manifest's choices). A manifest that cannot be used (a syntax or schema error, unknown keys,
 an adapter that is not registered, more than 256 KiB, a symlink, a path outside the source, two
 manifest names at the root) fails the run with exit 6 before anything is read. A declaration the
 evidence contradicts is a finding, never an override.
@@ -84,13 +86,17 @@ rules.
 ## Output
 
 Quiet by default: on success, the four lines above on stdout and nothing on stderr. A dry run
-prints `planned SOURCE: N sources to ingest; nothing written` and a findings summary. Errors are
+prints `planned SOURCE: N sources to ingest; nothing written` and a findings summary; with
+`--explain`, a blank line and the rendered explanation follow. Errors are
 one line on stderr: `neptune: <code>: <message>`.
 
 With `--json`, stdout is JSON Lines (UTF-8, sorted keys, no whitespace):
 
 - one line per job event as it happens: `{"event":{"details":{…},"kind":"…","phase":"…"},"type":"event"}`
   (kinds and details: [ingestion-pipeline.md](ingestion-pipeline.md));
+- with `--explain`, one `{"explanation":{…},"type":"explanation"}` line just before the result: the
+  explanation's canonical `dumps()` bytes (`neptune.explanation/1`), byte-identical from a fresh
+  workspace over the same bytes;
 - then exactly one result line, always last, always with these keys (`null` where one does not
   apply):
 

@@ -1,6 +1,7 @@
 """``neptune init-manifest`` and the ingest command's manifest flags (ADR 0047 §7)."""
 
 import io
+import json
 from pathlib import Path
 
 from neptune.cli import exit_codes
@@ -79,3 +80,28 @@ def test_it_never_writes_a_second_manifest_name(tmp_path: Path) -> None:
     assert code == exit_codes.BY_CODE["destination_exists"] and "neptune.json" in err
     assert not (root / "neptune.yaml").exists()
     assert init(tmp_path, "-o", "-")[0] == exit_codes.OK  # printing writes nothing beside it
+
+
+def test_explain_applies_the_manifest(tmp_path: Path) -> None:
+    root = folder(tmp_path)
+    (root / "notes.txt").write_bytes(
+        b"step,**joint**,[spec](spec.pdf)\n1,**shoulder**,[a](a.pdf)\n2,**elbow**,[b](b.pdf)\n"
+    )
+    common = ("--explain", "--json", "-w", str(tmp_path / "ws"), "--isolation", "in_process")
+
+    def notes(*extra: str) -> dict[str, object]:
+        code, out, err = call("ingest", str(root), *common, *extra)
+        assert code == exit_codes.OK, err
+        lines = [json.loads(line) for line in out.splitlines()]
+        (explanation,) = [line["explanation"] for line in lines if line["type"] == "explanation"]
+        (source,) = [s for s in explanation["sources"] if s["locations"][0]["path"] == "notes.txt"]
+        result: dict[str, object] = source
+        return result
+
+    assert notes()["status"] == "ambiguous"  # markdown and tabular tie
+    (root / "pins.yaml").write_text(
+        "neptune: 1\nsources:\n  - {path: notes.txt, adapter: markdown}\n"
+    )
+    pinned = notes("--manifest", str(root / "pins.yaml"))
+    assert pinned["status"] == "planned" and pinned["adapter"] == "markdown"
+    assert notes("--no-manifest")["status"] == "ambiguous"

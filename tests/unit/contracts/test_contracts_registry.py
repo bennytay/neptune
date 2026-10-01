@@ -77,16 +77,18 @@ def test_package_schema_goldens_cover_four_robots_and_every_document() -> None:
         assert latest.goldens[f"{robot}.receipt.json"] == "#/$defs/IngestReceipt"
 
 
-def test_catalog_api_is_a_draft_pending_the_ledger() -> None:
+def test_catalog_api_is_owned_by_the_ledger_export() -> None:
+    """The Platform draft 0.0.0 stays; the Ledger's export (MVL-88) superseded it as 1.0.0."""
     registry = _registry()
     contract = registry.contract("catalog-api")
     assert contract.owner.package == "neptune-ledger"
     assert contract.owner.module == "neptune_ledger.api"
-    (version,) = registry.versions("catalog-api")
-    assert (version.status, version.version, version.owner_version) == ("draft", (0, 0, 0), None)
-    assert "superseded" in version.note
+    draft, export = registry.versions("catalog-api")[:2]
+    assert (draft.status, draft.version, draft.owner_version) == ("draft", (0, 0, 0), None)
+    assert "superseded" in draft.note
+    assert (export.status, export.version, export.owner_version) == ("draft", (1, 0, 0), "1.0.0")
     report = tool.check_owner(registry, "neptune-ledger")
-    assert report.problems == [] and "SKIPPED" in report.notes[0]
+    assert report.problems == []
 
 
 def test_committed_compatibility_matrix_is_current() -> None:
@@ -95,7 +97,7 @@ def test_committed_compatibility_matrix_is_current() -> None:
     assert text == (CONTRACTS / "compatibility.md").read_text("utf-8")
     assert text == tool.render_matrix(_registry())
     assert "| `neptune-ledger` | 1.0.0 current |" in text
-    assert "| `catalog-api` | `neptune-ledger` | active | — | 0.0.0 |" in text
+    assert "| `catalog-api` | `neptune-ledger` | active | — | 1.0.0 |" in text
 
 
 def test_golden_generator_is_deterministic() -> None:
@@ -167,8 +169,12 @@ def test_a_newer_draft_does_not_make_a_lock_behind(registry: Any) -> None:
 
 def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> None:
     current = tool.show(registry.latest("package-schema", stable=True).version)
+    graph = tool.show(registry.latest("graph-schema", stable=True).version)
     registry.write_lock(
-        {p: {"package-schema": current} for p in ("neptune-deploy", "neptune-ledger")}
+        {
+            "neptune-deploy": {"graph-schema": graph, "package-schema": current},
+            "neptune-ledger": {"package-schema": current},
+        }
     )
     calls: list[Any] = []
 
@@ -177,7 +183,7 @@ def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> Non
         return 0
 
     report = tool.check_packages(registry, registry.lock(), runner=runner)
-    assert report.ok and len(calls) == 1
+    assert report.ok and len(calls) == 2  # one per owner: the compiler and neptune-memory
     assert sum("54 goldens checked" in n for n in report.notes) == 1
 
 
@@ -327,7 +333,7 @@ def test_malformed_registry_is_reported(registry: Any, damage: str, expected: st
     elif damage == "extra_golden":
         (version / "golden" / "stray.json").write_text("{}\n")
     elif damage == "planned_with_version":
-        shutil.copytree(version, registry.root / "graph-schema" / "v1.0.0")
+        shutil.copytree(version, registry.root / "query-packet" / "v1.0.0")
     elif damage == "unknown_package":
         path = registry.root / "query-packet" / "contract.toml"
         path.write_text(_text(path).replace('"neptune-learn"]', '"neptune-nowhere"]'))
@@ -509,7 +515,7 @@ def test_the_first_stable_version_adds_every_in_repo_consumer(
 
 def test_bump_refuses_planned_contracts(registry: Any) -> None:
     with pytest.raises(tool.ContractError, match="planned"):
-        tool.bump(registry, "graph-schema", "0.1.0")
+        tool.bump(registry, "query-packet", "0.1.0")
 
 
 def test_post_needs_a_key_and_never_guesses(
