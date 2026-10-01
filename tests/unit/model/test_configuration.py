@@ -83,6 +83,7 @@ def value(
     text: Any = None,
     *,
     order: int = 0,
+    occurrence: tuple[int, ...] | None = None,
     tag: Any = None,
     snapshot: RecordId = SNAPSHOT_ID,
     provenance: Provenance | None = None,
@@ -103,6 +104,7 @@ def value(
         provenance=provenance,
         snapshot=snapshot,
         path=path,
+        occurrence=occurrence if occurrence is not None else (0,) * len(path),
         order=order if path else 0,
         tag=tag if tag is not None else NotCovered(),
         text=text,
@@ -206,6 +208,10 @@ def test_every_value_shape_round_trips_and_validates() -> None:
         ({"path": ("a", True)}, "keys and positions"),
         ({"path": ("a", -1)}, "keys and positions"),
         ({"order": -1}, "position"),
+        ({"occurrence": ()}, "one rank per step"),
+        ({"occurrence": (-1,)}, "ranks"),
+        ({"occurrence": [0]}, "must be a tuple"),
+        ({"path": (0,), "occurrence": (1,)}, "occurs once"),
         ({"text": NotApplicable()}, "collections and aliases"),
         ({"value": NotApplicable()}, "every node has a value"),
         ({"tag": Known("")}, "non-empty"),
@@ -372,10 +378,43 @@ def test_a_collection_compares_by_its_type_and_an_alias_by_its_target() -> None:
 
 def test_repeated_keys_compare_in_source_order() -> None:
     first = value(("k",), scalar("int", 1), order=0)
-    second = value(("k",), scalar("int", 2), order=1, provenance=at("/k2"))
-    swapped = [other(replace(first, order=1)), other(replace(second, order=0))]
+    second = value(("k",), scalar("int", 2), order=1, occurrence=(1,), provenance=at("/k2"))
+    swapped = [
+        other(replace(first, order=1, occurrence=(1,))),
+        other(replace(second, order=0, occurrence=(0,))),
+    ]
     assert changes([first, second], swapped) == [(("k",), ChangeKind.CHANGED)]
     assert changes([first, second], [other(first)]) == [(("k",), ChangeKind.CHANGED)]
+
+
+def test_values_under_repeated_keys_order_by_occurrence_whatever_order_they_come_in() -> None:
+    # The YAML "a: {x: 1}" then "a: {x: 2}": both x values are at path (a, x), order 0, and only
+    # their occurrence tells them apart.
+    document = [
+        value((), mapping(2)),
+        value(("a",), mapping(1), provenance=at("/a/0")),
+        value(("a", "x"), scalar("int", 1), provenance=at("/a/0/x")),
+        value(("a",), mapping(1), order=1, occurrence=(1,), provenance=at("/a/1")),
+        value(("a", "x"), scalar("int", 2), occurrence=(1, 0), provenance=at("/a/1/x")),
+    ]
+    digest = configuration_digest(document)
+    for ordering in (document[::-1], sorted(document, key=lambda r: r.id)):
+        assert configuration_digest(ordering) == digest
+        assert compare_configurations(document, [other(r) for r in ordering]) == ()
+    flipped = [
+        *document[:2],
+        replace(document[2], value=Known(scalar("int", 2))),
+        document[3],
+        replace(document[4], value=Known(scalar("int", 1))),
+    ]
+    assert configuration_digest(flipped) != digest
+    assert changes(document, [other(r) for r in flipped]) == [(("a", "x"), ChangeKind.CHANGED)]
+
+
+def test_two_values_at_one_address_are_refused() -> None:
+    twin = value(("rate",), scalar("int", 1), provenance=at("/twin"))
+    with pytest.raises(ValueError, match="two values at path"):
+        configuration_digest([*DOCUMENT, twin])
 
 
 def test_values_of_two_snapshots_are_never_compared_as_one() -> None:

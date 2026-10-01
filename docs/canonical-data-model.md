@@ -211,14 +211,15 @@ a bug, not a value.
   (verbatim, each citing its span, never attached to a value), `values` (how many value records it has) and
   `digest`.
 - `ConfigurationValue` (since version 2): one node, naming its `snapshot`: `path` (keys verbatim, positions as
-  integers), `order` among its parent's entries, YAML `tag` (`NotCovered` in JSON and TOML), `text` (a
+  integers), `occurrence` (per step, which of the entries sharing that key it passes through; `(path,
+  occurrence)` is unique in a snapshot), `order` among its parent's entries, YAML `tag` (`NotCovered` in JSON and TOML), `text` (a
   scalar as written) and `value`: a `ConfigCollection`, a `ConfigAlias` (a reference, never expanded) or a
   `ConfigScalar` in the format's own type, citing its span. A format-defined null is `KnownAbsent` citing
   the document; YAML 1.1 and 1.2 readings that differ in an undeclared document are `Ambiguous`.
 - A value's locator is a `JsonPointer` into the document as parsed, after a `config:document` step in YAML;
   each entry of a repeated key is addressed by position (`config:entry`) instead.
-- Identity: the bytes by their content id, the values by `digest`, the sha256 of every value's path and
-  `comparison_key`. `compare_configurations(left, right)` lists the paths whose declared values differ;
+- Identity: the bytes by their content id, the values by `digest`, the sha256 of every value's path, occurrence
+  and `comparison_key`, in that order. `compare_configurations(left, right)` lists the paths whose declared values differ;
   equal digests exactly when it lists none. Spelling, quoting, comments, key order and format never count.
 - Nothing is inferred: a key named `wheel_radius` is a declared number, with no unit unless the document
   states one in a value of its own.

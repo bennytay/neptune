@@ -7,7 +7,8 @@ What it emits for a configuration file:
   the file's encoding, byte-order mark and line endings, its comments verbatim, how many values
   it has and their digest;
 - one ``ConfigurationValue`` per node of the document, in document order: mappings, sequences,
-  YAML aliases and scalars, each with its path, its position in its parent, its YAML tag, its
+  YAML aliases and scalars, each with its path, which repeated keys it passes through, its
+  position in its parent, its YAML tag, its
   text as written and its reading in the format's own schema, citing the exact span it is
   written at.
 
@@ -576,6 +577,7 @@ class _Records:
         self.snapshot_id = evidence_record_id(ConfigurationSnapshot.kind, self.root, self.transform)
         self.document_provenance = self._provenance(self.root)
         self._steps, self._tokens = self._locators()
+        self._occurrence = self._occurrences()
 
     def _provenance(self, evidence: EvidenceRef) -> Provenance:
         return Provenance(evidence, self.transform.id, AssertionKind.OBSERVED)
@@ -602,6 +604,19 @@ class _Records:
                 steps.append(steps[node.parent])
                 tokens.append((*tokens[node.parent], pointer_token(node.path[-1])))
         return steps, tokens
+
+    def _occurrences(self) -> list[tuple[int, ...]]:
+        """Each node's rank per step: which of its parent's entries with its key it is."""
+        ranks: list[tuple[int, ...]] = []
+        seen: dict[tuple[int, str | int], int] = defaultdict(int)
+        for node in self.nodes:
+            if node.parent < 0:
+                ranks.append(())
+                continue
+            key = (node.parent, node.path[-1])
+            ranks.append((*ranks[node.parent], seen[key]))
+            seen[key] += 1
+        return ranks
 
     def evidence(self, index: int) -> EvidenceRef:
         locator = (*self._steps[index], JsonPointer(_pointer(self._tokens[index])))
@@ -631,6 +646,7 @@ class _Records:
             provenance=self._provenance(evidence),
             snapshot=self.snapshot_id,
             path=node.path,
+            occurrence=self._occurrence[index],
             order=node.order,
             tag=Known(node.tag) if node.tag is not None else NotCovered(),
             text=text,

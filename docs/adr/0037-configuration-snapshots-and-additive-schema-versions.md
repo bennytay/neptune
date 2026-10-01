@@ -64,7 +64,11 @@ Forces:
    document (a mapping, a sequence, a YAML alias or a scalar), naming its `snapshot`.
    - `path`: keys verbatim (a string's decoded content; a YAML key's scalar text) and sequence
      positions as integers, `()` for the root. `order`: its position among its parent's entries,
-     so key order survives. Two values share a path only where a key repeats.
+     so key order survives. Two values share a path only where a key repeats, so `occurrence`
+     holds one rank per step of the path: which of its parent's entries with that key the step
+     passes through (0 for the first and for every sequence position). `(path, occurrence)` is
+     unique in a snapshot: values sort, compare and hash in one order, however they are listed
+     (a package's tables are sorted by id).
    - `tag`: a YAML node's tag, the explicit one expanded or YAML's non-specific `?` (plain
      scalars, collections) or `!` (quoted and block scalars); `NotCovered` in JSON and TOML, and
      for an alias, which has none of its own.
@@ -86,9 +90,9 @@ Forces:
    and a table with no one place (an array of tables, a dotted-key table) its pointer alone.
 5. **Snapshot identity and comparison.** A snapshot's bytes are identified by their content id; a
    run is bound to them, and through them to its snapshot. Its values are identified by `digest`:
-   the sha256 of every value's path and `comparison_key` in path order
-   (`neptune.identity.configuration`). `compare_configurations` joins two snapshots' values by
-   path and reports each added, removed or changed path with the records on each side. They
+   the sha256 of every value's path, occurrence and `comparison_key`, in path then occurrence
+   order (`neptune.identity.configuration`). `compare_configurations` joins two snapshots' values
+   by path, compares a repeated key's entries by occurrence, and reports each added, removed or changed path with the records on each side. They
    agree: equal digests exactly when no path changed. What a value declares counts: its reading,
    or for one with no reading its text and tag; a collection's type, not its length (its entries
    count themselves); an alias's target. Spelling, quoting, comments, key order, anchors' names,

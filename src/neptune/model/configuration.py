@@ -8,8 +8,9 @@ Two evidence records of the ``machine`` family, added in schema version 2:
   verbatim and uninterpreted, how many values it has, and ``digest``: the identity of its values,
   equal for two documents that declare equal values however they are laid out.
 - ``ConfigurationValue``: one node of the document's tree: a mapping, a sequence, an alias or a
-  scalar. ``path`` is where it sits (keys verbatim, sequence positions as integers) and ``order``
-  its position among its parent's entries, so key order survives. ``text`` is a scalar as written,
+  scalar. ``path`` is where it sits (keys verbatim, sequence positions as integers),
+  ``occurrence`` which of the entries sharing each key it passes through, and ``order`` its
+  position among its parent's entries, so key order survives. ``text`` is a scalar as written,
   read by no schema; ``value`` is the reading the format's own schema gives it: ``KnownAbsent``
   for a null the format defines, ``Ambiguous`` where the schemas that could apply disagree (a
   YAML ``on`` is a boolean in YAML 1.1 and text in YAML 1.2), ``Unknown`` where no reading can be
@@ -28,6 +29,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from itertools import pairwise
 from typing import ClassVar, Final, NewType, TypeAlias
 
 from neptune.model._fields import (
@@ -413,6 +415,18 @@ def configuration_snapshot_from_json(data: JsonValue) -> ConfigurationSnapshot:
     )
 
 
+def _check_occurrence(path: Path, occurrence: tuple[int, ...]) -> None:
+    if not isinstance(occurrence, tuple):
+        raise TypeError(f"occurrence must be a tuple, got {type(occurrence).__name__}")
+    if len(occurrence) != len(path):
+        raise ValueError(f"occurrence has one rank per step of the path, got {occurrence!r}")
+    for segment, rank in zip(path, occurrence, strict=True):
+        if not is_int(rank) or not 0 <= rank <= INT64_MAX:
+            raise ValueError(f"occurrence holds ranks, got {rank!r}")
+        if isinstance(segment, int) and rank:
+            raise ValueError(f"a sequence position occurs once, got rank {rank} at {segment}")
+
+
 def _verbatim_decoder(data: JsonValue) -> str:
     return json_str(data, "text")
 
@@ -427,7 +441,11 @@ class ConfigurationValue:
     transform says it belongs to.
 
     - ``path``: its keys verbatim and its sequence positions; ``()`` for the root. Two values of
-      one snapshot share a path only when a key repeats in one mapping (a finding says so).
+      one snapshot share a path only when a key repeats in one mapping.
+    - ``occurrence``: one rank per step of ``path``: which of its parent's entries with that key
+      the step passes through (0 for the first, and for every sequence position). ``(path,
+      occurrence)`` is unique in a snapshot, so values sort, compare and hash in one order however
+      a key repeats.
     - ``order``: its position among its parent's entries or items, in source order.
     - ``tag``: a YAML node's tag: the explicit one, expanded, or the non-specific ``?`` (plain
       scalars and collections) or ``!`` (quoted and block scalars). ``NotCovered`` in JSON and
@@ -447,6 +465,7 @@ class ConfigurationValue:
     provenance: Provenance
     snapshot: RecordId
     path: Path
+    occurrence: tuple[int, ...]
     order: int
     tag: Knowledge[str]
     text: Knowledge[str]
@@ -456,6 +475,7 @@ class ConfigurationValue:
         check_evidence_record(self.id, self.provenance)
         parse_record_id(self.snapshot)
         _check_path("path", self.path)
+        _check_occurrence(self.path, self.occurrence)
         if not is_int(self.order) or not 0 <= self.order <= INT64_MAX:
             raise ValueError(f"order must be a position, got {self.order!r}")
         if not self.path and self.order:
@@ -483,6 +503,7 @@ class ConfigurationValue:
             self.id,
             self.provenance,
             {
+                "occurrence": list(self.occurrence),
                 "order": self.order,
                 "path": list(self.path),
                 "snapshot": self.snapshot,
@@ -499,7 +520,7 @@ def configuration_value_from_json(data: JsonValue) -> ConfigurationValue:
     obj, record_id, provenance = evidence_record_object(
         data,
         ConfigurationValue.kind,
-        {"order", "path", "snapshot", "tag", "text", "value"},
+        {"occurrence", "order", "path", "snapshot", "tag", "text", "value"},
         ConfigurationValue.since,
     )
     return ConfigurationValue(
@@ -507,6 +528,9 @@ def configuration_value_from_json(data: JsonValue) -> ConfigurationValue:
         provenance=provenance,
         snapshot=parse_record_id(json_str(obj["snapshot"], "snapshot")),
         path=_path_from_json(obj["path"], "path"),
+        occurrence=tuple(
+            json_int(rank, "occurrence") for rank in json_array(obj["occurrence"], "occurrence")
+        ),
         order=json_int(obj["order"], "order"),
         tag=from_json(obj["tag"], text_decoder("tag"), provenance_from_json),
         text=from_json(obj["text"], _verbatim_decoder, provenance_from_json),
@@ -561,13 +585,29 @@ def comparison_key(value: ConfigurationValue) -> JsonValue:
             }
 
 
+def address(value: ConfigurationValue) -> tuple[tuple[tuple[int, int | str], ...], tuple[int, ...]]:
+    """Where a value sits, as a sort key: its path, then which repeated entries it passes through.
+
+    Unique in a snapshot, so the order of a snapshot's values never depends on the order they
+    were given in (a package's tables are sorted by id).
+    """
+    return path_sort_key(value.path), value.occurrence
+
+
 def snapshot_of(values: Iterable[ConfigurationValue]) -> tuple[ConfigurationValue, ...]:
-    """``values`` sorted by path, then order, after checking they belong to one snapshot."""
+    """``values`` sorted by ``address``, after checking they are of one snapshot, each address
+    once."""
     found = tuple(values)
     snapshots = {value.snapshot for value in found}
     if len(snapshots) > 1:
         raise ValueError(f"values of {len(snapshots)} snapshots; compare one snapshot at a time")
-    return tuple(sorted(found, key=lambda value: (path_sort_key(value.path), value.order)))
+    ordered = tuple(sorted(found, key=address))
+    for before, after in pairwise(ordered):
+        if address(before) == address(after):
+            raise ValueError(
+                f"two values at path {list(after.path)}, occurrence {list(after.occurrence)}"
+            )
+    return ordered
 
 
 class ChangeKind(StrEnum):
@@ -591,9 +631,11 @@ class ConfigurationChange:
 
 
 def _declared(values: list[ConfigurationValue]) -> str:
-    """The comparison keys as exact text: Python's ``==`` takes ``-0.0`` for ``0.0``, and the
-    digest, which hashes the keys' canonical JSON, does not."""
-    return json.dumps([comparison_key(value) for value in values], sort_keys=True)
+    """The values' occurrences and comparison keys as exact text: Python's ``==`` takes ``-0.0``
+    for ``0.0``, and the digest, which hashes the keys' canonical JSON, does not."""
+    return json.dumps(
+        [[list(value.occurrence), comparison_key(value)] for value in values], sort_keys=True
+    )
 
 
 def compare_configurations(
@@ -602,8 +644,9 @@ def compare_configurations(
     """Every path at which two snapshots' values differ, field by field, sorted by path.
 
     Each side is the values of one snapshot. Paths are joined exactly: keys verbatim, positions
-    as positions. At a repeated key, the values there compare in source order. Two snapshots with
-    no change have equal digests (``configuration_digest``), and the converse holds too.
+    as positions. At a repeated key, the values there compare by occurrence, entry by entry. Two
+    snapshots with no change have equal digests (``configuration_digest``), and the converse holds
+    too.
     """
     sides: list[dict[Path, list[ConfigurationValue]]] = []
     for values in (left, right):

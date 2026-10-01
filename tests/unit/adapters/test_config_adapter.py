@@ -667,6 +667,30 @@ def test_a_repeated_key_keeps_every_entry_addressed_by_position(name: str) -> No
         check_yaml_citations(data, output)
 
 
+def test_values_under_a_repeated_key_have_one_order_however_they_are_listed() -> None:
+    # Both x values are at path (a, x), order 0; their occurrence is (0, 0) and (1, 0).
+    data = b"a: {x: 1}\na: {x: 2}\n"
+    output = run(data, yaml_version="1.2")
+    (snapshot,) = snapshots(output)
+    found = sorted((v for v in values(output) if v.path == ("a", "x")), key=lambda v: v.occurrence)
+    assert [(v.occurrence, reading(v)) for v in found] == [
+        ((0, 0), ("int", 1)),
+        ((1, 0), ("int", 2)),
+    ]
+    as_stored = sorted(values(output), key=lambda v: v.id)  # a package's table order
+    assert configuration_digest(as_stored) == snapshot.digest
+    assert configuration_digest(as_stored[::-1]) == snapshot.digest
+    for comment in range(20):  # other ids, so other table orders: never a change
+        again = run(data + b"#" + str(comment).encode() + b"\n", yaml_version="1.2")
+        stored = sorted(values(again), key=lambda v: v.id)
+        assert compare_configurations(as_stored, stored) == ()
+        assert configuration_digest(stored) == snapshots(again)[0].digest == snapshot.digest
+    swapped = run(b"a: {x: 2}\na: {x: 1}\n", yaml_version="1.2")
+    changed = compare_configurations(values(output), values(swapped))
+    assert [(c.path, c.change) for c in changed] == [(("a", "x"), ChangeKind.CHANGED)]
+    assert snapshots(swapped)[0].digest != snapshot.digest
+
+
 def test_toml_refuses_a_repeated_key_as_every_toml_reader_does() -> None:
     output = run(fixture("duplicates.toml"))
     assert values(output) == [] and codes(output) == ["config.syntax_error"]

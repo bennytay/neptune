@@ -456,6 +456,12 @@
         "kind": {
           "const": "configuration_value"
         },
+        "occurrence": {
+          "items": {
+            "type": "integer"
+          },
+          "type": "array"
+        },
         "order": {
           "type": "integer"
         },
@@ -494,6 +500,7 @@
       "required": [
         "id",
         "kind",
+        "occurrence",
         "order",
         "path",
         "provenance",
