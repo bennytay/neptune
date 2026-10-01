@@ -6,8 +6,10 @@
 # Refuses, with a one-line reason and a non-zero exit, unless the PR is open, not a draft, targets
 # `main` and has no conflicts; its head equals expected-head-sha when given (a prefix of at least 7
 # hex digits is accepted); the latest review verdict for that head, a PR comment or review line
-# `Review: MERGE @ <sha-prefix>`, is MERGE; the `check` run for the head succeeded; and, if the PR
-# changes an ARCHITECTURE.md, its body fills the template's **Architecture change** section.
+# `Review: MERGE @ <sha-prefix>` by an OWNER, MEMBER or COLLABORATOR, is MERGE (a later REVISE
+# overrides an earlier MERGE); the `check` run for the head succeeded; and, if the PR changes an
+# ARCHITECTURE.md, its body's **Architecture change** section has content, not just the heading.
+# The JSON filters live in scripts/factory-merge.jq.
 # Being up to date with main is not required: the merge queue tests the PR on top of main.
 #
 # Then runs `gh pr merge --squash --auto --match-head-commit <head>` with the PR title (#N) as the
@@ -38,6 +40,8 @@ refuse() {
 
 command -v gh >/dev/null || refuse "gh is not installed"
 command -v jq >/dev/null || refuse "jq is not installed"
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+[[ -f $here/factory-merge.jq ]] || refuse "missing $here/factory-merge.jq"
 
 repo=${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}
 
@@ -64,17 +68,14 @@ body=$(jq -r '.body // ""' <<<"$pull")
 [[ $mergeable_state != dirty ]] || refuse "PR has conflicts with main; merge origin/main into it"
 
 # The reviewer's verdict: the latest `Review: <VERDICT> @ <sha-prefix>` line, in an issue comment or a
-# review body, whose SHA prefixes the head. Markdown emphasis or a quote marker around it is tolerated.
+# review body by an OWNER, MEMBER or COLLABORATOR, whose SHA prefixes the head (scripts/factory-merge.jq).
 verdict=$(
   {
-    gh api --paginate "repos/$repo/issues/$pr/comments" --jq '.[] | {at: .created_at, body}'
-    gh api --paginate "repos/$repo/pulls/$pr/reviews" --jq '.[] | {at: .submitted_at, body}'
-  } | jq -rs --arg head "$head" '
-    [ .[] | .at as $at | (.body // "") | split("\n")[]
-      | capture("^[\\s>*_`]*Review:[\\s*_`]*(?<v>[A-Za-z_-]+)[\\s*_`]*@[\\s*_`]*(?<sha>[0-9a-fA-F]{7,40})")
-      | select(.sha as $s | $head | startswith($s | ascii_downcase))
-      | {at: $at, v: (.v | ascii_upcase)} ]
-    | sort_by(.at) | last | .v // empty'
+    gh api --paginate "repos/$repo/issues/$pr/comments" \
+      --jq '.[] | {at: .created_at, association: .author_association, body}'
+    gh api --paginate "repos/$repo/pulls/$pr/reviews" \
+      --jq '.[] | {at: .submitted_at, association: .author_association, body}'
+  } | jq -rs -L "$here" --arg head "$head" 'include "factory-merge"; verdict($head)'
 )
 [[ $verdict == MERGE ]] ||
   refuse "no 'Review: MERGE @ ${head:0:7}' verdict for the head (latest: '${verdict:-none}')"
@@ -91,8 +92,7 @@ fi
 # ARCHITECTURE.md is a shared diagram: a PR that edits one must say what changed in it.
 files=$(gh api --paginate "repos/$repo/pulls/$pr/files" --jq '.[].filename')
 if grep -Eq '(^|/)ARCHITECTURE\.md$' <<<"$files"; then
-  jq -e '(.body // "") | gsub("<!--[\\s\\S]*?-->"; "") | test("\\*\\*Architecture change\\*\\*")' \
-    <<<"$pull" >/dev/null ||
+  jq -e -L "$here" 'include "factory-merge"; architecture_change_filled' <<<"$pull" >/dev/null ||
     refuse "PR edits ARCHITECTURE.md but its body has no filled **Architecture change** section"
 fi
 
