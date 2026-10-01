@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:dbc07d778aa9d6dc6e42d290e86502e3a64b9d80c8d7ffde6223665ad339bdb5`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:4b6c91b105ff19c1d044b326f040293ff903f6579080a0b97673b05667e3a5b2`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -18,7 +18,7 @@ Receipt `rec:sha256:dbc07d778aa9d6dc6e42d290e86502e3a64b9d80c8d7ffde6223665ad339
 
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
-| `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | none | `rec:ed890c24ddd0` |
+| `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
 
 ## Records
 
@@ -56,11 +56,11 @@ Receipt `rec:sha256:dbc07d778aa9d6dc6e42d290e86502e3a64b9d80c8d7ffde6223665ad339
 
 ## Findings
 
-- **info** `mcap.attachment_not_extracted` (unsupported): an attachment of 50 bytes is an embedded file no record kind holds yet; it is cited here, its name and media type in the details · `rec:e02e86bbaee3`
-- **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded; each row cites its message's bytes · `rec:44d875224fb9`
-- **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:561663cb2eae`
-- **info** `mcap.payload_not_decoded` (unsupported): channel 4's message payloads are not decoded; each row cites its message's bytes · `rec:87acf08d4bb0`
-- **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:8a21352d9b96`
+- **info** `mcap.attachment_not_extracted` (unsupported): an attachment of 50 bytes is an embedded file no record kind holds yet; it is cited here, its name and media type in the details · `rec:3840bb82b683`
+- **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded; each row cites its message's bytes · `rec:24c920d14f41`
+- **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:2a04449178fd`
+- **info** `mcap.payload_not_decoded` (unsupported): channel 4's message payloads are not decoded; each row cites its message's bytes · `rec:542c3cbcba95`
+- **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:5e30cda4992d`
 
 ## Ambiguous fields
 

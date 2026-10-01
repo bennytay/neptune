@@ -6,7 +6,7 @@ become series rows citing their exact bytes, metadata records become tables, att
 anything else are findings, and every chunk is decompressed and checked on the way.
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Final
 
@@ -147,12 +147,31 @@ class Cite:
 
 
 class Records:
-    """Reads records by place, decompressing each chunk that holds one at most once."""
+    """Reads records by place, the chunk last opened kept for the next place inside it."""
 
     def __init__(self, source: SourceReader, limit: int) -> None:
         self.source = source
         self.limit = limit
         self._chunk: OpenedChunk | None = None
+        self._declared: dict[Place, Channel | Schema] = {}
+
+    def load(self, channels: Iterable[Place], schemas: Iterable[Place]) -> None:
+        """Parse these Channel and Schema records in file order, so each chunk holding some is
+        decompressed once, however the channels' order interleaves their chunks."""
+        parsers: list[Callable[[bytes], Channel | Schema]] = [parse_channel, parse_schema]
+        wanted = [(place, parsers[0]) for place in channels]
+        wanted += [(place, parsers[1]) for place in schemas]
+        for place, parse in sorted(wanted, key=lambda item: item[0].steps):
+            self._declared[place] = parse(self.content(place))
+        self._chunk = None
+
+    def channel(self, place: Place) -> Channel:
+        found = self._declared.get(place)
+        return found if isinstance(found, Channel) else parse_channel(self.content(place))
+
+    def schema(self, place: Place) -> Schema:
+        found = self._declared.get(place)
+        return found if isinstance(found, Schema) else parse_schema(self.content(place))
 
     def content(self, place: Place) -> bytes:
         (offset, length), *inner = place.steps
@@ -262,14 +281,15 @@ class Declarations:
             last=last,
         )
         self.records.append(run)
+        channels = [as_list(item) for item in as_list(self.context["channels"])]
+        self.read.load((as_place(where) for _, where in channels), self.schemas.values())
         counts: dict[int, tuple[int, Place]] = {}
         if statistics is not None:
             place, stats = statistics
             for channel, count, at in stats.channel_message_counts:
                 entry = place.within(RECORD_HEADER + at, CHANNEL_COUNT_ENTRY)
                 counts.setdefault(channel, (count, entry))
-        for item in as_list(self.context["channels"]):
-            channel_id, where = as_list(item)
+        for channel_id, where in channels:
             self._stream(as_int(channel_id), as_place(where), run.id, counts)
         return ChunkOutput(
             records=tuple(self.records),
@@ -323,7 +343,7 @@ class Declarations:
         counts: dict[int, tuple[int, Place]],
     ) -> None:
         cite = self.cite
-        channel = parse_channel(self.read.content(place))
+        channel = self.read.channel(place)
         if channel.id != channel_id:
             raise ValueError(f"the plan's channel {channel_id} is declared as {channel.id}")
         ids = cite.channel(place)
@@ -475,7 +495,7 @@ class Declarations:
                 records=(stream,),
             )
             return Unknown(), Unknown(), Unknown()
-        schema = parse_schema(self.read.content(where))
+        schema = self.read.schema(where)
         provenance = cite.provenance(where)
         start, length = schema.data
         definition: Knowledge[EvidenceRef] = (

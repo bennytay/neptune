@@ -6,7 +6,8 @@ records for a record inside a chunk. It is also the record's locator: two ``Byte
 the second inside what the first decodes to, exactly as MCAP's own Message Index counts offsets.
 """
 
-from collections.abc import Iterator, Sequence
+import io
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Final
 
@@ -17,12 +18,12 @@ from neptune.adapters.mcap.records import (
     ChunkFault,
     ChunkHead,
     FieldError,
-    Inner,
+    InnerRecords,
     check_crc,
     decompress,
-    inner_records,
     parse_chunk_head,
     record_header,
+    record_limit,
 )
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.provenance import ByteRange
@@ -36,10 +37,22 @@ _CHUNK_HEAD_READ: Final = 4096
 
 
 def read_exact(source: SourceReader, offset: int, length: int) -> bytes:
-    """``length`` bytes from ``offset``; a reader that comes up short raises ``ShortReadError``."""
+    """``length`` bytes from ``offset``; a reader that comes up short raises ``ShortReadError``.
+
+    The pieces are written into one buffer as they come, so a read holds its bytes once.
+    """
     if length == 0:
         return b""
-    return b"".join(read_pieces(source, offset, offset + length))
+    pieces = read_pieces(source, offset, offset + length)
+    first = next(pieces)
+    if len(first) == length:
+        return first
+    buffer = io.BytesIO()
+    buffer.write(first)
+    del first
+    for piece in pieces:
+        buffer.write(piece)
+    return buffer.getvalue()
 
 
 @dataclass(frozen=True)
@@ -150,18 +163,20 @@ def content_of(source: SourceReader, record: TopRecord, start: int = 0, size: in
 
 @dataclass(frozen=True)
 class OpenedChunk:
-    """A chunk's records, uncompressed and checked, with the records found in them.
+    """A chunk's records, uncompressed and checked.
 
     ``partial`` when the Chunk record was cut short: ``data`` is then the prefix its stored bytes
-    decode to, unchecked, and ``cut`` the offset of a record that prefix ends inside.
+    decode to, unchecked. ``records`` walks the records lazily, at most ``most`` of them.
     """
 
     place: Place
     head: ChunkHead
     data: bytes
-    records: Sequence[Inner]
-    cut: int | None
     partial: bool
+    most: int
+
+    def records(self) -> InnerRecords:
+        return InnerRecords(self.data, self.most)
 
 
 class ChunkProblem(Exception):
@@ -192,13 +207,18 @@ def open_chunk(source: SourceReader, record: TopRecord, limit: int) -> OpenedChu
         raise ChunkProblem("too_large", head)
     if compression is None:
         raise ChunkProblem(str(ChunkFault.UNKNOWN_COMPRESSION), head)
-    stored = content_of(source, record, start, length)
-    whole = len(stored) == length
+    available = (record.present if record.cut else record.length) - start
+    whole = available >= length
     try:
-        data = decompress(compression, stored, head.uncompressed_size, whole=whole)
+        # The stored bytes are only the call's argument, so they are freed once decompressed.
+        data = decompress(
+            compression,
+            content_of(source, record, start, length),
+            head.uncompressed_size,
+            whole=whole,
+        )
         if whole:
             check_crc(data, head.uncompressed_crc)
     except ChunkError as exc:
         raise ChunkProblem(str(exc.fault), head) from None
-    found, cut = inner_records(data)
-    return OpenedChunk(record.place, head, data, found, cut, not whole)
+    return OpenedChunk(record.place, head, data, not whole, record_limit(limit))

@@ -12,15 +12,16 @@ from hypothesis import strategies as st
 
 from neptune.adapters.mcap.records import (
     MAGIC,
+    MESSAGE_RECORD,
     RECORD_HEADER,
     ChunkError,
     ChunkFault,
     FieldError,
+    InnerRecords,
     Opcode,
     Text,
     check_crc,
     decompress,
-    inner_records,
     opcode_name,
     parse_attachment_head,
     parse_channel,
@@ -32,6 +33,7 @@ from neptune.adapters.mcap.records import (
     parse_metadata,
     parse_schema,
     parse_statistics,
+    record_limit,
 )
 from neptune.adapters.mcap.scan import Place, place_from_json, scan
 from neptune.discovery.reader import BytesReader
@@ -96,7 +98,15 @@ def test_statistics_keep_where_each_channel_count_is() -> None:
 
 def test_index_and_metadata_records_parse() -> None:
     entries = struct.pack("<QQ", 5, 0) + struct.pack("<QQ", 6, 40)
-    assert parse_message_index(struct.pack("<H", 1) + string(entries)).entries == ((5, 0), (6, 40))
+    content = struct.pack("<H", 1) + string(entries)
+    message_index = parse_message_index(content)
+    assert (message_index.channel_id, message_index.entries) == (
+        1,
+        (6, 2),
+    )  # where the entries are, how many
+    assert list(message_index.read(content)) == [(5, 0), (6, 40)]
+    with pytest.raises(FieldError):  # entries are whole (log_time, offset) pairs
+        parse_message_index(struct.pack("<H", 1) + string(entries[:-1]))
     pairs = struct.pack("<HQ", 1, 100)
     content = (
         struct.pack("<QQQQ", 1, 2, 50, 60) + string(pairs) + struct.pack("<Q", 9) + string(b"zstd")
@@ -132,12 +142,24 @@ def test_opcode_names() -> None:
 
 def test_inner_records_stop_at_a_record_cut_short() -> None:
     data = record(0x05, bytes(22)) + record(0x05, bytes(22))
-    found, cut = inner_records(data)
-    assert [(r.offset, r.length) for r in found] == [(0, 22), (31, 22)] and cut is None
-    found, cut = inner_records(data[:-1])
-    assert len(found) == 1 and cut == 31
-    found, cut = inner_records(data[:35])
-    assert len(found) == 1 and cut == 31  # not even the header
+    walk = InnerRecords(data, 10)
+    assert list(walk) == [(0, 5, 22), (31, 5, 22)]
+    assert (walk.cut, walk.stop, walk.framed) == (None, None, 62)
+    walk = InnerRecords(data[:-1], 10)
+    assert len(list(walk)) == 1 and (walk.cut, walk.framed) == (31, 31)
+    walk = InnerRecords(data[:35], 10)
+    assert len(list(walk)) == 1 and (walk.cut, walk.framed) == (31, 31)  # not even the header
+
+
+def test_a_walk_visits_at_most_its_bound_of_records_and_says_where_it_stopped() -> None:
+    data = record(0x80, b"") * 5
+    walk = InnerRecords(data, 3)
+    assert [offset for offset, _, _ in walk] == [0, 9, 18]
+    assert (walk.stop, walk.cut, walk.framed) == (27, None, 27)
+    walk = InnerRecords(data, 5)  # exactly the bound: nothing is left over
+    assert len(list(walk)) == 5 and walk.stop is None
+    # As many records as a chunk at the size limit holds of the smallest messages.
+    assert record_limit(10 * MESSAGE_RECORD) == 10 and record_limit(1) == 1
 
 
 def test_a_chunk_head_reads_only_up_to_its_records() -> None:
@@ -196,6 +218,18 @@ def test_a_chunk_cut_short_gives_the_prefix_its_bytes_decode_to() -> None:
         assert data.startswith(prefix)
 
 
+def test_frames_after_the_first_are_decoded_and_bounded_alike() -> None:
+    data = bytes(range(256)) * 9000  # over one 4 MiB piece in total, across two frames
+    for compression, frame in (
+        ("zstd", zstandard.ZstdCompressor().compress(data)),
+        ("lz4", lz4.frame.compress(data)),
+    ):
+        assert decompress(compression, frame * 2, 2 * len(data), whole=True) == data * 2
+        with pytest.raises(ChunkError) as raised:  # more frames than declared: never past it
+            decompress(compression, frame * 3, 2 * len(data), whole=True)
+        assert raised.value.fault is ChunkFault.SIZE
+
+
 def test_a_crc_of_zero_is_not_checked_and_any_other_must_match() -> None:
     check_crc(b"abc", 0)
     check_crc(b"abc", zlib.crc32(b"abc"))
@@ -251,4 +285,4 @@ def test_no_bytes_make_the_parsers_raise_anything_but_field_errors(data: bytes) 
     ):
         with contextlib.suppress(FieldError):
             parse(data)
-    inner_records(data)
+    list(InnerRecords(data, 1000))

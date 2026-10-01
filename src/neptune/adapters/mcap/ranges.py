@@ -19,10 +19,11 @@ where the ranges fall.
 """
 
 import hashlib
+import struct
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from neptune.adapters.contract import SourceReader
 from neptune.adapters.mcap.layout import DATA_START, Declared, Directory, Summary, Tail
@@ -160,13 +161,17 @@ class Layout:
     data_end: bool = False  # the data section ends with its Data End record
 
 
-def _messages(chunk: OpenedChunk) -> list[int]:
-    """The channel id of each message in a chunk, in order (as ingest counts them)."""
-    return [
-        int.from_bytes(chunk.data[inner.content : inner.content + 2], "little")
-        for inner in chunk.records
-        if inner.opcode == Opcode.MESSAGE and inner.length >= 2
-    ]
+CHANNEL_ID: Final = struct.Struct("<H")  # a Message's first field
+
+
+def count_messages(chunk: OpenedChunk) -> Counter[int]:
+    """A chunk's messages per channel, as ingest counts them, holding nothing per message."""
+    data, read_channel = chunk.data, CHANNEL_ID.unpack_from
+    counts: Counter[int] = Counter()
+    for offset, opcode, length in chunk.records():
+        if opcode == Opcode.MESSAGE and length >= 2:
+            counts[read_channel(data, offset + RECORD_HEADER)[0]] += 1
+    return counts
 
 
 # --- Indexed layout -----------------------------------------------------------------------------
@@ -197,17 +202,19 @@ def index_counts(index: ChunkIndex) -> Counter[int] | None:
 
 def skipped(
     selection: Selection, index: ChunkIndex, planned: Counter[int] | None, wanted: Iterable[int]
-) -> bool:
-    """Whether a chunk holds no message the config selects, so it is not decompressed.
+) -> str | None:
+    """Why a chunk holds no message the config selects, by its index alone, so it is not read.
 
-    Only a chunk whose counts the index gives may be skipped: another one's counts are known only
-    by reading it, and the chunks after it are numbered from them.
+    ``time`` when the index puts the chunk outside the log_time window, ``topics`` when it lists
+    no selected channel in it, else ``None``. Only a chunk whose counts the index gives may be
+    skipped: another one's counts are known only by reading it, and the chunks after it are
+    numbered from them.
     """
     if not selection.active or planned is None:
-        return False
+        return None
     if not selection.overlaps(index.start_time, index.end_time):
-        return True
-    return not any(planned[channel] for channel in wanted)
+        return "time"
+    return None if any(planned[channel] for channel in wanted) else "topics"
 
 
 def chunk_at(source: SourceReader, offset: int, length: int) -> TopRecord | None:
@@ -220,13 +227,13 @@ def chunk_at(source: SourceReader, offset: int, length: int) -> TopRecord | None
     return TopRecord(offset, opcode, declared, None)
 
 
-def chunk_messages(source: SourceReader, index: ChunkIndex, limit: int) -> list[int] | None:
-    """The channel of each message of the chunk an index entry names, or ``None``."""
+def chunk_messages(source: SourceReader, index: ChunkIndex, limit: int) -> Counter[int] | None:
+    """The messages per channel of the chunk an index entry names, or ``None``."""
     record = chunk_at(source, index.chunk_start, index.chunk_length)
     if record is None:
         return None
     try:
-        return _messages(open_chunk(source, record, limit))
+        return count_messages(open_chunk(source, record, limit))
     except ChunkProblem:
         return None
 
@@ -269,7 +276,7 @@ def _indexed(
         found = index_counts(index)
         exact.append(found is not None)
         if found is None:
-            found = Counter(chunk_messages(source, index, limit) or [])
+            found = chunk_messages(source, index, limit) or Counter()
         counts.append(found)
     totals: Counter[int] = Counter()
     for found in counts:
@@ -294,14 +301,33 @@ def _indexed(
         lead = indexes[0][1].chunk_start - DATA_START
         grouper.add(Unit(DATA_START, lead, Counter(), Counter(), 0))
     following = [index.chunk_start for _, index in indexes[1:]] + [summary.start]
+    skips: Counter[str] = Counter()
+    first_skip: Place | None = None
     for (place, index), found, known, stop in zip(indexes, counts, exact, following, strict=True):
         skip = skipped(selection, index, found if known else None, wanted)
+        if skip is not None:
+            skips[skip] += 1
+            first_skip = first_skip or Place(((index.chunk_start, index.chunk_length),))
         rows = 0 if skip else sum(found.values())
         unit = Unit(
             index.chunk_start, stop - index.chunk_start, Counter(), found, rows, True, place
         )
         grouper.add(unit)
     layout = Layout(True, True, grouper.finish(summary.start), data_end=True)
+    if first_skip is not None:
+        layout.findings.append(
+            reporter.finding(
+                "skipped_by_index",
+                FindingCategory.SKIPPED,
+                Severity.INFO,
+                first_skip,
+                f"{skips.total()} chunk(s) are not read: the summary's chunk index puts them"
+                " outside the log_time window (time) or lists no selected channel in them"
+                " (topics). The skip relies on the index alone, so messages a lying index hides"
+                " there have no rows; the first is cited",
+                {"chunks": skips.total(), "reasons": dict(sorted(skips.items()))},
+            )
+        )
     first: dict[int, Place] = {}
     for (_, index), found in zip(indexes, counts, strict=True):
         for channel, count in found.items():
@@ -345,41 +371,54 @@ class _Scan:
     top_first: dict[int, Place] = field(default_factory=dict)
     chunked: Counter[int] = field(default_factory=Counter)
     chunked_first: dict[int, Place] = field(default_factory=dict)
-    malformed: list[Place] = field(default_factory=list)
+    malformed: int = 0
+    malformed_first: Place | None = None
     out_of_range: Counter[int] = field(default_factory=Counter)
     out_of_range_first: list[Place] = field(default_factory=list)
+    # Per (record kind, id): the first record unlike the first declaration, it, and how many.
+    conflicts: dict[tuple[str, int], tuple[Place, Place, int]] = field(default_factory=dict)
 
-    def chunk(self, source: SourceReader, record: TopRecord, limit: int) -> list[int]:
-        """A chunk's declarations and the channel of each message; none if it is unreadable.
+    def chunk(self, source: SourceReader, record: TopRecord, limit: int) -> Counter[int]:
+        """A chunk's declarations and its messages per channel; none if it is unreadable.
 
         An unreadable chunk counts no messages: ingest reports it, and its messages have no rows.
+        One walk over the chunk's records, keeping nothing per record.
         """
         self.chunks = True
         try:
             chunk = open_chunk(source, record, limit)
         except ChunkProblem:
-            return []
-        for inner in chunk.records:
-            if inner.opcode in (Opcode.SCHEMA, Opcode.CHANNEL):
-                place = Place((chunk.place.steps[0], (inner.offset, inner.end - inner.offset)))
-                self.declare(inner.opcode, chunk.data[inner.content : inner.end], place)
-        messages = _messages(chunk)
+            return Counter()
+        data, outer, read_channel = chunk.data, chunk.place.steps[0], CHANNEL_ID.unpack_from
+        messages: Counter[int] = Counter()
+        for offset, opcode, length in chunk.records():
+            if opcode == Opcode.MESSAGE:
+                if length >= 2:
+                    messages[read_channel(data, offset + RECORD_HEADER)[0]] += 1
+            elif opcode in (Opcode.SCHEMA, Opcode.CHANNEL):
+                end = offset + RECORD_HEADER + length
+                place = Place((outer, (offset, end - offset)))
+                self.declare(opcode, data[offset + RECORD_HEADER : end], place)
         self.chunked.update(messages)
         for channel in messages:
             self.chunked_first.setdefault(channel, record.place)
         return messages
 
+    def _malformed(self, place: Place) -> None:
+        self.malformed += 1
+        self.malformed_first = self.malformed_first or place
+
     def message(self, source: SourceReader, record: TopRecord) -> Counter[int]:
         """A top-level message: its channel, or a problem planning reports for unchunked files."""
         if record.length < 2:
-            self.malformed.append(record.place)
+            self._malformed(record.place)
             return Counter()
         head = content_of(source, record, 0, MESSAGE_FIELDS)
         channel = int.from_bytes(head[:2], "little")
         self.top[channel] += 1
         self.top_first.setdefault(channel, record.place)
         if record.length < MESSAGE_FIELDS:
-            self.malformed.append(record.place)
+            self._malformed(record.place)
         else:
             parsed = parse_message_head(head)
             if max(parsed.log_time, parsed.publish_time) > INT64_MAX:
@@ -408,24 +447,28 @@ class _Scan:
                 self.directory.channels[parsed.id] = (Declared(place, digest), parsed)
             known = self.directory.channels[parsed.id][0]
         if known.digest != digest:
-            what = "schema" if isinstance(parsed, Schema) else "channel"
+            key = ("schema" if isinstance(parsed, Schema) else "channel", parsed.id)
+            first, _, count = self.conflicts.get(key, (place, known.place, 0))
+            self.conflicts[key] = (first, known.place, count + 1)
+
+    def report(self, chunked: bool) -> None:
+        """What planning reports once for the whole file: conflicting declarations, undeclared
+        channels, and in a file whose messages are not chunked the messages that cannot get rows
+        or their times.
+        """
+        for (what, declared_id), (place, known, count) in self.conflicts.items():
             self.findings.append(
                 self.reporter.finding(
                     "conflicting_declaration",
                     FindingCategory.INCONSISTENT,
                     Severity.WARNING,
                     place,
-                    f"this {what} record declares {what} id {parsed.id} unlike its first"
-                    " declaration, which is the one read",
-                    {"id": parsed.id, "record": what},
-                    related=(known.place,),
+                    f"{count} {what} record(s) declare {what} id {declared_id} unlike its first"
+                    " declaration, which is the one read; the first of them is cited",
+                    {"id": declared_id, "record": what, "records": count},
+                    related=(known,),
                 )
             )
-
-    def report(self, chunked: bool) -> None:
-        """What planning reports once for the whole file: undeclared channels, and in a file
-        whose messages are not chunked the messages that cannot get rows or their times.
-        """
         counts, first = (
             (self.chunked, self.chunked_first) if chunked else (self.top, self.top_first)
         )
@@ -433,16 +476,16 @@ class _Scan:
         self.findings += _unknown_channels(self.reporter, undeclared, counts)
         if chunked:
             return  # top-level messages and chunk contents are ingest's, record by record
-        if self.malformed:
+        if self.malformed_first is not None:
             self.findings.append(
                 self.reporter.finding(
                     "corrupt_record",
                     FindingCategory.CORRUPT,
                     Severity.ERROR,
-                    self.malformed[0],
-                    f"{len(self.malformed)} Message record(s) are shorter than their fixed fields;"
+                    self.malformed_first,
+                    f"{self.malformed} Message record(s) are shorter than their fixed fields;"
                     " they have no rows. The first is cited",
-                    {"count": len(self.malformed), "reason": "malformed"},
+                    {"count": self.malformed, "reason": "malformed"},
                 )
             )
         if self.out_of_range:
@@ -490,9 +533,7 @@ def _scanned(
             if opcode == Opcode.CHUNK and stop == source.size:
                 messages = found.chunk(source, record, limit)
                 size = stop - record.offset
-                grouper.add(
-                    Unit(record.offset, size, Counter(), Counter(messages), len(messages), True)
-                )
+                grouper.add(Unit(record.offset, size, Counter(), messages, messages.total(), True))
             break
         size = record.end - record.offset
         if opcode == Opcode.MESSAGE_INDEX and pending is not None:
@@ -508,7 +549,7 @@ def _scanned(
         flush()
         if opcode == Opcode.CHUNK:
             messages = found.chunk(source, record, limit)
-            pending = Unit(record.offset, size, Counter(), Counter(messages), len(messages), True)
+            pending = Unit(record.offset, size, Counter(), messages, messages.total(), True)
             continue
         top: Counter[int] = Counter()
         if opcode in (Opcode.SCHEMA, Opcode.CHANNEL) and record.length <= limit:

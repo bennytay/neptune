@@ -12,7 +12,10 @@ itself. A message past its chunk's indexed count has no row. Every finding cites
 chunk and is made by the one planned chunk that starts at it.
 """
 
+import struct
 import zlib
+from array import array
+from bisect import bisect_left
 from collections import Counter
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
@@ -32,7 +35,7 @@ from neptune.adapters.mcap.ingest import (
     columns,
     ticks,
 )
-from neptune.adapters.mcap.ranges import index_counts, skipped
+from neptune.adapters.mcap.ranges import CHANNEL_ID, index_counts, skipped
 from neptune.adapters.mcap.records import (
     INT64_MAX,
     MAGIC,
@@ -40,11 +43,11 @@ from neptune.adapters.mcap.records import (
     RECORD_HEADER,
     ChunkIndex,
     FieldError,
+    InnerRecords,
     Opcode,
     opcode_name,
     parse_attachment_head,
     parse_chunk_index,
-    parse_message_head,
     parse_message_index,
     parse_metadata,
 )
@@ -89,23 +92,35 @@ class Slot:
     rows: dict[str, list[object]] = field(default_factory=dict)
 
 
+# A channel's messages in one chunk, in record order: their offsets and log times, 16 bytes each.
+Entries = tuple["array[int]", "array[int]"]
+_NONE: Final[Entries] = (array("Q"), array("Q"))
+
+
 @dataclass
 class _Read:
     """A chunk just read: its messages per channel, for the Message Index records after it."""
 
     chunk: OpenedChunk
-    entries: dict[int, list[tuple[int, int]]]
+    entries: dict[int, Entries]
 
 
 @dataclass
 class _Held:
-    """What one chunk's messages hold, counted over the whole chunk by every planned chunk."""
+    """What one chunk's messages hold. ``found`` is counted by every planned chunk reading it;
+    the rest only by the one that reports on it, over the whole chunk.
+    """
 
     found: Counter[int] = field(default_factory=Counter)
     malformed: int = 0
     out_of_range: Counter[int] = field(default_factory=Counter)
-    unknown: Counter[str] = field(default_factory=Counter)
+    unknown: Counter[int] = field(default_factory=Counter)
     first_unknown: Place | None = None
+    entries: dict[int, Entries] = field(default_factory=dict)
+    times: tuple[int, int] | None = None  # the least and greatest log time of the messages
+
+
+_MESSAGE_HEAD: Final = struct.Struct("<HIQQ")
 
 
 def _content(source: SourceReader, place: Place) -> bytes:
@@ -137,12 +152,10 @@ class Data:
                 as_int(seq),
                 {name: [] for name, _ in self.columns},
             )
-        self.indexes: list[ChunkIndex] | None = None
+        self.indexes: list[tuple[Place, ChunkIndex]] | None = None
         if "index" in context:
-            self.indexes = [
-                parse_chunk_index(_content(source, as_place(place)))
-                for place in as_list(context["index"])
-            ]
+            places = [as_place(place) for place in as_list(context["index"])]
+            self.indexes = [(place, parse_chunk_index(_content(source, place))) for place in places]
         self.ordinal = 0
         self.records: list[EvidenceRecord] = []
         self.findings: list[IngestFinding] = []
@@ -182,11 +195,11 @@ class Data:
         if self.indexes is None:
             self._walk(self.start, self.end, None)
         else:
-            starts = [index.chunk_start for index in self.indexes]
+            starts = [index.chunk_start for _, index in self.indexes]
             if not starts or self.start < starts[0]:
                 self._walk(self.start, starts[0] if starts else self.end, None)
-            for k, index in enumerate(self.indexes):
-                self._walk(index.chunk_start, ([*starts[k + 1 :], self.end])[0], index)
+            for k, entry in enumerate(self.indexes):
+                self._walk(entry[1].chunk_start, ([*starts[k + 1 :], self.end])[0], entry)
         at_end = self.end == self.source.size and self.indexes is None
         if at_end and not self.data_end and not self.truncated:
             self.report(
@@ -203,11 +216,12 @@ class Data:
             findings=tuple(self.findings),
         )
 
-    def _walk(self, start: int, end: int, index: ChunkIndex | None) -> None:
-        """The records of ``[start, end)``; with ``index``, a unit starting at that chunk."""
+    def _walk(self, start: int, end: int, indexed: tuple[Place, ChunkIndex] | None) -> None:
+        """The records of ``[start, end)``; with ``indexed``, a unit starting at that chunk."""
         self.read = None
         records = scan(self.source, start, end)
-        if index is not None:
+        if indexed is not None:
+            index = indexed[1]
             first = next(records, None)
             if (
                 first is None
@@ -217,7 +231,7 @@ class Data:
             ):
                 self._unindexed(index)
                 return
-            self._chunk(first, index)
+            self._chunk(first, indexed)
         for record in records:
             if record.cut:
                 self._cut(record, end)
@@ -311,18 +325,24 @@ class Data:
 
     # -- messages --
 
-    def _row(self, slot: Slot, seq: int, data: bytes, at: int, place: Place) -> None:
-        head = parse_message_head(data, at)
-        if not self.selection.admits(head.log_time):
+    def _row(
+        self,
+        slot: Slot,
+        seq: int,
+        head: tuple[int, int, int, int],
+        steps: tuple[tuple[int, int], ...],
+    ) -> None:
+        _, sequence, log_time, publish_time = head
+        if not self.selection.admits(log_time):
             return
         rows = slot.rows
-        for column, value in ((LOG_TIME, head.log_time), (PUBLISH_TIME, head.publish_time)):
+        for column, value in ((LOG_TIME, log_time), (PUBLISH_TIME, publish_time)):
             tick = ticks(value)
             rows[column].append(tick)
             rows[state_column(column)].append(KNOWN if tick is not None else UNKNOWN)
         rows[SEQ].append(seq)
-        rows[SEQUENCE].append(head.sequence)
-        for step, (offset, size) in enumerate(place.steps):
+        rows[SEQUENCE].append(sequence)
+        for step, (offset, size) in enumerate(steps):
             rows[locator_column(step, "length")].append(size)
             rows[locator_column(step, "offset")].append(offset)
 
@@ -338,18 +358,19 @@ class Data:
             return
         seq, slot.seq = slot.seq, slot.seq + 1
         if record.length >= MESSAGE_FIELDS:
-            self._row(slot, seq, head, 0, record.place)
+            self._row(slot, seq, _MESSAGE_HEAD.unpack_from(head), record.place.steps)
 
     def _advance(self, counts: Counter[int]) -> None:
         for channel, slot in self.slots.items():
             slot.seq += counts[channel]
 
-    def _chunk(self, record: TopRecord, index: ChunkIndex | None) -> int:
+    def _chunk(self, record: TopRecord, indexed: tuple[Place, ChunkIndex] | None) -> int:
         """One chunk: its messages numbered from the slots' ``seq``, then the slots advanced.
 
         Returns how many messages it holds that could be read.
         """
         self.read = None  # Message Index records after this chunk are checked against it only
+        index = indexed[1] if indexed is not None else None
         planned = index_counts(index) if index is not None else None
         if index is not None and skipped(self.selection, index, planned, self.slots):
             self._advance(planned or Counter())
@@ -360,48 +381,106 @@ class Data:
             self._advance(planned or Counter())
             self._chunk_problem(record, problem)
             return 0
-        outer = chunk.place.steps[0]
+        if indexed is not None:
+            self._index_fields(chunk, *indexed)
+        records = chunk.records()
+        held = self._messages(chunk, records, planned)
+        self._advance(planned if planned is not None else held.found)
+        if self.lead:
+            self._chunk_findings(chunk, records, held, planned)
+        return held.found.total()
+
+    def _messages(
+        self, chunk: OpenedChunk, records: InnerRecords, planned: Counter[int] | None
+    ) -> _Held:
+        """One walk over a chunk's records, holding nothing per record but 16 bytes a message
+        for the Message Index check.
+
+        The planned chunk reporting on the chunk walks all of it; a later stretch of its
+        messages only counts its way to its first message and stops after its last.
+        """
+        data, outer, lead = chunk.data, chunk.place.steps[0], self.lead
+        first, last, slots = self.first, self.last, self.slots
+        read_head, read_channel = _MESSAGE_HEAD.unpack_from, CHANNEL_ID.unpack_from
         held = _Held()
-        entries: dict[int, list[tuple[int, int]]] = {}
-        base = {channel: slot.seq for channel, slot in self.slots.items()}
-        for inner in chunk.records:
-            place = Place((outer, (inner.offset, inner.end - inner.offset)))
-            if inner.opcode not in (Opcode.MESSAGE, Opcode.SCHEMA, Opcode.CHANNEL):
-                held.unknown[opcode_name(inner.opcode)] += 1
-                held.first_unknown = held.first_unknown or place
-            if inner.opcode != Opcode.MESSAGE:
+        found = held.found
+        base = {channel: slot.seq for channel, slot in slots.items()}
+        least, greatest = 1 << 64, -1
+        for offset, opcode, length in records:
+            if opcode != Opcode.MESSAGE:
+                if lead and opcode not in (Opcode.SCHEMA, Opcode.CHANNEL):
+                    held.unknown[opcode] += 1
+                    if held.first_unknown is None:
+                        held.first_unknown = Place((outer, (offset, RECORD_HEADER + length)))
                 continue
-            if inner.length < 2:
+            if length < 2:
                 held.malformed += 1
                 continue
+            content = offset + RECORD_HEADER
+            channel = read_channel(data, content)[0]
+            j = found[channel]
+            found[channel] = j + 1
             ordinal = self.ordinal
             self.ordinal += 1
-            channel = int.from_bytes(chunk.data[inner.content : inner.content + 2], "little")
-            j = held.found[channel]
-            held.found[channel] += 1
-            if inner.length < MESSAGE_FIELDS:
+            if length < MESSAGE_FIELDS:
                 held.malformed += 1
                 continue
-            head = parse_message_head(chunk.data, inner.content)
-            entries.setdefault(channel, []).append((head.log_time, inner.offset))
-            if max(head.log_time, head.publish_time) > INT64_MAX:
-                held.out_of_range[channel] += 1
-            slot = self.slots.get(channel)
+            if not lead and ordinal < first:
+                continue  # a later stretch counts its way to its first message
+            if not lead and last is not None and ordinal >= last:
+                break  # and what follows its last message is not its own
+            head = read_head(data, content)
+            if lead:
+                _, _, log_time, publish_time = head
+                offsets, times = held.entries.setdefault(channel, (array("Q"), array("Q")))
+                offsets.append(offset)
+                times.append(log_time)
+                least, greatest = min(least, log_time), max(greatest, log_time)
+                if log_time > INT64_MAX or publish_time > INT64_MAX:
+                    held.out_of_range[channel] += 1
+            slot = slots.get(channel)
             if slot is None or (planned is not None and j >= planned[channel]):
                 continue
-            if ordinal < self.first or (self.last is not None and ordinal >= self.last):
+            if ordinal < first or (last is not None and ordinal >= last):
                 continue
-            self._row(slot, base[channel] + j, chunk.data, inner.content, place)
-        self._advance(planned if planned is not None else held.found)
-        self._chunk_findings(chunk, held, planned, entries)
-        return sum(held.found.values())
+            self._row(slot, base[channel] + j, head, (outer, (offset, RECORD_HEADER + length)))
+        if greatest >= 0:
+            held.times = (least, greatest)
+        return held
+
+    def _index_fields(self, chunk: OpenedChunk, place: Place, index: ChunkIndex) -> None:
+        """The chunk index entry against the Chunk record it names: their fields must agree."""
+        head = chunk.head
+        pairs: dict[str, tuple[JsonValue, JsonValue]] = {
+            "compressed_size": (index.compressed_size, head.records[1]),
+            "end_time": (index.end_time, head.end_time),
+            "start_time": (index.start_time, head.start_time),
+            "uncompressed_size": (index.uncompressed_size, head.uncompressed_size),
+        }
+        differ: dict[str, JsonValue] = {
+            name: [indexed, found] for name, (indexed, found) in pairs.items() if indexed != found
+        }
+        if index.compression.raw != head.compression.raw:
+            differ["compression"] = [index.compression.shown, head.compression.shown]
+        if differ:
+            self.report(
+                "index_mismatch",
+                FindingCategory.INCONSISTENT,
+                Severity.WARNING,
+                chunk.place,
+                "the summary's chunk index entry ([indexed, chunk]) disagrees with the Chunk"
+                " record it names; the chunk's own fields are read. Selection by the index may"
+                " have skipped what it holds elsewhere",
+                {"fields": differ, "reason": "chunk_fields"},
+                related=(place,),
+            )
 
     def _chunk_findings(
         self,
         chunk: OpenedChunk,
+        records: InnerRecords,
         held: _Held,
         planned: Counter[int] | None,
-        entries: dict[int, list[tuple[int, int]]],
     ) -> None:
         place, outer = chunk.place, chunk.place.steps[0]
         if planned is not None and +planned != +held.found:
@@ -442,30 +521,54 @@ class Data:
                 {"channels": {str(c): n for c, n in sorted(held.out_of_range.items())}},
             )
         if held.first_unknown is not None:
+            unknown = {opcode_name(opcode): n for opcode, n in held.unknown.items()}
             self.report(
                 "unknown_record",
                 FindingCategory.UNSUPPORTED,
                 Severity.INFO,
                 held.first_unknown,
-                f"{sum(held.unknown.values())} record(s) a chunk does not hold are skipped; the"
+                f"{held.unknown.total()} record(s) a chunk does not hold are skipped; the"
                 " first is cited",
-                {"opcodes": dict(sorted(held.unknown.items()))},
+                {"opcodes": dict(sorted(unknown.items()))},
+            )
+        if records.stop is not None:
+            self.report(
+                "too_many_records",
+                FindingCategory.LIMIT,
+                Severity.ERROR,
+                Place((outer, (records.stop, len(chunk.data) - records.stop))),
+                f"the chunk holds more than {records.most} records, more than a chunk of"
+                " messages within max_chunk_bytes can; the records after them are not read",
+                {"max_chunk_bytes": self.limit, "max_records": records.most},
             )
         if chunk.partial:
+            self.report(
+                "chunk_truncated",
+                FindingCategory.CORRUPT,
+                Severity.WARNING,
+                place,
+                f"the chunk is cut short: its stored bytes decode to {len(chunk.data)} of its"
+                f" {chunk.head.uncompressed_size} bytes, whose whole records end at"
+                f" {records.framed}; only those records are read, unchecked by its CRC",
+                {
+                    "decoded_bytes": len(chunk.data),
+                    "framed_bytes": records.framed,
+                    "uncompressed_bytes": chunk.head.uncompressed_size,
+                },
+            )
             return
-        if chunk.cut is not None:
+        if records.cut is not None:
             self.report(
                 "corrupt_record",
                 FindingCategory.CORRUPT,
                 Severity.ERROR,
-                Place((outer, (chunk.cut, len(chunk.data) - chunk.cut))),
+                Place((outer, (records.cut, len(chunk.data) - records.cut))),
                 "the chunk's records end inside a record; the rest of the chunk is not read",
                 {"reason": "records_overrun"},
             )
-        self.read = _Read(chunk, entries)
-        times = [time for found in entries.values() for time, _ in found]
+        self.read = _Read(chunk, held.entries)
         declared: list[JsonValue] = [chunk.head.start_time, chunk.head.end_time]
-        if times and [min(times), max(times)] != declared:
+        if held.times is not None and list(held.times) != declared:
             self.report(
                 "index_mismatch",
                 FindingCategory.INCONSISTENT,
@@ -473,7 +576,7 @@ class Data:
                 place,
                 "the chunk's declared message times differ from the log times of the messages"
                 " it holds",
-                {"declared": declared, "found": [min(times), max(times)], "reason": "times"},
+                {"declared": declared, "found": list(held.times), "reason": "times"},
             )
 
     def _chunk_problem(self, record: TopRecord, problem: ChunkProblem) -> None:
@@ -500,30 +603,57 @@ class Data:
     # -- other records --
 
     def _message_index(self, record: TopRecord, read: _Read) -> None:
+        """A Message Index record after the chunk just read: the same messages, in any order.
+
+        Its entries are read lazily and matched against the chunk's, which are in offset order:
+        each must name a message of the chunk, with its log time, and none twice.
+        """
         self.read = read  # the next Message Index record follows the same chunk
+        if record.length > self.limit:
+            self._too_large(record)
+            return
+        content = content_of(self.source, record)
         try:
-            index = parse_message_index(content_of(self.source, record))
+            index = parse_message_index(content)
         except FieldError:
             self._malformed(record)
             return
-        declared = sorted(index.entries)
-        found = sorted(read.entries.get(index.channel_id, []))
-        if declared != found:
+        offsets, times = read.entries.get(index.channel_id, _NONE)
+        seen = bytearray(len(offsets))
+        declared = matched = 0
+        for log_time, offset in index.read(content):
+            declared += 1
+            k = bisect_left(offsets, offset)
+            if k < len(offsets) and offsets[k] == offset and times[k] == log_time and not seen[k]:
+                seen[k] = 1
+                matched += 1
+        if declared != len(offsets) or matched != declared:
             self.report(
                 "index_mismatch",
                 FindingCategory.INCONSISTENT,
                 Severity.WARNING,
                 record.place,
-                f"the Message Index for channel {index.channel_id} lists {len(declared)}"
-                f" message(s) unlike the {len(found)} the chunk before it holds",
+                f"the Message Index for channel {index.channel_id} lists {declared}"
+                f" message(s) unlike the {len(offsets)} the chunk before it holds",
                 {
-                    "declared": len(declared),
-                    "found": len(found),
+                    "declared": declared,
+                    "found": len(offsets),
                     "id": index.channel_id,
                     "reason": "message_index",
                 },
                 related=(read.chunk.place,),
             )
+
+    def _too_large(self, record: TopRecord) -> None:
+        what = opcode_name(record.opcode)
+        self.report(
+            "record_too_large",
+            FindingCategory.LIMIT,
+            Severity.ERROR,
+            record.place,
+            f"a {what} record of {record.length} bytes is over max_chunk_bytes; it is not read",
+            {"bytes": record.length, "max_chunk_bytes": self.limit},
+        )
 
     def _malformed(self, record: TopRecord) -> None:
         self.report(
@@ -584,15 +714,7 @@ class Data:
         if not self.lead:
             return
         if record.length > self.limit:
-            self.report(
-                "record_too_large",
-                FindingCategory.LIMIT,
-                Severity.ERROR,
-                record.place,
-                f"a Metadata record of {record.length} bytes is over max_chunk_bytes; it is not"
-                " read",
-                {"bytes": record.length, "max_chunk_bytes": self.limit},
-            )
+            self._too_large(record)
             return
         try:
             metadata = parse_metadata(content_of(self.source, record))

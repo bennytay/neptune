@@ -242,7 +242,7 @@ def test_a_channel_declared_twice_differently_keeps_its_first_declaration() -> N
     data = unchunked(channel(1, b"/first"), message(1, 1), channel(1, b"/second"), message(1, 2))
     output = run(data)
     found = finding(output, "conflicting_declaration")
-    assert found.details == {"id": 1, "record": "channel"}
+    assert found.details == {"id": 1, "record": "channel", "records": 1}
     (stream,) = [s for s in output.records() if isinstance(s, Stream)]
     assert stream.topic == Known("/first") and len(row_keys(output)) == 2
 

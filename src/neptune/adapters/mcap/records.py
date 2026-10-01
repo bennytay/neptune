@@ -14,6 +14,7 @@ caller turns it into a finding. Nothing here reads a source or allocates more th
 import io
 import struct
 import zlib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
 from typing import Final
@@ -26,6 +27,7 @@ FOOTER_RECORD: Final = RECORD_HEADER + FOOTER_CONTENT
 TAIL: Final = FOOTER_RECORD + len(MAGIC)  # the footer record and the closing magic
 FOOTER_CRC_SPAN: Final = RECORD_HEADER + 16  # the footer bytes the summary CRC covers
 MESSAGE_FIELDS: Final = 22  # channel_id u16, sequence u32, log_time u64, publish_time u64
+MESSAGE_RECORD: Final = RECORD_HEADER + MESSAGE_FIELDS  # the smallest whole Message record
 MESSAGE_INDEX_ENTRY: Final = 16  # log_time u64, offset u64
 CHANNEL_COUNT_ENTRY: Final = 10  # channel_id u16, count u64
 INT64_MAX: Final = 2**63 - 1
@@ -257,18 +259,28 @@ def parse_chunk_head(content: bytes) -> ChunkHead:
 
 @dataclass(frozen=True)
 class MessageIndex:
+    """A Message Index record: its channel, and where its entries are, read lazily."""
+
     channel_id: int
-    entries: tuple[tuple[int, int], ...]  # (log_time, offset in the chunk's records)
+    entries: tuple[int, int]  # where the entries start in the content, and how many there are
+
+    def read(self, content: bytes) -> Iterator[tuple[int, int]]:
+        """Each entry, ``(log_time, offset in the chunk's records)``, in stored order."""
+        start, count = self.entries
+        return _INDEX_ENTRY.iter_unpack(memoryview(content)[start : start + count * 16])
+
+
+_INDEX_ENTRY: Final = struct.Struct("<QQ")
 
 
 def parse_message_index(content: bytes) -> MessageIndex:
     fields = Fields(content)
     channel_id = fields.u16()
-    array = fields.section()
-    entries = []
-    while array.left:
-        entries.append((array.u64(), array.u64()))
-    return MessageIndex(channel_id, tuple(entries))
+    start, length = fields.blob()
+    count, rest = divmod(length, MESSAGE_INDEX_ENTRY)
+    if rest:
+        raise FieldError("a Message Index's entries are not whole (log_time, offset) pairs")
+    return MessageIndex(channel_id, (start, count))
 
 
 @dataclass(frozen=True)
@@ -425,36 +437,57 @@ def parse_data_end(content: bytes) -> int:
 # --- Records inside a chunk ---------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Inner:
-    """One record in a chunk's uncompressed records: where it starts, its opcode and length."""
-
-    offset: int
-    opcode: int
-    length: int
-
-    @property
-    def content(self) -> int:
-        return self.offset + RECORD_HEADER
-
-    @property
-    def end(self) -> int:
-        return self.offset + RECORD_HEADER + self.length
+_RECORD_HEAD: Final = struct.Struct("<BQ")
 
 
-def inner_records(data: bytes) -> tuple[list[Inner], int | None]:
-    """Every whole record in ``data``, and the offset of a record cut short, if one is."""
-    found: list[Inner] = []
-    offset, size = 0, len(data)
-    while offset < size:
-        if offset + RECORD_HEADER > size:
-            return found, offset
-        opcode, length = record_header(data, offset)
-        if offset + RECORD_HEADER + length > size:
-            return found, offset
-        found.append(Inner(offset, opcode, length))
-        offset += RECORD_HEADER + length
-    return found, None
+def record_limit(max_chunk_bytes: int) -> int:
+    """How many records a chunk's walk visits: as many as ``max_chunk_bytes`` holds Messages.
+
+    No chunk within the size limit holds more Message records than this, so only a chunk of
+    records smaller than any Message reaches it (ADR 0034 §7).
+    """
+    return max(1, max_chunk_bytes // MESSAGE_RECORD)
+
+
+class InnerRecords:
+    """The records in a chunk's uncompressed bytes, walked lazily: nothing is kept per record.
+
+    Iterating yields ``(offset, opcode, length)`` for each whole record in order, at most ``most``
+    of them. After a whole walk, ``framed`` is where the last whole record visited ends, ``cut``
+    the offset of a record the bytes end inside, and ``stop`` the offset where the walk stopped
+    after ``most`` records; each is ``None`` when it does not apply. A walk holds no more than
+    the bytes it is given, however many records they hold.
+    """
+
+    __slots__ = ("cut", "data", "framed", "most", "stop")
+
+    def __init__(self, data: bytes, most: int) -> None:
+        self.data = data
+        self.most = most
+        self.framed = 0
+        self.cut: int | None = None
+        self.stop: int | None = None
+
+    def __iter__(self) -> Iterator[tuple[int, int, int]]:
+        data, size, most, unpack = self.data, len(self.data), self.most, _RECORD_HEAD.unpack_from
+        self.cut = self.stop = None
+        offset = count = 0
+        while offset < size:
+            if offset + RECORD_HEADER > size:
+                self.cut = offset
+                break
+            opcode, length = unpack(data, offset)
+            end = offset + RECORD_HEADER + length
+            if end > size:
+                self.cut = offset
+                break
+            if count == most:
+                self.stop = offset
+                break
+            count += 1
+            yield offset, opcode, length
+            offset = end
+        self.framed = offset
 
 
 # --- Decompression ------------------------------------------------------------------------------
@@ -475,60 +508,76 @@ class ChunkError(Exception):
         self.fault = fault
 
 
-def _zstd(data: bytes, limit: int) -> bytes:
+# Decompressed output is written in pieces of at most this, into one growing buffer.
+_PIECE: Final = 4 * 1024 * 1024
+
+
+def _zstd(data: bytes, limit: int, out: io.BytesIO) -> None:
     import zstandard
 
     reader = zstandard.ZstdDecompressor().stream_reader(
         io.BytesIO(data), read_across_frames=True, closefd=False
     )
-    out = bytearray()
-    while len(out) <= limit:
-        piece = reader.read(min(1 << 20, limit + 1 - len(out)))
+    while out.tell() <= limit:
+        piece = reader.read(min(_PIECE, limit + 1 - out.tell()))
         if not piece:
             break
-        out += piece
-    return bytes(out)
+        out.write(piece)
 
 
-def _lz4(data: bytes, limit: int) -> bytes:
+def _lz4(data: bytes, limit: int, out: io.BytesIO) -> None:
+    """LZ4 frames, fed in pieces so the decompressor never holds a copy of the rest."""
     import lz4.frame
 
-    out = bytearray()
-    rest = data
-    while rest and len(out) <= limit:
-        decompressor = lz4.frame.LZ4FrameDecompressor()
-        out += decompressor.decompress(rest, max_length=limit + 1 - len(out))
-        while not decompressor.eof and not decompressor.needs_input and len(out) <= limit:
-            piece = decompressor.decompress(b"", max_length=limit + 1 - len(out))
+    view = memoryview(data)
+    position, pending = 0, b""
+    decompressor = lz4.frame.LZ4FrameDecompressor()
+    while out.tell() <= limit:
+        room = min(_PIECE, limit + 1 - out.tell())
+        if decompressor.eof:  # a frame ended: the next one starts in what it did not use
+            pending = decompressor.unused_data or b""
+            decompressor = lz4.frame.LZ4FrameDecompressor()
+            if not pending and position >= len(view):
+                break
+        if pending:
+            piece, pending = decompressor.decompress(pending, max_length=room), b""
+        elif decompressor.needs_input:
+            if position >= len(view):
+                break
+            stored = view[position : position + _PIECE]
+            position += len(stored)
+            piece = decompressor.decompress(stored, max_length=room)
+        else:
+            piece = decompressor.decompress(b"", max_length=room)
             if not piece:
                 break
-            out += piece
-        if not decompressor.eof:
-            break
-        rest = decompressor.unused_data or b""
-    return bytes(out)
+        out.write(piece)
 
 
 def decompress(compression: str, data: bytes, size: int, *, whole: bool) -> bytes:
     """A chunk's records from its stored bytes: exactly ``size`` bytes, or ``ChunkError``.
 
-    Output is bounded by ``size`` whatever the stored bytes claim, so a decompression bomb costs
-    at most ``size + 1`` bytes. A chunk cut short (``whole`` false) yields whatever prefix its
-    stored bytes decode to.
+    Output is bounded by ``size`` whatever the stored bytes claim and is written into one buffer,
+    so a decompression bomb costs at most ``size + 1`` bytes besides its stored bytes. A chunk cut
+    short (``whole`` false) yields the prefix its stored bytes decode to before they end or stop
+    decoding: how far a library gets into an incomplete block is its own, which is why the
+    libraries' versions are part of the transform (ADR 0034 §1).
     """
     if compression not in COMPRESSIONS:
         raise ChunkError(ChunkFault.UNKNOWN_COMPRESSION)
     if compression == "":
         out = data[: size + 1]
     else:
+        buffer = io.BytesIO()
         try:
-            out = _zstd(data, size) if compression == "zstd" else _lz4(data, size)
+            (_zstd if compression == "zstd" else _lz4)(data, size, buffer)
         except MemoryError:
             raise
         except Exception as exc:  # the libraries raise their own errors on hostile bytes
             if whole:
                 raise ChunkError(ChunkFault.DECOMPRESSION) from exc
-            return b""
+        out = buffer.getvalue()  # the buffer's own bytes: no copy
+        del buffer
     if whole and len(out) != size:
         raise ChunkError(ChunkFault.SIZE)
     return out[:size]

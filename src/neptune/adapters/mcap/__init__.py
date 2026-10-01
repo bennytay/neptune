@@ -21,6 +21,7 @@ it once. Corruption is local: a chunk that fails its CRC, a record cut short, an
 each costs what it touches and is a finding; what can still be read is read.
 """
 
+from importlib.metadata import version
 from typing import Final
 
 from neptune.adapters.contract import (
@@ -61,6 +62,10 @@ from neptune.adapters.mcap.summary import summarize
 DEFAULT_CHUNK_BYTES: Final = 64 * 1024 * 1024
 DEFAULT_MAX_ROWS: Final = 100_000
 DEFAULT_MAX_CHUNK_BYTES: Final = 256 * 1024 * 1024
+# The decompressors, as installed: how far each gets into a chunk cut short, and what it makes of
+# a chunk without a CRC, become rows, so their versions are part of the transform and of every
+# cache key (ADR 0034 §1, ADR 0031).
+LIBRARIES: Final = tuple((name, version(name)) for name in ("lz4", "zstandard"))
 
 
 def _code(name: str, description: str) -> Documented:
@@ -98,7 +103,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " rows; empty selects every channel",
         ),
     ),
-    libraries=(),
+    libraries=LIBRARIES,
     finding_codes=(
         _code(
             "attachment_not_extracted",
@@ -107,9 +112,14 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         _code("bad_magic", "the source does not start with MCAP's magic; nothing is read"),
         _code(
+            "chunk_truncated",
+            "the file ends inside a chunk: the bytes its stored prefix decodes to, and where its"
+            " whole records end; only those are read (corrupt, warning)",
+        ),
+        _code(
             "conflicting_declaration",
-            "a Schema or Channel record repeats an id with other content; the first is read"
-            " (inconsistent, warning)",
+            "Schema or Channel records repeat an id with other content, counted per id; the"
+            " first declaration is read (inconsistent, warning)",
         ),
         _code(
             "corrupt_record",
@@ -136,8 +146,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         _code(
             "index_mismatch",
-            "an index disagrees with the data: a Message Index or a chunk's times (warning), a"
-            " chunk not where indexed or not indexed, its messages without rows (error)",
+            "an index disagrees with the data: a Message Index, a chunk index entry's fields or"
+            " a chunk's times (warning), a chunk not where indexed or not indexed, its messages"
+            " without rows (error)",
         ),
         _code(
             "invalid_utf8",
@@ -168,6 +179,12 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "a chunk or record declares more bytes than max_chunk_bytes; not read (limit, error)",
         ),
         _code(
+            "skipped_by_index",
+            "indexed chunks not read because the summary's chunk index puts them outside the"
+            " log_time window or lists no selected channel in them; the skip relies on the"
+            " index (skipped, info)",
+        ),
+        _code(
             "summary_unusable",
             "the footer points at a summary out of bounds, too large, failing its CRC or"
             " malformed; the file is planned by scanning it (corrupt, warning)",
@@ -176,6 +193,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "time_out_of_range",
             "a u64 time does not fit a signed 64-bit tick count; it is unknown"
             " (unrepresentable, warning)",
+        ),
+        _code(
+            "too_many_records",
+            "a chunk holds more records than max_chunk_bytes / 31, more than a chunk of"
+            " messages within the limit can; the rest is not read (limit, error)",
         ),
         _code(
             "truncated",
@@ -247,10 +269,16 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " value/sequence (uint32), locator/<i>/offset and length",
         ),
     ),
+    # A call holds one chunk's stored bytes and what they decode to, each at most
+    # max_chunk_bytes, then the decoded bytes and 16 bytes per message; zstd's window (128 MiB
+    # at most) and the rows of one planned chunk come on top. Records are walked, never listed.
     resources=Resources(max_memory=3 * DEFAULT_MAX_CHUNK_BYTES, streaming=True),
     security=(
         "Decompression output is bounded by the chunk's declared size, itself bounded by"
-        " max_chunk_bytes, so a decompression bomb costs at most that.",
+        " max_chunk_bytes, and written into one buffer, so a decompression bomb costs at most"
+        " max_chunk_bytes besides its stored bytes.",
+        "A chunk's records are walked over its bytes without an object per record, at most"
+        " max_chunk_bytes / 31 of them, so a chunk of tiny records costs its bytes, not more.",
         "Every length is checked against its record before it is read; nothing is allocated"
         " from a length the file states without that check.",
         "zstd and lz4 frames are decoded by the zstandard and lz4 libraries inside the sandbox.",
