@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from markdown_it import MarkdownIt
+from markdown_it.parser_block import _rules as _BLOCK_RULES
+from markdown_it.ruler import RuleOptionsType
 from markdown_it.rules_block import (
     StateBlock,
     code,
@@ -40,7 +42,6 @@ from markdown_it.rules_block import (
     reference,
     table,
 )
-from markdown_it.parser_block import _rules as _BLOCK_RULES
 from markdown_it.token import Token
 
 from neptune.model.world import BlockRole
@@ -57,7 +58,9 @@ _LEAVES: Final = (
 )
 NEWLINES: Final = re.compile(r"\r\n?|\n")
 # Which blocks each rule may interrupt: ``Ruler.at`` resets these, so the wrapper restores them.
-_INTERRUPTS: Final = {name: {"alt": list(alt)} for name, _, alt in _BLOCK_RULES}
+_INTERRUPTS: Final[dict[str, RuleOptionsType]] = {
+    name: {"alt": list(alt)} for name, _, alt in _BLOCK_RULES
+}
 _ROLES: Final[dict[str, BlockRole]] = {
     "fence": BlockRole.CODE,
     "code_block": BlockRole.CODE,

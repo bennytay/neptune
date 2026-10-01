@@ -5,10 +5,12 @@ text is exactly the code points its span cites. Roles come from what CommonMark 
 expected lists spell out per fixture.
 """
 
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Final
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -133,6 +135,83 @@ def test_the_name_decides_only_where_the_bytes_cannot() -> None:
     assert probe(b"", "empty.md")[0] == NAMED_DAMAGED and probe(b"", "empty")[0] == 0.0
     assert probe(b"\x89PNG\r\n\x1a\n", "x.md")[0] == 0.0
     assert probe(YAML, "robot.yaml") == (0.0, ["markdown.no_syntax"])  # comments and dashes
+
+
+@pytest.mark.parametrize(
+    ("text", "kind"),
+    [
+        ("```\ncode\n```", "strong"),
+        ("  ~~~~ py\ncode\n~~~~~", "strong"),
+        ("a | b\n--- | :---:", "strong"),
+        ("| a | b |\n|:---|---:|\n", "strong"),
+        ("# Title", "weak"),
+        ("Title\n=====", "weak"),
+        ("Title\n--", "weak"),
+        ("see [spec](https://example.invalid/a)", "weak"),
+        ("![fig](a.png)", "weak"),
+        ("a [x](  ) and [y](z)", "weak"),
+        ("this is **bold** text", "weak"),
+        ("so __bold__ too", "weak"),
+        ("> quoted", "weak"),
+        ("use `ros2 run`", "weak"),
+        ("``x` `y`", "weak"),
+    ],
+)
+def test_each_construct_the_probe_counts_is_found(text: str, kind: str) -> None:
+    unnamed = probe(text.encode())[0]
+    pair = probe((text + "\n\n# Heading\n\nuse `code`").encode())[0]
+    assert pair == STRUCTURE
+    assert unnamed == (STRUCTURE if kind == "strong" else 0.0)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "```\nnever closed\n",
+        "```\nclosed by fewer\n``",
+        "    ```\nindented\n    ```",
+        "| a | b |\n|---|",
+        "---|--",
+        "####### seven",
+        "#nospace",
+        "    Title\n=====",
+        "[](x) [a]( ) [a](b c)",
+        "** x** and __ y__ and **z",
+        "> ",
+        "`` and ` `",
+    ],
+)
+def test_the_probe_does_not_mistake_near_misses_for_syntax(text: str) -> None:
+    assert probe(text.encode())[0] == 0.0
+    assert probe(text.encode(), "a.md")[0] == NAMED_TEXT
+
+
+HOSTILE_HEADS: Final = {
+    "brackets": b"[" * PROBE_HEAD_SIZE,
+    "label_without_target": b"[a](" * (PROBE_HEAD_SIZE // 4),
+    "target_closers": b"[a](" + b"](" * (PROBE_HEAD_SIZE // 2),
+    "openers": b"```\n~~~\n" * (PROBE_HEAD_SIZE // 8),
+    "fence_ladder": b"".join(b"`" * n + b"\n" for n in range(360, 3, -1)),
+    "delimiter_spaces": b"---|---" + b" " * PROBE_HEAD_SIZE + b"x",
+    "delimiter_pipes": b"|---" * (PROBE_HEAD_SIZE // 4) + b"x",
+    "bold_unclosed": b"**x " * (PROBE_HEAD_SIZE // 4),
+    "bold_spaced": b"** a " * (PROBE_HEAD_SIZE // 5),
+    "underline": b"a\n" + b"=" * PROBE_HEAD_SIZE + b"x",
+    "ticks": b"` " * (PROBE_HEAD_SIZE // 2),
+    "heading_spaces": b"#" + b" " * PROBE_HEAD_SIZE + b"\t",
+    "quotes": b">" * PROBE_HEAD_SIZE,
+    "many_short_lines": b"a\n--\n" * (PROBE_HEAD_SIZE // 5),
+    "carriage_returns": b"\r" * PROBE_HEAD_SIZE,
+}
+
+
+@pytest.mark.parametrize("name", sorted(HOSTILE_HEADS))
+def test_the_probe_is_linear_on_hostile_heads(name: str) -> None:
+    data = HOSTILE_HEADS[name][:PROBE_HEAD_SIZE]
+    started = time.perf_counter()
+    probe(data, "x.md")
+    # Linear: milliseconds. A quadratic pattern takes seconds on 64 KiB; this bound is 100x slack.
+    assert time.perf_counter() - started < 1.0
 
 
 def test_selection_against_the_text_adapter_never_ties() -> None:

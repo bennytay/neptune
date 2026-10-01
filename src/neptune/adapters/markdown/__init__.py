@@ -12,10 +12,10 @@ What it emits for a file (ADR 0038):
 Roles are the syntax's: an ATX or setext heading is a ``heading`` with its level; a paragraph in a
 list item is a ``list_item`` with its list depth, in a blockquote a ``quote``, otherwise a
 ``paragraph``; fenced and indented code is ``code``; a GFM table is a ``table``. An HTML block's
-role is ``Unknown``: CommonMark declares raw HTML, not what it is. So is a link reference definition's
-(``[label]: url "title"``): the model has no role for it, but the text is evidence a learner needs to
-resolve ``[text][label]``, so it is a block, and ``markdown.link_definitions`` says how many.
-Thematic breaks and blank lines are not blocks; they stay in the bytes.
+role is ``Unknown``: CommonMark declares raw HTML, not what it is. So is a link reference
+definition's (``[label]: url "title"``): the model has no role for it, but the text is evidence a
+learner needs to resolve ``[text][label]``, so it is a block, and ``markdown.link_definitions``
+says how many. Thematic breaks and blank lines are not blocks; they stay in the bytes.
 
 The text is the file's bytes after a leading UTF-8 BOM, decoded as UTF-8; spans count code
 points, an invalid sequence counting as the U+FFFD that Python's ``errors="replace"`` gives it,
@@ -99,20 +99,23 @@ OBSERVED: Final = AssertionKind.OBSERVED
 
 # Constructs plain text rarely has. A fence or a GFM delimiter row is enough alone; the others
 # count when two kinds appear. List markers are never counted: YAML and plain notes use them.
-_STRONG: Final = {
-    "fenced code": re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n(?:.*\n)*? {0,3}\1", re.MULTILINE),
-    "table delimiter row": re.compile(
-        r"^ {0,3}\|? *:?-{3,}:? *(\| *:?-{3,}:? *)+\|? *$", re.MULTILINE
-    ),
-}
-_WEAK: Final = {
-    "ATX heading": re.compile(r"^ {0,3}#{1,6}[ \t]+\S", re.MULTILINE),
-    "setext heading": re.compile(r"^ {0,3}\S[^\n]*\n {0,3}(=+|-{2,}) *$", re.MULTILINE),
-    "link": re.compile(r"!?\[[^\]\n]+\]\([^)\s]+\)"),
-    "strong emphasis": re.compile(r"(\*\*|__)\S[^\n]*?\S\1"),
-    "blockquote": re.compile(r"^ {0,3}> ?\S", re.MULTILINE),
-    "code span": re.compile(r"`[^`\n]+`"),
-}
+# The probe runs on hostile bytes, so it reads each line once, left to right: no pattern here can
+# backtrack over a line more than once, and a line is read only up to PROBE_LINE characters.
+PROBE_LINE: Final = 4096
+_ATX: Final = re.compile(r" {0,3}#{1,6}[ \t]+\S")
+_SETEXT_UNDERLINE: Final = re.compile(r" {0,3}(?:=+|-{2,}) *")
+_DELIMITER_CELL: Final = re.compile(r":?-{3,}:?")
+_BLOCKQUOTE: Final = re.compile(r" {0,3}> ?\S")
+_LINK_TARGET: Final = re.compile(r"[)\s]")
+_STRONG_NAMES: Final = ("fenced code", "table delimiter row")
+_WEAK_NAMES: Final = (
+    "ATX heading",
+    "setext heading",
+    "link",
+    "strong emphasis",
+    "blockquote",
+    "code span",
+)
 _CLOSING: Final = re.compile(r"(?:---|\.\.\.)[ \t]*")
 _TITLE: Final = re.compile(r"title:(?=[ \t]|$)")
 
@@ -270,10 +273,106 @@ def _front_matter(
 # --- The adapter ------------------------------------------------------------------------------
 
 
+def _opens_fence(line: str) -> str | None:
+    """The fence a line opens (its run of three or more backticks or tildes), else ``None``."""
+    stripped = line.lstrip(" ")
+    if len(line) - len(stripped) > 3 or stripped[:3] not in ("```", "~~~"):
+        return None
+    mark = stripped[0]
+    return stripped[: len(stripped) - len(stripped.lstrip(mark))]
+
+
+def _is_delimiter_row(line: str) -> bool:
+    """A GFM delimiter row: two or more cells of ``---`` with optional colons, pipes between."""
+    stripped = line.strip(" ")
+    if len(line) - len(line.lstrip(" ")) > 3 or "|" not in stripped:
+        return False
+    cells = stripped.removeprefix("|").removesuffix("|").split("|")
+    return len(cells) >= 2 and all(_DELIMITER_CELL.fullmatch(cell.strip(" ")) for cell in cells)
+
+
+def _paragraph_line(line: str) -> bool:
+    """Text a setext underline can follow: indented at most three spaces, then non-space."""
+    stripped = line.lstrip(" ")
+    return len(line) - len(stripped) <= 3 and stripped[:1].strip() != ""
+
+
+def _has_link(line: str) -> bool:
+    """``[label](target)`` within the line, the label non-empty, the target without spaces."""
+    start, stop = 0, -1  # the nearest ``)`` or space at or after a target's first character
+    while (close := line.find("](", start)) >= 0:
+        start = close + 2
+        opening = line.find("[", line.rfind("]", 0, close) + 1, close)
+        if opening < 0 or close - opening < 2:
+            continue
+        if stop < start:
+            found = _LINK_TARGET.search(line, start)
+            stop = found.start() if found else len(line)
+            if stop == len(line):
+                return False  # nothing later closes it either
+        if stop > start and line[stop] == ")":
+            return True
+    return False
+
+
+def _has_strong(line: str) -> bool:
+    """``**text**`` or ``__text__`` within the line, the text starting and ending in non-space."""
+    for mark in ("**", "__"):
+        start = 0
+        while (open_ := line.find(mark, start)) >= 0:
+            inner = open_ + 2
+            if inner >= len(line) or line[inner].isspace():
+                start = open_ + 1
+                continue
+            close = line.find(mark, inner + 1)
+            while close >= 0 and line[close - 1].isspace():
+                close = line.find(mark, close + 1)
+            return close >= 0  # no closing mark later serves any later opening either
+    return False
+
+
+def _has_code_span(line: str) -> bool:
+    tick = line.find("`")
+    while tick >= 0:
+        close = line.find("`", tick + 1)
+        if close < 0:
+            return False
+        if close > tick + 1:
+            return True
+        tick = close
+    return False
+
+
 def _probe_kinds(text: str) -> tuple[list[str], list[str]]:
-    strong = [name for name, pattern in _STRONG.items() if pattern.search(text)]
-    weak = [name for name, pattern in _WEAK.items() if pattern.search(text)]
-    return strong, weak
+    """The Markdown constructs in ``text`` (newlines as LF), strong kinds then weak, in order."""
+    found: set[str] = set()
+    fence: str | None = None
+    previous = ""
+    for raw in text.split("\n"):
+        line = raw[:PROBE_LINE]
+        if fence is not None:
+            if line.lstrip(" ").startswith(fence) and len(line) - len(line.lstrip(" ")) <= 3:
+                found.add("fenced code")
+                fence = None
+        elif "fenced code" not in found:
+            fence = _opens_fence(line)
+        if "table delimiter row" not in found and _is_delimiter_row(line):
+            found.add("table delimiter row")
+        if _ATX.match(line):
+            found.add("ATX heading")
+        if _SETEXT_UNDERLINE.fullmatch(line) and _paragraph_line(previous):
+            found.add("setext heading")
+        if _BLOCKQUOTE.match(line):
+            found.add("blockquote")
+        for name, test in (
+            ("link", _has_link),
+            ("strong emphasis", _has_strong),
+            ("code span", _has_code_span),
+        ):
+            if name not in found and test(line):
+                found.add(name)
+        previous = line
+    return ([n for n in _STRONG_NAMES if n in found], [n for n in _WEAK_NAMES if n in found])
 
 
 class MarkdownAdapter:
