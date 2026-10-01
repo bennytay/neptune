@@ -50,7 +50,8 @@ KNOWN_STORAGE: Final = {"sqlite3": ".db3", "mcap": ".mcap"}
 KNOWN_VERSIONS: Final = range(1, 10)
 MAX_ROWS: Final = 10_000
 LISTED: Final = 16  # entries a finding lists before it counts the rest
-PART: Final = re.compile(r"(?P<stem>.*)_(?P<index>[0-9]+)(?P<ext>\.[^./]+)(\.[a-z0-9]+)?")
+LONG_INDEX: Final = re.compile(r".*_[0-9]{19,}\.[^./]+(\.[a-z0-9]+)?")
+PART: Final = re.compile(r"(?P<stem>.*)_(?P<index>[0-9]{1,18})(?P<ext>\.[^./]+)(\.[a-z0-9]+)?")
 TOPIC_COLUMNS: Final = (
     "name",
     "type",
@@ -589,6 +590,18 @@ class Metadata:
         self, names: list[str], paths: list[_yaml.Scalar], parts: list[_Part]
     ) -> None:
         """rosbag2 names the parts of a split bag ``<name>_<n>.<ext>``, counting from 0."""
+        long = [n for n in names if LONG_INDEX.fullmatch(n.rsplit("/", 1)[-1])]
+        if long:
+            anchor = next(s for s in [*paths, *(p.path for p in parts)] if s.text == long[0])
+            self.say(
+                "part_unnumbered",
+                FindingCategory.UNSUPPORTED,
+                Severity.INFO,
+                self.range(anchor),
+                f"{len(long)} listed part name(s) end in more than 18 digits; they are not read as"
+                " numbered parts, so gaps in the numbering are not checked",
+                {"parts": [n[:256] for n in long[:LISTED]], "total": len(long)},
+            )
         found = [m for n in names if (m := PART.fullmatch(n.rsplit("/", 1)[-1]))]
         if not found or len(found) != len(names):
             return

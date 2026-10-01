@@ -677,9 +677,21 @@ def test_a_single_listed_part_that_is_not_the_first_is_a_gap() -> None:
     finding = next(f for f in run(text.encode()).findings() if f.code == "rosbag2.part_gap")
     assert finding.details["missing"] == [0, 1, 2] and finding.details["missing_count"] == 3
     assert "part_gap" not in codes(run(text.replace("bag_3", "bag_0").encode()))
-    huge = text.replace("bag_3", "bag_" + "9" * 40)
+    huge = text.replace("bag_3", "bag_" + "9" * 18)
     gap = next(f for f in run(huge.encode()).findings() if f.code == "rosbag2.part_gap")
     assert len(gap.details["missing"]) == 64  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("digits", [19, 40, 4300, 4301, 20000])
+def test_a_part_name_with_a_huge_digit_run_is_a_finding_not_a_crash(digits: int) -> None:
+    name = "x_" + "7" * digits + ".db3"
+    for lists in (
+        f"  relative_file_paths:\n    - {name}\n",
+        f"  files:\n    - path: {name}\n",
+    ):
+        out = run(("rosbag2_bagfile_information:\n  version: 5\n" + lists).encode())
+        assert "part_unnumbered" in codes(out) and "part_gap" not in codes(out)
+        assert records(out, Run)
 
 
 def test_undeclared_topic_ids_are_counted_without_keeping_each(tmp_path: Path) -> None:

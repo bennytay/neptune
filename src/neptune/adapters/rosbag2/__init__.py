@@ -121,6 +121,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "the files list is not in order of start time (inconsistent, warning)",
         ),
         _code(
+            "part_unnumbered",
+            "listed part names ending in more than 18 digits are not read as numbered parts"
+            " (unsupported, info)",
+        ),
+        _code(
             "parts_disagree",
             "relative_file_paths and files list different parts: missing from or extra to each"
             " other (inconsistent, warning)",
