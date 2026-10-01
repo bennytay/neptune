@@ -107,10 +107,13 @@ Path("plan.json").write_bytes(plan.explanation.dumps())  # canonical JSON, neptu
   confidence, reasons and why it won or lost, the adapter's `inspect` summary and the plan; the
   session grouping with reasons and contested readings; work left and heavy sources; everything left
   out (unsupported, ambiguous, quarantined, unreadable, skipped, links) with why. ADR 0044.
-- It parses nothing (`ingest` is never called) and **keeps nothing** in the workspace: no ledger, no
-  plan. So the ingest after it plans again, and explaining never changes any later package.
+- It parses nothing (`ingest` is never called) and only reads the sources. Like any dry run it warms
+  the workspace (ledger and plans), so the ingest after it plans nothing again; no package depends on
+  what the workspace held.
 - Byte-identical for the same folder, adapters, config and workspace contents; no job id, clock or
-  absolute path inside.
+  absolute path inside. Bounded: long lists end in `*_omitted` counts and a
+  `neptune.explain.truncated` finding (ADR 0044 §8).
+- From the shell: `neptune ingest SOURCE --explain [--json]` (`cli.md`).
 
 ## Adapters and options
 

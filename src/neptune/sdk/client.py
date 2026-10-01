@@ -5,7 +5,7 @@ the same parameters and results; the async ones are awaited. Both build the runt
 ``IngestJob`` and nothing else decides what is ingested:
 
 - ``ingest(source, destination)`` runs the whole job and returns an ``IngestResult``;
-- ``dry_run(source)`` runs it up to and including ``plan``, keeps nothing in the workspace and
+- ``dry_run(source)`` runs it up to and including ``plan``, reads the sources only and
   returns its ``Explanation`` on the result (``IngestJob.dry_run``, ADR 0044);
 - ``start(source, destination)`` and ``start_dry_run(source)`` run it on a thread of its own and
   return a handle to iterate its events, wait for its result, or cancel it.
