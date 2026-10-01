@@ -427,7 +427,10 @@ def test_an_empty_root_gives_an_empty_package(tmp_path: Path) -> None:
     (tmp_path / "empty").mkdir()
     seen = run(tmp_path / "empty", tmp_path)
     package = read_package(tmp_path / "package")
-    assert package.receipt.sources == () and package.receipt.transforms == ()
+    assert package.receipt.sources == ()
+    # Grouping ran over nothing: its transform, and its two tables present and empty (ADR 0036).
+    assert [t.adapter_id for t in package.receipt.transforms] == ["neptune.grouping"]
+    assert package.derived == {"session_proposal": (), "session_unassigned": ()}
     summaries = {e.phase: e.details for e in seen if e.kind == "phase_finished"}
     assert summaries[Phase.PARSE] == {"chunks": 0, "failed": 0, "skipped": 0}
     assert [e.phase for e in seen if e.kind == "phase_started"] == list(PHASES)
