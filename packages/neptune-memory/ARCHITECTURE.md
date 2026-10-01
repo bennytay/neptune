@@ -33,8 +33,8 @@ flowchart LR
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1 built
   class K2 partial
-  class CON,DER,STO,SPA,EPI,CLI,K3 todo
-  class SCH partial
+  class DER,STO,SPA,EPI,CLI,K3 todo
+  class CON,SCH partial
   class SEAM built
   class LED,OUT ext
   style M fill:#8b949e0f,stroke:#8b949e
