@@ -23,6 +23,7 @@ Imports the runtime, the store and the adapters; the CLI (MVL-11) wraps this.
 """
 
 from neptune.adapters.builtin import builtin_adapters
+from neptune.discovery.ignore import DEFAULT_PATTERNS, IgnorePolicy
 from neptune.runtime import EventSink, Isolation, JobEvent, JobOptions, JobState, Limits, Phase
 from neptune.sdk.client import (
     AsyncIngestion,
@@ -42,6 +43,7 @@ from neptune.sdk.errors import (
     JobFailedError,
     NeptuneError,
     NetworkRefusedError,
+    NothingToResumeError,
     PackageInvalidError,
     PublishIncompleteError,
     SandboxUnavailableError,
@@ -52,12 +54,14 @@ from neptune.sdk.result import IngestResult, committed_result, read_package
 from neptune.store.workspace import Workspace
 
 __all__ = [
+    "DEFAULT_PATTERNS",
     "ERRORS",
     "AsyncIngestion",
     "AsyncNeptune",
     "ConfigurationError",
     "DestinationExistsError",
     "EventSink",
+    "IgnorePolicy",
     "IngestResult",
     "Ingestion",
     "InvalidDestinationError",
@@ -72,6 +76,7 @@ __all__ = [
     "Neptune",
     "NeptuneError",
     "NetworkRefusedError",
+    "NothingToResumeError",
     "PackageInvalidError",
     "Phase",
     "PublishIncompleteError",

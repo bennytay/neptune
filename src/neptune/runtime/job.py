@@ -74,6 +74,7 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.registry import AdapterRegistry, SelectionStatus
+from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
 from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe
 from neptune.discovery.reader import LocalReader, SourceChangedError
@@ -190,7 +191,9 @@ class JobOptions:
     receipt and ``sandbox_ready`` event record exactly which guarantees were lost. These are the
     runtime transform's config, so a package's runtime findings name the policy they were made
     under. ``config`` gives each adapter, by id, the option values to configure it with. ``job``
-    names the job in its envelope; by default a fresh random token.
+    names the job in its envelope; by default a fresh random token. ``ignore`` says which ignore
+    rules the walk applies (ADR 0043): by default version-control internals, OS metadata and the
+    root's ``.neptune-ignore``; whatever they leave unread is a finding naming the rule.
     """
 
     attempts: int = DEFAULT_ATTEMPTS
@@ -199,8 +202,11 @@ class JobOptions:
     isolation: Isolation = Isolation.SUBPROCESS
     limits: Limits = DEFAULT_LIMITS
     allow_degraded_sandbox: bool = False
+    ignore: IgnorePolicy = field(default_factory=IgnorePolicy)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.ignore, IgnorePolicy):
+            raise JobError(f"ignore must be an IgnorePolicy, got {self.ignore!r}")
         if isinstance(self.attempts, bool) or not isinstance(self.attempts, int):
             raise JobError(f"attempts must be an integer, got {self.attempts!r}")
         if self.attempts < 1:
@@ -473,8 +479,8 @@ class IngestJob:
     ) -> None:
         self.root = Path(root)
         self.destination = Path(destination) if destination is not None else None
-        if not self.root.is_dir():
-            raise JobError(f"{self.root} is not a directory")
+        if not self.root.is_dir() and not self.root.is_file():  # one file is a root too (ADR 0043)
+            raise JobError(f"{self.root} is neither a directory nor a regular file")
         if self.destination is not None and self.destination.exists():
             raise JobError(f"{self.destination} exists; a package is written once")
         self.workspace = workspace
@@ -623,7 +629,7 @@ class IngestJob:
         self._emit(events.WORKSPACE_SWEPT, {"scratch": scratch, "staging": staging})
 
     def _phases(self, started: str, *, dry: bool) -> ContentId | None:
-        source = self._local = LocalSource(self.root)
+        source = self._local = self._source()
         entries = self._discover(source)
         scanned = self._fingerprint(source, entries)
         self._inspect(source)
@@ -772,9 +778,13 @@ class IngestJob:
     def _skip(self, entry: SkippedEntry) -> None:
         """A walk entry that was not read: discovery's finding says why; this is its event."""
         location = local_location(entry.raw_path)
-        self._emit(
-            events.ENTRY_SKIPPED, {"location": location.to_json(), "reason": str(entry.reason)}
-        )
+        details: dict[str, JsonValue] = {
+            "location": location.to_json(),
+            "reason": str(entry.reason),
+        }
+        if entry.rule is not None:  # left unread by an ignore rule: which one (ADR 0043)
+            details["rule"] = entry.rule.to_json()
+        self._emit(events.ENTRY_SKIPPED, details)
 
     def _unreadable(self, source: _Source, exc: Exception) -> None:
         """A source could not be read when the job came to it: changed, refused, or an I/O error.
@@ -871,6 +881,21 @@ class IngestJob:
 
     # --- discover ------------------------------------------------------------------------------
 
+    def _source(self) -> LocalSource:
+        """The root as a source, walked under the job's ignore rules (ADR 0043).
+
+        The rules are the policy's and the root's ``.neptune-ignore``; one that cannot be used
+        fails the job as a configuration error, before anything is walked.
+        """
+        with self._enter(Phase.DISCOVER):
+            try:
+                rules = self.options.ignore.rules(LocalSource(self.root))
+            except IgnoreError as exc:
+                raise JobError(f"the ignore rules cannot be used: {exc}") from exc
+            except OSError as exc:
+                raise JobError(f"{self.root} cannot be read: {exc}") from exc
+            return LocalSource(self.root, ignore=rules)
+
     def _discover(self, source: LocalSource) -> tuple[WalkEntry, ...]:
         with self._enter(Phase.DISCOVER):
             entries = tuple(source.walk())
@@ -915,8 +940,9 @@ class IngestJob:
             except OSError as exc:
                 message = f"the ledger of {self.root} cannot be saved: {exc}"
                 raise JobError(message) from _unusable(exc)
+            producers = result.producers  # discovery's, and the ignore rules' (ADR 0043)
             for finding in result.findings:  # what the walk saw and did not read (ADR 0029 §1)
-                self._record(finding, result.transform)
+                self._record(finding, producers[finding.transform])
             walked = {
                 (e.raw_path, e.reason, e.detail) for e in entries if isinstance(e, SkippedEntry)
             }
