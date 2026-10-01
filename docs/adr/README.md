@@ -12,7 +12,7 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0005](0005-timestamp-domains.md) | Timestamp domains | Accepted |
 | [0006](0006-provenance-and-locators.md) | Provenance and locator model | Accepted |
 | [0007](0007-coordinate-frames.md) | Coordinate-frame semantics | Accepted |
-| [0008](0008-adapter-abi.md) | Adapter ABI surface | Accepted |
+| [0008](0008-adapter-abi.md) | Adapter ABI surface | Accepted; exact types in 0024 |
 | [0009](0009-source-revisions-and-id-rendering.md) | Source revisions, dedup policy and id rendering | Accepted; §3–§5 amended by 0010 |
 | [0010](0010-lossless-local-locations.md) | Lossless local locations: raw names, symlinks, absences | Accepted |
 | [0011](0011-knowledge-json-and-types.md) | `Knowledge[T]`: JSON shape, Python types, provenance slot | Accepted; §2 clarified by 0023 |
@@ -28,4 +28,5 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0021](0021-schema-export-and-worked-examples.md) | The canonical JSON Schema and the worked examples | Accepted |
 | [0022](0022-ingest-package-and-receipt.md) | The ingest package and its receipt | Accepted; §1 amended by 0023 |
 | [0023](0023-m1-gate-freeze-and-growth.md) | The M1 gate: the model freezes, grows only by addition, and fixes four gaps | Accepted |
+| [0024](0024-adapter-abi-types-selection-and-reference-adapter.md) | The adapter ABI's exact types, adapter selection, and the reference adapter | Accepted |
 | [0027](0027-hostile-file-handling.md) | Hostile file handling: walk findings, archive limits, source verification, scratch space | Accepted |
