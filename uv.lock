@@ -544,6 +544,13 @@ source = { editable = "packages/neptune-ledger" }
 dependencies = [
     { name = "neptune" },
     { name = "psycopg", extra = ["binary"] },
+    { name = "pyarrow" },
+]
+
+[package.optional-dependencies]
+contract-tests = [
+    { name = "jsonschema" },
+    { name = "pytest" },
 ]
 
 [package.dev-dependencies]
@@ -553,9 +560,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "jsonschema", marker = "extra == 'contract-tests'", specifier = ">=4.23" },
     { name = "neptune", editable = "." },
     { name = "psycopg", extras = ["binary"], specifier = "==3.3.6" },
+    { name = "pyarrow", specifier = ">=25.0.1" },
+    { name = "pytest", marker = "extra == 'contract-tests'", specifier = ">=8.3" },
 ]
+provides-extras = ["contract-tests"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pgserver", specifier = "==0.1.4" }]
