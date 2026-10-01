@@ -58,6 +58,9 @@ another's evidence.
      each one's `storage`: `referenced` or `materialised`, from `manifest.sources`) and
      `source_location` (every location seen: one row per `source_revision` per package, with the
      location object as stated and the revisions it supersedes).
+   - Locators and locations are stored as canonical JSON text (root ADR 0002), never `jsonb`: text
+     keeps the canonical bytes, so sibling locators compare by exact string equality, and it holds
+     an escaped NUL (`\u0000`) from hostile input, which `jsonb` refuses.
    - `transform` (adapter id, adapter version, config hash, libraries; once per transform id) and
      `transform_upstream` (the lineage DAG's edges as declared). `upstream_id` has no foreign key: a
      declared edge to a transform not yet registered is kept, not dropped.
@@ -88,14 +91,18 @@ another's evidence.
 7. **Indexes for threads, lineage and time windows.** Thread keys, membership and the current view
    are ADR 0003's; the thread index itself is a derived table its implementation adds by a later
    migration. The catalog indexes the columns it reads, every lookup within one tenant's schema:
-   declared keys by `record_logical_id (namespace, value, kind)`; evidence anchors and lineage sets
-   `(record kind, source content id)` by `record (source_content_id, kind, source_locator)`, siblings
-   sharing a locator; per-clock order by `record (world_clock, world_first, world_last,
+   declared logical-id keys by `record_logical_id (namespace, value, kind)`; evidence anchors and
+   lineage sets `(record kind, source content id)` by `record (source_content_id, kind,
+   md5(source_locator))`, siblings sharing a locator (a digest, so a long locator cannot exceed the
+   B-tree entry limit); per-clock order by `record (world_clock, world_first, world_last,
    registration_key)`; transaction order and `as_of` by `record (registration_key, record_id,
    package_id)`, `package (tx_seq)` unique and `package (tx_time, tx_seq)`; transforms by
    `transform (adapter_id, adapter_version)`, `record (transform_id)` and `transform_upstream
    (upstream_id)`; plus `record (record_id)`, `record (package_id, kind)`, `package_source
    (content_id)` and a GIN index on `ambiguous_pointers`. Partition pruning on `kind` narrows each.
+   ADR 0003's `software_version` keys (a `SoftwareItem`'s commit or digest) are not logical ids;
+   the catalog finds their records through the `software_configuration` partition, and the
+   derived thread index holds the keys.
 8. **Tests run against a real PostgreSQL 16 with no service.** The `pgserver` wheel (pinned,
    test-only dependency group) ships PostgreSQL 16 binaries; the tests start one server per session
    and a fresh database per test.

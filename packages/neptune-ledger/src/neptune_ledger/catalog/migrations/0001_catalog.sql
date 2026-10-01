@@ -137,7 +137,7 @@ CREATE TABLE source_location (
   revision_id record_id NOT NULL,
   package_id content_id NOT NULL,
   content_id content_id NOT NULL,
-  location jsonb NOT NULL CHECK (jsonb_typeof(location) = 'object' AND location ? 'kind'),
+  location text NOT NULL CHECK (location LIKE '{%}'),  -- canonical JSON, as the record states it
   supersedes text[] NOT NULL DEFAULT '{}',  -- record ids of the revisions this one supersedes
   PRIMARY KEY (tenant_id, revision_id, package_id),
   FOREIGN KEY (tenant_id, package_id) REFERENCES package (tenant_id, package_id),
@@ -197,7 +197,7 @@ CREATE TABLE record (
   -- Provenance summary: the record-level provenance (a finding's subject and transform). The
   -- source and locator are the record's EvidenceRef, the evidence anchor of ADR 0003 §1.
   source_content_id content_id,
-  source_locator jsonb CHECK (jsonb_typeof(source_locator) = 'array'),
+  source_locator text CHECK (source_locator LIKE '[%]'),  -- canonical JSON text, never jsonb
   transform_id record_id,
   assertion_kind text CHECK (assertion_kind IN ('observed', 'stated')),
   -- World time of the record as ADR 0003 §3 defines it: start and end ticks on the start's clock,
@@ -252,8 +252,10 @@ CREATE TABLE record_structured_record PARTITION OF record FOR VALUES IN ('struct
 CREATE INDEX record_by_id ON record (record_id);
 CREATE INDEX record_by_package ON record (package_id, kind);
 CREATE INDEX record_by_transform ON record (transform_id) WHERE transform_id IS NOT NULL;
--- Evidence anchors and lineage sets: (source content id, kind), then siblings by locator.
-CREATE INDEX record_by_evidence ON record (source_content_id, kind, source_locator)
+-- Evidence anchors and lineage sets: (source content id, kind), then siblings by locator. The
+-- locator is indexed by digest, so a long one cannot exceed the B-tree entry limit; queries
+-- compare source_locator itself.
+CREATE INDEX record_by_evidence ON record (source_content_id, kind, md5(source_locator))
   WHERE source_content_id IS NOT NULL;
 -- Per-clock order: (clock, start, end, registration key), as ADR 0003 §3 sorts a partition.
 CREATE INDEX record_by_world_time

@@ -215,3 +215,27 @@ def test_a_records_registration_key_is_its_packages_sequence(catalog: Conn) -> N
             " registration_key, line, schema_version) VALUES ('acme', 'run', %s, %s, 2, 1, 1)",
             ("rec:sha256:" + "d" * 64, package),
         )
+
+
+@pytest.mark.parametrize(
+    "locator",
+    [
+        '[{"kind":"json_pointer","pointer":"/a\\u0000b"}]',  # an escaped NUL from hostile text
+        '[{"kind":"json_pointer","pointer":"/' + "x" * 5000 + '"}]',  # past the B-tree limit
+    ],
+)
+def test_hostile_locators_are_stored_as_stated(catalog: Conn, locator: str) -> None:
+    package = _package(catalog, 1)
+    source = "sha256:" + "e" * 64
+    catalog.execute(
+        f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id, registration_key,"
+        " line, schema_version, source_content_id, source_locator)"
+        " VALUES ('acme', 'run', %s, %s, 1, 1, 1, %s, %s)",
+        ("rec:sha256:" + "d" * 64, package, source, locator),
+    )
+    row = catalog.execute(
+        f"SELECT source_locator FROM {SCHEMA}.record WHERE source_content_id = %s"
+        " AND kind = 'run' AND md5(source_locator) = md5(%s)",
+        (source, locator),
+    ).fetchone()
+    assert row == (locator,)

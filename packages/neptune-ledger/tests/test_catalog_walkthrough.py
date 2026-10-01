@@ -75,6 +75,11 @@ def load_package(name: str) -> Package:
     return Package(name, manifest_bytes, manifest, receipt, tables)
 
 
+def canonical(value: Any) -> str:
+    """Canonical JSON text (root ADR 0002): sorted keys, no whitespace, UTF-8."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
 def _escape(token: str) -> str:
     return token.replace("~", "~0").replace("/", "~1")
 
@@ -137,14 +142,14 @@ def provenance_summary(kind: str, record: dict[str, Any]) -> tuple[str | None, .
         if subject["kind"] != "evidence":
             return None, None, record["transform"], None
         ref = subject["ref"]
-        return ref["source"], json.dumps(ref["locator"]), record["transform"], None
+        return ref["source"], canonical(ref["locator"]), record["transform"], None
     provenance = record.get("provenance")
     if provenance is None:  # source_artifact, source_revision, source_absence, transform_record
         return None, None, None, None
     evidence = provenance["evidence"]
     return (
         evidence["source"],
-        json.dumps(evidence["locator"]),
+        canonical(evidence["locator"]),
         provenance["transform"],
         provenance["assertion_kind"],
     )
@@ -194,7 +199,7 @@ def register(conn: Conn, schema: str, package: Package) -> tuple[str, int, bool]
                     revision["id"],
                     pid,
                     revision["content_id"],
-                    json.dumps(revision["location"]),
+                    canonical(revision["location"]),
                     revision["supersedes"],
                 ),
             )
