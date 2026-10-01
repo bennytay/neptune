@@ -104,6 +104,14 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
      version). Details record a fixed `error` code mapped from the exception's class (`bad_zip`,
      `bad_tar`, `bad_deflate`, `end_of_data`, ...), never the library's message, which varies
      across Python and zlib versions.
+   - A tar ends only at a zero block. Past the first header, `TarFile.next` quietly takes a header
+     cut short, missing or invalid for the end of the archive, so every later member would go
+     unseen in a listing called complete. `TarInfo.fromtarfile` is overridden to turn these into
+     findings citing `header_offset` (in the inflated stream for a compressed tar), with
+     `complete = False`: a header cut short, and a tar that stops at a member boundary without its
+     end-of-archive marker or right after an extended header, are `truncated`; a bad checksum or a
+     negative size is `corrupt`. A lone zero block (half the marker) ends the archive, as it does
+     for GNU tar.
    - Subjects are `EvidenceRef`s: the member's byte range in the archive, under the outer member's
      range when nested, and under the compressed stream's range for a compressed tar (ADR 0016).
      Ranges are cut to the archive, since a header may declare any offset or size.
@@ -150,6 +158,9 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
   lie low and `zipfile` builds every entry before a caller sees one.
 - **Catching only the documented exceptions.** `tarfile` and `zipfile` raise `IndexError`,
   `ValueError` and `NotImplementedError` on hostile headers; any of them would fail the job.
+- **Accepting a tar that stops at a member boundary without its end-of-archive marker.** Every
+  common writer emits the marker, and a copy cut at a filesystem block boundary lands on a member
+  boundary whenever members fill whole blocks; that tar would read as complete with members missing.
 - **`RecursionError` as the limit on chained tar headers.** It strikes at a depth that depends on
   the caller's stack, so the same archive would give different findings from different call
   sites, and the links it holds until then can be gigabytes.
@@ -186,5 +197,5 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
   follow-up decision.
 - Revisit if a format needs its own limits (video containers, bags of bags), if `tarfile` or
   `zipfile` change the private hooks relied on (`TarInfo._proc_member`, `TarFile.offset` and
-  `members`, `zipfile._EndRecData`), or if inspection time on compressed corpora is measured to
+  `members`, `TarFile.next` reading through `TarInfo.fromtarfile`, `zipfile._EndRecData`), or if inspection time on compressed corpora is measured to
   dominate ingest.

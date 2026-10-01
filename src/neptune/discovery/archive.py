@@ -31,7 +31,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import IO, Final, Protocol, cast
+from typing import IO, Final, Protocol, Self, cast
 
 from neptune.discovery.policy import bytes_field, path_problem, text_field
 from neptune.identity.findings import ingest_finding
@@ -859,7 +859,15 @@ _EXTENDED_HEADERS: Final = frozenset(
     }
 )
 _MAX_HEADER_CHAIN: Final = 32  # extended headers before one member; real archives use at most 4
-_TRUNCATION_MESSAGES: Final = ("unexpected end of data", "truncated header", "empty file")
+# What tarfile says when the stream ends inside a member, or where an extended header promised one.
+_TRUNCATION_MESSAGES: Final = ("unexpected end of data", "truncated header", "empty header")
+# tarfile's header errors, undocumented and so not in typeshed. ``EOFHeaderError`` (a zero block,
+# the end-of-archive marker) is deliberately absent.
+_HEADER_CUT_SHORT: Final[tuple[type[tarfile.HeaderError], ...]] = (
+    tarfile.TruncatedHeaderError,  # type: ignore[attr-defined]
+    tarfile.EmptyHeaderError,  # type: ignore[attr-defined]
+)
+_HEADER_INVALID: Final[type[tarfile.HeaderError]] = tarfile.InvalidHeaderError  # type: ignore[attr-defined]
 _SPECIAL_TYPES: Final = {
     tarfile.FIFOTYPE: "fifo",
     tarfile.CHRTYPE: "character_device",
@@ -874,6 +882,21 @@ class _HeaderTooLarge(tarfile.TarError):
         super().__init__(message)
         self.message = message
         self.details = details
+
+
+class _HeaderDefect(tarfile.TarError):
+    """A member header cut short, missing or invalid, raised past ``TarFile.next`` to the caller.
+
+    Past the first header, ``next`` takes a ``TruncatedHeaderError``, ``EmptyHeaderError`` or
+    ``InvalidHeaderError`` for the end of the archive, so a tar cut inside a header, cut at a
+    member boundary or holding a bad header would list as complete with every later member
+    unseen. This is not a ``HeaderError``, so ``next`` lets it through.
+    """
+
+    def __init__(self, offset: int, *, truncated: bool) -> None:
+        super().__init__("truncated header" if truncated else "invalid header")
+        self.offset = offset
+        self.truncated = truncated
 
 
 class _GuardedTarFile(tarfile.TarFile):
@@ -900,8 +923,19 @@ class _GuardedTarInfo(tarfile.TarInfo):
     One header above ``MAX_HEADER_SIZE``, more than ``_MAX_HEADER_CHAIN`` chained before one
     member (a fixed cap, so a long chain is a finding at any stack depth, never a
     ``RecursionError`` that depends on the caller), or pax global headers above
-    ``MAX_HEADER_SIZE`` in total.
+    ``MAX_HEADER_SIZE`` in total. A header tarfile cannot parse is a ``_HeaderDefect``.
     """
+
+    @classmethod
+    def fromtarfile(cls, archive: tarfile.TarFile) -> Self:
+        # ``TarFile.next`` reads every member through here; only a zero block may end the archive.
+        offset = archive.offset  # where this member's headers start
+        try:
+            return super().fromtarfile(archive)
+        except _HEADER_CUT_SHORT as exc:
+            raise _HeaderDefect(offset, truncated=True) from exc
+        except _HEADER_INVALID as exc:
+            raise _HeaderDefect(offset, truncated=False) from exc
 
     def _proc_member(self, archive: tarfile.TarFile) -> tarfile.TarInfo:
         if self.type not in _EXTENDED_HEADERS:
@@ -1257,6 +1291,8 @@ def _header_too_large(state: _State, scope: tuple[Locator, ...], exc: _HeaderToo
 
 def _is_truncation(exc: BaseException) -> bool:
     """EOF inside a compressed stream, or tarfile's words for data that ends early."""
+    if isinstance(exc, _HeaderDefect):
+        return exc.truncated
     return isinstance(exc, EOFError) or (
         isinstance(exc, tarfile.TarError) and any(t in str(exc) for t in _TRUNCATION_MESSAGES)
     )
@@ -1266,13 +1302,16 @@ def _tar_error(state: _State, scope: tuple[Locator, ...], exc: BaseException) ->
     truncated = _is_truncation(exc)
     code = TRUNCATED if truncated else CORRUPT
     what = "ends before its declared structure does" if truncated else "cannot be decoded"
+    details = _error(exc)
+    if isinstance(exc, _HeaderDefect):
+        details = {**details, "header_offset": exc.offset}  # inflated stream if compressed
     state.finding(
         code,
         FindingCategory.CORRUPT,
         Severity.ERROR,
         scope,
         f"tar {what}; inspection stopped",
-        _error(exc),
+        details,
     )
 
 

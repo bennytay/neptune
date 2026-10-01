@@ -732,6 +732,90 @@ def test_a_truncated_tar_still_reports_its_whole_members(tmp_path: Path) -> None
     assert not report.complete
 
 
+def ustar_member(name: str, data: bytes) -> bytes:
+    info = tarfile.TarInfo(name)
+    info.size = len(data)
+    return info.tobuf(tarfile.USTAR_FORMAT) + data + bytes(-len(data) % 512)
+
+
+ONE = ustar_member("a.txt", b"a" * 10)  # one header block, one data block
+FULL = ONE + ustar_member("b.txt", b"b" * 10) + bytes(1024)
+
+
+def maybe_gzip(data: bytes, compress: bool) -> bytes:
+    return gzip.compress(data, mtime=0) if compress else data
+
+
+COMPRESS = pytest.mark.parametrize("compress", [False, True], ids=["plain", "gzip"])
+
+
+@COMPRESS
+@pytest.mark.parametrize(
+    "cut", [len(ONE) + 100, len(ONE)], ids=["inside-a-header", "at-a-member-boundary"]
+)
+def test_a_tar_cut_after_its_first_member_is_truncated(
+    tmp_path: Path, cut: int, compress: bool
+) -> None:
+    """Past the first header tarfile takes a short or missing header for the end of the archive."""
+    report = inspect(maybe_gzip(FULL[:cut], compress), tmp_path)
+    assert codes(report) == [TRUNCATED]
+    assert report.findings[0].details == {"error": "end_of_data", "header_offset": len(ONE)}
+    assert [m.name for m in report.members] == ["a.txt"]
+    assert not report.complete
+
+
+@pytest.mark.parametrize(
+    "header",
+    [pax_tar({"comment": "c"}, b"")[:1024], tarfile.TarInfo("n" * 200).tobuf(tarfile.GNU_FORMAT)],
+    ids=["pax", "gnu-long-name"],
+)
+def test_a_tar_cut_after_an_extended_header_is_truncated(tmp_path: Path, header: bytes) -> None:
+    """The header and its record block, then nothing: the member it describes is missing."""
+    report = inspect(header[:1024], tmp_path)
+    assert codes(report) == [TRUNCATED]
+    assert (report.members, report.complete) == ((), False)
+
+
+@COMPRESS
+@pytest.mark.parametrize(
+    ("data", "names"),
+    [(FULL, ["a.txt", "b.txt"]), (ONE + bytes(512), ["a.txt"])],
+    ids=["end-of-archive-marker", "lone-zero-block"],  # GNU tar too ends at a lone zero block
+)
+def test_a_tar_ends_at_its_first_zero_block(
+    tmp_path: Path, data: bytes, names: list[str], compress: bool
+) -> None:
+    report = inspect(maybe_gzip(data, compress), tmp_path)
+    assert (codes(report), report.complete) == ([], True)
+    assert [m.name for m in report.members] == names
+
+
+@COMPRESS
+def test_a_bad_header_after_the_first_is_corrupt_not_the_end(
+    tmp_path: Path, compress: bool
+) -> None:
+    bad = bytearray(ustar_member("b.txt", b"b" * 10))
+    bad[148:156] = b"0000000\x00"  # a well-formed checksum field holding the wrong sum
+    data = ONE + bytes(bad) + ustar_member("c.txt", b"c") + bytes(1024)
+    report = inspect(maybe_gzip(data, compress), tmp_path)
+    assert codes(report) == [CORRUPT]
+    assert report.findings[0].details == {"error": "bad_tar", "header_offset": len(ONE)}
+    assert [m.name for m in report.members] == ["a.txt"]  # c.txt is past the defect, unseen
+    assert not report.complete
+
+
+@pytest.mark.parametrize(
+    ("before", "names"), [(b"", []), (ONE, ["a.txt"])], ids=["first", "after-a-member"]
+)
+def test_a_negative_pax_size_is_corrupt(tmp_path: Path, before: bytes, names: list[str]) -> None:
+    """tarfile has moved its offset past the header when ``_block(-5)`` raises, even at 0."""
+    report = inspect(before + pax_tar({"size": "-5"}, b""), tmp_path)
+    assert codes(report) == [CORRUPT]
+    assert report.findings[0].details == {"error": "bad_tar", "header_offset": len(before)}
+    assert [m.name for m in report.members] == names
+    assert not report.complete
+
+
 def test_not_an_archive_and_an_empty_zip(tmp_path: Path) -> None:
     report = inspect(b"\x89MCAP0\r\n" + bytes(64), tmp_path)
     assert codes(report) == [UNRECOGNISED] and report.kind is None
