@@ -43,6 +43,10 @@ a directory of a million entries, a stream that never ends.
      one path (default 2: a tar inside a gzip), and `max_ratio`: a member declaring more than that
      many decoded bytes per compressed byte is reported and not decoded at all. Decoding stops at
      the budget whatever the stream declares, so a bomb costs at most `scan_bytes` of memory.
+   - Declared sizes are never trusted for reading: a member's head is decoded to a full head
+     whatever the container states, adapters are hinted what the stream holds, and a declaration
+     the stream contradicts is a `container_corrupt` finding. A stream container (gzip, bzip2, xz)
+     inside a member cut by the budget is not opened, because its trailer lies beyond the bytes.
    - Citations follow ADR 0016: a member's stored bytes are a `ByteRange` in its container's
      scope (compressed if the member is compressed; a gzip member is its whole stream), and a member
      of a nested container adds a step inside what the engine decoded. Headers are metadata.

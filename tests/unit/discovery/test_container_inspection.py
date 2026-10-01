@@ -6,6 +6,7 @@ its ``method`` says, must equal the bytes ``zipfile`` / ``tarfile`` / ``gzip`` h
 
 import bz2
 import gzip
+import hashlib
 import importlib.util
 import io
 import lzma
@@ -22,7 +23,21 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from neptune.adapters.builtin import builtin_adapters
-from neptune.adapters.contract import PROBE_HEAD_SIZE
+from neptune.adapters.contract import (
+    ABI_VERSION,
+    PROBE_HEAD_SIZE,
+    AdapterConfig,
+    AdapterDescriptor,
+    Chunk,
+    ChunkOutput,
+    FormatSpec,
+    InspectResult,
+    Plan,
+    ProbeHints,
+    ProbeResult,
+    Resources,
+    SourceReader,
+)
 from neptune.adapters.registry import AdapterRegistry, SelectionStatus
 from neptune.discovery.containers import (
     ContainerReport,
@@ -56,8 +71,41 @@ GENERATOR: Final = _load("make_probe_fixtures", FIXTURES / "probe" / "make_probe
 NOTES: Final = (FIXTURES / "text" / "notes.txt").read_bytes()
 
 
+class Invariant:
+    """An adapter that checks the ABI's head law on every probe and claims nothing."""
+
+    descriptor = AdapterDescriptor(
+        id="invariant",
+        version="1.0.0",
+        abi=ABI_VERSION,
+        summary="Asserts len(head) == min(hints.size, PROBE_HEAD_SIZE) for every probe.",
+        formats=(FormatSpec("Nothing"),),
+        record_kinds=("document_record",),
+        config=(),
+        libraries=(),
+        finding_codes=(),
+        locator_steps=(),
+        conventions=(),
+        resources=Resources(0, True),
+        security=(),
+    )
+
+    def probe(self, head: bytes, hints: ProbeHints) -> ProbeResult:
+        assert len(head) == min(hints.size, PROBE_HEAD_SIZE), (len(head), hints.size)
+        return ProbeResult(0.0, ())
+
+    def inspect(self, source: SourceReader, config: AdapterConfig) -> InspectResult:
+        raise NotImplementedError
+
+    def plan(self, source: SourceReader, config: AdapterConfig) -> Plan:
+        raise NotImplementedError
+
+    def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput:
+        raise NotImplementedError
+
+
 def registry() -> AdapterRegistry:
-    return AdapterRegistry([*builtin_adapters(), TALLY.TallyAdapter()])
+    return AdapterRegistry([*builtin_adapters(), TALLY.TallyAdapter(), Invariant()])
 
 
 def probe(data: bytes, name: str = "", policy: ProbePolicy | None = None) -> SourceProbe:
@@ -205,10 +253,17 @@ def test_the_member_limit_cuts_the_listing_and_says_so() -> None:
     }
 
 
-def _patch_zip(data: bytes, field: int, value: bytes) -> bytes:
-    """Overwrite ``field`` bytes after both headers of the first member."""
-    local = data.index(b"PK\x03\x04")
-    central = data.index(b"PK\x01\x02")
+def _nth(data: bytes, needle: bytes, n: int) -> int:
+    at = -1
+    for _ in range(n + 1):
+        at = data.index(needle, at + 1)
+    return at
+
+
+def _patch_zip(data: bytes, field: int, value: bytes, member: int = 0) -> bytes:
+    """Overwrite the ``field`` bytes after both headers of ``member`` (the CD lies 2 further)."""
+    local = _nth(data, b"PK\x03\x04", member)
+    central = _nth(data, b"PK\x01\x02", member)
     out = bytearray(data)
     out[local + field : local + field + len(value)] = value
     out[central + field + 2 : central + field + 2 + len(value)] = value
@@ -445,6 +500,106 @@ def test_bzip2_and_xz_sizes_are_known_only_when_the_stream_ends_in_the_head() ->
         (member,) = probed.container.members
         assert member.size is None  # not stated, and the stream goes on past the head
         assert selected(member) == "text"
+
+
+def test_a_declared_size_the_stream_contradicts_is_a_finding_and_the_member_is_still_probed() -> (
+    None
+):
+    for declared in (1000, 4):
+        data = _patch_zip(fixture("members.zip"), 22, declared.to_bytes(4, "little"))
+        probed = probe(data)
+        assert probed.container is not None
+        member = probed.container.members[0]
+        assert member.size == declared  # reported as the container states it
+        assert selected(member) == "text"  # probed with what the stream holds
+        assert codes(probed)[0] == ("container_corrupt", "")
+        assert probed.findings[0].details == {"declared": declared, "decoded": 232, "member": 0}
+
+
+def test_a_short_declared_size_for_a_long_stream_is_a_finding() -> None:
+    long = b"line of text\n" * 10000
+    data = _patch_zip(
+        _zip_bytes([("long.txt", long, zipfile.ZIP_DEFLATED)]), 22, (5).to_bytes(4, "little")
+    )
+    probed = probe(data)
+    assert probed.container is not None
+    assert selected(probed.container.members[0]) == "text"
+    assert codes(probed)[0] == ("container_corrupt", "")
+    assert "holds more than" in probed.findings[0].message
+
+
+def test_a_stored_member_whose_two_sizes_disagree_is_a_finding() -> None:
+    data = _patch_zip(fixture("members.zip"), 22, (99).to_bytes(4, "little"), member=2)
+    probed = probe(data)
+    assert probed.container is not None
+    assert selected(probed.container.members[2]) == "tally"
+    assert codes(probed)[0] == ("container_corrupt", "")
+    assert probed.findings[0].details == {"compressed_size": 17, "member": 2, "size": 99}
+
+
+def test_a_gzip_whose_stated_size_disagrees_with_its_stream_is_a_finding() -> None:
+    data = bytearray(gzip.compress(NOTES, mtime=0))
+    data[-4:] = (len(NOTES) + 1).to_bytes(4, "little")
+    probed = probe(bytes(data))
+    assert probed.container is not None
+    assert selected(probed.container.members[0]) == "text"
+    assert codes(probed)[0] == ("container_corrupt", "")
+    assert probed.findings[0].details == {
+        "declared": len(NOTES) + 1,
+        "decoded": len(NOTES),
+        "member": 0,
+    }
+
+
+def test_a_stream_container_inside_a_member_cut_by_the_budget_is_not_opened() -> None:
+    noise = b"".join(hashlib.sha256(i.to_bytes(4, "little")).digest() for i in range(3000))
+    for inner in (gzip.compress(noise, mtime=0), bz2.compress(noise), lzma.compress(noise)):
+        assert len(inner) > PROBE_HEAD_SIZE
+        outer = _zip_bytes([("inner", inner, zipfile.ZIP_DEFLATED)])
+        probed = probe(outer, policy=ProbePolicy(scan_bytes=PROBE_HEAD_SIZE))
+        assert probed.container is not None
+        (member,) = probed.container.members
+        assert member.nested is not None and member.nested.members == ()
+        assert codes(probed)[0] == ("container_limit", "bytes")
+        assert "inside a compressed member is not opened" in probed.findings[0].message
+        whole = probe(outer)  # the default budget covers it: opened, and its member probed
+        assert whole.container is not None
+        nested = whole.container.members[0].nested
+        assert nested is not None and nested.members[0].probe is not None
+
+
+def _tar_header(typeflag: bytes, size: int, name: bytes = b"x") -> bytes:
+    header = bytearray(512)
+    header[: len(name)] = name
+    header[100:108] = b"0000644\x00"
+    header[124:136] = f"{size:011o}\x00".encode()
+    header[156:157] = typeflag
+    header[257:265] = b"ustar\x0000"
+    header[148:156] = b" " * 8
+    header[148:156] = f"{sum(header):06o}\x00 ".encode()
+    return bytes(header)
+
+
+def test_a_flood_of_extended_headers_cannot_get_around_the_member_limit() -> None:
+    first = fixture("members.tar")[:1024]  # the first member and its data
+    data = first + _tar_header(b"x", 0) * 40 + bytes(1024)
+    probed = probe(data, policy=ProbePolicy(max_members=5))
+    assert probed.container is not None
+    assert [m.name for m in probed.container.members] == [b"notes.txt"]
+    assert not probed.container.complete
+    assert codes(probed)[0] == ("container_limit", "members")
+    assert probed.findings[0].details["headers"] == 16
+
+
+def test_an_extended_header_declaring_more_than_remains_is_corrupt() -> None:
+    data = fixture("members.tar")[:1024] + _tar_header(b"x", 1_000_000) + bytes(512)
+    probed = probe(data)
+    assert probed.container is not None
+    assert not probed.container.complete
+    assert codes(probed)[0] == ("container_corrupt", "")
+    assert (
+        "extended header" in probed.findings[0].message and "remain" in probed.findings[0].message
+    )
 
 
 # --- Hostile input: never an exception, always the same answer -----------------------------------

@@ -466,15 +466,21 @@ def _finish(
 
 
 def _decoded_head(
-    scope: _Scope, member: Member, decoded: _Decoded, declared: int | None
+    scope: _Scope,
+    member: Member,
+    decoded: _Decoded,
+    declared: int | None,
+    modulus: int | None = None,
 ) -> tuple[bytes | None, int | None, Callable[[], _View]]:
     """The head of a compressed member, or ``None`` with a finding if it cannot be decoded whole.
 
-    Returns the head, the size to hint to adapters, and how to view the decoded bytes.
+    Returns the head, the size to hint to adapters, and how to view the decoded bytes. The head is
+    decoded to ``PROBE_HEAD_SIZE`` whatever the container declares, so the hint is what the stream
+    holds: its length when the stream ended inside the head, the declared size when that is at
+    least a head, else "more than a head". A declared size the stream contradicts is a finding and
+    the member is still probed; ``modulus`` is for gzip, whose stated size is modulo 2^32.
     """
-    want = PROBE_HEAD_SIZE if declared is None else min(declared, PROBE_HEAD_SIZE)
-    head = decoded.prefix(want)
-    whole = decoded.eof
+    head = decoded.prefix(PROBE_HEAD_SIZE)
 
     def view() -> _View:
         return _Prefix(decoded.prefix(scope.policy.scan_bytes), decoded.eof)
@@ -488,7 +494,20 @@ def _decoded_head(
             member=member.index,
         )
         return None, None, view
-    if len(head) < want and not whole:
+    if decoded.eof:
+        actual = len(head)
+        stated = actual if declared is None else declared
+        if (actual if modulus is None else actual % modulus) != stated:
+            scope.corrupt(
+                member.entry,
+                f"member {member.index} declares {declared} decoded bytes; its stream holds"
+                f" {actual}",
+                declared=stated,
+                decoded=actual,
+                member=member.index,
+            )
+        return head, actual, view
+    if len(head) < PROBE_HEAD_SIZE:
         scope.corrupt(
             member.entry,
             f"member {member.index}: the {member.method} stream ends after {len(head)} decoded"
@@ -497,9 +516,31 @@ def _decoded_head(
             member=member.index,
         )
         return None, None, view
-    if declared is not None:
+    if declared is not None and declared >= PROBE_HEAD_SIZE:
         return head, declared, view
-    return head, len(head) if whole else len(head) + 1, view
+    if declared is not None and modulus is None:
+        scope.corrupt(
+            member.entry,
+            f"member {member.index} declares {declared} decoded bytes; its stream holds more"
+            f" than {PROBE_HEAD_SIZE}",
+            declared=declared,
+            member=member.index,
+        )
+    return head, PROBE_HEAD_SIZE + 1, view
+
+
+def _unopened(view: _View, scope: _Scope, kind: ContainerKind) -> ContainerReport:
+    """A stream container inside a compressed member cut by the budget: not opened, said so."""
+    scope.limit(
+        "bytes",
+        scope.cite(0, view.size),
+        f"a {kind} stream inside a compressed member is not opened: only its first {view.size}"
+        f" decoded bytes were examined (scan_bytes)",
+        container=str(kind),
+        decoded=view.size,
+        scan_bytes=scope.policy.scan_bytes,
+    )
+    return ContainerReport(kind, (), None, False)
 
 
 # --- zip -----------------------------------------------------------------------------------------
@@ -767,6 +808,14 @@ def _zip_member(
         )
         return member
     if method == 0:
+        if uncompressed != compressed:
+            scope.corrupt(
+                member.entry,
+                f"zip: stored member {index} declares {uncompressed} bytes but holds {compressed}",
+                compressed_size=compressed,
+                member=index,
+                size=uncompressed,
+            )
         stored = view.read(data_at, min(compressed, PROBE_HEAD_SIZE))
         return _finish(
             scope, member, stored, compressed, partial(_Window, view, data_at, compressed)
@@ -872,6 +921,10 @@ def _tar(view: _View, scope: _Scope) -> ContainerReport:
     long_name: bytes | None = None
     long_link: bytes | None = None
     pax: dict[bytes, bytes] = {}
+    headers = 0
+    # Extended headers (long names, pax) precede a member, normally one or two of them; a flood
+    # of them must not get around max_members, so every header read counts against this.
+    header_cap = 3 * scope.policy.max_members
 
     def budget_hit() -> None:
         scope.limit(
@@ -912,6 +965,19 @@ def _tar(view: _View, scope: _Scope) -> ContainerReport:
             cut_short(f"tar: the header at {offset} is cut short")
             complete = False
             break
+        headers += 1
+        if headers > header_cap:
+            scope.limit(
+                "members",
+                whole,
+                f"tar: {headers} headers read for {index} members; the listing stops"
+                f" (max_members {scope.policy.max_members})",
+                headers=headers,
+                listed=index,
+                max_members=scope.policy.max_members,
+            )
+            complete = False
+            break
         if header[257:262] != b"ustar":
             scope.corrupt(
                 scope.cite(offset, _BLOCK),
@@ -940,12 +1006,15 @@ def _tar(view: _View, scope: _Scope) -> ContainerReport:
         typeflag = header[156:157]
         data_at = offset + _BLOCK
         if typeflag in (b"L", b"K", b"x", b"g"):
-            want = min(size, _HEADER_LIMIT)
-            block = view.read(data_at, want)
-            if len(block) < want:
-                cut_short(f"tar: the extended header at {offset} is cut short")
+            available = max(0, view.size - data_at)
+            if size > available:
+                cut_short(
+                    f"tar: the extended header at {offset} declares {size} bytes;"
+                    f" {available} remain"
+                )
                 complete = False
                 break
+            block = view.read(data_at, min(size, _HEADER_LIMIT))
             if typeflag == b"L":
                 long_name = _cstring(block)
             elif typeflag == b"K":
@@ -1027,6 +1096,8 @@ def _tar(view: _View, scope: _Scope) -> ContainerReport:
 
 def _gzip(view: _View, scope: _Scope) -> ContainerReport:
     kind, size = ContainerKind.GZIP, view.size
+    if not view.complete:
+        return _unopened(view, scope, kind)  # the trailer, and so the sizes, lie beyond the budget
     whole = scope.cite(0, size)
     header = view.read(0, min(size, _HEADER_LIMIT))
     flags = header[3] if len(header) >= 10 else 0
@@ -1071,7 +1142,7 @@ def _gzip(view: _View, scope: _Scope) -> ContainerReport:
         )
         return ContainerReport(kind, (member,), 1, True)
     decoded = _Decoded(view, at, compressed, _Inflate(), scope.policy.scan_bytes)
-    head, hint, nested = _decoded_head(scope, member, decoded, declared)
+    head, hint, nested = _decoded_head(scope, member, decoded, declared, modulus=1 << 32)
     return ContainerReport(kind, (_finish(scope, member, head, hint, nested),), 1, True)
 
 
@@ -1079,6 +1150,8 @@ def _stream(
     view: _View, scope: _Scope, kind: ContainerKind, decompressor: _Decompressor
 ) -> ContainerReport:
     """A single-member stream that states neither a name nor a size: bzip2, xz."""
+    if not view.complete:
+        return _unopened(view, scope, kind)  # a cut stream would read as corrupt, which it is not
     whole = scope.cite(0, view.size)
     member = Member(0, b"", MemberKind.FILE, whole, None, view.size, str(kind))
     decoded = _Decoded(view, 0, view.size, decompressor, scope.policy.scan_bytes)
