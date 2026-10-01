@@ -43,6 +43,9 @@ anything not byte-canonical.
 - `identity.revisions.SourceLedger` applies the policy: same bytes anywhere ⇒ one artifact; same location
   and bytes ⇒ nothing new; changed bytes ⇒ new revision; rename ⇒ new location, no new artifact, and the old
   location becomes absent; bytes reappearing ⇒ new revision superseding the absence.
+- The workspace keeps each root's ledger across jobs, history and all. A package lists only its own job's
+  scan: the artifacts, one revision per location holding bytes (each its chain's first), no absences
+  (ADR 0035 §9). So the same folder gives the same package whatever earlier jobs or dry runs saw.
 - Locations are `LocalPath` (relative to the ingest root), `RawLocalPath` (the same, for names that are not
   valid UTF-8, kept as exact bytes) or `ExternalObjectRef` `(connector id, object id, revision token)` for
   object stores (MVL-45). A new token over identical bytes is not a new revision.

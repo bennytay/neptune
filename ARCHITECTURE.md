@@ -3,8 +3,10 @@
 ```mermaid
 flowchart LR
   RAW["Raw robotics evidence<br/>logs · bags · URDF<br/>docs · images"]
+  DEV["Robotics code"]
 
   subgraph N["Neptune"]
+    SDK["Python SDK<br/>sync · async"]
     DISC["Discovery &amp; identity"]
     RT["Ingestion runtime"]
     WS[("Local workspace + cache<br/>ledgers · plans · chunks<br/>derivatives · scratch")]
@@ -13,7 +15,7 @@ flowchart LR
     CAN["Canonical model<br/>records + provenance"]
     PKG[("Ingest package")]
     VAL["Validation &amp; alignment"]
-    DER["Derived annotations"]
+    DER["Derived annotations<br/>session proposals"]
   end
 
   subgraph D["Downstream, not Neptune"]
@@ -23,13 +25,15 @@ flowchart LR
   end
 
   RAW --> DISC --> RT
+  DEV -->|ingest · dry run| SDK -->|runs jobs| RT
   RT <-->|probes / chunks / records| SB
   SB <-->|one call, limits| AD
   AD -.->|conforms to| CAN
   RT <-->|commit / reuse by key| WS
   WS --> PKG
   PKG <--> VAL
-  PKG --> DER
+  DISC -->|layout| DER
+  DER <-->|derived tables| PKG
   PKG ==> MEM --> RET --> USE
   DER -.-> MEM
 
@@ -45,9 +49,11 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class CAN,WS,K1 built
-  class DISC,RT,AD,PKG,K2 partial
-  class VAL,DER,K3 todo
+  class DISC,RT,AD,PKG,DER,K2 partial
+  class VAL,K3 todo
   class SB built
+  class SDK built
+  class DEV ext
   class RAW,MEM,RET,USE ext
   style N fill:#8b949e0f,stroke:#8b949e
   style D fill:none,stroke:#8b949e,stroke-dasharray:2 3

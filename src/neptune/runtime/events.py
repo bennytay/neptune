@@ -41,6 +41,7 @@ class JobState(StrEnum):
     PENDING = "pending"  # built, not run
     RUNNING = "running"  # in a phase
     COMMITTED = "committed"  # the package is in place
+    PLANNED = "planned"  # a dry run stopped after plan: nothing parsed, no package (ADR 0035)
     CANCELLED = "cancelled"  # stopped at a checkpoint on request; the workspace keeps the work
     FAILED = "failed"  # the job itself could not proceed (never one source's problem)
 
@@ -58,6 +59,7 @@ PROBE_FAILED: Final = "probe_failed"
 SOURCE_SELECTED: Final = "source_selected"
 SOURCE_UNSUPPORTED: Final = "source_unsupported"
 SOURCE_AMBIGUOUS: Final = "source_ambiguous"
+SESSIONS_PROPOSED: Final = "sessions_proposed"  # grouping's counts, at the end of inspect
 SOURCE_UNREADABLE: Final = "source_unreadable"
 SOURCE_CHANGED: Final = "source_changed"
 SOURCE_SHORT_READ: Final = "source_short_read"  # a call read the source short (ADR 0033 §3)
@@ -75,6 +77,7 @@ SOURCE_QUARANTINED: Final = "source_quarantined"
 PACKAGE_STAGED: Final = "package_staged"
 PACKAGE_VERIFIED: Final = "package_verified"
 JOB_COMMITTED: Final = "job_committed"
+JOB_PLANNED: Final = "job_planned"  # a dry run's end (ADR 0035)
 JOB_CANCELLED: Final = "job_cancelled"
 JOB_FAILED: Final = "job_failed"
 

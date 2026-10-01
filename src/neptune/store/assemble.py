@@ -24,12 +24,13 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, Final, Protocol
+from typing import Any, BinaryIO, Final, Protocol
 
 from neptune.identity import canonical_json
 from neptune.identity.hashing import digest_stream
 from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
+from neptune.model.jsonvalue import JsonObject
 from neptune.model.package import package_manifest_from_json
 from neptune.model.run import Stream
 from neptune.model.source import LocalPath, RawLocalPath, SourceAbsence, SourceRevision
@@ -46,10 +47,7 @@ from neptune.store.package import (
 )
 from neptune.store.receipt import cited_sources
 from neptune.store.series import SERIES_SETTINGS, merge_runs
-from neptune.store.workspace import DerivativeKey, Held, Owner, Workspace
-
-if TYPE_CHECKING:
-    from neptune.model.jsonvalue import JsonObject
+from neptune.store.workspace import DerivativeKey, Held, Owner, Workspace, WorkspaceError
 
 _COPY_SIZE: Final = 1024 * 1024
 # A stream's series file, as a derivative of the runs of the chunks it merges (ADR 0031 §4). The
@@ -99,6 +97,19 @@ def _copy_checked(source: Path, target: Path, expected: tuple[int, ContentId]) -
     return False
 
 
+@contextmanager
+def _workspace_io() -> Iterator[None]:
+    """An ``OSError`` reading or writing the workspace is the workspace's: ``WorkspaceError``.
+
+    So a caller tells a workspace that will not read or write from a package that cannot be
+    written (ADR 0035 §6); the ``OSError`` is the cause.
+    """
+    try:
+        yield
+    except OSError as exc:
+        raise WorkspaceError(f"the workspace cannot be read or written: {exc}") from exc
+
+
 def _series_file(
     workspace: Workspace, key: DerivativeKey, stream: Stream, runs: list[Path], target: Path
 ) -> Held:
@@ -110,12 +121,14 @@ def _series_file(
     def build(directory: Path) -> None:
         merge_runs(stream, runs, directory / SERIES_FILE)
 
-    derivative, held = workspace.materialise(key, build)
+    with _workspace_io():
+        derivative, held = workspace.materialise(key, build)
     kept = derivative.files.get(SERIES_FILE)
     if kept is not None and _copy_checked(derivative.file(SERIES_FILE), target, kept):
         return held
-    workspace.discard(key)
-    derivative, _ = workspace.materialise(key, build)
+    with _workspace_io():
+        workspace.discard(key)
+        derivative, _ = workspace.materialise(key, build)
     if not _copy_checked(derivative.file(SERIES_FILE), target, derivative.files[SERIES_FILE]):
         raise PackageError(f"the series file of {stream.id} changed while it was copied")
     return Held.REBUILT
@@ -150,16 +163,31 @@ def _open_staging(destination: Path) -> Path:
     return _sibling(destination)
 
 
+class NotDurableError(PackageError):
+    """The package was renamed into place, but flushing the directory that names it failed.
+
+    It is whole at its destination, and a crash before the disk catches up may still lose its
+    name. Nothing is removed: what failed is the guarantee, not the package. Every other failure
+    of a publish happens before the rename, so the destination is not the publisher's.
+    """
+
+
 def _rename_into_place(staging: Path, destination: Path) -> None:
     """Flush ``staging`` to disk, rename it to ``destination`` in one step, flush where it landed.
 
-    The package appears whole or not at all, and once it has appeared it stays.
+    The package appears whole or not at all, and once it has appeared it stays. If the last
+    flush fails, ``NotDurableError``: the package is in place, but may not survive a crash.
     """
     if destination.exists():
         raise PackageError(f"{destination} exists; a package is written once")
     fsync_tree(staging)
     staging.rename(destination)
-    fsync_directory(destination.parent)
+    try:
+        fsync_directory(destination.parent)
+    except OSError as exc:
+        raise NotDurableError(
+            f"{destination} is in place, but its directory cannot be flushed: {exc}"
+        ) from exc
 
 
 @contextmanager
@@ -245,12 +273,17 @@ def stage(
     materialise: Iterable[ContentId] = (),
     source: SourceOpener | None = None,
     extra: Iterable[Any] = (),
+    derived: Mapping[str, Iterable[JsonObject]] | None = None,
 ) -> StagedPackage:
     """Build the package of ``ingested`` sources, each a (content id, transform id) pair.
 
+    ``ledger`` is every artifact, revision and absence the package lists, as given: the job
+    passes its own scan's, never the workspace's history (ADR 0035 §9), since every entry is
+    hashed into the package and its receipt.
     Every ingested source must be in ``ledger``, since the package lists the sources it cites,
     and every chunk of its plan must be committed in ``workspace``. ``extra`` adds records that
-    are no adapter's output: the runtime's own transform and findings. ``materialise`` names
+    are no adapter's output: the runtime's own transform and findings, and the transforms that
+    ``derived`` tables (session proposals, ADR 0036) name. ``materialise`` names
     sources to copy into the package. Each is read as ``export`` reads one: from the head of a
     location chain in ``ledger`` that holds it, opened through ``source`` so its policy applies,
     and hashed where it lands. Every other source is referenced. ``destination`` must not exist.
@@ -275,13 +308,15 @@ def stage(
     for content, transform in sorted(set(ingested)):
         if ledger.artifact(content) is None:
             raise PackageError(f"source {content} was ingested but the ledger does not hold it")
-        plan = workspace.load_plan(content, transform)
+        with _workspace_io():
+            plan = workspace.load_plan(content, transform)
         if plan is None:
             raise PackageError(f"no plan of {content} under transform {transform}")
         found: list[Any] = [plan.transform, *plan.findings]
         for chunk in plan.chunks:
             chunk_id = str(chunk["id"])
-            output = workspace.load(chunk_id)
+            with _workspace_io():
+                output = workspace.load(chunk_id)
             found += [*output.records, *output.findings]
             for stream, run in output.runs.items():
                 runs[stream].append((chunk_id, run, (content, transform)))
@@ -314,6 +349,7 @@ def stage(
             series=series,
             blobs=_land(scratch, locations, source) if source is not None else {},
             store={"series": SERIES_SETTINGS} if series else {},
+            derived=derived,
         )
         copied = _lay_out(staging, contents, movable=scratch)
         scratch.rmdir()  # every merged series and landed source was moved into place
@@ -325,7 +361,11 @@ def stage(
 
 
 def publish(staged: StagedPackage) -> ContentId:
-    """Flush a staged package and rename it into place. Its destination must still not exist."""
+    """Flush a staged package and rename it into place. Its destination must still not exist.
+
+    ``NotDurableError`` means the rename happened and only the flush after it failed; any other
+    error, that nothing was renamed.
+    """
     _rename_into_place(staged.path, staged.destination)
     return staged.id
 
@@ -339,6 +379,7 @@ def assemble(
     materialise: Iterable[ContentId] = (),
     source: SourceOpener | None = None,
     extra: Iterable[Any] = (),
+    derived: Mapping[str, Iterable[JsonObject]] | None = None,
 ) -> ContentId:
     """``stage`` then ``publish``: write the package of ``ingested`` sources at ``destination``.
 
@@ -352,6 +393,7 @@ def assemble(
         materialise=materialise,
         source=source,
         extra=extra,
+        derived=derived,
     )
     try:
         return publish(staged)
@@ -420,7 +462,11 @@ def export(package_root: Path, destination: Path, source: SourceOpener) -> Conte
         scratch.mkdir()
         blobs = {**package.blobs, **_land(scratch, locations, source)}
         contents = package_contents(
-            package.records, series=package.series, blobs=blobs, store=package.manifest.store
+            package.records,
+            series=package.series,
+            blobs=blobs,
+            store=package.manifest.store,
+            derived=package.derived,
         )
         copied = _lay_out(staging, contents, movable=scratch)
         scratch.rmdir()  # every landed source was moved into place

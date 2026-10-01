@@ -74,6 +74,8 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.registry import AdapterRegistry, SelectionStatus
+from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
+from neptune.discovery.layout import Layout, layout_from_scan
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
 from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe
 from neptune.discovery.reader import LocalReader, SourceChangedError
@@ -130,7 +132,7 @@ from neptune.runtime.sandbox import (
     Returned,
     SandboxError,
 )
-from neptune.store.assemble import StagedPackage, publish, stage
+from neptune.store.assemble import NotDurableError, StagedPackage, publish, stage
 from neptune.store.package import (
     PackageError,
     read_package,
@@ -190,7 +192,9 @@ class JobOptions:
     receipt and ``sandbox_ready`` event record exactly which guarantees were lost. These are the
     runtime transform's config, so a package's runtime findings name the policy they were made
     under. ``config`` gives each adapter, by id, the option values to configure it with. ``job``
-    names the job in its envelope; by default a fresh random token.
+    names the job in its envelope; by default a fresh random token. ``grouping`` configures
+    session grouping (ADR 0036): its gap, and the sessions the user declares, stated and set
+    against the rules' readings; it is the grouping transform's config.
     """
 
     attempts: int = DEFAULT_ATTEMPTS
@@ -199,6 +203,7 @@ class JobOptions:
     isolation: Isolation = Isolation.SUBPROCESS
     limits: Limits = DEFAULT_LIMITS
     allow_degraded_sandbox: bool = False
+    grouping: GroupingConfig = field(default_factory=GroupingConfig)
 
     def __post_init__(self) -> None:
         if isinstance(self.attempts, bool) or not isinstance(self.attempts, int):
@@ -219,18 +224,21 @@ class JobOptions:
             raise JobError("limits bound sandboxed calls; in-process calls have none to set")
         if self.isolation is Isolation.IN_PROCESS and self.allow_degraded_sandbox:
             raise JobError("allow_degraded_sandbox is a sandbox policy; in-process calls have none")
+        if not isinstance(self.grouping, GroupingConfig):
+            raise JobError(f"grouping must be a GroupingConfig, got {self.grouping!r}")
 
 
 @dataclass(frozen=True)
 class JobOutcome:
-    """How a job ended: committed with a package, or cancelled at a checkpoint without one.
+    """How a job ended: committed with a package, cancelled at a checkpoint without one, or
+    planned (a dry run, ADR 0035): stopped after ``plan``, without one.
 
     ``cache`` says what the job reused and recomputed, and why (ADR 0031 §5).
     """
 
     state: JobState
     job: str
-    destination: Path
+    destination: Path | None  # None for a dry run built without one
     package: ContentId | None
     ingested: tuple[tuple[ContentId, RecordId], ...]
     findings: tuple[IngestFinding, ...]
@@ -318,6 +326,21 @@ def _errno_name(exc: BaseException) -> str | None:
     return None
 
 
+def _unusable(exc: Exception) -> Exception:
+    """``exc``, raised reading or writing the workspace, as the workspace's failure.
+
+    A ``JobError`` caused by a ``WorkspaceError`` or ``ScratchError`` is the workspace's, and
+    the SDK says ``workspace_unusable`` for it (ADR 0035 §6), so every workspace read and write
+    that fails the job raises its ``JobError`` from this: ``exc`` itself if it already is one,
+    else a ``WorkspaceError`` caused by it (an ``OSError``, a ledger or plan that does not read).
+    """
+    if isinstance(exc, WorkspaceError | ScratchError):
+        return exc
+    error = WorkspaceError(str(exc))
+    error.__cause__ = exc
+    return error
+
+
 def _chunk_series_failure(output: ChunkOutput) -> Failure | None:
     """A chunk's batches of one stream agree on their columns, and ``seq`` is unique among them.
 
@@ -399,7 +422,8 @@ def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[JsonObje
         try:
             checked.append((chunk_id, check_run(stream, run)))
         except (SeriesReadError, OSError) as exc:
-            raise JobError(f"the run of committed chunk {chunk_id} cannot be read: {exc}") from exc
+            message = f"the run of committed chunk {chunk_id} cannot be read: {exc}"
+            raise JobError(message) from _unusable(exc)
         except Exception as exc:
             problems.append(
                 {
@@ -437,15 +461,16 @@ def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[JsonObje
 class IngestJob:
     """One ingest of ``root`` into a package at ``destination``, through ``workspace``.
 
-    Build it, then ``run`` it once. ``on_event`` receives every ``JobEvent`` as it happens;
-    ``cancel`` is checked at every checkpoint. Problems with one source become findings in the
-    package; problems with the job raise ``JobError``.
+    Build it, then ``run`` it once, or ``dry_run`` it once to see what ``run`` would ingest
+    (ADR 0035); a dry run needs no destination. ``on_event`` receives every ``JobEvent`` as it
+    happens; ``cancel`` is checked at every checkpoint. Problems with one source become findings
+    in the package; problems with the job raise ``JobError``.
     """
 
     def __init__(
         self,
         root: Path,
-        destination: Path,
+        destination: Path | None,
         workspace: Workspace,
         registry: AdapterRegistry,
         options: JobOptions | None = None,
@@ -454,10 +479,10 @@ class IngestJob:
         cancel: threading.Event | None = None,
     ) -> None:
         self.root = Path(root)
-        self.destination = Path(destination)
+        self.destination = Path(destination) if destination is not None else None
         if not self.root.is_dir():
             raise JobError(f"{self.root} is not a directory")
-        if self.destination.exists():
+        if self.destination is not None and self.destination.exists():
             raise JobError(f"{self.destination} exists; a package is written once")
         self.workspace = workspace
         self.registry = registry
@@ -502,6 +527,11 @@ class IngestJob:
         self._engine = ProbeEngine(registry)
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
+        self._grouper = LayoutGrouper(self.options.grouping)
+        self._layout = Layout(())
+        self._grouping: Grouping | None = None
+        self._dry = False  # a dry run: stops after plan (ADR 0035)
+        self._published: ContentId | None = None  # the package, once renamed into place
 
     @staticmethod
     def _configure(
@@ -523,20 +553,50 @@ class IngestJob:
 
     def run(self) -> JobOutcome:
         """Run every phase. Returns when the package is in place or the job was cancelled."""
+        if self.destination is None:
+            raise JobError("a job that writes a package needs a destination")
+        return self._execute(dry=False)
+
+    def dry_run(self) -> JobOutcome:
+        """Run ``discover``, ``fingerprint``, ``inspect`` and ``plan``, then stop (ADR 0035).
+
+        What ``run`` would ingest: every source's selection, its plan and which of its chunks
+        the workspace already holds (``JobOutcome.cache``), and the findings so far. No chunk is
+        parsed, nothing is assembled and no package is written, so the outcome is ``planned``
+        (or ``cancelled``) with no package. The ledger and plans it saves are the ones ``run``
+        saves, so a later ``run`` reuses them. MVL-15 adds adapters' ``inspect`` and grouping.
+        """
+        return self._execute(dry=True)
+
+    @property
+    def committed(self) -> JobOutcome | None:
+        """The committed outcome once the package is in place, else ``None``.
+
+        ``run`` returns it. It is here too for when ``on_event`` raised after the package was
+        published and ``run`` propagated that exception instead: the job is ``committed`` all
+        the same, since its package is in place (ADR 0035 §3).
+        """
+        return self._outcome(self._published) if self._published is not None else None
+
+    def _execute(self, *, dry: bool) -> JobOutcome:
         if self.state is not JobState.PENDING:
             raise JobError("a job runs once")
         self.state = JobState.RUNNING
+        self._dry = dry
         started = _now()
         try:
             with self.workspace.in_use():  # collection waits until the job is done
                 self._sweep()
-                package = self._phases(started)
+                package = self._phases(started, dry=dry)
         except _Cancelled:
             self._discard()
             self.state = JobState.CANCELLED
             self._emit(events.JOB_CANCELLED, {})
             return self._outcome(None)
         except Exception as exc:
+            if self._published is not None:  # ``on_event`` raised once the package was in place
+                self.state = JobState.COMMITTED
+                raise
             self._discard()
             self.state = JobState.FAILED
             self._emit(events.JOB_FAILED, {"error": type(exc).__name__})
@@ -544,9 +604,17 @@ class IngestJob:
                 raise JobError(f"the workspace cannot be used: {exc}") from exc
             raise
         except BaseException:
+            if self._published is not None:
+                self.state = JobState.COMMITTED
+                raise
             self._discard()  # the process is going down: leave nothing half-staged
             self.state = JobState.FAILED
             raise
+        if package is None:  # a dry run, stopped after plan
+            self.state = JobState.PLANNED
+            planned = sum(1 for item in self._sources if item.planned)
+            self._emit(events.JOB_PLANNED, {"sources": planned})
+            return self._outcome(None)
         self.state = JobState.COMMITTED
         return self._outcome(package)
 
@@ -561,17 +629,19 @@ class IngestJob:
         except ScratchError as exc:
             raise JobError(f"the workspace cannot hold scratch space: {exc}") from exc
         except OSError as exc:
-            raise JobError(f"the workspace cannot be swept: {exc}") from exc
+            raise JobError(f"the workspace cannot be swept: {exc}") from _unusable(exc)
         self._emit(events.WORKSPACE_SWEPT, {"scratch": scratch, "staging": staging})
 
-    def _phases(self, started: str) -> ContentId:
+    def _phases(self, started: str, *, dry: bool) -> ContentId | None:
         source = self._local = LocalSource(self.root)
         entries = self._discover(source)
-        ledger = self._fingerprint(source, entries)
+        scanned = self._fingerprint(source, entries)
         self._inspect(source)
         self._plan(source)
+        if dry:
+            return None
         self._ingest(source)
-        self._assemble(ledger)
+        self._assemble(scanned)
         receipt = self._validate()
         return self._commit(receipt, started)
 
@@ -676,7 +746,8 @@ class IngestJob:
                 directory = stack.enter_context(space) / "call"
                 directory.mkdir(mode=0o700)
             except (ScratchError, OSError) as exc:
-                raise JobError(f"the workspace cannot give a call scratch space: {exc}") from exc
+                message = f"the workspace cannot give a call scratch space: {exc}"
+                raise JobError(message) from _unusable(exc)
             return self._run(work, codec, (reader.fileno(),), directory)
 
     def _run(
@@ -834,16 +905,26 @@ class IngestJob:
     # --- fingerprint ---------------------------------------------------------------------------
 
     def _fingerprint(self, source: LocalSource, entries: tuple[WalkEntry, ...]) -> SourceLedger:
+        """Hash every file into the root's ledger and save it; return what this scan observed.
+
+        The workspace's ledger keeps the root's whole history, for resume and the cache (ADR 0026
+        §1, ADR 0031 §3). The package lists only this scan (ADR 0035 §9): a new ledger that
+        observed each location as the walk found it, holding the artifact the job reads its bytes
+        as. Each revision is the first of its location's chain and nothing is absent, so what
+        earlier jobs, dry runs or cancelled ingests saw never reaches a package or its receipt.
+        """
         with self._enter(Phase.FINGERPRINT):
             try:
                 ledger = self.workspace.load_ledger(self.root)
             except (WorkspaceError, ValueError, OSError) as exc:
-                raise JobError(f"the ledger of {self.root} cannot be loaded: {exc}") from exc
+                message = f"the ledger of {self.root} cannot be loaded: {exc}"
+                raise JobError(message) from _unusable(exc)
             result = fingerprint(source, ledger, entries)
             try:
                 self.workspace.save_ledger(self.root, ledger)
             except OSError as exc:
-                raise JobError(f"the ledger of {self.root} cannot be saved: {exc}") from exc
+                message = f"the ledger of {self.root} cannot be saved: {exc}"
+                raise JobError(message) from _unusable(exc)
             for finding in result.findings:  # what the walk saw and did not read (ADR 0029 §1)
                 self._record(finding, result.transform)
             walked = {
@@ -853,6 +934,8 @@ class IngestJob:
                 if (entry.raw_path, entry.reason, entry.detail) not in walked:
                     self._skip(entry)
             by_content: dict[ContentId, _Source] = {}
+            scanned = SourceLedger()
+            listed: list[Observation] = []
             new_artifacts = new_revisions = 0
             replaced = _replaced(ledger, result.observations)
             for observation in result.observations:
@@ -865,6 +948,7 @@ class IngestJob:
                 artifact = ledger.artifact(revision.content_id)
                 if artifact is None:
                     raise JobError(f"the ledger lost artifact {revision.content_id}")
+                listed.append(scanned.observe(location, artifact))
                 self._emit(
                     events.SOURCE_HASHED,
                     {
@@ -882,6 +966,8 @@ class IngestJob:
             for absence in result.absences:
                 self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
             self._sources = list(by_content.values())
+            # Grouping reads the revisions the package lists, so it recomputes from the package.
+            self._layout = layout_from_scan(listed, result.symlinks)
             self._finish(
                 Phase.FINGERPRINT,
                 {
@@ -892,7 +978,7 @@ class IngestJob:
                     "sources": len(self._sources),
                 },
             )
-        return ledger
+        return scanned
 
     # --- inspect -------------------------------------------------------------------------------
 
@@ -982,7 +1068,20 @@ class IngestJob:
                 else:
                     counts["unsupported"] += 1
                     self._emit(events.SOURCE_UNSUPPORTED, details)
+            self._group()
             self._finish(Phase.INSPECT, dict(counts))
+
+    def _group(self) -> None:
+        """Stage 5, at the end of inspect so a dry run sees it too: propose sessions from this
+        scan's layout (ADR 0036). Names and directories only, no adapter call; the proposals
+        reach the package as derived tables and the findings under the grouping's transform."""
+        self._check_cancel()
+        grouping = self._grouper.propose(self._layout)
+        self._producers[grouping.transform.id] = grouping.transform
+        for finding in grouping.findings:
+            self._record(finding, grouping.transform)
+        self._grouping = grouping
+        self._emit(events.SESSIONS_PROPOSED, grouping.summary())
 
     # --- plan ----------------------------------------------------------------------------------
 
@@ -1013,7 +1112,7 @@ class IngestJob:
                 except (WorkspaceError, ContractError, ValueError, OSError) as exc:
                     raise JobError(
                         f"the stored plan of {item.content_id} cannot be read: {exc}"
-                    ) from exc
+                    ) from _unusable(exc)
                 reused = stored is not None
                 item.plan_cache = PlanCache(Rule.PLANNED) if reused else self._explain(item)
                 if stored is None:
@@ -1033,10 +1132,13 @@ class IngestJob:
                     except (WorkspaceError, OSError) as exc:
                         raise JobError(
                             f"the plan of {item.content_id} cannot be saved: {exc}"
-                        ) from exc
+                        ) from _unusable(exc)
                     chunks = plan.chunks
                 item.chunks, item.planned = chunks, True
-                done = sum(1 for chunk in chunks if self.workspace.committed(chunk.id))
+                held: set[str] = {c.id for c in chunks if self.workspace.committed(c.id)}
+                if self._dry:  # never parsed: the report says what the workspace holds
+                    item.hits = held
+                done = len(held)
                 planned += 1
                 chunks_total += len(chunks)
                 committed_total += done
@@ -1346,7 +1448,8 @@ class IngestJob:
                         laws=lineage.RUNTIME_VERSION,
                     )
                 except OSError as exc:
-                    raise JobError(f"chunk {chunk.id} cannot be committed: {exc}") from exc
+                    message = f"chunk {chunk.id} cannot be committed: {exc}"
+                    raise JobError(message) from _unusable(exc)
                 except Exception as exc:
                     failure = Failure.raised(Step.COMMIT, exc)
             if failure is not None:
@@ -1435,7 +1538,8 @@ class IngestJob:
             series = tuple(read_run(run) for _, run in sorted(committed.runs.items()))
             return ChunkOutput(committed.records, series, committed.findings)
         except (ValueError, OSError) as exc:  # a WorkspaceError, SeriesError or ContractError too
-            raise JobError(f"committed chunk {chunk.id} cannot be read: {exc}") from exc
+            message = f"committed chunk {chunk.id} cannot be read: {exc}"
+            raise JobError(message) from _unusable(exc)
 
     def _kept(
         self,
@@ -1458,7 +1562,7 @@ class IngestJob:
                 derivative, _ = self.workspace.materialise(key, build)
                 held, value = Held.REBUILT, read(derivative)
         except (ValueError, OSError) as exc:
-            raise JobError(f"{what} cannot be kept: {exc}") from exc
+            raise JobError(f"{what} cannot be kept: {exc}") from _unusable(exc)
         self._derived(key, held)
         return value
 
@@ -1485,9 +1589,11 @@ class IngestJob:
         try:
             stored = self.workspace.load_plan(item.content_id, item.config.transform.id)
         except (WorkspaceError, ValueError, OSError) as exc:
-            raise JobError(f"the plan of {item.content_id} cannot be read: {exc}") from exc
+            message = f"the plan of {item.content_id} cannot be read: {exc}"
+            raise JobError(message) from _unusable(exc)
         if stored is None:
-            raise JobError(f"the plan of {item.content_id} vanished from the workspace")
+            message = f"the plan of {item.content_id} vanished from the workspace"
+            raise JobError(message) from WorkspaceError(message)
         said_something = bool(stored.findings)
         for finding in stored.findings:
             finding_ids.add(finding.id)
@@ -1495,7 +1601,8 @@ class IngestJob:
             try:
                 output = self.workspace.load(chunk.id)
             except (WorkspaceError, ValueError, OSError) as exc:
-                raise JobError(f"committed chunk {chunk.id} cannot be read: {exc}") from exc
+                message = f"committed chunk {chunk.id} cannot be read: {exc}"
+                raise JobError(message) from _unusable(exc)
             said_something = said_something or bool(output.records or output.findings)
             for record in output.records:
                 if record.id in record_ids:
@@ -1571,7 +1678,9 @@ class IngestJob:
         kind = events.DERIVATIVE_REUSED if held is Held.HELD else events.DERIVATIVE_BUILT
         self._emit(kind, {"derivative": key.id, "recipe": key.recipe, "rule": str(entry.rule)})
 
-    def _assemble(self, ledger: SourceLedger) -> None:
+    def _assemble(self, scanned: SourceLedger) -> None:
+        """Admit each source that passes the cross-chunk laws and stage the package of those,
+        listing ``scanned``: this job's scan, never the workspace's history (ADR 0035 §9)."""
         with self._enter(Phase.ASSEMBLE):
             self._check_cancel()
             quarantined = 0
@@ -1607,13 +1716,23 @@ class IngestJob:
             cited = {finding.transform for finding in self._findings.values()}
             if self._lost_guarantees:
                 cited.add(self.transform.id)
+            derived = None
+            if self._grouping is not None:  # its derived tables name its transform
+                cited.add(self._grouping.transform.id)
+                derived = self._grouping.tables()
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
             ]
+            assert self.destination is not None  # ``run`` refuses to start without one
             try:
                 self._staged = stage(
-                    self.destination, self.workspace, ledger, self._ingested, extra=extra
+                    self.destination,
+                    self.workspace,
+                    scanned,
+                    self._ingested,
+                    extra=extra,
+                    derived=derived,
                 )
             except (PackageError, WorkspaceError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the package cannot be assembled: {exc}") from exc
@@ -1670,9 +1789,16 @@ class IngestJob:
                 write_envelope(staged.path, envelope)
                 write_cache_report(staged.path, self._cache_report().to_json())
                 package = publish(staged)
+            except NotDurableError as exc:
+                self._staged = None  # renamed into place: nothing staged is left to discard
+                raise JobError(
+                    f"package {staged.id} is in place, but may not survive a crash: {exc}"
+                ) from exc
             except (PackageError, OSError) as exc:
                 raise JobError(f"the package cannot be committed: {exc}") from exc
             self._staged = None
+            # Past here only ``on_event`` runs: whatever it raises, the job is committed.
+            self._published = package
             self._emit(events.JOB_COMMITTED, {"package": package, "sources": len(self._ingested)})
             self._finish(Phase.COMMIT, {"package": package})
         return package
