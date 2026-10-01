@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:77c0fbfad5ea718ccdca78e2041592f6887f662de0a17a40741cf7ab1e9418fd`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:2be1665fdae7a005ebd3ac56fc92d8378486c3765a9e90c66ef35a759525e203`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -20,6 +20,7 @@ Receipt `rec:sha256:77c0fbfad5ea718ccdca78e2041592f6887f662de0a17a40741cf7ab1e94
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
 | `markdown` | `0.1.0` | `sha256:9303501e224f` | markdown-it-py 4.2.0 | `rec:40ee4b52a530` |
+| `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:a46247e2db11` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
 
 ## Records
@@ -33,7 +34,7 @@ Receipt `rec:sha256:77c0fbfad5ea718ccdca78e2041592f6887f662de0a17a40741cf7ab1e94
 | `source_revision` | 2 |
 | `structured_record` | 5 |
 | `structured_table` | 2 |
-| `transform_record` | 2 |
+| `transform_record` | 3 |
 
 ## Runs
 
