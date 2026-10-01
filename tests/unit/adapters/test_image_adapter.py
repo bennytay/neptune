@@ -315,7 +315,10 @@ def test_what_a_camera_or_writer_declares_is_stated_and_what_was_measured_is_obs
             assert png[declared] == STATED, declared
     assert png["IHDR"] == OBSERVED
     assert kinds_of("wrist_depth.pgm")["PNM header"] == OBSERVED
-    assert kinds_of("floor_map.bmp")["BITMAPV5HEADER"] == OBSERVED
+    bmp = kinds_of("floor_map.bmp")
+    assert bmp["BITMAPFILEHEADER"] == OBSERVED
+    assert bmp["BITMAPV5HEADER"] == STATED  # density, colour endpoints and intent are declared
+    assert kinds_of("legacy_cam.bmp")["BITMAPINFOHEADER"] == STATED
     assert kinds_of("floor_map.bmp")["ICC header"] == STATED
     assert kinds_of("humanoid_headcam.webp")["VP8X"] == OBSERVED
     assert kinds_of("rover_raw.dng")["IFD0"] == STATED

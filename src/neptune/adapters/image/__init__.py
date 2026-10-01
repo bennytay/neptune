@@ -160,8 +160,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "max_value_bytes",
             DEFAULT_MAX_VALUE_BYTES,
             "the largest value copied into a row cell (an IFD value, a PNG or JPEG text, an XMP"
-            " path or value): an IFD value over it stays cited in the bytes, a text or XMP string"
-            " is cut to it, each with image.value_not_copied",
+            " namespace, path or value). A larger one is not copied: its cell is NotCovered (an"
+            " IFD value is left out of its row) and one image.value_not_copied per table cites"
+            " the first cells and counts the rest; the bytes hold the value",
         ),
     ),
     libraries=(),
@@ -182,8 +183,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "assertion_kinds",
             "stated: what the file's writer or camera declares (every IFD, XMP, ICC and text table"
             " and row, JFIF, Adobe, capture time, position, device, orientation); observed: the"
-            " measured raster structure (IHDR, SOFn, VP8*, BMP and PNM headers) and the Image's"
-            " size",
+            " measured raster structure (IHDR, SOFn, VP8*, the BMP file header, the PNM header) and the"
+            " Image's size; a BMP DIB header and an ANIM chunk declare density, colour endpoints,"
+            " intent and background, so they are stated",
         ),
         Documented(
             "capture",
@@ -226,7 +228,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "xmp_tables",
             "one table per XMP packet citing its bytes: namespace URI, XMP path with the packet's"
-            " prefixes (prop, struct/field, array[i], prop/?xml:lang), value text as written",
+            " prefixes (prop, struct/field, array[i], prop/?xml:lang), value text as written; one over"
+            " max_value_bytes is a NotCovered cell",
         ),
     ),
     resources=Resources(max_memory=256 * 1024 * 1024, streaming=True),

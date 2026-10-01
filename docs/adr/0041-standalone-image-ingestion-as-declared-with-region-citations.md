@@ -48,7 +48,9 @@ offsets past the end, zlib bombs and XML bombs are routine.
 4. **Declared is `stated`, measured is `observed`** (non-negotiable 2). Everything a writer or camera
    declares is `stated`: every IFD, XMP, ICC, text, JFIF and Adobe table and row, and the capture
    (time, position, make, model, serials, orientation) with its `TimestampDomain`. Only the measured
-   raster structure is `observed`: IHDR, SOFn, VP8*, BMP and Netpbm headers, and the `Image`'s size.
+   raster structure is `observed`: IHDR, SOFn, VP8*, the BMP file header, the Netpbm header, and the
+   `Image`'s size. A BMP DIB header and a WebP ANIM chunk also declare density, colour endpoints,
+   intent and background colour, so they are `stated`.
 5. **Capture is read as declared.** `Make` and `Model` verbatim; `BodySerialNumber` and DNG
    `CameraSerialNumber` as device identifiers (namespaces `exif.body_serial`, `dng.camera_serial`);
    `Orientation` 1 to 8 kept and never applied.
@@ -75,8 +77,12 @@ offsets past the end, zlib bombs and XML bombs are routine.
    metadata still looks for its frame header, within another `max_structures` segments, and a PNG
    stopped by a limit does not judge its raster. Work is charged before it is done: an IFD is read
    one entry at a time, strip and tile arrays spend `max_entries` x 256 items, a PNG chunk or metadata
-   block over `max_metadata_bytes` is cited and not read, and a text cell, XMP path or XMP value
-   is cut to `max_value_bytes` with a finding. A text chunk inflates only that far; other streams
+   block over `max_metadata_bytes` is cited and not read, and a text cell, XMP namespace, path or
+   value over `max_value_bytes` is not copied: its cell is `NotCovered` (citing the exact cell, like
+   an IFD value left out of its row), never a prefix in a `Known` cell, and one
+   `image.value_not_copied` per table cites the first 16 such cells with their lengths and counts
+   the rest. An XMP path stops growing once it passes the cap, so deep trees of long names cost no
+   more than the names. A text chunk inflates only that far; other streams
    inflate to `max_metadata_bytes` each and four times that in all; all rows of a source hold at most
    `max_metadata_bytes` of text. An XMP packet or ICC profile at given bytes is parsed once however many
    tags point at it. Netpbm headers are scanned in one pass, in at most the probe head (64 KiB, one limit for probe,

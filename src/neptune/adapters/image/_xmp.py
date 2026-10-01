@@ -18,11 +18,11 @@ from dataclasses import dataclass, field
 from typing import Final
 from xml.parsers import expat
 
-from neptune.adapters.image._context import Context
-from neptune.adapters.image._emit import VALUE_NOT_COPIED, XMP_UNREADABLE
+from neptune.adapters.image._context import Context, NotCopied, Skipped
+from neptune.adapters.image._emit import XMP_UNREADABLE, CellInput
 from neptune.adapters.image._space import LimitHit, Space
 from neptune.model.ids import RecordId
-from neptune.model.knowledge import AssertionKind, Known
+from neptune.model.knowledge import AssertionKind, Known, NotCovered
 from neptune.model.provenance import Locator
 
 RDF: Final = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -143,6 +143,7 @@ def read(ctx: Context, space: Space, what: str) -> RecordId | None:
                 rows.fields(description, "")
     except LimitHit as hit:
         ctx.stopped(hit)
+    ctx.not_copied(whole, XMP_HEADER, rows.skipped)
     return table
 
 
@@ -152,36 +153,56 @@ class _Rows:
         self.table = table
         self.locator = locator
         self.count = 0
+        self.keep = ctx.max_value_bytes
+        self.skipped = Skipped()
 
-    def emit(self, namespace: str, path: str, value: str) -> None:
+    def emit(self, namespace: str, path: str | None, value: str) -> None:
+        """One row. A text over ``max_value_bytes`` (a path is ``None`` once it is) is not copied:
+        its cell is ``NotCovered`` and one finding for the packet names the first such cells."""
         self.ctx.budget.entry()
-        keep = self.ctx.max_value_bytes
-        cells = [_cut(text, keep) for text in (namespace, path, value)]
-        if cells != [namespace, path, value]:
-            self.ctx.out.finding(
-                VALUE_NOT_COPIED,
-                self.locator,
-                f"XMP namespaces, paths or values over {keep} bytes (max_value_bytes) are cut to"
-                " it; the packet's bytes hold them whole",
-                {"max_value_bytes": keep},
-            )
+        cells: list[CellInput] = []
+        for column, text in enumerate((namespace, path, value)):
+            if text is None:
+                self.skipped.add(self.count, column, NotCopied(None))
+                cells.append(NotCovered())
+                continue
+            size = _bytes_over(text, self.keep)
+            if size is None:
+                cells.append(text)
+            else:
+                self.skipped.add(self.count, column, NotCopied(size))
+                cells.append(NotCovered())
         self.ctx.out.row(self.table, self.locator, self.count, cells)
         self.count += 1
 
-    def fields(self, node: _Node, path: str) -> None:
+    def _add(self, path: str | None, piece: str) -> str | None:
+        """``path`` followed by ``piece``, or ``None`` once it would pass ``max_value_bytes``.
+
+        The longer path is never built, so a deep tree of long names costs no more than its
+        names; characters are at most bytes, so a path of more characters is over.
+        """
+        if path is None or len(path) + len(piece) > self.keep:
+            return None
+        joined = path + piece
+        return joined if _bytes_over(joined, self.keep) is None else None
+
+    def _join(self, path: str | None, name: str) -> str | None:
+        return self._add(path, name if path == "" else f"/{name}")
+
+    def fields(self, node: _Node, path: str | None) -> None:
         """The fields of a struct (or of a top-level ``rdf:Description``): attributes, children."""
         for name, value in node.attributes:
             if name.uri not in (RDF, XML):
-                self.emit(name.uri, _join(path, name.qualified), value)
+                self.emit(name.uri, self._join(path, name.qualified), value)
         for child in node.children:
-            self.value(child, _join(path, child.name.qualified), child.name.uri)
+            self.value(child, self._join(path, child.name.qualified), child.name.uri)
 
-    def value(self, node: _Node, path: str, namespace: str) -> None:
+    def value(self, node: _Node, path: str | None, namespace: str) -> None:
         """One property element: a simple value, a URI, a struct or an array."""
         rdf = {name.local: value for name, value in node.attributes if name.uri == RDF}
         for name, value in node.attributes:
             if name.uri == XML:
-                self.emit(namespace, f"{path}/?xml:{name.local}", value)
+                self.emit(namespace, self._add(path, f"/?xml:{name.local}"), value)
         resource = rdf.get("resource")
         if resource is not None:
             self.emit(namespace, path, resource)
@@ -189,9 +210,9 @@ class _Rows:
         fields = [(n, v) for n, v in node.attributes if n.uri not in (RDF, XML)]
         if rdf.get("parseType") == "Resource" or fields:
             for name, value in fields:
-                self.emit(name.uri, _join(path, name.qualified), value)
+                self.emit(name.uri, self._join(path, name.qualified), value)
             for child in node.children:
-                self.value(child, _join(path, child.name.qualified), child.name.uri)
+                self.value(child, self._join(path, child.name.qualified), child.name.uri)
             return
         if not node.children:
             self.emit(namespace, path, "".join(node.text))
@@ -200,20 +221,16 @@ class _Rows:
             if child.name.uri == RDF and child.name.local in _ARRAYS:
                 items = [item for item in child.children if item.name.is_rdf("li")]
                 for index, item in enumerate(items, 1):
-                    self.value(item, f"{path}[{index}]", namespace)
+                    self.value(item, self._add(path, f"[{index}]"), namespace)
             elif child.name.is_rdf("Description"):
                 self.fields(child, path)
             else:
-                self.value(child, _join(path, child.name.qualified), child.name.uri)
+                self.value(child, self._join(path, child.name.qualified), child.name.uri)
 
 
-def _cut(text: str, keep: int) -> str:
-    """``text`` cut to at most ``keep`` bytes of UTF-8, never inside a character."""
+def _bytes_over(text: str, keep: int) -> int | None:
+    """The UTF-8 size of ``text`` if it is more than ``keep`` bytes, else ``None``."""
     if len(text) * 4 <= keep:
-        return text
-    raw = text.encode()
-    return text if len(raw) <= keep else raw[:keep].decode("utf-8", errors="ignore")
-
-
-def _join(path: str, name: str) -> str:
-    return f"{path}/{name}" if path else name
+        return None
+    size = len(text.encode())
+    return size if size > keep else None

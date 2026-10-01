@@ -21,7 +21,7 @@ from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.image import ImageAdapter
 from neptune.discovery.reader import BytesReader
 from neptune.model.finding import FindingCategory, Severity
-from neptune.model.knowledge import Known
+from neptune.model.knowledge import Known, NotCovered
 from neptune.model.world import Image, StructuredRecord, StructuredTable
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures" / "image"
@@ -41,6 +41,11 @@ VALID: Final = (
     "survey_tile.tif", "humanoid_headcam.webp", "floor_map.bmp", "legacy_cam.bmp",
     "wrist_depth.pgm", "thermal.ppm", "gripper_mask.pbm", "gripper.pam",
 )  # fmt: skip
+
+
+def known(state: Any) -> Any:
+    assert isinstance(state, Known), state
+    return state.value
 
 
 def data_of(name: str) -> bytes:
@@ -451,17 +456,37 @@ def test_an_os2_bitmap_with_huffman_compression_is_not_judged_by_an_uncompressed
     assert "image.raster_truncated" in codes(run(bytes(plain)))
 
 
-def test_a_long_png_text_is_cut_to_max_value_bytes_with_a_finding() -> None:
+def not_covered_cells(output: SourceOutput) -> list[tuple[StructuredTable, StructuredRecord, int]]:
+    records = output.records()
+    tables = {r.id: r for r in records if isinstance(r, StructuredTable)}
+    return [
+        (tables[r.table], r, column)
+        for r in records
+        if isinstance(r, StructuredRecord)
+        for column, c in enumerate(r.cells)
+        if isinstance(c, NotCovered)
+    ]
+
+
+def test_a_long_png_text_is_not_copied_its_cell_is_not_covered_and_the_finding_cites_it() -> None:
     output = run(png_with_chunk(b"tEXt", b"Comment\x00" + b"a" * 5000))
-    assert "image.value_not_copied" in codes(output)
-    lengths = [
-        len(c.value)
+    (table, row, column), *_ = [
+        c for c in not_covered_cells(output) if str(known(c[0].name)) == "tEXt"
+    ]
+    assert known(table.header)[column] == "text"
+    assert not any(  # no prefix of it is a Known cell anywhere
+        isinstance(c, Known) and isinstance(c.value, str) and c.value.startswith("aaaa")
         for r in output.records()
         if isinstance(r, StructuredRecord)
         for c in r.cells
-        if isinstance(c, Known) and isinstance(c.value, str)
+    )
+    (finding,) = [f for f in output.findings() if f.code == "image.value_not_copied"]
+    step = finding.subject.locator[-1]  # type: ignore[union-attr]
+    assert (step.row, step.column, step.column_name) == (0, column, "text")  # type: ignore[union-attr]
+    assert finding.subject.locator[:-1] == row.provenance.evidence.locator[:-1]  # type: ignore[union-attr]
+    assert finding.details["count"] == 1 and finding.details["cells"] == [
+        {"column": column, "length": 5000, "row": 0}
     ]
-    assert max(lengths) == 4096
     wide = run(png_with_chunk(b"tEXt", b"Comment\x00" + b"a" * 5000), max_value_bytes=8192)
     assert "image.value_not_copied" not in codes(wide)
 
@@ -569,7 +594,7 @@ def xmp_png(depth: int, ancestor: int, leaf: int, leaves: int) -> bytes:
 
 
 def test_xmp_paths_of_deep_long_names_are_cut_and_the_total_text_is_bounded() -> None:
-    data = xmp_png(depth=60, ancestor=1000, leaf=100, leaves=15_000)
+    data = xmp_png(depth=60, ancestor=1000, leaf=100, leaves=4000)
     assert len(data) < 512 * 1024
     tracemalloc.start()
     try:
@@ -577,16 +602,38 @@ def test_xmp_paths_of_deep_long_names_are_cut_and_the_total_text_is_bounded() ->
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert {"image.value_not_copied", "image.limit_exceeded"} <= codes(output)
+    assert "image.value_not_copied" in codes(output)
     assert peak < 160 * 1024 * 1024  # un-capped, these paths alone were ~900 MB
-    paths = [
-        c.value
+    assert not any(  # nothing over the cap is a Known cell
+        isinstance(c, Known) and isinstance(c.value, str) and len(c.value.encode()) > 4096
         for r in output.records()
-        if isinstance(r, StructuredRecord) and len(r.cells) == 3
-        for c in r.cells[1:2]
-        if isinstance(c, Known) and isinstance(c.value, str)
+        if isinstance(r, StructuredRecord)
+        for c in r.cells
+    )
+    (finding,) = [
+        f
+        for f in output.findings()
+        if f.code == "image.value_not_copied" and f.details["count"] > 1
     ]
-    assert paths and max(map(len, paths)) <= 4096
+    assert finding.details["count"] > 16 and len(finding.details["cells"]) == 16  # type: ignore[arg-type]
+
+
+def test_a_tree_of_130_kb_ancestor_names_costs_about_its_names() -> None:
+    data = xmp_png(depth=60, ancestor=130_000, leaf=10, leaves=3)
+    assert len(data) < 64 * 1024
+    tracemalloc.start()
+    try:
+        output = run(data)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert len(images(output)) == 1 and "image.value_not_copied" in codes(output)
+    assert peak < 72 * 1024 * 1024  # the names ~8 MB, a few copies; paths of 8 MB each were 270 MB
+    assert all(
+        known(t.header)[c] in ("path", "value", "namespace")
+        for t, _, c in not_covered_cells(output)
+        if str(known(t.name)) == "XMP"
+    )
 
 
 def test_total_text_of_a_source_is_bounded_by_max_metadata_bytes() -> None:
@@ -651,20 +698,31 @@ def test_many_inflate_bombs_spend_the_sources_inflate_total() -> None:
     assert peak < 16 * 1024 * 1024
 
 
-def test_xmp_text_is_cut_to_max_value_bytes_of_utf8_never_inside_a_character() -> None:
+def test_an_xmp_value_over_the_cap_is_not_copied_whatever_its_characters() -> None:
     packet = (
         '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF'
         ' xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
-        '<rdf:Description xmlns:t="http://example.com/t/" t:Note="' + "漢" * 4096 + '"/>'
+        '<rdf:Description xmlns:t="http://example.com/t/" t:Note="' + "漢" * 4096 + '"'
+        ' t:Short="漢" t:Edge="' + "漢" * 1365 + '"/>'  # 4095 bytes: copied
         "</rdf:RDF></x:xmpmeta>"
     ).encode()
     output = run(png_with_chunk(b"iTXt", b"XML:com.adobe.xmp\x00\x00\x00\x00\x00" + packet))
-    values = [
+    (table, row, column), *_ = [
+        c for c in not_covered_cells(output) if str(known(c[0].name)) == "XMP"
+    ]
+    assert known(table.header)[column] == "value"
+    kept = [
         c.value
         for r in output.records()
         if isinstance(r, StructuredRecord) and len(r.cells) == 3
         for c in r.cells
         if isinstance(c, Known) and isinstance(c.value, str) and "漢" in c.value
     ]
-    assert values and all(len(v.encode()) <= 4096 for v in values)
-    assert "image.value_not_copied" in codes(output)
+    assert sorted(len(v) for v in kept) == [1, 1365]
+    (finding,) = [
+        f
+        for f in output.findings()
+        if f.code == "image.value_not_copied"
+        and f.details["cells"] == [{"column": 2, "length": 3 * 4096, "row": row.row}]
+    ]
+    assert finding.subject.locator[-1].column == 2  # type: ignore[union-attr]

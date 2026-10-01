@@ -283,7 +283,7 @@ class _Png:
         keep = self.ctx.max_value_bytes
         if name == "tEXt":
             cell = self.ctx.text_cell(
-                data[at : at + keep + 1], len(data) - at > keep, "latin-1", locator
+                data[at : at + keep + 1], len(data) - at > keep, "latin-1", locator, len(data) - at
             )
             self.ctx.structure(locator, name, ("keyword", "text"), [key, cell])
             return
@@ -316,25 +316,33 @@ class _Png:
         is_xmp = key.encode("latin-1") == XMP_KEYWORD
         body: Space | None = None  # the whole text, only for an XMP packet that is parsed
         found: tuple[bytes, bool] | None = None  # the text's first max_value_bytes
+        total: int | None = None  # its size, where it is known without inflating
         if compressed and data[at + 1] != 0:
             self._method("iTXt", data[at + 1], locator)
         elif compressed and is_xmp:
             body = self._inflated("iTXt", data_at + text_at, data[text_at:])
             if body is not None:
-                found = body.read(0, min(body.size, keep)), body.size > keep
+                found, total = (body.read(0, min(body.size, keep + 1)), body.size > keep), body.size
         elif compressed:
             found = self._prefix("iTXt", data_at + text_at, data[text_at:])
         else:
-            found = data[text_at : text_at + keep + 1], len(data) - text_at > keep
+            found, total = (
+                (data[text_at : text_at + keep + 1], len(data) - text_at > keep),
+                len(data) - text_at,
+            )
             if is_xmp:
                 body = self.space.window(data_at + text_at, len(data) - text_at)
         language = self.ctx.text_cell(
-            data[at + 2 : cut][: keep + 1], cut - at - 2 > keep, "latin-1", locator
+            data[at + 2 : cut][: keep + 1], cut - at - 2 > keep, "latin-1", locator, cut - at - 2
         )
         translated = self.ctx.text_cell(
-            data[cut + 1 : cut2][: keep + 1], cut2 - cut - 1 > keep, "utf-8", locator
+            data[cut + 1 : cut2][: keep + 1],
+            cut2 - cut - 1 > keep,
+            "utf-8",
+            locator,
+            cut2 - cut - 1,
         )
-        text = Unknown() if found is None else self.ctx.text_cell(*found, "utf-8", locator)
+        text = Unknown() if found is None else self.ctx.text_cell(*found, "utf-8", locator, total)
         columns = ("keyword", "language", "translated_keyword", "text")
         self.ctx.structure(locator, "iTXt", columns, [key, language, translated, text])
         if body is not None:

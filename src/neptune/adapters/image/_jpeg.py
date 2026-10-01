@@ -240,8 +240,8 @@ class _Jpeg:
     def _comment(self, data_at: int, length: int) -> None:
         locator = self.space.cite(data_at, length)
         keep = self.ctx.max_value_bytes
-        raw = self.space.read(data_at, min(length, keep))
-        cell = self.ctx.text_cell(raw, length > keep, "ascii", locator)
+        raw = self.space.read(data_at, min(length, keep + 1))
+        cell = self.ctx.text_cell(raw, length > keep, "ascii", locator, length)
         self.ctx.structure(locator, "COM", ("comment",), [cell])
 
     def _sof(self, marker: int, data_at: int, length: int) -> None:
