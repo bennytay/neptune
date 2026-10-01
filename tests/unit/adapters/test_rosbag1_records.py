@@ -160,7 +160,10 @@ def test_a_connection_keeps_the_record_topic_apart_from_the_headers_fields() -> 
     text = connection.text(b"topic")
     assert text is not None and text.value == "/a"
     assert [name for name, _ in connection.pairs()] == [b"topic", b"type", b"callerid"]
-    assert connection.same_as(parse_connection(raw))
+    assert connection.signature() == parse_connection(raw).signature()
+    other = record([(b"op", b"\x07"), (b"conn", struct.pack("<I", 4)), (b"topic", b"/c")], header)
+    assert connection.signature() != parse_connection(other).signature()  # the topic is part of it
+    assert dict(connection.brief()) == {"topic": "/b", "type": "t/T", "callerid": "/n"}
     with pytest.raises(FieldError):
         parse_connection(record([(b"op", b"\x05")]))
 

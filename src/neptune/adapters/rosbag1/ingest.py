@@ -185,8 +185,9 @@ class Declarations:
         for item in as_list(self.context.get("counts", [])):
             conn, total, where = as_list(item)
             counts[as_int(conn)] = (as_int(total), as_place(where))
-        for item in as_list(self.context["channels"]):
-            conn, where = as_list(item)
+        # In file order, so each chunk that holds declarations is decompressed once.
+        channels = [as_list(item) for item in as_list(self.context["channels"])]
+        for conn, where in sorted(channels, key=lambda item: as_place(item[1]).steps):
             self._stream(as_int(conn), as_place(where), run.id, counts)
         return ChunkOutput(
             records=tuple(self.records),
@@ -401,6 +402,7 @@ class Declarations:
             return read_exact(self.source, offset, length)
         if self._chunk_cache is None or self._chunk_cache[0] != (offset, length):
             record = next(scan(self.source, offset, offset + length, self.limits.header_bytes))
+            self._chunk_cache = None  # one chunk held at a time
             try:
                 opened = open_chunk(self.source, record, self.limits.chunk_bytes)
             except ChunkProblem as problem:

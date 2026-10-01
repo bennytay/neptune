@@ -177,7 +177,8 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
     layout = plan_layout(source, reporter, head, bounds, max_rows)
     findings += layout.findings
     ranges = plan_ranges(layout, chunk_bytes, max_rows)
-    cost = sum(declared.place.steps[0][1] for declared in layout.declared.values())
+    # what reading the declarations costs: each record or chunk holding them, once
+    cost = sum(length for _, length in {d.place.steps[0] for d in layout.declared.values()})
     chunks = [make_chunk(source, config, _declarations(layout, head), cost)]
     for context, size in _data(layout, ranges):
         chunks.append(make_chunk(source, config, context, size))

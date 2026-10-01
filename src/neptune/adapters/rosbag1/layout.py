@@ -9,6 +9,7 @@ messages. A unit is a chunk and what follows it up to the next chunk.
 """
 
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -22,6 +23,7 @@ from neptune.adapters.rosbag1.records import (
     Connection,
     FieldError,
     Op,
+    message_connection,
     parse_bag_header,
     parse_chunk_info,
     parse_connection,
@@ -44,6 +46,8 @@ MAX_INDEX_BYTES: Final = 64 * 1024 * 1024  # the most of an index planning reads
 # A chunk claiming more messages than max_rows is read by several planned chunks; an index that
 # asks for more than this many extra ones is not believed.
 MAX_EXTRA_STRETCHES: Final = 10_000
+MAX_INDEX_PAIRS: Final = 4_000_000  # (connection, count) pairs an index may list in all
+MAX_UNITS: Final = 1_000_000  # chunks a scan plans; a hostile bag can hold millions of tiny ones
 
 
 @dataclass(frozen=True)
@@ -83,7 +87,8 @@ class Declared:
     """A connection and where its Connection record is."""
 
     place: Place
-    connection: Connection
+    signature: bytes  # a digest of what it declares, to tell a repeat from a different one
+    brief: tuple[tuple[str, str], ...]  # what ``inspect`` lists
 
 
 @dataclass(frozen=True)
@@ -173,8 +178,8 @@ class Declarations:
                     )
                 self._too_many += 1
                 return
-            self.found[connection.id] = Declared(place, connection)
-        elif not existing.connection.same_as(connection) and connection.id not in self._conflicts:
+            self.found[connection.id] = Declared(place, connection.signature(), connection.brief())
+        elif existing.signature != connection.signature() and connection.id not in self._conflicts:
             self._conflicts[connection.id] = 1
             self.findings.append(
                 self.reporter.finding(
@@ -243,7 +248,7 @@ def read_index(
     if size - pos > MAX_INDEX_BYTES:
         return IndexProblem("too_large", Place(((pos, MAX_INDEX_BYTES),)))
     declarations = Declarations(reporter)
-    connection_records = 0
+    connection_records = pairs = 0
     parsed: list[tuple[Place, ChunkInfo]] = []
     for record in scan(source, pos, size, limits.header_bytes):
         if record.cut:
@@ -252,14 +257,22 @@ def read_index(
             return IndexProblem("record", record.place)
         if record.op == Op.CONNECTION:
             connection_records += 1
+            if connection_records > header.conn_count:  # more than the Bag Header counts
+                return IndexProblem("counts", head.place)
             _declare_top(source, reporter, limits, record, declarations)
         elif record.op == Op.CHUNK_INFO:
             if record.raw is None:
                 return IndexProblem("record_size", record.place)
+            if len(parsed) >= header.chunk_count:
+                return IndexProblem("counts", head.place)
             try:
-                parsed.append((record.place, parse_chunk_info(record.raw)))
+                info = parse_chunk_info(record.raw)
             except FieldError:
                 return IndexProblem("chunk_info", record.place)
+            pairs += len(info.counts)
+            if pairs > MAX_INDEX_PAIRS:
+                return IndexProblem("implausible", record.place)
+            parsed.append((record.place, info))
         else:
             return IndexProblem("record", record.place)
     if connection_records != header.conn_count or len(parsed) != header.chunk_count:
@@ -315,21 +328,21 @@ def _stated(parsed: list[tuple[Place, ChunkInfo]]) -> Stated:
 # --- Scanning -----------------------------------------------------------------------------------
 
 
-def survey(chunk: OpenedChunk) -> tuple[Counter[int], list[tuple[int, int]]]:
-    """A chunk's messages per connection, and the Connection records in it (offset, length).
+def survey(chunk: OpenedChunk, on_connection: Callable[[int, int], None]) -> Counter[int]:
+    """A chunk's messages per connection; each Connection record in it (offset, length) is
+    handed to ``on_connection`` as it is met, not kept.
 
-    The rule that decides which records are messages is the one ``Data`` numbers rows by.
+    The rule that decides which records are messages is ``message_connection``'s, the one ``Data``
+    numbers rows by.
     """
     counts: Counter[int] = Counter()
-    connections: list[tuple[int, int]] = []
     for inner in chunk.records():
-        if inner.op == Op.MESSAGE and inner.fields is not None:
-            conn = inner.fields.unsigned(b"conn", 4)
-            if conn is not None:
-                counts[conn] += 1
+        conn = message_connection(inner)
+        if conn is not None:
+            counts[conn] += 1
         elif inner.op == Op.CONNECTION:
-            connections.append((inner.offset, inner.length))
-    return counts, connections
+            on_connection(inner.offset, inner.length)
+    return counts
 
 
 _RECORD_SLACK: Final = 64 * 1024  # what a Connection record holds besides its connection header
@@ -371,47 +384,70 @@ def scan_layout(source: SourceReader, reporter: Reporter, head: Head, limits: Li
     """Every record of the data section visited once, every chunk decompressed once."""
     declarations = Declarations(reporter)
     layout = Layout(False, head.start, source.size)
-    starts: list[tuple[int, Counter[int]]] = []
+    starts: list[tuple[int, tuple[tuple[int, int], ...]]] = []
     # Connection records inside chunks that cannot be declared: how many, and the first.
     unusable: dict[str, tuple[int, Place]] = {}
     for record in scan(source, head.start, source.size, limits.header_bytes):
         if record.op == Op.CONNECTION and not record.cut:
             _declare_top(source, reporter, limits, record, declarations)
         elif record.op == Op.CHUNK and record.problem is None:
+            if len(starts) >= MAX_UNITS:
+                declarations.findings.append(
+                    reporter.finding(
+                        "too_many_records",
+                        FindingCategory.LIMIT,
+                        Severity.ERROR,
+                        record.place,
+                        f"the data section holds more than {MAX_UNITS} chunks; the rest is not"
+                        " planned and has no rows",
+                        {"limit": MAX_UNITS, "reason": "chunks"},
+                    )
+                )
+                break
             counts: Counter[int] = Counter()
             try:
                 opened = open_chunk(source, record, limits.chunk_bytes)
             except ChunkProblem:
                 pass
             else:
-                counts, inner = survey(opened)
-                for offset, length in inner:
-                    where = opened.place.inner(offset, length)
-                    if length > limits.header_bytes + _RECORD_SLACK:
-                        reason = "header_too_large"
-                    else:
-                        try:
-                            found = parse_connection(opened.data[offset : offset + length])
-                        except FieldError:
-                            reason = "corrupt_record"
-                        else:
-                            declarations.add(where, found)
-                            continue
-                    count, first = unusable.get(reason, (0, where))
-                    unusable[reason] = (count + 1, first)
+
+                def declare(at: int, size: int, held: OpenedChunk = opened) -> None:
+                    _declare_inner(held, at, size, limits, declarations, unusable)
+
+                counts = survey(opened, declare)
                 del opened
-            starts.append((record.offset, counts))
+            starts.append((record.offset, tuple(sorted(counts.items()))))
         if record.cut:
             break
     declarations.findings += _unusable_findings(reporter, limits, unusable)
     ends = [pos for pos, _ in starts[1:]] + [source.size] if starts else []
-    layout.units = [
-        Unit(pos, end, tuple(sorted(counts.items())))
-        for (pos, counts), end in zip(starts, ends, strict=True)
-    ]
+    layout.units = [Unit(pos, end, counts) for (pos, counts), end in zip(starts, ends, strict=True)]
     layout.declared = declarations.found
     layout.findings = declarations.findings
     return layout
+
+
+def _declare_inner(
+    chunk: OpenedChunk,
+    offset: int,
+    length: int,
+    limits: Limits,
+    declarations: Declarations,
+    unusable: dict[str, tuple[int, Place]],
+) -> None:
+    """A Connection record inside a chunk: declared, or counted as one that cannot be."""
+    where = chunk.place.inner(offset, length)
+    if length > limits.header_bytes + _RECORD_SLACK:
+        reason = "header_too_large"
+    else:
+        try:
+            declarations.add(where, parse_connection(chunk.data[offset : offset + length]))
+        except FieldError:
+            reason = "corrupt_record"
+        else:
+            return
+    count, first = unusable.get(reason, (0, where))
+    unusable[reason] = (count + 1, first)
 
 
 def plan_layout(

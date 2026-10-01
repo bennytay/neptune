@@ -20,6 +20,7 @@ import pytest
 from neptune.adapters.contract import configure
 from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.rosbag1 import DESCRIPTOR, Rosbag1Adapter
+from neptune.adapters.rosbag1.records import parse_chunk_info
 from neptune.discovery.reader import BytesReader
 from neptune.model.finding import Severity
 from neptune.model.knowledge import Known, Unknown
@@ -580,3 +581,48 @@ def test_ros_time_is_kept_as_stored_even_when_it_is_not_normalised() -> None:
     output = run(unnormalised)
     (rows,) = found_rows(output).values()
     assert rows[0]["time/0"] == 2 * 10**9 + 3_000_000_000  # as declared, not 5 s
+
+
+def test_many_chunks_the_index_does_not_list_are_one_finding_with_a_count() -> None:
+    data, at = MAKE.write(Options(compression="none"))
+    start = at["chunk_info:0"][0]
+    end = at["chunk_info:2"][0] + at["chunk_info:2"][1]
+    unlisted = with_bag_header(data[:start] + data[end:], chunk_count=0)
+    output = run(unlisted)
+    (finding,) = [f for f in output.findings() if f.code == "rosbag1.index_mismatch"]
+    assert finding.details == {"count": 3, "reason": "unindexed_chunk"}
+    assert row_count(output) == 0
+
+
+def test_a_scan_plans_at_most_so_many_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("neptune.adapters.rosbag1.layout.MAX_UNITS", 1)
+    output = run(fixture("unclosed.bag"))
+    (finding,) = [f for f in output.findings() if f.code == "rosbag1.too_many_records"]
+    assert finding.details == {"limit": 1, "reason": "chunks"}
+    unplanned = [f for f in output.findings() if f.code == "rosbag1.index_mismatch"]
+    assert [f.details for f in unplanned] == [{"count": 2, "reason": "unplanned_chunk"}]
+    assert row_count(output) == 6 and times(output) <= FULL_TIMES  # only the planned chunk
+
+
+def test_an_index_listing_more_than_the_bag_header_counts_is_not_read_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[int] = []
+    real = parse_chunk_info
+
+    def counting(raw: bytes) -> Any:
+        seen.append(1)
+        return real(raw)
+
+    monkeypatch.setattr("neptune.adapters.rosbag1.layout.parse_chunk_info", counting)
+    output = run(with_bag_header(ROBOT_NONE, chunk_count=1))
+    assert codes(output) == ["rosbag1.index_invalid"] and len(seen) == 1  # stopped at the second
+    assert keys(output) == FULL_KEYS
+
+
+def test_the_index_lists_a_connection_by_a_bounded_number_of_bytes() -> None:
+    long = MAKE.Connection(0, "/" + "t" * 5000, "p/T", "m" * 32, "int32 x\n", "/" + "n" * 5000, "0")
+    data, _ = MAKE.write(Options(compression="none", connections=(long,), messages=(), chunks=()))
+    summary: Any = Rosbag1Adapter().inspect(BytesReader(data), configure(DESCRIPTOR)).summary
+    (entry,) = summary["connections"]
+    assert len(entry["topic"]) == 256 and len(entry["callerid"]) == 256

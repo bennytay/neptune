@@ -23,14 +23,7 @@ def _connections(layout: Layout) -> dict[str, JsonValue]:
     counts = layout.stated.counts if layout.stated is not None else {}
     listed: list[JsonValue] = []
     for conn, declared in sorted(layout.declared.items()):
-        connection = declared.connection
-        entry: dict[str, JsonValue] = {"id": conn}
-        if connection.topic is not None:
-            entry["topic"] = connection.topic.shown
-        for name in ("type", "md5sum", "callerid", "latching"):
-            text = connection.text(name.encode())
-            if text is not None:
-                entry[name] = text.shown
+        entry: dict[str, JsonValue] = {"id": conn, **dict(declared.brief)}
         if conn in counts:
             entry["message_count"] = counts[conn][0]
         listed.append(entry)

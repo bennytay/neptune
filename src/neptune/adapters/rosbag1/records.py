@@ -13,12 +13,13 @@ caller turns it into a finding. Nothing here reads a source or allocates more th
 """
 
 import bz2
+import hashlib
 import io
 import struct
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
-from typing import Final, NamedTuple
+from typing import Any, Final, NamedTuple
 
 MAGIC: Final = b"#ROSBAG V2.0\n"
 FORMAT_VERSION: Final = "2.0"
@@ -33,6 +34,7 @@ MAX_HEADER_BYTES_CEILING: Final = 64 * 1024 * 1024
 TIME_BYTES: Final = 8
 NANOSECONDS: Final = 10**9
 COMPRESSIONS: Final = ("none", "bz2", "lz4")
+_BRIEF: Final = 256
 
 
 class Op(IntEnum):
@@ -245,8 +247,25 @@ class Connection:
         data = self.header.data
         return tuple((f.name, data[f.start : f.start + f.length]) for f in self.header.fields)
 
-    def same_as(self, other: "Connection") -> bool:
-        return self.topic == other.topic and self.pairs() == other.pairs()
+    def signature(self) -> bytes:
+        """A digest of the topic and every header field, to tell a repeated declaration from a
+        different one without keeping the record."""
+        digest = hashlib.sha256(self.topic.raw if self.topic is not None else b"\xff")
+        for name, value in self.pairs():
+            digest.update(struct.pack("<II", len(name), len(value)) + name + value)
+        return digest.digest()
+
+    def brief(self) -> tuple[tuple[str, str], ...]:
+        """What ``inspect`` lists of a connection: its topic, type, md5sum, callerid and
+        latching, each cut to 256 bytes."""
+        found = []
+        if self.topic is not None:
+            found.append(("topic", Text(self.topic.raw[:_BRIEF], 0).shown))
+        for name in ("type", "md5sum", "callerid", "latching"):
+            text = self.text(name.encode())
+            if text is not None:
+                found.append((name, Text(text.raw[:_BRIEF], 0).shown))
+        return tuple(found)
 
 
 def parse_connection(data: bytes) -> Connection:
@@ -358,6 +377,15 @@ class Inner(NamedTuple):
     fields: Fields | None
 
 
+def message_connection(inner: Inner) -> int | None:
+    """The connection a record inside a chunk is a message of: the rule that decides which records
+    are messages, and so how every connection's messages are numbered, for the plan's counts and
+    for ingest alike. ``None`` for a record that is not a message or names no ``conn``."""
+    if inner.op != Op.MESSAGE or inner.fields is None:
+        return None
+    return inner.fields.unsigned(b"conn", 4)
+
+
 class InnerRecords:
     """The records in a chunk's uncompressed bytes, walked lazily: nothing is kept per record.
 
@@ -433,11 +461,11 @@ class ChunkError(Exception):
 _PIECE: Final = 4 * 1024 * 1024
 
 
-def _bz2(data: bytes, limit: int, out: io.BytesIO) -> None:
-    """One bzip2 stream, fed in pieces so the decompressor never holds a copy of the rest."""
+def _drain(decompressor: Any, data: bytes, limit: int, out: io.BytesIO) -> None:
+    """One compressed stream, fed in pieces so the decompressor never holds a copy of the rest,
+    and read in pieces so its output never passes ``limit`` + 1 bytes."""
     view = memoryview(data)
     position = 0
-    decompressor = bz2.BZ2Decompressor()
     while out.tell() <= limit and not decompressor.eof:
         room = min(_PIECE, limit + 1 - out.tell())
         if decompressor.needs_input:
@@ -451,28 +479,16 @@ def _bz2(data: bytes, limit: int, out: io.BytesIO) -> None:
             if not piece:
                 break
         out.write(piece)
+
+
+def _bz2(data: bytes, limit: int, out: io.BytesIO) -> None:
+    _drain(bz2.BZ2Decompressor(), data, limit, out)
 
 
 def _lz4(data: bytes, limit: int, out: io.BytesIO) -> None:
-    """One LZ4 frame, fed in pieces so the decompressor never holds a copy of the rest."""
     import lz4.frame
 
-    view = memoryview(data)
-    position = 0
-    decompressor = lz4.frame.LZ4FrameDecompressor()
-    while out.tell() <= limit and not decompressor.eof:
-        room = min(_PIECE, limit + 1 - out.tell())
-        if decompressor.needs_input:
-            if position >= len(view):
-                break
-            stored = view[position : position + _PIECE]
-            position += len(stored)
-            piece = decompressor.decompress(stored, max_length=room)
-        else:
-            piece = decompressor.decompress(b"", max_length=room)
-            if not piece:
-                break
-        out.write(piece)
+    _drain(lz4.frame.LZ4FrameDecompressor(), data, limit, out)
 
 
 def decompress(compression: str, data: bytes, size: int, *, whole: bool) -> bytes:

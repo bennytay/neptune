@@ -28,10 +28,10 @@ from neptune.adapters.rosbag1.ingest import (
     columns,
 )
 from neptune.adapters.rosbag1.records import (
-    Connection,
     FieldError,
     InnerRecords,
     Op,
+    message_connection,
     op_name,
     parse_chunk_info,
     parse_connection,
@@ -110,6 +110,8 @@ class _Unit:
     first_header: dict[str, Place] = field(default_factory=dict)
     outside: int = 0
     first_outside: Place | None = None
+    unlisted: int = 0
+    first_unlisted: Place | None = None
     index_mismatch: list[list[JsonValue]] = field(default_factory=list)
     index_mismatches: int = 0
     first_index: Place | None = None
@@ -131,7 +133,7 @@ class Data:
         self.lead = self.first == 0  # of the planned chunks reading one chunk, the one reporting
         self.columns = columns()
         self.slots: dict[int, Slot] = {}
-        self.declared: dict[int, tuple[Place, Connection]] = {}
+        self.declared: dict[int, tuple[Place, bytes]] = {}
         for item in as_list(context["channels"]):
             conn, where, seq = as_list(item)
             place = as_place(where)
@@ -151,7 +153,10 @@ class Data:
         (offset, length) = place.steps[0]
         # The plan declared it from these bytes; only a source that changed fails to parse.
         with contextlib.suppress(FieldError):
-            self.declared[conn] = (place, parse_connection(read_exact(self.source, offset, length)))
+            self.declared[conn] = (
+                place,
+                parse_connection(read_exact(self.source, offset, length)).signature(),
+            )
 
     def report(
         self,
@@ -189,7 +194,8 @@ class Data:
             if self.start < positions[0]:
                 self._walk(self.start, positions[0], None)
             for k, unit in enumerate(self.units):
-                self._walk(unit[0], ([*positions[k + 1 :], self.end])[0], unit)
+                end = positions[k + 1] if k + 1 < len(positions) else self.end
+                self._walk(unit[0], end, unit)
         return ChunkOutput(series=tuple(self._batches()), findings=tuple(self.findings))
 
     def _planned(self, info: Place | None) -> Planned | None:
@@ -233,19 +239,11 @@ class Data:
             self.read = None
         elif op == Op.INDEX_DATA:
             self._index_data(record, around)
-        elif op == Op.CHUNK:
+        elif op == Op.CHUNK:  # a unit's first record is its chunk; no other chunk was planned
             self.read = None
-            if self.indexed:
-                self.report(
-                    "index_mismatch",
-                    FindingCategory.INCONSISTENT,
-                    Severity.ERROR,
-                    record.place,
-                    "a chunk the index does not list; its messages have no rows",
-                    {"reason": "unindexed_chunk"},
-                )
-            else:
-                self._chunk(record, None, end)
+            around.unlisted += 1
+            if around.first_unlisted is None:
+                around.first_unlisted = record.place
         elif op == Op.MESSAGE:
             self.read = None
             around.outside += 1
@@ -295,6 +293,18 @@ class Data:
                     " they are not read",
                     {"count": count, "reason": "header"},
                 )
+        if around.unlisted and around.first_unlisted is not None:
+            self.report(
+                "index_mismatch",
+                FindingCategory.INCONSISTENT,
+                Severity.ERROR,
+                around.first_unlisted,
+                f"{around.unlisted} chunk(s) the plan does not list; their messages have no rows",
+                {
+                    "count": around.unlisted,
+                    "reason": "unindexed_chunk" if self.indexed else "unplanned_chunk",
+                },
+            )
         if around.outside and around.first_outside is not None:
             self.report(
                 "message_outside_layout",
@@ -427,7 +437,7 @@ class Data:
                     if held.first_other is None:
                         held.first_other = chunk.place.inner(inner.offset, inner.length)
                 continue
-            conn = fields.unsigned(b"conn", 4)
+            conn = message_connection(inner)
             if conn is None:
                 held.malformed += 1
                 continue
@@ -475,7 +485,7 @@ class Data:
             held.unparsed_connections += 1
             return
         declared = self.declared.get(found.id)
-        if declared is None or declared[1].same_as(found):
+        if declared is None or declared[1] == found.signature():
             return
         held.conflicts[found.id] += 1
         if held.first_conflict is None:
