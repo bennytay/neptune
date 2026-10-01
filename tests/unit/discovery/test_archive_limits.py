@@ -2,6 +2,7 @@
 
 import gzip
 import io
+import struct
 import tarfile
 import tracemalloc
 import zipfile
@@ -103,6 +104,18 @@ def gnu_long_names(links: int, name_size: int) -> Iterator[bytes]:
     yield tarfile.TarInfo("final").tobuf(tarfile.GNU_FORMAT) + bytes(1024)
 
 
+def gnu_sparse_tar(chunk: bytes, expanded: int) -> bytes:
+    """An old GNU sparse ``S`` member: ``chunk`` stored at offset 0, expanding to ``expanded``."""
+    info = tarfile.TarInfo("s")
+    info.type = tarfile.GNUTYPE_SPARSE
+    info.size = len(chunk)
+    block = bytearray(info.tobuf(tarfile.GNU_FORMAT))
+    block[386:398] = b"%011o\x00" % 0
+    block[398:410] = b"%011o\x00" % len(chunk)
+    block[483:495] = b"%011o\x00" % expanded
+    return with_checksum(block) + chunk + bytes(-len(chunk) % 512) + bytes(1024)
+
+
 def gzip_chunks(chunks: Iterable[bytes]) -> bytes:
     """A gzip stream of ``chunks``, compressed as they come, so the input is never held whole."""
     compressor = zlib.compressobj(9, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
@@ -128,6 +141,7 @@ ERROR_CODES = {
     "bad_encoding",
     "bad_value",
     "bad_index",
+    "bad_number",
     "os_error",
     "other",
 }
@@ -481,6 +495,89 @@ def test_ordinary_extended_headers_pass(tmp_path: Path, form: int) -> None:
         ("l" * 120, 0),
     ]
     assert report.complete
+
+
+SPARSE_BOMB = 200 * MiB
+SPARSE_CHUNK = b"PK\x03\x04" + bytes(508)  # a stored chunk that sniffs as a nested zip
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        pax_tar({"GNU.sparse.map": "0,512", "GNU.sparse.size": str(SPARSE_BOMB)}, SPARSE_CHUNK),
+        pax_tar(
+            {
+                "GNU.sparse.map": "0,512",
+                "GNU.sparse.realsize": str(SPARSE_BOMB),
+                "size": str(SPARSE_BOMB),  # moves tarfile's idea of where the next header is
+            },
+            SPARSE_CHUNK,
+        ),
+        gnu_sparse_tar(SPARSE_CHUNK, SPARSE_BOMB),
+    ],
+    ids=["pax-0.1", "pax-size-override", "gnu-old"],
+)
+def test_a_sparse_member_is_held_to_the_ratio_before_it_is_read(
+    tmp_path: Path, data: bytes
+) -> None:
+    """tarfile fills sparse holes with zeros: 512 stored bytes would spool 200 MiB to scratch."""
+    assert len(data) < 16_000
+    report = inspect(data, tmp_path)
+    assert codes(report) == [COMPRESSION_RATIO_EXCEEDED]
+    details = report.findings[0].details
+    assert (details["uncompressed"], details["compressed"]) == (SPARSE_BOMB, 512)
+    [member] = report.members
+    assert (member.declared_size, member.read_bytes, member.nested) == (SPARSE_BOMB, 0, None)
+    [step] = member.locator
+    assert isinstance(step, ByteRange) and step.offset + step.length <= len(data)
+    assert peak_memory(lambda: inspect(data, tmp_path)) < MiB
+    report = inspect(gzip.compress(data, mtime=0), tmp_path)  # compressed: the same, per member
+    assert codes(report) == [COMPRESSION_RATIO_EXCEEDED]
+    loose = 1_000_000  # the size limits hold the expanded size too, before a byte is read
+    report = inspect(
+        data, tmp_path, ArchiveLimits(max_compression_ratio=loose, max_member_size=MiB)
+    )
+    assert codes(report) == [MEMBER_SIZE_EXCEEDED]
+    report = inspect(data, tmp_path, ArchiveLimits(max_compression_ratio=loose, max_total_size=MiB))
+    assert codes(report) == [TOTAL_SIZE_EXCEEDED]
+    assert [m.read_bytes for m in report.members] == [0]
+
+
+def test_a_sparse_member_within_the_ratio_is_read_to_its_expanded_size(tmp_path: Path) -> None:
+    data = pax_tar({"GNU.sparse.map": "0,512", "GNU.sparse.size": "40000"}, b"x" * 512)
+    report = inspect(data, tmp_path)
+    assert (codes(report), report.complete) == ([], True)
+    assert [(m.declared_size, m.read_bytes) for m in report.members] == [(40_000, 40_000)]
+
+
+@pytest.mark.parametrize("kind", [tarfile.REGTYPE, tarfile.SYMTYPE])
+def test_sizes_beyond_any_range_are_findings_not_crashes(tmp_path: Path, kind: bytes) -> None:
+    """A base-256 size field can declare 2^70 bytes; the member's range stays inside the tar."""
+    info = tarfile.TarInfo("huge")
+    info.type = kind
+    info.size = 1 << 70
+    data = info.tobuf(tarfile.GNU_FORMAT) + bytes(1024)
+    report = inspect(data, tmp_path)
+    assert codes(report) == [MEMBER_SIZE_EXCEEDED]
+    [step] = report.members[0].locator
+    assert step == ByteRange(0, len(data))
+
+
+def test_a_zip64_header_offset_beyond_the_archive_is_a_member_finding(
+    tmp_path: Path, hostile: ModuleType
+) -> None:
+    data = bytearray(hostile.make_zip([("a.txt", b"x")]))
+    entry = data.find(b"PK\x01\x02")
+    name_length, extra_length = struct.unpack_from("<HH", data, entry + 28)
+    struct.pack_into("<I", data, entry + 42, 0xFFFFFFFF)  # the offset lives in the zip64 extra
+    struct.pack_into("<H", data, entry + 30, extra_length + 12)
+    at = entry + 46 + name_length + extra_length
+    data[at:at] = struct.pack("<HHQ", 1, 8, (1 << 64) - 1)
+    end = data.rfind(b"PK\x05\x06")
+    struct.pack_into("<I", data, end + 12, struct.unpack_from("<I", data, end + 12)[0] + 12)
+    report = inspect(bytes(data), tmp_path)
+    assert codes(report) == [MEMBER_CORRUPT]
+    assert report.members[0].locator == (ByteRange(len(data), 0),)
 
 
 def test_a_huge_declared_member_with_no_data_is_truncation(tmp_path: Path) -> None:

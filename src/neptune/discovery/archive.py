@@ -31,7 +31,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import IO, Final, Protocol
+from typing import IO, Final, Protocol, cast
 
 from neptune.discovery.policy import bytes_field, path_problem, text_field
 from neptune.identity.findings import ingest_finding
@@ -40,6 +40,7 @@ from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import ContentId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.provenance import ByteRange, EvidenceRef, Locator, TransformRecord
+from neptune.model.time import INT64_MAX
 
 ARCHIVE_ADAPTER_ID: Final = "neptune.archive"
 ARCHIVE_VERSION: Final = "1.0.0"
@@ -242,6 +243,7 @@ _ERROR_CODES: Final[tuple[tuple[type[BaseException], str], ...]] = (
     (UnicodeError, "bad_encoding"),
     (ValueError, "bad_value"),
     (LookupError, "bad_index"),
+    (ArithmeticError, "bad_number"),
     (OSError, "os_error"),
 )
 
@@ -323,7 +325,11 @@ def _declared_within(
     *,
     compressed: int | None,
 ) -> bool:
-    """Check a member's declared size against the limits before inflating anything."""
+    """Check a member's declared size against the limits before inflating anything.
+
+    ``compressed`` is what the member occupies in the archive: its compressed size in a zip, its
+    stored chunks in a sparse tar member, whose holes tarfile fills with zeros unread.
+    """
     limits = state.limits
     if declared > limits.max_member_size:
         state.limit(
@@ -348,7 +354,7 @@ def _declared_within(
         state.limit(
             COMPRESSION_RATIO_EXCEEDED,
             locator,
-            f"member declares {declared} bytes from {compressed} compressed, over"
+            f"member declares {declared} bytes from {compressed} in the archive, over"
             f" {limits.max_compression_ratio}:1; not read",
             {
                 **text_field("name", name),
@@ -499,6 +505,12 @@ def _member_defect(
     )
 
 
+def _span(offset: int, length: int, end: int) -> ByteRange:
+    """``length`` bytes from ``offset``, cut to ``[0, end)``: a header may declare any span."""
+    start = min(max(offset, 0), end)
+    return ByteRange(start, min(max(length, 0), end - start))
+
+
 def _read_up_to(fileobj: _Readable, count: int) -> bytes:
     """Up to ``count`` bytes, tolerating short reads; shorter only at EOF."""
     pieces: list[bytes] = []
@@ -632,7 +644,7 @@ def _zip(
         members: list[ArchiveMember] = []
         for index, info in enumerate(infos):
             end = infos[index + 1].header_offset if index + 1 < len(infos) else archive.start_dir
-            locator = (*prefix, ByteRange(info.header_offset, max(end - info.header_offset, 0)))
+            locator = (*prefix, _span(info.header_offset, end - info.header_offset, size))
             members.append(_zip_member(state, archive, info, locator, depth))
             if state.stopped:
                 return members, False
@@ -1016,9 +1028,12 @@ def _tar_members(
                 {"members": count, **limits.to_json()},
             )
             return members, False
-        length = info.offset_data - info.offset + _round_up(info.size)
-        locator = (*tar_prefix, ByteRange(info.offset, length))
-        inflated = info.offset_data + info.size
+        stored = _stored_size(info)
+        length = info.offset_data - info.offset + _round_up(stored)
+        # A plain tar's members are bytes of the archive; a compressed one's, of its inflated
+        # stream, whose length is not known before it is inflated.
+        locator = (*tar_prefix, _span(info.offset, length, INT64_MAX if compressed else size))
+        inflated = info.offset_data + stored
         if compressed and inflated > limits.max_compression_ratio * max(size, 1):
             state.limit(
                 COMPRESSION_RATIO_EXCEEDED,
@@ -1033,7 +1048,7 @@ def _tar_members(
                 },
             )
             return members, False
-        member, proceed = _tar_member(state, archive, info, locator, depth)
+        member, proceed = _tar_member(state, archive, info, locator, depth, stored)
         members.append(member)
         if not proceed:
             return members, False
@@ -1045,6 +1060,7 @@ def _tar_member(
     info: tarfile.TarInfo,
     locator: tuple[Locator, ...],
     depth: int,
+    stored: int,
 ) -> tuple[ArchiveMember, bool]:
     name = info.name
     if info.isdir():
@@ -1062,8 +1078,9 @@ def _tar_member(
         return ArchiveMember(name, kind, info.size, locator, read, nested)
 
     # Skipping a member still inflates its data to reach the next header, so its declared size
-    # must fit the limits whatever its kind.
-    if not _declared_within(state, name, locator, info.size, compressed=None):
+    # must fit the limits whatever its kind. ``info.size`` is a sparse member's expanded size, and
+    # the ratio holds it against the chunks stored: tarfile fills the holes with zeros, unread.
+    if not _declared_within(state, name, locator, info.size, compressed=stored):
         return member(0), False
     # The name first, whatever the kind: a link named ``../x`` is unsafe before it is a link.
     if _skip_by_policy(state, name, kind, locator, tar_type=info.type):
@@ -1169,6 +1186,14 @@ def _tar_error(state: _State, scope: tuple[Locator, ...], exc: BaseException) ->
         f"tar {what}; inspection stopped",
         _error(exc),
     )
+
+
+def _stored_size(info: tarfile.TarInfo) -> int:
+    """The data bytes a member keeps in the tar stream: its size, or a sparse member's chunks."""
+    sparse = cast("list[tuple[int, int]] | None", info.sparse)  # typeshed says ``bytes``
+    if sparse is None:
+        return max(info.size, 0)
+    return sum(max(length, 0) for _, length in sparse)
 
 
 def _round_up(size: int) -> int:
