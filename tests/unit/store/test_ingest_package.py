@@ -39,7 +39,13 @@ from neptune.model.provenance import (
 from neptune.model.reference import TimestampDomain
 from neptune.model.run import Run, Stream
 from neptune.model.schema import canonical_schema
-from neptune.model.series import SeriesProvenance, step_template
+from neptune.model.series import (
+    ColumnType,
+    SeriesBatch,
+    SeriesColumn,
+    SeriesProvenance,
+    step_template,
+)
 from neptune.model.source import LocalPath
 from neptune.model.time import NANOSECOND, ClockRole, Timestamp
 from neptune.store.package import (
@@ -49,6 +55,7 @@ from neptune.store.package import (
     RECEIPT_TEXT,
     PackageError,
     blob_path,
+    package_contents,
     package_files,
     package_id,
     read_envelope,
@@ -60,10 +67,12 @@ from neptune.store.package import (
     write_package,
 )
 from neptune.store.receipt import build_receipt, render_receipt
+from neptune.store.series import SERIES_SETTINGS, write_series
 
 LOG_BYTES = b"\x89MCAP0\r\n" + bytes(200)
 NOTES_BYTES = b"field notes: wind 12 kn\n"
 LOG = content_id(LOG_BYTES)
+STORE = {"series": SERIES_SETTINGS}
 
 
 def records(adapter_version: str = "1.0.0") -> list[Any]:
@@ -274,13 +283,45 @@ def test_sources_are_referenced_unless_materialised() -> None:
         package_files(records(), blobs={content_id(b"other"): b"other"})
 
 
-def test_series_are_named_by_their_stream() -> None:
+def imu_batch(stream: Stream, rows: int = 3) -> SeriesBatch:
+    """Rows of the test log's ``/imu`` stream: a sample every 1000 ticks, cited by byte range."""
+    columns = {
+        "locator/0/length": [10] * rows,
+        "locator/0/offset": [100 + 10 * i for i in range(rows)],
+        "seq": list(range(rows)),
+        "time/0": [1_000 * (i + 1) for i in range(rows)],
+    }
+    return SeriesBatch(
+        stream.id,
+        tuple(SeriesColumn(n, ColumnType.INT64, tuple(v)) for n, v in columns.items()),
+    )
+
+
+def test_series_are_named_by_their_stream_and_checked_against_it(tmp_path: Path) -> None:
     stream = stream_of(records())
-    files = package_files(records(), series={stream.id: b"PAR1 fake parquet PAR1"})
-    assert files[series_path(stream.id)] == b"PAR1 fake parquet PAR1"
-    assert read_files(files).series == {stream.id: b"PAR1 fake parquet PAR1"}
+    series = tmp_path / "imu.parquet"
+    write_series(stream, [imu_batch(stream)], series)
+    with pytest.raises(PackageError, match=r"store\.series"):
+        package_contents(records(), series={stream.id: series})
+    contents = package_contents(records(), series={stream.id: series}, store=STORE)
+    assert contents[series_path(stream.id)] == series
+    write_package(tmp_path / "package", contents)
+    package = read_package(tmp_path / "package")
+    assert package.series == {stream.id: tmp_path / "package" / series_path(stream.id)}
+    assert package.files() == read_package(tmp_path / "package").files()
     with pytest.raises(PackageError, match="not a stream"):
-        package_files(records(), series={mcap_of(records()).id: b"x"})
+        package_contents(records(), series={mcap_of(records()).id: series}, store=STORE)
+
+
+def test_a_series_that_breaks_its_stream_is_refused(tmp_path: Path) -> None:
+    stream = stream_of(records())
+    other = replace(stream, topic=Known("/gps"))  # same id, another line: not this stream's file
+    series = tmp_path / "gps.parquet"
+    write_series(other, [imu_batch(stream)], series)
+    with pytest.raises(PackageError, match="does not hold stream"):
+        package_contents(records(), series={stream.id: series}, store=STORE)
+    with pytest.raises(PackageError, match="not a readable Parquet file"):
+        package_files(records(), series={stream.id: b"PAR1 fake parquet PAR1"}, store=STORE)
 
 
 def test_the_package_documents_validate_against_the_schema() -> None:

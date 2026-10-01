@@ -10,18 +10,24 @@ A package is a directory::
     blobs/sha256/<2 hex>/<64 hex>    a materialised source's bytes
     volatile/receipt-envelope.json   ReceiptEnvelope: job, wall clock, host, root; not listed
 
-``package_files`` computes every deterministic file from the records: the same records, series
-and blobs always give the same bytes and so the same package id. ``read_package`` checks all of
+``package_contents`` computes every deterministic file from the records: the same records,
+series and blobs always give the same bytes and so the same package id. ``package_files`` is the
+same for a package held wholly in memory. ``read_package`` checks all of
 it: the manifest, every file's size and hash, no stray files, every table's order and records,
-lineage ids, and a receipt that recomputes from the tables.
+lineage ids, every series against its stream, and a receipt that recomputes from the tables.
+
+A file's content is bytes or a path on disk. Series and blobs can be gigabytes, so they stay
+paths: hashed, checked and copied as streams, never held in memory (ADR 0025).
 """
 
+import hashlib
 import re
+import shutil
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, TypeAlias
 
 from neptune.identity import canonical_json
 from neptune.identity.findings import check_ingest_finding
@@ -43,6 +49,7 @@ from neptune.model.package import (
 )
 from neptune.model.provenance import Provenance, TransformRecord
 from neptune.store.receipt import build_receipt, check_receipt, render_receipt
+from neptune.store.series import SeriesError, check_series
 
 MANIFEST: Final = "manifest.json"
 RECEIPT: Final = "receipt.json"
@@ -52,6 +59,11 @@ ENVELOPE: Final = f"{VOLATILE}/receipt-envelope.json"
 _SERIES: Final = re.compile(r"series/([0-9a-f]{64})\.parquet")
 _BLOB: Final = re.compile(r"blobs/sha256/([0-9a-f]{2})/([0-9a-f]{64})")
 _TABLE: Final = re.compile(r"records/([a-z][a-z0-9_]*)\.jsonl")
+
+
+# A package file's content: bytes in memory, or a file on disk read as a stream.
+Content: TypeAlias = bytes | Path
+_READ_SIZE: Final = 1024 * 1024
 
 
 class PackageError(ValueError):
@@ -75,22 +87,39 @@ def _document(value: Any) -> bytes:
     return canonical_json.dumps(value.to_json())
 
 
+def _digest(content: Content) -> tuple[int, ContentId]:
+    """Size and sha256 of ``content``, streamed from disk for a path."""
+    if isinstance(content, bytes):
+        return len(content), content_id(content)
+    digest, size = hashlib.sha256(), 0
+    with content.open("rb") as stream:
+        while block := stream.read(_READ_SIZE):
+            digest.update(block)
+            size += len(block)
+    return size, ContentId("sha256:" + digest.hexdigest())
+
+
+def _bytes(content: Content) -> bytes:
+    return content if isinstance(content, bytes) else content.read_bytes()
+
+
 # --- Writing -----------------------------------------------------------------------------------
 
 
-def package_files(
+def package_contents(
     records: Iterable[Any],
     *,
-    series: Mapping[RecordId, bytes] | None = None,
-    blobs: Mapping[ContentId, bytes] | None = None,
+    series: Mapping[RecordId, Content] | None = None,
+    blobs: Mapping[ContentId, Content] | None = None,
     store: JsonObject | None = None,
-) -> dict[str, bytes]:
+) -> dict[str, Content]:
     """Every file of the package holding ``records``, by path: deterministic, manifest included.
 
     ``records`` are the source ledger, the transforms, the evidence records and the findings.
-    ``series`` are the stream files the store wrote, by stream id. ``blobs`` are the sources to
-    materialise, by content id; every other source stays referenced (ADR 0022 §5). ``store`` holds
-    the settings the store wrote them with.
+    ``series`` are the stream files the store wrote (``neptune.store.series``), by stream id; a
+    stream may have none, as in a records-only package. ``blobs`` are the sources to materialise,
+    by content id; every other source stays referenced (ADR 0022 §5). ``store`` holds the settings
+    the store wrote them with. Series and blobs may be paths, which are never loaded.
     """
     series, blobs, store = dict(series or {}), dict(blobs or {}), dict(store or {})
     tables: dict[str, list[Any]] = {kind: [] for kind in RECORD_KINDS}
@@ -99,7 +128,7 @@ def package_files(
         if kind not in tables:
             raise PackageError(f"not a record of a known kind: {record!r}")
         tables[kind].append(record)
-    files: dict[str, bytes] = {}
+    files: dict[str, Content] = {}
     for kind, members in tables.items():
         members.sort(key=record_key)
         keys = [record_key(record) for record in members]
@@ -107,6 +136,8 @@ def package_files(
             raise PackageError(f"two {kind} records share an id")
         files[table_path(kind)] = b"".join(_document(record) + b"\n" for record in members)
     streams = {stream.id for stream in tables["stream"]}
+    if series and not isinstance(store.get("series"), Mapping):
+        raise PackageError("series need the settings they were written with, under store.series")
     for stream, data in series.items():
         if stream not in streams:
             raise PackageError(f"series for {stream}, which is not a stream of this package")
@@ -115,7 +146,7 @@ def package_files(
     for content, data in blobs.items():
         if content not in artifacts:
             raise PackageError(f"blob {content} is not a source artifact of this package")
-        if content_id(data) != content or len(data) != artifacts[content].size:
+        if _digest(data) != (artifacts[content].size, content):
             raise PackageError(f"blob bytes do not hash to {content}")
         files[blob_path(content)] = data
     receipt = build_receipt(record for members in tables.values() for record in members)
@@ -132,9 +163,7 @@ def package_files(
             )
             for content in sorted(artifacts)
         ),
-        files=tuple(
-            PackageFile(path, len(data), content_id(data)) for path, data in sorted(files.items())
-        ),
+        files=tuple(PackageFile(path, *_digest(data)) for path, data in sorted(files.items())),
         store=store,
     )
     files[MANIFEST] = _document(manifest)
@@ -142,19 +171,37 @@ def package_files(
     return files
 
 
-def package_id(files: Mapping[str, bytes]) -> ContentId:
+def package_files(
+    records: Iterable[Any],
+    *,
+    series: Mapping[RecordId, bytes] | None = None,
+    blobs: Mapping[ContentId, bytes] | None = None,
+    store: JsonObject | None = None,
+) -> dict[str, bytes]:
+    """``package_contents`` for a package held in memory: every file as bytes."""
+    contents = package_contents(records, series=series, blobs=blobs, store=store)
+    return {path: _bytes(data) for path, data in contents.items()}
+
+
+def package_id(files: Mapping[str, Content]) -> ContentId:
     """The package's identity: the sha256 of its manifest's bytes (ADR 0002 §5)."""
-    return content_id(files[MANIFEST])
+    return content_id(_bytes(files[MANIFEST]))
 
 
-def write_package(root: Path, files: Mapping[str, bytes]) -> ContentId:
-    """Write ``package_files`` output into ``root``, which must not exist or be empty."""
+def write_package(root: Path, files: Mapping[str, Content]) -> ContentId:
+    """Write ``package_contents`` output into ``root``, which must not exist or be empty.
+
+    A path is copied as a stream; ``read_package`` checks the result.
+    """
     if root.exists() and (not root.is_dir() or any(root.iterdir())):
         raise PackageError(f"{root} is not an empty directory")
     for relative, data in sorted(files.items()):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
+        if isinstance(data, bytes):
+            path.write_bytes(data)
+        else:
+            shutil.copyfile(data, path)
     return package_id(files)
 
 
@@ -179,26 +226,31 @@ class IngestPackage:
     manifest: PackageManifest
     receipt: IngestReceipt
     records: tuple[Any, ...]
-    series: Mapping[RecordId, bytes]
-    blobs: Mapping[ContentId, bytes]
+    series: Mapping[RecordId, Content]
+    blobs: Mapping[ContentId, Content]
 
-    def files(self) -> dict[str, bytes]:
+    def files(self) -> dict[str, Content]:
         """The package's deterministic files, rebuilt from what was read."""
-        return package_files(
+        return package_contents(
             self.records, series=self.series, blobs=self.blobs, store=self.manifest.store
         )
 
 
 def read_package(root: Path) -> IngestPackage:
-    """Read a package directory and verify it; ``volatile/`` is left out."""
-    files: dict[str, bytes] = {}
+    """Read a package directory and verify it; ``volatile/`` is left out.
+
+    Series and blobs stay on disk: they are hashed and checked as streams, and the package holds
+    their paths.
+    """
+    files: dict[str, Content] = {}
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root).as_posix()
         if path.is_symlink():
             raise PackageError(f"{relative} is a symlink; a package holds regular files only")
         if relative == VOLATILE or relative.startswith(f"{VOLATILE}/") or path.is_dir():
             continue
-        files[relative] = path.read_bytes()
+        large = _SERIES.fullmatch(relative) or _BLOB.fullmatch(relative)
+        files[relative] = path if large else path.read_bytes()
     return read_files(files)
 
 
@@ -213,11 +265,12 @@ def _load(data: bytes, what: str) -> JsonValue:
         raise PackageError(f"{what} is not canonical JSON: {exc}") from exc
 
 
-def read_files(files: Mapping[str, bytes]) -> IngestPackage:
+def read_files(files: Mapping[str, Content]) -> IngestPackage:
     """Verify a package given as its files by path (everything but ``volatile/``)."""
     if MANIFEST not in files:
         raise PackageError(f"no {MANIFEST}")
-    manifest = package_manifest_from_json(_load(files[MANIFEST], MANIFEST))
+    manifest_bytes = _bytes(files[MANIFEST])
+    manifest = package_manifest_from_json(_load(manifest_bytes, MANIFEST))
     listed = {file.path: file for file in manifest.files}
     present = set(files) - {MANIFEST}
     if present != set(listed):
@@ -225,8 +278,13 @@ def read_files(files: Mapping[str, bytes]) -> IngestPackage:
             f"files do not match the manifest: unlisted {sorted(present - set(listed))},"
             f" missing {sorted(set(listed) - present)}"
         )
+    small = {
+        path: _bytes(data)
+        for path, data in files.items()
+        if not (_SERIES.fullmatch(path) or _BLOB.fullmatch(path))
+    }
     for path, file in listed.items():
-        if len(files[path]) != file.size or content_id(files[path]) != file.sha256:
+        if _digest(small.get(path, files[path])) != (file.size, file.sha256):
             raise PackageError(f"{path} does not match its size and hash in the manifest")
     if dict(manifest.tables).keys() != RECORD_KINDS.keys():
         raise PackageError("the manifest must count a table for every record kind")
@@ -234,10 +292,10 @@ def read_files(files: Mapping[str, bytes]) -> IngestPackage:
     records: list[Any] = []
     for kind, (_, read) in RECORD_KINDS.items():
         path = table_path(kind)
-        if path not in files:
+        if path not in small:
             raise PackageError(f"no table for {kind}: an empty table is an empty file")
-        members = [read(_load(line, path)) for line in files[path].splitlines()]
-        if files[path] != b"".join(_document(record) + b"\n" for record in members):
+        members = [read(_load(line, path)) for line in small[path].splitlines()]
+        if small[path] != b"".join(_document(record) + b"\n" for record in members):
             raise PackageError(f"{path} is not one canonical line per record")
         keys = [record_key(record) for record in members]
         if keys != sorted(set(keys)):
@@ -247,9 +305,9 @@ def read_files(files: Mapping[str, bytes]) -> IngestPackage:
         records.extend(members)
     _check_lineage(records)
 
-    series: dict[RecordId, bytes] = {}
-    blobs: dict[ContentId, bytes] = {}
-    streams = {record.id for record in records if record.kind == "stream"}
+    series: dict[RecordId, Content] = {}
+    blobs: dict[ContentId, Content] = {}
+    streams = {record.id: record for record in records if record.kind == "stream"}
     handles = {handle.content_id: handle for handle in manifest.sources}
     artifacts = {record.content_id for record in records if record.kind == "source_artifact"}
     if set(handles) != artifacts:
@@ -261,10 +319,14 @@ def read_files(files: Mapping[str, bytes]) -> IngestPackage:
             stream = parse_record_id(f"rec:sha256:{match[1]}")
             if stream not in streams:
                 raise PackageError(f"{path} names no stream of this package")
+            try:
+                check_series(streams[stream], data)
+            except SeriesError as exc:
+                raise PackageError(f"{path}: {exc}") from exc
             series[stream] = data
         elif (match := _BLOB.fullmatch(path)) and match[2].startswith(match[1]):
             content = parse_content_id(f"sha256:{match[2]}")
-            if content_id(data) != content or handles.get(content) is None:
+            if _digest(data)[1] != content or handles.get(content) is None:
                 raise PackageError(f"{path} does not hold the source it is named for")
             blobs[content] = data
         else:
@@ -272,18 +334,20 @@ def read_files(files: Mapping[str, bytes]) -> IngestPackage:
     for content, handle in handles.items():
         if (handle.storage is Storage.MATERIALISED) != (content in blobs):
             raise PackageError(f"source {content} is {handle.storage}, but its blob says otherwise")
+    if series and not isinstance(manifest.store.get("series"), Mapping):
+        raise PackageError("the package has series but its manifest records no store.series")
 
-    receipt = ingest_receipt_from_json(_load(files[RECEIPT], RECEIPT))
+    receipt = ingest_receipt_from_json(_load(small[RECEIPT], RECEIPT))
     try:
         check_receipt(receipt, records)
     except ValueError as exc:
         raise PackageError(str(exc)) from exc
     if receipt.id != manifest.receipt:
         raise PackageError("the manifest names another receipt")
-    if files[RECEIPT_TEXT] != render_receipt(receipt).encode("utf-8"):
+    if small[RECEIPT_TEXT] != render_receipt(receipt).encode("utf-8"):
         raise PackageError(f"{RECEIPT_TEXT} is not the rendering of {RECEIPT}")
     return IngestPackage(
-        id=content_id(files[MANIFEST]),
+        id=content_id(manifest_bytes),
         manifest=manifest,
         receipt=receipt,
         records=tuple(records),
