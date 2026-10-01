@@ -20,6 +20,7 @@ from neptune.model.ids import (
     ContentId,
     LogicalId,
     RecordId,
+    check_text,
     logical_id_from_json,
     parse_content_id,
     parse_record_id,
@@ -132,8 +133,10 @@ def _link(kind: str, record: Mapping[str, object]) -> _Link | None:
     if _str(record, "predicate") != SAME_AS:
         return None
     operator = _str(record, "operator")
-    if not operator:
-        raise _Malformed("'operator' must be non-empty")
+    try:
+        check_text("operator", operator)
+    except ValueError as exc:
+        raise _Malformed(str(exc)) from exc
     return _Link(
         rid,
         "operator_assertion",
@@ -286,7 +289,7 @@ class IdentityConsolidator:
 
     @staticmethod
     def _candidates(view: _View, components: _Components) -> list[ClaimDraft]:
-        """Per shared content id: every thread citing it is a candidate reading of each other."""
+        """Per shared content id and subject: every other thread citing it, not already same_as."""
         citing: dict[ContentId, dict[bytes, list[RecordId]]] = {}
         for key, (_, records) in view.threads.items():
             for rid, sources in records:
@@ -294,14 +297,19 @@ class IdentityConsolidator:
                     citing.setdefault(source, {}).setdefault(key, []).append(rid)
         drafts: list[ClaimDraft] = []
         for source, by_node in sorted(citing.items()):
-            if len(by_node) < 2 or len({components.find(k) for k in by_node}) < 2:
-                continue
-            candidates: list[JsonValue] = [
-                {"evidence": sorted(by_node[key]), "node": view.threads[key][0].to_json()}
-                for key in sorted(by_node)
-            ]
-            inputs = tuple(rid for key in sorted(by_node) for rid in by_node[key])
             for key in sorted(by_node):
+                # Nodes already joined to the subject by same_as are not candidate readings of it.
+                group = [
+                    k
+                    for k in sorted(by_node)
+                    if k == key or components.find(k) != components.find(key)
+                ]
+                if len(group) < 2:
+                    continue
+                candidates: list[JsonValue] = [
+                    {"evidence": sorted(by_node[k]), "node": view.threads[k][0].to_json()}
+                    for k in group
+                ]
                 drafts.append(
                     ClaimDraft(
                         predicate=SAME_AS_CANDIDATE,
@@ -312,7 +320,7 @@ class IdentityConsolidator:
                             "source": source,
                         },
                         assertion_kind="observed",
-                        inputs=inputs,
+                        inputs=tuple(rid for k in group for rid in by_node[k]),
                         state=KnowledgeState.AMBIGUOUS,
                     )
                 )

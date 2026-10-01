@@ -101,6 +101,8 @@ class ClaimDraft:
 
     def __post_init__(self) -> None:
         check_token("predicate", self.predicate)
+        if not isinstance(self.subject, LogicalId):
+            raise TypeError(f"subject must be a LogicalId, got {type(self.subject).__name__}")
         canonical_json.dumps(self.object)  # CanonicalJsonError (a ValueError) if not representable
         if self.assertion_kind not in ("observed", "stated", "inferred"):
             raise ValueError(
@@ -129,9 +131,11 @@ def claim_id(transform: ConsolidatorTransform, draft: ClaimDraft) -> RecordId:
         "config_hash": transform.config_hash,
         "consolidator_id": transform.consolidator_id,
         "consolidator_version": transform.version,
+        "assertion_kind": draft.assertion_kind,
         "inputs": list(draft.inputs),
         "object": draft.object,
         "predicate": draft.predicate,
+        "state": str(draft.state),
         "subject": draft.subject.to_json(),
     }
     if transform.model is not None:
@@ -170,6 +174,7 @@ class ConsolidationFinding:
         if "." not in self.code:
             raise ValueError(f"finding code is <producer>.<name>: {self.code!r}")
         check_text("message", self.message)
+        canonical_json.dumps(dict(self.details))  # CanonicalJsonError (a ValueError) if not
         object.__setattr__(self, "records", tuple(sorted(set(self.records))))
         object.__setattr__(self, "details", dict(self.details))
 
@@ -314,6 +319,13 @@ def run_consolidator(
             text = type(exc).__name__
         finding = _runner_finding("failed", transform, text[:MAX_MESSAGE])
         return Consolidation(transform, (), (finding,))
+    if not (
+        isinstance(output, ConsolidatorOutput)
+        and all(isinstance(d, ClaimDraft) for d in output.drafts)
+        and all(isinstance(f, ConsolidationFinding) for f in output.findings)
+    ):
+        message = "consolidate() must return ConsolidatorOutput of ClaimDrafts and findings"
+        return Consolidation(transform, (), (_runner_finding("bad_output", transform, message),))
     claims: dict[RecordId, ProposedClaim] = {}
     findings: dict[RecordId, ConsolidationFinding] = {f.id: f for f in output.findings}
     for draft in output.drafts:

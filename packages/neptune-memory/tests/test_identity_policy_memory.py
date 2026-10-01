@@ -216,6 +216,39 @@ def test_two_robots_same_urdf_stay_two_nodes() -> None:
     assert [c["node"] for c in listed if isinstance(c, dict)] == [LEG_A.to_json(), LEG_B.to_json()]
 
 
+def test_nodes_joined_by_same_as_are_not_candidates_for_each_other() -> None:
+    packages = _drone()
+    third = LogicalId("serial", "PX4-SPARE")
+    packages["pkg-flight"] = [_thread(DRONE_LOG, ULOG, SHARED_URDF)]
+    packages["pkg-fleet"] = [_thread(DRONE_ASSET, FLEET_CSV, SHARED_URDF), packages["pkg-fleet"][1]]
+    packages["pkg-spare"] = [_thread(third, SHARED_URDF)]
+    result = _run(packages)
+    assert len(_of(result, SAME_AS)) == 1
+    by_subject = {c.draft.subject: c.draft.object for c in _of(result, SAME_AS_CANDIDATE)}
+    assert set(by_subject) == {DRONE_ASSET, DRONE_LOG, third}
+    for subject, other in ((DRONE_ASSET, DRONE_LOG), (DRONE_LOG, DRONE_ASSET)):
+        obj = by_subject[subject]
+        assert isinstance(obj, dict) and isinstance(obj["candidates"], list)
+        listed = [c["node"] for c in obj["candidates"] if isinstance(c, dict)]
+        assert other.to_json() not in listed and third.to_json() in listed
+
+
+def test_hostile_operator_name_is_one_finding_not_a_lost_build() -> None:
+    assertion = {
+        "kind": "operator_assertion",
+        "id": _rid("operator_assertion", "hostile"),
+        "predicate": "same_as",
+        "subject": LEG_A.to_json(),
+        "object": LEG_B.to_json(),
+        "operator": "\ud800",
+    }
+    packages = _same_urdf()
+    packages["pkg-a"].append(assertion)
+    result = _run(packages)
+    assert [f.code for f in result.findings] == ["identity.malformed_record"]
+    assert len(_of(result, SAME_AS_CANDIDATE)) == 2
+
+
 def test_identical_thread_records_in_two_packages_are_one_node() -> None:
     thread = _thread(LEG_A, SHARED_URDF)
     ledger = StubLedger({"pkg-1": (1, [thread]), "pkg-2": (1, [thread])})

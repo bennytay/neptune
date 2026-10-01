@@ -220,6 +220,28 @@ def test_crash_with_hostile_message_keeps_only_the_type(text: str) -> None:
     assert finding.message == "RuntimeError"
 
 
+def test_wrong_output_type_is_a_finding() -> None:
+    @dataclass(frozen=True)
+    class Wrong(Crashes):
+        def consolidate(
+            self,
+            ledger: LedgerReader,
+            previous: Sequence[PriorClaim],
+            config: Mapping[str, JsonValue],
+        ) -> ConsolidatorOutput:
+            return ConsolidatorOutput(("not a draft",))  # type: ignore[arg-type]
+
+    result = run_consolidator(Wrong(), _ledger(), (), {})
+    assert not result.claims
+    assert [f.code for f in result.findings] == ["consolidate.bad_output"]
+
+
+def test_state_and_assertion_kind_are_part_of_the_id() -> None:
+    base = claim_id(_transform(), _draft())
+    assert claim_id(_transform(), replace(_draft(), state=KnowledgeState.AMBIGUOUS)) != base
+    assert claim_id(_transform(), replace(_draft(), assertion_kind="stated")) != base
+
+
 def test_rebuild_reproduces_the_graph_byte_for_byte() -> None:
     plan: list[tuple[Consolidator, Mapping[str, JsonValue]]] = [
         (CountObservations(), {}),
@@ -255,9 +277,11 @@ def test_rebuild_rejects_a_duplicate_consolidator() -> None:
         ({"state": KnowledgeState.UNKNOWN}, "known or ambiguous"),
         ({"inputs": ("not-a-record-id",)}, "record id"),
         ({"object": float("nan")}, "representable"),
+        ({"subject": {"namespace": "serial", "value": "x"}}, "LogicalId"),
     ],
 )
 def test_malformed_draft_is_rejected(kwargs: dict[str, object], error: str) -> None:
+    # TypeError for a wrong subject type; every other case is a ValueError.
     fields: dict[str, object] = {
         "predicate": "p",
         "subject": ARM,
@@ -266,7 +290,7 @@ def test_malformed_draft_is_rejected(kwargs: dict[str, object], error: str) -> N
         "inputs": (_rid(1),),
     }
     fields.update(kwargs)
-    with pytest.raises(ValueError, match=error):
+    with pytest.raises((ValueError, TypeError), match=error):
         ClaimDraft(**fields)  # type: ignore[arg-type]
 
 
@@ -279,3 +303,5 @@ def test_finding_id_is_content_derived_and_records_are_sorted() -> None:
     assert a.id != ConsolidationFinding("x.y", Severity.INFO, "other", a.records).id
     with pytest.raises(ValueError, match="producer"):
         ConsolidationFinding("nodot", Severity.INFO, "m")
+    with pytest.raises(ValueError, match="representable"):
+        ConsolidationFinding("x.y", Severity.INFO, "m", details={"v": float("nan")})

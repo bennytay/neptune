@@ -36,8 +36,8 @@ catalog API (MVL-85) are not on `main`; the shapes consumed here are pinned when
 3. **Everything else is a candidate, never a fact.** Threads that only share evidence (one URDF, one register
    CSV) get one `same_as_candidate` claim per subject node per shared content id. Its knowledge state is
    `Ambiguous`; its object lists every candidate node (the subject included, which is the "distinct" reading, so
-   there are always at least two) with the record ids that are the evidence for each. Groups already joined by
-   `same_as` produce no candidate.
+   there are always at least two) with the record ids that are the evidence for each. Nodes already joined to
+   the subject by `same_as` are not candidates for it.
 4. **No merge operation.** `same_as` is a symmetric edge emitted once, subject = the lower logical id in
    canonical JSON order. Queries traverse it; nothing rewrites or collapses nodes. Undoing an identity is
    superseding a claim, never splitting a node.
@@ -60,7 +60,8 @@ with a token `consolidator_id`, a `version` and a `model` that is `None` for det
   `inferred` claims, and the model is hashed into every claim id and carried in every claim's transform.
 - **The runner stamps provenance.** `run_consolidator` hashes the resolved config, derives every id, drops a
   draft without input records or with the wrong `assertion_kind` (a finding, not an exception), turns a raised
-  exception into a `consolidate.failed` finding, and returns claims sorted by id. A consolidator never sets ids.
+  exception into a `consolidate.failed` finding (and output of the wrong type into `consolidate.bad_output`), and
+  returns claims sorted by id. A consolidator never sets ids.
 - **"Previous claims"** are the claims of consolidators *earlier in the same build's declared order*; never a
   consolidator's own output and never a previous build's graph. That is what makes a re-run idempotent.
 - **Drafts, not `Claim`s.** Until MVL-102's `Claim` is on `main`, the runner returns `ProposedClaim(id, draft,
@@ -69,9 +70,10 @@ with a token `consolidator_id`, a `version` and a `model` that is `None` for det
 ### 3. Lineage
 
 `claim_id = record_id("memory.claim", {consolidator_id, consolidator_version, config_hash, inputs, predicate,
-subject, object[, model]})` using the compiler's canonical JSON and sha256 record-id scheme. `inputs` is the
+subject, object, assertion_kind, state[, model]})` using the compiler's canonical JSON and sha256 record-id scheme. `inputs` is the
 sorted, de-duplicated set of Ledger record ids (and earlier claim ids) the claim rests on, so input order is
-irrelevant. Same inputs give the same id; a version or config change gives a sibling id. An upgrade adds sibling
+irrelevant. `assertion_kind` and knowledge `state` are hashed too, so a stated and an observed claim (or a
+known and an ambiguous one) on the same inputs are never one id. Same inputs give the same id; a version or config change gives a sibling id. An upgrade adds sibling
 claims; nothing edits or deletes a claim from an earlier lineage.
 
 ### 4. Rebuild
