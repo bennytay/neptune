@@ -5,7 +5,8 @@ import io
 import tarfile
 import tracemalloc
 import zipfile
-from collections.abc import Callable
+import zlib
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from types import ModuleType
 from typing import IO
@@ -89,6 +90,28 @@ def pax_tar(pax: dict[str, str], data: bytes) -> bytes:
         info.pax_headers = pax
         archive.addfile(info, io.BytesIO(data))
     return buffer.getvalue()
+
+
+def gnu_long_names(links: int, name_size: int) -> Iterator[bytes]:
+    """``links`` chained GNU long-name headers of ``name_size`` bytes each, then one member."""
+    for _ in range(links):
+        info = tarfile.TarInfo("././@LongLink")
+        info.type = tarfile.GNUTYPE_LONGNAME
+        info.size = name_size
+        yield info.tobuf(tarfile.GNU_FORMAT)
+        yield b"a" * name_size + bytes(-name_size % 512)
+    yield tarfile.TarInfo("final").tobuf(tarfile.GNU_FORMAT) + bytes(1024)
+
+
+def gzip_chunks(chunks: Iterable[bytes]) -> bytes:
+    """A gzip stream of ``chunks``, compressed as they come, so the input is never held whole."""
+    compressor = zlib.compressobj(9, zlib.DEFLATED, 16 + zlib.MAX_WBITS)
+    return b"".join(compressor.compress(chunk) for chunk in chunks) + compressor.flush()
+
+
+def at_depth(frames: int, run: Callable[[], ArchiveReport]) -> ArchiveReport:
+    """``run()`` called ``frames`` stack frames deeper than the caller."""
+    return run() if frames == 0 else at_depth(frames - 1, run)
 
 
 ERROR_CODES = {
@@ -381,6 +404,83 @@ def test_a_pax_header_bomb_is_refused(tmp_path: Path) -> None:
     assert report.findings[0].details["declared_size"] == 2 * MiB
     assert not report.complete
     assert peak_memory(lambda: inspect(data, tmp_path)) < 2 * MiB
+
+
+def test_chained_long_names_are_capped_at_one_mebibyte_in_total(tmp_path: Path) -> None:
+    """tarfile holds every link of a long-name chain until the member's last header parses."""
+    data = gzip_chunks(gnu_long_names(40, MiB - 512))  # 40 MiB of names in about 40 KB
+    assert len(data) < 100_000
+    report = inspect(data, tmp_path)
+    assert codes(report) == [HEADER_TOO_LARGE]
+    assert report.findings[0].details == {"header_offset": 0, "max_header_size": MiB}
+    assert not report.complete
+    assert peak_memory(lambda: inspect(data, tmp_path)) < 4 * MiB
+
+
+def test_one_members_headers_are_capped_however_they_are_split(
+    tmp_path: Path, hostile: ModuleType
+) -> None:
+    """Two long names under the per-header cap still add up past it; the member before is kept."""
+    first = hostile.make_tar([(hostile.tar_info("ok.txt", 3), b"ok\n")])[:1024]
+    data = first + b"".join(gnu_long_names(2, 700_000))
+    report = inspect(data, tmp_path)
+    assert codes(report) == [HEADER_TOO_LARGE]
+    assert report.findings[0].details == {"header_offset": 1024, "max_header_size": MiB}
+    assert [(m.name, m.read_bytes) for m in report.members] == [("ok.txt", 3)]
+
+
+def test_a_long_header_chain_is_a_finding_at_any_stack_depth(tmp_path: Path) -> None:
+    """1,200 chained long names: a fixed chain cap, not a RecursionError that moves with depth."""
+    data = b"".join(gnu_long_names(1200, 1))
+    shallow = inspect(data, tmp_path)
+    assert codes(shallow) == [HEADER_TOO_LARGE]
+    assert shallow.findings[0].details == {
+        "header_chain": 33,
+        "max_header_chain": 32,
+        "max_header_size": MiB,
+    }
+    assert at_depth(600, lambda: inspect(data, tmp_path)) == shallow
+
+
+def test_pax_global_headers_are_capped_across_the_archive(tmp_path: Path) -> None:
+    """Global headers accumulate in tarfile for the archive's life, so their total is capped."""
+    pieces = []
+    for index in range(3):
+        pax = {f"key{index}": "v" * 600_000}
+        pieces.append(tarfile.TarInfo.create_pax_global_header(pax))
+        pieces.append(tarfile.TarInfo(f"m{index}").tobuf(tarfile.USTAR_FORMAT))
+    report = inspect(b"".join(pieces) + bytes(1024), tmp_path)
+    assert codes(report) == [HEADER_TOO_LARGE]
+    declared = [
+        tarfile.TarInfo.frombuf(header[:512], "utf-8", "surrogateescape").size
+        for header in pieces[::2]
+    ]
+    assert report.findings[0].details["global_header_bytes"] == declared[0] + declared[1]
+    assert declared[0] < MiB < declared[0] + declared[1]
+    assert [m.name for m in report.members] == ["m0"]
+
+
+@pytest.mark.parametrize("form", [tarfile.PAX_FORMAT, tarfile.GNU_FORMAT])
+def test_ordinary_extended_headers_pass(tmp_path: Path, form: int) -> None:
+    buffer = io.BytesIO()
+    with tarfile.open(
+        fileobj=buffer, mode="w", format=form, pax_headers={"comment": "a git archive"}
+    ) as archive:
+        info = tarfile.TarInfo("d/" * 150 + "f.txt")
+        info.size = 3
+        archive.addfile(info, io.BytesIO(b"ok\n"))
+        link = tarfile.TarInfo("l" * 120)
+        link.type = tarfile.SYMTYPE
+        link.linkname = "t/" * 100
+        archive.addfile(link)
+    report = inspect(buffer.getvalue(), tmp_path)
+    assert codes(report) == [MEMBER_LINK]
+    assert report.findings[0].details["target"] == "t/" * 100
+    assert [(m.name, m.read_bytes) for m in report.members] == [
+        ("d/" * 150 + "f.txt", 3),
+        ("l" * 120, 0),
+    ]
+    assert report.complete
 
 
 def test_a_huge_declared_member_with_no_data_is_truncation(tmp_path: Path) -> None:

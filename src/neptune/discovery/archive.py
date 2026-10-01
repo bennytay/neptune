@@ -762,6 +762,7 @@ _EXTENDED_HEADERS: Final = frozenset(
         tarfile.GNUTYPE_LONGLINK,
     }
 )
+_MAX_HEADER_CHAIN: Final = 32  # extended headers before one member; real archives use at most 4
 _TRUNCATION_MESSAGES: Final = ("unexpected end of data", "truncated header", "empty file")
 _SPECIAL_TYPES: Final = {
     tarfile.FIFOTYPE: "fifo",
@@ -771,20 +772,124 @@ _SPECIAL_TYPES: Final = {
 
 
 class _HeaderTooLarge(tarfile.TarError):
-    def __init__(self, size: int) -> None:
-        super().__init__(f"extended header declares {size} bytes")
-        self.size = size
+    """One member's headers would cost more than this module allows tarfile to hold."""
+
+    def __init__(self, message: str, details: JsonObject) -> None:
+        super().__init__(message)
+        self.message = message
+        self.details = details
+
+
+class _GuardedTarFile(tarfile.TarFile):
+    """Counts what headers cost while tarfile recurses through them, and keeps no members.
+
+    tarfile parses a GNU long name or a pax header by recursing into the next header, so a chain
+    of them is a recursion as deep as the chain and holds every link in memory until the member's
+    last header is parsed; pax global headers accumulate for the life of the archive.
+    """
+
+    members: list[tarfile.TarInfo]  # set by tarfile; undocumented, so not in typeshed
+    header_chain = 0  # extended headers being parsed for the member being read
+    global_header_bytes = 0  # pax global headers so far
+
+    def next(self) -> tarfile.TarInfo | None:
+        info = super().next()
+        self.members.clear()  # tarfile keeps every member, pax headers and all; we need none
+        return info
 
 
 class _GuardedTarInfo(tarfile.TarInfo):
-    """Refuses extended headers above ``MAX_HEADER_SIZE``: tarfile reads them whole into memory."""
+    """Refuses extended headers tarfile would hold beyond the caps: it reads each whole.
+
+    One header above ``MAX_HEADER_SIZE``, more than ``_MAX_HEADER_CHAIN`` chained before one
+    member (a fixed cap, so a long chain is a finding at any stack depth, never a
+    ``RecursionError`` that depends on the caller), or pax global headers above
+    ``MAX_HEADER_SIZE`` in total.
+    """
 
     def _proc_member(self, archive: tarfile.TarFile) -> tarfile.TarInfo:
-        if self.type in _EXTENDED_HEADERS and self.size > MAX_HEADER_SIZE:
-            raise _HeaderTooLarge(self.size)
+        if self.type not in _EXTENDED_HEADERS:
+            return self._proc_next(archive)
+        if self.size > MAX_HEADER_SIZE:
+            raise _HeaderTooLarge(
+                f"tar extended header declares {self.size} bytes, more than the"
+                f" {MAX_HEADER_SIZE} allowed",
+                {"declared_size": self.size},
+            )
+        assert isinstance(archive, _GuardedTarFile)  # _tar opens every archive as one
+        if archive.header_chain >= _MAX_HEADER_CHAIN:
+            raise _HeaderTooLarge(
+                f"tar member has more than {_MAX_HEADER_CHAIN} chained extended headers",
+                {"header_chain": archive.header_chain + 1, "max_header_chain": _MAX_HEADER_CHAIN},
+            )
+        if self.type == tarfile.XGLTYPE:
+            archive.global_header_bytes += self.size
+            if archive.global_header_bytes > MAX_HEADER_SIZE:
+                raise _HeaderTooLarge(
+                    f"tar global headers declare {archive.global_header_bytes} bytes in total,"
+                    f" more than the {MAX_HEADER_SIZE} allowed",
+                    {"global_header_bytes": archive.global_header_bytes},
+                )
+        archive.header_chain += 1
+        try:
+            return self._proc_next(archive)
+        finally:
+            archive.header_chain -= 1
+
+    def _proc_next(self, archive: tarfile.TarFile) -> tarfile.TarInfo:
         # Not in typeshed, but the hook tarfile dispatches every header through since 2.5.
         processed: tarfile.TarInfo = super()._proc_member(archive)  # type: ignore[misc]
         return processed
+
+
+class _HeaderBudget:
+    """The tar stream as tarfile's stream layer reads it, metered while headers are parsed.
+
+    Before each member's headers the caller allows ``MAX_HEADER_SIZE`` bytes past where they
+    start, plus tarfile's 10 KiB read-ahead; a read beyond that raises ``_HeaderTooLarge`` instead
+    of feeding tarfile more, so chained long names and pax records cannot add up past the cap,
+    in memory or in inflation. Member data is not metered: its declared size was checked against
+    the limits before tarfile reads or skips it.
+    """
+
+    def __init__(self, fileobj: _Readable) -> None:
+        self._fileobj = fileobj
+        self._served = 0
+        self._start = 0
+        self._limit: int | None = None
+
+    def headers_at(self, offset: int) -> None:
+        """A member's headers start at ``offset`` in the tar stream."""
+        self._start = offset
+        self._limit = offset + MAX_HEADER_SIZE + tarfile.RECORDSIZE
+
+    def data(self) -> None:
+        self._limit = None
+
+    def read(self, size: int, /) -> bytes:
+        if self._limit is not None:
+            if self._served >= self._limit:
+                raise _HeaderTooLarge(
+                    f"tar headers from offset {self._start} run past the {MAX_HEADER_SIZE}"
+                    " bytes allowed",
+                    {"header_offset": self._start},
+                )
+            size = min(size, self._limit - self._served)
+        data = self._fileobj.read(size)
+        self._served += len(data)
+        return data
+
+    def tell(self) -> int:
+        return self._served
+
+    def write(self, b: bytes, /) -> object:
+        raise io.UnsupportedOperation("read-only")
+
+    def seek(self, pos: int, /) -> object:
+        raise io.UnsupportedOperation("a tar stream is read once, in order")
+
+    def close(self) -> None:
+        pass
 
 
 def _compressed(
@@ -862,10 +967,10 @@ def _tar(
     members: list[ArchiveMember] = []
     stream.seek(0)
     with _open_compressed(kind, stream) if compressed else nullcontext(stream) as fileobj:
+        budget = _HeaderBudget(fileobj)
+        budget.headers_at(0)  # opening parses the first member's headers
         try:
-            archive = tarfile.open(  # noqa: SIM115 (the ``with`` below owns it once it exists)
-                fileobj=fileobj, mode="r|", tarinfo=_GuardedTarInfo
-            )
+            archive = _GuardedTarFile.open(fileobj=budget, mode="r|", tarinfo=_GuardedTarInfo)
         except _HeaderTooLarge as exc:
             _header_too_large(state, scope, exc)
             return members, False
@@ -873,12 +978,13 @@ def _tar(
             _tar_error(state, scope, exc)
             return members, False
         with archive:
-            return _tar_members(state, archive, size, scope, tar_prefix, compressed, depth)
+            return _tar_members(state, archive, budget, size, scope, tar_prefix, compressed, depth)
 
 
 def _tar_members(
     state: _State,
     archive: tarfile.TarFile,
+    budget: _HeaderBudget,
     size: int,
     scope: tuple[Locator, ...],
     tar_prefix: tuple[Locator, ...],
@@ -889,6 +995,7 @@ def _tar_members(
     members: list[ArchiveMember] = []
     count = 0
     while True:
+        budget.headers_at(archive.offset)
         try:
             info = archive.next()
         except _HeaderTooLarge as exc:
@@ -897,6 +1004,7 @@ def _tar_members(
         except Exception as exc:  # any parser error is the archive's finding, see _ERROR_CODES
             _tar_error(state, scope, exc)
             return members, False
+        budget.data()
         if info is None:
             return members, True
         count += 1
@@ -1037,9 +1145,8 @@ def _header_too_large(state: _State, scope: tuple[Locator, ...], exc: _HeaderToo
     state.limit(
         HEADER_TOO_LARGE,
         scope,
-        f"tar extended header declares {exc.size} bytes, more than the {MAX_HEADER_SIZE} allowed;"
-        " inspection stopped",
-        {"declared_size": exc.size, "max_header_size": MAX_HEADER_SIZE},
+        f"{exc.message}; inspection stopped",
+        {**exc.details, "max_header_size": MAX_HEADER_SIZE},
     )
 
 
