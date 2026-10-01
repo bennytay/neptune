@@ -507,13 +507,33 @@ async def _drive(run: AsyncIngestion, on_event: EventSink | None) -> IngestResul
                 on_event(event)
     except (Exception, asyncio.CancelledError) as exc:
         run.cancel()
-        await run.wait()
+        again = await _until_ended(run)
         run._attach_committed(exc)
+        if again is not None:  # cancelled while it waited: the task still ends cancelled
+            run._attach_committed(again)
+            raise again from exc
         raise
     except BaseException:
         run.cancel()
         raise
     return await run.result()
+
+
+async def _until_ended(run: AsyncIngestion) -> asyncio.CancelledError | None:
+    """Wait for ``run`` to end, through any further cancellation of this task, and return the
+    last such cancellation, if one came.
+
+    The job stops at its next checkpoint, or publishes if it is past its last, whatever this
+    task is told meanwhile (an ``asyncio.timeout`` firing, then a task group cancelling it), so
+    the wait always finishes and the caller always learns whether a package was committed.
+    """
+    cancelled: asyncio.CancelledError | None = None
+    while not run.done():
+        try:
+            await run.wait()
+        except asyncio.CancelledError as exc:
+            cancelled = exc
+    return cancelled
 
 
 # --- One call ------------------------------------------------------------------------------------

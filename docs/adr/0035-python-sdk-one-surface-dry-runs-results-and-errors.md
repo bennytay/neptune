@@ -67,9 +67,10 @@ sandbox without parsing text.
      last checkpoint is the start of `commit`; after it the package is written and renamed into
      place whatever happens. A cancel that arrives then (the event set, the awaiting task
      cancelled, an `on_event` exception, a `with` block left by an exception) is acknowledged
-     once the package is in place: the interruption still propagates (a cancelled task must end
-     in `CancelledError` for `asyncio.timeout` and task groups to work, and a consumer's
-     exception is the consumer's), carrying the job's committed `IngestResult`.
+     once the package is in place; the wait goes on through any further cancellation of the
+     task, so the caller always learns the outcome. The interruption still propagates (a
+     cancelled task must end in `CancelledError` for `asyncio.timeout` and task groups to work,
+     and a consumer's exception is the consumer's), carrying the job's committed `IngestResult`.
      `committed_result(error)` returns it (following `__cause__` and `__context__`, so it is
      found behind a `TimeoutError` or a task's re-raised `CancelledError`), and a note on the
      exception names the package for people; `None` means the job stopped without a package

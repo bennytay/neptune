@@ -260,6 +260,9 @@ def test_a_task_cancelled_after_the_last_checkpoint_carries_the_committed_packag
         task.cancel()
         await asyncio.sleep(0.05)
         assert not task.done()  # acknowledged after the publish, not before
+        task.cancel()  # cancelled again while it waits (a timeout, then a task group)
+        await asyncio.sleep(0.05)
+        assert not task.done()  # still waits: the caller must learn what was committed
         gate.set()
         with pytest.raises(asyncio.CancelledError) as caught:
             await task
