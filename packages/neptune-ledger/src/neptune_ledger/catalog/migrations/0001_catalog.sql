@@ -80,7 +80,17 @@ BEGIN
 END
 $$;
 
+-- Refuse UPDATE, DELETE and TRUNCATE: registering a package only adds rows (§6; ADR 0003 §5).
+CREATE FUNCTION refuse_change() RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'catalog table % is append-only', TG_TABLE_NAME;
+END
+$$;
+
 -- One row per registered package. Re-registering the same package id changes nothing (§6).
+-- Read in tx_seq order, this table is the Ledger registration log (§4; ADR 0003 §8).
 CREATE TABLE package (
   tenant_id text NOT NULL REFERENCES tenant (tenant_id),
   package_id content_id NOT NULL,       -- sha256 of the package's manifest.json bytes
@@ -91,10 +101,15 @@ CREATE TABLE package (
   tx_seq bigint NOT NULL CHECK (tx_seq >= 1),
   tx_time tx_time NOT NULL,
   PRIMARY KEY (tenant_id, package_id),
-  UNIQUE (tenant_id, tx_seq)
+  UNIQUE (tenant_id, tx_seq),
+  UNIQUE (tenant_id, package_id, tx_seq)  -- target of record.registration_key
 );
 CREATE INDEX package_by_tx_time ON package (tx_time, tx_seq);
 CREATE INDEX package_by_receipt ON package (receipt_id);
+
+-- The registration log: (package id, transaction time, sequence), ordered by tx_seq, append-only.
+CREATE VIEW registration_log AS
+  SELECT tenant_id, tx_seq, tx_time, package_id FROM package ORDER BY tx_seq;
 
 -- Source bytes by content id: one row however many packages cite them.
 CREATE TABLE source (
@@ -175,13 +190,18 @@ CREATE TABLE record (
   kind text NOT NULL,
   record_id text NOT NULL,
   package_id content_id NOT NULL,
+  -- The registering package's tx_seq: the registration key ADR 0003 §3 breaks ties with.
+  registration_key bigint NOT NULL,
   line integer NOT NULL CHECK (line >= 1),
   schema_version integer NOT NULL CHECK (schema_version >= 1),
-  -- Provenance summary: the record-level provenance (a finding's subject and transform).
+  -- Provenance summary: the record-level provenance (a finding's subject and transform). The
+  -- source and locator are the record's EvidenceRef, the evidence anchor of ADR 0003 §1.
   source_content_id content_id,
+  source_locator jsonb CHECK (jsonb_typeof(source_locator) = 'array'),
   transform_id record_id,
   assertion_kind text CHECK (assertion_kind IN ('observed', 'stated')),
-  -- World time: integer ticks on one named clock, exactly as the record states them.
+  -- World time of the record as ADR 0003 §3 defines it: start and end ticks on the start's clock,
+  -- exactly as stated; world_last is NULL when the end is open.
   world_clock record_id,
   world_first bigint,
   world_last bigint,
@@ -189,10 +209,13 @@ CREATE TABLE record (
   ambiguous_pointers text[] NOT NULL DEFAULT '{}',
   PRIMARY KEY (tenant_id, kind, record_id, package_id),
   UNIQUE (tenant_id, kind, package_id, line),
-  FOREIGN KEY (tenant_id, package_id) REFERENCES package (tenant_id, package_id),
+  FOREIGN KEY (tenant_id, package_id, registration_key)
+    REFERENCES package (tenant_id, package_id, tx_seq),
+  CHECK ((source_content_id IS NULL) = (source_locator IS NULL)),
   CHECK (CASE WHEN kind = 'source_artifact' THEN record_id ~ '^sha256:[0-9a-f]{64}$'
               ELSE record_id ~ '^rec:sha256:[0-9a-f]{64}$' END),
-  CHECK ((world_clock IS NULL) = (world_first IS NULL AND world_last IS NULL))
+  CHECK ((world_clock IS NULL) = (world_first IS NULL)),
+  CHECK (world_last IS NULL OR world_first IS NOT NULL)
 ) PARTITION BY LIST (kind);
 
 -- One partition per record kind of package schema 1 (neptune.model.kinds.RECORD_KINDS). There is
@@ -229,9 +252,14 @@ CREATE TABLE record_structured_record PARTITION OF record FOR VALUES IN ('struct
 CREATE INDEX record_by_id ON record (record_id);
 CREATE INDEX record_by_package ON record (package_id, kind);
 CREATE INDEX record_by_transform ON record (transform_id) WHERE transform_id IS NOT NULL;
-CREATE INDEX record_by_source ON record (source_content_id) WHERE source_content_id IS NOT NULL;
-CREATE INDEX record_by_world_time ON record (world_clock, world_first, world_last)
+-- Evidence anchors and lineage sets: (source content id, kind), then siblings by locator.
+CREATE INDEX record_by_evidence ON record (source_content_id, kind, source_locator)
+  WHERE source_content_id IS NOT NULL;
+-- Per-clock order: (clock, start, end, registration key), as ADR 0003 §3 sorts a partition.
+CREATE INDEX record_by_world_time
+  ON record (world_clock, world_first, world_last, registration_key)
   WHERE world_clock IS NOT NULL;
+CREATE INDEX record_by_registration ON record (registration_key, record_id, package_id);
 CREATE INDEX record_by_ambiguous ON record USING gin (ambiguous_pointers)
   WHERE ambiguous_pointers <> '{}';
 
@@ -249,4 +277,42 @@ CREATE TABLE record_logical_id (
   FOREIGN KEY (tenant_id, kind, record_id, package_id)
     REFERENCES record (tenant_id, kind, record_id, package_id)
 );
-CREATE INDEX record_logical_id_by_value ON record_logical_id (namespace, value);
+CREATE INDEX record_logical_id_by_value ON record_logical_id (namespace, value, kind);
+
+-- Append-only, every table registration writes.
+CREATE TRIGGER package_append_only BEFORE UPDATE OR DELETE ON package
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER source_append_only BEFORE UPDATE OR DELETE ON source
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER package_source_append_only BEFORE UPDATE OR DELETE ON package_source
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER source_location_append_only BEFORE UPDATE OR DELETE ON source_location
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER transform_append_only BEFORE UPDATE OR DELETE ON transform
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER transform_upstream_append_only BEFORE UPDATE OR DELETE ON transform_upstream
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER clock_append_only BEFORE UPDATE OR DELETE ON clock
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER record_append_only BEFORE UPDATE OR DELETE ON record
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER record_logical_id_append_only BEFORE UPDATE OR DELETE ON record_logical_id
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER package_no_truncate BEFORE TRUNCATE ON package
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER source_no_truncate BEFORE TRUNCATE ON source
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER package_source_no_truncate BEFORE TRUNCATE ON package_source
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER source_location_no_truncate BEFORE TRUNCATE ON source_location
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER transform_no_truncate BEFORE TRUNCATE ON transform
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER transform_upstream_no_truncate BEFORE TRUNCATE ON transform_upstream
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER clock_no_truncate BEFORE TRUNCATE ON clock
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER record_no_truncate BEFORE TRUNCATE ON record
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER record_logical_id_no_truncate BEFORE TRUNCATE ON record_logical_id
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();

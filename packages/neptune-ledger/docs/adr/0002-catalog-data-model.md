@@ -8,8 +8,8 @@
 
 Every later Ledger component (registration, entity threads, the lineage current-view, the lakehouse,
 the catalog API) writes into or reads from the catalog. The catalog must therefore be a deterministic
-function of the packages registered, so it can be rebuilt from packages alone (ADR 0001 §3), and it
-must hold no fact the packages do not state. Packages are immutable files outside the database; a
+function of the packages registered and the order they were registered in, so it can be rebuilt
+(ADR 0001 §3, ADR 0003 §8), and it must hold no fact the packages do not state. Packages are immutable files outside the database; a
 package's identity is the sha256 of its `manifest.json` (root ADR 0022). Times in packages are
 integer ticks on named clocks (root ADRs 0005, 0012); the Ledger also needs its own time, for when
 it learned of a package. Customers' catalogs must never meet. Getting any of this wrong means a
@@ -37,13 +37,20 @@ another's evidence.
 4. **Two times, never mixed.** *Transaction time* is the Ledger's own clock: `next_tx()` locks the
    one-row `tx_clock`, increments `tx_seq` (strictly increasing per tenant) and returns `tx_time`,
    the host's UTC time as RFC 3339 text with exactly six fractional digits, raised to the previous
-   tick's time if the host clock went back. Only `package` carries transaction time (`tx_seq`,
-   `tx_time`). *World time* is what the evidence states: `record.world_clock` (a
+   tick's time if the host clock went back. A package's **transaction key** is `(tx_time, tx_seq)`;
+   `tx_time` never decreases as `tx_seq` grows, so transaction order is `tx_seq` order. Only
+   `package` carries transaction time. *World time* is what the evidence states: `record.world_clock` (a
    `timestamp_domain` record id) with `world_first` / `world_last` ticks as `bigint`, unconverted.
-   No column has a timestamp, date or interval type. The registration log (`package` in `tx_seq`
-   order) is the only input besides the packages; a rebuild replays it, advancing the clock with
-   `replay_tx(tx_seq, tx_time)`, which accepts only a tick after the clock's last, so a rebuilt
-   catalog equals the original including transaction times and live ticks continue after it.
+   No column has a timestamp, date or interval type.
+   The **Ledger registration log** is the ordered, append-only list of `(package id, transaction
+   time, sequence)`: the `package` table read in `tx_seq` order, exposed as the view
+   `registration_log`. Together with the packages it is the whole rebuild input (ADR 0003 §8). A
+   rebuild replays it in order, advancing the clock with `replay_tx(tx_seq, tx_time)`, which
+   accepts only a tick after the clock's last; the rebuilt catalog equals the original, transaction
+   times included, and live ticks continue after it. Each `record` row carries its registering
+   package's `tx_seq` as `registration_key`, enforced by a foreign key to
+   `package (package_id, tx_seq)`: the per-record registration key ADR 0003 §3 uses as a tie-break
+   and §4.5 evaluates `as_of` against.
 5. **Tables.**
    - `package`: `package_id` (manifest sha256), `schema_version`, `receipt_id`, `root_locator` (where
      it was registered from), `ledger_version`, `tx_seq`, `tx_time`.
@@ -57,30 +64,38 @@ another's evidence.
    - `clock`: every `timestamp_domain` seen, by package, with its `field` and `scope`.
    - `record`: one row per record per package that holds it, `PARTITION BY LIST (kind)` with one
      partition per kind of package schema 1 and no default partition, so an unknown kind is refused.
-     The key is `(tenant_id, kind, record_id, package_id)`; `record_id` is
-     `neptune.model.kinds.record_key` (a content id for `source_artifact`). Columns: `line`,
-     `schema_version`; the provenance summary `source_content_id`, `transform_id`,
-     `assertion_kind` from the record-level provenance (for `ingest_finding`, the finding's
-     transform and its `evidence` subject's source; NULL for ledger records); the world-time
-     interval; `ambiguous_pointers`, the JSON pointers of every `Ambiguous` field.
-   - World time by kind: `run`, `stream`: `first`/`last`; `calibration`: `valid_from`/`valid_until`;
-     `image`, `video`: `capture.time` as an instant. Only Known values are indexed; if the two ends
-     name different clocks neither is indexed. A NULL index column means "not Known in the
-     record", never absent; the package keeps the missingness state.
+     The key is `(tenant_id, kind, record_id, package_id)`, which is ADR 0003's entry identity;
+     `record_id` is `neptune.model.kinds.record_key` (a content id for `source_artifact`). Columns:
+     `registration_key` (§4), `line`, `schema_version`; the provenance summary
+     `source_content_id`, `source_locator` (the record-level `EvidenceRef`'s locator array, so
+     the pair is ADR 0003 §1's evidence anchor), `transform_id`, `assertion_kind` (for
+     `ingest_finding`, the finding's transform and its `evidence` subject; NULL for ledger
+     records); the world time; `ambiguous_pointers`, the JSON pointers of every `Ambiguous` field.
+   - World time is exactly ADR 0003 §3's entry world time, computed at registration and not
+     redefined here: `world_clock` is the domain of the start `s`, `world_first` is `s`,
+     `world_last` is `e` or NULL when the end is open. Kinds outside that table have none. A NULL
+     index column means "not Known in the record", never absent; the package keeps the
+     missingness state.
    - `record_logical_id`: every Known logical id (`{namespace, value}`) a record states, with the
      JSON pointer it is stated at.
-6. **Re-registration.** Registering a package whose `package_id` is already in the tenant is a
+6. **Append-only; re-registration.** Every table registration writes refuses `UPDATE`, `DELETE`
+   and `TRUNCATE` by trigger: supersession is never deletion (ADR 0003 §5), and removing a package
+   needs its own ADR. Registering a package whose `package_id` is already in the tenant is a
    no-op: it returns the stored `package_id` and `tx_seq`, allocates no tick and writes nothing,
    so record ids are unchanged. A registration locks `tx_clock` before looking the package up, so
    two concurrent registrations of one package cannot both insert it. A different `root_locator`
    for the same id is not recorded; the stored one stands.
-7. **Indexes for threads and time windows.** By logical id (`record_logical_id (namespace, value)`),
-   kind and record id (`record (record_id)`, partition pruning on kind), package
-   (`record (package_id, kind)`), transform (`record (transform_id)`, `transform_upstream
-   (upstream_id)`), source (`record (source_content_id)`, `package_source (content_id)`), world-time
-   interval on a named clock (`record (world_clock, world_first, world_last)`), Ambiguous fields
-   (GIN on `ambiguous_pointers`) and transaction time (`package (tx_seq)` unique, `package (tx_time,
-   tx_seq)`). Thread semantics are ADR 0003's (MVL-87); the catalog stores only what records state.
+7. **Indexes for threads, lineage and time windows.** Thread keys, membership and the current view
+   are ADR 0003's; the thread index itself is a derived table its implementation adds by a later
+   migration. The catalog indexes the columns it reads, every lookup within one tenant's schema:
+   declared keys by `record_logical_id (namespace, value, kind)`; evidence anchors and lineage sets
+   `(record kind, source content id)` by `record (source_content_id, kind, source_locator)`, siblings
+   sharing a locator; per-clock order by `record (world_clock, world_first, world_last,
+   registration_key)`; transaction order and `as_of` by `record (registration_key, record_id,
+   package_id)`, `package (tx_seq)` unique and `package (tx_time, tx_seq)`; transforms by
+   `transform (adapter_id, adapter_version)`, `record (transform_id)` and `transform_upstream
+   (upstream_id)`; plus `record (record_id)`, `record (package_id, kind)`, `package_source
+   (content_id)` and a GIN index on `ambiguous_pointers`. Partition pruning on `kind` narrows each.
 8. **Tests run against a real PostgreSQL 16 with no service.** The `pgserver` wheel (pinned,
    test-only dependency group) ships PostgreSQL 16 binaries; the tests start one server per session
    and a fresh database per test.

@@ -148,8 +148,9 @@ def test_a_record_of_an_unknown_kind_is_refused(pg: Conn) -> None:
     )
     with pytest.raises(psycopg.errors.CheckViolation):  # no partition for the value
         pg.execute(
-            "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id, line,"
-            " schema_version) VALUES ('acme', 'telepathy', %s, %s, 1, 1)",
+            "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
+            " registration_key, line, schema_version)"
+            " VALUES ('acme', 'telepathy', %s, %s, 1, 1, 1)",
             (ROBOT, PACKAGE),
         )
 
@@ -226,8 +227,8 @@ def test_a_record_key_must_have_its_kinds_shape(pg: Conn, kind: str, key: str) -
     )
     with pytest.raises(psycopg.errors.CheckViolation):
         pg.execute(
-            "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id, line,"
-            " schema_version) VALUES ('acme', %s, %s, %s, 1, 1)",
+            "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
+            " registration_key, line, schema_version) VALUES ('acme', %s, %s, %s, 1, 1, 1)",
             (kind, key, PACKAGE),
         )
 

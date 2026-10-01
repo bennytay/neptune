@@ -32,14 +32,20 @@ RECORDS: Final = REPO / "tests" / "fixtures" / "model"
 WALKTHROUGH: Final = Path(__file__).resolve().parents[1] / "docs" / "catalog-walkthrough.md"
 EXAMPLES: Final = ("drone", "quadruped", "manipulator", "mobile_robot")
 
-# Where each kind states a world-time interval: (first, last) JSON paths (ADR 0002 §5).
-WORLD_TIME: Final[dict[str, tuple[tuple[str, ...], tuple[str, ...]]]] = {
-    "run": (("first",), ("last",)),
-    "stream": (("first",), ("last",)),
-    "calibration": (("valid_from",), ("valid_until",)),
-    "image": (("capture", "time"), ("capture", "time")),
-    "video": (("capture", "time"), ("capture", "time")),
+# The fields that state an entry's world time (ADR 0003 §3): start, end, and the fallback that
+# stands in for both when neither is Known.
+WORLD_TIME: Final[dict[str, tuple[str, str, str | None]]] = {
+    "run": ("first", "last", None),
+    "stream": ("first", "last", None),
+    "calibration": ("valid_from", "valid_until", "performed"),
 }
+
+
+RECORD_COLUMNS: Final = (
+    "tenant_id, kind, record_id, package_id, registration_key, line, schema_version,"
+    " source_content_id, source_locator, transform_id, assertion_kind,"
+    " world_clock, world_first, world_last, ambiguous_pointers"
+)
 
 
 @dataclass(frozen=True)
@@ -100,36 +106,48 @@ def logical_ids(record: dict[str, Any]) -> list[tuple[str, str, str]]:
     ]
 
 
-def _known_time(record: dict[str, Any], path: tuple[str, ...]) -> tuple[str, int] | None:
-    node: Any = record
-    for step in path:
-        node = node.get(step) if isinstance(node, dict) else None
+def _known_time(record: dict[str, Any], field: str | None) -> tuple[str, int] | None:
+    node = record.get(field) if field else None
     if isinstance(node, dict) and node.get("knowledge") == "known":
         return node["value"]["domain_id"], node["value"]["ticks"]
     return None
 
 
 def world_time(kind: str, record: dict[str, Any]) -> tuple[str | None, int | None, int | None]:
-    """The interval on one clock; ends that are not Known, or name another clock, stay NULL."""
+    """(clock, s, e) by ADR 0003 §3: e is NULL (open) if not Known or on another clock than s."""
     if kind not in WORLD_TIME:
         return None, None, None
-    first, last = (_known_time(record, path) for path in WORLD_TIME[kind])
-    if first and last and first[0] != last[0]:
-        return None, None, None  # two clocks: never mixed into one interval
-    clock = (first or last or (None, None))[0]
-    return clock, first[1] if first else None, last[1] if last else None
+    start_field, end_field, fallback = WORLD_TIME[kind]
+    start, end = _known_time(record, start_field), _known_time(record, end_field)
+    if start is None and (performed := _known_time(record, fallback)) is not None:
+        start = performed
+        end = end or performed
+    if start is None:
+        start = end  # a point at the end
+    if start is None:
+        return None, None, None
+    open_end = end is None or end[0] != start[0]
+    return start[0], start[1], None if open_end else end[1]  # type: ignore[index]
 
 
 def provenance_summary(kind: str, record: dict[str, Any]) -> tuple[str | None, ...]:
-    """(source content id, transform id, assertion kind) of the record-level provenance."""
+    """(source content id, locator JSON, transform id, assertion kind), record-level provenance."""
     if kind == "ingest_finding":
         subject = record["subject"]
-        source = subject["ref"]["source"] if subject["kind"] == "evidence" else None
-        return source, record["transform"], None
+        if subject["kind"] != "evidence":
+            return None, None, record["transform"], None
+        ref = subject["ref"]
+        return ref["source"], json.dumps(ref["locator"]), record["transform"], None
     provenance = record.get("provenance")
     if provenance is None:  # source_artifact, source_revision, source_absence, transform_record
-        return None, None, None
-    return provenance["evidence"]["source"], provenance["transform"], provenance["assertion_kind"]
+        return None, None, None, None
+    evidence = provenance["evidence"]
+    return (
+        evidence["source"],
+        json.dumps(evidence["locator"]),
+        provenance["transform"],
+        provenance["assertion_kind"],
+    )
 
 
 def register(conn: Conn, schema: str, package: Package) -> tuple[str, int, bool]:
@@ -206,12 +224,13 @@ def register(conn: Conn, schema: str, package: Package) -> tuple[str, int, bool]
             for line, record in enumerate(records, start=1):
                 key = record["content_id"] if kind == "source_artifact" else record["id"]
                 conn.execute(
-                    f"INSERT INTO record VALUES ({', '.join(['%s'] * 13)})",
+                    f"INSERT INTO record ({RECORD_COLUMNS}) VALUES ({', '.join(['%s'] * 15)})",
                     (
                         tenant,
                         kind,
                         key,
                         pid,
+                        tx_seq,
                         line,
                         record["schema_version"],
                         *provenance_summary(kind, record),

@@ -66,8 +66,9 @@ def test_every_table_has_a_non_null_tenant_id(catalog: Conn) -> None:
     tables = _tables(catalog)
     assert len(tables) > 25
     tenant_columns = {t for t, c, _, nullable in _columns(catalog) if c == "tenant_id"}
-    assert tenant_columns == set(tables)
-    assert all(nullable == "NO" for _, c, _, nullable in _columns(catalog) if c == "tenant_id")
+    assert tenant_columns == set(tables) | {"registration_log"}  # the one view carries it too
+    nullable = {t for t, c, _, null in _columns(catalog) if c == "tenant_id" and null == "YES"}
+    assert nullable == {"registration_log"}  # views report every column as nullable
 
 
 def test_every_tenant_id_references_the_schemas_single_tenant(catalog: Conn) -> None:
@@ -103,8 +104,9 @@ def test_assertion_kind_admits_only_the_canonical_kinds(catalog: Conn) -> None:
         (package, "rec:sha256:" + "c" * 64, "2026-10-02T00:00:00.000000Z"),
     )
     insert = (
-        f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id, line,"
-        " schema_version, assertion_kind) VALUES ('acme', 'run', %s, %s, %s, 1, %s)"
+        f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id,"
+        " registration_key, line, schema_version, assertion_kind)"
+        " VALUES ('acme', 'run', %s, %s, 1, %s, 1, %s)"
     )
     for line, kind in enumerate(("observed", "stated", None), start=1):
         catalog.execute(insert, ("rec:sha256:" + f"{line:064x}", package, line, kind))
@@ -122,7 +124,7 @@ def test_transaction_time_and_world_time_never_share_a_table(catalog: Conn) -> N
     columns = _columns(catalog)
     tx_tables = {t for t, c, _, _ in columns if c.startswith("tx_")}
     world_tables = {t for t, c, _, _ in columns if c.startswith("world_")}
-    assert tx_tables == {"package"}
+    assert tx_tables == {"package", "registration_log"}  # the log is a view of package
     assert all(t == "record" or t.startswith("record_") for t in world_tables)
     assert tx_tables.isdisjoint(world_tables)
     tx_types = {(c, d) for t, c, d, _ in columns if t == "package" and c.startswith("tx_")}
@@ -143,8 +145,9 @@ def test_world_ticks_need_a_named_clock(catalog: Conn) -> None:
     )
     with pytest.raises(psycopg.errors.CheckViolation):
         catalog.execute(
-            f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id, line,"
-            " schema_version, world_first) VALUES ('acme', 'run', %s, %s, 1, 1, 5)",
+            f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id,"
+            " registration_key, line, schema_version, world_first)"
+            " VALUES ('acme', 'run', %s, %s, 1, 1, 1, 5)",
             ("rec:sha256:" + "d" * 64, package),
         )
 
@@ -162,3 +165,53 @@ def test_nothing_references_outside_the_tenant_schema(catalog: Conn) -> None:
     ).fetchall()
     assert rows
     assert {str(row[1]) for row in rows} == {SCHEMA}
+
+
+def _package(conn: Conn, seq: int) -> str:
+    package = "sha256:" + f"{seq:064x}"
+    conn.execute(
+        f"INSERT INTO {SCHEMA}.package VALUES ('acme', %s, 1, %s, 'root', '0.0.1', %s, %s)",
+        (package, "rec:sha256:" + "c" * 64, seq, f"2026-10-02T00:00:0{seq}.000000Z"),
+    )
+    return package
+
+
+def test_the_registration_log_is_the_packages_in_sequence_order(catalog: Conn) -> None:
+    packages = [_package(catalog, seq) for seq in (2, 1, 3)]
+    rows = catalog.execute(f"SELECT tx_seq, package_id FROM {SCHEMA}.registration_log").fetchall()
+    assert rows == [(1, packages[1]), (2, packages[0]), (3, packages[2])]
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "UPDATE {s}.package SET root_locator = 'elsewhere'",
+        "DELETE FROM {s}.package",
+        "TRUNCATE {s}.package CASCADE",
+        "UPDATE {s}.record SET line = 2",
+        "DELETE FROM {s}.record",
+        "TRUNCATE {s}.record CASCADE",
+    ],
+)
+def test_registered_rows_are_append_only(catalog: Conn, statement: str) -> None:
+    package = _package(catalog, 1)
+    catalog.execute(
+        f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id,"
+        " registration_key, line, schema_version) VALUES ('acme', 'run', %s, %s, 1, 1, 1)",
+        ("rec:sha256:" + "d" * 64, package),
+    )
+    with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
+        catalog.execute(statement.format(s=SCHEMA))
+    row = catalog.execute(f"SELECT count(*) FROM {SCHEMA}.record").fetchone()
+    assert row == (1,)
+
+
+def test_a_records_registration_key_is_its_packages_sequence(catalog: Conn) -> None:
+    package = _package(catalog, 1)
+    _package(catalog, 2)
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):
+        catalog.execute(
+            f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id,"
+            " registration_key, line, schema_version) VALUES ('acme', 'run', %s, %s, 2, 1, 1)",
+            ("rec:sha256:" + "d" * 64, package),
+        )

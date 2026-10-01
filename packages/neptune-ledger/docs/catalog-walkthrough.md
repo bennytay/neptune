@@ -30,8 +30,10 @@ One registration is one transaction in the tenant's schema:
    `handeye`, `rosbag1`, `csv`, `png`, all `1.0.0`), and no upstream edges.
 8. `clock` from each `timestamp_domain` record: its field and scope.
 9. `record`: one row per line of every `records/<kind>.jsonl`, into the kind's partition, with
-   the provenance summary, the world-time interval where the kind has one, and the pointers of its
-   `Ambiguous` fields; then `record_logical_id` for every Known logical id the record states.
+   the package's `tx_seq` as `registration_key`, the provenance summary (source, locator,
+   transform, assertion kind), the world time where ADR 0003 §3 gives the kind one, and the
+   pointers of its `Ambiguous` fields; then `record_logical_id` for every Known logical id the
+   record states.
 
 ## Packages
 
@@ -91,25 +93,25 @@ the package is the record.
 
 ## World-time index
 
-Rows with a world-time interval, keyed `tx_seq·kind·first 8 hex of the record id`. The clock is
-named by its `timestamp_domain` record (`world_clock`); its field is shown for reading. Ticks are as
-the source states them, never converted. NULL means the end is not Known in the record.
+Rows with a world time, keyed `tx_seq·kind·first 8 hex of the record id`. The columns hold ADR 0003
+§3's start `s`, end `e` and the clock of `s`, named by its `timestamp_domain` record
+(`world_clock`); its field is shown for reading. Ticks are as the source states them, never
+converted. A NULL `world_last` is an open end: not Known, or on another clock than the start.
 
 | row | clock field | world_first | world_last |
 |---|---|---|---|
 | 1·run·bbe0a997 | timestamp | 12000000 | NULL |
 | 2·run·5bf3bccb | starting_time | 1790762400000000000 | 1790762400045000000 |
 | 3·run·0cf852d4 | log_time | 1790762401000000000 | 1790762401020000000 |
-| 4·image·deec240c | DateTimeOriginal | 1790802012 | 1790802012 |
 | 4·run·83e76d50 | time | 1790766000000000000 | 1790766000200000000 |
 
 - The drone's run starts at tick 12 000 000 of the ULog `timestamp` clock (microsecond ticks,
   epoch `Unknown` in the package) and states no end, so `world_last` is NULL. It is on a different
   clock from every other row and is never compared with them.
-- The photo's capture time is an instant (`world_first = world_last`) on the camera's own clock,
-  whose timescale the package keeps as `Unknown`.
-- The streams' and calibrations' intervals are `Unknown` in these packages (series rows are not
-  written; no calibration states a validity), so they have no row here.
+- The streams' and calibrations' times are `Unknown` in these packages (series rows are not
+  written; no calibration states a validity or when it was performed), so they have no row here.
+- The photo's EXIF capture time stays in the package: ADR 0003 §3 gives `image` no world time, and
+  the catalog indexes exactly that definition.
 
 A time-window query names one clock and compares ticks only within it:
 
