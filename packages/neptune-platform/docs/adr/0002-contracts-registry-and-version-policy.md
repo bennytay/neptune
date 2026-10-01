@@ -39,52 +39,71 @@ are stored, versioned, checked and announced.
    - `alignment-records` and `lifecycle-records` are `planned`, with `part_of = "package-schema"`.
      They ship inside the package schema's version.
    - `graph-schema`, `query-packet` and `dataset-manifest` are `planned` and have no versions.
-3. **Version mapping.** Registry versions are semver.
+3. **Breaking means reader-incompatible.** Registry versions are semver.
+   - A minor or patch version must accept every golden of every earlier version with the same
+     major, each at its recorded schema pointer. Any other change is a new major version.
+   - `bump` validates the earlier goldens against the new schema. If any golden fails, it refuses
+     a minor or patch version and names the first failing golden. `check` re-verifies the same
+     rule over the whole registry, so a hand-edited version cannot break it.
    - An integer owner constant (the compiler's `SCHEMA_VERSION`) is the registry major. A breaking
-     change raises the constant. An additive or editorial change to the schema is a minor or patch
-     release under the same constant.
+     change raises the constant.
    - A string owner constant (for example `CATALOG_API_VERSION`) must equal the registry version
      exactly.
-   - `bump` and `check` both enforce this mapping.
-4. **Lock.** `contracts/lock.toml` lists, for each consuming package, the version of each contract
-   it is built against. Draft versions need not be declared. `check --package P` fails when any of
-   the following holds:
+4. **Lock.** `contracts/lock.toml` lists, for each package in this repository, the version of
+   each contract it is built against. Draft versions need not be declared. The script writes the
+   lock in a canonical form, and `check` rejects any other form. A consumer that is behind is
+   handled by how far it lags the contract's latest **stable** version:
+   - A lag of a minor or patch version is a **warning**. The check exits 0 and prints the hint to
+     pick up the bump. That version is reader-compatible by decision 3.
+   - A lag of a major version is **fatal**.
+
+   `check --package P` also fails when any of the following holds:
    - P has no lock entry.
    - P declares a version that was never published.
-   - P declares a version older than the contract's latest **stable** version.
    - P is listed as a consumer of a contract that has a stable version, and P does not declare it.
    - The lock names a package that is not a consumer.
 
-   The consumer's coordinator raises the lock as an issue in its own project. The registry never
-   edits a consumer's lock on its behalf.
+   A stable major `bump` raises the lock entry of every in-repo consumer in the same PR. The
+   contract tests of those consumers must pass at the new version before that PR merges. This is
+   how "a breaking change cannot land while a consumer is red" holds inside the monorepo. A minor
+   or patch bump leaves the lock alone, and each consumer's coordinator raises its entry as an
+   issue in its own project. Out-of-repo consumers, which have no lock entry, always pick the bump
+   up as an issue.
 5. **Consumer check.** `scripts/contracts.py check --package P` does the following:
    - Validates the whole registry: structure, canonical bytes, schema hashes, every schema against
-     the metaschema, and every golden against its pointer.
+     the metaschema, every golden against its pointer, and reader compatibility within each major.
    - Checks P's lock as described in decision 4.
    - Runs, with pytest, the declared contract tests of each upstream owner. If the owner package is
      not installed yet, the step is skipped with an explicit `SKIPPED` message. If the owner is
      installed but its declared tests are missing, the check fails.
 
-   `check --all` covers every package in the lock. The Ledger's CI job runs
-   `check --package neptune-ledger`. Until the Ledger scaffold exists, a unit test runs it.
+   `check --all` covers every package in the lock. It validates the registry once and runs each
+   owner's tests once. The Ledger's CI job runs `check --package neptune-ledger`. Until the Ledger
+   scaffold exists, a unit test runs it.
 6. **Owner-side rule.** `scripts/contracts.py check-owner --package P` imports each schema that P
-   exports. It fails if the canonical form of that schema differs from the registry's latest
-   version, or if P's version constant differs from what that version recorded. The fix is to
-   raise the constant if the change is breaking, then run `bump`. The compiler is the first wired
-   owner, through `make contracts-check`, and a unit test makes the compiler's own CI enforce it.
+   exports. It fails in two cases:
+   - The canonical form of the schema differs from the registry's latest version. The fix is to
+     raise the constant if the change is breaking, then run `bump`.
+   - Only P's version constant differs from what that version recorded. The fix is to restore the
+     constant, or to publish the new major with `bump <contract> <constant>.0.0`.
+
+   The compiler is the first wired owner, through `make contracts-check`. A unit test makes the
+   compiler's own CI enforce the rule.
 7. **Bump and announce.** `scripts/contracts.py bump <contract> <version>` takes the schema from
    the owner's export and the goldens from the owner's generator, then writes the version
    directory. It refuses in each of these cases:
    - the version is not newer;
-   - the export is unchanged;
+   - neither the export nor the constant changed;
    - the version breaks the constant mapping;
-   - a golden does not validate;
+   - a new golden does not validate;
+   - a minor or patch version rejects an earlier golden of its major;
    - the contract is `planned`.
 
-   It then prints one announcement for each consumer, addressed to that consumer's current gate
-   issue in `contracts/packages.toml`. Comments are posted through the Linear GraphQL API (stdlib
-   `urllib`) only when `--post` is given and `LINEAR_API_KEY` is set. Tests never touch the
-   network.
+   Next, a stable major bump raises the in-repo locks. The command then prints one announcement
+   for each consumer, addressed to that consumer's current gate issue in
+   `contracts/packages.toml`. Comments are posted through the Linear GraphQL API (stdlib
+   `urllib`) only when `--post` is given. With `--post`, `LINEAR_API_KEY` is checked before
+   anything is written. Tests never touch the network.
 8. **Dependencies.** The tool uses the standard library plus `jsonschema`, which is already a dev
    dependency installed by `make setup`. Nothing new is added.
 
@@ -92,6 +111,9 @@ are stored, versioned, checked and announced.
 
 - **Each owner keeps its schema in its own package; consumers import it.** Lost: a consumer would
   silently move with the owner's HEAD. The value of the registry is the explicit, lagging lock.
+- **Fail every consumer that lags by any version.** Lost: the first additive compiler change would
+  turn every consumer red, even though their reader-compatible goldens still pass. A
+  minor-version lag carries no risk, so it is only a warning.
 - **Hash-only pins without semver.** Lost: they cannot tell a breaking change from an additive one,
   and they give coordinators no wording for announcements.
 - **Store version metadata in `contract.toml`.** Lost: the stdlib has no TOML writer. Keeping the
@@ -108,6 +130,10 @@ are stored, versioned, checked and announced.
 - A compiler PR that changes the exported schema now fails `make check`
   (`test_compiler_owner_rule_holds`) until `bump package-schema` publishes a new version. In-flight
   schema work (MVL-82 alignment records, MVL-83 lifecycle kinds) must include that bump.
+  - An additive change (for example a new record kind) is a minor version. The Ledger's check
+    then warns but stays green.
+  - A breaking change is a major version. It raises the Ledger's lock in the same PR, and that PR
+    keeps every in-repo consumer's tests green.
 - Each version directory carries a full copy of the schema, about 150 KB for the package schema.
   This is accepted for auditability. Revisit if the registry grows past a few MB.
 - Golden files are regenerated only by `bump`. If the worked examples change without a schema

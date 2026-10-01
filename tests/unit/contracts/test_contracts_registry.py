@@ -14,6 +14,8 @@ from typing import Any
 
 import pytest
 
+from neptune.model.record import SCHEMA_VERSION
+
 REPO = Path(__file__).resolve().parents[3]
 CONTRACTS = REPO / "contracts"
 
@@ -61,7 +63,8 @@ def test_compiler_owner_rule_holds() -> None:
     report = tool.check_owner(_registry(), "neptune")
     assert report.problems == []
     latest = _registry().latest("package-schema")
-    assert latest.owner_version == 1
+    assert latest.owner_version == SCHEMA_VERSION
+    assert latest.version[0] == SCHEMA_VERSION
     assert latest.schema_text == (REPO / "docs/schema/canonical.schema.json").read_text("utf-8")
 
 
@@ -125,16 +128,71 @@ def _check(registry: Any, package: str = "neptune-ledger") -> Any:
     return tool.check_package(registry, package, runner=lambda targets, cwd: 0)
 
 
-def test_a_lock_behind_the_registry_fails(registry: Any) -> None:
+def _next(registry: Any, contract: str, *, major: bool = False) -> str:
+    """The next minor (or major) version after the registry's latest, whatever that is."""
+    current = registry.latest(contract).version
+    following = (current[0] + 1, 0, 0) if major else (current[0], current[1] + 1, 0)
+    return ".".join(str(part) for part in following)
+
+
+def test_a_minor_lag_warns_and_passes(registry: Any) -> None:
     assert _check(registry).ok
-    _publish(registry, "package-schema", "1.1.0")
+    newer = _next(registry, "package-schema")
+    _publish(registry, "package-schema", newer)
     report = _check(registry)
-    assert any("is behind" in p and "1.1.0" in p for p in report.problems)
+    assert report.ok
+    assert any(n.startswith("WARNING") and "is behind" in n and newer in n for n in report.notes)
+
+
+def test_a_major_lag_fails(registry: Any) -> None:
+    newer = _next(registry, "package-schema", major=True)
+    _publish(registry, "package-schema", newer)
+    report = _check(registry)
+    assert any("a major version behind" in p and newer in p for p in report.problems)
 
 
 def test_a_newer_draft_does_not_make_a_lock_behind(registry: Any) -> None:
-    _publish(registry, "package-schema", "2.0.0", status="draft")
+    _publish(registry, "package-schema", _next(registry, "package-schema", major=True), "draft")
     assert _check(registry).ok
+
+
+def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> None:
+    current = tool.show(registry.latest("package-schema", stable=True).version)
+    registry.write_lock(
+        {p: {"package-schema": current} for p in ("neptune-deploy", "neptune-ledger")}
+    )
+    calls: list[Any] = []
+
+    def runner(targets: Any, cwd: Path) -> int:
+        calls.append(targets)
+        return 0
+
+    report = tool.check_packages(registry, registry.lock(), runner=runner)
+    assert report.ok and len(calls) == 1
+    assert sum("54 goldens checked" in n for n in report.notes) == 1
+
+
+def test_a_minor_version_must_accept_its_majors_goldens(registry: Any) -> None:
+    newer = _next(registry, "package-schema")
+    _publish(registry, "package-schema", newer)
+    path = registry.root / "package-schema" / f"v{newer}"
+    meta = json.loads(_text(path / "version.json"))
+    schema = json.loads(_text(path / "schema.json"))
+    schema["$defs"]["PackageManifest"]["required"] = ["no_such_field"]
+    (path / "schema.json").write_text(tool.canonical(schema))
+    meta["schema_sha256"] = tool.sha256(tool.canonical(schema))
+    meta["goldens"] = {k: v for k, v in meta["goldens"].items() if "manifest" not in k}
+    for golden in (path / "golden").glob("*.manifest.json"):
+        golden.unlink()
+    (path / "version.json").write_text(tool.canonical(meta))
+    problems = tool.check_registry(registry).problems
+    assert any("must be a major version" in p and "manifest.json" in p for p in problems)
+
+
+def test_lock_must_be_canonical(registry: Any) -> None:
+    lock = registry.root / "lock.toml"
+    lock.write_text(lock.read_text() + "\n")
+    assert any("not in canonical form" in p for p in tool.check_registry(registry).problems)
 
 
 def test_lock_problems(registry: Any) -> None:
@@ -219,7 +277,7 @@ def _toy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int = 1) -> A
     (root / "packages.toml").write_text(
         '[toy-owner]\npath = "."\n[toy-consumer]\npath = "c"\ngate_issue = "MVL-1"\n'
     )
-    (root / "lock.toml").write_text('[toy-consumer]\ntoy = "1.0.0"\n')
+    tool.Registry(root).write_lock({"toy-consumer": {"toy": "1.0.0"}})
     (root / "toy" / "contract.toml").write_text(
         'title = "Toy"\nstatus = "active"\nconsumers = ["toy-consumer"]\n[owner]\n'
         'package = "toy-owner"\nmodule = "toy_owner"\nschema_export = "toy_owner:schema"\n'
@@ -240,7 +298,7 @@ def _toy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: int = 1) -> A
         "stable",
         1,
         {"type": "object"},
-        {"one.json": ("#", {"n": 1})},
+        {"one.json": ("#", {"n": 1, "old": True})},
     )
     return registry
 
@@ -260,10 +318,11 @@ def test_owner_rule(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     changed = tool.check_owner(registry, "toy-owner").problems
     assert any("differs from registry 1.0.0" in p and "bump toy" in p for p in changed)
     _owner(tmp_path, {"type": "object"}, 2)
-    assert any(
-        "version constant is 2" in p for p in tool.check_owner(registry, "toy-owner").problems
-    )
+    (only_constant,) = tool.check_owner(registry, "toy-owner").problems
+    assert "schema is unchanged" in only_constant and "bump toy 2.0.0" in only_constant
     assert tool.main(["--root", str(registry.root), "check-owner", "--package", "toy-owner"]) == 1
+    tool.bump(registry, "toy", "2.0.0")  # the suggested command works
+    assert tool.check_owner(registry, "toy-owner").ok
 
 
 def test_bump_writes_a_version_and_announces(
@@ -277,7 +336,8 @@ def test_bump_writes_a_version_and_announces(
     assert tool.check_owner(registry, "toy-owner").ok
     assert tool.check_registry(registry).ok
     consumer = tool.check_package(registry, "toy-consumer", runner=lambda targets, cwd: 0)
-    assert any("is behind" in p for p in consumer.problems)
+    assert consumer.ok and any("WARNING" in n for n in consumer.notes)
+    assert registry.lock() == {"toy-consumer": {"toy": "1.0.0"}}  # a minor leaves locks alone
     written = _files(registry.root / "toy" / "v1.1.0")
     shutil.rmtree(registry.root / "toy" / "v1.1.0")
     tool.bump(registry, "toy", "1.1.0")
@@ -290,6 +350,12 @@ def test_bump_writes_a_version_and_announces(
     [
         ({"type": "object", "required": ["n"]}, 1, "1.0.0", "not newer"),
         ({"type": "object"}, 1, "1.1.0", "nothing to bump"),
+        (
+            {"type": "object", "properties": {"n": {}}, "additionalProperties": False},
+            1,
+            "1.1.0",
+            "not reader-compatible.*v1.0.0/golden/one.json",
+        ),
         ({"type": "object", "required": ["n"]}, 1, "2.0.0", "major must equal"),
         ({"type": "object", "required": ["n"]}, "1.2.0", "1.1.0", "bump it to '1.1.0'"),
         ({"type": "array"}, 1, "1.1.0", "does not validate"),
@@ -311,6 +377,17 @@ def test_bump_refusals(
     assert [v.version for v in registry.versions("toy")] == [(1, 0, 0)]
 
 
+def test_a_major_bump_raises_in_repo_locks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry = _toy(tmp_path, monkeypatch)
+    _owner(tmp_path, {"type": "object", "properties": {"n": {}}, "additionalProperties": False}, 2)
+    assert tool.main(["--root", str(registry.root), "bump", "toy", "2.0.0"]) == 0
+    assert registry.lock() == {"toy-consumer": {"toy": "2.0.0"}}
+    assert "raises `toy-consumer` from 1.0.0 to 2.0.0" in capsys.readouterr().out
+    assert tool.check_package(registry, "toy-consumer", runner=lambda targets, cwd: 0).ok
+
+
 def test_bump_refuses_planned_contracts(registry: Any) -> None:
     with pytest.raises(tool.ContractError, match="planned"):
         tool.bump(registry, "graph-schema", "0.1.0")
@@ -326,7 +403,7 @@ def test_post_needs_a_key_and_never_guesses(
     argv = ["--root", str(registry.root), "bump", "toy", "1.1.0", "--post"]
     assert tool.main(argv, environ={}) == 1
     assert "needs LINEAR_API_KEY" in capsys.readouterr().err and posted == []
-    shutil.rmtree(registry.root / "toy" / "v1.1.0")
+    assert not (registry.root / "toy" / "v1.1.0").exists()  # checked before writing
     assert tool.main(argv, environ={"LINEAR_API_KEY": "k"}) == 0
     assert [(issue, key) for issue, _, key in posted] == [("MVL-1", "k")]
 
