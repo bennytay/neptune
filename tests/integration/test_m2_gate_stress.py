@@ -8,11 +8,14 @@ fixture suite end to end. The large-source measurements are
 ``tests/fixtures/runtime/stress_large_source.py``, run at a small size here.
 """
 
+import ctypes
 import importlib.util
 import io
 import json
+import os
 import random
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -417,6 +420,49 @@ def test_a_config_change_invalidates_exactly_one_derivative(site: Path, tmp_path
 # --- The hostile fixture suite through a real job ------------------------------------------------
 
 
+class OpenWatch:
+    """Every open and read, by any process, of ``directory`` or a file in it (Linux inotify).
+
+    The kernel reports the job's own opens and its sandboxed calls' alike, whatever path or
+    descriptor they went through: a symlink followed into ``directory`` is an open there. Opens
+    with ``O_PATH`` and ``stat`` read nothing and are not reported.
+    """
+
+    IN_ACCESS: Final = 0x001
+    IN_OPEN: Final = 0x020
+    _EVENT: Final = struct.Struct("iIII")  # wd, mask, cookie, len; then len bytes of name
+
+    def __init__(self, directory: Path) -> None:
+        libc = ctypes.CDLL(None, use_errno=True)
+        self._fd: int = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        if self._fd < 0:
+            raise OSError(ctypes.get_errno(), "inotify_init1")
+        mask = self.IN_OPEN | self.IN_ACCESS
+        if libc.inotify_add_watch(self._fd, os.fsencode(directory), mask) < 0:
+            os.close(self._fd)
+            raise OSError(ctypes.get_errno(), "inotify_add_watch")
+
+    def seen(self) -> list[tuple[str, str]]:
+        """``(event, name)`` for each open or read since the last call; ``name`` is ``""`` for the
+        directory itself."""
+        found: list[tuple[str, str]] = []
+        while True:
+            try:
+                data = os.read(self._fd, 64 * 1024)
+            except BlockingIOError:
+                return found
+            offset = 0
+            while offset < len(data):
+                _, mask, _, length = self._EVENT.unpack_from(data, offset)
+                start = offset + self._EVENT.size
+                name = data[start : start + length].rstrip(b"\0").decode()
+                found.append(("open" if mask & self.IN_OPEN else "read", name))
+                offset = start + length
+
+    def close(self) -> None:
+        os.close(self._fd)
+
+
 def listing(root: Path) -> list[tuple[str, int, bytes]]:
     rows = []
     for path in sorted(root.rglob("*")):
@@ -429,13 +475,24 @@ def listing(root: Path) -> list[tuple[str, int, bytes]]:
 def test_the_hostile_suite_through_a_real_job(hostile: ModuleType, tmp_path: Path) -> None:
     """Every hostile fixture (escaping and looping links, a FIFO, odd names, a deep tree, archive
     bombs, traversal names, truncated and corrupt archives) through the job with the sandbox: the
-    job commits, the tree is untouched, nothing outside it is read, every refusal is a finding,
+    job commits, the tree is untouched, nothing outside it is opened or read by the job or any of
+    its calls (watched by the kernel), the canary is in no package, every refusal is a finding,
     benign files land, and a second job in another workspace writes the same package."""
     root = tmp_path / "root"
     root.mkdir()
-    hostile.build_tree(root, tmp_path / "outside")
+    outside = tmp_path / "outside"
+    hostile.build_tree(root, outside)
     before = listing(root)
-    first = Job(root, tmp_path / "home", tmp_path / "first", registry())
+    watch = OpenWatch(outside)
+    try:
+        first = Job(root, tmp_path / "home", tmp_path / "first", registry())
+        assert watch.seen() == []  # the canary and its directory were never opened
+        second = Job(root, tmp_path / "other", tmp_path / "second", registry())
+        assert watch.seen() == []
+        assert (outside / "canary.txt").read_bytes() == hostile.CANARY
+        assert ("open", "canary.txt") in watch.seen()  # the watch does see an open there
+    finally:
+        watch.close()
     assert listing(root) == before
     sources = {s.content_id for s in first.package.receipt.sources}
     assert content_id(hostile.CANARY) not in sources
@@ -451,7 +508,6 @@ def test_the_hostile_suite_through_a_real_job(hostile: ModuleType, tmp_path: Pat
     assert {"benign.txt", "deep/" + "d/" * hostile.DEEP + "leaf.txt"} <= read
     home = tmp_path / "home"
     assert list((home / "scratch").iterdir()) == [] and list((home / "staging").iterdir()) == []
-    second = Job(root, tmp_path / "other", tmp_path / "second", registry())
     assert second.outcome.package == first.outcome.package
 
 
