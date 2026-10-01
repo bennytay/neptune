@@ -80,7 +80,10 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
    directory. A file no rule places is `session_unassigned`, `unknown`. Every file of the layout is
    a member of some proposal or unassigned, exactly once; a file sits in two proposals only when
    all of them are contested (`check_grouping`, run on every grouping). Identical bytes at two
-   locations stay two members; each proposal holding one says so (`same_bytes`).
+   locations stay two members; each proposal holding one says so (`same_bytes`, one reason per
+   shared content, empty files excepted since all of them are equal).
+   - Names choose numbers, so nothing grouping does is proportional to a number a name states:
+     missing part indices are counted and listed only up to 64.
 5. **Links are recorded, never followed or made members.** A link's target is read lexically
    against its own directory (an absolute target, or one leaving the root, resolves to nothing).
    A proposal lists a link as `alias` when the target is its own directory or a member, and as

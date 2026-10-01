@@ -261,7 +261,8 @@ def _check_derived(kind: str, data: bytes, transforms: set[str]) -> tuple[JsonOb
             parse_record_id(_derived_key(kind, line))
         except ValueError as exc:
             raise PackageError(f"{path}: {exc}") from exc
-        if line.get("transform") not in transforms:
+        transform = line.get("transform")
+        if not isinstance(transform, str) or transform not in transforms:
             raise PackageError(f"{path} holds a line whose transform is not in the package")
         lines.append(line)
     keys = [str(line["id"]) for line in lines]

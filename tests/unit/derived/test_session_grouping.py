@@ -649,3 +649,32 @@ def test_any_tree_keeps_the_laws_whatever_order_it_is_given_in(
 
 def paths_of(proposals: Iterable[SessionProposal]) -> list[list[str]]:
     return sorted(sorted(members(p)) for p in proposals)
+
+
+# --- Hostile names and sizes -------------------------------------------------------------------
+
+
+def test_part_numbers_far_apart_cost_nothing_and_are_counted() -> None:
+    huge = 10**18
+    layout = synthetic(b"x_1.bag", b"x_" + str(huge).encode() + b".bag")
+    [whole] = [p for p in LayoutGrouper().propose(layout).proposals if len(p.members) == 2]
+    details = whole.reasons[0].details
+    assert details["missing_count"] == huge - 2
+    assert details["missing"] == list(range(2, 66))
+
+
+def test_duplicates_say_so_once_per_proposal_and_empty_files_never() -> None:
+    files = []
+    for index in range(300):
+        for name, data in ((b"same.yaml", b"the same bytes"), (b".gitkeep", b"")):
+            location = local_location(b"run_%d/" % index + name)
+            content = content_id(data)
+            files.append(LayoutFile(revision_id(location, content, ()), location, content))
+    grouping = LayoutGrouper().propose(layout_of(files))
+    assert len(grouping.proposals) == 300
+    for proposal in grouping.proposals:
+        [same] = [r for r in proposal.reasons if r.rule == Rule.SAME_BYTES]
+        assert same.details["count"] == 299
+        assert same.details["locations"] == [proposal.members[1].location.to_json()]
+        listed = same.details["same_as"]
+        assert isinstance(listed, list) and len(listed) == 8

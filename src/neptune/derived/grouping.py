@@ -69,6 +69,7 @@ from neptune.discovery.layout import (
     parent,
 )
 from neptune.identity.findings import ingest_finding
+from neptune.identity.hashing import content_id
 from neptune.identity.provenance import transform_record
 from neptune.model._fields import exact_object, json_array, json_int, json_str
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
@@ -98,8 +99,11 @@ NO_SESSION: Final = "no_session"
 SEVERAL_SESSIONS: Final = "several_sessions"
 SEVERAL_STEMS: Final = "several_stems"
 
-# How many locations a reason or finding lists before it only counts.
+# How many locations a reason or finding lists before it only counts; a duplicate's twins are
+# listed more briefly, since every proposal holding one says so.
 _LISTED: Final = 64
+_SAME_LISTED: Final = 8
+_EMPTY: Final = content_id(b"")
 
 
 class Rule(StrEnum):
@@ -387,13 +391,22 @@ def _location_json(path: bytes) -> JsonObject:
 
 
 def _sequence_details(prefix: bytes, indices: Sequence[int]) -> JsonObject:
+    """The parts' indices and the gaps between the least and greatest. Names choose the indices,
+    so the gaps are counted, and listed only up to ``_LISTED``: work is bounded by the number of
+    parts, never by how far apart a hostile name puts two indices."""
     present = set(indices)
-    missing = [i for i in range(min(present), max(present) + 1) if i not in present]
+    low, high = min(present), max(present)
+    missing: list[int] = []
+    index = low
+    while index <= high and len(missing) < _LISTED:
+        if index not in present:
+            missing.append(index)
+        index += 1
     return {
         **bytes_json("prefix", prefix),
         "indices": sorted(indices)[:_LISTED],
-        "missing": missing[:_LISTED],
-        "missing_count": len(missing),
+        "missing": missing,
+        "missing_count": high - low + 1 - len(present),
         "parts": len(indices),
     }
 
@@ -895,29 +908,40 @@ class _Proposer:
                     self.drafts[index].links.add((link, LinkRelation.INSIDE))
 
     def _same_bytes(self) -> None:
+        """One reason per proposal per content it shares with files outside it. Empty files
+        are all equal and say nothing, so they are left out. Work is one pass over the files
+        and, per proposal, its members plus a bounded listing."""
         by_content: dict[str, list[bytes]] = defaultdict(list)
         for path, file in sorted(self.files.items()):
-            by_content[file.content_id].append(path)
+            if file.content_id != _EMPTY:
+                by_content[file.content_id].append(path)
         for draft in self.drafts:
+            held: dict[str, list[bytes]] = defaultdict(list)
             for path in sorted(draft.members):
-                twins = [
-                    other
-                    for other in by_content[self.files[path].content_id]
-                    if other != path and other not in draft.members
-                ]
-                if twins:
-                    draft.reasons.append(
-                        Reason(
-                            Rule.SAME_BYTES,
-                            "a member holds the same bytes as files outside this session;"
-                            " equal bytes are never merged",
-                            {
-                                "count": len(twins),
-                                "location": _location_json(path),
-                                "same_as": [_location_json(t) for t in twins[:_LISTED]],
-                            },
-                        )
+                held[self.files[path].content_id].append(path)
+            for content, inside_draft in sorted(held.items()):
+                everywhere = by_content.get(content, [])
+                outside = len(everywhere) - len(inside_draft)
+                if outside <= 0:
+                    continue
+                listed: list[JsonValue] = []
+                for other in everywhere:
+                    if len(listed) == _SAME_LISTED:
+                        break
+                    if other not in draft.members:
+                        listed.append(_location_json(other))
+                draft.reasons.append(
+                    Reason(
+                        Rule.SAME_BYTES,
+                        "members hold the same bytes as files outside this session;"
+                        " equal bytes are never merged",
+                        {
+                            "count": outside,
+                            "locations": [_location_json(p) for p in inside_draft[:_LISTED]],
+                            "same_as": listed,
+                        },
                     )
+                )
 
     # --- records -------------------------------------------------------------------------------
 

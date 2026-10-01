@@ -150,3 +150,19 @@ def test_derived_lines_must_be_objects() -> None:
     records, _ = ledger_and_grouping()
     with pytest.raises(PackageError):
         package_files(records, derived={"session_proposal": [{"id": "x"}]})
+
+
+@pytest.mark.parametrize("transform", [[], {}, 1, "absent"])
+def test_a_transform_that_is_not_an_id_is_refused_not_crashed_on(transform: Any) -> None:
+    records, grouping = ledger_and_grouping()
+    files = package_files(records, derived=grouping.tables())
+    path = derived_path("session_proposal")
+    first, *rest = files[path].splitlines(keepends=True)
+    line = canonical_json.loads(first.rstrip(b"\n"))
+    assert isinstance(line, dict)
+    bad = {k: v for k, v in line.items() if k != "transform"}
+    if transform != "absent":
+        bad["transform"] = transform
+    doctored = canonical_json.dumps(bad) + b"\n" + b"".join(rest)
+    with pytest.raises(PackageError, match="transform"):
+        read_files(with_manifest_for(files, {path: doctored}))
