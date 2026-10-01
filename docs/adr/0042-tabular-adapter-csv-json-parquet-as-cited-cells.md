@@ -22,8 +22,11 @@ One adapter, `tabular`, no new record kind and no schema change: it emits `Struc
 Parquet magic, then JSON shape, then CSV dialect.
 
 1. **No inference.** "Type inference" is the types the source declares. CSV cells stay text (`007`,
-   `1e5`, `n/a` are text); a blank or whitespace-only cell is `Unknown`, never `""`. JSON keeps its
-   own types; Parquet keeps its declared ones. Nothing is coerced, parsed as a date or unit-converted.
+   `1e5`, `n/a` are text); a blank or whitespace-only CSV field is `Unknown`, never `""`, because CSV has no null. JSON
+   keeps its own types; Parquet keeps its declared ones.
+   A *declared* string is a value, not missingness, so whitespace-only JSON and Parquet strings
+   are `Known`; only `""` is `Unknown`, because the model holds no empty cell text (ADR 0020 §5)
+   and the cell's citation still names the `""` it came from. Nothing is coerced, parsed as a date or unit-converted.
 2. **CSV dialect.** UTF-8 (after a BOM); records end at LF outside quotes, a CR before it belongs to
    the ending; `"` quotes, `""` is a quote. The delimiter is `csv_delimiter` or, for `auto`, sniffed
    from the head: comma, tab and semicolon are tried, and one qualifies when the first 64 records
@@ -35,7 +38,7 @@ Parquet magic, then JSON shape, then CSV dialect.
 3. **JSON.** Rows are a root array's elements or JSON Lines' non-blank lines. A row's cells are its
    leaves in document order, each cited `[ByteRange(row), JsonPointer(path)]`, so the row record is
    not a `Row` citation and each cell carries its own provenance (ADR 0020 §5). Strings are text
-   (blank is `Unknown`), `true` and `false` booleans, `null` is `KnownAbsent` citing itself (the
+   (`""` is `Unknown`, see 1), `true` and `false` booleans, `null` is `KnownAbsent` citing itself (the
    grammar defines it), an empty object or array is an `Unknown` leaf. An integer is an int within
    int64 or uint64; another number is a double only when the double's shortest digits equal the
    literal's value; otherwise it keeps its literal text and `tabular.json_number_text` says so.
@@ -74,10 +77,19 @@ Parquet magic, then JSON shape, then CSV dialect.
    that cannot tell JSON Lines from one JSON text is extended to what two rows of `max_row_bytes`
    need. It then scans once for row boundaries (quote-aware for CSV, string- and
    nesting-aware for JSON, the footer for Parquet) without decoding, and cuts blocks between rows:
-   CSV 8,192 rows or 1 MiB, JSON 4,096 rows or 256 KiB, Parquet a row group or a slice of 65,536
-   cells (8,192 rows at most). Block bounds are constants of this adapter version, never settings or
+   CSV 8,192 rows or 1 MiB, JSON 4,096 rows or 256 KiB, Parquet a slice of a row group of 65,536
+   cells (8,192 rows at most), or the statistics of up to 8,192 column chunks (a row group with no
+   rows has no chunk of its own). Block bounds are constants of this adapter version, never settings or
    host facts, so the chunk ids and findings are deterministic. Memory is bounded by a read piece,
-   whatever a row's length.
+   whatever a row's length. Two Parquet costs are bounded in the plan. Every chunk's `ingest` opens
+   the footer again (a separate sandboxed call), so a table has at most 100,000 chunks and its
+   chunks times the footer's bytes stay under 8 GiB (about 40 s of parsing at the measured
+   190 MB/s); past either, `row_limit` says where reading stopped. And pyarrow cannot seek into a
+   row group, so each slice decodes its group from the start: the native re-decoding grows with the
+   square of a group's slices. Measured on 1M rows x 4 columns (125 slices): 24 s in all, about 1 s
+   of it re-decoding, the rest building records. A group is read for at most 2,048 slices (33M rows
+   at 4 columns); the rest is a `row_limit` finding naming the first row not read. A schema with no
+   leaf columns has no cells to cite: `parquet_footer`, no records.
 9. **Hostile input.** Settings, checked before a row is parsed, bound what a row or footer may cost:
    `max_row_bytes` (1 MiB), `max_columns` (16,384), `max_json_depth` (64, measured without
    recursion), `max_rows` (100,000,000, past which `row_limit`), `max_footer_bytes` (16 MiB) and
@@ -123,5 +135,8 @@ Parquet magic, then JSON shape, then CSV dialect.
 - JSON Lines whose first two rows do not both fit in the 64 KiB probe head are declined by probing
   (the head cannot tell them from one document) and fall to the text adapter; a manifest that picks
   `tabular` gets them read correctly.
+- Type inference over columns (is this text column an integer, a timestamp, an enum) is the other
+  half of the issue's "schema/type inference", and it is interpretation, so it lives under
+  `derived/`, not here: tracked as MVL-194, which reads this adapter's tables and annotates them.
 - Bytes columns and list items are left in the source until a decision on binary cells is taken;
   revisit when a consumer needs them.

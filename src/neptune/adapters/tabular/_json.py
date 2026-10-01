@@ -7,7 +7,8 @@
   leaves in document order, each citing ``[ByteRange(value), JsonPointer(path)]``: an object's
   members by key, an array's items by index, a scalar row at ``""``. An empty object or array
   is a blank leaf: ``Unknown`` at its pointer.
-- Values keep JSON's types: strings are text (blank or whitespace-only text is ``Unknown``),
+- Values keep JSON's types: strings are text (``""`` is ``Unknown``, since the model holds no
+  empty cell text; a whitespace-only string is the value it declares),
   ``true`` and ``false`` booleans, ``null`` is ``KnownAbsent`` citing the ``null`` itself, which
   the grammar defines. An integer literal is an int when an int64 or a uint64 holds it; another
   number is a double when the double's shortest digits equal the literal's value. Any other
@@ -637,7 +638,7 @@ def _cell(value: object, provenance: Provenance, issues: "_RowIssues") -> Knowle
             issues.text_numbers += 1
         return Known(cell, provenance)
     if isinstance(value, str):
-        if not value.strip():
+        if not value:  # the model holds no empty cell text (ADR 0020 §5): Unknown, at its pointer
             return Unknown(provenance)
         try:
             value.encode("utf-8")

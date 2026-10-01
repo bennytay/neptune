@@ -162,8 +162,10 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "blocks",
             "rows are read in blocks between rows: CSV 8,192 rows or 1 MiB, JSON 4,096 rows or"
-            " 256 KiB, Parquet a row group or a slice of 65,536 cells (8,192 rows at most);"
-            " at most 100,000 blocks; findings about rows count per block",
+            " 256 KiB, Parquet a slice of a row group of 65,536 cells (8,192 rows at most) or the"
+            " statistics of up to 8,192 column chunks; at most 100,000 chunks, and chunks times"
+            " footer bytes under 8 GiB; at most 2,048 slices of one row group; findings about rows"
+            " count per block",
         ),
         Documented(
             "csv",
@@ -178,7 +180,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "json",
             "rows are a root array's elements or the non-blank lines of JSON Lines, cited by"
             " their bytes; cells are leaves in document order cited by JSON pointer; an empty"
-            " object or array is an Unknown leaf; null is KnownAbsent citing itself; an integer"
+            " object or array is an Unknown leaf; null is KnownAbsent citing itself; "
+            " is Unknown and other strings are text; an integer"
             " is an int within int64 or uint64, another number a double when its shortest digits"
             " equal the literal, else its text; NaN and Infinity are non-finite reals; header is"
             " NotApplicable when every row is an object, Unknown otherwise",

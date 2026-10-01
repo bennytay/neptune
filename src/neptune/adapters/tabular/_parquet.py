@@ -14,12 +14,15 @@ Cells keep the declared types: booleans, integers of every width, floats (a FLOA
 strings, a DECIMAL as its exact decimal text at its declared scale, and a DATE, TIME, TIMESTAMP or
 INTERVAL-free duration as the integer the file stores, whose unit and zone the schema table
 gives: nothing is converted to UTC or to another unit. A null is ``KnownAbsent`` citing the
-footer, which declares the column optional; an empty or whitespace-only string is ``Unknown``.
+footer, which declares the column optional; an empty string is ``Unknown`` (the model holds no
+empty cell text) and a whitespace-only one is text.
 Columns whose values have no cell type (bytes, INT96, intervals, and the items of lists and maps)
 are not decoded: their cells are ``Unknown`` and one finding per column says so.
 
-Row groups are the chunk boundaries. A row group with more cells than a block holds is read in
-slices of ``rows_per_block`` rows, each slice decoding its row group up to its own rows.
+Row groups are the chunk boundaries (a group with no rows has none; the statistics of many groups
+share chunks, since each chunk parses the footer again). A row group with more cells than a
+block holds is read in slices of ``rows_per_block`` rows, each slice decoding its row group up
+to its own rows (at most ``MAX_SLICES`` of them).
 """
 
 import io
@@ -43,7 +46,6 @@ from neptune.adapters.tabular._common import (
     Limits,
     bytes_at,
     cite,
-    context_flag,
     context_int,
     finding,
     observed,
@@ -71,6 +73,16 @@ ENCRYPTED: Final = b"PARE"
 TAIL: Final = 8  # the footer's length (4 bytes, little-endian) and the magic
 BLOCK_ROWS: Final = 8192
 BLOCK_CELLS: Final = 65536
+# The column chunks' statistics rows one chunk covers (a group of more columns is a chunk alone).
+STAT_ROWS: Final = 8192
+# Every chunk parses the footer again: the chunks of a table, times the footer's bytes, stay under
+# this (about 40 s of parsing at the measured 190 MB/s).
+PARSE_BUDGET: Final = 8 * 1024**3
+# A slice decodes its row group from the start (pyarrow cannot seek), so a group's native decoding
+# grows with the square of its slices. Measured: 1M rows x 4 columns, 125 slices, 24 s in all, of
+# which about 1 s is re-decoding; at 2,048 slices re-decoding matches the linear work. More slices
+# than this in one group are not read.
+MAX_SLICES: Final = 2048
 # The most blocks a table is read in; a declared row count past it is a ``row_limit``.
 MAX_BLOCKS: Final = 100_000
 READ_BUFFER: Final = 1024 * 1024
@@ -379,7 +391,7 @@ def _statistic(raw: Any, column: Any) -> Knowledge[CellValue]:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError:
                 return Unknown()
-            return Known(text) if text.strip() else Unknown()
+            return Known(text) if text else Unknown()
         if logical == "Decimal" and column.scale >= 0 and raw:
             return Known(_exact_decimal(int.from_bytes(raw, "big", signed=True), column.scale))
     return Unknown()
@@ -458,6 +470,19 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
         return _none(source, config, _unreadable_footer(source, config, footer, exc))
     if found is None:
         return _none(source, config, _unmapped(source, config, footer))
+    if not found:
+        return _none(
+            source,
+            config,
+            finding(
+                config,
+                "parquet_footer",
+                footer.ref(source),
+                "the schema declares no leaf columns: there are no cells to cite; nothing is"
+                " decoded",
+                {},
+            ),
+        )
     if len(found) > limits.max_columns:
         return _none(
             source,
@@ -478,8 +503,40 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
     }
     chunks = [make_chunk(source, config, {**base, "part": "table"}, footer.length)]
     findings: list[IngestFinding] = []
+    # Every chunk's ingest opens the footer again, so the chunks are bounded by their number and by
+    # the footer bytes they would parse in all; a group with no rows costs a chunk of statistics at
+    # most, and many groups share one.
+    metadata = pf.metadata
+    stats: list[tuple[int, int]] = []  # [first, stop) row groups, as the statistics chunks cover
+    held, first_group = 0, 0
+    for index in range(metadata.num_row_groups):
+        group = metadata.row_group(index)
+        if group.num_columns != len(found):
+            continue
+        if held and held + group.num_columns > STAT_ROWS:
+            stats.append((first_group, index))
+            held = 0
+        if not held:
+            first_group = index
+        held += group.num_columns
+    if held:
+        stats.append((first_group, metadata.num_row_groups))
+    chunks += [
+        make_chunk(
+            source,
+            config,
+            {**base, "first": a, "part": "statistics", "stop": b},
+            footer.length,
+        )
+        for a, b in stats
+    ]
+
+    def room(more: int) -> bool:
+        total = len(chunks) + more
+        return total <= MAX_BLOCKS and total * footer.length <= PARSE_BUDGET
+
     per_block = max(1, min(BLOCK_ROWS, BLOCK_CELLS // max(1, len(found))))
-    row, blocks, limited = 0, 0, False
+    row, limited = 0, False
     for index in range(metadata.num_row_groups):
         group = metadata.row_group(index)
         problem = _check_group(group, index, footer, found, limits)
@@ -492,9 +549,8 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
                     config, name, bytes_at(source, *_group_range(group, footer)), message, details
                 )
             )
-        if count and (
-            row + count > limits.max_rows or blocks + -(-count // per_block) > MAX_BLOCKS
-        ):
+        slices = -(-count // per_block)
+        if count and (row + count > limits.max_rows or not room(slices)):
             limited = True
             count = 0
             findings.append(
@@ -503,29 +559,43 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
                     "row_limit",
                     bytes_at(source, *_group_range(group, footer)),
                     f"row group {index} would take the table past max_rows ({limits.max_rows})"
-                    f" rows or {MAX_BLOCKS} blocks; rows from {row} on are not read",
-                    {"max_blocks": MAX_BLOCKS, "max_rows": limits.max_rows, "row": row},
+                    f" rows, {MAX_BLOCKS} chunks or {PARSE_BUDGET} footer bytes parsed;"
+                    f" rows from {row} on are not read",
+                    {
+                        "max_blocks": MAX_BLOCKS,
+                        "max_rows": limits.max_rows,
+                        "parse_budget": PARSE_BUDGET,
+                        "row": row,
+                    },
                 )
             )
-        first = 0
-        while True:
-            take = min(per_block, count - first)
+        elif slices > MAX_SLICES:
+            # A slice decodes its row group from the start (pyarrow cannot seek), so the work of
+            # a group grows with the square of its slices: only the first ones are read.
+            kept = MAX_SLICES * per_block
+            findings.append(
+                finding(
+                    config,
+                    "row_limit",
+                    bytes_at(source, *_group_range(group, footer)),
+                    f"row group {index} holds {count} rows in {slices} slices, over {MAX_SLICES};"
+                    f" its rows from {row + kept} on are not read",
+                    {"max_slices": MAX_SLICES, "row": row + kept, "row_group": index},
+                )
+            )
+            count = kept
+        low, high = _group_range(group, footer)
+        for first in range(0, count, per_block):
             context: JsonObject = {
                 **base,
-                "count": take,
+                "count": min(per_block, count - first),
                 "first": first,
                 "part": "row_group",
                 "row": row + first,
                 "row_group": index,
                 "rows_per_block": per_block,
-                "statistics": first == 0 and group.num_columns == len(found),
             }
-            low, high = _group_range(group, footer)
-            chunks.append(make_chunk(source, config, context, high - low if take else 0))
-            blocks += 1
-            first += take
-            if first >= count:
-                break
+            chunks.append(make_chunk(source, config, context, high - low))
         row += declared
     return Plan(tuple(chunks), tuple(findings))
 
@@ -638,7 +708,7 @@ def _text_cell(raw: bytes) -> Knowledge[CellValue] | None:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    return Known(text) if text.strip() else Unknown()
+    return Known(text) if text else Unknown()
 
 
 def _statistics(
@@ -720,8 +790,24 @@ def _value_cell(value: Any, absent: Provenance) -> Knowledge[CellValue]:
     if isinstance(value, float):
         return Known(real(value))
     if isinstance(value, str):
-        return Known(value) if value.strip() else Unknown()
+        return Known(value) if value else Unknown()
     return Known(value)
+
+
+def _statistics_chunk(
+    source: SourceReader, config: AdapterConfig, limits: Limits, context: JsonObject
+) -> ChunkOutput:
+    """The column chunks' statistics of the row groups ``[first, stop)`` that match the schema."""
+    footer = _footer_of(context)
+    pf = _open(source, limits)
+    found = leaves(pf)
+    if found is None:
+        return ChunkOutput()
+    records: list[StructuredRecord] = []
+    for index in range(context_int(context, "first"), context_int(context, "stop")):
+        if pf.metadata.row_group(index).num_columns == len(found):
+            records.extend(_statistics(source, config, pf, footer, index, found))
+    return ChunkOutput(records=tuple(records))
 
 
 def _rows(
@@ -734,15 +820,8 @@ def _rows(
     pa, _ = _arrow()
     pf = _open(source, limits)
     found = leaves(pf)
-    if found is None:
+    if found is None or not count:
         return ChunkOutput()
-    records: list[StructuredRecord] = []
-    if context_flag(context, "statistics") and pf.metadata.row_group(index).num_columns == len(
-        found
-    ):
-        records.extend(_statistics(source, config, pf, footer, index, found))
-    if not count:
-        return ChunkOutput(records=tuple(records))
     absent = observed(footer.ref(source), config)
     table_id = record_id(StructuredTable.kind, whole(source), config)
     columns = sorted({leaf.walk[0] for leaf in found if leaf.decoded})
@@ -757,35 +836,33 @@ def _rows(
         for leaf in found
     ]
     pieces: list[tuple[int, list[list[Any] | None]]] = []
-    if not columns:
-        pieces.append((count, [None] * len(found)))
-    else:
-        names = [pf.schema_arrow.field(column).name for column in columns]
-        try:
-            seen = 0
-            for batch in pf.iter_batches(
-                batch_size=per_block, row_groups=[index], columns=names, use_threads=False
-            ):
-                if seen + batch.num_rows > first:
-                    low = max(0, first - seen)
-                    high = min(batch.num_rows, first + count - seen)
-                    pieces.append((high - low, _arrays(pa, batch.slice(low, high - low), walked)))
-                seen += batch.num_rows
-                if seen >= first + count:
-                    break
-            if seen < first + count:
-                raise ValueError("the row group holds fewer rows than it declares")
-        except _decode_errors() as exc:
-            start, end = _group_range(pf.metadata.row_group(index), footer)
-            problem = finding(
-                config,
-                "parquet_rows_unreadable",
-                bytes_at(source, start, end),
-                f"rows {row} to {row + count - 1} of row group {index} do not decode"
-                f" ({type(exc).__name__}); they have no record",
-                {"error": type(exc).__name__, "first": row, "rows": count, "row_group": index},
-            )
-            return ChunkOutput(records=tuple(records), findings=(problem,))
+    names = [pf.schema_arrow.field(column).name for column in columns]
+    try:
+        seen = 0
+        for batch in pf.iter_batches(
+            batch_size=per_block, row_groups=[index], columns=names, use_threads=False
+        ):
+            if seen + batch.num_rows > first:
+                low = max(0, first - seen)
+                high = min(batch.num_rows, first + count - seen)
+                pieces.append((high - low, _arrays(pa, batch.slice(low, high - low), walked)))
+            seen += batch.num_rows
+            if seen >= first + count:
+                break
+        if seen < first + count:
+            raise ValueError("the row group holds fewer rows than it declares")
+    except _decode_errors() as exc:
+        start, end = _group_range(pf.metadata.row_group(index), footer)
+        problem = finding(
+            config,
+            "parquet_rows_unreadable",
+            bytes_at(source, start, end),
+            f"rows {row} to {row + count - 1} of row group {index} do not decode"
+            f" ({type(exc).__name__}); they have no record",
+            {"error": type(exc).__name__, "first": row, "rows": count, "row_group": index},
+        )
+        return ChunkOutput(findings=(problem,))
+    records: list[StructuredRecord] = []
     for height, piece in pieces:
         for offset in range(height):
             cells = [
@@ -806,6 +883,8 @@ def ingest(
         return ChunkOutput()
     if part == "table":
         return _table(source, config, limits, context)
+    if part == "statistics":
+        return _statistics_chunk(source, config, limits, context)
     return _rows(source, config, limits, context)
 
 

@@ -243,7 +243,7 @@ def snapshot(output: SourceOutput) -> list[bytes]:
 
 
 def test_a_row_group_is_a_chunk(humanoid: SourceOutput) -> None:
-    assert len(humanoid.plan.chunks) == 1 + 3
+    assert len(humanoid.plan.chunks) == 1 + 1 + 3  # table, statistics, row groups
 
 
 def test_slicing_a_row_group_does_not_change_what_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -388,3 +388,85 @@ def test_undecoded_columns_do_not_make_rows_the_data_cannot_back(tmp_path: Path)
         "tabular.parquet_rows_unreadable",
     ]
     assert rows_of(output, tables(output)["data"]) == []
+
+
+# --- Fragmented and degenerate files -----------------------------------------------------------
+
+
+def write_groups(tmp_path: Path, groups: int, height: int = 0) -> bytes:
+    import pyarrow as pa
+
+    table = pa.table({"a": pa.array([1] * height, pa.int64()), "b": pa.array(["x"] * height)})
+    path = tmp_path / f"groups{groups}.parquet"
+    with pq.ParquetWriter(path, table.schema) as writer:
+        for _ in range(groups):
+            writer.write_table(table)
+    return path.read_bytes()
+
+
+def parse_cost(output: SourceOutput) -> int:
+    """Footer bytes the plan's chunks parse in all: every chunk's ingest opens the footer."""
+    footer = next(
+        int(str(c.context["footer_length"]))
+        for c in output.plan.chunks
+        if "footer_length" in c.context
+    )
+    return len(output.plan.chunks) * footer
+
+
+def test_empty_row_groups_share_chunks_and_the_cost_stays_linear(tmp_path: Path) -> None:
+    small, large = run(write_groups(tmp_path, 2000)), run(write_groups(tmp_path, 20000))
+    # an empty group costs no chunk of its own: the table's, then one chunk per 8,192 statistics
+    # rows (two columns a group), so 20,000 groups are 6 chunks, not 20,000
+    assert len(small.plan.chunks) == 1 + 1
+    assert len(large.plan.chunks) == 1 + -(-40_000 // _parquet.STAT_ROWS)
+    # what the parser pays is chunks x footer bytes, and it stays far below the budget
+    assert parse_cost(large) < 64 * 1024 * 1024
+    assert len(rows_of(large, tables(large)["row_groups"])) == 40_000  # all statistics land
+
+
+def test_fragmented_files_past_the_parse_budget_stop_with_a_finding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = write_groups(tmp_path, 300, height=3)
+    footer = int.from_bytes(data[-8:-4], "little")
+    monkeypatch.setattr(_parquet, "PARSE_BUDGET", footer * 40)
+    output = run(data)
+    assert len(output.plan.chunks) <= 40
+    (finding,) = [f for f in output.findings() if f.code == "tabular.row_limit"]
+    assert finding.details["parse_budget"] == footer * 40
+    data_rows = rows_of(output, tables(output)["data"])
+    assert 0 < len(data_rows) < 900 and [r.row for r in data_rows] == list(range(len(data_rows)))
+
+
+def test_a_file_with_no_columns_is_a_finding_not_a_crash(tmp_path: Path) -> None:
+    import pyarrow as pa
+
+    path = tmp_path / "none.parquet"
+    pq.write_table(pa.table({}), path)
+    output = run(path.read_bytes())
+    assert codes(output) == ["tabular.parquet_footer"] and output.records() == ()
+
+
+def test_slices_of_one_row_group_are_capped_because_each_decodes_from_the_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_parquet, "BLOCK_ROWS", 3)
+    monkeypatch.setattr(_parquet, "MAX_SLICES", 1)
+    output = run(HUMANOID)
+    capped = [f for f in output.findings() if f.code == "tabular.row_limit"]
+    assert sorted(str(f.details["row_group"]) for f in capped) == ["0", "1"]  # 4 rows, 3 kept
+    data = tables(output)["data"]
+    # row numbers are the file's own: the rows cut from groups 0 and 1 are missing, none shift
+    assert [r.row for r in rows_of(output, data)] == [0, 1, 2, 4, 5, 6, 8, 9]
+
+
+def test_strings_are_values_empty_is_unknown_and_whitespace_is_text(tmp_path: Path) -> None:
+    import pyarrow as pa
+
+    path = tmp_path / "strings.parquet"
+    pq.write_table(pa.table({"s": ["", "  ", "x", None]}), path)
+    output = run(path.read_bytes())
+    cells_ = [r.cells[0] for r in rows_of(output, tables(output)["data"])]
+    assert [type(c) for c in cells_] == [Unknown, Known, Known, KnownAbsent]
+    assert cells(rows_of(output, tables(output)["data"])[1]) == ["  "]

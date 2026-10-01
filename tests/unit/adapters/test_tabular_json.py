@@ -199,11 +199,14 @@ def test_python_style_non_finite_numbers_are_the_reals_they_spell() -> None:
     }
 
 
-def test_blank_strings_and_empty_containers_are_unknown() -> None:
+def test_a_declared_string_is_a_value_even_when_it_is_only_whitespace() -> None:
     output = run(b'[{"a":"","b":"  \\t","c":{},"d":[],"e":"x"}]')
     (record,) = rows(output)
     kinds = {pointer_of(c): type(c) for c in record.cells}
-    assert kinds == {"/a": Unknown, "/b": Unknown, "/c": Unknown, "/d": Unknown, "/e": Known}
+    # a whitespace string is a declared value; "" cannot be (the model holds no empty cell text,
+    # ADR 0020 §5), so it is Unknown, citing the "" at its pointer; empty containers hold nothing
+    assert kinds == {"/a": Unknown, "/b": Known, "/c": Unknown, "/d": Unknown, "/e": Known}
+    assert values(record)["/b"] == "  \t"
 
 
 def test_a_scalar_row_is_cited_at_the_empty_pointer() -> None:
@@ -249,7 +252,7 @@ def test_every_cell_resolves_to_its_value_in_the_bytes_it_cites(name: str) -> No
             if isinstance(cell, KnownAbsent):
                 assert found is None
             elif isinstance(cell, Unknown):
-                assert found in ("", {}, [])
+                assert found in ({}, [], "")
             elif isinstance(value_of(cell), str) and isinstance(found, int):  # beyond 64 bits
                 assert int(str(value_of(cell))) == found
             else:
@@ -471,7 +474,7 @@ def test_every_leaf_of_a_written_table_resolves_to_its_value(
             if isinstance(cell, KnownAbsent):
                 assert found is None
             elif isinstance(cell, Unknown):
-                assert found in ({}, []) or (isinstance(found, str) and not found.strip())
+                assert found in ({}, [], "")
             elif isinstance(found, bool | str):
                 assert value_of(cell) is found or value_of(cell) == found
             elif isinstance(value_of(cell), str):  # an integer beyond 64 bits, kept as its text
