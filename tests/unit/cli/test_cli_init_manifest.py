@@ -70,3 +70,12 @@ def test_ingest_manifest_flags(tmp_path: Path) -> None:
     (tmp_path / "outside.yaml").write_text("neptune: 1\n")
     code, _, err = call("ingest", str(root), *common, "--manifest", str(tmp_path / "outside.yaml"))
     assert code == exit_codes.BY_CODE["invalid_configuration"] and "outside the folder" in err
+
+
+def test_it_never_writes_a_second_manifest_name(tmp_path: Path) -> None:
+    root = folder(tmp_path)
+    (root / "neptune.json").write_text('{"neptune": 1}')
+    code, _, err = init(tmp_path, "--force")
+    assert code == exit_codes.BY_CODE["destination_exists"] and "neptune.json" in err
+    assert not (root / "neptune.yaml").exists()
+    assert init(tmp_path, "-o", "-")[0] == exit_codes.OK  # printing writes nothing beside it

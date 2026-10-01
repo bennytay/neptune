@@ -74,6 +74,9 @@ def discover(source: LocalSource) -> LocalPath | None:
     """The root's manifest, if it has one; ``ManifestError`` if it has more than one name."""
     if source.is_file:
         return None
+    # A root that cannot be opened is the root's problem, not a manifest's: its OSError
+    # propagates, and the job reports the root (as for ``.neptune-ignore``, ADR 0043 §7).
+    os.close(os.open(source.root, os.O_RDONLY | os.O_DIRECTORY))
     found = [name for name in MANIFEST_NAMES if _exists(source, LocalPath(name))]
     if len(found) > 1:
         raise ManifestError(f"the folder has {' and '.join(found)}; keep one manifest")
@@ -114,7 +117,12 @@ def locate(source: LocalSource, path: os.PathLike[str] | str) -> LocalPath:
             f"{given} is outside the folder; a manifest is evidence about the folder it is in, "
             "so the package must hold it: put it in the folder"
         )
-    location = local_location(os.fsencode(relative).replace(os.sep.encode(), b"/"))
+    if relative == os.curdir:
+        raise ManifestError(f"{given} is the folder itself, not a manifest file in it")
+    try:
+        location = local_location(os.fsencode(relative).replace(os.sep.encode(), b"/"))
+    except ValueError as exc:
+        raise ManifestError(f"{given} does not name a file in the folder: {exc}") from None
     if isinstance(location, RawLocalPath):
         raise ManifestError(f"{given}: a manifest's path must be UTF-8")
     return location

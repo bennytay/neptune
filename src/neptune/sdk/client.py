@@ -132,6 +132,8 @@ def _manifest(root: Path, manifest: ManifestChoice) -> LoadedManifest | None:
         return read(source, location) if location is not None else None
     except ManifestError as exc:
         raise ConfigurationError(f"the manifest cannot be used: {exc}") from exc
+    except OSError:  # the root cannot be opened: the job reports it as the root's failure
+        return None
 
 
 def _workspace(workspace: Workspace | StrPath | None) -> Workspace:
@@ -399,8 +401,10 @@ class Neptune:
         """Resolve and check the call now; return what builds its job around a sink and event."""
         root = _local_root(source, self._workspace)
         options = self._options
-        if options.manifest is None and (loaded := _manifest(root, manifest)) is not None:
-            options = replace(options, manifest=loaded)
+        if manifest is False:  # none, even one the client's options carry
+            options = replace(options, manifest=None)
+        elif manifest is not None or options.manifest is None:
+            options = replace(options, manifest=_manifest(root, manifest))
         target = _destination(destination, root) if destination is not None else None
         if resume and not self._workspace.has_ledger(root):
             raise NothingToResumeError(

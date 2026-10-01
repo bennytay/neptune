@@ -496,6 +496,18 @@ class _InitManifest:
         if not folder.is_dir():
             return self._fail("invalid_source", f"{_text(args.folder)} is not a folder")
         target = None if args.output == "-" else Path(args.output or folder / MANIFEST_NAMES[0])
+        others = [
+            name
+            for name in MANIFEST_NAMES
+            if (folder / name).exists() or (folder / name).is_symlink()
+            if target is not None and (folder / name).absolute() != target.absolute()
+        ]
+        if others and target is not None and target.parent.absolute() == folder.absolute():
+            return self._fail(
+                "destination_exists",
+                f"{_text(args.folder)} already has {others[0]}; a folder holds one manifest "
+                "(remove it, or write elsewhere with -o)",
+            )
         if target is not None and (target.exists() or target.is_symlink()) and not args.force:
             return self._fail(
                 "destination_exists", f"{_text(os.fspath(target))} exists; --force overwrites it"
