@@ -24,12 +24,13 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, Final, Protocol
+from typing import Any, BinaryIO, Final, Protocol
 
 from neptune.identity import canonical_json
 from neptune.identity.hashing import digest_stream
 from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
+from neptune.model.jsonvalue import JsonObject
 from neptune.model.package import package_manifest_from_json
 from neptune.model.run import Stream
 from neptune.model.source import LocalPath, RawLocalPath, SourceAbsence, SourceRevision
@@ -47,9 +48,6 @@ from neptune.store.package import (
 from neptune.store.receipt import cited_sources
 from neptune.store.series import SERIES_SETTINGS, merge_runs
 from neptune.store.workspace import DerivativeKey, Held, Owner, Workspace
-
-if TYPE_CHECKING:
-    from neptune.model.jsonvalue import JsonObject
 
 _COPY_SIZE: Final = 1024 * 1024
 # A stream's series file, as a derivative of the runs of the chunks it merges (ADR 0031 §4). The
@@ -245,12 +243,14 @@ def stage(
     materialise: Iterable[ContentId] = (),
     source: SourceOpener | None = None,
     extra: Iterable[Any] = (),
+    derived: Mapping[str, Iterable[JsonObject]] | None = None,
 ) -> StagedPackage:
     """Build the package of ``ingested`` sources, each a (content id, transform id) pair.
 
     Every ingested source must be in ``ledger``, since the package lists the sources it cites,
     and every chunk of its plan must be committed in ``workspace``. ``extra`` adds records that
-    are no adapter's output: the runtime's own transform and findings. ``materialise`` names
+    are no adapter's output: the runtime's own transform and findings, and the transforms that
+    ``derived`` tables (session proposals, ADR 0036) name. ``materialise`` names
     sources to copy into the package. Each is read as ``export`` reads one: from the head of a
     location chain in ``ledger`` that holds it, opened through ``source`` so its policy applies,
     and hashed where it lands. Every other source is referenced. ``destination`` must not exist.
@@ -314,6 +314,7 @@ def stage(
             series=series,
             blobs=_land(scratch, locations, source) if source is not None else {},
             store={"series": SERIES_SETTINGS} if series else {},
+            derived=derived,
         )
         copied = _lay_out(staging, contents, movable=scratch)
         scratch.rmdir()  # every merged series and landed source was moved into place
@@ -339,6 +340,7 @@ def assemble(
     materialise: Iterable[ContentId] = (),
     source: SourceOpener | None = None,
     extra: Iterable[Any] = (),
+    derived: Mapping[str, Iterable[JsonObject]] | None = None,
 ) -> ContentId:
     """``stage`` then ``publish``: write the package of ``ingested`` sources at ``destination``.
 
@@ -352,6 +354,7 @@ def assemble(
         materialise=materialise,
         source=source,
         extra=extra,
+        derived=derived,
     )
     try:
         return publish(staged)
@@ -420,7 +423,11 @@ def export(package_root: Path, destination: Path, source: SourceOpener) -> Conte
         scratch.mkdir()
         blobs = {**package.blobs, **_land(scratch, locations, source)}
         contents = package_contents(
-            package.records, series=package.series, blobs=blobs, store=package.manifest.store
+            package.records,
+            series=package.series,
+            blobs=blobs,
+            store=package.manifest.store,
+            derived=package.derived,
         )
         copied = _lay_out(staging, contents, movable=scratch)
         scratch.rmdir()  # every landed source was moved into place
