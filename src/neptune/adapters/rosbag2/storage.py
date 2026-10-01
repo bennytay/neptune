@@ -1,0 +1,756 @@
+"""rosbag2's ``sqlite3`` storage: one ``.db3`` file of a bag (ADR 0045).
+
+The file is a SQLite database with a ``topics`` table (one row per topic: name, type, serialisation
+format, offered QoS profiles) and a ``messages`` table (one row per message: topic, timestamp,
+payload); newer bags add ``message_definitions`` (the message type's definition text). A database
+becomes what an MCAP recording becomes (ADR 0034), so that both storage backends of one recording
+give the same run and streams:
+
+- one ``Run`` citing the database header, its ``first`` and ``last`` the smallest and largest
+  message timestamp, each citing the bytes of that timestamp;
+- one ``TimestampDomain`` for the ``timestamp`` column (the recorder's clock, scope ``()``);
+- one ``Stream`` per ``topics`` row, citing the row, with the type, serialisation and QoS as the
+  row states them, the definition's bytes when ``message_definitions`` holds them, and the message
+  count the planning pass counted;
+- one series row per message: ``seq`` (its place among its topic's messages in rowid order),
+  ``time/0``, ``value/message_id`` and ``value/data_bytes``, and the locator of the message's cell.
+
+Planning reads every leaf page of ``messages`` once (not the payloads that spill into overflow
+pages) because ``seq`` is a rank within the topic and the extent is a minimum and maximum; the
+chunks are rowid ranges, each with the ``seq`` its topics start from. A chunk walks its range only.
+"""
+
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Final
+
+from neptune.adapters.contract import (
+    AdapterConfig,
+    Chunk,
+    ChunkOutput,
+    InspectResult,
+    Plan,
+    SourceReader,
+    make_chunk,
+)
+from neptune.adapters.rosbag2._cite import Cite, clip
+from neptune.adapters.rosbag2._sqlite import (
+    HEADER_SIZE,
+    Cell,
+    Database,
+    Problem,
+    SchemaEntry,
+    SqliteError,
+    Walk,
+    column_names,
+    int_value,
+    read_schema,
+    record_fields,
+    text_value,
+)
+from neptune.model.finding import FindingCategory, IngestFinding, Severity
+from neptune.model.ids import RecordId
+from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.model.knowledge import AssertionKind, Knowledge, Known, Unknown
+from neptune.model.provenance import ByteRange, EvidenceRef, adapter_locator
+from neptune.model.reference import TimestampDomain
+from neptune.model.run import Run, Stream
+from neptune.model.series import (
+    SEQ,
+    ColumnType,
+    SeriesBatch,
+    SeriesColumn,
+    SeriesProvenance,
+    locator_column,
+    step_template,
+    time_column,
+    value_column,
+)
+from neptune.model.time import NANOSECOND, ClockRole, Timestamp
+
+if TYPE_CHECKING:
+    from neptune.identity.provenance import EvidenceRecord
+
+TIME_FIELD: Final = "rosbag2:time_field"
+MAX_TOPICS: Final = 100_000
+LISTED: Final = 16
+TOPIC_REQUIRED: Final = ("name", "type", "serialization_format")
+MESSAGE_REQUIRED: Final = ("topic_id", "timestamp", "data")
+DEFINITION_REQUIRED: Final = ("topic_type", "encoding", "encoded_message_definition")
+MESSAGE_ID, DATA_BYTES = value_column("message_id"), value_column("data_bytes")
+COLUMNS: Final = tuple(
+    sorted(
+        [
+            (SEQ, ColumnType.INT64),
+            (time_column(0), ColumnType.INT64),
+            (MESSAGE_ID, ColumnType.INT64),
+            (DATA_BYTES, ColumnType.INT64),
+            (locator_column(0, "length"), ColumnType.INT64),
+            (locator_column(0, "offset"), ColumnType.INT64),
+        ]
+    )
+)
+PROBLEMS: Final = {
+    "unreadable": "a page the file does not hold whole",
+    "not_table_page": "a page that is not a table b-tree page",
+    "cell_count": "a page whose cell count does not fit it",
+    "cell_pointer": "a cell pointer or varint outside its page",
+    "cell_overrun": "a cell that runs past its page",
+    "key_order": "an interior key out of order or outside its parent's range",
+    "rowid_order": "a row whose rowid is not after the rows before it, or is outside its range",
+    "too_deep": "a b-tree deeper than the reader follows",
+    "page_budget": "more pages visited than the file has (a cycle)",
+}
+
+
+@dataclass(frozen=True)
+class Layout:
+    """The tables a rosbag2 database must have and the position of each column in its records."""
+
+    topics: SchemaEntry
+    messages: SchemaEntry
+    definitions: SchemaEntry | None
+    topic_columns: dict[str, int]
+    message_columns: dict[str, int]
+    definition_columns: dict[str, int]
+
+
+def _columns(entry: SchemaEntry, required: tuple[str, ...]) -> dict[str, int] | None:
+    names = column_names(entry.sql)
+    if names is None or not set(required) <= set(names):
+        return None
+    return {name: index for index, name in enumerate(names)}
+
+
+def find_layout(schema: list[SchemaEntry]) -> Layout | None:
+    """The rosbag2 tables among ``schema``, or ``None`` if ``topics`` and ``messages`` do not
+    have the columns rosbag2 writes."""
+    by_name: dict[str, SchemaEntry] = {}
+    for entry in schema:
+        by_name.setdefault(entry.name, entry)
+    topics, messages = by_name.get("topics"), by_name.get("messages")
+    if topics is None or messages is None:
+        return None
+    topic_columns = _columns(topics, TOPIC_REQUIRED)
+    message_columns = _columns(messages, MESSAGE_REQUIRED)
+    if topic_columns is None or message_columns is None:
+        return None
+    definitions = by_name.get("message_definitions")
+    definition_columns = _columns(definitions, DEFINITION_REQUIRED) if definitions else None
+    return Layout(
+        topics,
+        messages,
+        definitions if definition_columns else None,
+        topic_columns,
+        message_columns,
+        definition_columns or {},
+    )
+
+
+@dataclass(frozen=True)
+class Message:
+    rowid: int
+    topic: int
+    ticks: int
+    stamp: ByteRange  # the bytes of the timestamp (the cell, when its value has none)
+    cell: ByteRange
+    data_bytes: int
+
+
+def decode_message(cell: Cell, columns: dict[str, int]) -> Message | str:
+    """A ``messages`` row, or the reason it cannot be one (``bad_record``, ``bad_type``)."""
+    wanted = max(columns[name] for name in MESSAGE_REQUIRED) + 1
+    try:
+        fields = record_fields(cell, wanted)
+        if len(fields) < wanted:
+            return "bad_record"
+        topic, stamp, data = (fields[columns[name]] for name in MESSAGE_REQUIRED)
+        if not (topic.is_int and stamp.is_int and (data.is_blob or data.is_text)):
+            return "bad_type"
+        topic_id, ticks = int_value(cell, topic), int_value(cell, stamp)
+    except SqliteError:
+        return "bad_record"
+    where = ByteRange(cell.offset, cell.length)
+    place = ByteRange(stamp.offset, stamp.size) if stamp.size else where
+    return Message(cell.rowid, topic_id, ticks, place, where, data.size)
+
+
+@dataclass(frozen=True)
+class Topic:
+    row: Cell
+    values: dict[str, str | None]  # None: not text, not UTF-8, or not all in the page
+    place: ByteRange
+    definition_of: str | None = None
+
+
+def read_topics(db: Database, layout: Layout, walk: Walk) -> tuple[list[Topic], bool]:
+    """The ``topics`` rows in rowid order, and whether there were more than ``MAX_TOPICS``."""
+    wanted = max(layout.topic_columns.values()) + 1
+    topics: list[Topic] = []
+    for cell in db.table(layout.topics.root, walk=walk):
+        if len(topics) >= MAX_TOPICS:
+            return topics, True
+        values: dict[str, str | None] = {}
+        try:
+            fields = record_fields(cell, wanted)
+        except SqliteError:
+            fields = []
+        for name, index in layout.topic_columns.items():
+            if index < len(fields) and fields[index].is_text:
+                values[name] = text_value(cell, fields[index])
+            elif index < len(fields) and fields[index].is_null and name != "id":
+                values[name] = ""
+            else:
+                values[name] = None
+        topics.append(Topic(cell, values, ByteRange(cell.offset, cell.length)))
+    return topics, False
+
+
+@dataclass(frozen=True)
+class Definition:
+    encoding: str | None
+    text: ByteRange | None  # the bytes of the definition, when all of them are in the page
+
+
+def read_definitions(db: Database, layout: Layout) -> dict[str, Definition]:
+    """The first ``message_definitions`` row of each type, by rowid."""
+    found: dict[str, Definition] = {}
+    if layout.definitions is None:
+        return found
+    columns = layout.definition_columns
+    wanted = max(columns[name] for name in DEFINITION_REQUIRED) + 1
+    for cell in db.table(layout.definitions.root, walk=Walk()):
+        try:
+            fields = record_fields(cell, wanted)
+            if len(fields) < wanted:
+                continue
+            kind, encoding, text = (fields[columns[name]] for name in DEFINITION_REQUIRED)
+            name = text_value(cell, kind) if kind.is_text else None
+        except SqliteError:
+            continue
+        if name is None or name in found:
+            continue
+        local = text.is_text and text.at + text.size <= len(cell.local) and text.size > 0
+        found[name] = Definition(
+            text_value(cell, encoding) if encoding.is_text else None,
+            ByteRange(text.offset, text.size) if local else None,
+        )
+    return found
+
+
+def open_database(
+    source: SourceReader, walk: Walk
+) -> tuple[Database | None, Layout | None, list[SchemaEntry], str]:
+    """The database, its rosbag2 layout (``None`` if it has none), its tables, and an error."""
+    try:
+        db = Database(source)
+        schema = read_schema(db, walk)
+    except SqliteError as exc:
+        return None, None, [], str(exc)
+    return db, find_layout(schema), schema, ""
+
+
+# --- Inspect -------------------------------------------------------------------------------------
+
+
+def inspect_storage(source: SourceReader) -> InspectResult:
+    walk = Walk()
+    db, layout, schema, error = open_database(source, walk)
+    if db is None:
+        return InspectResult({"part": "sqlite3", "readable": False, "error": error})
+    summary: dict[str, JsonValue] = {
+        "part": "sqlite3",
+        "readable": True,
+        "page_size": db.header.page_size,
+        "pages": db.header.pages,
+        "tables": sorted(entry.name for entry in schema)[:1000],
+        "rosbag2": layout is not None,
+        "wal": db.header.journal == 2,
+    }
+    if layout is not None:
+        topics, more = read_topics(db, layout, Walk())
+        summary["topics"] = [
+            {"name": t.values.get("name") or "", "type": t.values.get("type") or ""}
+            for t in topics[:1000]
+        ]
+        summary["topics_omitted"] = max(0, len(topics) - 1000) + (1 if more else 0)
+    return InspectResult(summary)
+
+
+# --- Plan ----------------------------------------------------------------------------------------
+
+
+def _page_range(source: SourceReader, db: Database, page: int) -> ByteRange:
+    size = db.header.page_size
+    start = (page - 1) * size
+    if start >= source.size:
+        return clip(source, 0, HEADER_SIZE)
+    return clip(source, start, size)
+
+
+class _Tally:
+    """What a walk met besides rows: damaged pages and refused rows, by reason, first first."""
+
+    def __init__(self) -> None:
+        self.pages: dict[str, list[int]] = defaultdict(list)
+        self.rows: dict[str, list[Cell]] = defaultdict(list)
+        self.counts: dict[str, int] = defaultdict(int)
+
+    def problems(self, problems: list[Problem]) -> None:
+        for problem in problems:
+            self.counts[problem.reason] += 1
+            if problem.page not in self.pages[problem.reason]:
+                self.pages[problem.reason].append(problem.page)
+
+
+def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> Plan:
+    cite = Cite(source, config)
+    findings: list[IngestFinding] = []
+    walk = Walk()
+    db, layout, schema, error = open_database(source, walk)
+
+    def unreadable() -> Plan:
+        return Plan((make_chunk(source, config, {"part": "unreadable"}, 0),), tuple(findings))
+
+    if db is None:
+        findings.append(
+            cite.finding(
+                "bad_database",
+                FindingCategory.CORRUPT,
+                Severity.ERROR,
+                (clip(source, 0, HEADER_SIZE),),
+                f"the source is not a database this reader opens: {error}; nothing is read",
+                {"size": source.size},
+            )
+        )
+        return unreadable()
+    header = db.header
+    if header.truncated:
+        findings.append(
+            cite.finding(
+                "truncated",
+                FindingCategory.CORRUPT,
+                Severity.WARNING,
+                (clip(source, 28, 4),),
+                f"the file holds {source.size} bytes, {header.pages} whole pages of"
+                f" {header.page_size}; the header declares {header.declared_pages or 'none'}."
+                " Pages that are not there are not read",
+                {
+                    "declared_pages": header.declared_pages,
+                    "pages": header.pages,
+                    "size": source.size,
+                },
+            )
+        )
+    if header.journal == 2:
+        findings.append(
+            cite.finding(
+                "wal_not_read",
+                FindingCategory.LIMIT,
+                Severity.INFO,
+                (clip(source, 18, 2),),
+                "the database is in WAL mode; a `-wal` file beside it is another source and is"
+                " not read, so messages only it holds are missing",
+                {},
+            )
+        )
+    tally = _Tally()
+    tally.problems(walk.problems)
+    if layout is None:
+        findings.append(
+            cite.finding(
+                "not_rosbag2_storage",
+                FindingCategory.UNSUPPORTED,
+                Severity.ERROR,
+                (clip(source, 0, HEADER_SIZE),),
+                "the database has no `topics` and `messages` tables with the columns rosbag2"
+                " writes; it is not read",
+                {"tables": sorted(entry.name for entry in schema)[:LISTED]},
+            )
+        )
+        _damage(cite, source, db, tally, findings)
+        return unreadable()
+    walk = Walk()
+    topics, too_many = read_topics(db, layout, walk)
+    tally.problems(walk.problems)
+    if too_many:
+        findings.append(
+            cite.finding(
+                "too_many_topics",
+                FindingCategory.LIMIT,
+                Severity.ERROR,
+                (ByteRange(topics[-1].place.offset, topics[-1].place.length),),
+                f"the database declares more than {MAX_TOPICS} topics; the rest are not read",
+                {"limit": MAX_TOPICS},
+            )
+        )
+    declared = {topic.row.rowid for topic in topics}
+    counts: dict[int, int] = defaultdict(int)
+    unknown: dict[int, int] = defaultdict(int)
+    first_unknown: Cell | None = None
+    extent: dict[str, tuple[int, ByteRange]] = {}
+    chunks: list[tuple[JsonObject, int]] = []
+    current: dict[str, JsonValue] = {}
+    starts: dict[int, int] = {}
+    rows = size = 0
+    walk = Walk()
+    columns = layout.message_columns
+    for cell in db.table(layout.messages.root, walk=walk):
+        outcome = decode_message(cell, columns)
+        if isinstance(outcome, str):
+            tally.counts[outcome] += 1
+            if not tally.rows[outcome]:
+                tally.rows[outcome].append(cell)
+            continue
+        if outcome.topic not in declared:
+            unknown[outcome.topic] += 1
+            first_unknown = first_unknown or cell
+            continue
+        if "first" not in extent or outcome.ticks < extent["first"][0]:
+            extent["first"] = (outcome.ticks, outcome.stamp)
+        if "last" not in extent or outcome.ticks > extent["last"][0]:
+            extent["last"] = (outcome.ticks, outcome.stamp)
+        if not rows:
+            current = {"lo": outcome.rowid}
+            starts = {}
+        starts.setdefault(outcome.topic, counts[outcome.topic])
+        counts[outcome.topic] += 1
+        rows += 1
+        size += outcome.cell.length
+        current["hi"] = outcome.rowid
+        if rows >= max_rows:
+            chunks.append((_data(current, starts), size))
+            rows = size = 0
+    if rows:
+        chunks.append((_data(current, starts), size))
+    tally.problems(walk.problems)
+    _damage(cite, source, db, tally, findings)
+    if unknown and first_unknown is not None:
+        findings.append(
+            cite.finding(
+                "unknown_topic",
+                FindingCategory.CORRUPT,
+                Severity.ERROR,
+                (ByteRange(first_unknown.offset, first_unknown.length),),
+                f"{sum(unknown.values())} message(s) name {len(unknown)} topic id(s) that no"
+                " `topics` row declares; they get no rows",
+                {
+                    "messages": sum(unknown.values()),
+                    "topic_ids": {str(i): n for i, n in sorted(unknown.items())[:LISTED]},
+                },
+            )
+        )
+    declarations: dict[str, JsonValue] = {
+        "counts": [[topic, n] for topic, n in sorted(counts.items())],
+        "part": "declarations",
+    }
+    for name in ("first", "last"):
+        if name in extent:
+            ticks, where = extent[name]
+            declarations[name] = [ticks, where.offset, where.length]
+    plan = [make_chunk(source, config, declarations, source.size // 64)]
+    plan += [make_chunk(source, config, context, cost) for context, cost in chunks]
+    return Plan(tuple(plan), tuple(findings))
+
+
+def _data(current: dict[str, JsonValue], starts: dict[int, int]) -> JsonObject:
+    return {
+        "hi": current["hi"],
+        "lo": current["lo"],
+        "part": "data",
+        "seq": [[topic, start] for topic, start in sorted(starts.items())],
+    }
+
+
+def _damage(
+    cite: Cite, source: SourceReader, db: Database, tally: _Tally, findings: list[IngestFinding]
+) -> None:
+    for reason in sorted(tally.pages):
+        pages = sorted(tally.pages[reason])
+        findings.append(
+            cite.finding(
+                "damaged_page",
+                FindingCategory.CORRUPT,
+                Severity.ERROR,
+                (_page_range(source, db, pages[0]),),
+                f"{PROBLEMS.get(reason, reason)}: {tally.counts[reason]} time(s) on"
+                f" {len(pages)} page(s); the rows under them are not read",
+                {
+                    "pages": pages[:LISTED],
+                    "pages_omitted": max(0, len(pages) - LISTED),
+                    "problems": tally.counts[reason],
+                    "reason": reason,
+                },
+            )
+        )
+    for reason in sorted(tally.rows):
+        cell = tally.rows[reason][0]
+        findings.append(
+            cite.finding(
+                "bad_row",
+                FindingCategory.CORRUPT,
+                Severity.WARNING,
+                (ByteRange(cell.offset, cell.length),),
+                f"{tally.counts[reason]} message row(s) are unusable ({reason}: the record does not"
+                " parse or its topic or timestamp is not an integer); they get no rows",
+                {"first_rowid": cell.rowid, "reason": reason, "rows": tally.counts[reason]},
+            )
+        )
+
+
+# --- Ingest --------------------------------------------------------------------------------------
+
+
+def ingest_storage(source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput:
+    part = chunk.context["part"]
+    if part == "unreadable":
+        return ChunkOutput()  # the plan's finding says why
+    db, layout, _, error = open_database(source, Walk())
+    if db is None or layout is None:
+        raise SqliteError(error or "the planned database is not a rosbag2 database")
+    if part == "declarations":
+        return _Declarations(source, chunk, config, db, layout).run()
+    return _Rows(source, chunk, config, db, layout).run()
+
+
+class _Streams:
+    """The ids and series template of every stream, from the topics rows."""
+
+    def __init__(self, source: SourceReader, config: AdapterConfig) -> None:
+        self.cite = Cite(source, config)
+        self.source = source
+
+    def stream_id(self, topic: Topic) -> RecordId:
+        return self.cite.record_id(Stream.kind, topic.place)
+
+    @property
+    def clock(self) -> RecordId:
+        return self.cite.record_id(
+            TimestampDomain.kind,
+            ByteRange(0, 16),
+            adapter_locator(TIME_FIELD, {"name": "timestamp"}),
+        )
+
+
+def _ints(value: JsonValue) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"expected an integer, got {value!r}")
+    return value
+
+
+def _pairs(value: JsonValue) -> list[list[JsonValue]]:
+    if not isinstance(value, list) or not all(isinstance(item, list) for item in value):
+        raise ValueError(f"expected a list of lists, got {value!r}")
+    return [item for item in value if isinstance(item, list)]
+
+
+class _Declarations:
+    def __init__(
+        self,
+        source: SourceReader,
+        chunk: Chunk,
+        config: AdapterConfig,
+        db: Database,
+        layout: Layout,
+    ) -> None:
+        self.ids = _Streams(source, config)
+        self.cite = self.ids.cite
+        self.source = source
+        self.context = chunk.context
+        self.db = db
+        self.layout = layout
+        self.records: list[EvidenceRecord] = []
+        self.series: list[SeriesBatch] = []
+        self.findings: list[IngestFinding] = []
+
+    def run(self) -> ChunkOutput:
+        cite, source = self.cite, self.source
+        spec = cite.provenance(
+            ByteRange(self.layout.messages.cell.offset, self.layout.messages.cell.length)
+        )
+        clock = TimestampDomain(
+            id=self.ids.clock,
+            provenance=cite.provenance(
+                ByteRange(0, 16), adapter_locator(TIME_FIELD, {"name": "timestamp"})
+            ),
+            field="timestamp",
+            scope=(),
+            role=Known(ClockRole.RECEIVE, spec),
+            resolution=Known(NANOSECOND, spec),
+            epoch=Unknown(),
+            timescale=Unknown(),
+            declared_monotonic=Unknown(),
+        )
+        header = clip(source, 0, HEADER_SIZE)
+        run = Run(
+            id=cite.record_id(Run.kind, header),
+            provenance=cite.provenance(header),
+            logical_id=Unknown(),
+            machine=Unknown(),
+            first=self._extent("first", clock.id),
+            last=self._extent("last", clock.id),
+        )
+        self.records += [clock, run]
+        counts = {_ints(t): _ints(n) for t, n in (tuple(p) for p in _pairs(self.context["counts"]))}
+        topics, _ = read_topics(self.db, self.layout, Walk())
+        definitions = read_definitions(self.db, self.layout)
+        for topic in topics:
+            self._stream(topic, run.id, clock.id, counts.get(topic.row.rowid, 0), definitions)
+        return ChunkOutput(tuple(self.records), tuple(self.series), tuple(self.findings))
+
+    def _extent(self, name: str, clock: RecordId) -> Knowledge[Timestamp]:
+        found = self.context.get(name)
+        if found is None:
+            return Unknown()
+        ticks, offset, length = (_ints(v) for v in (found if isinstance(found, list) else []))
+        return Known(Timestamp(ticks, clock), self.cite.provenance(ByteRange(offset, length)))
+
+    def _text(self, topic: Topic, name: str, stream: RecordId) -> Knowledge[str]:
+        value = topic.values.get(name)
+        provenance = self.cite.provenance(topic.place)
+        if value is None:
+            self.findings.append(
+                self.cite.finding(
+                    "invalid_utf8",
+                    FindingCategory.UNREPRESENTABLE,
+                    Severity.WARNING,
+                    (topic.place,),
+                    f"the topics row's `{name}` is not UTF-8 text held in its page; it is unknown",
+                    {"column": name, "rowid": topic.row.rowid},
+                    records=(stream,),
+                )
+            )
+            return Unknown(provenance)
+        return Known(value, provenance) if value else Unknown(provenance)
+
+    def _stream(
+        self,
+        topic: Topic,
+        run: RecordId,
+        clock: RecordId,
+        count: int,
+        definitions: dict[str, Definition],
+    ) -> None:
+        cite = self.cite
+        stream_id = self.ids.stream_id(topic)
+        provenance = cite.provenance(topic.place)
+        name = self._text(topic, "name", stream_id)
+        kind = self._text(topic, "type", stream_id)
+        encoding = self._text(topic, "serialization_format", stream_id)
+        schema_encoding: Knowledge[str] = Unknown()
+        definition: Knowledge[EvidenceRef] = Unknown()
+        found = definitions.get(topic.values.get("type") or "")
+        if found is not None:
+            schema_encoding = Known(found.encoding, provenance) if found.encoding else Unknown()
+            if found.text is not None:
+                definition = Known(cite.evidence(found.text), cite.provenance(found.text))
+            else:
+                self.findings.append(
+                    cite.finding(
+                        "definition_not_local",
+                        FindingCategory.LIMIT,
+                        Severity.INFO,
+                        (topic.place,),
+                        "the type's definition spills into overflow pages; its bytes are not one"
+                        " range, so the stream's definition is unknown",
+                        {"type": topic.values.get("type") or ""},
+                        records=(stream_id,),
+                    )
+                )
+        metadata = tuple(
+            (key, value)
+            for key in ("offered_qos_profiles", "type_description_hash")
+            if (value := topic.values.get(key))
+        )
+        stream = Stream(
+            id=stream_id,
+            provenance=provenance,
+            run=run,
+            topic=name,
+            schema_name=kind,
+            schema_encoding=schema_encoding,
+            schema_definition=definition,
+            message_encoding=encoding,
+            metadata=metadata,
+            clocks=(clock,),
+            message_count=Known(
+                count,
+                cite.provenance(
+                    ByteRange(self.layout.messages.cell.offset, self.layout.messages.cell.length)
+                ),
+            ),
+            first=Unknown(),
+            last=Unknown(),
+            series=series_template(self.source),
+        )
+        self.records.append(stream)
+        self.series.append(
+            SeriesBatch(stream_id, tuple(SeriesColumn(n, t, ()) for n, t in COLUMNS))
+        )
+        self.findings.append(
+            cite.finding(
+                "payload_not_decoded",
+                FindingCategory.UNSUPPORTED,
+                Severity.INFO,
+                (topic.place,),
+                f"topic {topic.row.rowid}'s message payloads are not decoded; each row cites its"
+                " message's cell",
+                {
+                    "rowid": topic.row.rowid,
+                    "serialization_format": topic.values.get("serialization_format") or "",
+                },
+                records=(stream_id,),
+            )
+        )
+
+
+def series_template(source: SourceReader) -> SeriesProvenance:
+    """A row cites its message's cell: its length and offset in the file."""
+    step = step_template("byte_range", per_row=("length", "offset"))
+    return SeriesProvenance(source.content_id, (step,), AssertionKind.OBSERVED)
+
+
+class _Rows:
+    def __init__(
+        self,
+        source: SourceReader,
+        chunk: Chunk,
+        config: AdapterConfig,
+        db: Database,
+        layout: Layout,
+    ) -> None:
+        self.ids = _Streams(source, config)
+        self.context = chunk.context
+        self.db = db
+        self.layout = layout
+
+    def run(self) -> ChunkOutput:
+        low, high = _ints(self.context["lo"]), _ints(self.context["hi"])
+        starts = {_ints(t): _ints(s) for t, s in (tuple(p) for p in _pairs(self.context["seq"]))}
+        topics, _ = read_topics(self.db, self.layout, Walk())
+        streams = {topic.row.rowid: self.ids.stream_id(topic) for topic in topics}
+        rows: dict[int, dict[str, list[int | None]]] = {}
+        for cell in self.db.table(self.layout.messages.root, low, high):
+            message = decode_message(cell, self.layout.message_columns)
+            if isinstance(message, str) or message.topic not in streams:
+                continue
+            seq = starts.get(message.topic, 0)
+            starts[message.topic] = seq + 1
+            columns = rows.setdefault(message.topic, {name: [] for name, _ in COLUMNS})
+            columns[SEQ].append(seq)
+            columns[time_column(0)].append(message.ticks)
+            columns[MESSAGE_ID].append(message.rowid)
+            columns[DATA_BYTES].append(message.data_bytes)
+            columns[locator_column(0, "length")].append(message.cell.length)
+            columns[locator_column(0, "offset")].append(message.cell.offset)
+        batches = tuple(
+            SeriesBatch(
+                streams[topic],
+                tuple(SeriesColumn(name, kind, tuple(columns[name])) for name, kind in COLUMNS),
+            )
+            for topic, columns in sorted(rows.items())
+        )
+        return ChunkOutput(series=batches)
+
+
+__all__ = ["ingest_storage", "inspect_storage", "plan_storage"]
