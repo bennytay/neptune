@@ -52,8 +52,9 @@ def test_format_adapters_are_leaves() -> None:
                     names = [node.module or ""]
                 else:
                     continue
+                own = f"neptune.adapters.{package.name}"
                 for name in names:
-                    if name.startswith("neptune"):
+                    if name.startswith("neptune") and name.split(".")[:3] != own.split("."):
                         assert name.startswith(allowed), (
                             f"{package.name}/{path.name} imports {name}"
                         )

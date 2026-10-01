@@ -10,8 +10,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from neptune.adapters.builtin import default_registry
 from neptune.adapters.contract import PROBE_HEAD_SIZE, FormatSpec, Magic
+from neptune.adapters.text import TextAdapter
 from neptune.discovery.sniff import (
     SIGNATURES,
     ContainerKind,
@@ -102,9 +102,9 @@ def test_the_table_is_well_formed_and_every_magic_fits_in_a_head() -> None:
 
 
 def test_adapters_declared_magic_becomes_signatures_naming_the_adapter() -> None:
-    assert declared_signatures(default_registry().descriptors().values()) == ()  # text has none
+    assert declared_signatures([TextAdapter().descriptor]) == ()  # text has none
     spec = FormatSpec("Tally", magic=(Magic(0, b"TALLY1\n"),))
-    descriptor = next(iter(default_registry().descriptors().values()))
+    descriptor = TextAdapter().descriptor
     from dataclasses import replace
 
     declared = declared_signatures([replace(descriptor, formats=(spec,))])
