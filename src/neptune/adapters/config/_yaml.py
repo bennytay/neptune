@@ -368,6 +368,8 @@ class _Document:
 
 
 _STR: Final = "tag:yaml.org,2002:str"
+# A plain key no reading holds (0x_, 2026-02-30): told apart for duplicates, never a tag.
+UNREADABLE_TYPE: Final = "unreadable:"
 _TYPE_TAGS: Final = {
     ScalarType.BOOL: "tag:yaml.org,2002:bool",
     ScalarType.INT: "tag:yaml.org,2002:int",
@@ -394,7 +396,7 @@ def _reading_type(reading: Reading) -> str:
         return "tag:yaml.org,2002:null"
     if isinstance(reading, Value):
         return _TYPE_TAGS[reading.readings[0].type]
-    return f"unreadable:{reading.issue}"
+    return f"{UNREADABLE_TYPE}{reading.issue}"
 
 
 def _versions(declared: tuple[int, int] | None, option: str) -> tuple[YamlVersion, ...]:

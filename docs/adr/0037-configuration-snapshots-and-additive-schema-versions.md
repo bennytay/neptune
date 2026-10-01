@@ -73,7 +73,8 @@ Forces:
      (a package's tables are sorted by id).
    - `key_tag`: the type of the entry's key where it is not a string: the tag a YAML key
      resolves to (`tag:yaml.org,2002:int` for `1`, an application's `!tag`), `Ambiguous` where
-     the YAML versions disagree (`on`). `NotApplicable` for string keys (every JSON and TOML
+     the YAML versions disagree (`on`), `Unknown` where a pattern matches and no version reads
+     a value (`0x_`). `NotApplicable` for string keys (every JSON and TOML
      key, a quoted or plain-text YAML key), the root and sequence items. So `1` and `"1"` share
      a path and still declare two keys.
    - `tag`: a YAML node's tag, the explicit one expanded or YAML's non-specific `?` (plain

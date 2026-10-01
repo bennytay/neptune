@@ -462,7 +462,8 @@ class ConfigurationValue:
     - ``order``: its position among its parent's entries or items, in source order.
     - ``key_tag``: the type of its key where that is not a string: the tag a YAML key resolves
       to (``tag:yaml.org,2002:int`` for ``1``, ``...:bool`` for ``true``, an application's
-      ``!tag``), ``Ambiguous`` where the YAML versions disagree (``on``). ``NotApplicable`` for a
+      ``!tag``), ``Ambiguous`` where the YAML versions disagree (``on``), ``Unknown`` where a
+      number or date pattern matches but no version reads a value (``0x_``). ``NotApplicable`` for a
       string key (every JSON and TOML key, a quoted or plain-text YAML key), the root and sequence
       items, so ``1`` and ``"1"``, one path, still declare two keys.
     - ``tag``: a YAML node's tag: the explicit one, expanded, or the non-specific ``?`` (plain

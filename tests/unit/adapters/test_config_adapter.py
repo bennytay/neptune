@@ -825,6 +825,10 @@ def test_yaml_keys_that_are_not_strings_are_part_of_the_digest() -> None:
         "tag:yaml.org,2002:bool",
         "tag:yaml.org,2002:str",
     ]
+    # A key whose pattern matches but which no version reads has no type, never a made-up tag.
+    for data in (b"0x_: 1\n", b"2026-02-30: 2\n"):
+        (entry,) = [v for v in values(run(data)) if v.path]
+        assert entry.key_tag == Unknown()
     # String keys add nothing: the same values as JSON and as YAML share a digest.
     as_json = run(b'{"m": {"a": 1, "b": [true]}}')
     as_yaml = run(b"m:\n  'a': 1\n  b: [true]\n")

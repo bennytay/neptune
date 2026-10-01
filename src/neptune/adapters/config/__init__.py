@@ -63,6 +63,7 @@ from neptune.adapters.config._tree import (
     Value,
     pointer_token,
 )
+from neptune.adapters.config._yaml import UNREADABLE_TYPE
 from neptune.adapters.contract import (
     ABI_VERSION,
     NAME_ONLY,
@@ -634,6 +635,8 @@ _ISSUES: Final[dict[Issue, tuple[FindingCategory, Severity, str]]] = {
 def _key_tag(key_type: tuple[str, ...] | None) -> Knowledge[str]:
     if key_type is None:
         return NotApplicable()
+    if any(kind.startswith(UNREADABLE_TYPE) for kind in key_type):
+        return Unknown()  # a pattern matched, but no version reads a value: no type is held
     if len(key_type) == 1:
         return Known(key_type[0])
     return Ambiguous(tuple(Candidate(tag) for tag in key_type))
