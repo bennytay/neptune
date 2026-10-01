@@ -40,3 +40,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0033](0033-m2-gate-probing-scratch-short-reads-and-reuse.md) | The M2 gate: the job probes in the sandbox, calls get scratch, short reads are the source's | Accepted |
 | [0035](0035-python-sdk-one-surface-dry-runs-results-and-errors.md) | The Python SDK: one sync and async surface over the job, dry runs, results and a stable error taxonomy | Accepted |
 | [0036](0036-session-grouping-v0-observed-layout-and-derived-proposals.md) | Session grouping v0: an observed layout, inferred proposals, derived tables in the package | Accepted |
+| [0041](0041-standalone-image-ingestion-as-declared-with-region-citations.md) | Standalone image ingestion: containers read as declared, no pixel decoded, regions cited | Accepted |
