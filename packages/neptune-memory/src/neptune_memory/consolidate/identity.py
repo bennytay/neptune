@@ -2,47 +2,71 @@
 
 One node per Ledger thread, keyed by its declared logical id. ``same_as`` only from a declared
 identifier match (compiler ``IdentityLink``, MVL-82), configuration-lineage continuity, or an
-operator assertion. Threads that merely share evidence get an ``Ambiguous`` ``same_as_candidate``.
-Nothing is merged: ``same_as`` is an edge that queries traverse.
+operator assertion. Threads of one node type that merely cite the same source get
+``same_as_candidate`` claims: the identity is ambiguous and stays undecided. Nothing is merged:
+``same_as`` is an edge that queries traverse.
 
 The record shapes below are what Memory consumes through ``LedgerReader``; they are pinned when
-MVL-82 (``IdentityLink``) and MVL-85 (catalog API) land. Malformed records are findings.
+MVL-82 (``IdentityLink``) and MVL-85 (catalog API) land. Every link-bearing record carries its own
+``valid_from`` and ``evidence``. Malformed records are findings.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, TypeVar
 
 from neptune.identity import canonical_json
 from neptune.model.finding import Severity
 from neptune.model.ids import (
-    ContentId,
+    ExternalObjectRef,
     LogicalId,
     RecordId,
     check_text,
     logical_id_from_json,
-    parse_content_id,
     parse_record_id,
 )
-from neptune.model.knowledge import KnowledgeState
+from neptune.model.knowledge import AssertionKind
+from neptune.model.provenance import EvidenceRef, evidence_ref_from_json
+from neptune.model.time import Timestamp, timestamp_from_json
 from neptune_memory.consolidate.base import (
     ClaimDraft,
     ConsolidationFinding,
     ConsolidatorOutput,
     ModelRef,
-    PriorClaim,
 )
+from neptune_memory.schema.nodes import NodeRef, NodeType
+from neptune_memory.schema.predicates import CORE_PREDICATES, Cardinality, PredicateSpec
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from neptune.model.jsonvalue import JsonValue
     from neptune_memory.ledger import LedgerReader
+    from neptune_memory.schema.claim import Claim
 
-# Predicates; MVL-102's predicate registry adopts these names.
 SAME_AS: Final = "same_as"
 SAME_AS_CANDIDATE: Final = "same_as_candidate"
+
+# The vocabulary identity claims are validated against: the core plus the two identity predicates.
+IDENTITY_PREDICATES: Final = CORE_PREDICATES.extend(
+    PredicateSpec(
+        SAME_AS,
+        1,
+        frozenset(NodeType),
+        frozenset(NodeType),
+        Cardinality.MANY,
+        "the same real-world thing: declared identifier, configuration lineage or operator",
+    ),
+    PredicateSpec(
+        SAME_AS_CANDIDATE,
+        1,
+        frozenset(NodeType),
+        frozenset(NodeType),
+        Cardinality.MANY,
+        "ambiguous: both cite the same source; whether they are one thing is undecided",
+    ),
+)
 
 # Ledger record kinds this consolidator reads.
 THREAD: Final = "ledger_thread"
@@ -50,22 +74,17 @@ IDENTITY_LINK: Final = "identity_link"
 CONFIGURATION_LINEAGE: Final = "configuration_lineage"
 OPERATOR_ASSERTION: Final = "operator_assertion"
 
+_T = TypeVar("_T")
 Ground = Literal["declared_identifier", "configuration_lineage", "operator_assertion"]
+
+
+def node_ref(node_type: NodeType, logical_id: LogicalId) -> NodeRef:
+    """A thread's node id is ``<namespace>:<value>``; a namespace has no ``:``, so it is unique."""
+    return NodeRef(node_type, f"{logical_id.namespace}:{logical_id.value}")
 
 
 def _key(node: LogicalId) -> bytes:
     return canonical_json.dumps(node.to_json())
-
-
-@dataclass(frozen=True)
-class _Link:
-    """One grounded ``same_as`` reason from one record."""
-
-    record: RecordId
-    ground: Ground
-    left: LogicalId
-    right: LogicalId
-    detail: Mapping[str, JsonValue]
 
 
 class _Malformed(ValueError):
@@ -85,100 +104,125 @@ def _str(record: Mapping[str, object], name: str) -> str:
     return value
 
 
-def _logical(record: Mapping[str, object], name: str) -> LogicalId:
+def _parsed(record: Mapping[str, object], name: str, parse: Callable[[JsonValue], _T]) -> _T:
     try:
-        return logical_id_from_json(_field(record, name))  # type: ignore[arg-type]
-    except (ValueError, TypeError) as exc:
+        return parse(_field(record, name))  # type: ignore[arg-type]
+    except _Malformed:
+        raise
+    except (ValueError, TypeError, KeyError) as exc:
         raise _Malformed(f"{name!r}: {exc}") from exc
 
 
 def _record_id(record: Mapping[str, object]) -> RecordId:
-    try:
-        return parse_record_id(_str(record, "id"))
-    except ValueError as exc:
-        raise _Malformed(str(exc)) from exc
+    return _parsed(record, "id", lambda v: parse_record_id(v))  # type: ignore[arg-type]
 
 
-def _sources(record: Mapping[str, object]) -> tuple[ContentId, ...]:
-    value = _field(record, "sources")
-    if not isinstance(value, (list, tuple)) or not all(isinstance(v, str) for v in value):
-        raise _Malformed("'sources' must be a list of content ids")
+def _evidence(record: Mapping[str, object]) -> tuple[EvidenceRef, ...]:
+    value = _field(record, "evidence")
+    if not isinstance(value, (list, tuple)) or not value:
+        raise _Malformed("'evidence' must be a non-empty list of evidence refs")
     try:
-        return tuple(sorted({parse_content_id(v) for v in value}))
-    except ValueError as exc:
-        raise _Malformed(str(exc)) from exc
+        return tuple(evidence_ref_from_json(item) for item in value)
+    except (ValueError, TypeError, KeyError) as exc:
+        raise _Malformed(f"'evidence': {exc}") from exc
+
+
+@dataclass(frozen=True)
+class _Thread:
+    record: RecordId
+    node: LogicalId
+    node_type: NodeType
+    valid_from: Timestamp
+    evidence: tuple[EvidenceRef, ...]
+
+
+@dataclass(frozen=True)
+class _Link:
+    """One grounded ``same_as`` reason from one record."""
+
+    record: RecordId
+    ground: Ground
+    left: LogicalId
+    right: LogicalId
+    valid_from: Timestamp
+    evidence: tuple[EvidenceRef, ...]
+
+
+def _thread(record: Mapping[str, object]) -> _Thread:
+    return _Thread(
+        _record_id(record),
+        _parsed(record, "logical_id", logical_id_from_json),
+        _parsed(record, "node_type", NodeType),  # type: ignore[arg-type]
+        _parsed(record, "valid_from", timestamp_from_json),
+        _evidence(record),
+    )
+
+
+_SIDES: Final[Mapping[str, tuple[Ground, str, str]]] = {
+    IDENTITY_LINK: ("declared_identifier", "left", "right"),
+    CONFIGURATION_LINEAGE: ("configuration_lineage", "predecessor", "successor"),
+    OPERATOR_ASSERTION: ("operator_assertion", "subject", "object"),
+}
 
 
 def _link(kind: str, record: Mapping[str, object]) -> _Link | None:
     """Parse one link-bearing record; ``None`` for an operator assertion about another predicate."""
-    rid = _record_id(record)
     if kind == IDENTITY_LINK:
-        identifier = _logical(record, "identifier")
-        return _Link(
-            rid,
-            "declared_identifier",
-            _logical(record, "left"),
-            _logical(record, "right"),
-            {"identifier": identifier.to_json()},
-        )
-    if kind == CONFIGURATION_LINEAGE:
-        before, after = _logical(record, "predecessor"), _logical(record, "successor")
-        return _Link(
-            rid,
-            "configuration_lineage",
-            before,
-            after,
-            {"predecessor": before.to_json(), "successor": after.to_json()},
-        )
-    if _str(record, "predicate") != SAME_AS:
-        return None
-    operator = _str(record, "operator")
-    try:
-        check_text("operator", operator)
-    except ValueError as exc:
-        raise _Malformed(str(exc)) from exc
+        _parsed(record, "identifier", logical_id_from_json)
+    if kind == OPERATOR_ASSERTION:
+        if _str(record, "predicate") != SAME_AS:
+            return None
+        _parsed(record, "operator", lambda v: check_text("operator", v))  # type: ignore[arg-type]
+    ground, left, right = _SIDES[kind]
     return _Link(
-        rid,
-        "operator_assertion",
-        _logical(record, "subject"),
-        _logical(record, "object"),
-        {"operator": operator},
+        _record_id(record),
+        ground,
+        _parsed(record, left, logical_id_from_json),
+        _parsed(record, right, logical_id_from_json),
+        _parsed(record, "valid_from", timestamp_from_json),
+        _evidence(record),
     )
 
 
 def _malformed(kind: str, package_id: str, index: int, reason: str) -> ConsolidationFinding:
+    try:
+        reason.encode("utf-8")
+    except UnicodeEncodeError:
+        reason = "unrepresentable text"
     return ConsolidationFinding(
         code="identity.malformed_record",
         severity=Severity.ERROR,
-        message=f"{kind} record {index} in {package_id} is malformed: {reason}",
+        message=f"{kind} record {index} in package {package_id!r} is malformed: {reason}"[:1000],
         details={"index": index, "kind": kind, "package_id": package_id},
     )
 
 
 @dataclass(frozen=True)
+class _Node:
+    ref: NodeRef
+    threads: tuple[_Thread, ...]  # sorted by record id
+
+
+@dataclass(frozen=True)
 class _View:
-    threads: Mapping[bytes, tuple[LogicalId, tuple[tuple[RecordId, tuple[ContentId, ...]], ...]]]
-    links: tuple[_Link, ...]
+    nodes: Mapping[bytes, _Node]  # by logical-id key, sorted
+    links: tuple[_Link, ...]  # sorted by record id
     findings: tuple[ConsolidationFinding, ...]
 
 
 def _read(ledger: LedgerReader) -> _View:
     """Collect threads and links across every package, de-duplicated by record id."""
-    threads: dict[bytes, tuple[LogicalId, dict[RecordId, tuple[ContentId, ...]]]] = {}
+    threads: dict[bytes, dict[RecordId, _Thread]] = {}
     links: dict[RecordId, _Link] = {}
     findings: list[ConsolidationFinding] = []
     for ref in ledger.list_packages():
         for index, record in enumerate(ledger.read_records(ref.package_id, THREAD) or ()):
             try:
-                rid, node, sources = (
-                    _record_id(record),
-                    _logical(record, "logical_id"),
-                    _sources(record),
-                )
+                thread = _thread(record)
             except _Malformed as exc:
                 findings.append(_malformed(THREAD, ref.package_id, index, str(exc)))
                 continue
-            threads.setdefault(_key(node), (node, {}))[1][rid] = sources
+            threads.setdefault(_key(thread.node), {})[thread.record] = thread
         for kind in (IDENTITY_LINK, CONFIGURATION_LINEAGE, OPERATOR_ASSERTION):
             for index, record in enumerate(ledger.read_records(ref.package_id, kind) or ()):
                 try:
@@ -188,11 +232,23 @@ def _read(ledger: LedgerReader) -> _View:
                     continue
                 if link is not None:
                     links[link.record] = link
-    return _View(
-        {k: (node, tuple(sorted(recs.items()))) for k, (node, recs) in sorted(threads.items())},
-        tuple(links[k] for k in sorted(links)),
-        tuple(findings),
-    )
+    nodes: dict[bytes, _Node] = {}
+    for key in sorted(threads):
+        group = tuple(threads[key][rid] for rid in sorted(threads[key]))
+        types = sorted({t.node_type for t in group})
+        if len(types) > 1:
+            findings.append(
+                ConsolidationFinding(
+                    code="identity.node_type_conflict",
+                    severity=Severity.WARNING,
+                    message="threads with one logical id declare different node types; no node",
+                    records=tuple(t.record for t in group),
+                    details={"node_types": [str(t) for t in types]},
+                )
+            )
+            continue
+        nodes[key] = _Node(node_ref(types[0], group[0].node), group)
+    return _View(nodes, tuple(links[k] for k in sorted(links)), tuple(findings))
 
 
 class _Components:
@@ -213,9 +269,16 @@ class _Components:
             self._parent[max(ra, rb)] = min(ra, rb)
 
 
-def nodes(ledger: LedgerReader) -> tuple[LogicalId, ...]:
-    """One node per Ledger thread, in canonical logical-id order."""
-    return tuple(node for node, _ in _read(ledger).threads.values())
+def nodes(ledger: LedgerReader) -> tuple[NodeRef, ...]:
+    """One node per Ledger thread (logical id), in canonical logical-id order."""
+    return tuple(node.ref for node in _read(ledger).nodes.values())
+
+
+def _source_key(ref: EvidenceRef) -> bytes:
+    source = ref.source
+    return canonical_json.dumps(
+        source.to_json() if isinstance(source, ExternalObjectRef) else source
+    )
 
 
 class IdentityConsolidator:
@@ -228,7 +291,7 @@ class IdentityConsolidator:
     def consolidate(
         self,
         ledger: LedgerReader,
-        previous: Sequence[PriorClaim],
+        previous: Sequence[Claim],
         config: Mapping[str, JsonValue],
     ) -> ConsolidatorOutput:
         view = _read(ledger)
@@ -245,83 +308,113 @@ class IdentityConsolidator:
         drafts: list[ClaimDraft] = []
         components = _Components()
         for link in view.links:
-            draft, finding = self._same_as(view, link)
-            if finding is not None:
-                findings.append(finding)
-            if draft is not None:
-                drafts.append(draft)
-                components.union(_key(link.left), _key(link.right))
-        drafts.extend(self._candidates(view, components))
+            outcome = _same_as(view, link)
+            if isinstance(outcome, ConsolidationFinding):
+                findings.append(outcome)
+                continue
+            drafts.append(outcome)
+            components.union(_key(link.left), _key(link.right))
+        drafts.extend(_candidates(view, components))
         return ConsolidatorOutput(tuple(drafts), tuple(findings))
 
-    @staticmethod
-    def _same_as(view: _View, link: _Link) -> tuple[ClaimDraft | None, ConsolidationFinding | None]:
-        left, right = _key(link.left), _key(link.right)
-        if left == right:
-            return None, ConsolidationFinding(
-                code="identity.self_link",
-                severity=Severity.WARNING,
-                message=f"{link.ground} record links a node to itself",
-                records=(link.record,),
-            )
-        missing = [
-            node
-            for key, node in ((left, link.left), (right, link.right))
-            if key not in view.threads
-        ]
-        if missing:
-            return None, ConsolidationFinding(
-                code="identity.dangling_link",
-                severity=Severity.WARNING,
-                message=f"{link.ground} record names a logical id with no Ledger thread",
-                records=(link.record,),
-                details={"missing": [node.to_json() for node in missing]},
-            )
-        subject, other = sorted((link.left, link.right), key=_key)
-        draft = ClaimDraft(
-            predicate=SAME_AS,
-            subject=subject,
-            object={"ground": link.ground, "node": other.to_json(), **link.detail},
-            assertion_kind="stated" if link.ground == "operator_assertion" else "observed",
-            inputs=(link.record,),
-        )
-        return draft, None
 
-    @staticmethod
-    def _candidates(view: _View, components: _Components) -> list[ClaimDraft]:
-        """Per shared content id and subject: every other thread citing it, not already same_as."""
-        citing: dict[ContentId, dict[bytes, list[RecordId]]] = {}
-        for key, (_, records) in view.threads.items():
-            for rid, sources in records:
-                for source in sources:
-                    citing.setdefault(source, {}).setdefault(key, []).append(rid)
-        drafts: list[ClaimDraft] = []
-        for source, by_node in sorted(citing.items()):
-            for key in sorted(by_node):
-                # Nodes already joined to the subject by same_as are not candidate readings of it.
-                group = [
-                    k
-                    for k in sorted(by_node)
-                    if k == key or components.find(k) != components.find(key)
-                ]
-                if len(group) < 2:
-                    continue
-                candidates: list[JsonValue] = [
-                    {"evidence": sorted(by_node[k]), "node": view.threads[k][0].to_json()}
-                    for k in group
-                ]
-                drafts.append(
-                    ClaimDraft(
-                        predicate=SAME_AS_CANDIDATE,
-                        subject=view.threads[key][0],
-                        object={
-                            "basis": "shared_source",
-                            "candidates": candidates,
-                            "source": source,
-                        },
-                        assertion_kind="observed",
-                        inputs=tuple(rid for k in group for rid in by_node[k]),
-                        state=KnowledgeState.AMBIGUOUS,
-                    )
-                )
-        return drafts
+def _link_finding(
+    code: str, link: _Link, message: str, **details: JsonValue
+) -> ConsolidationFinding:
+    return ConsolidationFinding(
+        code=f"identity.{code}",
+        severity=Severity.WARNING,
+        message=f"{link.ground} record {message}",
+        records=(link.record,),
+        details=details,
+    )
+
+
+def _same_as(view: _View, link: _Link) -> ClaimDraft | ConsolidationFinding:
+    left, right = _key(link.left), _key(link.right)
+    if left == right:
+        return _link_finding("self_link", link, "links a node to itself")
+    missing = [n for k, n in ((left, link.left), (right, link.right)) if k not in view.nodes]
+    if missing:
+        return _link_finding(
+            "dangling_link",
+            link,
+            "names a logical id with no Ledger node",
+            missing=[n.to_json() for n in missing],
+        )
+    a, b = view.nodes[min(left, right)], view.nodes[max(left, right)]
+    if a.ref.node_type is not b.ref.node_type:
+        return _link_finding(
+            "type_mismatch",
+            link,
+            "links nodes of different types",
+            node_types=[str(a.ref.node_type), str(b.ref.node_type)],
+        )
+    return ClaimDraft(
+        subject=a.ref,
+        predicate=SAME_AS,
+        object=b.ref,
+        valid_from=link.valid_from,
+        assertion_kind=(
+            AssertionKind.STATED if link.ground == "operator_assertion" else AssertionKind.OBSERVED
+        ),
+        evidence=link.evidence,
+        records=(link.record,),
+    )
+
+
+def _candidates(view: _View, components: _Components) -> list[ClaimDraft]:
+    """One claim per ordered pair of same-type nodes citing a common source, not already same_as.
+
+    Evidence is every ref of either node's threads into the shared sources; records are those
+    threads. Valid from the subject's first thread (by record id) citing a shared source.
+    """
+    citing: dict[bytes, set[bytes]] = {}
+    for key, node in view.nodes.items():
+        for thread in node.threads:
+            for ref in thread.evidence:
+                citing.setdefault(_source_key(ref), set()).add(key)
+    pairs: dict[tuple[bytes, bytes], set[bytes]] = {}
+    for source, keys in citing.items():
+        for a in keys:
+            for b in keys:
+                if a != b and view.nodes[a].ref.node_type is view.nodes[b].ref.node_type:
+                    pairs.setdefault((a, b), set()).add(source)
+    drafts: list[ClaimDraft] = []
+    for (a, b), shared in sorted(pairs.items()):
+        if components.find(a) == components.find(b):
+            continue
+        cited = [
+            (thread, ref)
+            for key in (a, b)
+            for thread in view.nodes[key].threads
+            for ref in thread.evidence
+            if _source_key(ref) in shared
+        ]
+        first = next(thread for thread, _ in cited if _key(thread.node) == a)
+        drafts.append(
+            ClaimDraft(
+                subject=view.nodes[a].ref,
+                predicate=SAME_AS_CANDIDATE,
+                object=view.nodes[b].ref,
+                valid_from=first.valid_from,
+                assertion_kind=AssertionKind.OBSERVED,
+                evidence=tuple(ref for _, ref in cited),
+                records=tuple(thread.record for thread, _ in cited),
+            )
+        )
+    return drafts
+
+
+def same_as_candidates(claims: Sequence[Claim], subject: NodeRef) -> tuple[NodeRef, ...]:
+    """The candidate identities of ``subject``: itself (the distinct reading) and each candidate."""
+    others = {
+        c.object
+        for c in claims
+        if c.predicate == SAME_AS_CANDIDATE
+        and c.subject == subject
+        and isinstance(c.object, NodeRef)
+    }
+    if not others:
+        return ()
+    return (subject, *sorted(others, key=lambda n: n.node_id))

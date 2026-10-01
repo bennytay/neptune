@@ -1,47 +1,47 @@
-"""The consolidator contract, claim-id derivation and rebuild (ADR 0003 §2-§4).
+"""The consolidator contract, claim stamping and rebuild (ADR 0003 §2-§4).
 
 A consolidator is a pure function ``(LedgerReader, previous claims, resolved config) -> drafts +
-findings``. It never sets ids or provenance: ``run_consolidator`` hashes the config, derives every
-claim id from the claim's lineage, rejects drafts that break the contract as findings, and sorts the
-output. ``rebuild`` folds an ordered consolidator set over one Ledger snapshot; same snapshot, set,
+findings``. It never sets ids or provenance: ``run_consolidator`` hashes the config, stamps the
+transform and the Ledger transaction onto each draft to build a ``schema.Claim`` (whose id covers
+the transform, so a new version or config is a sibling claim), canonicalises evidence and record
+order, refuses drafts that break the contract or the vocabulary as findings, and sorts the output.
+``rebuild`` folds an ordered consolidator set over one Ledger snapshot; same snapshot, set,
 versions and configs give byte-identical canonical JSON.
-
-``ProposedClaim`` is the consolidator-side envelope until MVL-102's ``schema.Claim`` lands; the
-schema builds its ``Claim`` from ``(id, draft, transform)``. It is not a second claim model.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final, Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Final, Protocol, runtime_checkable
 
 from neptune.identity import canonical_json
 from neptune.identity.ids import config_hash, record_id
 from neptune.model.finding import Severity
 from neptune.model.ids import (
     ConfigHash,
-    LogicalId,
     RecordId,
     check_text,
     check_token,
     parse_config_hash,
-    parse_record_id,
 )
-from neptune.model.knowledge import KnowledgeState
+from neptune.model.knowledge import Knowledge, NotApplicable
+from neptune_memory.schema.claim import Claim, ClaimProvenance, is_inferred
+from neptune_memory.schema.interval import OPEN, LedgerTx, Open
+from neptune_memory.schema.predicates import CORE_PREDICATES, PredicateRegistry, violations
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from neptune.model.jsonvalue import JsonObject, JsonValue
+    from neptune.model.provenance import EvidenceRef
+    from neptune.model.time import Timestamp
     from neptune_memory.ledger import LedgerReader
+    from neptune_memory.schema.claim import ClaimAssertionKind, ClaimId, ClaimObject
+    from neptune_memory.schema.nodes import NodeRef
 
-# Record kinds hashed into claim and finding ids. Changing either re-lineages every claim: new ADR.
-CLAIM_KIND: Final = "memory.claim"
+# Record kind hashed into finding ids. Changing it re-lineages every finding: new ADR.
 FINDING_KIND: Final = "memory.finding"
-
-AssertionKind = Literal["observed", "stated", "inferred"]
-DETERMINISTIC_KINDS: Final[frozenset[str]] = frozenset({"observed", "stated"})
-CLAIM_STATES: Final = (KnowledgeState.KNOWN, KnowledgeState.AMBIGUOUS)
+MAX_MESSAGE: Final = 1000
 
 
 @dataclass(frozen=True)
@@ -61,7 +61,7 @@ class ModelRef:
 
 @dataclass(frozen=True)
 class ConsolidatorTransform:
-    """What produced a claim: consolidator id, version, resolved-config hash and model, if any."""
+    """What produced a build's claims: consolidator id, version, config hash and model, if any."""
 
     consolidator_id: str
     version: str
@@ -84,79 +84,28 @@ class ConsolidatorTransform:
         return out
 
 
+def _not_applicable() -> Knowledge[float]:
+    return NotApplicable()
+
+
 @dataclass(frozen=True)
 class ClaimDraft:
-    """What a consolidator asserts, before the runner stamps its id and transform.
+    """A ``Claim`` without what the runner stamps: transform, transaction time, canonical order.
 
-    ``inputs`` are the Ledger record ids (and earlier claim ids) the claim rests on; they are
-    stored sorted and de-duplicated, so the order a consolidator found them in never matters.
+    ``evidence`` and ``records`` may come in any order and with repeats; the runner de-duplicates
+    and sorts them, so the order a consolidator found its inputs in never changes a claim id.
+    Validation is ``Claim``'s: a draft it refuses becomes a finding.
     """
 
+    subject: NodeRef
     predicate: str
-    subject: LogicalId
-    object: JsonValue
-    assertion_kind: AssertionKind
-    inputs: tuple[RecordId, ...]
-    state: KnowledgeState = KnowledgeState.KNOWN
-
-    def __post_init__(self) -> None:
-        check_token("predicate", self.predicate)
-        if not isinstance(self.subject, LogicalId):
-            raise TypeError(f"subject must be a LogicalId, got {type(self.subject).__name__}")
-        canonical_json.dumps(self.object)  # CanonicalJsonError (a ValueError) if not representable
-        if self.assertion_kind not in ("observed", "stated", "inferred"):
-            raise ValueError(
-                f"assertion_kind must be observed|stated|inferred: {self.assertion_kind!r}"
-            )
-        if self.state not in CLAIM_STATES:
-            raise ValueError(f"a claim is known or ambiguous, not {self.state}")
-        for value in self.inputs:
-            parse_record_id(value)
-        object.__setattr__(self, "inputs", tuple(sorted(set(self.inputs))))
-
-    def to_json(self) -> JsonObject:
-        return {
-            "assertion_kind": self.assertion_kind,
-            "inputs": list(self.inputs),
-            "object": self.object,
-            "predicate": self.predicate,
-            "state": str(self.state),
-            "subject": self.subject.to_json(),
-        }
-
-
-def claim_id(transform: ConsolidatorTransform, draft: ClaimDraft) -> RecordId:
-    """ADR 0003 §3: the id over the claim's lineage. A version or config change is a sibling id."""
-    inputs: dict[str, JsonValue] = {
-        "config_hash": transform.config_hash,
-        "consolidator_id": transform.consolidator_id,
-        "consolidator_version": transform.version,
-        "assertion_kind": draft.assertion_kind,
-        "inputs": list(draft.inputs),
-        "object": draft.object,
-        "predicate": draft.predicate,
-        "state": str(draft.state),
-        "subject": draft.subject.to_json(),
-    }
-    if transform.model is not None:
-        inputs["model"] = transform.model.to_json()
-    return record_id(CLAIM_KIND, inputs)
-
-
-@dataclass(frozen=True)
-class ProposedClaim:
-    """A draft with its derived id and transform: the triple MVL-102's ``Claim`` is built from."""
-
-    id: RecordId
-    draft: ClaimDraft
-    transform: ConsolidatorTransform
-
-    @property
-    def predicate(self) -> str:
-        return self.draft.predicate
-
-    def to_json(self) -> JsonObject:
-        return {"draft": self.draft.to_json(), "id": self.id, "transform": self.transform.to_json()}
+    object: ClaimObject
+    valid_from: Timestamp
+    assertion_kind: ClaimAssertionKind
+    evidence: tuple[EvidenceRef, ...]
+    records: tuple[RecordId, ...]
+    valid_to: Timestamp | Open = OPEN
+    confidence: Knowledge[float] = field(default_factory=_not_applicable)
 
 
 @dataclass(frozen=True)
@@ -204,22 +153,13 @@ class ConsolidatorOutput:
 
 
 @runtime_checkable
-class PriorClaim(Protocol):
-    """The fields of an earlier consolidator's claim a later one may rest on."""
-
-    @property
-    def id(self) -> RecordId: ...
-
-    @property
-    def predicate(self) -> str: ...
-
-
-@runtime_checkable
 class Consolidator(Protocol):
     """A pure function of the Ledger view, earlier claims and its resolved config (ADR 0003 §2).
 
     ``config`` is resolved: defaults already filled in, so an explicit default and an omitted one
-    hash the same. Implementations must not read the clock, randomness, the network or files.
+    hash the same. A model-based consolidator's config holds ``"model": model.to_json()`` so the
+    model is in every claim's ``config_hash``. Implementations must not read the clock,
+    randomness, the network or files.
     """
 
     @property
@@ -234,17 +174,17 @@ class Consolidator(Protocol):
     def consolidate(
         self,
         ledger: LedgerReader,
-        previous: Sequence[PriorClaim],
+        previous: Sequence[Claim],
         config: Mapping[str, JsonValue],
     ) -> ConsolidatorOutput: ...
 
 
 @dataclass(frozen=True)
 class Consolidation:
-    """One consolidator's output in one build: claims sorted by id, findings sorted by id."""
+    """One consolidator's output in one build: claims and findings, each sorted by id."""
 
     transform: ConsolidatorTransform
-    claims: tuple[ProposedClaim, ...]
+    claims: tuple[Claim, ...]
     findings: tuple[ConsolidationFinding, ...]
 
     def to_json(self) -> JsonObject:
@@ -255,86 +195,115 @@ class Consolidation:
         }
 
 
-MAX_MESSAGE: Final = 1000
-
-
-def _valid_unicode(text: str) -> bool:
+def _safe_text(text: str) -> str:
+    """Untrusted text (an exception message) kept only if it is one printable line of Unicode."""
     try:
         text.encode("utf-8")
     except UnicodeEncodeError:
-        return False
-    return True
+        return "(unprintable)"
+    return text[:MAX_MESSAGE] if text.isprintable() else "(unprintable)"
 
 
-def _runner_finding(
+def _finding(
     code: str, transform: ConsolidatorTransform, message: str, records: Sequence[RecordId] = ()
 ) -> ConsolidationFinding:
     return ConsolidationFinding(
         code=f"consolidate.{code}",
         severity=Severity.ERROR,
-        message=message,
+        message=_safe_text(message),
         records=tuple(records),
         details={"consolidator_id": transform.consolidator_id, "version": transform.version},
     )
 
 
-def _check_draft(
-    draft: ClaimDraft, transform: ConsolidatorTransform
-) -> ConsolidationFinding | None:
-    if not draft.inputs:
-        return _runner_finding(
-            "claim_without_inputs", transform, f"{draft.predicate} claim names no input records"
+def _evidence_key(ref: EvidenceRef) -> bytes:
+    return canonical_json.dumps(ref.to_json())
+
+
+def _stamp(
+    draft: ClaimDraft,
+    transform: ConsolidatorTransform,
+    recorded_at: LedgerTx,
+    registry: PredicateRegistry,
+) -> Claim | ConsolidationFinding:
+    try:
+        records = tuple(sorted(set(draft.records)))
+        if is_inferred(draft.assertion_kind) != (transform.model is not None):
+            allowed = "inferred" if transform.model is not None else "observed or stated"
+            message = f"{draft.predicate} claim is {draft.assertion_kind}; expected {allowed}"
+            return _finding("wrong_assertion_kind", transform, message, records)
+        claim = Claim(
+            subject=draft.subject,
+            predicate=draft.predicate,
+            object=draft.object,
+            valid_from=draft.valid_from,
+            valid_to=draft.valid_to,
+            recorded_at=recorded_at,
+            assertion_kind=draft.assertion_kind,
+            confidence=draft.confidence,
+            provenance=ClaimProvenance(
+                evidence=tuple(sorted(set(draft.evidence), key=_evidence_key)),
+                records=records,
+                consolidator_id=transform.consolidator_id,
+                consolidator_version=transform.version,
+                config_hash=transform.config_hash,
+            ),
         )
-    allowed = DETERMINISTIC_KINDS if transform.model is None else frozenset({"inferred"})
-    if draft.assertion_kind not in allowed:
-        return _runner_finding(
-            "wrong_assertion_kind",
-            transform,
-            f"{draft.predicate} claim is {draft.assertion_kind}; this consolidator may emit "
-            + "|".join(sorted(allowed)),
-            draft.inputs,
-        )
-    return None
+    except (TypeError, ValueError) as exc:
+        message = f"{draft.predicate!r} claim refused: {type(exc).__name__}: {exc}"
+        return _finding("invalid_claim", transform, message)
+    found = violations(claim, registry)
+    if found:
+        message = "; ".join(f"{v.code}: {v.message}" for v in found)
+        return _finding("schema_violation", transform, message, records)
+    return claim
 
 
 def run_consolidator(
     consolidator: Consolidator,
     ledger: LedgerReader,
-    previous: Sequence[PriorClaim],
+    previous: Sequence[Claim],
     config: Mapping[str, JsonValue],
+    *,
+    recorded_at: LedgerTx,
+    registry: PredicateRegistry = CORE_PREDICATES,
 ) -> Consolidation:
-    """Run one consolidator and stamp its output. Contract breaches become findings, not errors."""
+    """Run one consolidator and stamp its output. Contract breaches become findings, not errors.
+
+    Raises only for a caller error: a config that is not canonical JSON, or a model-based
+    consolidator whose resolved config does not name its model.
+    """
+    model = consolidator.model
+    if model is not None and config.get("model") != model.to_json():
+        raise ValueError("a model-based consolidator's resolved config must hold its model")
     transform = ConsolidatorTransform(
         consolidator_id=consolidator.consolidator_id,
         version=consolidator.version,
         config_hash=config_hash(config),
-        model=consolidator.model,
+        model=model,
     )
     try:
         output = consolidator.consolidate(ledger, tuple(previous), config)
     except Exception as exc:  # partial success: a crashing consolidator is a finding
-        # The exception text is untrusted: keep it only if it is valid Unicode and one line.
-        text = f"{type(exc).__name__}: {exc}"
-        if "\n" in text or not text.isprintable() or not _valid_unicode(text):
-            text = type(exc).__name__
-        finding = _runner_finding("failed", transform, text[:MAX_MESSAGE])
-        return Consolidation(transform, (), (finding,))
+        message = f"{type(exc).__name__}: {exc}"
+        if _safe_text(message) != message:
+            message = type(exc).__name__
+        return Consolidation(transform, (), (_finding("failed", transform, message),))
     if not (
         isinstance(output, ConsolidatorOutput)
         and all(isinstance(d, ClaimDraft) for d in output.drafts)
         and all(isinstance(f, ConsolidationFinding) for f in output.findings)
     ):
-        message = "consolidate() must return ConsolidatorOutput of ClaimDrafts and findings"
-        return Consolidation(transform, (), (_runner_finding("bad_output", transform, message),))
-    claims: dict[RecordId, ProposedClaim] = {}
+        message = "consolidate() must return a ConsolidatorOutput of ClaimDrafts and findings"
+        return Consolidation(transform, (), (_finding("bad_output", transform, message),))
+    claims: dict[ClaimId, Claim] = {}
     findings: dict[RecordId, ConsolidationFinding] = {f.id: f for f in output.findings}
     for draft in output.drafts:
-        problem = _check_draft(draft, transform)
-        if problem is not None:
-            findings[problem.id] = problem
-            continue
-        identifier = claim_id(transform, draft)
-        claims[identifier] = ProposedClaim(identifier, draft, transform)
+        stamped = _stamp(draft, transform, recorded_at, registry)
+        if isinstance(stamped, Claim):
+            claims[stamped.id] = stamped
+        else:
+            findings[stamped.id] = stamped
     return Consolidation(
         transform,
         tuple(claims[key] for key in sorted(claims)),
@@ -343,16 +312,25 @@ def run_consolidator(
 
 
 def rebuild(
-    ledger: LedgerReader, plan: Sequence[tuple[Consolidator, Mapping[str, JsonValue]]]
+    ledger: LedgerReader,
+    plan: Sequence[tuple[Consolidator, Mapping[str, JsonValue]]],
+    *,
+    recorded_at: LedgerTx,
+    registry: PredicateRegistry = CORE_PREDICATES,
 ) -> tuple[Consolidation, ...]:
-    """ADR 0003 §4: run ``plan`` in order; each consolidator sees only earlier ones' claims."""
+    """ADR 0003 §4: run ``plan`` in order; each consolidator sees only earlier ones' claims.
+
+    ``recorded_at`` is the Ledger snapshot's transaction: when Memory learned these claims.
+    """
     ids = [consolidator.consolidator_id for consolidator, _ in plan]
     if len(set(ids)) != len(ids):
         raise ValueError(f"a consolidator appears twice in the plan: {ids}")
-    previous: list[ProposedClaim] = []
+    previous: list[Claim] = []
     results: list[Consolidation] = []
     for consolidator, config in plan:
-        result = run_consolidator(consolidator, ledger, previous, config)
+        result = run_consolidator(
+            consolidator, ledger, previous, config, recorded_at=recorded_at, registry=registry
+        )
         results.append(result)
         previous.extend(result.claims)
     return tuple(results)
