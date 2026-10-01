@@ -48,13 +48,14 @@ exceptions. The fixtures are `tests/fixtures/hostile/` (README lists each file a
 | M2 (MVL-57) | done: the probe engine, its container decoders included, runs in the sandbox, one call per source, its reply re-derived and refused unless exact; `plan` and `ingest` write only beneath a per-call scratch directory; short reads and changed sources verified; walk findings in every package; the hostile suite through a real job (ADR 0033) |
 | M4 (MVL-17) | done: MCAP: decompression bounded by the chunk's declared size, itself bounded by `max_chunk_bytes`; every length checked against its record before a read; the summary read only up to 64 MiB; source text kept out of finding messages; the first native decoders (`zstandard`, `lz4`) run only inside sandboxed calls (ADR 0034) |
 | M4 (MVL-19) | rosbag2: sqlite3 databases are never handed to an SQL engine: a bounded b-tree reader checks every page number, length, cell pointer and key against its page and the file, visits at most the file's page count and 40 levels, and opens no journal, `-wal` or `-shm`; `metadata.yaml` is read by a YAML subset parser that refuses anchors, aliases, tags and multi-line scalars and bounds size, depth and nodes; listed part paths are kept as text and never opened, unsafe ones are findings (ADR 0045) |
+| M6 (MVL-28) | done: PDF parsed in pure Python (pypdf) under bounded inflation (`max_stream_bytes`), page content (`max_page_content_bytes`, `max_page_operations`), form and state depth; a broken cross-reference is rebuilt in memory, never written; RC4 with the empty password only, AES never decrypted; JavaScript and embedded files reported, never run or opened; no external decoder started; Markdown bounded by `max_document_bytes` and 64-deep nesting, inline never parsed (ADR 0038) |
 | M6 (MVL-30) | CSV, JSON and Parquet rows bounded before parsing (`max_row_bytes`, `max_columns`, `max_json_depth`, `max_rows`); Parquet footers bounded and their offsets checked before pyarrow reads a page, single-threaded, inside the sandbox; damaged rows are findings (ADR 0042) |
-| M6 (MVL-28/29) | malformed PDF/image safeguards; no active content execution |
+| M6 (MVL-29) | malformed image safeguards |
 | M9 | auth/profile handling for connectors; presigned uploads; idempotency keys |
 | M10 (MVL-50) | consolidated adversarial suite; sandbox escape and exhaustion tests as acceptance |
 
-Secret scanning / redaction hooks are noted in the design contract and not yet scheduled; raise an issue when
-the first document adapter lands.
+Secret scanning / redaction hooks are noted in the design contract and not yet scheduled; MVL-79 tracks them,
+raised when the first document adapters (PDF, Markdown) landed.
 
 ## Parser sandbox (ADR 0030)
 

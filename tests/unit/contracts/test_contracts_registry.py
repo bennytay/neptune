@@ -89,6 +89,15 @@ def test_catalog_api_is_a_draft_pending_the_ledger() -> None:
     assert report.problems == [] and "SKIPPED" in report.notes[0]
 
 
+def test_committed_compatibility_matrix_is_current() -> None:
+    """contracts/compatibility.md is generated; a PR that changes the registry regenerates it."""
+    text = tool.render_matrix(_registry())
+    assert text == (CONTRACTS / "compatibility.md").read_text("utf-8")
+    assert text == tool.render_matrix(_registry())
+    assert "| `neptune-ledger` | 1.0.0 current |" in text
+    assert "| `catalog-api` | `neptune-ledger` | active | — | 0.0.0 |" in text
+
+
 def test_golden_generator_is_deterministic() -> None:
     contract = _registry().contract("package-schema")
     first = tool.generate_goldens(_registry(), contract)
@@ -189,6 +198,43 @@ def test_a_minor_version_must_accept_its_majors_goldens(registry: Any) -> None:
     assert any("must be a major version" in p and "manifest.json" in p for p in problems)
 
 
+def test_matrix_follows_the_registry(registry: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    root = ["--root", str(registry.root)]
+    assert tool.main([*root, "matrix", "--check"]) == 0
+    newer = _next(registry, "package-schema")
+    _publish(registry, "package-schema", newer)
+    assert tool.main([*root, "matrix", "--check"]) == 1
+    assert "compatibility.md is stale" in capsys.readouterr().err
+    assert tool.main([*root, "matrix"]) == 0
+    text = _text(registry.root / "compatibility.md")
+    assert f"| `package-schema` | `neptune` | active | {newer} | — |" in text
+    assert "| `neptune-ledger` | 1.0.0 behind |" in text
+    assert tool.main([*root, "matrix", "--check"]) == 0
+    lock = registry.lock()
+    registry.write_lock({**lock, "neptune-deploy": {}})
+    assert "| `neptune-deploy` | not declared |" in tool.render_matrix(registry)
+
+
+def test_check_cli_unions_packages_and_runs_each_owner_once(
+    registry: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`check --all --package P` (make contracts-check without PKG) runs owner tests once."""
+    calls: list[Any] = []
+
+    def runner(targets: Any, cwd: Path) -> int:
+        calls.append(targets)
+        return 0
+
+    monkeypatch.setattr(tool, "run_pytest", runner)
+    for target in registry.contract("package-schema").owner.contract_tests:  # the CLI's repo
+        (registry.root.parent / target).parent.mkdir(parents=True, exist_ok=True)
+        (registry.root.parent / target).touch()
+    argv = ["--root", str(registry.root), "check", "--all", "--package", "neptune-ledger"]
+    assert tool.main([*argv, "--package", "neptune-ledger"]) == 0
+    assert len(calls) == 1
+    assert tool.main(["--root", str(registry.root), "check", "--package", "demo"]) == 1
+
+
 def test_lock_must_be_canonical(registry: Any) -> None:
     lock = registry.root / "lock.toml"
     lock.write_text(lock.read_text() + "\n")
@@ -225,6 +271,35 @@ def test_an_uninstalled_owner_is_skipped_with_a_message(registry: Any) -> None:
     report = _check(registry)
     assert report.ok
     assert any("SKIPPED" in n and "neptune_absent.x is not importable" in n for n in report.notes)
+
+
+@pytest.mark.parametrize(
+    ("init", "problem"),
+    [
+        ("import neptune_nowhere_dependency\n", "neptune_nowhere_dependency"),
+        ("raise ImportError('boom in init')\n", "boom in init"),
+        ("raise RuntimeError('boom in init')\n", "boom in init"),
+        ("", None),  # the parent imports; only the owner module is missing: not installed yet
+    ],
+)
+def test_a_broken_owner_import_is_a_problem_not_a_skip(
+    registry: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, init: str, problem: str | None
+) -> None:
+    (tmp_path / "mvl195_owner").mkdir()
+    (tmp_path / "mvl195_owner" / "__init__.py").write_text(init)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+    path = registry.root / "package-schema" / "contract.toml"
+    path.write_text(_text(path).replace('module = "neptune.model"', 'module = "mvl195_owner.api"'))
+    consumer, owner = _check(registry), tool.check_owner(registry, "neptune")
+    sys.modules.pop("mvl195_owner", None)
+    if problem is None:
+        assert consumer.ok and owner.ok
+        assert any("SKIPPED" in n for n in consumer.notes + owner.notes)
+        return
+    for report in (consumer, owner):
+        assert any("fails to import" in p and problem in p for p in report.problems), report
+        assert not any("SKIPPED" in n for n in report.notes)
 
 
 @pytest.mark.parametrize(
@@ -331,6 +406,7 @@ def test_bump_writes_a_version_and_announces(
     registry = _toy(tmp_path, monkeypatch)
     _owner(tmp_path, {"type": "object", "required": ["n"]}, 1)
     assert tool.main(["--root", str(registry.root), "bump", "toy", "1.1.0"]) == 0
+    assert tool.main(["--root", str(registry.root), "matrix", "--check"]) == 0  # bump wrote it
     out = capsys.readouterr().out
     assert "comment for MVL-1 (toy-consumer)" in out and "declares 1.0.0" in out
     assert tool.check_owner(registry, "toy-owner").ok
@@ -385,6 +461,49 @@ def test_a_major_bump_raises_in_repo_locks(
     assert tool.main(["--root", str(registry.root), "bump", "toy", "2.0.0"]) == 0
     assert registry.lock() == {"toy-consumer": {"toy": "2.0.0"}}
     assert "raises `toy-consumer` from 1.0.0 to 2.0.0" in capsys.readouterr().out
+    assert tool.check_package(registry, "toy-consumer", runner=lambda targets, cwd: 0).ok
+
+
+def _make_draft(registry: Any, lock: dict[str, dict[str, str]]) -> None:
+    """Turn the toy's v1.0.0 into a draft that nobody locks."""
+    meta_path = registry.root / "toy" / "v1.0.0" / "version.json"
+    meta = json.loads(_text(meta_path))
+    meta["status"] = "draft"
+    meta_path.write_text(tool.canonical(meta))
+    registry.write_lock(lock)
+
+
+def test_a_drafts_goldens_do_not_bind_the_next_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The draft's golden carries `old`, which the closed schema rejects; a draft binds nobody."""
+    registry = _toy(tmp_path, monkeypatch)
+    _make_draft(registry, {"toy-consumer": {}})
+    closed = {"type": "object", "properties": {"n": {}}, "additionalProperties": False}
+    _owner(tmp_path, closed, 1)
+    assert tool.compatibility_breaks(registry, "toy", (1, 1, 0), closed) == []
+    tool.bump(registry, "toy", "1.1.0", status="draft")
+    assert tool.check_registry(registry).ok
+    assert registry.lock() == {"toy-consumer": {}}  # a draft sets no lock entry
+    _owner(tmp_path, {"type": "object", "properties": {"n": {}}}, 1)
+    tool.bump(registry, "toy", "1.2.0")
+    assert tool.check_registry(registry).ok
+    strict = {"type": "object", "properties": {"n": {"type": "string"}}}
+    breaks = tool.compatibility_breaks(registry, "toy", (1, 3, 0), strict)
+    assert [b.split(":", 1)[0] for b in breaks] == ["v1.2.0/golden/one.json"]  # stable binds
+
+
+def test_the_first_stable_version_adds_every_in_repo_consumer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry = _toy(tmp_path, monkeypatch)
+    _make_draft(registry, {"toy-consumer": {}, "toy-owner": {}})
+    _owner(tmp_path, {"type": "object", "required": ["n"]}, 1)
+    assert tool.main(["--root", str(registry.root), "bump", "toy", "1.1.0"]) == 0
+    assert registry.lock() == {"toy-consumer": {"toy": "1.1.0"}, "toy-owner": {}}
+    assert "first stable version: the same PR adds `toy-consumer` at 1.1.0" in (
+        capsys.readouterr().out
+    )
     assert tool.check_package(registry, "toy-consumer", runner=lambda targets, cwd: 0).ok
 
 
@@ -456,3 +575,17 @@ def test_register_makes_a_new_package_green(registry: Any) -> None:
     assert _check(registry, "demo").ok
     with pytest.raises(tool.ContractError, match="not a package name"):
         tool.register(registry, "Demo_Bad")
+    assert tool.main(["--root", str(registry.root), "matrix", "--check"]) == 0
+
+
+def test_register_regenerates_the_matrix(registry: Any) -> None:
+    """A planned consumer's scaffold turns `not declared (no package yet)` into `not declared`,
+    and `new-package.sh` stays green because register writes the matrix."""
+    root = ["--root", str(registry.root)]
+    assert tool.register(registry, "neptune-deploy") == [
+        "contracts/lock.toml",
+        "contracts/compatibility.md",
+    ]
+    assert tool.main([*root, "matrix", "--check"]) == 0
+    assert "| `neptune-deploy` | not declared |" in _text(registry.root / "compatibility.md")
+    assert tool.register(registry, "neptune-deploy") == []

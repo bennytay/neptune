@@ -1,0 +1,581 @@
+"""Whole PDFs built in the test: large tags, image tables, page labels, broken boxes, repairs,
+and the hostile shapes whose cost must stay bounded.
+
+Each document is written with the fixture generator's PDF writer and read by the adapter through
+the harness, so every law of the contract is checked on it too.
+"""
+
+import importlib
+import importlib.util
+import json
+import sys
+import time
+import tracemalloc
+from pathlib import Path
+from types import ModuleType
+from typing import Any, Final
+
+import pytest
+
+from neptune.adapters.harness import SourceOutput, ingest_source
+from neptune.adapters.pdf import PdfAdapter
+from neptune.adapters.pdf._labels import LabelsUnreadable, numeral
+from neptune.discovery.reader import BytesReader
+from neptune.identity import canonical_json
+from neptune.model.knowledge import Known
+from neptune.model.world import (
+    BlockRole,
+    DocumentBlock,
+    DocumentRecord,
+    StructuredRecord,
+    StructuredTable,
+)
+
+FIXTURES: Final = Path(__file__).parents[2] / "fixtures" / "pdf"
+
+
+def _generator() -> ModuleType:
+    if "make_pdfs" in sys.modules:
+        return sys.modules["make_pdfs"]
+    spec = importlib.util.spec_from_file_location("make_pdfs", FIXTURES / "make_pdfs.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["make_pdfs"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+MAKE: Final = _generator()
+
+
+def ingest(data: bytes, pages_per_chunk: int = 1, **config: Any) -> SourceOutput:
+    return ingest_source(PdfAdapter(pages_per_chunk), BytesReader(data), config)
+
+
+def state(knowledge: Any) -> Any:
+    return knowledge.value if isinstance(knowledge, Known) else type(knowledge).__name__
+
+
+def roles(output: SourceOutput) -> list[Any]:
+    found = [r for r in output.records() if isinstance(r, DocumentBlock)]
+    return [state(block.role) for block in sorted(found, key=lambda block: block.order)]
+
+
+def tagged_report(pages: int, per_page: int, rows: int, *, image_table: bool = False) -> bytes:
+    """``pages`` pages of ``per_page`` tagged paragraphs under one element, then a page holding a
+    ``rows`` x 4 table, each cell text or, with ``image_table``, an image."""
+    pdf = MAKE.Pdf()
+    tree, root, document = pdf.reserve(), pdf.reserve(), pdf.reserve()
+    resources = {"Font": {"F1": pdf.add(MAKE.HELVETICA)}, "XObject": {"Im": MAKE.gray_image(pdf)}}
+    kids: list[Any] = []
+    nums: list[Any] = []
+    page_refs = []
+    for index in range(pages):
+        content = b"".join(
+            MAKE.marked("P", i, MAKE.text("F1", 8, 72, 760 - 10 * i, b"Line %d.%d" % (index, i)))
+            for i in range(per_page)
+        )
+        page_ref = MAKE.page(pdf, tree, content, resources, StructParents=index)
+        elements = [pdf.reserve() for _ in range(per_page)]
+        for i, element in enumerate(elements):
+            MAKE._element(pdf, element, "P", document, [i], page_ref)
+        kids += elements
+        nums += [index, list(elements)]
+        page_refs.append(page_ref)
+    body = b""
+    for r in range(rows):
+        for c in range(4):
+            if image_table:
+                drawn = b"q 4 0 0 4 %d %d cm /Im Do Q\n" % (72 + 50 * c, 700 - 2 * r)
+            else:
+                drawn = MAKE.text("F1", 2, 72 + 50 * c, 760 - 2 * r, b"r%dc%d" % (r, c))
+            body += MAKE.marked("TD", r * 4 + c, drawn)
+    table_page = MAKE.page(pdf, tree, body, resources, StructParents=pages)
+    table, cells, row_refs = pdf.reserve(), [], []
+    for r in range(rows):
+        row = pdf.reserve()
+        row_cells = [pdf.reserve() for _ in range(4)]
+        for c, cell in enumerate(row_cells):
+            MAKE._element(pdf, cell, "TD", row, [r * 4 + c], table_page)
+        MAKE._element(pdf, row, "TR", table, list(row_cells))
+        row_refs.append(row)
+        cells += row_cells
+    MAKE._element(pdf, table, "Table", document, list(row_refs))
+    MAKE._element(pdf, document, "Document", root, [*kids, table])
+    nums += [pages, list(cells)]
+    pdf.set(
+        root, {"Type": MAKE.Name("StructTreeRoot"), "K": [document], "ParentTree": {"Nums": nums}}
+    )
+    MAKE.page_tree(pdf, [*page_refs, table_page], tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree, StructTreeRoot=root, MarkInfo={"Marked": True})))
+
+
+def test_large_tagged_documents_stay_tagged_whatever_the_chunking() -> None:
+    data = tagged_report(pages=40, per_page=60, rows=300)
+    one, eight = ingest(data, 1), ingest(data, 8)
+    assert [f.code for f in eight.findings()] == []
+    assert roles(eight) == roles(one) == [BlockRole.PARAGRAPH] * 2400 + [BlockRole.TABLE]
+    assert [r.to_json() for r in eight.records()] == [r.to_json() for r in one.records()]
+    rows = [r for r in eight.records() if isinstance(r, StructuredRecord)]
+    assert len(rows) == 300 and state(rows[0].cells[0]).startswith("r")
+
+
+def test_a_table_of_images_has_no_cells_to_cite() -> None:
+    output = ingest(tagged_report(pages=0, per_page=0, rows=2, image_table=True))
+    assert roles(output) == [BlockRole.TABLE]
+    assert [r for r in output.records() if isinstance(r, StructuredRecord)] == []
+    assert len([r for r in output.records() if isinstance(r, StructuredTable)]) == 1
+
+
+def four_pages(box: Any = None, count: int = 4, info: Any = None, **catalog: Any) -> bytes:
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    pages = []
+    for _ in range(count):
+        media_box = box if box is not None else [0, 0, 612, 792]
+        pages.append(pdf.add({"Type": MAKE.Name("Page"), "Parent": tree, "MediaBox": media_box}))
+    MAKE.page_tree(pdf, pages, tree)
+    root = MAKE.catalog(pdf, tree, **catalog)
+    return bytes(pdf.build(root, pdf.add(info) if info is not None else None))
+
+
+def pages(output: SourceOutput) -> list[tuple[Any, Any]]:
+    (record,) = [r for r in output.records() if isinstance(r, DocumentRecord)]
+    return [(state(page.label), state(page.width)) for page in record.pages]
+
+
+def test_page_labels_follow_the_specification() -> None:
+    labels = {
+        "Nums": [
+            0,
+            {"S": MAKE.Name("r"), "St": 3},
+            2,
+            {"S": MAKE.Name("A"), "St": 26, "P": MAKE.Lit(b"App-")},
+        ]
+    }
+    assert [label for label, _ in pages(ingest(four_pages(PageLabels=labels)))] == [
+        "iii",
+        "iv",
+        "App-Z",
+        "App-AA",
+    ]
+    assert [numeral("R", 1994), numeral("a", 53), numeral("D", 7), numeral(None, 3)] == [
+        "MCMXCIV",
+        "aaa",
+        "7",
+        "",
+    ]
+
+
+def test_malformed_page_labels_are_unknown_never_a_default() -> None:
+    for broken in (
+        {"Nums": [0, 5]},
+        {"Nums": [0, {"S": MAKE.Name("Q")}]},
+        {"Nums": [0, {"S": MAKE.Name("D"), "St": 0}]},
+        {"Kids": 3},
+        7,
+    ):
+        output = ingest(four_pages(PageLabels=broken))
+        assert [label for label, _ in pages(output)] == ["Unknown"] * 4, broken
+        assert [f.details for f in output.findings()] == [{"field": "page_labels"}]
+    try:
+        numeral("R", 10**12)
+    except LabelsUnreadable:
+        pass
+    else:
+        raise AssertionError("a roman numeral of a trillion is a memory bomb, not a label")
+
+
+def test_a_long_label_prefix_is_unknown_never_copied_to_every_page() -> None:
+    # The review's shape: one range whose prefix is copied into each of 200 labels.
+    huge = {"Nums": [0, {"S": MAKE.Name("D"), "P": MAKE.Lit(b"A" * 1_000_000)}]}
+    output = ingest(four_pages(count=200, PageLabels=huge), pages_per_chunk=64)
+    assert [label for label, _ in pages(output)] == ["Unknown"] * 200
+    assert [f.details for f in output.findings()] == [
+        {"field": "page_labels", "labels": 200, "limit": 256}
+    ]
+    # The bound is on the label: a 256-character one is kept, the one past it is not.
+    edge = {"Nums": [0, {"S": MAKE.Name("D"), "St": 9, "P": MAKE.Lit(b"P" * 255)}]}
+    output = ingest(four_pages(count=2, PageLabels=edge))
+    assert [label for label, _ in pages(output)] == ["P" * 255 + "9", "Unknown"]
+    assert [f.details["labels"] for f in output.findings()] == [1]
+
+
+def test_a_long_title_is_unknown_never_cut() -> None:
+    for size, expected in ((4096, "T" * 4096), (4097, "Unknown")):
+        output = ingest(four_pages(info={"Title": MAKE.Lit(b"T" * size)}))
+        (record,) = [r for r in output.records() if isinstance(r, DocumentRecord)]
+        assert state(record.title) == expected
+    assert [f.details for f in output.findings()] == [{"field": "title", "limit": 4096}]
+
+
+def test_the_document_record_always_fits_one_reply() -> None:
+    # Past 10,000 pages the record would outgrow a sandbox reply, the document chunk would die,
+    # and every block would cite a record never emitted: the pages past it are not read.
+    worst = {"Nums": [0, {"P": MAKE.Lit(b"\x01" * 256)}]}  # each label escapes to 1.5 KB
+    output = ingest(four_pages(count=10_001, PageLabels=worst), pages_per_chunk=10_001)
+    (record,) = [r for r in output.records() if isinstance(r, DocumentRecord)]
+    assert len(record.pages) == 10_000 and state(record.pages[0].label) == "\x01" * 256
+    assert len(output.plan.chunks) == 2
+    assert [(f.code, f.details) for f in output.findings()] == [
+        ("pdf.page_limit", {"limit": 10_000, "pages": 10_001})
+    ]
+    assert len(json.dumps(record.to_json())) < 32 * 1024 * 1024
+
+
+def test_active_content_past_the_page_limit_is_not_counted() -> None:
+    # Pages past the 10,000 the record describes are neither read nor scanned.
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    script = pdf.add({"S": MAKE.Name("JavaScript"), "JS": MAKE.Lit(b"app.alert(1);")})
+    base = {"Type": MAKE.Name("Page"), "Parent": tree, "MediaBox": [0, 0, 612, 792]}
+    leaves = [pdf.add(dict(base)) for _ in range(10_000)]
+    leaves.append(pdf.add({**base, "AA": {"O": script}}))
+    MAKE.page_tree(pdf, leaves, tree)
+    output = ingest(bytes(pdf.build(MAKE.catalog(pdf, tree))), pages_per_chunk=10_001)
+    assert [f.code for f in output.findings()] == ["pdf.page_limit"]
+
+
+def test_a_media_box_that_is_not_four_numbers_is_unknown() -> None:
+    # pypdf refuses number tokens over 64 characters, so no box overflows a float; a box of the
+    # wrong shape is the case left, and the adapter's finiteness check is a second guard.
+    output = ingest(four_pages(box=[0, 0, MAKE.Name("wide"), 792]))
+    assert pages(output) == [("Unknown", "Unknown")] * 4
+    assert [f.details["field"] for f in output.findings()] == ["media_box"] * 4
+
+
+def test_a_repaired_encrypted_file_is_never_read_as_plain_text() -> None:
+    data = (FIXTURES / "encrypted_owner.pdf").read_bytes()
+    output = ingest(data[: data.rindex(b"\nxref\n")])
+    assert sorted(f.code for f in output.findings()) == ["pdf.encrypted", "pdf.repaired"]
+    assert roles(output) == []
+
+
+# --- Hostile costs: each shape is the review's reproduction, built here, never committed --------
+
+
+def one_element_owning(count: int, used: int = 1) -> bytes:
+    """A tagged page whose parent tree lists ``count`` MCIDs, all owned by one ``P`` whose ``/K``
+    lists ``count`` other MCIDs: every lookup misses, the shape that made the reader quadratic.
+    The page's content uses the first ``used`` MCIDs (only those are placed)."""
+    pdf = MAKE.Pdf()
+    tree, root, element = pdf.reserve(), pdf.reserve(), pdf.reserve()
+    content = b"".join(
+        MAKE.marked("P", mcid, MAKE.text("F1", 12, 72, 700, b"Check the hydraulic line"))
+        for mcid in range(used)
+    )
+    resources = {"Font": {"F1": pdf.add(MAKE.HELVETICA)}}
+    page_ref = MAKE.page(pdf, tree, content, resources, StructParents=0)
+    MAKE._element(pdf, element, "P", root, list(range(count, 2 * count)), page_ref)
+    parents: list[Any] = [element] * count
+    tree_root = {"Type": MAKE.Name("StructTreeRoot"), "K": [element]}
+    pdf.set(root, {**tree_root, "ParentTree": {"Nums": [0, parents]}})
+    MAKE.page_tree(pdf, [page_ref], tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree, StructTreeRoot=root, MarkInfo={"Marked": True})))
+
+
+def test_an_element_owning_thousands_of_mcids_is_indexed_once() -> None:
+    data = one_element_owning(8000, used=8000)
+    started = time.process_time()
+    output = ingest(data)
+    assert time.process_time() - started < 5  # a scan per MCID took about a minute
+    assert [f.code for f in output.findings()] == []
+    assert roles(output) == ["paragraph"]  # 8,000 runs, one owner, one block
+
+
+def test_a_structure_past_its_step_bound_is_a_limit_and_the_page_is_read_untagged() -> None:
+    output = ingest(one_element_owning(250_000))
+    assert [(f.code, f.details) for f in output.findings()] == [
+        ("pdf.structure_limit", {"limit": 200_000, "page": 0})
+    ]
+    assert roles(output) == ["Unknown"]
+
+
+def shared_element(pages: int, kids: int, padding: int = 0) -> bytes:
+    """``pages`` tagged pages whose parent tree entries all name one ``P`` with ``kids`` kids,
+    after ``padding`` entries for other keys."""
+    pdf = MAKE.Pdf()
+    tree, root, element = pdf.reserve(), pdf.reserve(), pdf.reserve()
+    resources = {"Font": {"F1": pdf.add(MAKE.HELVETICA)}}
+    content = MAKE.marked("P", 0, MAKE.text("F1", 12, 72, 700, b"Check the hydraulic line"))
+    refs = [
+        MAKE.page(pdf, tree, content, resources, StructParents=number) for number in range(pages)
+    ]
+    MAKE._element(pdf, element, "P", root, list(range(1, kids + 1)), refs[0])
+    nums: list[Any] = [item for number in range(pages) for item in (number, [element])]
+    nums += [item for number in range(1000, 1000 + padding) for item in (number, [element])]
+    tree_root = {"Type": MAKE.Name("StructTreeRoot"), "K": [element]}
+    pdf.set(root, {**tree_root, "ParentTree": {"Nums": nums}})
+    MAKE.page_tree(pdf, refs, tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree, StructTreeRoot=root, MarkInfo={"Marked": True})))
+
+
+def test_pages_sharing_a_big_element_index_it_once() -> None:
+    # 100 pages x 100,000 kids rebuilt the kid index per page: 6.3 s, 12.4 s at 200 pages.
+    data = shared_element(100, 100_000)
+    started = time.process_time()
+    output = ingest(data, pages_per_chunk=100)
+    assert time.process_time() - started < 3
+    assert output.findings() == ()
+    assert roles(output) == ["paragraph"] * 100
+
+
+def two_elements(first: int, second: int) -> bytes:
+    """Page 0 uses an element with ``first`` kids; page 1 that one and another, ``second`` kids."""
+    pdf = MAKE.Pdf()
+    tree, root, big, other = pdf.reserve(), pdf.reserve(), pdf.reserve(), pdf.reserve()
+    resources = {"Font": {"F1": pdf.add(MAKE.HELVETICA)}}
+    run = MAKE.text("F1", 12, 72, 700, b"Check the hydraulic line")
+    one = MAKE.page(pdf, tree, MAKE.marked("P", 0, run), resources, StructParents=0)
+    both = MAKE.marked("P", 0, run) + MAKE.marked("P", 1, run)
+    two = MAKE.page(pdf, tree, both, resources, StructParents=1)
+    MAKE._element(pdf, big, "P", root, list(range(2, first + 2)), one)
+    MAKE._element(pdf, other, "P", root, list(range(2, second + 2)), two)
+    nums: list[Any] = [0, [big], 1, [big, other]]
+    tree_root = {"Type": MAKE.Name("StructTreeRoot"), "K": [big, other]}
+    pdf.set(root, {**tree_root, "ParentTree": {"Nums": nums}})
+    MAKE.page_tree(pdf, [one, two], tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree, StructTreeRoot=root, MarkInfo={"Marked": True})))
+
+
+def test_pages_sharing_a_big_number_tree_read_it_once() -> None:
+    data = shared_element(100, 10, padding=50_000)
+    started = time.process_time()
+    output = ingest(data, pages_per_chunk=100)
+    assert time.process_time() - started < 3
+    assert output.findings() == ()
+    assert roles(output) == ["paragraph"] * 100
+
+
+@pytest.mark.parametrize("bound", [40, 150, 170, 200, 230, 260, 600])
+def test_every_pages_tag_limit_is_the_same_in_any_chunking(
+    bound: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Paragraphs under one element and a table, at bounds that cut some pages and not others:
+    # the shared indexes (kids, rows, cells, tables) are charged to each page as if it built them.
+    monkeypatch.setattr(
+        importlib.import_module("neptune.adapters.pdf._structure"), "MAX_VISITS", bound
+    )
+    data = tagged_report(3, 20, 12)
+    outputs = [ingest(data, pages_per_chunk=size) for size in (4, 2, 1)]
+    seen = [
+        ([(f.code, f.details["page"]) for f in o.findings()], roles(o), texts(o)) for o in outputs
+    ]
+    assert seen[0] == seen[1] == seen[2]
+
+
+def test_a_pages_tags_do_not_depend_on_the_pages_sharing_its_chunk() -> None:
+    # Page 1 reads both elements: 150,000 + 60,000 kid steps pass the 200,000 bound. Page 0 builds
+    # the first index, but page 1 is charged for it all the same, in a chunk of its own or not.
+    data = two_elements(150_000, 60_000)
+    results = [ingest(data, pages_per_chunk=size) for size in (2, 1)]
+    for output in results:
+        assert [(f.code, f.details) for f in output.findings()] == [
+            ("pdf.structure_limit", {"limit": 200_000, "page": 1})
+        ]
+        assert roles(output) == ["paragraph", "Unknown", "Unknown"]
+    # Both within the bound: both pages tagged.
+    assert ingest(two_elements(100_000, 50_000), pages_per_chunk=2).findings() == ()
+
+
+def identity_font(pdf: Any, cmap: bytes) -> Any:
+    descendant = {
+        "Type": MAKE.Name("Font"),
+        "Subtype": MAKE.Name("CIDFontType2"),
+        "BaseFont": MAKE.Name("Ranges"),
+        "DW": 500,
+        "CIDSystemInfo": {"Registry": MAKE.Lit(b"Adobe"), "Ordering": MAKE.Lit(b"Identity")},
+        "FontDescriptor": {"Type": MAKE.Name("FontDescriptor"), "Ascent": 800, "Descent": -200},
+    }
+    return pdf.add(
+        {
+            "Type": MAKE.Name("Font"),
+            "Subtype": MAKE.Name("Type0"),
+            "BaseFont": MAKE.Name("Ranges"),
+            "Encoding": MAKE.Name("Identity-H"),
+            "DescendantFonts": [pdf.add(descendant)],
+            "ToUnicode": pdf.add(MAKE.Stream({}, cmap)),
+        }
+    )
+
+
+def ranges_cmap(count: int) -> bytes:
+    """``count`` one-code ``bfrange`` entries: code ``0x100 + i`` to letter ``i % 26``."""
+    lines = [b"begincmap\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"]
+    for start in range(0, count, 100):
+        group = range(start, min(start + 100, count))
+        lines.append(b"%d beginbfrange\n" % len(group))
+        lines += [b"<%04X> <%04X> <%04X>\n" % (0x100 + i, 0x100 + i, 0x41 + i % 26) for i in group]
+        lines.append(b"endbfrange\n")
+    return b"".join([*lines, b"endcmap\n"])
+
+
+def page_with_codes(cmap: bytes, codes: list[int]) -> bytes:
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    shown = b"BT /F1 12 Tf 72 700 Td <" + b"".join(b"%04X" % code for code in codes) + b"> Tj ET"
+    page_ref = MAKE.page(pdf, tree, shown, {"Font": {"F1": identity_font(pdf, cmap)}})
+    MAKE.page_tree(pdf, [page_ref], tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree)))
+
+
+def texts(output: SourceOutput) -> list[Any]:
+    found = [r for r in output.records() if isinstance(r, DocumentBlock)]
+    return [state(block.text) for block in sorted(found, key=lambda block: block.order)]
+
+
+def test_a_shared_fonts_warnings_are_reported_on_every_page_that_uses_it() -> None:
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    broken = pdf.add(MAKE.Stream({"Filter": MAKE.Name("FlateDecode")}, b"not deflate data at all"))
+    font = pdf.add(
+        {
+            "Type": MAKE.Name("Font"),
+            "Subtype": MAKE.Name("Type1"),
+            "BaseFont": MAKE.Name("Helvetica"),
+            "ToUnicode": broken,
+        }
+    )
+    shown = MAKE.text("F1", 12, 72, 700, b"Hello")
+    refs = [MAKE.page(pdf, tree, shown, {"Font": {"F1": font}}) for _ in range(3)]
+    MAKE.page_tree(pdf, refs, tree)
+    data = bytes(pdf.build(MAKE.catalog(pdf, tree)))
+    found = [
+        sorted((f.code, f.details["page"]) for f in ingest(data, pages_per_chunk=size).findings())
+        for size in (3, 1)
+    ]
+    assert found[0] == found[1] == [("pdf.content_unreadable", page) for page in range(3)]
+
+
+def test_a_font_evicted_and_loaded_again_on_one_page_is_reported_once() -> None:
+    # F1 warns when loaded; 17 other fonts fill the 16-font cache and evict it; F1 is used again.
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    broken = pdf.add(MAKE.Stream({"Filter": MAKE.Name("FlateDecode")}, b"not deflate data at all"))
+    warning = pdf.add(
+        {
+            "Type": MAKE.Name("Font"),
+            "Subtype": MAKE.Name("Type1"),
+            "BaseFont": MAKE.Name("Helvetica"),
+            "ToUnicode": broken,
+        }
+    )
+    fonts = {"F1": warning} | {f"F{n}": pdf.add(MAKE.HELVETICA) for n in range(2, 19)}
+    order = ["F1", *(f"F{n}" for n in range(2, 19)), "F1"]
+    shown = (
+        b"BT 72 700 Td " + b"".join(b"/%s 12 Tf (x) Tj " % name.encode() for name in order) + b"ET"
+    )
+    refs = [MAKE.page(pdf, tree, shown, {"Font": fonts}) for _ in range(3)]
+    MAKE.page_tree(pdf, refs, tree)
+    data = bytes(pdf.build(MAKE.catalog(pdf, tree)))
+    outputs = [ingest(data, pages_per_chunk=size) for size in (1, 2, 8)]
+    packed = [
+        b"".join(canonical_json.dumps(r.to_json()) + b"\n" for r in o.package_records())
+        for o in outputs
+    ]
+    assert packed[0] == packed[1] == packed[2]
+    found = sorted((f.code, f.details["page"], f.details["streams"]) for f in outputs[1].findings())
+    assert found == [("pdf.content_unreadable", page, 1) for page in range(3)]
+
+
+def test_pages_sharing_a_big_cmap_parse_it_once_per_chunk() -> None:
+    # One 60,000-range CMap on 60 pages: a parse per page took 60 x 0.3 s.
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    font = {"Font": {"F1": identity_font(pdf, ranges_cmap(60_000))}}
+    shown = b"BT /F1 12 Tf 72 700 Td <010001010102> Tj ET"
+    refs = [MAKE.page(pdf, tree, shown, font) for _ in range(60)]
+    MAKE.page_tree(pdf, refs, tree)
+    data = bytes(pdf.build(MAKE.catalog(pdf, tree)))
+    started = time.process_time()
+    output = ingest(data, pages_per_chunk=60)
+    assert time.process_time() - started < 3
+    assert texts(output) == ["ABC"] * 60
+    assert texts(ingest(data, pages_per_chunk=30)) == texts(output)
+
+
+def test_a_cmap_of_many_ranges_is_searched_not_scanned() -> None:
+    codes = [0x100 + (i * 7919) % 60_000 for i in range(20_000)]
+    data = page_with_codes(ranges_cmap(60_000), codes)
+    started = time.process_time()
+    output = ingest(data)
+    assert time.process_time() - started < 5  # a scan of every range per code took seconds
+    assert texts(output) == ["".join(chr(0x41 + (code - 0x100) % 26) for code in codes)]
+    assert [f.code for f in output.findings()] == []
+
+
+def test_a_cmap_past_the_entry_bound_is_a_font_limit_finding() -> None:
+    output = ingest(page_with_codes(ranges_cmap(140_000), [0x100, 0x100 + 139_999]))
+    assert texts(output) == ["Unknown"]  # the first code is mapped, the last is past the bound
+    assert sorted((f.code, f.details) for f in output.findings()) == [
+        ("pdf.font_limit", {"fonts": 1, "page": 0}),
+        ("pdf.unmapped_glyphs", {"blocks": 1, "page": 0}),
+    ]
+
+
+def page_drawing_form(form: bytes, **form_entries: Any) -> bytes:
+    """A page showing text, drawing form ``X1`` twice, then showing more text."""
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    entries = {
+        "Type": MAKE.Name("XObject"),
+        "Subtype": MAKE.Name("Form"),
+        "BBox": [0, 0, 10, 10],
+        **form_entries,
+    }
+    content = (
+        MAKE.text("F1", 12, 72, 700, b"Torque the flange bolts to 40 Nm")
+        + b"/X1 Do\n/X1 Do\n"
+        + MAKE.text("F1", 12, 72, 600, b"Then check the seal")
+    )
+    xobject = pdf.add(MAKE.Stream(entries, form))
+    resources = {"Font": {"F1": pdf.add(MAKE.HELVETICA)}, "XObject": {"X1": xobject}}
+    page_ref = MAKE.page(pdf, tree, content, resources)
+    MAKE.page_tree(pdf, [page_ref], tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree)))
+
+
+def test_a_form_that_cannot_be_parsed_costs_the_form_not_the_page() -> None:
+    inside = MAKE.text("F1", 12, 72, 650, b"Inside the form")
+    output = ingest(page_drawing_form(inside + b"[" * 5000 + b"]" * 5000 + b" pop"))
+    assert [(f.code, f.details) for f in output.findings()] == [
+        ("pdf.content_unreadable", {"error": "RecursionError", "form": "X1", "forms": 1, "page": 0})
+    ]
+    # What the form drew before its fault is kept, each time it is drawn; the page goes on.
+    assert texts(output) == [
+        "Torque the flange bolts to 40 Nm",
+        "Inside the form",
+        "Inside the form",
+        "Then check the seal",
+    ]
+
+
+def test_a_form_that_inflates_past_the_stream_bound_is_a_limit_on_that_form() -> None:
+    inflated = MAKE.bomb_deflate(ord(" "), 2 * 1024 * 1024)  # 11 KiB on disk
+    form = page_drawing_form(inflated, Filter=MAKE.Name("FlateDecode"))
+    output = ingest(form, max_stream_bytes=1024 * 1024)
+    limit = {"form": "X1", "forms": 1, "limit": "max_stream_bytes", "page": 0, "value": 1 << 20}
+    assert [(f.code, f.details) for f in output.findings()] == [("pdf.content_limit", limit)]
+    assert texts(output) == ["Torque the flange bolts to 40 Nm", "Then check the seal"]
+
+
+def test_a_dense_content_stream_is_parsed_only_as_far_as_it_can_run() -> None:
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    content = MAKE.text("F1", 12, 72, 700, b"Before the operators") + b"q Q\n" * 1_000_000
+    page_ref = MAKE.page(pdf, tree, content, {"Font": {"F1": pdf.add(MAKE.HELVETICA)}})
+    MAKE.page_tree(pdf, [page_ref], tree)
+    data = bytes(pdf.build(MAKE.catalog(pdf, tree)))
+    tracemalloc.start()
+    try:
+        output = ingest(data, max_page_operations=10_000)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    # Two million operators parsed whole hold some 300 MB; the parse stops past the 10,000 the
+    # page may run.
+    assert peak < 64 * 1024 * 1024
+    assert [(f.code, f.details["limit"]) for f in output.findings()] == [
+        ("pdf.content_limit", "max_page_operations")
+    ]
+    assert texts(output) == ["Before the operators"]
