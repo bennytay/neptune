@@ -455,3 +455,54 @@ def test_a_registration_reports_the_stored_root_after_a_move(
     )
     assert again.record_counts == first.record_counts
     assert first.registration_key != NotApplicable()
+
+
+# --- review fixes: hostile paths and rows ------------------------------------------------------
+
+
+def test_a_link_loop_on_the_root_path_is_unreadable_not_an_error(
+    pg_uri: str, tmp_path: Path
+) -> None:
+    ours = tmp_path / "b"
+    ours.mkdir()
+    (ours / "x").symlink_to(ours / "y")
+    (ours / "y").symlink_to(ours / "x")
+    with fresh(pg_uri, roots=[ours]) as catalog:
+        result = catalog.register(ours / "x" / "drone")
+    assert result.outcome == "refused"
+    assert [f.code for f in result.findings] == ["package_unreadable"]
+
+
+def test_the_root_is_opened_without_following_any_component(tmp_path: Path) -> None:
+    from neptune_ledger.catalog.check import open_root
+
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
+    real = open_root(str(tmp_path / "real"))
+    assert real is not None
+    os.close(real)
+    assert open_root(str(tmp_path / "link")) is None
+    assert open_root("relative/path") is None
+
+
+def test_a_wide_package_tree_never_runs_out_of_descriptors(
+    catalog: PostgresCatalog, drone: WorkedPackage
+) -> None:
+    for index in range(1200):  # more directories than the default 1024 descriptor limit
+        (drone.root / "volatile" / f"d{index:04}").mkdir(parents=True)
+    assert catalog.register(drone.root).outcome == "registered"
+
+
+def test_a_row_the_catalog_refuses_is_a_finding_not_an_outage(catalog: PostgresCatalog) -> None:
+    from neptune_ledger.catalog.registry import _Refused
+
+    def body(conn: Conn) -> None:
+        raise psycopg.errors.CheckViolation("new row violates check constraint")
+
+    with pytest.raises(_Refused) as refused:
+        catalog._run(body, refuse_as="sha256:" + "1" * 64)
+    assert [(f.code, f.subject) for f in refused.value.findings] == [
+        ("record_invalid", "sha256:" + "1" * 64)
+    ]
+    with pytest.raises(CatalogUnavailable):
+        catalog._run(body)

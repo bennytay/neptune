@@ -203,3 +203,19 @@ def test_the_cli_refuses_outside_the_package_roots_and_without_configuration(
     assert main([*db, "verify", drone.package_id, "--source-root", "s3://bucket/runs"]) == 2
     assert main(["register", str(drone.root)]) == 2
     assert "ledger:" in capsys.readouterr().err
+
+
+def test_an_intact_copy_in_a_later_store_wins_over_a_stale_one(
+    catalog: PostgresCatalog, sources: Path, tmp_path: Path
+) -> None:
+    drone = materialise("drone", tmp_path / "drone")
+    catalog.register(drone.root)
+    stale = tmp_path / "stale"
+    stale.mkdir()
+    (stale / "flight.ulg").write_bytes(b"an older copy")
+    report = catalog.verify_sources(
+        drone.package_id, [LocalSourceStore(stale), LocalSourceStore(sources)]
+    )
+    assert _states(report) == [("present", "flight.ulg")]
+    only_stale = catalog.verify_sources(drone.package_id, [LocalSourceStore(stale)])
+    assert _states(only_stale) == [("changed", "flight.ulg")]

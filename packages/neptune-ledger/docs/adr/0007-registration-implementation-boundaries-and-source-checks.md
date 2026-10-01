@@ -33,16 +33,21 @@ open by ADRs 0002–0006:
    0002 §5 harness. MVL-91 owns everything beyond 0001/0002: kind-specific projection columns,
    generated migrations, any stored body, and pointer lists beyond `Ambiguous`. It extends
    `package_rows` and writes inside the same transaction.
-2. **Package roots are local directories.** `register(package_root)` and `verify` work on a local
-   directory, opened and walked with `O_NOFOLLOW` descriptors relative to the root's descriptor
-   (`catalog.check`). A path swapped for a link after the walk is never followed. Large files
-   (series, blobs) go to the compiler's checks as `/proc/self/fd/N/<path>` of the checked root.
-   `verify` treats a stored root that no longer resolves to itself as `unreachable`: a link was
-   put on the path.
+2. **Package roots are local directories, opened without following anything.** The root's
+   resolved path is opened one component at a time from `/` with `O_NOFOLLOW`, so a link swapped
+   onto the path after the containment check fails the open. The walk (`catalog.check`) opens
+   each directory component-wise from the root descriptor when it is listed, so it holds at most
+   two descriptors. Large files (series, blobs) go to the compiler's checks as
+   `/proc/self/fd/N/<name>`, where N is their directory opened the same way, so registration
+   needs Linux's `/proc`. `verify` opens the stored root the same way, and a link anywhere on it
+   makes the package `unreachable`. A row that the catalog's constraints or triggers refuse (a
+   hostile package the compiler's readers let through) is `record_invalid`, not
+   `CatalogUnavailable`.
 3. **Referenced sources are checked by `PostgresCatalog.verify_sources(package_id, stores, *,
    as_of)`, outside catalog-api.** For each referenced source, it checks each location the package
-   currently states (ADR 0006 §5). It looks in the stores in order and reports `present`,
-   `changed` (another size or digest), `absent`, `moved` or `unsupported` (an external object).
+   currently states (ADR 0006 §5). It reports `present` if any store holds the stated bytes
+   there, else `changed` if some store holds other bytes, else `moved` or `absent`;
+   `unsupported` is an external object.
    `moved` means absent at this location but intact at a current location that another package,
    registered by `as_of`, states for the same content id. Request problems use catalog-api codes
    (`unknown_package`, `as_of_out_of_range`, `invalid_request`). It only reads and records
@@ -51,7 +56,8 @@ open by ADRs 0002–0006:
    version that adds source codes, or a `sources` option on `verify`, would fold this in.
 4. **Source roots sit behind a read-only `SourceStore`:** `describe()` and `open(path) -> BinaryIO
    | None`, with `path` the location's root-relative bytes. `LocalSourceStore` serves a directory
-   and never reads outside it once paths are resolved. An S3-compatible store is the same two
+   and opens every component with `O_NOFOLLOW`, so a location reached through a link is not
+   there, and nothing outside the directory is read. An S3-compatible store is the same two
    methods over `GetObject(prefix + path)`. The Ledger ships no S3 client. The interface is
    tested with an in-memory object store, and the CLI refuses an `s3://` root with a message
    naming this ADR.

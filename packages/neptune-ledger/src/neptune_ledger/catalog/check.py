@@ -62,17 +62,29 @@ class Checked:
 
 
 def open_root(path: str) -> int | None:
-    """A descriptor for the directory at ``path``, or None if it is missing, a symlink or no dir."""
-    try:
-        return os.open(path, _DIR_FLAGS)
-    except OSError:
+    """A descriptor for the directory at the absolute, resolved ``path``, or None.
+
+    Every component is opened with ``O_NOFOLLOW`` relative to its parent, so ``path`` must name
+    the directory with no link anywhere on it: a component that is missing, not a directory, or
+    a link (including one swapped in after the path was resolved) gives None (ADR 0006 §3).
+    """
+    if not path.startswith("/"):
         return None
+    fd = os.open("/", _DIR_FLAGS)
+    try:
+        for part in path.split("/"):
+            if part:
+                child = os.open(part, _DIR_FLAGS, dir_fd=fd)
+                os.close(fd)
+                fd = child
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
 
 
-def check_package(
-    root_fd: int, root_path: str, mode: Mode, expected_id: str | None = None
-) -> Checked:
-    """Check the package whose root directory, at ``root_path``, is open as ``root_fd``.
+def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> Checked:
+    """Check the package whose root directory is open as ``root_fd``.
 
     ``mode`` is ``register`` (every stage, records included) or ``verify`` (entries, the manifest
     against ``expected_id`` and the files; ADR 0006 §2). Never raises for anything in the package.
@@ -136,31 +148,39 @@ def check_package(
         for path in sorted(present - set(listed))
     ]
     files: dict[str, bytes | Path] = {MANIFEST: manifest_bytes}
-    for path in sorted(set(listed) & present):
-        size, digest = listed[path]
-        got = _hash(root_fd, path, size, keep=not _LARGE.fullmatch(path))
-        if got is None or got[0] != digest:
-            findings.append(
-                CatalogFinding(
-                    "file_digest_mismatch", path, "size or sha256 differs from the manifest"
-                )
-            )
-        else:
-            files[path] = got[1] if got[1] is not None else _path_of(root_fd, root_path, path)
-    checked = len(listed)
-    if findings or mode == "verify":
-        return Checked(tuple(findings), package_id, version, files_checked=checked)
-
+    parents: dict[str, int] = {}  # directories of large files, held open for read_files
     try:
-        package_manifest_from_json(manifest)
-        package = read_files(files)
-    except (PackageError, ValueError, TypeError, KeyError) as exc:
-        return Checked(
-            (CatalogFinding("record_invalid", package_id, _first_line(exc)),),
-            package_id,
-            version,
-            files_checked=checked,
-        )
+        for path in sorted(set(listed) & present):
+            size, digest = listed[path]
+            large = bool(_LARGE.fullmatch(path))
+            got = _hash(root_fd, path, size, keep=mode == "register" and not large)
+            if got is None or got[0] != digest:
+                detail = "size or sha256 differs from the manifest"
+                findings.append(CatalogFinding("file_digest_mismatch", path, detail))
+            elif mode == "register" and not large:
+                files[path] = got[1] or b""
+            elif mode == "register":
+                try:
+                    files[path] = _pinned(root_fd, path, parents)
+                except OSError:  # its directory changed since the walk
+                    detail = "its directory changed while it was being checked"
+                    findings.append(CatalogFinding("file_digest_mismatch", path, detail))
+        checked = len(listed)
+        if findings or mode == "verify":
+            return Checked(tuple(findings), package_id, version, files_checked=checked)
+        try:
+            package_manifest_from_json(manifest)
+            package = read_files(files)
+        except (PackageError, ValueError, TypeError, KeyError, OSError) as exc:
+            return Checked(
+                (CatalogFinding("record_invalid", package_id, _first_line(exc)),),
+                package_id,
+                version,
+                files_checked=checked,
+            )
+    finally:
+        for descriptor in parents.values():
+            os.close(descriptor)
     lines: dict[str, tuple[bytes, ...]] = {}
     for table in RECORD_KINDS:
         data = files[f"records/{table}.jsonl"]
@@ -221,17 +241,23 @@ def _is_file_entry(entry: object) -> bool:
 def _walk(root_fd: int) -> Iterator[tuple[str, str]]:
     """``(package-relative path, "dir" | "file" | "unsafe")`` for every entry, never following one.
 
-    Directories are entered through ``O_NOFOLLOW`` descriptors relative to their parent, so a
-    directory replaced by a link during the walk is reported, not entered.
+    A directory is opened only when it is listed, component by component from the root with
+    ``O_NOFOLLOW`` (``_open_dir``), so at most two descriptors are held whatever the tree's width,
+    and a directory replaced by a link after it was seen is reported, not entered.
     """
-    stack: list[tuple[int, str, bool]] = [(root_fd, "", False)]
+    stack = [""]
     while stack:
-        fd, prefix, owned = stack.pop()
+        prefix = stack.pop()
+        try:
+            fd = _open_dir(root_fd, prefix) if prefix else os.dup(root_fd)
+        except OSError:
+            yield prefix, "unsafe"
+            continue
         try:
             with os.scandir(fd) as found:
                 names = sorted(entry.name for entry in found)
             for name in names:
-                path = f"{prefix}{name}"
+                path = f"{prefix}/{name}" if prefix else name
                 try:
                     mode = os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode
                 except OSError:
@@ -240,34 +266,41 @@ def _walk(root_fd: int) -> Iterator[tuple[str, str]]:
                 if stat.S_ISREG(mode):
                     yield path, "file"
                 elif stat.S_ISDIR(mode):
-                    try:
-                        child = os.open(name, _DIR_FLAGS, dir_fd=fd)
-                    except OSError:
-                        yield path, "unsafe"
-                        continue
                     yield path, "dir"
-                    stack.append((child, f"{path}/", True))
+                    stack.append(path)
                 else:
                     yield path, "unsafe"  # symlink, FIFO, socket, device
+        except OSError:
+            yield prefix or ".", "unsafe"
         finally:
-            if owned:
-                os.close(fd)
+            os.close(fd)
 
 
-def _open(root_fd: int, path: str) -> int:
-    """Open ``path`` under the root, every component with ``O_NOFOLLOW``; a regular file only."""
-    *dirs, name = path.split("/")
-    fd, owned = root_fd, False
+def _open_dir(root_fd: int, path: str) -> int:
+    """Open the directory ``path`` under the root, every component with ``O_NOFOLLOW``."""
+    fd = os.dup(root_fd)
     try:
-        for part in dirs:
+        for part in path.split("/"):
             child = os.open(part, _DIR_FLAGS, dir_fd=fd)
-            if owned:
-                os.close(fd)
-            fd, owned = child, True
+            os.close(fd)
+            fd = child
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def open_below(root_fd: int, path: str) -> int:
+    """Open the regular file ``path`` under the root, every component with ``O_NOFOLLOW``.
+
+    A FIFO or device is refused without blocking on it (``O_NONBLOCK``); any failure is OSError.
+    """
+    head, _, name = path.rpartition("/")
+    fd = _open_dir(root_fd, head) if head else os.dup(root_fd)
+    try:
         target = os.open(name, _FILE_FLAGS, dir_fd=fd)
     finally:
-        if owned:
-            os.close(fd)
+        os.close(fd)
     if not stat.S_ISREG(os.fstat(target).st_mode):
         os.close(target)
         raise OSError(errno.EINVAL, f"{path} is not a regular file")
@@ -277,7 +310,7 @@ def _open(root_fd: int, path: str) -> int:
 
 def _read_small(root_fd: int, path: str) -> bytes | None:
     try:
-        with os.fdopen(_open(root_fd, path), "rb") as stream:
+        with os.fdopen(open_below(root_fd, path), "rb") as stream:
             return stream.read()
     except OSError:
         return None
@@ -289,7 +322,7 @@ def _hash(root_fd: int, path: str, size: int, *, keep: bool) -> tuple[str, bytes
     The size is compared before reading, so a hostile file of another size is never read.
     """
     try:
-        descriptor = _open(root_fd, path)
+        descriptor = open_below(root_fd, path)
     except OSError:
         return None
     with os.fdopen(descriptor, "rb") as stream:
@@ -308,11 +341,14 @@ def _hash(root_fd: int, path: str, size: int, *, keep: bool) -> tuple[str, bytes
     return "sha256:" + digest.hexdigest(), b"".join(kept) if keep else None
 
 
-def _path_of(root_fd: int, root_path: str, path: str) -> Path:
-    """The path of a large file for the compiler's streaming checks (ADR 0006 §1).
+def _pinned(root_fd: int, path: str, parents: dict[str, int]) -> Path:
+    """A path for the compiler's streaming checks that cannot leave the checked tree.
 
-    ``/proc/self/fd/N`` names the root directory that was opened and checked, not whatever
-    ``root_path`` names now; without ``/proc`` the resolved root path is used.
+    The file's directory is opened component by component with ``O_NOFOLLOW`` and held open;
+    ``/proc/self/fd/N/<name>`` then names that directory, whatever its path names now, and the
+    compiler opens ``<name>`` itself with ``O_NOFOLLOW``. This needs Linux's ``/proc``.
     """
-    proc = Path(f"/proc/self/fd/{root_fd}")
-    return proc / path if proc.is_dir() else Path(root_path) / path
+    head, _, name = path.rpartition("/")
+    if head not in parents:
+        parents[head] = _open_dir(root_fd, head)
+    return Path(f"/proc/self/fd/{parents[head]}") / name

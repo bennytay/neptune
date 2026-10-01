@@ -13,18 +13,16 @@ object is there. ``LocalSourceStore`` serves a directory. An S3-compatible store
 two methods with ``GetObject`` on ``prefix + path``; this package ships no S3 client (ADR 0007).
 """
 
-import errno
 import hashlib
 import os
-import stat
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, BinaryIO, Final, Literal, Protocol
 
 from neptune.identity import canonical_json
 from neptune.model.knowledge import Knowledge, Known
 from neptune_ledger.api.types import CatalogFinding, TransactionKey
+from neptune_ledger.catalog.check import open_below, open_root
 
 _READ_SIZE: Final = 1024 * 1024
 
@@ -44,29 +42,29 @@ class SourceStore(Protocol):
 
 
 class LocalSourceStore:
-    """A local directory as a source store. A path that resolves outside it is not there."""
+    """A local directory as a source store. No link in or below it is ever followed.
+
+    The root is opened component by component and the path below it likewise, each with
+    ``O_NOFOLLOW``, so a location whose path holds a link, or one swapped in while it is read,
+    is reported as not there, and nothing outside the directory is read.
+    """
 
     def __init__(self, root: str | os.PathLike[str]) -> None:
-        self._root = Path(root).resolve()
+        self._root = os.path.realpath(root)
 
     def describe(self) -> str:
-        return str(self._root)
+        return self._root
 
     def open(self, path: bytes) -> BinaryIO | None:
-        target = (self._root / os.fsdecode(path)).resolve()
-        if not target.is_relative_to(self._root):
+        root_fd = open_root(self._root)
+        if root_fd is None:
             return None
         try:
-            descriptor = os.open(target, os.O_RDONLY | os.O_NONBLOCK)
-        except OSError as exc:
-            if exc.errno in (errno.ENOENT, errno.ENOTDIR, errno.EACCES, errno.ELOOP):
-                return None
-            raise
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):  # a FIFO or device is never read
-            os.close(descriptor)
+            return os.fdopen(open_below(root_fd, os.fsdecode(path)), "rb")
+        except OSError:
             return None
-        os.set_blocking(descriptor, True)
-        return os.fdopen(descriptor, "rb")
+        finally:
+            os.close(root_fd)
 
 
 @dataclass(frozen=True)
@@ -150,24 +148,27 @@ def _check(source: Stated, location: str, stores: Sequence[SourceStore]) -> Sour
     if path is None:
         detail = "not a root-relative location; its connector resolves it, not the Ledger"
         return SourceCheck(source.content_id, location, "unsupported", detail)
+    other: tuple[SourceStore, tuple[int, str]] | None = None
     for store in stores:
         found = _digest(store, path)
-        if found is None:
-            continue
         if found == (source.size, source.content_id):
             return SourceCheck(
                 source.content_id, location, "present", f"intact in {store.describe()}"
             )
-        detail = f"in {store.describe()} with size {found[0]} and {found[1]}, not the stated bytes"
+        if found is not None and other is None:
+            other = store, found
+    if other is not None:
+        store, (size, digest) = other
+        detail = f"in {store.describe()} with size {size} and {digest}, not the stated bytes"
         return SourceCheck(source.content_id, location, "changed", detail)
-    for other in source.elsewhere:
-        other_path = _path(other)
-        if other_path is None or other == location:
+    for candidate in source.elsewhere:
+        candidate_path = _path(candidate)
+        if candidate_path is None or candidate == location:
             continue
         for store in stores:
-            if _digest(store, other_path) == (source.size, source.content_id):
+            if _digest(store, candidate_path) == (source.size, source.content_id):
                 detail = f"not at this location; intact at another stated one in {store.describe()}"
-                return SourceCheck(source.content_id, location, "moved", detail, found_at=other)
+                return SourceCheck(source.content_id, location, "moved", detail, found_at=candidate)
     detail = f"in none of {len(stores)} source store(s)"
     return SourceCheck(source.content_id, location, "absent", detail)
 

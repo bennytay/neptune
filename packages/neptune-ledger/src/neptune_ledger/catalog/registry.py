@@ -48,6 +48,13 @@ T = TypeVar("T")
 # SQLSTATEs after which the whole transaction is retried (ADR 0004 §4): a retry either registers
 # the package or finds it registered, so it is always safe.
 RETRYABLE: Final = (psycopg.errors.SerializationFailure, psycopg.errors.DeadlockDetected)
+# What a package's own rows can trip: a constraint, a value out of a column's range, or a
+# catalog trigger (the body-digest backstop of ADR 0005 §2).
+HOSTILE: Final = (
+    psycopg.errors.IntegrityError,
+    psycopg.errors.DataError,
+    psycopg.errors.RaiseException,
+)
 UNREADABLE: Final = "no readable package directory at this root"
 _MAX_SEQ: Final = 2**63 - 1
 Verdict = Literal["damaged", "intact", "unknown_package", "unreachable"]
@@ -112,21 +119,25 @@ class PostgresCatalog:
         """Catalogue the package at ``package_root``; see ``CatalogApi.register``."""
         raw = Path(package_root)
         given = str(raw.absolute())  # as named, unresolved: a refusal reveals nothing more
-        root = str(raw.resolve())  # every link and ".." resolved in order (ADR 0006 §3)
+        # Every link and ".." resolved in order (ADR 0006 §3); realpath, unlike Path.resolve on
+        # Python 3.11 and 3.12, does not raise on a link loop.
+        root = os.path.realpath(raw)
         if raw.is_symlink() or not self._inside_roots(root):
             return self._unreadable(given)
-        root_fd = open_root(root)  # O_NOFOLLOW: a link swapped in after the check is refused
+        root_fd = open_root(root)  # no component followed: a link swapped in since is refused
         if root_fd is None:
             return self._unreadable(given)
         try:
-            checked = check_package(root_fd, root, "register")
+            checked = check_package(root_fd, "register")
         finally:
             os.close(root_fd)
         if checked.findings:
             return self._refusal(root, checked, list(checked.findings))
         rows = package_rows(str(checked.package_id), checked.manifest, checked.lines)
         try:
-            outcome, key, locator, version = self._run(lambda conn: self._write(conn, rows, root))
+            outcome, key, locator, version = self._run(
+                lambda conn: self._write(conn, rows, root), refuse_as=rows.package_id
+            )
         except _Refused as refused:
             return self._refusal(root, checked, refused.findings)
         return Registration(
@@ -145,7 +156,7 @@ class PostgresCatalog:
         if self._roots is None:
             return True
         path = Path(resolved)
-        return any(path.is_relative_to(root.resolve()) for root in self._roots)
+        return any(path.is_relative_to(os.path.realpath(root)) for root in self._roots)
 
     def _unreadable(self, given: str) -> Registration:
         """A refusal that reads the same for a missing root and one outside the tenant's roots."""
@@ -345,16 +356,16 @@ class PostgresCatalog:
             assert problem is not None
             return _report(package_id, "unknown_package", point, None, (problem,))
         root = row[1]
-        # The stored locator is fully resolved; if it no longer resolves to itself, a link was
-        # put somewhere on it, and following it could read another tree (ADR 0006 §2, §3).
-        root_fd = open_root(root) if str(Path(root).resolve()) == root else None
+        # The stored locator is fully resolved and every component is opened without following
+        # a link: a link put anywhere on it since makes the root unreachable (ADR 0006 §2, §3).
+        root_fd = open_root(root)
         if root_fd is None:
             finding = CatalogFinding(
                 "package_unreadable", root, "the stored root locator does not exist"
             )
             return _report(package_id, "unreachable", point, row, (finding,))
         try:
-            checked = check_package(root_fd, root, "verify", package_id)
+            checked = check_package(root_fd, "verify", package_id)
         finally:
             os.close(root_fd)
         verdict: Verdict = "damaged" if checked.findings else "intact"
@@ -503,11 +514,13 @@ class PostgresCatalog:
             self._conn = conn
         return self._conn
 
-    def _run(self, body: Callable[[Conn], T]) -> T:
+    def _run(self, body: Callable[[Conn], T], *, refuse_as: str | None = None) -> T:
         """Run ``body`` in one transaction; retry it on 40001/40P01 (ADR 0004 §4).
 
-        A ``_Refused`` rolls the transaction back and propagates. Any other store failure, or
-        retries running out, is ``CatalogUnavailable``: nothing was written.
+        A ``_Refused`` rolls the transaction back and propagates. With ``refuse_as`` (a package
+        id), a row the catalog's constraints or triggers refuse is that package's fault, so it
+        becomes ``_Refused`` with a ``record_invalid`` finding, not an outage. Any other store
+        failure, or retries running out, is ``CatalogUnavailable``: nothing was written.
         """
         for attempt in range(self._attempts):
             try:
@@ -517,6 +530,11 @@ class PostgresCatalog:
             except RETRYABLE:
                 time.sleep(0.01 * (attempt + 1))
                 continue
+            except HOSTILE as exc:
+                if refuse_as is None:
+                    raise CatalogUnavailable(f"the catalog store refused the call: {exc}") from exc
+                detail = f"the catalog refuses a row of it: {str(exc).splitlines()[0][:300]}"
+                raise _Refused([CatalogFinding("record_invalid", refuse_as, detail)]) from exc
             except psycopg.OperationalError as exc:
                 self.close()
                 raise CatalogUnavailable(f"the catalog store is unreachable: {exc}") from exc

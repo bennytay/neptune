@@ -164,6 +164,8 @@ def logical_ids(record: Any) -> list[tuple[str, str, str]]:
         if obj.get("knowledge") == "known"
         and isinstance(obj.get("value"), dict)
         and obj["value"].keys() == {"namespace", "value"}
+        and isinstance(obj["value"]["namespace"], str)
+        and isinstance(obj["value"]["value"], str)
     ]
 
 
