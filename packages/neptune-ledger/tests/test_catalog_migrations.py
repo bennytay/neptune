@@ -12,6 +12,7 @@ from neptune_ledger.catalog import migrate
 from neptune_ledger.catalog.migrate import (
     MigrationError,
     apply_migrations,
+    check_collation,
     migrations,
     tenant_schema,
 )
@@ -20,6 +21,7 @@ Conn = psycopg.Connection[tuple[object, ...]]
 TX_TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z")
 ROBOT = "rec:sha256:" + "a" * 64
 PACKAGE = "sha256:" + "b" * 64
+DIGEST = "sha256:" + "f" * 64  # a record body digest (ADR 0005 §2)
 
 
 def _columns(pg: Conn, schema: str) -> list[tuple[object, ...]]:
@@ -147,8 +149,8 @@ def test_a_record_of_an_unknown_kind_is_refused(pg: Conn) -> None:
     with pytest.raises(psycopg.errors.CheckViolation):  # no partition for the value
         pg.execute(
             "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
-            " registration_key, line, schema_version)"
-            " VALUES ('acme', 'telepathy', %s, %s, 1, 1, 1)",
+            " registration_key, line, schema_version, body_digest)"
+            f" VALUES ('acme', 'telepathy', %s, %s, 1, 1, 1, '{DIGEST}')",
             (ROBOT, PACKAGE),
         )
 
@@ -225,7 +227,8 @@ def test_a_record_key_must_have_its_kinds_shape(pg: Conn, kind: str, key: str) -
     with pytest.raises(psycopg.errors.CheckViolation):
         pg.execute(
             "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
-            " registration_key, line, schema_version) VALUES ('acme', %s, %s, %s, 1, 1, 1)",
+            " registration_key, line, schema_version, body_digest)"
+            f" VALUES ('acme', %s, %s, %s, 1, 1, 1, '{DIGEST}')",
             (kind, key, PACKAGE),
         )
 
@@ -332,3 +335,113 @@ def test_a_package_must_match_its_log_entry(pg: Conn) -> None:
             " root_locator) VALUES ('acme', %s, 1, %s, 'elsewhere')",
             (PACKAGE, ROBOT),
         )
+
+
+@pytest.mark.parametrize(
+    ("provider", "collation"),
+    [("c", "en_US.UTF-8"), ("c", "C.UTF-8"), ("i", "C"), ("c", "")],
+)
+def test_a_database_without_byte_order_collation_is_refused(provider: str, collation: str) -> None:
+    with pytest.raises(MigrationError, match="C collation"):
+        check_collation(provider, collation)
+
+
+@pytest.mark.parametrize("collation", ["C", "POSIX"])
+def test_byte_order_collations_are_accepted(collation: str) -> None:
+    check_collation("c", collation)
+
+
+def test_the_test_database_sorts_ids_as_bytes(pg: Conn) -> None:
+    apply_migrations(pg, "acme")
+    rows = pg.execute(
+        "SELECT v FROM (VALUES ('a_b'), ('aB'), ('a-b'), ('ab'), ('A_b')) AS t (v) ORDER BY v"
+    ).fetchall()
+    values = [str(row[0]) for row in rows]
+    assert values == sorted(values, key=lambda v: v.encode("utf-8"))
+
+
+def test_a_registration_costs_the_same_whatever_the_catalog_size(pg: Conn) -> None:
+    """ADR 0005 §1: the clock checks read the one clock row, not every earlier registration."""
+    apply_migrations(pg, "acme")
+    sources = {
+        str(row[0]): str(row[1])
+        for row in pg.execute(
+            "SELECT p.proname, p.prosrc FROM pg_proc p"
+            " JOIN pg_namespace n ON n.oid = p.pronamespace"
+            " WHERE n.nspname = 'tenant_acme'"
+            " AND p.proname IN ('registration_log_follows_clock', 'package_from_log')"
+        ).fetchall()
+    }
+    assert set(sources) == {"registration_log_follows_clock", "package_from_log"}
+    for name, body in sources.items():
+        assert re.search(r"FROM (registration_log|package)\s+WHERE tx_seq", body) is None, name
+    assert (
+        "tenant_id = NEW.tenant_id AND package_id = NEW.package_id" in sources["package_from_log"]
+    )
+
+
+def test_a_record_id_keeps_one_body(pg: Conn) -> None:
+    apply_migrations(pg, "acme")
+    first, second = "sha256:" + "1" * 64, "sha256:" + "2" * 64
+    add_package(pg, "tenant_acme", first, 1)
+    insert = (
+        "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
+        " registration_key, line, schema_version, body_digest) VALUES ('acme', 'run', %s, %s, %s,"
+        " 1, 1, %s)"
+    )
+    pg.execute(insert, (ROBOT, first, 1, DIGEST))
+    add_package(pg, "tenant_acme", second, 2)
+    with pytest.raises(psycopg.errors.RaiseException, match="catalogued with body"):
+        pg.execute(insert, (ROBOT, second, 2, "sha256:" + "e" * 64))
+    pg.execute(insert, (ROBOT, second, 2, DIGEST))  # the same body from another package
+    assert pg.execute("SELECT count(*) FROM tenant_acme.record").fetchone() == (2,)
+
+
+def test_location_absences_are_append_only(pg: Conn) -> None:
+    apply_migrations(pg, "acme")
+    add_package(pg, "tenant_acme", PACKAGE, 1)
+    pg.execute(
+        "INSERT INTO tenant_acme.location_absence VALUES ('acme', %s, %s, %s, %s)",
+        (ROBOT, PACKAGE, '{"kind":"local","path":"flight.ulg"}', ["rec:sha256:" + "9" * 64]),
+    )
+    for statement in (
+        "UPDATE tenant_acme.location_absence SET location = '{}'",
+        "DELETE FROM tenant_acme.location_absence",
+        "TRUNCATE tenant_acme.location_absence",
+    ):
+        with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
+            pg.execute(statement)
+
+
+def test_migrations_commit_on_a_connection_outside_autocommit(pg: Conn) -> None:
+    """The collation check runs inside the migration transaction, so nothing is left open."""
+    pg.autocommit = False
+    apply_migrations(pg, "acme")
+    assert pg.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+    pg.rollback()  # nothing to roll back: the migrations were committed
+    pg.autocommit = True
+    assert pg.execute("SELECT count(*) FROM tenant_acme.schema_migration").fetchone() == (
+        len(migrations()),
+    )
+
+
+def test_a_source_artifact_may_differ_in_chunking_only(pg: Conn) -> None:
+    """ADR 0005 §2: chunk_size and chunks are not identity, so source_artifact bodies may differ;
+    its conflict rule is the source table's (content id, size)."""
+    apply_migrations(pg, "acme")
+    first, second = "sha256:" + "1" * 64, "sha256:" + "2" * 64
+    content = "sha256:" + "a" * 64
+    insert = (
+        "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
+        " registration_key, line, schema_version, body_digest)"
+        " VALUES ('acme', 'source_artifact', %s, %s, %s, 1, 1, %s)"
+    )
+    add_package(pg, "tenant_acme", first, 1)
+    pg.execute(insert, (content, first, 1, "sha256:" + "c" * 64))  # hashed in 8 MiB chunks
+    add_package(pg, "tenant_acme", second, 2)
+    pg.execute(insert, (content, second, 2, "sha256:" + "d" * 64))  # the same bytes, 256 B chunks
+    rows = pg.execute(
+        "SELECT count(DISTINCT body_digest) FROM tenant_acme.record WHERE record_id = %s",
+        (content,),
+    ).fetchone()
+    assert rows == (2,), "each package's chunking stays as it stated it"
