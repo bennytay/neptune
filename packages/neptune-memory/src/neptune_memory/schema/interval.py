@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from fractions import Fraction
+from functools import cached_property
 from typing import TYPE_CHECKING, Final, NewType
 
 from neptune.identity.ids import record_id
@@ -85,11 +86,7 @@ class Interval:
         return starts_before_other_ends and other_starts_before_self_ends
 
     def to_json(self) -> JsonObject:
-        return {"end": _instant_json(self.end), "start": self.start.to_json()}
-
-
-def _instant_json(value: Timestamp | Open) -> JsonValue:
-    return value.to_json()
+        return {"end": self.end.to_json(), "start": self.start.to_json()}
 
 
 _CIVIL_TIMESCALES: Final = frozenset({Timescale.UTC, Timescale.TAI, Timescale.GPS, Timescale.POSIX})
@@ -118,7 +115,7 @@ class CivilClock:
         if not isinstance(self.resolution, Fraction) or self.resolution <= 0:
             raise ValueError(f"resolution must be a positive Fraction: {self.resolution!r}")
 
-    @property
+    @cached_property
     def domain_id(self) -> RecordId:
         """The clock's id, derived from its definition: equal clocks, equal ids, any source."""
         return record_id(

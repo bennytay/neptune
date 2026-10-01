@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import cached_property
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
 from neptune.model.ids import check_text, check_token
@@ -20,6 +22,8 @@ from neptune_memory.schema.claim import ValueType, is_inferred, object_type
 from neptune_memory.schema.nodes import CONTEXT_TYPES, DECLARED_ONLY, NodeRef, NodeType
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from neptune.model.jsonvalue import JsonObject
     from neptune_memory.schema.claim import Claim
 
@@ -95,14 +99,18 @@ class PredicateRegistry:
         if names != sorted(set(names)):
             raise ValueError(f"predicates must be unique and sorted by name: {names}")
 
+    @cached_property
+    def _by_name(self) -> Mapping[str, PredicateSpec]:
+        return MappingProxyType({spec.name: spec for spec in self.specs})
+
     def __contains__(self, name: object) -> bool:
-        return any(spec.name == name for spec in self.specs)
+        return name in self._by_name
 
     def spec(self, name: str) -> PredicateSpec:
-        for spec in self.specs:
-            if spec.name == name:
-                return spec
-        raise UnknownPredicateError(name)
+        try:
+            return self._by_name[name]
+        except KeyError:
+            raise UnknownPredicateError(name) from None
 
     def extend(self, *specs: PredicateSpec) -> PredicateRegistry:
         """A registry with ``specs`` added; a known name must ``widen`` its registered spec."""

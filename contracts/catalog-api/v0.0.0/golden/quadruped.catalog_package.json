@@ -1,0 +1,12 @@
+{
+  "api_version": "0.0.0",
+  "kind": "catalog_package",
+  "package_id": "sha256:44b4309877e2ce74d1a82d2c872eaafec8f07325b299637dae59d8f07dfa76b1",
+  "package_schema_version": 1,
+  "record_counts": {
+    "frame": 2,
+    "hardware_component": 6,
+    "run": 1
+  },
+  "registered": 0
+}

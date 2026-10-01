@@ -1,0 +1,12 @@
+title = "Ingest package schema: canonical record lines, manifest and receipt (compiler ADR 0017, 0022)"
+status = "active"
+consumers = ["neptune-deploy", "neptune-learn", "neptune-ledger"]
+
+[owner]
+package = "neptune"
+module = "neptune.model"
+schema_export = "neptune.model.schema:canonical_schema"
+# An integer constant is the registry major: raise it for a breaking change.
+version_constant = "neptune.model.record:SCHEMA_VERSION"
+golden_generator = "contracts/package-schema/goldens.py"
+contract_tests = ["tests/unit/model/test_schema.py", "tests/integration/test_worked_examples.py"]
