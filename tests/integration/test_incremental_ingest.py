@@ -35,6 +35,7 @@ from neptune.adapters.contract import (
 )
 from neptune.adapters.registry import AdapterRegistry
 from neptune.adapters.text import TextAdapter
+from neptune.discovery.reader import LocalReader
 from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id
 from neptune.model.jsonvalue import JsonValue
@@ -389,11 +390,13 @@ def test_a_new_per_chunk_law_judges_kept_chunks_as_a_fresh_workspace_would(
 
     a_new_law(monkeypatch, law)
     counted = adapters()
-    judged, _ = warm(corpus, counted)
+    judged, seen = warm(corpus, counted)
     fresh, _ = Runner(tmp_path / "fresh" / "home", tmp_path / "fresh" / "out")(corpus, adapters())
     failed = [f for f in judged.findings if f.code == lineage.CHUNK_FAILED]
     assert failed and {f.details["step"] for f in failed} == {law}
     assert {f.details["attempts"] for f in failed} == {1}
+    skipped = {e.details["chunk"] for e in seen if e.kind == "chunk_skipped"}
+    assert skipped and not skipped & {f.details["chunk"] for f in failed}  # refused, not reused
     assert judged.findings == fresh.findings
     assert judged.package == fresh.package == read_package(judged.destination).id
     assert counted.calls("ingest") == {"tally": 0, "text": 0}  # judged as kept: no adapter call
@@ -403,10 +406,19 @@ def test_a_new_per_chunk_law_judges_kept_chunks_as_a_fresh_workspace_would(
     verdicts = [d for d in report.derivatives if d.recipe == "neptune.runtime.chunk-laws/1"]
     assert len(verdicts) == kept_chunks and all(d.cache == "miss" for d in verdicts)
 
+    opened: list[object] = []
+
+    class Opening(LocalReader):  # every reader the job opens
+        def __init__(self, *args: Any) -> None:
+            opened.append(args[1])
+            super().__init__(*args)
+
+    monkeypatch.setattr(job_module, "LocalReader", Opening)
     again, _ = warm(corpus, adapters())  # judged once per runtime version: the verdicts are kept
     verdicts = [d for d in again.cache.derivatives if d.recipe == "neptune.runtime.chunk-laws/1"]
     assert len(verdicts) == kept_chunks and all(d.cache == "hit" for d in verdicts)
     assert (again.findings, again.package) == (fresh.findings, fresh.package)
+    assert len(opened) == len(list(corpus.iterdir()))  # each probed once; none opened to judge
 
 
 def test_a_chunk_admitted_under_unknown_laws_is_judged_again(corpus: Path, run: Runner) -> None:

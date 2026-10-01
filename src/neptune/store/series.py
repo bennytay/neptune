@@ -348,7 +348,10 @@ def read_run(run: Path) -> SeriesBatch:
     """
     opened = _open(run)
     stream = _run_stream(opened)
-    table = opened.read()
+    try:
+        table = opened.read()
+    except (pa.ArrowException, OSError) as exc:
+        raise SeriesReadError(f"a run of {stream} cannot be read: {exc}") from exc
     columns = []
     for field in table.schema:
         repeated = pa.types.is_list(field.type)

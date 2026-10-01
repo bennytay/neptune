@@ -138,6 +138,18 @@ class _Cancelled(Exception):
     """Raised at a checkpoint when cancellation was requested; caught by ``run``."""
 
 
+class _Unopened(Exception):
+    """A source could not be opened to judge a kept chunk; ``cause`` says why.
+
+    Neither an ``OSError`` nor a ``ValueError``, so it passes through the workspace's handling of
+    a derivative being built to the job, which quarantines the source.
+    """
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(type(cause).__name__)
+        self.cause = cause
+
+
 @dataclass(frozen=True)
 class JobOptions:
     """What a job may be told besides its root, destination, workspace and adapters.
@@ -201,6 +213,25 @@ class _Source:
     def key(self) -> tuple[ContentId, RecordId]:
         assert self.config is not None  # only selected sources have a key
         return (self.content_id, self.config.transform.id)
+
+
+class _Opener:
+    """One source's reader, opened the first time a chunk needs the source; then ``close``."""
+
+    def __init__(self, source: LocalSource, item: _Source) -> None:
+        self._source, self._item = source, item
+        self._reader: LocalReader | None = None
+
+    def open(self) -> LocalReader:
+        """The reader. The first call opens it and raises whatever opening raises."""
+        if self._reader is None:
+            self._reader = LocalReader(self._source, self._item.location, self._item.artifact)
+        return self._reader
+
+    def close(self) -> None:
+        if self._reader is not None:
+            self._reader.close()
+            self._reader = None
 
 
 def _now() -> str:
@@ -832,36 +863,36 @@ class IngestJob:
         for item in self._sources:
             if not item.planned or item.quarantined:
                 continue
-            reader: LocalReader | None = None
+            opener = _Opener(source, item)
             try:
                 for chunk in item.chunks:
                     self._phase = Phase.PARSE  # between chunks, the job is about to parse
                     self._check_cancel()
-                    hit = self.workspace.committed(chunk.id)
-                    if hit:
+                    if self.workspace.committed(chunk.id):
                         item.hits.add(chunk.id)  # its output is reused: no adapter call
+                        admitted = self._judge(item, chunk, opener)
+                        if admitted is None:  # the source could not be opened to judge it
+                            failed += 1
+                            break
+                        if not admitted:
+                            failed += 1
+                            continue
                         skipped += 1
                         self._emit(
                             events.CHUNK_SKIPPED,
                             {"chunk": chunk.id, "source": item.content_id},
                             Phase.PARSE,
                         )
-                        if self.workspace.admitted(chunk.id) == lineage.RUNTIME_VERSION:
-                            continue
-                        # admitted under other laws, or unknown ones: judged by these below
-                    if reader is None:
-                        with self._enter(Phase.PARSE):
-                            try:
-                                reader = LocalReader(source, item.location, item.artifact)
-                            except _UNREADABLE as exc:
-                                self._unreadable(item, exc)
-                        if reader is None:
-                            failed += 1
-                            break
-                    if hit:
-                        if not self._judge(item, reader, chunk):
-                            failed += 1
                         continue
+                    reader: LocalReader | None = None
+                    with self._enter(Phase.PARSE):
+                        try:
+                            reader = opener.open()
+                        except _UNREADABLE as exc:
+                            self._unreadable(item, exc)
+                    if reader is None:
+                        failed += 1
+                        break
                     parsed = self._parse(item, reader, chunk)
                     if parsed is None:
                         failed += 1
@@ -877,8 +908,7 @@ class IngestJob:
                     else:
                         failed += 1
             finally:
-                if reader is not None:
-                    reader.close()
+                opener.close()
         self._finish(
             Phase.PARSE, {"chunks": committed + failed, "failed": failed, "skipped": skipped}
         )
@@ -970,7 +1000,10 @@ class IngestJob:
 
         The output is the adapter's, so a check can meet anything: a record-like object without
         provenance, a ``to_json`` that raises. Each is a ``Failure`` naming the check, never an
-        escape that fails the job.
+        escape that fails the job. The same checks judge a committed output that another runtime
+        version admitted (``_judge``), as the workspace keeps it: records and findings sorted by
+        id, one sorted batch per stream. So a law, and the facts its failure names, depends on a
+        chunk's content and never on the order or batching the adapter emitted it in.
         """
         assert item.adapter is not None and item.config is not None
         try:
@@ -1021,25 +1054,34 @@ class IngestJob:
             )
         return True
 
-    def _judge(self, item: _Source, reader: LocalReader, chunk: Chunk) -> bool:
-        """Judge a chunk committed under other laws by this runtime's, without the adapter.
+    def _judge(self, item: _Source, chunk: Chunk, opener: _Opener) -> bool | None:
+        """Whether a committed chunk's output is admitted by this runtime's per-chunk laws.
 
-        Its output was admitted by another runtime version (or one not recorded), whose per-chunk
-        laws may differ from these. A chunk these laws refuse fails as it would in a fresh
-        workspace: ``chunk_failed`` at the check it broke, after one attempt (ADR 0031 §2).
+        One this runtime version admitted is, as it stands. One another version admitted (or
+        whose version is not recorded) is judged by these laws without the adapter (ADR 0031
+        §2); one they refuse fails as it would in a fresh workspace: ``chunk_failed`` at the
+        check it broke, after one attempt. ``None`` if the source, needed to judge it, could not
+        be opened (it is quarantined as unreadable, as a fresh ingest would find it).
         """
+        if self.workspace.admitted(chunk.id) == lineage.RUNTIME_VERSION:
+            return True
         with self._enter(Phase.NORMALIZE):
-            failure = self._chunk_laws(item, reader, chunk)
+            try:
+                failure = self._chunk_laws(item, chunk, opener)
+            except _Unopened as exc:
+                self._unreadable(item, exc.cause)
+                return None
             if failure is not None:
                 self._fail_chunk(item, chunk, 1, failure)
                 return False
         return True
 
-    def _chunk_laws(self, item: _Source, reader: LocalReader, chunk: Chunk) -> Failure | None:
+    def _chunk_laws(self, item: _Source, chunk: Chunk, opener: _Opener) -> Failure | None:
         """This runtime's per-chunk laws over a chunk's committed output, kept as a derivative.
 
         A function of the chunk's id (its output never changes) and of the runtime's version, so
-        it is judged once per version: the next job of this version reads the verdict back.
+        it is judged once per version: the next job of this version reads the verdict back, and
+        the source is opened only to judge.
         """
         assert item.config is not None
         key = chunk_laws_key(
@@ -1047,6 +1089,10 @@ class IngestJob:
         )
 
         def build(directory: Path) -> None:
+            try:
+                reader = opener.open()
+            except _UNREADABLE as exc:
+                raise _Unopened(exc) from exc
             failure = self._check_output(item, reader, chunk, self._committed_output(chunk))
             verdict: JsonObject = (
                 {"admitted": True}
