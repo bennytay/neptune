@@ -1,8 +1,10 @@
 """MVL-6 acceptance: a job killed mid-ingest resumes safely without duplicating work.
 
-The victim is a real process (``tests/fixtures/runtime/kill_after_chunks.py``) that SIGKILLs
-itself after N chunks commit, so no cleanup runs. The resumed job, in this process, must skip
-every chunk the victim committed, reuse its plans, and build the package a clean run builds.
+The victim is a real process (``tests/fixtures/runtime/kill_mid_job.py``) that SIGKILLs itself at
+a chosen point (after a chunk commits, halfway through writing one, with one staged but not
+renamed, while the package is staged, before it is published), so no cleanup runs. The resumed
+job, in this process, must skip every chunk the victim committed, reuse its plans, and build the
+package a clean run builds; the workspace must hold no partial chunk.
 """
 
 import importlib.util
@@ -28,7 +30,7 @@ from neptune.store.workspace import Workspace
 pytestmark = pytest.mark.integration
 
 FIXTURES: Final = Path(__file__).parents[1] / "fixtures"
-VICTIM: Final = FIXTURES / "runtime" / "kill_after_chunks.py"
+VICTIM: Final = FIXTURES / "runtime" / "kill_mid_job.py"
 
 
 def _load(name: str) -> ModuleType:
@@ -44,7 +46,7 @@ FRAMELOG: Final = _load("framelog_adapter")
 
 
 def registry() -> AdapterRegistry:
-    """The victim's registry (``kill_after_chunks.registry``): the same adapters, same chunking."""
+    """The victim's registry (``kill_mid_job.registry``): the same adapters, same chunking."""
     return AdapterRegistry(
         [
             *builtin_adapters(),
@@ -68,10 +70,29 @@ def corpus(tmp_path: Path) -> Path:
     return root
 
 
-def kill_after(root: Path, home: Path, destination: Path, progress: Path, chunks: int) -> int:
+def kill_at(
+    root: Path, home: Path, destination: Path, progress: Path, point: str, count: int
+) -> int:
+    """Run the victim until it kills itself at the ``count``-th ``point``; its return code."""
     paths = [str(path) for path in (root, home, destination, progress)]
-    command = [sys.executable, str(VICTIM), *paths, str(chunks)]
+    command = [sys.executable, str(VICTIM), *paths, point, str(count)]
     return subprocess.run(command, check=False, timeout=180).returncode
+
+
+def whole_chunks(workspace: Workspace) -> set[str]:
+    """Every chunk committed in ``workspace``, each checked to be complete: no partial chunk."""
+    found = set()
+    for chunk in workspace.chunks():
+        directory = workspace.chunk_path(chunk)
+        assert sorted(p.name for p in directory.iterdir()) == [
+            "chunk.json",
+            "findings.jsonl",
+            "records.jsonl",
+            "runs",
+        ]
+        workspace.load(chunk)  # every file reads back
+        found.add(chunk)
+    return found
 
 
 def logged(progress: Path) -> list[JsonObject]:
@@ -103,7 +124,7 @@ def test_a_job_killed_mid_ingest_resumes_without_redoing_committed_chunks(
     corpus: Path, tmp_path: Path
 ) -> None:
     home, destination, progress = tmp_path / "home", tmp_path / "package", tmp_path / "events"
-    assert kill_after(corpus, home, destination, progress, chunks=5) == -signal.SIGKILL
+    assert kill_at(corpus, home, destination, progress, "committed", 5) == -signal.SIGKILL
     assert not destination.exists()
     before = logged(progress)
     killed = [logged_chunk(e) for e in before if e["kind"] == "chunk_committed"]
@@ -133,6 +154,47 @@ def test_a_job_killed_mid_ingest_resumes_without_redoing_committed_chunks(
     assert dict(envelope.durations).keys() == {str(phase) for phase in Phase}
     assert not envelope.root.endswith("/")  # the root as the host names it
     assert Workspace(home).clear_staging() >= 0  # whatever the kill left in staging is removable
+
+
+@pytest.mark.parametrize(
+    ("point", "count", "workspace_debris", "beside_debris"),
+    [
+        ("chunk-writing", 3, 1, 0),  # a run written into a chunk's staging; the rest not yet
+        ("chunk-staged", 4, 1, 0),  # a chunk staged whole and flushed, not renamed into chunks/
+        ("package-staging", 1, 0, 1),  # a series merged into the staged package beside it
+        ("before-publish", 1, 0, 1),  # the staged package with its envelope, not renamed
+    ],
+)
+def test_a_job_killed_inside_a_write_resumes_to_the_clean_package(
+    corpus: Path,
+    tmp_path: Path,
+    point: str,
+    count: int,
+    workspace_debris: int,
+    beside_debris: int,
+) -> None:
+    home, destination, progress = tmp_path / "home", tmp_path / "package", tmp_path / "events"
+    assert kill_at(corpus, home, destination, progress, point, count) == -signal.SIGKILL
+    assert not destination.exists()
+    killed = {logged_chunk(e) for e in logged(progress) if e["kind"] == "chunk_committed"}
+    workspace = Workspace(home)
+    assert whole_chunks(workspace) == killed  # what was committed is whole; nothing else is there
+    assert len(list((home / "staging").iterdir())) == workspace_debris
+    staged_beside = [p for p in tmp_path.iterdir() if p.name.startswith(".package.")]
+    assert len(staged_beside) == beside_debris  # a hidden sibling, never the destination
+    if point == "before-publish":  # killed between write_envelope and publish
+        staged = staged_beside[0]
+        assert read_envelope(staged).receipt == read_package(staged).manifest.receipt
+
+    seen: list[JobEvent] = []
+    outcome = IngestJob(corpus, destination, workspace, registry(), on_event=seen.append).run()
+    assert outcome.state is JobState.COMMITTED
+    assert killed <= chunks_of(seen, "chunk_skipped")
+    assert not killed & chunks_of(seen, "chunk_committed")
+    clean = IngestJob(corpus, tmp_path / "clean", Workspace(tmp_path / "other"), registry()).run()
+    assert outcome.package == clean.package == read_package(destination).id
+    assert whole_chunks(workspace) == whole_chunks(Workspace(tmp_path / "other"))
+    assert workspace.clear_staging() == workspace_debris  # the dead writer's lock is gone
 
 
 def test_a_job_interrupted_in_process_resumes_the_same_way(corpus: Path, tmp_path: Path) -> None:
