@@ -39,7 +39,8 @@ fmt: ## Format code and auto-fix lint findings
 > $(UV) run ruff check --fix .
 
 lint: adr-index-check ## Formatting, lint and ADR-index check without modifying files
-> @$(EACH) $(RUN) ruff format --check $$x . && $(RUN) ruff check $$x .; done
+# `set -e` ignores a failure on the left of `&&`, so each step exits explicitly.
+> @$(EACH) $(RUN) ruff format --check $$x . || exit 1; $(RUN) ruff check $$x . || exit 1; done
 
 type: ## Static type check (mypy --strict)
 > @$(EACH) $(RUN) mypy; done
