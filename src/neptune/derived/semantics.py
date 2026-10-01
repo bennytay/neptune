@@ -21,7 +21,7 @@ A candidate's confidence is its best rule's. The most confident candidate is the
 (``known``); two or more at the top are ``ambiguous`` and none is chosen; none is ``unknown``.
 Units by convention (REP 103: metres, radians, seconds) come only with ``known_type`` rules, for
 the fields that convention covers, as field paths (a path and everything below it); a joint's unit
-depends on whether it is revolute or prismatic, so joint states and trajectories get none.
+depends on whether it is revolute or prismatic, so joint states, trajectories and grippers get none.
 """
 
 import math
@@ -178,9 +178,8 @@ KNOWN_TYPES: Final[Mapping[str, KnownType]] = {
     "trajectory_msgs/MultiDOFJointTrajectory": _k(
         _S.JOINT_TRAJECTORY_COMMAND, "joint_names points"
     ),
-    "control_msgs/GripperCommand": _k(
-        _S.GRIPPER_COMMAND, "position max_effort", ("position", "m"), ("max_effort", "N")
-    ),
+    # a gripper's position is metres or radians, as its fingers slide or turn: no unit
+    "control_msgs/GripperCommand": _k(_S.GRIPPER_COMMAND, "position max_effort"),
     "ackermann_msgs/AckermannDrive": _k(
         _S.DRIVE_COMMAND, "steering_angle speed", ("steering_angle", "rad"), ("speed", "m/s")
     ),

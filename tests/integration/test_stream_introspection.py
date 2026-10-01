@@ -20,7 +20,14 @@ from neptune.derived.schemas import LayoutState, PathKind, SchemaLimits
 from neptune.derived.semantics import KNOWN_TYPE, KNOWN_TYPE_UNCHECKED, Semantic, SemanticState
 from neptune.model.knowledge import Known
 from neptune.model.provenance import ByteRange, EvidenceRef
-from neptune.sdk import Neptune, RunContents, StreamContents, Workspace, run_contents
+from neptune.sdk import (
+    InvalidRequestError,
+    Neptune,
+    RunContents,
+    StreamContents,
+    Workspace,
+    run_contents,
+)
 from neptune.store.package import read_package
 
 pytestmark = pytest.mark.integration
@@ -236,3 +243,29 @@ def test_the_driver_is_order_independent(ingested: tuple[Path, tuple[RunContents
         return None
 
     assert introspect(records, none) == introspect(list(reversed(records)), none)
+
+
+def test_a_parser_that_raises_costs_one_layout_not_the_job(
+    ingested: tuple[Path, tuple[RunContents, ...]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, runs = ingested
+    records = [s.stream for s in streams(runs)]
+
+    def boom(*_: object) -> None:
+        raise RecursionError("a parser bug")
+
+    monkeypatch.setattr("neptune.derived.introspection.parse_definition", boom)
+    found = introspect(records, lambda ref: b"x" * ref.locator[0].length)  # type: ignore[union-attr]
+    reasons = {line.problem.reason for line in found.layouts if line.problem is not None}
+    assert reasons <= {"parser_failed", "no_definition"} and "parser_failed" in reasons
+    assert "neptune.introspection.definition_malformed" in {f.code for f in found.findings}
+
+
+def test_asking_for_an_unknown_semantic_is_an_invalid_request(
+    ingested: tuple[Path, tuple[RunContents, ...]],
+) -> None:
+    _, runs = ingested
+    with pytest.raises(InvalidRequestError, match="not a semantic"):
+        runs[0].carrying("lidar")
+    with pytest.raises(InvalidRequestError):
+        streams(runs)[0].may_carry("IMU")

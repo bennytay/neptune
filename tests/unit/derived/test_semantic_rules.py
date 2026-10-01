@@ -225,3 +225,25 @@ def test_classification_is_deterministic() -> None:
     first = classified("telemetry/Combined", FIX + "float32 voltage\nfloat32 charge\n")
     assert first == classified("telemetry/Combined", FIX + "float32 voltage\nfloat32 charge\n")
     assert classify(None, LayoutState.UNKNOWN, None).candidates == ()
+
+
+def test_json_schema_axes_behind_references_still_have_a_pose_shape() -> None:
+    data = (
+        '{"$defs":{"axis":{"type":"number"},'
+        '"vec":{"type":"object","properties":{"x":{"$ref":"#/$defs/axis"},'
+        '"y":{"$ref":"#/$defs/axis"},"z":{"$ref":"#/$defs/axis"}}},'
+        '"quat":{"type":"object","properties":{"x":{"$ref":"#/$defs/axis"},'
+        '"y":{"$ref":"#/$defs/axis"},"z":{"$ref":"#/$defs/axis"},"w":{"$ref":"#/$defs/axis"}}}},'
+        '"type":"object","properties":{"position":{"$ref":"#/$defs/vec"},'
+        '"orientation":{"$ref":"#/$defs/quat"}}}'
+    )
+    assert top("arm.EndEffectorPose", data, "jsonschema")[:2] == ("pose", 0.6)
+
+
+def test_a_gripper_command_has_no_conventional_unit() -> None:
+    assert top("control_msgs/GripperCommand", "float64 position\nfloat64 max_effort\n")[:2] == (
+        "gripper_command",
+        0.9,
+    )
+    best = classified("control_msgs/GripperCommand", "float64 position\nfloat64 max_effort\n")
+    assert best.candidates[0].units == ()

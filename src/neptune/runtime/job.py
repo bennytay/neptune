@@ -1782,13 +1782,16 @@ class IngestJob:
         ranges are read, each through a verified reader; no message is decoded and no adapter
         called. A package with no stream gets no introspection, so no tables and no transform."""
         streams: list[Stream] = []
-        for content, transform in sorted(set(self._ingested)):
-            plan = self.workspace.load_plan(content, transform)
-            if plan is None:
-                continue  # staging refuses the package and says why
-            for chunk in plan.chunks:
-                output = self.workspace.load(str(chunk["id"]))
-                streams.extend(r for r in output.records if isinstance(r, Stream))
+        try:
+            for content, transform in sorted(set(self._ingested)):
+                plan = self.workspace.load_plan(content, transform)
+                if plan is None:
+                    continue  # staging refuses the package and says why
+                for chunk in plan.chunks:
+                    output = self.workspace.load(str(chunk["id"]))
+                    streams.extend(r for r in output.records if isinstance(r, Stream))
+        except (WorkspaceError, ValueError, OSError) as exc:
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
         if not streams:
             return None
         items = {item.content_id: item for item in self._sources}

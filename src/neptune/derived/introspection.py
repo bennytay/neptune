@@ -26,6 +26,7 @@ from neptune.derived.schemas import (
 )
 from neptune.derived.semantics import (
     SEMANTIC_KIND,
+    Classified,
     SemanticState,
     StreamSemantic,
     classify,
@@ -105,8 +106,20 @@ _FINDINGS: Final = {
     "invalid_utf8": ("definition_malformed", FindingCategory.UNREPRESENTABLE),
     "definition_unreadable": ("definition_unreadable", FindingCategory.MISSING),
     "definition_not_a_range": ("definition_unreadable", FindingCategory.UNSUPPORTED),
+    "composition_not_parsed": ("definition_not_covered", FindingCategory.UNSUPPORTED),
+    "parser_failed": ("definition_malformed", FindingCategory.FAILED),
 }
 _LIMIT: Final = ("definition_limit", FindingCategory.LIMIT)
+
+
+def _guarded_parse(encoding: str, name: str | None, data: bytes, limits: SchemaLimits) -> Parsed:
+    """``parse_definition``, with any exception it should never raise made a ``parser_failed``
+    problem: hostile bytes cost their stream's layout, never the job (non-negotiable 7)."""
+    try:
+        return parse_definition(encoding, name, data, limits)
+    except Exception as exc:
+        problem = Problem("parser_failed", f"the parser failed: {type(exc).__name__}")
+        return Parsed(LayoutState.UNKNOWN, problem=problem)
 
 
 class _Run:
@@ -198,7 +211,7 @@ class _Run:
                 )
                 result = Parsed(LayoutState.UNKNOWN, problem=problem)
             else:
-                result = parse_definition(encoding, name, data, limits)
+                result = _guarded_parse(encoding, name, data, limits)
         self.parsed[key] = result
         return result
 
@@ -261,7 +274,19 @@ class _Run:
         )
 
     def semantic(self, stream: Stream, layout: StreamLayout) -> StreamSemantic:
-        classified = classify(layout.schema_name, layout.state, layout.layout)
+        try:
+            classified = classify(layout.schema_name, layout.state, layout.layout)
+        except Exception as exc:  # a rule's bug costs this stream its semantic, not the job
+            classified = Classified(())
+            self.report(
+                "classification_failed",
+                FindingCategory.FAILED,
+                Severity.WARNING,
+                layout.definition or _declared_evidence(stream),
+                f"the semantic rules failed ({type(exc).__name__}); the semantic is unknown",
+                {"error": type(exc).__name__},
+                stream.id,
+            )
         evidence = [_declared_evidence(stream)]
         if layout.definition is not None and layout.state is LayoutState.KNOWN:
             evidence.insert(0, layout.definition)

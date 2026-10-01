@@ -48,13 +48,17 @@ and another follows it. A new canonical record kind or field would collide with 
    - `paths`: every path from the root, depth first in declaration order (`orientation.x`,
      `points[].positions[]`), each with its leaf type and why it ends. The endings are
      `primitive`, `unresolved` (the type is not defined), `recursive` (a cycle), `empty` and
-     `depth`. `truncated` says that more paths exist.
+     `depth` (the path has crossed `max_depth` nested message fields). `truncated` says that
+     more paths exist.
    - Parsed encodings:
      - `ros1msg` and `ros2msg`: `MSG:` sections, `pkg/msg/Name` ≡ `pkg/Name`, unqualified names
        resolved in the user's package, ROS 1 `Header` → `std_msgs/Header`, and string constants
        keeping their `#`.
-     - `jsonschema`: properties, items, `maxItems`, local `$ref`, and a property's `unit`
-       keyword.
+     - `jsonschema`: properties, items, `maxItems`, local `$ref` chains (also at the root, up
+       to 32 hops), and a property's `unit` keyword. `allOf`, `anyOf` and `oneOf` are not
+       parsed: a property using one ends `unresolved`, and a root using one is `unknown`
+       (`composition_not_parsed`). Text that canonical JSON cannot hold (lone surrogates) is
+       `invalid_utf8`.
    - `.msg` has no unit syntax, so a `.msg` field has no unit. Nothing is guessed from comments.
 3. **`stream_semantic`** (`neptune.derived.semantics`): one line per stream, `inferred`. Its
    `candidates` are listed most confident first. Each candidate has a confidence band (a ranking,
@@ -80,8 +84,8 @@ and another follows it. A new canonical record kind or field would collide with 
      - `unknown` when no rule fired.
    - Units come only from `known_type` rules, as field-path prefixes (REP 103: `m`, `m/s`,
      `rad/s`, `m/s2`, `V`, `A.h`, `deg`, `N`, `N.m`), stored as text and never converted. Joint
-     states and trajectories get none, because the unit depends on whether a joint is revolute
-     or prismatic.
+     states, trajectories and gripper commands get none, because the unit depends on whether a
+     joint is revolute or prismatic.
    - A definition that lacks a known type's fields contradicts its name. `known_type` does not
      fire, and the driver reports `neptune.introspection.type_contradicts_layout`.
 4. **In the job** (`neptune.derived.introspection.introspect`), at the start of `assemble`:
@@ -93,7 +97,10 @@ and another follows it. A new canonical record kind or field would collide with 
      64 MiB per package, 1024 types, 16384 fields, JSON nesting 64, path depth 32, 4096 paths.
      Every parser is iterative, and JSON nesting is checked before `json.loads`.
    - Findings:
-     - `definition_malformed`: corrupt or unrepresentable bytes, warning;
+     - `definition_malformed`: corrupt or unrepresentable bytes, or a parser that raised
+       (`parser_failed`, caught per definition), warning;
+     - `definition_not_covered`: a JSON Schema composition at the root, warning;
+     - `classification_failed`: a rule that raised, caught per stream, warning;
      - `definition_limit`: warning;
      - `definition_unreadable`: warning;
      - `encoding_not_covered`: unsupported, info;

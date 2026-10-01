@@ -235,7 +235,7 @@ def test_deep_nesting_stops_at_the_depth_limit() -> None:
     layout = known("ros2msg", "pkg/T0", chain(40), limits)
     (path,) = layout.paths
     assert path.kind is PathKind.DEPTH
-    assert path.path.count(".") == 7
+    assert path.path.count(".") == 8  # a path crosses at most max_depth message fields
     assert known("ros2msg", "pkg/T0", chain(5), limits).paths[0].kind is PathKind.PRIMITIVE
 
 
@@ -435,3 +435,72 @@ def test_limits_are_positive_integers() -> None:
         SchemaLimits(max_paths=0)
     with pytest.raises(ValueError):
         SchemaLimits(max_depth=True)
+
+
+def test_a_ros2_default_keeps_a_quoted_hash_and_drops_the_comment() -> None:
+    layout = known("ros2msg", "pkg/A", "string s \"a#b\"  # the comment\nstring t 'c#' #x\n")
+    root = layout.type("pkg/A")
+    assert root is not None
+    assert [f.default for f in root.fields] == ['"a#b"', "'c#'"]
+
+
+def test_a_max_depth_of_one_still_expands_root_fields() -> None:
+    layout = known("ros2msg", "pkg/T0", chain(3), SchemaLimits(max_depth=1))
+    assert [(p.path, p.kind) for p in layout.paths] == [("next.next", PathKind.DEPTH)]
+
+
+@pytest.mark.parametrize("token", ["\u00b2", "1" + "0" * 5000, "01x", ""])
+def test_hostile_pointer_tokens_leave_a_reference_unresolved(token: str) -> None:
+    document = '{"allOf":[{}],"properties":{"a":{"$ref":"#/allOf/' + token + '"}}}'
+    layout = known("jsonschema", "x", document)
+    assert [(p.path, p.kind) for p in layout.paths] == [("a", PathKind.UNRESOLVED)]
+
+
+def test_lone_surrogates_in_a_json_schema_are_unknown_not_a_failed_package() -> None:
+    for document in (
+        '{"properties":{"\\ud800":{"type":"number"}}}',
+        '{"properties":{"a":{"type":"number","unit":"\\udfff"}}}',
+        '{"properties":{"a":{"$ref":"#/\\ud800"}}}',
+    ):
+        parsed = parse_definition("jsonschema", "x", document.encode(), LIMITS)
+        assert parsed.problem is not None and parsed.problem.reason == "invalid_utf8", document
+
+
+def test_a_reference_to_a_primitive_is_that_primitive() -> None:
+    document = {
+        "definitions": {
+            "num": {"type": "number", "unit": "m"},
+            "alias": {"$ref": "#/definitions/num"},
+        },
+        "properties": {"x": {"$ref": "#/definitions/num"}, "y": {"$ref": "#/definitions/alias"}},
+    }
+    layout = known("jsonschema", "x", schema(document))
+    assert [(p.path, p.type, p.kind, p.unit) for p in layout.paths] == [
+        ("x", "number", PathKind.PRIMITIVE, "m"),
+        ("y", "number", PathKind.PRIMITIVE, "m"),
+    ]
+
+
+def test_a_reference_cycle_without_an_object_is_bounded() -> None:
+    document = {"a": {"$ref": "#/b"}, "b": {"$ref": "#/a"}, "properties": {"p": {"$ref": "#/a"}}}
+    layout = known("jsonschema", "x", schema(document))
+    assert [(p.path, p.kind) for p in layout.paths] == [("p", PathKind.UNRESOLVED)]
+
+
+def test_a_root_reference_is_followed_and_a_root_composition_is_not_parsed() -> None:
+    document = {
+        "$ref": "#/$defs/P",
+        "$defs": {"P": {"properties": {"x": {"type": "number"}, "q": {"properties": {}}}}},
+        "properties": {"q": {"type": "string"}},  # beside a root $ref: not the root's
+    }
+    layout = known("jsonschema", "pkg.P", schema(document))
+    assert [(p.path, p.kind) for p in layout.paths] == [
+        ("x", PathKind.PRIMITIVE),
+        ("q", PathKind.EMPTY),
+    ]
+    assert len({t.name for t in layout.types}) == len(layout.types)
+    composed = schema({"allOf": [{"properties": {"x": {"type": "number"}}}]})
+    parsed = parse_definition("jsonschema", "pkg.P", composed, LIMITS)
+    assert parsed.problem is not None and parsed.problem.reason == "composition_not_parsed"
+    nested = schema({"properties": {"c": {"oneOf": [{"type": "number"}, {"type": "string"}]}}})
+    assert known("jsonschema", "x", nested).paths[0].kind is PathKind.UNRESOLVED

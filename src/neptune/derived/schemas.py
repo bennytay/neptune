@@ -391,6 +391,20 @@ def _ros_type(
     return _canonical(base, line), False, array, bound
 
 
+def _uncommented(text: str) -> str:
+    """``text`` up to its first ``#`` outside a quoted default (``string s "a#b"``)."""
+    quote = None
+    for index, char in enumerate(text):
+        if quote is not None:
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+        elif char == "#":
+            return text[:index]
+    return text
+
+
 def _ros_field(text: str, package: str | None, ros2: bool, line: int) -> Field:
     parts = text.split(None, 1)
     if len(parts) < 2:
@@ -407,7 +421,7 @@ def _ros_field(text: str, package: str | None, ros2: bool, line: int) -> Field:
         if not value:
             raise _Malformed("malformed", f"constant {constant['name']} has no value", line)
         return Field(constant["name"], kind, True, None, bound, constant=value)
-    words = rest.split("#", 1)[0].split(None, 1)
+    words = _uncommented(rest).split(None, 1)
     if not words or not _NAME.fullmatch(words[0]):
         raise _Malformed("malformed", f"{rest[:40]!r} is not a field name", line)
     default = words[1].strip() if len(words) > 1 else None
@@ -494,16 +508,47 @@ def _pointer_token(name: str) -> str:
 
 def _resolve(root: Mapping[str, object], pointer: str) -> object:
     """The value at a local JSON pointer (``#/a/b``), or ``None`` when there is none."""
+    if pointer == "#":
+        return root
+    if not pointer.startswith("#/"):
+        return None
     node: object = root
-    for token in pointer[2:].split("/") if pointer != "#" else ():
+    for token in pointer[2:].split("/"):
         token = token.replace("~1", "/").replace("~0", "~")
         if isinstance(node, Mapping) and token in node:
             node = node[token]
-        elif isinstance(node, list) and token.isdigit() and int(token) < len(node):
+        elif (
+            isinstance(node, list)
+            and token.isascii()
+            and token.isdigit()
+            and len(token) <= _DIGITS
+            and int(token) < len(node)
+        ):
             node = node[int(token)]
         else:
             return None
     return node
+
+
+_COMPOSITION: Final = ("allOf", "anyOf", "oneOf")
+_REF_HOPS: Final = 32  # ``$ref`` to ``$ref`` …: a chain longer than this is left unresolved
+
+
+def _json_text(value: str, what: str) -> str:
+    """``value`` if it is text canonical JSON can hold: ``json.loads`` lets lone surrogates
+    (``"\\ud800"``) through, which no UTF-8 line can carry."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise _Malformed("invalid_utf8", f"a {what} is not valid Unicode") from None
+    return value
+
+
+def _is_object(schema: Mapping[str, object]) -> bool:
+    kind = schema.get("type")
+    if isinstance(kind, list):
+        kind = next((k for k in kind if isinstance(k, str) and k != "null"), None)
+    return kind == "object" or (kind is None and isinstance(schema.get("properties"), Mapping))
 
 
 def _parse_json_schema(text: str, root_name: str, limits: SchemaLimits) -> list[MessageType]:
@@ -516,41 +561,57 @@ def _parse_json_schema(text: str, root_name: str, limits: SchemaLimits) -> list[
     if not isinstance(document, Mapping):
         raise _Malformed("malformed", "a JSON Schema is an object")
     names: dict[int, str] = {}  # each object schema visited, by identity, to its type name
-    pending: list[tuple[str, Mapping[str, object]]] = []
+    # (type name, schema, the schema's own JSON pointer): a type is named by its pointer, the
+    # root by the stream's type name
+    pending: list[tuple[str, Mapping[str, object], str]] = []
     types: list[MessageType] = []
     count = 0
 
-    def name_of(schema: Mapping[str, object], name: str) -> str:
+    def name_of(schema: Mapping[str, object], name: str, pointer: str | None = None) -> str:
         if id(schema) not in names:
             if len(names) >= limits.max_types:
                 raise _Malformed("type_limit", f"more than {limits.max_types} types")
             names[id(schema)] = name
-            pending.append((name, schema))
+            pending.append((name, schema, pointer or name))
         return names[id(schema)]
+
+    def target(schema: Mapping[str, object]) -> tuple[Mapping[str, object] | None, str | None]:
+        """The schema a ``$ref`` chain ends at (or ``schema``), and the last pointer followed;
+        ``None`` for a remote, missing or too long chain."""
+        pointer = None
+        for _ in range(_REF_HOPS):
+            ref = schema.get("$ref")
+            if not isinstance(ref, str):
+                return schema, pointer
+            pointer = _json_text(ref, "$ref")
+            found = _resolve(document, pointer)
+            if not isinstance(found, Mapping):
+                return None, pointer
+            schema = found
+        return None, pointer
 
     def field(name: str, schema: object, pointer: str, array: bool = False) -> Field:
         if not isinstance(schema, Mapping):
             return Field(name, "any", True)
         unit = schema.get("unit")
-        unit = unit if isinstance(unit, str) else None
-        ref = schema.get("$ref")
-        if isinstance(ref, str):
-            target = _resolve(document, ref) if ref.startswith("#") else None
-            if isinstance(target, Mapping):
-                return Field(name, name_of(target, ref), False, unit=unit)
-            return Field(name, ref, False, unit=unit)
-        kind = schema.get("type")
-        if isinstance(kind, list) and all(isinstance(k, str) for k in kind):
-            text_kinds = [k for k in kind if isinstance(k, str)]
-            if set(text_kinds) <= _JSON_PRIMITIVES:
-                return Field(name, "|".join(text_kinds), True, unit=unit)
-            kind = next((k for k in text_kinds if k != "null"), None)
-        if kind == "object" or (kind is None and isinstance(schema.get("properties"), Mapping)):
-            return Field(name, name_of(schema, pointer), False, unit=unit)
+        unit = _json_text(unit, "unit") if isinstance(unit, str) else None
+        resolved, ref = target(schema)
+        if resolved is None:  # an unresolved reference: a type this definition does not hold
+            return Field(name, ref or "any", False, unit=unit)
+        if ref is not None:
+            pointer = ref
+            other = resolved.get("unit")
+            unit = unit or (_json_text(other, "unit") if isinstance(other, str) else None)
+        kind = resolved.get("type")
+        if isinstance(kind, list) and kind and all(isinstance(k, str) for k in kind):
+            if set(kind) <= _JSON_PRIMITIVES:
+                return Field(name, "|".join(kind), True, unit=unit)
+            kind = next((k for k in kind if k != "null"), None)
+        if _is_object(resolved):
+            return Field(name, name_of(resolved, pointer), False, unit=unit)
         if kind == "array" and not array:
-            items = schema.get("items")
-            inner = field(name, items, pointer + "/items", array=True)
-            limit = schema.get("maxItems")
+            inner = field(name, resolved.get("items"), pointer + "/items", array=True)
+            limit = resolved.get("maxItems")
             shape = (
                 Array(ArrayKind.BOUNDED, limit)
                 if isinstance(limit, int) and not isinstance(limit, bool) and limit >= 0
@@ -559,22 +620,33 @@ def _parse_json_schema(text: str, root_name: str, limits: SchemaLimits) -> list[
             return Field(name, inner.type, inner.primitive, shape, unit=inner.unit or unit)
         if isinstance(kind, str) and (kind in _JSON_PRIMITIVES or kind == "array"):
             return Field(name, kind, True, unit=unit)
+        if kind is None and any(key in resolved for key in _COMPOSITION):
+            return Field(name, "composition", False, unit=unit)  # not parsed: unresolved
         return Field(name, "any", True, unit=unit)
 
-    name_of(document, root_name)
+    root, root_pointer = target(document)
+    if root is None or not _is_object(root):
+        composed = root is not None and any(key in root for key in _COMPOSITION)
+        raise _Malformed(
+            "composition_not_parsed" if composed else "malformed",
+            "the root schema is a composition (allOf, anyOf, oneOf), which is not parsed"
+            if composed
+            else "the root schema is not an object schema",
+        )
+    name_of(root, root_name, root_pointer or "#")
     done = 0
     while done < len(pending):
-        name, schema = pending[done]
+        name, schema, pointer = pending[done]
         done += 1
         properties = schema.get("properties", {})
         if not isinstance(properties, Mapping):
             raise _Malformed("malformed", f"{name}'s properties are not an object")
-        pointer = "#" if name == root_name else name
         fields = []
         for key, value in properties.items():
             count += 1
             if count > limits.max_fields:
                 raise _Malformed("field_limit", f"more than {limits.max_fields} fields")
+            key = _json_text(key, "property name")
             fields.append(field(key, value, f"{pointer}/properties/{_pointer_token(key)}"))
         types.append(MessageType(name, tuple(fields)))
     return types
@@ -618,7 +690,7 @@ def flatten(root: str, types: Iterable[MessageType], limits: SchemaLimits) -> La
             ending = PathKind.RECURSIVE
         elif not any(f.constant is None for f in by_name[field.type].fields):
             ending = PathKind.EMPTY
-        elif depth + 1 >= limits.max_depth:
+        elif depth >= limits.max_depth:
             ending = PathKind.DEPTH
         if ending is None:
             inner = by_name[field.type]

@@ -25,8 +25,16 @@ from neptune.derived.sessions import read_derived
 from neptune.model.ids import RecordId
 from neptune.model.knowledge import Known
 from neptune.model.run import Run, Stream
-from neptune.sdk.errors import PackageInvalidError
+from neptune.sdk.errors import InvalidRequestError, PackageInvalidError
 from neptune.store.package import IngestPackage
+
+
+def _semantic(value: Semantic | str) -> Semantic:
+    try:
+        return Semantic(value)
+    except ValueError:
+        known = ", ".join(str(s) for s in Semantic)
+        raise InvalidRequestError(f"{value!r} is not a semantic; one of: {known}") from None
 
 
 def _text(knowledge: object) -> str | None:
@@ -84,14 +92,15 @@ class StreamContents:
 
     def carries(self, semantic: Semantic | str) -> bool:
         """Whether the stream's inferred semantic is ``semantic`` (``known`` only)."""
-        return self.semantic is not None and self.semantic.semantic == Semantic(semantic)
+        wanted = _semantic(semantic)
+        return self.semantic is not None and self.semantic.semantic == wanted
 
     def may_carry(self, semantic: Semantic | str) -> bool:
         """Whether ``semantic`` is the stream's semantic or ties for it (``ambiguous``)."""
+        wanted = _semantic(semantic)
         if self.semantic is None or not self.semantic.candidates:
             return False
         top = self.semantic.candidates[0].confidence
-        wanted = Semantic(semantic)
         return any(c.semantic == wanted and c.confidence == top for c in self.semantic.candidates)
 
 
@@ -115,6 +124,7 @@ class RunContents:
     ) -> tuple[StreamContents, ...]:
         """The streams inferred to carry ``semantic``; with ``ambiguous``, also those where it
         ties with another reading."""
+        semantic = _semantic(semantic)
         test = StreamContents.may_carry if ambiguous else StreamContents.carries
         return tuple(s for s in self.streams if test(s, semantic))
 
