@@ -37,7 +37,6 @@ from neptune.adapters.mcap.ingest import (
 )
 from neptune.adapters.mcap.ranges import CHANNEL_ID, index_counts, skipped
 from neptune.adapters.mcap.records import (
-    INT64_MAX,
     MAGIC,
     MESSAGE_FIELDS,
     RECORD_HEADER,
@@ -69,6 +68,7 @@ from neptune.model.jsonvalue import JsonValue
 from neptune.model.knowledge import Knowledge, Known, NotApplicable, Unknown
 from neptune.model.provenance import Row
 from neptune.model.series import SEQ, SeriesBatch, SeriesColumn, locator_column, state_column
+from neptune.model.time import INT64_MAX
 from neptune.model.world import CellValue, StructuredRecord, StructuredTable
 
 if TYPE_CHECKING:

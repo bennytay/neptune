@@ -13,7 +13,6 @@ from typing import Final
 from neptune.adapters.contract import AdapterConfig, Chunk, ChunkOutput, SourceReader
 from neptune.adapters.mcap.records import (
     CHANNEL_COUNT_ENTRY,
-    INT64_MAX,
     MAGIC,
     MESSAGE_ENCODINGS,
     RECORD_HEADER,
@@ -70,7 +69,7 @@ from neptune.model.series import (
     time_column,
     value_column,
 )
-from neptune.model.time import NANOSECOND, ClockRole, Timestamp
+from neptune.model.time import INT64_MAX, NANOSECOND, ClockRole, Timestamp
 
 TIME_FIELD: Final = "mcap:time_field"
 MAGIC_PLACE: Final = Place(((0, len(MAGIC)),))
@@ -129,8 +128,10 @@ class Cite:
     def evidence(self, place: Place, *more: Locator) -> EvidenceRef:
         return EvidenceRef(self.source.content_id, (*place.locator(), *more))
 
-    def provenance(self, place: Place, *more: Locator) -> Provenance:
-        return Provenance(self.evidence(place, *more), self.transform.id, AssertionKind.OBSERVED)
+    def provenance(
+        self, place: Place, *more: Locator, kind: AssertionKind = AssertionKind.OBSERVED
+    ) -> Provenance:
+        return Provenance(self.evidence(place, *more), self.transform.id, kind)
 
     def record_id(self, kind: str, place: Place, *more: Locator) -> RecordId:
         return evidence_record_id(kind, self.evidence(place, *more), self.transform)
@@ -319,7 +320,7 @@ class Declarations:
             field_place = place.within(RECORD_HEADER + at, 8)
             tick = ticks(value)
             if tick is None:
-                found.append(Unknown(self.cite.provenance(field_place)))
+                found.append(Unknown(self.cite.provenance(field_place, kind=AssertionKind.STATED)))
                 self.finding(
                     "time_out_of_range",
                     FindingCategory.UNREPRESENTABLE,
@@ -330,9 +331,8 @@ class Declarations:
                     {"field": name, "value": value},
                 )
             else:
-                found.append(
-                    Known(Timestamp(tick, self.cite.log_time), self.cite.provenance(field_place))
-                )
+                stated = self.cite.provenance(field_place, kind=AssertionKind.STATED)
+                found.append(Known(Timestamp(tick, self.cite.log_time), stated))
         return found[0], found[1]
 
     def _stream(
@@ -385,7 +385,7 @@ class Declarations:
         count: Knowledge[int] = Unknown()
         if channel_id in counts:
             value, entry = counts[channel_id]
-            count = Known(value, cite.provenance(entry))
+            count = Known(value, cite.provenance(entry, kind=AssertionKind.STATED))
         stream = Stream(
             id=ids.stream,
             provenance=cite.provenance(place),

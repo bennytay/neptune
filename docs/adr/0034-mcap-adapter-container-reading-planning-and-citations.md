@@ -47,7 +47,8 @@ costs a full pass. The model is frozen (ADR 0023): no new fields, no new record 
    - One `Stream` per channel: topic, message encoding and metadata verbatim; schema name and
      encoding citing the Schema record, the definition as the exact bytes of its `data`;
      `KnownAbsent` (the specification) for schema id 0; `message_count` from the Statistics
-     map entry it cites, else `Unknown`; `first`/`last` `Unknown` (no per-channel extent is
+     map entry it cites, else `Unknown`; it, like the run's `first`/`last`, is `stated`: the
+     writer's claim about records elsewhere, which only the indexed plan cross-checks; `first`/`last` `Unknown` (no per-channel extent is
      declared). A blank or non-UTF-8 string is `Unknown` with a finding, never a replacement
      character; a repeated metadata key is left out with a finding.
    - A channel or schema is cited at its record in a usable summary, else at its first record in
@@ -113,7 +114,8 @@ costs a full pass. The model is frozen (ADR 0023): no new fields, no new record 
    of its message order (no gaps in `seq`), and the chunk gets a `chunk_truncated` finding (bytes
    decoded, bytes whose records are whole, bytes declared; the CRC cannot be checked); cut after
    its data, it loses only the summary (a warning). Every length is checked against its record before
-   anything is read or allocated; `max_chunk_bytes` (256 MiB, config) bounds a chunk or record.
+   anything is read or allocated; `max_chunk_bytes` (256 MiB, config) bounds a chunk or record; it cannot be raised above 256 MiB
+   (a `ConfigError`), because the adapter's declared memory is sized for that.
 8. **Selection by topic and time** is config, so it is lineage: `topic_pattern` (a regular
    expression a whole topic must match; empty selects all) and an inclusive `log_time` window.
    Unselected messages keep their `seq` and get no row; every stream is still declared, with a
@@ -125,7 +127,11 @@ costs a full pass. The model is frozen (ADR 0023): no new fields, no new record 
    sorted by `log_time`, Parquet row groups) and reach any message's bytes through its locator.
 9. **Inspect** reads the head, the footer and the summary only, and reports the header, summary
    state, statistics, schemas, channels with their declared counts, chunk totals and each
-   channel's extent at chunk granularity, attachments, metadata, and whether planning is indexed.
+   channel's extent at chunk granularity, attachments, metadata, and whether the summary carries a
+   chunk index (`planning: "indexed"`; `plan` uses it only once it passes its checks, §5, and
+   scans otherwise, which inspect does not tell, as the checks read the data section). Each list
+   holds its first 1,000 entries and an `<name>_omitted` count, so a hostile summary cannot push
+   the reply past the sandbox's cap.
 
 ## Alternatives considered
 

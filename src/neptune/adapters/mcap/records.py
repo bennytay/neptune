@@ -28,14 +28,13 @@ TAIL: Final = FOOTER_RECORD + len(MAGIC)  # the footer record and the closing ma
 FOOTER_CRC_SPAN: Final = RECORD_HEADER + 16  # the footer bytes the summary CRC covers
 MESSAGE_FIELDS: Final = 22  # channel_id u16, sequence u32, log_time u64, publish_time u64
 MESSAGE_RECORD: Final = RECORD_HEADER + MESSAGE_FIELDS  # the smallest whole Message record
+MAX_CHUNK_BYTES_CEILING: Final = 256 * 1024 * 1024  # what the adapter's memory is declared for
 MESSAGE_INDEX_ENTRY: Final = 16  # log_time u64, offset u64
 CHANNEL_COUNT_ENTRY: Final = 10  # channel_id u16, count u64
-INT64_MAX: Final = 2**63 - 1
 
 # Statistics content offsets of the fields a citation names (spec: Statistics record).
 STATISTICS_START_TIME: Final = 26
 STATISTICS_END_TIME: Final = 34
-STATISTICS_COUNTS: Final = 42
 
 # The registry of well-known encodings in the MCAP specification's appendix.
 MESSAGE_ENCODINGS: Final = frozenset({"cbor", "cdr", "flatbuffer", "json", "protobuf", "ros1"})
@@ -130,9 +129,9 @@ class Fields:
     def u64(self) -> int:
         return self._unpack("<Q", 8)
 
-    def blob(self, width: int = 4) -> tuple[int, int]:
+    def blob(self) -> tuple[int, int]:
         """A length-prefixed byte field: where its bytes start and how many there are."""
-        length = self.u32() if width == 4 else self.u64()
+        length = self.u32()
         return self.take(length), length
 
     def text(self) -> Text:
@@ -194,9 +193,6 @@ def parse_schema(content: bytes) -> Schema:
     schema_id = fields.u16()
     name, encoding = fields.text(), fields.text()
     return Schema(schema_id, name, encoding, fields.blob())
-
-
-SCHEMA_HEAD: Final = 2 + 4  # id and the name's length: what is read before the name
 
 
 @dataclass(frozen=True)
@@ -428,10 +424,6 @@ class MetadataIndex:
 def parse_metadata_index(content: bytes) -> MetadataIndex:
     fields = Fields(content)
     return MetadataIndex(fields.u64(), fields.u64(), fields.text())
-
-
-def parse_data_end(content: bytes) -> int:
-    return Fields(content).u32()
 
 
 # --- Records inside a chunk ---------------------------------------------------------------------

@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING, Final
 from neptune.adapters.contract import SourceReader
 from neptune.adapters.mcap.layout import DATA_START, Declared, Directory, Summary, Tail
 from neptune.adapters.mcap.records import (
-    INT64_MAX,
     MESSAGE_FIELDS,
     MESSAGE_INDEX_ENTRY,
     RECORD_HEADER,
@@ -54,6 +53,7 @@ from neptune.adapters.mcap.scan import (
     scan,
 )
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
+from neptune.model.time import INT64_MAX
 
 if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonValue
@@ -365,7 +365,6 @@ class _Scan:
     directory: Directory
     findings: list[IngestFinding] = field(default_factory=list)
     chunks: bool = False
-    digests: dict[tuple[int, int], tuple[bytes, Place]] = field(default_factory=dict)
     # Top-level messages: per channel the count and first place; malformed and late times.
     top: Counter[int] = field(default_factory=Counter)
     top_first: dict[int, Place] = field(default_factory=dict)

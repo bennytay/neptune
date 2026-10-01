@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from neptune.adapters.contract import AdapterConfig, ConfigError, SourceReader
-from neptune.adapters.mcap.records import Text
+from neptune.adapters.mcap.records import MAX_CHUNK_BYTES_CEILING, Text
 from neptune.adapters.mcap.scan import Place
 from neptune.identity.findings import ingest_finding
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
@@ -56,6 +56,11 @@ def selection(config: AdapterConfig) -> Selection:
     start, end = config.integer("log_time_start"), config.integer("log_time_end")
     if not 0 <= start <= end <= LOG_TIME_MAX:
         raise ConfigError(f"log_time_start and log_time_end are 0 <= start <= end < 2^64: {start}")
+    limit = config.integer("max_chunk_bytes")
+    if not 1 <= limit <= MAX_CHUNK_BYTES_CEILING:
+        # The adapter declares memory for chunks of at most the ceiling; a larger one would be
+        # killed by the sandbox and lose its whole planned chunk instead of one finding.
+        raise ConfigError(f"max_chunk_bytes is 1 <= n <= {MAX_CHUNK_BYTES_CEILING}: {limit}")
     return Selection(pattern, start, end)
 
 

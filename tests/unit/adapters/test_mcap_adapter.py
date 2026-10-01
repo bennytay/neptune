@@ -27,7 +27,7 @@ from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.mcap import DESCRIPTOR, McapAdapter
 from neptune.discovery.reader import BytesReader
 from neptune.identity import canonical_json
-from neptune.model.knowledge import Known, KnownAbsent, NotApplicable, Unknown
+from neptune.model.knowledge import AssertionKind, Known, KnownAbsent, NotApplicable, Unknown
 from neptune.model.provenance import ByteRange, EvidenceRef, Provenance, Row
 from neptune.model.reference import TimestampDomain
 from neptune.model.run import Run, Stream
@@ -476,3 +476,29 @@ def test_a_window_outside_a_chunk_never_decompresses_it() -> None:
 def test_a_pattern_that_is_not_a_regular_expression_is_a_config_error() -> None:
     with pytest.raises(ConfigError):
         run(fixture("robot.mcap"), topic_pattern="(")
+
+
+def test_a_chunk_limit_above_what_the_adapter_declares_memory_for_is_a_config_error() -> None:
+    for limit in (0, (256 << 20) + 1):
+        with pytest.raises(ConfigError):
+            run(fixture("robot.mcap"), max_chunk_bytes=limit)
+    assert run(fixture("robot.mcap"), max_chunk_bytes=256 << 20).config.transform.id
+
+
+def test_what_the_statistics_state_is_stated_not_observed() -> None:
+    (run_record,) = of(ROBOT, Run)
+    for knowledge in (run_record.first, run_record.last):
+        assert knowledge.provenance.assertion_kind is AssertionKind.STATED
+    for stream in of(ROBOT, Stream):
+        assert stream.message_count.provenance.assertion_kind is AssertionKind.STATED
+
+
+def test_inspect_lists_at_most_a_bounded_number_of_entries_per_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("neptune.adapters.mcap.summary.MAX_LISTED", 2)
+    result = McapAdapter().inspect(BytesReader(fixture("robot.mcap")), configure(DESCRIPTOR))
+    summary: Any = result.summary
+    assert len(summary["channels"]) == 2 and summary["channels_omitted"] == 2
+    assert len(summary["schemas"]) == 2 and summary["schemas_omitted"] == 1
+    assert len(summary["attachments"]) == 1 and "attachments_omitted" not in summary

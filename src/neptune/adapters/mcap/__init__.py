@@ -50,6 +50,7 @@ from neptune.adapters.mcap.planning import make_plan
 from neptune.adapters.mcap.records import (
     FORMAT_VERSION,
     MAGIC,
+    MAX_CHUNK_BYTES_CEILING,
     RECORD_HEADER,
     FieldError,
     Opcode,
@@ -61,7 +62,7 @@ from neptune.adapters.mcap.summary import summarize
 
 DEFAULT_CHUNK_BYTES: Final = 64 * 1024 * 1024
 DEFAULT_MAX_ROWS: Final = 100_000
-DEFAULT_MAX_CHUNK_BYTES: Final = 256 * 1024 * 1024
+DEFAULT_MAX_CHUNK_BYTES: Final = MAX_CHUNK_BYTES_CEILING
 # The decompressors, as installed: how far each gets into a chunk cut short, and what it makes of
 # a chunk without a CRC, become rows, so their versions are part of the transform and of every
 # cache key (ADR 0034 §1, ADR 0031).
@@ -94,7 +95,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ConfigOption(
             "max_chunk_bytes",
             DEFAULT_MAX_CHUNK_BYTES,
-            "a chunk or record declaring more stored or uncompressed bytes is not read",
+            "a chunk or record declaring more stored or uncompressed bytes is not read; at most"
+            " 256 MiB, the memory the adapter declares",
         ),
         ConfigOption(
             "topic_pattern",

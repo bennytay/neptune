@@ -38,6 +38,17 @@ def _indexed(summary: Summary) -> JsonObject:
     return out
 
 
+# A hostile summary can hold a million tiny index records; the reply lists the first of each kind
+# and counts the rest, so it stays inside the sandbox's reply cap.
+MAX_LISTED = 1000
+
+
+def _listed(out: dict[str, JsonValue], name: str, items: list[JsonValue]) -> None:
+    out[name] = items[:MAX_LISTED]
+    if len(items) > MAX_LISTED:
+        out[f"{name}_omitted"] = len(items) - MAX_LISTED
+
+
 def _declared(summary: Summary) -> JsonObject:
     counts = {}
     statistics: dict[str, JsonValue] | None = None
@@ -67,7 +78,14 @@ def _declared(summary: Summary) -> JsonObject:
             entry["message_count"] = counts[channel_id]
         channels.append(entry)
     out: dict[str, JsonValue] = {
-        "attachments": [
+        "chunks": _indexed(summary),
+        "records": dict(sorted(summary.records.items())),
+    }
+    _listed(out, "channels", channels)
+    _listed(
+        out,
+        "attachments",
+        [
             {
                 "bytes": index.data_size,
                 "create_time": index.create_time,
@@ -78,14 +96,19 @@ def _declared(summary: Summary) -> JsonObject:
             }
             for _, index in summary.attachment_indexes
         ],
-        "channels": channels,
-        "chunks": _indexed(summary),
-        "metadata": [
+    )
+    _listed(
+        out,
+        "metadata",
+        [
             {"length": index.length, "name": index.name.shown, "offset": index.offset}
             for _, index in summary.metadata_indexes
         ],
-        "records": dict(sorted(summary.records.items())),
-        "schemas": [
+    )
+    _listed(
+        out,
+        "schemas",
+        [
             {
                 "bytes": schema.data[1],
                 "encoding": schema.encoding.shown,
@@ -94,7 +117,7 @@ def _declared(summary: Summary) -> JsonObject:
             }
             for schema_id, (_, schema) in sorted(summary.schemas.items())
         ],
-    }
+    )
     if statistics is not None:
         out["statistics"] = statistics
     return out
@@ -122,6 +145,7 @@ def summarize(source: SourceReader, config: AdapterConfig) -> InspectResult:
         header = head.header[1]
         out["header"] = {"library": header.library.shown, "profile": header.profile.shown}
     tail = read_tail(source)
+    # "indexed" means the summary carries a chunk index; plan uses it only once it passes its checks
     planning = "scan"
     if tail.footer is None:
         out["summary"] = "no footer"
