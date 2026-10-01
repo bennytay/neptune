@@ -484,10 +484,12 @@ class Subprocess:
         self, status: int, cpu: float, killed: Limit | None, data: bytes, codec: Codec[T]
     ) -> Outcome[T]:
         limits = self.limits
+        if killed is not None:
+            # Whatever the status: a reply found too long only after the child exited, or a
+            # deadline passed as it exited, is the limit, every time, not a decoded reply.
+            return Exceeded(killed, limits.value(killed))
         if os.WIFSIGNALED(status):
             signum = os.WTERMSIG(status)
-            if signum == signal.SIGKILL and killed is not None:
-                return Exceeded(killed, limits.value(killed))
             if signum == signal.SIGXCPU or (signum == signal.SIGKILL and cpu >= limits.cpu_seconds):
                 return Exceeded(Limit.CPU, limits.cpu_seconds)
             return Crashed(signal=_signal_name(signum))

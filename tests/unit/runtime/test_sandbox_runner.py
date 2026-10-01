@@ -239,6 +239,12 @@ def test_a_reply_larger_than_the_memory_limit_is_refused() -> None:
     inherited = b"x" * (80 * MIB)  # mapped before the fork: the child adds nothing to send it
     assert small.call(lambda: inherited, RAW) == Exceeded(Limit.REPLY, 64 * MIB)
     assert small.call(lambda: inherited[: 60 * MIB], RAW) == Returned(inherited[: 60 * MIB])
+    # One byte over: the excess may still sit in the pipe when the child exits, and is the limit
+    # every time, never a decoded reply.
+    over = inherited[: 64 * MIB + 1]
+    assert {small.call(lambda: over, RAW) for _ in range(5)} == {Exceeded(Limit.REPLY, 64 * MIB)}
+    exact = inherited[: 64 * MIB]
+    assert small.call(lambda: exact, RAW) == Returned(exact)
 
 
 def test_outcomes_are_deterministic(box: Subprocess) -> None:
