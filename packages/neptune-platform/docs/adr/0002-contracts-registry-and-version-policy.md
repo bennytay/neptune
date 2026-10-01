@@ -138,9 +138,13 @@ are stored, versioned, checked and announced.
   This is accepted for auditability. Revisit if the registry grows past a few MB.
 - Golden files are regenerated only by `bump`. If the worked examples change without a schema
   change, the published goldens stay as they were, and they must still validate.
-- The CI wiring of each consumer's `contracts check` job arrives with the package template
-  (MVL-122) and each package scaffold. The integration harness (MVL-123) runs `check --all` in
-  the merge queue.
+- CI runs `make contracts-check PKG=<name>` in every package job:
+  - The compiler job applies the owner rule.
+  - Each member job applies the owner rule, then `check --package <name>`.
+
+  Each member therefore needs a `[<name>]` section in `contracts/lock.toml`, left empty if it
+  consumes nothing. Without `PKG`, the target also runs `check --all`. The integration harness
+  (MVL-123) runs `check --all` in the merge queue.
 - Revisit if a contract needs a non-JSON-Schema artefact (for example a protobuf or an HTTP
   OpenAPI document). The layout already allows extra files in a version directory, but `check`
   validates only JSON Schema.
