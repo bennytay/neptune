@@ -142,7 +142,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         _code(
             "index_mismatch",
             "the index disagrees with the data: an Index Data record, a chunk's times (warning),"
-            " a chunk not where indexed or not indexed, whose messages have no rows (error)",
+            " a chunk not where indexed, or chunks the index or plan does not list, whose messages"
+            " have no rows (error)",
         ),
         _code(
             "invalid_utf8",
@@ -179,7 +180,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         _code(
             "too_many_records",
             "a chunk holds more records than max_chunk_bytes / 46, more than a chunk of messages"
-            " within the limit can; the rest is not read (limit, error)",
+            " within the limit can, or a scanned bag holds over 1,000,000 chunks; the rest is not"
+            " read or planned (limit, error)",
         ),
         _code(
             "topic_mismatch",

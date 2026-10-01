@@ -77,7 +77,8 @@ stated.
      for `index_pos` 0, a bag that was never closed; `warning` otherwise) and the bag is scanned.
    - *Scanned*: every top-level record visited once, every chunk decompressed once, to find the
      connections (the first declaration in file order) and count the messages. That is the price of
-     a bag never closed, cut short, or with an index that lies.
+     a bag never closed, cut short, or with an index that lies. A scan plans at most 1,000,000
+     chunks (a `too_many_records` finding after that); a chunk no unit starts at has no rows.
    - The data section is cut into ranges of whole *units* (a chunk and what follows up to the next
      chunk) of at most `chunk_bytes` (64 MiB) and `max_rows` (100,000) messages, constructor
      arguments. A chunk with more messages is read by several planned chunks, each emitting one
@@ -89,7 +90,7 @@ stated.
    grouped; a message past its chunk's count has no row and the chunk gets a
    `message_count_mismatch` finding, so `seq` ranges never overlap whatever an index claims. Every
    unit starts at its listed chunk or is skipped with an `index_mismatch` finding; a chunk the index
-   does not list gets no rows and the same finding. Findings are made once per unit by the planned
+   does not list gets no rows and the same finding, counted once per unit. Findings are made once per unit by the planned
    chunk that starts at it; the plan makes the ones about the whole source.
 7. **Integrity and recovery.** A bag has no checksums, so a chunk is checked by its framing: it
    must decompress to exactly its declared `size`, and its records must frame exactly. A chunk
