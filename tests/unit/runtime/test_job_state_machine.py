@@ -183,7 +183,7 @@ def test_options_are_checked_before_any_work(root: Path, tmp_path: Path) -> None
     with pytest.raises(JobError, match="non-empty text"):
         JobOptions(job="")
     with pytest.raises(JobError, match="not registered"):
-        IngestJob(root, tmp_path / "p", home, registry, JobOptions(config={"mcap": {}}))
+        IngestJob(root, tmp_path / "p", home, registry, JobOptions(config={"no_such_adapter": {}}))
     with pytest.raises(JobError, match="no options"):
         IngestJob(root, tmp_path / "p", home, registry, JobOptions(config={"text": {"x": 1}}))
     with pytest.raises(JobError, match="block_rule"):
