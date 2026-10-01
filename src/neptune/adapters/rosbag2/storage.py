@@ -38,7 +38,6 @@ from neptune.adapters.rosbag2._sqlite import (
     HEADER_SIZE,
     Cell,
     Database,
-    Problem,
     SchemaEntry,
     SqliteError,
     Walk,
@@ -46,6 +45,7 @@ from neptune.adapters.rosbag2._sqlite import (
     int_value,
     read_schema,
     record_fields,
+    rowid_alias,
     text_value,
 )
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
@@ -135,6 +135,8 @@ def find_layout(schema: list[SchemaEntry]) -> Layout | None:
     message_columns = _columns(messages, MESSAGE_REQUIRED)
     if topic_columns is None or message_columns is None:
         return None
+    if rowid_alias(topics.sql) != "id":
+        return None  # messages name a topic by its rowid; `id` must be that rowid
     definitions = by_name.get("message_definitions")
     definition_columns = _columns(definitions, DEFINITION_REQUIRED) if definitions else None
     return Layout(
@@ -296,11 +298,13 @@ class _Problems:
         self.rows: dict[str, list[Cell]] = defaultdict(list)
         self.counts: dict[str, int] = defaultdict(int)
 
-    def problems(self, problems: list[Problem]) -> None:
-        for problem in problems:
-            self.counts[problem.reason] += 1
-            if problem.page not in self.pages[problem.reason]:
-                self.pages[problem.reason].append(problem.page)
+    def problems(self, walk: Walk) -> None:
+        for reason, count in walk.counts.items():
+            self.counts[reason] += count
+        for problem in walk.problems:  # at most MAX_PROBLEMS, so this stays small
+            pages = self.pages[problem.reason]
+            if problem.page not in pages:
+                pages.append(problem.page)
 
 
 def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> Plan:
@@ -355,7 +359,7 @@ def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> 
             )
         )
     problems = _Problems()
-    problems.problems(walk.problems)
+    problems.problems(walk)
     if layout is None:
         findings.append(
             cite.finding(
@@ -372,7 +376,7 @@ def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> 
         return unreadable()
     walk = Walk()
     topics, too_many = read_topics(db, layout, walk)
-    problems.problems(walk.problems)
+    problems.problems(walk)
     if too_many:
         findings.append(
             cite.finding(
@@ -386,7 +390,8 @@ def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> 
         )
     declared = {topic.row.rowid for topic in topics}
     counts: dict[int, int] = defaultdict(int)
-    unknown: dict[int, int] = defaultdict(int)
+    unknown: dict[int, int] = {}  # the first LISTED undeclared ids, each with its count
+    unknown_total = 0
     first_unknown: Cell | None = None
     extent: dict[str, tuple[int, ByteRange]] = {}
     chunks: list[tuple[JsonObject, int]] = []
@@ -403,7 +408,9 @@ def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> 
                 problems.rows[outcome].append(cell)
             continue
         if outcome.topic not in declared:
-            unknown[outcome.topic] += 1
+            unknown_total += 1
+            if outcome.topic in unknown or len(unknown) < LISTED:
+                unknown[outcome.topic] = unknown.get(outcome.topic, 0) + 1
             first_unknown = first_unknown or cell
             continue
         if "first" not in extent or outcome.ticks < extent["first"][0]:
@@ -423,7 +430,7 @@ def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> 
             rows = size = 0
     if rows:
         chunks.append((_data(current, starts), size))
-    problems.problems(walk.problems)
+    problems.problems(walk)
     _damage(cite, source, db, problems, findings)
     if unknown and first_unknown is not None:
         findings.append(
@@ -432,11 +439,11 @@ def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> 
                 FindingCategory.CORRUPT,
                 Severity.ERROR,
                 (ByteRange(first_unknown.offset, first_unknown.length),),
-                f"{sum(unknown.values())} message(s) name {len(unknown)} topic id(s) that no"
+                f"{unknown_total} message(s) name topic id(s) that no"
                 " `topics` row declares; they get no rows",
                 {
-                    "messages": sum(unknown.values()),
-                    "topic_ids": {str(i): n for i, n in sorted(unknown.items())[:LISTED]},
+                    "messages": unknown_total,
+                    "topic_ids": {str(i): n for i, n in sorted(unknown.items())},
                 },
             )
         )

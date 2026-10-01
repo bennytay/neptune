@@ -18,6 +18,7 @@ here are about the bag's own statements (``docs/adapter-contract.md``, law 9).
 """
 
 import re
+from collections import Counter
 from collections.abc import Sequence as SequenceABC
 from dataclasses import dataclass
 from itertools import pairwise
@@ -513,38 +514,40 @@ class Metadata:
     ) -> None:
         declared = [(scalar, scalar.text) for scalar in paths]
         declared += [(part.path, part.path.text) for part in parts]
-        seen: set[str] = set()
+        unsafe: dict[str, tuple[_yaml.Scalar, str]] = {}
         for scalar, text in declared:
             why = _unsafe(text)
-            if why is not None and text not in seen:
-                self.say(
-                    "unsafe_part_path",
-                    FindingCategory.CORRUPT,
-                    Severity.WARNING,
-                    self.range(scalar),
-                    f"a listed part path is {why}: it is kept as declared and must not be opened"
-                    " relative to the bag",
-                    {"path": text[:256], "reason": why},
-                )
-            seen.add(text)
+            if why is not None and text not in unsafe:
+                unsafe[text] = (scalar, why)
+        if unsafe:
+            first, _ = next(iter(unsafe.values()))
+            self.say(
+                "unsafe_part_path",
+                FindingCategory.CORRUPT,
+                Severity.WARNING,
+                self.range(first),
+                f"{len(unsafe)} listed part path(s) are empty, absolute or leave the bag's"
+                " directory: they are kept as declared and must not be opened relative to the bag",
+                {
+                    "paths": {text[:256]: why for text, (_, why) in list(unsafe.items())[:LISTED]},
+                    "total": len(unsafe),
+                },
+            )
         for label, group in (
-            ("relative_file_paths", [s.text for s in paths]),
-            ("files", [p.path.text for p in parts]),
+            ("relative_file_paths", paths),
+            ("files", [p.path for p in parts]),
         ):
-            repeated = sorted({t for t in group if group.count(t) > 1})
+            counts = Counter(scalar.text for scalar in group)
+            repeated = sorted(text for text, n in counts.items() if n > 1)
             if repeated:
-                first = next(
-                    s
-                    for s in (paths if label == "relative_file_paths" else [p.path for p in parts])
-                    if s.text == repeated[0]
-                )
+                first = next(scalar for scalar in group if scalar.text == repeated[0])
                 self.say(
                     "duplicate_part",
                     FindingCategory.INCONSISTENT,
                     Severity.WARNING,
                     self.range(first),
                     f"`{label}` lists {len(repeated)} part(s) more than once",
-                    {"list": label, "parts": repeated[:LISTED]},
+                    {"list": label, "parts": repeated[:LISTED], "total": len(repeated)},
                 )
         in_paths = {s.text for s in paths}
         in_files = {p.path.text for p in parts}
@@ -586,17 +589,21 @@ class Metadata:
         self, names: list[str], paths: list[_yaml.Scalar], parts: list[_Part]
     ) -> None:
         """rosbag2 names the parts of a split bag ``<name>_<n>.<ext>``, counting from 0."""
-        found = [(m, n) for n in names if (m := PART.fullmatch(n.rsplit("/", 1)[-1]))]
-        if len(found) < 2 or len(found) != len(names):
+        found = [m for n in names if (m := PART.fullmatch(n.rsplit("/", 1)[-1]))]
+        if not found or len(found) != len(names):
             return
-        stems = {m["stem"] + m["ext"] for m, _ in found}
-        if len(stems) != 1:
+        if len({m["stem"] + m["ext"] for m in found}) != 1:
             return
-        indices = sorted({int(m["index"]) for m, _ in found})
-        expected = set(range(indices[0], indices[-1] + 1))
-        missing = sorted(expected - set(indices))
-        start = 0 if indices[0] == 0 else None
-        if missing or start is None:
+        indices = {int(m["index"]) for m in found}
+        last = max(indices)
+        missing_count = last + 1 - len(indices)  # numbering counts from 0
+        if missing_count:
+            missing: list[int] = []
+            for index in range(last + 1):
+                if index not in indices:
+                    missing.append(index)
+                    if len(missing) >= 64:
+                        break
             anchor = paths[0] if paths else parts[0].path
             self.say(
                 "part_gap",
@@ -606,9 +613,9 @@ class Metadata:
                 "the listed parts of a split bag are not numbered from 0 without gaps: parts the"
                 " numbering implies are missing",
                 {
-                    "first_index": indices[0],
-                    "missing": missing[:64],
-                    "missing_count": len(missing),
+                    "first_index": min(indices),
+                    "missing": missing,
+                    "missing_count": missing_count,
                     "parts": len(indices),
                 },
             )
@@ -668,9 +675,9 @@ def _flatten(
         return found
     for entry in node.entries:
         name = prefix + entry.key.text
-        if skip and not prefix and entry.key.text in LISTS:
-            continue
         value = entry.value
+        if skip and not prefix and entry.key.text in LISTS and isinstance(value, _yaml.Sequence):
+            continue  # a list with a table of its own
         if isinstance(value, _yaml.Scalar):
             found.append((name, entry.key, value))
         elif isinstance(value, _yaml.Mapping):

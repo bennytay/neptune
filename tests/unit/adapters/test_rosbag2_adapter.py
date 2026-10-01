@@ -642,3 +642,73 @@ def _all_findings() -> list[IngestFinding]:
     for data in (DB3.read_bytes(), METADATA.read_bytes(), DB3.read_bytes()[:9000]):
         out += run(data).findings()
     return out
+
+
+def test_a_surrogate_escape_is_a_finding_not_a_failure() -> None:
+    out = run(edit_metadata("version: 5", 'version: "\\ud800"'))
+    assert "unsupported_yaml" in codes(out)
+
+
+def test_sixty_thousand_listed_parts_are_checked_in_linear_time() -> None:
+    names = "".join(f"    - bag_{i % 30000}.db3\n" for i in range(60_000))
+    text = "rosbag2_bagfile_information:\n  version: 5\n  relative_file_paths:\n" + names
+    out = run(text.encode())
+    finding = next(f for f in out.findings() if f.code == "rosbag2.duplicate_part")
+    assert finding.details["total"] == 30000 and len(finding.details["parts"]) == 16  # type: ignore[arg-type]
+    assert "too_many_entries" in codes(out)
+
+
+def test_many_unsafe_paths_are_one_finding_with_a_total() -> None:
+    names = "".join(f"    - /abs/{i}.db3\n" for i in range(400))
+    out = run(("rosbag2_bagfile_information:\n  relative_file_paths:\n" + names).encode())
+    unsafe = [f for f in out.findings() if f.code == "rosbag2.unsafe_part_path"]
+    assert len(unsafe) == 1 and unsafe[0].details["total"] == 400
+
+
+def test_a_list_key_with_a_scalar_value_is_kept_in_the_entries_table() -> None:
+    text = "rosbag2_bagfile_information:\n  version: 5\n  files: 5\n  relative_file_paths:\n"
+    out = run(text.encode())
+    bag = dict(table_rows(out)["rosbag2_bagfile_information"])
+    assert bag["files"] == 5 and bag["relative_file_paths"] is None
+
+
+def test_a_single_listed_part_that_is_not_the_first_is_a_gap() -> None:
+    text = "rosbag2_bagfile_information:\n  relative_file_paths:\n    - bag_3.db3\n"
+    finding = next(f for f in run(text.encode()).findings() if f.code == "rosbag2.part_gap")
+    assert finding.details["missing"] == [0, 1, 2] and finding.details["missing_count"] == 3
+    assert "part_gap" not in codes(run(text.replace("bag_3", "bag_0").encode()))
+    huge = text.replace("bag_3", "bag_" + "9" * 40)
+    gap = next(f for f in run(huge.encode()).findings() if f.code == "rosbag2.part_gap")
+    assert len(gap.details["missing"]) == 64  # type: ignore[arg-type]
+
+
+def test_undeclared_topic_ids_are_counted_without_keeping_each(tmp_path: Path) -> None:
+    path = tmp_path / "many.db3"
+    shutil.copyfile(DB3, path)
+    conn = sqlite3.connect(path)
+    conn.executemany(
+        "INSERT INTO messages(topic_id, timestamp, data) VALUES (?, ?, x'00')",
+        [(1000 + i, 5 + i) for i in range(500)],
+    )
+    conn.commit()
+    conn.close()
+    out = run(path.read_bytes())
+    finding = next(f for f in out.findings() if f.code == "rosbag2.unknown_topic")
+    assert finding.details["messages"] == 500 and len(finding.details["topic_ids"]) == 16  # type: ignore[arg-type]
+
+
+def test_topics_whose_id_is_not_the_rowid_are_not_rosbag2_storage(tmp_path: Path) -> None:
+    path = tmp_path / "ids.db3"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE topics(id INTEGER NOT NULL, name TEXT NOT NULL, type TEXT NOT NULL,
+            serialization_format TEXT NOT NULL, offered_qos_profiles TEXT NOT NULL);
+        CREATE TABLE messages(id INTEGER PRIMARY KEY, topic_id INTEGER NOT NULL,
+            timestamp INTEGER NOT NULL, data BLOB NOT NULL);
+        """
+    )
+    conn.close()
+    data = path.read_bytes()
+    assert codes(run(data)) == ["not_rosbag2_storage"]
+    assert probe(data) == 0.0

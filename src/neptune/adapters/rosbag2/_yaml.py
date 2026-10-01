@@ -129,14 +129,19 @@ class Document:
 def _strip_comment(text: str) -> str:
     """``text`` without a trailing comment (a ``#`` at the start or after a blank, unquoted)."""
     quote = ""
-    for i, char in enumerate(text):
+    i = 0
+    while i < len(text):
+        char = text[i]
         if quote:
-            if char == quote and not (quote == '"' and text[i - 1] == "\\"):
+            if char == "\\" and quote == '"':
+                i += 1  # the escaped character, a quote or a backslash, never closes
+            elif char == quote:
                 quote = ""
         elif char in "\"'" and (i == 0 or text[i - 1] in " \t[{,:-"):
             quote = char
         elif char == "#" and (i == 0 or text[i - 1] in " \t"):
             return text[:i].rstrip()
+        i += 1
     return text.rstrip()
 
 
@@ -514,11 +519,12 @@ def _unquote(token: str, line: int) -> str:
             width = _HEX[code]
             digits = body[i + 1 : i + 1 + width]
             try:
-                out.append(chr(int(digits, 16)))
+                point = int(digits, 16)
+                if len(digits) != width or not digits.isalnum() or 0xD800 <= point <= 0xDFFF:
+                    raise ValueError(digits)
+                out.append(chr(point))
             except (ValueError, OverflowError) as exc:
                 raise YamlError(f"a bad \\{code} escape", line) from exc
-            if len(digits) != width:
-                raise YamlError(f"a bad \\{code} escape", line)
             i += 1 + width
         elif code in _ESCAPES:
             out.append(_ESCAPES[code])

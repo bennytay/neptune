@@ -224,12 +224,25 @@ def text_value(cell: Cell, column: Field, limit: int = 1 << 20) -> str | None:
         return None
 
 
+MAX_PROBLEMS: Final = 1000
+
+
 @dataclass
 class Walk:
-    """What one walk of a table b-tree met besides its cells."""
+    """What one walk of a table b-tree met besides its cells.
+
+    ``problems`` keeps the first ``MAX_PROBLEMS``; ``counts`` counts every one by reason, so a
+    database of damaged pages costs a bounded list, not one entry per cell.
+    """
 
     problems: list[Problem] = field(default_factory=list)
+    counts: dict[str, int] = field(default_factory=dict)
     budget: int = 0
+
+    def note(self, page: int, reason: str) -> None:
+        self.counts[reason] = self.counts.get(reason, 0) + 1
+        if len(self.problems) < MAX_PROBLEMS:
+            self.problems.append(Problem(page, reason))
 
 
 class Database:
@@ -278,30 +291,30 @@ class Database:
     ) -> Iterator[Cell]:
         """Rows of page ``number`` whose rowids lie in ``(above, upto]`` and ``[low, high]``."""
         if depth > MAX_DEPTH:
-            walk.problems.append(Problem(number, "too_deep"))
+            walk.note(number, "too_deep")
             return
         if walk.budget <= 0:
-            walk.problems.append(Problem(number, "page_budget"))
+            walk.note(number, "page_budget")
             return
         walk.budget -= 1
         try:
             page = self.page(number)
         except SqliteError:
-            walk.problems.append(Problem(number, "unreadable"))
+            walk.note(number, "unreadable")
             return
         header = self.header
         usable = header.usable
         base = HEADER_SIZE if number == 1 else 0
         kind = page[base]
         if kind not in (LEAF_TABLE, INTERIOR_TABLE):
-            walk.problems.append(Problem(number, "not_table_page"))
+            walk.note(number, "not_table_page")
             return
         leaf = kind == LEAF_TABLE
         head_end = base + (8 if leaf else 12)
         count = struct.unpack_from(">H", page, base + 3)[0]
         pointers_end = head_end + 2 * count
         if pointers_end > usable:
-            walk.problems.append(Problem(number, "cell_count"))
+            walk.note(number, "cell_count")
             return
         pointers = struct.unpack_from(f">{count}H", page, head_end)
         if leaf:
@@ -312,17 +325,17 @@ class Database:
         bound = above
         for pointer in pointers:
             if pointer < pointers_end or pointer + 5 > usable:
-                walk.problems.append(Problem(number, "cell_pointer"))
+                walk.note(number, "cell_pointer")
                 continue
             child = struct.unpack_from(">I", page, pointer)[0]
             try:
                 key, _ = varint(page, pointer + 4, usable)
             except SqliteError:
-                walk.problems.append(Problem(number, "cell_pointer"))
+                walk.note(number, "cell_pointer")
                 continue
             key = _signed(key)
             if key <= bound or key > upto:
-                walk.problems.append(Problem(number, "key_order"))
+                walk.note(number, "key_order")
                 continue
             if key >= low and bound < high:
                 yield from self._node(child, bound, key, low, high, last, walk, depth + 1)
@@ -345,25 +358,25 @@ class Database:
         reach = (number - 1) * self.header.page_size
         for pointer in pointers:
             if pointer < pointers_end or pointer >= usable:
-                walk.problems.append(Problem(number, "cell_pointer"))
+                walk.note(number, "cell_pointer")
                 continue
             try:
                 payload, pos = varint(page, pointer, usable)
                 rowid, pos = varint(page, pos, usable)
             except SqliteError:
-                walk.problems.append(Problem(number, "cell_pointer"))
+                walk.note(number, "cell_pointer")
                 continue
             rowid = _signed(rowid)
             local = _local_size(payload, usable)
             end = pos + local + (4 if local < payload else 0)
             if end > usable:
-                walk.problems.append(Problem(number, "cell_overrun"))
+                walk.note(number, "cell_overrun")
                 continue
             if rowid < low or rowid > high:
                 continue
             if not above < rowid <= upto or rowid <= last[0]:
                 # outside the bounds its parents' keys give it, or not after the last row kept
-                walk.problems.append(Problem(number, "rowid_order"))
+                walk.note(number, "rowid_order")
                 continue
             last[0] = rowid
             yield Cell(
@@ -409,7 +422,10 @@ def read_schema(db: Database, walk: Walk | None = None) -> list[SchemaEntry]:
         kind, name = text_value(cell, columns[0]), text_value(cell, columns[1])
         if kind != "table" or name is None or not columns[3].is_int:
             continue
-        root = int_value(cell, columns[3])
+        try:
+            root = int_value(cell, columns[3])
+        except SqliteError:  # a row whose root page lies in overflow: skip it, keep the others
+            continue
         sql = text_value(cell, columns[4]) if columns[4].is_text else ""
         entries.append(SchemaEntry(kind, name, root, sql or "", cell))
     return entries

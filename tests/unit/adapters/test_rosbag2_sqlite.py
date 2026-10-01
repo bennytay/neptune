@@ -278,3 +278,27 @@ def test_a_lying_cell_count_is_a_problem_not_an_allocation(tmp_path: Path) -> No
 
 def test_header_constants() -> None:
     assert len(MAGIC) == 16 and HEADER_SIZE == 100
+
+
+def test_a_walk_keeps_a_bounded_list_of_problems_and_counts_them_all() -> None:
+    from neptune.adapters.rosbag2._sqlite import MAX_PROBLEMS
+
+    walk = Walk()
+    for page in range(5 * MAX_PROBLEMS):
+        walk.note(page, "cell_pointer")
+    assert len(walk.problems) == MAX_PROBLEMS
+    assert walk.counts == {"cell_pointer": 5 * MAX_PROBLEMS}
+
+
+def test_one_schema_row_that_spills_costs_that_row_only(tmp_path: Path) -> None:
+    path = tmp_path / "spill.db3"
+    build(path, count=5)
+    conn = sqlite3.connect(path)
+    name = "x" * 500
+    columns = ", ".join(f"c{i} TEXT" for i in range(1200))
+    conn.execute(f'CREATE TABLE "{name}"({columns})')
+    conn.commit()
+    conn.close()
+    db = Database(BytesReader(path.read_bytes()))
+    tables = {entry.name for entry in read_schema(db)}
+    assert {"topics", "messages"} <= tables

@@ -11,6 +11,7 @@ text rosbag2 writes. The sqlite3 bag and the MCAP bag hold the same messages; ``
 holds them as two parts of one bag.
 """
 
+import importlib
 import json
 import sqlite3
 import struct
@@ -142,7 +143,8 @@ def write_sqlite(path: Path, part: list[tuple[int, str, bytes]]) -> None:
 
 
 def write_mcap(path: Path, part: list[tuple[int, str, bytes]]) -> None:
-    from mcap.writer import CompressionType, Writer
+    writer_module = importlib.import_module("mcap.writer")  # not a project dependency
+    CompressionType, Writer = writer_module.CompressionType, writer_module.Writer
 
     with path.open("wb") as stream:
         writer = Writer(stream, compression=CompressionType.ZSTD)
@@ -181,8 +183,8 @@ def build() -> None:
 
 def oracle() -> str:
     """What the official readers read: rosbags for every bag, mcap for the MCAP files."""
-    from mcap.reader import make_reader
-    from rosbags.rosbag2 import Reader
+    make_reader = importlib.import_module("mcap.reader").make_reader
+    Reader = importlib.import_module("rosbags.rosbag2").Reader
 
     out: dict[str, object] = {}
     for folder in sorted(p for p in HERE.iterdir() if p.is_dir()):

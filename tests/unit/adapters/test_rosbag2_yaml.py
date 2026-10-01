@@ -189,3 +189,20 @@ def test_random_text_never_raises_and_spans_stay_inside_the_input() -> None:
         document = _yaml.parse(bytes(mutated))
         for scalar in scalars(document.root):
             assert 0 <= scalar.start <= scalar.end <= len(mutated)
+
+
+def test_escaped_backslashes_close_their_quote_before_a_comment() -> None:
+    document = _yaml.parse(b"a: \"C:\\\\\"  # a note\nb: 'x'  # more\n")
+    assert document.errors == []
+    assert isinstance(document.root, _yaml.Mapping)
+    assert [scalars(e.value)[0].text for e in document.root.entries] == ["C:\\", "x"]
+
+
+@pytest.mark.parametrize(
+    "escape", ["\\ud800", "\\udfff", "\\U0000d800", "\\x+1", "\\u+123", "\\ufff"]
+)
+def test_escapes_that_are_not_characters_are_errors_never_surrogates(escape: str) -> None:
+    document = _yaml.parse(f'a: "{escape}"\nb: ok\n'.encode())
+    assert [e.message for e in document.errors]
+    assert isinstance(document.root, _yaml.Mapping)
+    assert [e.key.text for e in document.root.entries] == ["b"]
