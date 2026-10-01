@@ -3,7 +3,10 @@
 ``confine`` runs in the forked child before any adapter code, and applies, in order:
 
 1. ``PR_SET_PDEATHSIG``: the child is killed if the job's process dies first; then ``setsid`` so
-   it has no controlling terminal to reach the job through (``/dev/tty`` SIGIO, ``TIOCSTI``).
+   it has no controlling terminal: ``/dev/tty`` does not open, and ``TIOCSTI`` and
+   ``TIOCSPGRP``, which need the caller's own controlling terminal, fail on any terminal. A
+   terminal it can still open read-only (the job's ``/dev/pts/N``) is kept from raising SIGIO
+   by the seccomp filter's ``O_ASYNC`` rules (5), not by ``setsid``.
 2. Descriptors: standard input and output go to ``/dev/null`` and every other descriptor is
    closed except the ones the call keeps (the reply pipe, the source).
 3. Resource limits: ``RLIMIT_CPU`` (SIGXCPU at the limit, SIGKILL a second later),
@@ -526,10 +529,13 @@ def confine(
         _prctl("pdeathsig", _PR_SET_PDEATHSIG, signal.SIGKILL)
         if os.getppid() != parent:  # the job died before the line above took effect
             os._exit(1)
-        # A new session, with no controlling terminal: a forked child inherits the job's, and
-        # reads stay open, so it could otherwise open ``/dev/tty`` and reach the job through it
-        # (SIGIO via ``O_ASYNC`` on the terminal, ``TIOCSTI`` input injection, ``TIOCSPGRP``),
-        # a path seccomp's descriptor-owner filters do not cover. ``setsid`` severs it.
+        # A new session, with no controlling terminal (a forked child inherits the job's): then
+        # ``/dev/tty`` does not open, and ``TIOCSTI`` input injection and ``TIOCSPGRP`` fail on
+        # any terminal, since both need the caller's own controlling one. It does not stop
+        # SIGIO: reads stay open, so the job's ``/dev/pts/N`` still opens read-only, and
+        # ``O_ASYNC`` on it would aim SIGIO at the terminal's foreground group, the job's. The
+        # seccomp filter refuses ``O_ASYNC`` (``F_SETFL``, ``FIOASYNC``) on every Landlock ABI;
+        # ABI 6 signal scoping blocks that delivery as well.
         os.setsid()
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGXCPU):
             signal.signal(signum, signal.SIG_DFL)

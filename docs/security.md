@@ -64,11 +64,15 @@ confined before any adapter code runs. A sandboxed call:
   below `memory_bytes`) in size or in the number of containers and elements it decodes to;
 - opens no socket, starts no process or program, and signals no other process — neither directly
   (`kill`, `tgkill`, `tkill`, `rt_*sigqueueinfo`, `pidfd_send_signal`) nor through a descriptor's
-  async-I/O owner (`fcntl` F_SETOWN/F_SETOWN_EX/F_SETSIG, `ioctl` FIOSETOWN/SIOCSPGRP/FIOASYNC),
-  the path only Landlock ABI 6 scopes, which seccomp closes on every ABI;
+  async-I/O owner (`fcntl` F_SETOWN/F_SETOWN_EX/F_SETSIG and F_SETFL with O_ASYNC, `ioctl`
+  FIOSETOWN/SIOCSPGRP/FIOASYNC), the path only Landlock ABI 6 scopes, which seccomp closes on
+  every ABI — including the job's own terminal, which stays readable and on which O_ASYNC alone
+  would make the kernel aim SIGIO at the job's process group;
 - cannot shed its parent-death signal or re-enable a core dump (`prctl` PR_SET_PDEATHSIG and
-  PR_SET_DUMPABLE are refused after setup); has no controlling terminal (`setsid`, so no
-  `/dev/tty` SIGIO or `TIOCSTI` injection); traces nothing and enters no namespace (seccomp);
+  PR_SET_DUMPABLE are refused after setup); has no controlling terminal (`setsid`: `/dev/tty`
+  does not open, and `TIOCSTI` injection and `TIOCSPGRP` fail on any terminal; SIGIO through a
+  terminal is the O_ASYNC filter above, not `setsid`); traces nothing and enters no namespace
+  (seccomp);
 - writes no byte to any file (`RLIMIT_FSIZE` 0), changes no file's mode, owner, times or xattrs
   and punches no bytes (`chmod`/`chown`/`utimensat`/`*xattr`/`fallocate` refused — Landlock
   covers none of these), and, under Landlock, creates, truncates, renames or removes nothing;

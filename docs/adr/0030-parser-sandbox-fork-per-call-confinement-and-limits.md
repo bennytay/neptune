@@ -41,10 +41,13 @@ partial chunk in the workspace.
    would end at the wall limit as a finding. The test suite filters that one warning.
 3. **The child is confined before any adapter code runs** (`neptune.runtime.confine`, Linux,
    x86_64 and aarch64):
-   - killed if the job dies (`PR_SET_PDEATHSIG`), and `setsid` so it has no controlling terminal
-     to reach the job through (`/dev/tty` SIGIO, `TIOCSTI` input injection); standard streams to
-     `/dev/null`; every other descriptor closed except the reply pipe and the source's read-only
-     descriptor;
+   - killed if the job dies (`PR_SET_PDEATHSIG`), and `setsid` so it has no controlling terminal:
+     `/dev/tty` does not open, and `TIOCSTI` input injection and `TIOCSPGRP` fail on any
+     terminal, since both need the caller's own. `setsid` does not stop SIGIO: the job's
+     `/dev/pts/N` stays readable, and `O_ASYNC` on it makes the kernel aim SIGIO at the
+     terminal's foreground group, the job's; the seccomp filter below closes that on every ABI
+     (ABI 6 scoping also blocks the delivery). Standard streams to `/dev/null`; every other
+     descriptor closed except the reply pipe and the source's read-only descriptor;
    - `RLIMIT_CPU`, `RLIMIT_AS` (the address space at fork plus the memory budget),
      `RLIMIT_CORE` 0 and not dumpable (no core dump, even through a piped `core_pattern`, holds
      source data), `RLIMIT_FSIZE` 0 (no byte is written to any file);
@@ -56,10 +59,11 @@ partial chunk in the workspace.
      `execveat`; no `kill` or `tgkill` but to itself, no `tkill`, `rt_*sigqueueinfo` or
      `pidfd_send_signal`. It also closes the async-I/O path to a signal, which only Landlock
      ABI 6 scopes, with argument filters that hold on every ABI: `fcntl`
-     `F_SETOWN`/`F_SETOWN_EX`/`F_SETSIG` and `ioctl` `FIOSETOWN`/`SIOCSPGRP`/`FIOASYNC` get
-     EPERM, as do `prctl` `PR_SET_PDEATHSIG` (so a child cannot shed its parent-death signal and
-     outlive a killed job) and `PR_SET_DUMPABLE` (so it cannot re-enable a core dump after
-     confinement). No file-metadata change (`chmod`, `chown`, `utimensat` and the `*xattr`
+     `F_SETOWN`/`F_SETOWN_EX`/`F_SETSIG`, `fcntl` `F_SETFL` with `O_ASYNC` (a JSET on the flag
+     argument's low word; any other `F_SETFL` is allowed) and `ioctl`
+     `FIOSETOWN`/`SIOCSPGRP`/`FIOASYNC` get EPERM, as do `prctl` `PR_SET_PDEATHSIG` (so a child
+     cannot shed its parent-death signal and outlive a killed job) and `PR_SET_DUMPABLE` (so it
+     cannot re-enable a core dump after confinement). No file-metadata change (`chmod`, `chown`, `utimensat` and the `*xattr`
      family) and no `fallocate` either: Landlock covers none of those, so without the filter a
      parser could make the source unreadable, world-write a user's file, punch its bytes, or
      retime it to defeat change detection even above the Landlock floor. No `ptrace`,
