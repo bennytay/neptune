@@ -214,6 +214,31 @@ def test_a_committed_chunk_reads_back_whole(tmp_path: Path) -> None:
     assert sorted(workspace.chunks()) == sorted(chunk.id for chunk in output.plan.chunks)
 
 
+def test_a_commit_keeps_the_laws_that_admitted_it(tmp_path: Path) -> None:
+    """The first commit's laws are kept; none, or a damaged record, reads as unknown laws."""
+    workspace, output = Workspace(tmp_path), tally_output()
+    first, second, third = output.plan.chunks
+
+    def commit(index: int, laws: Any = None) -> bool:
+        out = output.outputs[index]
+        chunk = output.plan.chunks[index]
+        return workspace.commit(chunk, out.records, out.findings, out.series, laws=laws)
+
+    assert commit(0, "0.1.0")
+    assert not commit(0, "0.2.0")  # committed already: the first commit's laws stay
+    assert workspace.admitted(first.id) == "0.1.0"
+    assert commit(1)
+    assert workspace.admitted(second.id) is None  # committed without laws: judged again
+    assert not (workspace.chunk_path(second.id) / "admitted.json").exists()
+    assert commit(2, "0.1.0")
+    for damaged in (b"{not json", b'{"laws":7}', b'{"laws":""}', b'{"laws":"0.1.0","x":1}'):
+        (workspace.chunk_path(third.id) / "admitted.json").write_bytes(damaged)
+        assert workspace.admitted(third.id) is None
+    for bad in ("", 7):
+        with pytest.raises(WorkspaceError, match="admitted under"):
+            commit(1, bad)
+
+
 def test_committing_a_chunk_again_changes_nothing(tmp_path: Path) -> None:
     workspace, output = Workspace(tmp_path), tally_output()
     commit_all(workspace, output)

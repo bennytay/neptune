@@ -20,11 +20,13 @@ from typing import Any, Final
 
 import pytest
 
+from neptune.adapters.check import check_chunk_output
 from neptune.adapters.contract import (
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
     ChunkOutput,
+    ContractError,
     InspectResult,
     Plan,
     ProbeHints,
@@ -36,6 +38,7 @@ from neptune.adapters.text import TextAdapter
 from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id
 from neptune.model.jsonvalue import JsonValue
+from neptune.model.series import SEQ
 from neptune.runtime import (
     CacheReport,
     IngestJob,
@@ -46,7 +49,10 @@ from neptune.runtime import (
     JobState,
     cache_report_from_json,
     collect,
+    lineage,
 )
+from neptune.runtime import job as job_module
+from neptune.runtime.lineage import Failure, Step
 from neptune.store.package import read_cache_report, read_envelope, read_package
 from neptune.store.workspace import Workspace
 
@@ -333,6 +339,90 @@ def test_a_new_adapter_that_claims_a_source_is_adapter_changed(corpus: Path, run
         "tally": 0,
         "text": 0,
     }
+
+
+def a_new_law(monkeypatch: pytest.MonkeyPatch, law: str) -> None:
+    """Release a new runtime version whose per-chunk laws refuse some chunk of the corpus.
+
+    ``check_chunk_output``: a document block may not come third or later in its document (some
+    text chunks break it). ``chunk_series``: a series may not hold ``seq`` 5 (one tally chunk).
+    """
+    monkeypatch.setattr(lineage, "RUNTIME_VERSION", "0.2.0")
+    if law == "check_chunk_output":
+
+        def stricter(
+            descriptor: AdapterDescriptor,
+            source: SourceReader,
+            config: AdapterConfig,
+            chunk: Chunk,
+            output: ChunkOutput,
+        ) -> None:
+            check_chunk_output(descriptor, source, config, chunk, output)
+            if any(getattr(record, "order", 0) >= 2 for record in output.records):
+                raise ContractError("a block comes third")
+
+        monkeypatch.setattr(job_module, "check_chunk_output", stricter)
+    else:
+        series = job_module._chunk_series_failure
+
+        def stricter_series(output: ChunkOutput) -> Failure | None:
+            for batch in output.series:
+                for column in batch.columns:
+                    if column.name == SEQ and 5 in column.values:
+                        facts: dict[str, JsonValue] = {"law": "seq_five", "stream": batch.stream}
+                        return Failure(Step.CHUNK_SERIES, "ContractError", facts)
+            return series(output)
+
+        monkeypatch.setattr(job_module, "_chunk_series_failure", stricter_series)
+
+
+@pytest.mark.parametrize("law", ["check_chunk_output", "chunk_series"])
+def test_a_new_per_chunk_law_judges_kept_chunks_as_a_fresh_workspace_would(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, law: str
+) -> None:
+    """Kept chunks are judged again by a new runtime's laws, without the adapter: one the new
+    laws refuse quarantines its source exactly as in a fresh workspace, so the package is the
+    same whatever the cache held (ADR 0031 §2)."""
+    warm = Runner(tmp_path / "warm" / "home", tmp_path / "warm" / "out")
+    before, _ = warm(corpus, adapters())  # every chunk committed under 0.1.0's laws
+    assert not [f for f in before.findings if f.code == lineage.CHUNK_FAILED]
+
+    a_new_law(monkeypatch, law)
+    counted = adapters()
+    judged, _ = warm(corpus, counted)
+    fresh, _ = Runner(tmp_path / "fresh" / "home", tmp_path / "fresh" / "out")(corpus, adapters())
+    failed = [f for f in judged.findings if f.code == lineage.CHUNK_FAILED]
+    assert failed and {f.details["step"] for f in failed} == {law}
+    assert {f.details["attempts"] for f in failed} == {1}
+    assert judged.findings == fresh.findings
+    assert judged.package == fresh.package == read_package(judged.destination).id
+    assert counted.calls("ingest") == {"tally": 0, "text": 0}  # judged as kept: no adapter call
+    report = check_report(judged)
+    assert report.totals()["chunks"]["miss"] == 0
+    kept_chunks = sum(len(s.chunks) for s in report.sources)
+    verdicts = [d for d in report.derivatives if d.recipe == "neptune.runtime.chunk-laws/1"]
+    assert len(verdicts) == kept_chunks and all(d.cache == "miss" for d in verdicts)
+
+    again, _ = warm(corpus, adapters())  # judged once per runtime version: the verdicts are kept
+    verdicts = [d for d in again.cache.derivatives if d.recipe == "neptune.runtime.chunk-laws/1"]
+    assert len(verdicts) == kept_chunks and all(d.cache == "hit" for d in verdicts)
+    assert (again.findings, again.package) == (fresh.findings, fresh.package)
+
+
+def test_a_chunk_admitted_under_unknown_laws_is_judged_again(corpus: Path, run: Runner) -> None:
+    """A chunk with no record of the laws that admitted it (format 1, or a damaged record) is
+    judged by the current ones, once, rather than trusted."""
+    first, _ = run(corpus, adapters())
+    workspace = Workspace(run.home)
+    chunks = [chunk.chunk for source in first.cache.sources for chunk in source.chunks]
+    (workspace.chunk_path(chunks[0]) / "admitted.json").unlink()
+    (workspace.chunk_path(chunks[1]) / "admitted.json").write_bytes(b"{damaged")
+    counted = adapters()
+    outcome, _ = run(corpus, counted)
+    judged = [d for d in outcome.cache.derivatives if d.recipe == "neptune.runtime.chunk-laws/1"]
+    assert len(judged) == 2 and all(d.cache == "miss" for d in judged)
+    assert counted.calls("ingest") == {"tally": 0, "text": 0}
+    assert outcome.package == first.package
 
 
 def test_an_interrupted_job_is_resumed_from_the_cache(corpus: Path, run: Runner) -> None:

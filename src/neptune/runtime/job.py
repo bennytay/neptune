@@ -40,13 +40,13 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
-from typing import Final
+from typing import Final, TypeVar
 
 from neptune.adapters.check import check_chunk_output, check_plan
 from neptune.adapters.contract import (
@@ -100,10 +100,11 @@ from neptune.runtime.cache import (
     Rule,
     SourceCache,
     admission_key,
+    chunk_laws_key,
     explain_plan,
 )
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
-from neptune.runtime.lineage import Failure, Law, Step, type_name
+from neptune.runtime.lineage import Failure, Law, Step, failure_from_json, type_name
 from neptune.store.assemble import StagedPackage, publish, stage
 from neptune.store.package import (
     PackageError,
@@ -111,7 +112,7 @@ from neptune.store.package import (
     write_cache_report,
     write_envelope,
 )
-from neptune.store.series import RunCheck, SeriesError, SeriesReadError, check_run
+from neptune.store.series import RunCheck, SeriesError, SeriesReadError, check_run, read_run
 from neptune.store.workspace import (
     Collected,
     Derivative,
@@ -126,6 +127,7 @@ DEFAULT_ATTEMPTS: Final = 2
 # reads are the adapter's: anything but ``SourceChangedError`` from ``plan`` or ``ingest`` is its
 # failure (``plan_failed``, ``chunk_failed``).
 _UNREADABLE: Final = (SourceChangedError, SourceAccessError, OSError)
+_T = TypeVar("_T")
 
 
 class JobError(Exception):
@@ -835,7 +837,8 @@ class IngestJob:
                 for chunk in item.chunks:
                     self._phase = Phase.PARSE  # between chunks, the job is about to parse
                     self._check_cancel()
-                    if self.workspace.committed(chunk.id):
+                    hit = self.workspace.committed(chunk.id)
+                    if hit:
                         item.hits.add(chunk.id)  # its output is reused: no adapter call
                         skipped += 1
                         self._emit(
@@ -843,7 +846,9 @@ class IngestJob:
                             {"chunk": chunk.id, "source": item.content_id},
                             Phase.PARSE,
                         )
-                        continue
+                        if self.workspace.admitted(chunk.id) == lineage.RUNTIME_VERSION:
+                            continue
+                        # admitted under other laws, or unknown ones: judged by these below
                     if reader is None:
                         with self._enter(Phase.PARSE):
                             try:
@@ -853,6 +858,10 @@ class IngestJob:
                         if reader is None:
                             failed += 1
                             break
+                    if hit:
+                        if not self._judge(item, reader, chunk):
+                            failed += 1
+                        continue
                     parsed = self._parse(item, reader, chunk)
                     if parsed is None:
                         failed += 1
@@ -986,7 +995,11 @@ class IngestJob:
             if failure is None:
                 try:
                     new = self.workspace.commit(
-                        chunk, output.records, output.findings, output.series
+                        chunk,
+                        output.records,
+                        output.findings,
+                        output.series,
+                        laws=lineage.RUNTIME_VERSION,
                     )
                 except OSError as exc:
                     raise JobError(f"chunk {chunk.id} cannot be committed: {exc}") from exc
@@ -1007,6 +1020,90 @@ class IngestJob:
                 },
             )
         return True
+
+    def _judge(self, item: _Source, reader: LocalReader, chunk: Chunk) -> bool:
+        """Judge a chunk committed under other laws by this runtime's, without the adapter.
+
+        Its output was admitted by another runtime version (or one not recorded), whose per-chunk
+        laws may differ from these. A chunk these laws refuse fails as it would in a fresh
+        workspace: ``chunk_failed`` at the check it broke, after one attempt (ADR 0031 §2).
+        """
+        with self._enter(Phase.NORMALIZE):
+            failure = self._chunk_laws(item, reader, chunk)
+            if failure is not None:
+                self._fail_chunk(item, chunk, 1, failure)
+                return False
+        return True
+
+    def _chunk_laws(self, item: _Source, reader: LocalReader, chunk: Chunk) -> Failure | None:
+        """This runtime's per-chunk laws over a chunk's committed output, kept as a derivative.
+
+        A function of the chunk's id (its output never changes) and of the runtime's version, so
+        it is judged once per version: the next job of this version reads the verdict back.
+        """
+        assert item.config is not None
+        key = chunk_laws_key(
+            item.content_id, item.config.transform.id, chunk.id, lineage.RUNTIME_VERSION
+        )
+
+        def build(directory: Path) -> None:
+            failure = self._check_output(item, reader, chunk, self._committed_output(chunk))
+            verdict: JsonObject = (
+                {"admitted": True}
+                if failure is None
+                else {"admitted": False, "failure": failure.to_json()}
+            )
+            (directory / VERDICT_FILE).write_bytes(canonical_json.dumps(verdict))
+
+        def read(derivative: Derivative) -> tuple[Failure | None]:
+            data = canonical_json.loads(derivative.read(VERDICT_FILE))
+            if data == {"admitted": True}:
+                return (None,)
+            if not isinstance(data, dict) or data.keys() != {"admitted", "failure"}:
+                raise ValueError("not a chunk's verdict")
+            if data["admitted"] is not False:
+                raise ValueError("a chunk's verdict with a failure does not admit it")
+            return (failure_from_json(data["failure"]),)
+
+        return self._kept(key, build, read, f"the verdict on chunk {chunk.id}")[0]
+
+    def _committed_output(self, chunk: Chunk) -> ChunkOutput:
+        """A committed chunk's output as the laws see it: its records, findings and runs.
+
+        Each stream's run comes back as one batch in run order. A chunk the workspace cannot
+        read back is the workspace's fault, not the source's: ``JobError``.
+        """
+        try:
+            committed = self.workspace.load(chunk.id)
+            series = tuple(read_run(run) for _, run in sorted(committed.runs.items()))
+            return ChunkOutput(committed.records, series, committed.findings)
+        except (ValueError, OSError) as exc:  # a WorkspaceError, SeriesError or ContractError too
+            raise JobError(f"committed chunk {chunk.id} cannot be read: {exc}") from exc
+
+    def _kept(
+        self,
+        key: DerivativeKey,
+        build: Callable[[Path], None],
+        read: Callable[[Derivative], _T],
+        what: str,
+    ) -> _T:
+        """A small derivative read back from the workspace: the one kept, or built now.
+
+        One kept that does not read back (``read`` raises ``ValueError``) is damaged: discarded
+        and built again. The workspace failing to keep it fails the job.
+        """
+        try:
+            derivative, held = self.workspace.materialise(key, build)
+            try:
+                value = read(derivative)
+            except ValueError:  # a WorkspaceError too: not what was kept
+                self.workspace.discard(key)
+                derivative, _ = self.workspace.materialise(key, build)
+                held, value = Held.REBUILT, read(derivative)
+        except (ValueError, OSError) as exc:
+            raise JobError(f"{what} cannot be kept: {exc}") from exc
+        self._derived(key, held)
+        return value
 
     # --- assemble ------------------------------------------------------------------------------
 
@@ -1098,30 +1195,17 @@ class IngestJob:
             problems: list[JsonValue] = list(self._cross_chunk_problems(item))
             (directory / VERDICT_FILE).write_bytes(canonical_json.dumps({"problems": problems}))
 
-        def read(derivative: Derivative) -> list[JsonObject] | None:
-            try:
-                data = canonical_json.loads(derivative.read(VERDICT_FILE))
-            except ValueError:  # a WorkspaceError too: not what was kept
-                return None
+        def read(derivative: Derivative) -> list[JsonObject]:
+            data = canonical_json.loads(derivative.read(VERDICT_FILE))
             found = data.get("problems") if isinstance(data, dict) else None
             if not isinstance(found, list):
-                return None
+                raise ValueError("not a source's verdict")
             problems: list[JsonObject] = [p for p in found if isinstance(p, dict)]
-            return problems if len(problems) == len(found) else None
+            if len(problems) != len(found):
+                raise ValueError("a verdict's problems are objects")
+            return problems
 
-        try:
-            derivative, held = self.workspace.materialise(key, build)
-            verdict = read(derivative)
-            if verdict is None:  # kept but damaged: build it again
-                self.workspace.discard(key)
-                derivative, _ = self.workspace.materialise(key, build)
-                held, verdict = Held.REBUILT, read(derivative)
-        except (WorkspaceError, OSError) as exc:
-            raise JobError(f"the verdict on {item.content_id} cannot be kept: {exc}") from exc
-        if verdict is None:
-            raise JobError(f"the verdict on {item.content_id} does not read back as written")
-        self._derived(key, held)
-        return verdict
+        return self._kept(key, build, read, f"the verdict on {item.content_id}")
 
     def _derived(self, key: DerivativeKey, held: Held) -> None:
         """Note a derivative the job read, and how the workspace came by it."""

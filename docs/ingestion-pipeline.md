@@ -78,6 +78,7 @@ needs, and nothing else decides: no clock, file time or flag.
 |---|---|---|
 | plan | (source content id, transform id) | `plan` |
 | chunk output | chunk id: source content id + transform (adapter id, version, config hash, libraries) + chunk context | `parse` |
+| verdict on the per-chunk laws, for a chunk another runtime version admitted | `neptune.runtime.chunk-laws/1`: the chunk id + runtime version | `normalize` |
 | verdict on the cross-chunk laws | `neptune.runtime.admission/1`: the plan's chunk ids + runtime version | `assemble` |
 | series file | `neptune.store.series/1`: the merged chunks' ids + `SERIES_SETTINGS` | `assemble` |
 
@@ -87,6 +88,11 @@ needs, and nothing else decides: no clock, file time or flag.
   before), `source_new`. A chunk not committed misses with `not_committed` if its plan was kept,
   else with its plan's rule. A derivative is `held`, `absent` or `corrupt` (damaged: rebuilt).
   So a change to one adapter recomputes that adapter's chunks and derivatives and nothing else.
+- **New laws judge what is kept.** A chunk records the runtime version whose laws admitted it.
+  A job of another version (or over a chunk with no record) judges its committed output by its
+  own per-chunk laws before reusing it, once per version and without the adapter; a chunk they
+  refuse fails as it would in a fresh workspace (`chunk_failed`, one attempt), so the package
+  never depends on what the cache held.
 - **Lazy derivatives.** Verdicts and series files are built the first time an assembly needs them,
   kept under `derivatives/`, and copied (hash-checked) after; a damaged one is rebuilt.
 - **Report.** `JobOutcome.cache` and `volatile/cache-report.json`: every plan, chunk and derivative

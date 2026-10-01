@@ -11,6 +11,7 @@ Everything an ingest needs to remember between runs lives here, never beside the
                                        by the source's content id, then the transform's id
     chunks/<2 hex>/<62 hex>/           one committed chunk output, by chunk id:
         chunk.json                     the chunk
+        admitted.json                  the version of the laws its output was checked against
         records.jsonl, findings.jsonl  its records and findings, canonical lines sorted by id
         runs/<64 hex>.parquet          its rows of each stream, sorted (``store.series``)
     derivatives/<2 hex>/<62 hex>/      one derivative, by the id of its ``DerivativeKey``:
@@ -71,6 +72,7 @@ WORKSPACE_KIND: Final = "neptune_workspace"
 HOME_VARIABLE: Final = "NEPTUNE_HOME"
 LOCK: Final = "lock"
 DERIVATIVE_FILE: Final = "derivative.json"
+ADMITTED_FILE: Final = "admitted.json"  # in a chunk's directory: the laws that admitted it
 DERIVATIVE_ID_SCHEME: Final = "neptune.derivative-id/1"
 
 
@@ -718,17 +720,26 @@ class Workspace:
         records: Iterable[Any],
         findings: Iterable[IngestFinding],
         series: Iterable[SeriesBatch],
+        *,
+        laws: str | None = None,
     ) -> bool:
         """Commit one chunk's output, whole or not at all. ``False`` if it was already committed.
 
         Outputs are deterministic, so a chunk committed twice, by two runs or two processes, is
-        the same output: the second commit changes nothing.
+        the same output: the second commit changes nothing. ``laws`` names the version of the
+        laws the output was checked against before it was committed (the runtime's version); it
+        is kept beside the output, so a job under other laws knows to judge it again (ADR 0031
+        §2). Without one, every job judges it again.
         """
+        if laws is not None and (not isinstance(laws, str) or not laws):
+            raise WorkspaceError(f"the laws a chunk was admitted under are named, got {laws!r}")
         final = self.chunk_path(chunk.id)
         if final.is_dir():
             return False
         with self._staging() as staged:
             (staged / "chunk.json").write_bytes(canonical_json.dumps(chunk.to_json()))
+            if laws is not None:
+                (staged / ADMITTED_FILE).write_bytes(canonical_json.dumps({"laws": laws}))
             (staged / "records.jsonl").write_bytes(_lines(records))
             (staged / "findings.jsonl").write_bytes(_lines(findings))
             (staged / "runs").mkdir()
@@ -747,6 +758,21 @@ class Workspace:
                 raise
             fsync_directory(final.parent)
             return True
+
+    def admitted(self, chunk: str) -> str | None:
+        """The version of the laws a committed chunk's output was admitted under, if known.
+
+        ``None`` for a chunk committed without one (by format 1, or not by a job) and for a record
+        that cannot be read: either way the output is judged again, so a damaged record costs
+        time, never a wrong admission.
+        """
+        path = self.chunk_path(chunk) / ADMITTED_FILE
+        try:
+            data = canonical_json.loads(path.read_bytes())
+        except (OSError, ValueError):
+            return None
+        laws = data.get("laws") if isinstance(data, dict) and data.keys() == {"laws"} else None
+        return laws if isinstance(laws, str) and laws else None
 
     def load(self, chunk: str) -> CommittedChunk:
         """A committed chunk's output."""

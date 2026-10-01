@@ -34,7 +34,8 @@ it applies to; "only affected" means nothing outside that transform's chunks and
 
 ## Decision
 
-1. **The cache key of a chunk is its id; nothing else is consulted.** The chunk id covers the
+1. **The cache key of a chunk's output is its id; nothing else decides its reuse.** Whether a
+   reused output is admitted is the laws' business (§2). The chunk id covers the
    source's content id (tier 1, so a rename or a second root holding the same bytes hits), the
    transform's adapter id, version, config hash, libraries and upstream, and the context `plan`
    gave the chunk (its identity within the source). `cost` is not in it. No clock, file time,
@@ -47,14 +48,28 @@ it applies to; "only affected" means nothing outside that transform's chunks and
    |---|---|---|
    | a plan | (source content id, transform id) | the adapter's `plan` |
    | a chunk's output | chunk id | the adapter's `ingest`, checked and committed |
+   | a chunk's verdict on the per-chunk laws of a runtime other than the one that admitted it | `neptune.runtime.chunk-laws/1` over the chunk id and the runtime's version | the job, from the committed output |
    | a source's verdict on the cross-chunk laws | `neptune.runtime.admission/1` over the plan's chunk ids and the runtime's version | the job (ADR 0028 §5) |
    | a stream's series file | `neptune.store.series/1` over the chunk ids whose runs it merges and `SERIES_SETTINGS` | the store's merge (ADR 0025) |
 
    A derivative's key (`DerivativeKey`: recipe and version, canonical-JSON inputs, and the
    (source, transform) pairs it reads from) hashes to `drv:sha256:<hex>`. A recipe's version
-   changes whenever the same inputs would give other bytes; the runtime's version, which ADR
-   0028 §4 already bumps when its findings change, is an input of the verdict, so new laws
-   recompute every verdict.
+   changes whenever the same inputs would give other bytes. The runtime's version changes
+   whenever its findings or any law it applies changes (ADR 0028 §4), the contract's
+   `check_chunk_output` included, and every verdict is keyed by it, so new laws recompute
+   every verdict, per-chunk and cross-chunk:
+
+   - A chunk is committed with the runtime version whose per-chunk laws (`check_chunk_output`,
+     the series laws within a chunk) admitted it (`admitted.json` in its directory). A job of
+     that version reuses it as it is.
+   - A job of another version, or over a chunk with no readable record of one (format 1 kept
+     none), still reuses the output (no adapter call) but first judges it by its own per-chunk
+     laws, over the output as committed: its records, its findings, and each stream's run read
+     back as one batch. The verdict is kept, so a chunk is judged once per version.
+   - A chunk the laws refuse fails exactly as it would in a fresh workspace: `chunk_failed` at
+     the step it broke, after one attempt, its source quarantined. The same inputs therefore
+     give the same package whatever the cache held. A per-chunk law judges content, never the
+     order or batching an adapter emitted it in, which the workspace does not keep.
 3. **Invalidation is a rule, and every miss names the first one that holds.** For a source's
    plan, in order:
    - `planned` (hit): the plan under this transform is kept;
@@ -70,7 +85,8 @@ it applies to; "only affected" means nothing outside that transform's chunks and
    over (the rule is made from what remains) and never fails the job, which plans the source
    either way.
 
-   A chunk is `committed` (hit) if its output is kept; otherwise it misses with `not_committed`
+   A chunk is `committed` (hit) if its output is kept (judged first if another runtime
+   version admitted it, §2); otherwise it misses with `not_committed`
    if its plan was kept (a job was interrupted, cancelled or failed on it) or with its plan's
    rule. A derivative is `held` (hit), `absent` (built now) or `corrupt` (kept but damaged:
    discarded and built again). Planning granularity is not a rule: the kept plan is reused
@@ -156,6 +172,10 @@ it applies to; "only affected" means nothing outside that transform's chunks and
 - A config or version change of one adapter recomputes that adapter's chunks, verdicts and
   series, and nothing of any other adapter's; the old lineage stays kept until collected, so
   switching back is free.
+- A new runtime version reads every kept chunk once, to judge it (no adapter call), and
+  recomputes every cross-chunk verdict; the next job of that version reuses both. The first job
+  over a workspace upgraded from format 1 does the same, since format 1 kept no admitting
+  version.
 - The workspace holds a stream's rows twice once its series file is built (the runs and the
   merged file). Collection removes both with their source's lineage; dropping runs whose series
   file is kept is a later optimisation.

@@ -7,10 +7,12 @@ times, no flag.
 - A **plan** is kept by (source content id, transform id) (ADR 0026 §1).
 - A **chunk's output** is kept by the chunk's id, which is its cache key: the source's content id,
   the transform (adapter id, version, resolved config, libraries) and the chunk's context, its
-  identity within the source (ADR 0024 §4). Equal ids mean equal output.
-- A **derivative** (a stream's series file, a source's verdict on the cross-chunk laws) is kept
-  by a ``DerivativeKey``: its recipe and version, the chunk ids and settings it reads. It is
-  built the first time something reads it, and copied after that.
+  identity within the source (ADR 0024 §4). Equal ids mean equal output. It records the runtime
+  version whose laws admitted it; a job of another version judges it again before reusing it.
+- A **derivative** (a stream's series file, a source's verdict on the cross-chunk laws, a chunk's
+  verdict on the per-chunk laws of a later runtime) is kept by a ``DerivativeKey``: its recipe and
+  version, the chunk ids and settings it reads. It is built the first time something reads it,
+  and copied after that.
 
 Each miss is explained by the first invalidation rule that holds (``Rule``, ``explain_plan``),
 and every job leaves a ``CacheReport``: each plan, chunk and derivative it needed, hit or miss and
@@ -42,6 +44,9 @@ REPORT_FORMAT: Final = 1
 # A source's verdict on the cross-chunk laws (ADR 0028 §5), as a derivative. Its inputs carry the
 # runtime's version, which changes whenever the laws do.
 ADMISSION_RECIPE: Final = "neptune.runtime.admission/1"
+# A committed chunk's verdict on the per-chunk laws, when the runtime that admitted it is another
+# version than the job's: judged again once per version, over the output as committed.
+CHUNK_LAWS_RECIPE: Final = "neptune.runtime.chunk-laws/1"
 VERDICT_FILE: Final = "verdict.json"
 
 
@@ -199,6 +204,19 @@ def admission_key(
         "transform": transform,
     }
     return DerivativeKey(ADMISSION_RECIPE, inputs, ((source, transform),))
+
+
+def chunk_laws_key(
+    source: ContentId, transform: RecordId, chunk: str, runtime: str
+) -> DerivativeKey:
+    """The key of a committed chunk's verdict on the per-chunk laws of runtime ``runtime``."""
+    inputs: JsonObject = {
+        "chunk": chunk,
+        "runtime": runtime,
+        "source": source,
+        "transform": transform,
+    }
+    return DerivativeKey(CHUNK_LAWS_RECIPE, inputs, ((source, transform),))
 
 
 # --- The report --------------------------------------------------------------------------------

@@ -85,12 +85,14 @@ def whole_chunks(workspace: Workspace) -> set[str]:
     for chunk in workspace.chunks():
         directory = workspace.chunk_path(chunk)
         assert sorted(p.name for p in directory.iterdir()) == [
+            "admitted.json",
             "chunk.json",
             "findings.jsonl",
             "records.jsonl",
             "runs",
         ]
         workspace.load(chunk)  # every file reads back
+        assert workspace.admitted(chunk) is not None
         found.add(chunk)
     return found
 
