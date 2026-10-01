@@ -13,7 +13,8 @@ overlapping valid intervals on the same clock:
    resurrected after the winner's interval.
 3. The arriving claim lists the claims it superseded in ``supersedes``. A closure version
    ``supersedes`` the version it narrows. Its provenance is the resolver's: the narrowed claim's
-   original evidence plus the winner's.
+   original evidence plus the winner's. A claim that starts at or after its winner keeps nothing:
+   the resolver only cuts tails, never heads.
 
 Nothing is deleted. Claims on different clocks are never compared: the pair is reported as a
 ``clock_mismatch`` finding and both stay current.
@@ -25,6 +26,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
+from neptune.identity.canonical_json import dumps
 from neptune.identity.ids import config_hash
 from neptune_memory.schema.claim import Claim, ClaimId, ClaimProvenance, is_inferred
 from neptune_memory.schema.interval import OPEN, LedgerTx, Open
@@ -33,7 +35,7 @@ from neptune_memory.schema.predicates import Cardinality, PredicateRegistry, che
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
-    from neptune.model.ids import ConfigHash, RecordId
+    from neptune.model.ids import RecordId
     from neptune.model.provenance import EvidenceRef
     from neptune_memory.schema.claim import ClaimAssertionKind
     from neptune_memory.schema.nodes import NodeRef
@@ -45,7 +47,8 @@ RESOLVER_VERSION: Final = "1"
 
 class FindingCode(StrEnum):
     CLOCK_MISMATCH = "clock_mismatch"  # contradicting objects on different clocks: not compared
-    OVERRIDDEN_ON_ARRIVAL = "overridden_on_arrival"  # the arriving claim lost over all its interval
+    # The arriving claim began at or after a winner's valid_from, so no part of it is current.
+    OVERRIDDEN_ON_ARRIVAL = "overridden_on_arrival"
 
 
 @dataclass(frozen=True)
@@ -101,9 +104,13 @@ def resolve(
     """The bi-temporal history of ``claims``: pure, deterministic, order-free and idempotent.
 
     ``claims`` may be assertions or a history ``resolve`` produced; either way only their
-    ``assertions`` count. Every claim must conform to ``registry`` (else ``ClaimSchemaError``) and
-    every consolidator must have a priority (else ``ValueError``).
+    ``assertions`` count, and every closure version in the input must be one this call recreates
+    (else ``ValueError``: no consolidator may forge resolver output). These are preconditions, not
+    data findings: ``consolidate/`` turns non-conforming claims into findings before they get here.
+    Every claim must conform to ``registry`` (else ``ClaimSchemaError``) and every consolidator
+    must have a priority (else ``ValueError``).
     """
+    claims = tuple(claims)
     inputs = assertions(claims)
     missing = sorted({c.provenance.consolidator_id for c in inputs} - priorities.keys())
     if missing:
@@ -112,7 +119,6 @@ def resolve(
         raise ValueError(f"{RESOLVER_ID} is reserved for the resolver")
     for claim in inputs:
         check_claim(claim, registry)
-    settings = _Settings(config_hash({"priorities": dict(priorities)}))
     versions: dict[ClaimId, Claim] = {}
     origin: dict[ClaimId, Claim] = {}  # version id -> the assertion it narrows
     current: dict[tuple[NodeRef, str], list[ClaimId]] = {}
@@ -125,7 +131,8 @@ def resolve(
             continue
         key = (arriving.subject, arriving.predicate)
         live = current.setdefault(key, [])
-        rivals = [versions[i] for i in live if versions[i].object != arriving.object]
+        claimed = _object_key(arriving)
+        rivals = [versions[i] for i in live if _object_key(versions[i]) != claimed]
         domain = arriving.valid_from.domain_id
         mismatched = sorted(r.id for r in rivals if r.valid_from.domain_id != domain)
         if mismatched:
@@ -144,7 +151,7 @@ def resolve(
             cutter = min(winners, key=lambda w: (w.valid_from.ticks, w.recorded_at, w.id))
             stored = replace(arriving, superseded_at=arriving.recorded_at)
             if arriving.valid_from < cutter.valid_from:
-                effective = _closure(arriving, arriving, cutter, arriving.recorded_at, settings)
+                effective = _closure(arriving, arriving, cutter, arriving.recorded_at)
                 origin[effective.id] = arriving
             else:
                 effective = None
@@ -166,9 +173,7 @@ def resolve(
             versions[loser.id] = replace(loser, superseded_at=arriving.recorded_at)
             live.remove(loser.id)
             if loser.valid_from < arriving.valid_from:
-                narrowed = _closure(
-                    loser, origin[loser.id], arriving, arriving.recorded_at, settings
-                )
+                narrowed = _closure(loser, origin[loser.id], arriving, arriving.recorded_at)
                 origin[narrowed.id] = origin[loser.id]
                 versions[narrowed.id] = narrowed
                 live.append(narrowed.id)
@@ -178,6 +183,9 @@ def resolve(
                 versions[effective.id] = effective
             live.append(effective.id)
 
+    forged = sorted({c.id for c in claims if is_closure(c)} - versions.keys())
+    if forged:
+        raise ValueError(f"closure versions this resolution does not produce: {forged}")
     history = tuple(sorted(versions.values(), key=lambda c: (c.recorded_at, c.id)))
     return Resolution(history, tuple(findings))
 
@@ -195,11 +203,6 @@ def as_of(history: Iterable[Claim], tx: LedgerTx) -> tuple[Claim, ...]:
 # --- Internals --------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class _Settings:
-    config_hash: ConfigHash
-
-
 def _beats(arriving: Claim, held: Claim) -> bool:
     """Whether ``arriving`` wins the overlap against the already-current ``held``."""
     return (assertion_rank(arriving.assertion_kind), arriving.valid_from.ticks) >= (
@@ -208,10 +211,17 @@ def _beats(arriving: Claim, held: Claim) -> bool:
     )
 
 
-def _closure(
-    version: Claim, root: Claim, winner: Claim, recorded_at: LedgerTx, settings: _Settings
-) -> Claim:
-    """``version`` narrowed to end where ``winner`` begins, recorded at ``recorded_at``."""
+def _object_key(claim: Claim) -> bytes:
+    """Objects compare as their canonical JSON: ``5`` and ``5.0`` differ, as they do in ids."""
+    return dumps(claim.object.to_json())
+
+
+def _closure(version: Claim, root: Claim, winner: Claim, recorded_at: LedgerTx) -> Claim:
+    """``version`` narrowed to end where ``winner`` begins, recorded at ``recorded_at``.
+
+    The closure's ``config_hash`` hashes the decision it records, ``{narrows, winner}``, so two
+    narrowings never share an id and unrelated configuration never changes it.
+    """
     evidence: list[EvidenceRef] = []
     for ref in (*root.provenance.evidence, *winner.provenance.evidence):
         if ref not in evidence:
@@ -222,7 +232,7 @@ def _closure(
         records=tuple(sorted(records)),
         consolidator_id=RESOLVER_ID,
         consolidator_version=RESOLVER_VERSION,
-        config_hash=settings.config_hash,
+        config_hash=config_hash({"narrows": version.id, "winner": winner.id}),
     )
     return replace(
         version,

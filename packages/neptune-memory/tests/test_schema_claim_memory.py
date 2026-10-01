@@ -23,6 +23,7 @@ from memory_schema_builders import (
 from neptune.identity.canonical_json import dumps
 from neptune.identity.ids import record_id
 from neptune.model.knowledge import Known, NotApplicable, NotCovered, Unknown
+from neptune.model.provenance import Provenance
 from neptune.model.scalars import NonFinite
 from neptune.model.time import DomainMismatchError, Epoch, Timescale
 from neptune.model.units import unit_from_text
@@ -276,3 +277,13 @@ def test_valid_and_current_views() -> None:
     assert first.is_current
     assert not replace(first, superseded_at=ledger_tx(1)).is_current
     assert STATED.value == "stated"
+
+
+def test_a_literal_unit_inherits_the_claim_provenance() -> None:
+    grounded = Provenance(evidence(0), record_id("transform_record", {"t": 1}), STATED)
+    with pytest.raises(ValueError, match="INHERITED"):
+        TypedLiteral(
+            ValueType.QUANTITY, 5.0, Known(unit_from_text("kg").known_or_raise(), grounded)
+        )
+    with pytest.raises(ValueError, match="INHERITED"):
+        TypedLiteral(ValueType.QUANTITY, 5.0, Unknown(grounded))

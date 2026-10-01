@@ -205,3 +205,29 @@ def test_resolver_refuses_bad_configuration_and_bad_claims() -> None:
         resolve([fact], CORE_PREDICATES, {**PRIORITIES, RESOLVER_ID: 0})
     with pytest.raises(ClaimSchemaError):
         resolve([replace(fact, predicate="teleports_to")], CORE_PREDICATES, PRIORITIES)
+
+
+def test_corroborating_claims_each_keep_their_own_closure() -> None:
+    amr = node(NodeType.MACHINE, "amr-12")
+    a, b, c = (node(NodeType.SITE, s) for s in ("bay-a", "bay-b", "bay-c"))
+    priorities = {"memory.a": 1, "memory.b": 1, "memory.test": 1}
+    first = claim(amr, "located_at", a, 0, tx=1, consolidator="memory.a")
+    second = claim(amr, "located_at", a, 0, tx=1, consolidator="memory.b")  # same evidence
+    moved = claim(amr, "located_at", b, 5, tx=2, ev=1)
+    earlier = claim(amr, "located_at", c, 2, tx=3, ev=2)  # narrows both closures again
+    history = resolve([first, second, moved, earlier], CORE_PREDICATES, priorities).claims
+    closures = [h for h in history if is_closure(h)]
+    narrowed = sorted(sid for h in closures for sid in h.supersedes)
+    assert len({h.id for h in closures}) == len(closures) == 5
+    assert len(set(narrowed)) == len(narrowed)
+    live = sorted((h.valid_from.ticks, h.object) for h in current(history))
+    assert live == [(0, a), (0, a), (2, c), (5, b)]
+
+
+def test_forged_closure_versions_are_refused() -> None:
+    amr = node(NodeType.MACHINE, "amr-12")
+    forged = claim(
+        amr, "located_at", node(NodeType.SITE, "bay-a"), 0, tx=1, consolidator=RESOLVER_ID
+    )
+    with pytest.raises(ValueError, match="does not produce"):
+        resolve([forged], CORE_PREDICATES, PRIORITIES)

@@ -33,6 +33,7 @@ from neptune.model.ids import (
 from neptune.model.knowledge import (
     Ambiguous,
     AssertionKind,
+    Inherited,
     Knowledge,
     Known,
     NotApplicable,
@@ -128,15 +129,22 @@ class TypedLiteral:
         if datatype is ValueType.QUANTITY:
             if not isinstance(self.unit, Known | Unknown | Ambiguous):
                 raise ValueError(f"a quantity's unit is Known, Unknown or Ambiguous: {self.unit!r}")
-            units = (
-                [self.unit.value]
+            readings = (
+                [self.unit]
                 if isinstance(self.unit, Known)
-                else [c.value for c in self.unit.candidates]
+                else list(self.unit.candidates)
                 if isinstance(self.unit, Ambiguous)
                 else []
             )
-            if not all(isinstance(unit, Unit) for unit in units):
+            if not all(isinstance(reading.value, Unit) for reading in readings):
                 raise TypeError(f"a quantity's unit must be a Unit: {self.unit!r}")
+            # The claim's provenance grounds the unit; a unit-level citation would make two equal
+            # declared values compare unequal.
+            slots = [r.provenance for r in readings]
+            if isinstance(self.unit, Unknown):
+                slots.append(self.unit.provenance)
+            if not all(isinstance(slot, Inherited) for slot in slots):
+                raise ValueError("a literal's unit inherits the claim's provenance (INHERITED)")
         elif not isinstance(self.unit, NotApplicable):
             raise ValueError(f"only a quantity has a unit; a {datatype} has NotApplicable")
 

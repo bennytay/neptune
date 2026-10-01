@@ -51,7 +51,8 @@ Code: `neptune_memory/schema/` (`nodes.py`, `interval.py`, `claim.py`, `predicat
 
 - `TypedLiteral(datatype, value, unit)`: `text`, `integer`, `real` (a finite float, or `NonFinite` as the
   source wrote it), `boolean`, `quantity` or `instant` (a `Timestamp`). Only a `quantity` has a unit, and that
-  unit is `Known(Unit)`, `Unknown` or `Ambiguous` exactly as declared. `5 mm` and `0.5 cm` are different objects.
+  unit is `Known(Unit)`, `Unknown` or `Ambiguous` exactly as declared, and it inherits the claim's provenance.
+  Objects compare by canonical JSON, so `5 mm` and `0.5 cm` (or `5` and `5.0`) are different objects.
 - `id = "claim:" + sha256(canonical JSON of {subject, predicate, object, valid, assertion_kind, confidence,
   provenance})`. It covers what is asserted and by whom, never the bookkeeping (`recorded_at`, `superseded_at`,
   `supersedes`). Re-recording the same assertion therefore produces the same claim.
@@ -83,8 +84,9 @@ Priorities are configuration: a consolidator with no priority is a `ValueError`.
    `valid_from`, then the later arrival.
 3. The **loser's** current version gets `superseded_at = arriving.recorded_at`. If it began before the winner, a
    **closure version** is recorded at that transaction with `valid_to = winner.valid_from`,
-   `supersedes = (loser,)` and provenance `memory.supersede` (the loser's original evidence plus the winner's).
-   Otherwise nothing of it remains current. A loser is never resurrected after the winner's interval.
+   `supersedes = (loser,)` and provenance `memory.supersede` (the loser's original evidence plus the winner's;
+   `config_hash` hashes `{narrows, winner}`, so distinct narrowings never share an id). Otherwise nothing of it
+   remains current. The resolver cuts tails, never heads, so a loser is not resurrected after a bounded winner.
 4. The **arriving** claim's `supersedes` lists the claims it beat. If it loses on arrival, it is stored with
    `superseded_at = recorded_at` (it was never current) and gets a closure version, or, if nothing is left, an
    `overridden_on_arrival` finding.
@@ -92,6 +94,12 @@ Priorities are configuration: a consolidator with no priority is a `ValueError`.
    current.
 
 `as_of(history, tx)` returns the versions with `recorded_at ≤ tx < superseded_at`. Nothing is ever deleted.
+
+Preconditions raise instead of producing findings, because they are caller bugs and not hostile data:
+`consolidate/` turns non-conforming claims into findings before they reach `resolve`. These preconditions are
+a claim that breaks the vocabulary (`ClaimSchemaError`), a consolidator with no priority, a priority for the
+reserved `memory.supersede`, and an input closure version that this resolution does not recreate, which is
+forged resolver output.
 
 **Property specification**, tested with hypothesis and an exhaustive permutation test:
 
