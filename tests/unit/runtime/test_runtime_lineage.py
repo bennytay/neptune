@@ -49,6 +49,7 @@ def test_the_runtime_transform_is_its_id_version_retry_and_isolation_policy() ->
         "cpu_seconds": 60,
         "isolation": "subprocess",
         "memory_bytes": 2 * 1024**3,
+        "reply_bytes": 64 * 1024 * 1024,
         "wall_seconds": 120,
     }
     assert TRANSFORM.libraries == () and TRANSFORM.upstream == ()
@@ -56,6 +57,7 @@ def test_the_runtime_transform_is_its_id_version_retry_and_isolation_policy() ->
     assert runtime_transform(2, Isolation.SUBPROCESS, DEFAULT_LIMITS) == TRANSFORM
     assert runtime_transform(3).id != TRANSFORM.id  # another policy is another lineage
     assert runtime_transform(2, limits=Limits(cpu_seconds=61)).id != TRANSFORM.id
+    assert runtime_transform(2, limits=Limits(reply_bytes=32 * 1024 * 1024)).id != TRANSFORM.id
 
 
 def test_in_process_records_no_limits_since_none_bound_it() -> None:

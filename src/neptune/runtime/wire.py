@@ -12,7 +12,10 @@ execution in the job's process.
   payloads, infinities and ``-0.0`` cross unchanged. A null cell is ``null``.
 - Plans travel as their chunks' ``to_json`` and findings; probe results as their ``to_json``.
 
-A decoder raises on anything it does not recognise; the sandbox reports that as a crash.
+A decoder raises on anything it does not recognise; the sandbox reports that as a crash. The byte
+size of a reply is already capped (``Limits.reply_bytes``); the decode is bounded in count too, so
+a reply that stays under the byte cap yet packs it with millions of empty containers or bare
+numbers is refused (``ReplyTooLarge``) and reported as ``Limit.REPLY``, not decoded.
 """
 
 import json
@@ -35,7 +38,7 @@ from neptune.model.ids import RecordId, parse_record_id
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.kinds import RECORD_KINDS
 from neptune.model.series import Cell, ColumnType, ScalarCell, SeriesBatch, SeriesColumn
-from neptune.runtime.sandbox import Codec
+from neptune.runtime.sandbox import Codec, ReplyTooLarge
 
 _FLOATS: Final = frozenset({ColumnType.FLOAT32, ColumnType.FLOAT64})
 _INTEGERS: Final = frozenset(
@@ -52,6 +55,45 @@ _INTEGERS: Final = frozenset(
 )
 _HEX: Final = re.compile(r"(?:[0-9a-f]{2})*")
 _DOUBLE: Final = re.compile(r"[0-9a-f]{16}")
+
+# The reply's byte size is already capped (``Limits.reply_bytes``); this caps how many containers
+# and elements a decode may build from it, so a reply that stays under the byte cap but packs it
+# with empty lists or bare zeros — millions of tiny Python objects — cannot exhaust the parent.
+# A value needs at least one byte, so a reply no larger than the cap can never exceed it: the
+# scan runs only for the rare reply above it, and stops the moment the count is passed.
+_MAX_REPLY_NODES: Final = 8 * 1024 * 1024
+_OPENERS: Final = frozenset(b",[{")
+_QUOTE: Final = 0x22
+_BACKSLASH: Final = 0x5C
+
+
+def _refuse_overlong(data: bytes) -> None:
+    """Raise ``ReplyTooLarge`` if ``data`` encodes more than ``_MAX_REPLY_NODES`` values, counting
+    outside strings so commas and brackets in text never inflate the count."""
+    count = 1
+    in_string = escaped = False
+    for byte in data:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == _BACKSLASH:
+                escaped = True
+            elif byte == _QUOTE:
+                in_string = False
+        elif byte == _QUOTE:
+            in_string = True
+        elif byte in _OPENERS:
+            count += 1
+            if count > _MAX_REPLY_NODES:
+                raise ReplyTooLarge(f"a reply of over {_MAX_REPLY_NODES} values is refused")
+
+
+def _loads(data: bytes) -> object:
+    """``json.loads``, bounded: a reply over the byte cap is stopped before it ever reaches here,
+    and one that packs the cap with values is refused before the standard library builds them."""
+    if len(data) > _MAX_REPLY_NODES:  # smaller than this can never hold too many values
+        _refuse_overlong(data)
+    return json.loads(data)
 
 
 def _dumps(value: object) -> bytes:
@@ -197,7 +239,7 @@ def encode_output(output: ChunkOutput) -> bytes:
 
 
 def decode_output(data: bytes) -> ChunkOutput:
-    value = _object(json.loads(data), {"findings", "records", "series"}, "a chunk output")
+    value = _object(_loads(data), {"findings", "records", "series"}, "a chunk output")
     return ChunkOutput(
         records=tuple(_record_from_json(item) for item in _list(value["records"], "records")),
         series=tuple(_batch_from_json(item) for item in _list(value["series"], "series")),
@@ -215,7 +257,7 @@ def encode_plan(plan: Plan) -> bytes:
 
 
 def decode_plan(data: bytes) -> Plan:
-    value = _object(json.loads(data), {"chunks", "findings"}, "a plan")
+    value = _object(_loads(data), {"chunks", "findings"}, "a plan")
     return Plan(
         chunks=tuple(chunk_from_json(item) for item in _list(value["chunks"], "chunks")),
         findings=_findings_from_json(value["findings"]),
@@ -227,7 +269,7 @@ def encode_probe(result: ProbeResult) -> bytes:
 
 
 def decode_probe(data: bytes) -> ProbeResult:
-    value = json.loads(data)
+    value = _loads(data)
     if not isinstance(value, Mapping) or not {"confidence", "reasons"} <= value.keys():
         raise ValueError("a probe result has a confidence and reasons")
     if not value.keys() <= {"confidence", "reasons", "version"}:

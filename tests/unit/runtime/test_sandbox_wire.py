@@ -33,6 +33,7 @@ from neptune.discovery.reader import BytesReader
 from neptune.model.ids import RecordId
 from neptune.model.series import Cell, ColumnType, SeriesBatch, SeriesColumn
 from neptune.runtime import wire
+from neptune.runtime.sandbox import ReplyTooLarge
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures"
 STREAM: Final = RecordId("rec:sha256:" + "ab" * 32)
@@ -99,6 +100,22 @@ def test_the_encoding_is_deterministic() -> None:
     _, chunks = outputs(TALLY.TallyAdapter(rows_per_chunk=2), b"TALLY1\n10 1\n20 2\n30 3\n")
     for output in chunks:
         assert wire.encode_output(output) == wire.encode_output(output)
+
+
+def test_a_bounded_decode_refuses_a_reply_packed_with_values() -> None:
+    """A reply that stays under the byte cap but holds more containers or elements than a decode
+    may build is refused with ``ReplyTooLarge``; the count ignores strings and short-circuits, so
+    a reply no larger than the cap is parsed without a scan."""
+    cap = wire._MAX_REPLY_NODES
+    flat = b"[" + b"0," * (cap + 8) + b"0]"  # millions of bare zeros
+    nested = b"[" * (cap + 8) + b"]" * (cap + 8)  # a very deep nesting
+    for data in (flat, nested):
+        with pytest.raises(ReplyTooLarge):
+            wire._loads(data)
+    # Commas and brackets inside a string never count: a big text value with many of each is fine.
+    text = b'"' + b",[{" * cap + b'"'
+    assert len(text) > cap and wire._loads(text) == ",[{" * cap
+    assert wire._loads(b"[]") == [] and wire._loads(b'{"a":1}') == {"a": 1}
 
 
 SCALARS: Final = {

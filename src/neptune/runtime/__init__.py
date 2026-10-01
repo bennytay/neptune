@@ -17,12 +17,18 @@ from neptune.runtime.cache import RULES, CacheReport, Rule, cache_report_from_js
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
 from neptune.runtime.job import IngestJob, JobError, JobOptions, JobOutcome, collect
 from neptune.runtime.lineage import FINDING_CODES, RUNTIME_ID, RUNTIME_VERSION, runtime_transform
-from neptune.runtime.sandbox import DEFAULT_LIMITS, Isolation, Limits
+from neptune.runtime.sandbox import (
+    DEFAULT_LIMITS,
+    REQUIRED_LANDLOCK_ABI,
+    Isolation,
+    Limits,
+)
 
 __all__ = [
     "DEFAULT_LIMITS",
     "FINDING_CODES",
     "PHASES",
+    "REQUIRED_LANDLOCK_ABI",
     "RULES",
     "RUNTIME_ID",
     "RUNTIME_VERSION",

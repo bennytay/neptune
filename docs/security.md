@@ -60,16 +60,28 @@ By default (`JobOptions.isolation = subprocess`) each adapter call runs in a chi
 confined before any adapter code runs. A sandboxed call:
 
 - is stopped at `cpu_seconds` (60), `wall_seconds` (120) and `memory_bytes` (2 GiB of address
-  space above the job's), and its reply may not exceed `memory_bytes`;
-- opens no socket, starts no process or program, signals no other process, traces nothing, and
-  enters no namespace (seccomp); writes no byte to any file (`RLIMIT_FSIZE` 0) and, where the
-  kernel has Landlock, creates, truncates, renames or removes nothing;
+  space above the job's); its reply may not exceed `reply_bytes` (64 MiB, a separate cap far
+  below `memory_bytes`) in size or in the number of containers and elements it decodes to;
+- opens no socket, starts no process or program, and signals no other process — neither directly
+  (`kill`, `tgkill`, `tkill`, `rt_*sigqueueinfo`, `pidfd_send_signal`) nor through a descriptor's
+  async-I/O owner (`fcntl` F_SETOWN/F_SETOWN_EX/F_SETSIG, `ioctl` FIOSETOWN/SIOCSPGRP/FIOASYNC),
+  the path only Landlock ABI 6 scopes, which seccomp closes on every ABI;
+- cannot shed its parent-death signal or re-enable a core dump (`prctl` PR_SET_PDEATHSIG and
+  PR_SET_DUMPABLE are refused after setup); traces nothing and enters no namespace (seccomp);
+- writes no byte to any file (`RLIMIT_FSIZE` 0) and, under Landlock, creates, truncates, renames
+  or removes nothing;
 - holds only its source's read-only descriptor and its reply pipe; prints to `/dev/null`;
   leaves no core dump; dies if the job dies;
-- answers in JSON that the job decodes strictly and checks like any adapter's output; only the
-  job writes the workspace, so a killed call leaves nothing behind.
+- answers in JSON that the job decodes strictly, bounded, and checks like any adapter's output;
+  only the job writes the workspace, so a killed call leaves nothing behind.
 
-A host that cannot apply these controls (not Linux, no seccomp filter for its architecture) fails
-the job before any source is read; `isolation = in_process` runs adapters unconfined, by choice.
+The sandbox fails closed below **Landlock ABI 3**, the floor at which a source is immutable (ABI 1
+blocks a file being created, written or removed, ABI 2 a rename or relink, ABI 3 a truncation;
+below ABI 1 procfs plus Yama `ptrace_scope` 0 can even reach the parent's memory). A host below
+it fails the job unless `allow_degraded_sandbox` is set, which runs anyway and records the exact
+guarantees lost in the `sandbox_ready` event and the receipt's runtime transform. The hosts
+Neptune targets (Ubuntu 24.04, Debian 12, RHEL 9) are at or above the floor. A host that cannot
+apply the controls at all (not Linux, no seccomp filter for its architecture) also fails the job
+before any source is read; `isolation = in_process` runs adapters unconfined, by explicit choice.
 Residual risks: a compromised parser can read files the user can read and put them into its own
-output, and the job holds a reply of up to `memory_bytes` while it decodes it.
+output, and the job holds a reply of up to `reply_bytes` while it decodes it.

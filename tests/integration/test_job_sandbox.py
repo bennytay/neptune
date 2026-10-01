@@ -210,7 +210,12 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
     assert ready.details == {
         "isolation": "subprocess",
         "landlock": confine.landlock_abi(),
-        "limits": {"cpu_seconds": 10, "memory_bytes": 256 * MIB, "wall_seconds": 2},
+        "limits": {
+            "cpu_seconds": 10,
+            "memory_bytes": 256 * MIB,
+            "reply_bytes": 64 * MIB,
+            "wall_seconds": 2,
+        },
     }
     # The receipt names the policy the findings were made under.
     (runtime,) = [
@@ -223,6 +228,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
         "cpu_seconds": 10,
         "isolation": "subprocess",
         "memory_bytes": 256 * MIB,
+        "reply_bytes": 64 * MIB,
         "wall_seconds": 2,
     }
     assert {f.transform for f in run.outcome.findings} == {runtime.id}
@@ -461,6 +467,38 @@ def test_a_host_that_cannot_sandbox_fails_the_job_before_any_work(
     assert trusted.of("sandbox_ready")[0].details == {"isolation": "in_process"}
 
 
+def test_a_host_below_the_landlock_floor_fails_closed_unless_degraded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    # A segfault is safe even without Landlock (seccomp is independent of it) and gives the job a
+    # runtime finding, so the receipt carries the runtime transform it was made under.
+    (root / "crash.hostile").write_bytes(HOSTILE.hostile("before", "segfault", "after"))
+    real = confine.host()
+    monkeypatch.setattr(confine, "host", lambda: confine.Host(real.arch, 0))
+
+    # Fail closed by default: a host that cannot keep the source immutable fails the job.
+    with pytest.raises(JobError, match="allow_degraded_sandbox"):
+        IngestJob(root, tmp_path / "p", Workspace(tmp_path / "closed"), registry())
+    assert not (tmp_path / "p").exists()
+
+    # Degraded by explicit choice: the job runs and records exactly what was lost.
+    run = Run(root, tmp_path, JobOptions(allow_degraded_sandbox=True), home="deg-home")
+    (ready,) = run.of("sandbox_ready")
+    assert ready.details["landlock"] == 0
+    lost = ready.details["degraded"]
+    assert isinstance(lost, list) and "truncate a file, the source included" in lost
+    (runtime,) = [
+        r
+        for r in run.package.records
+        if isinstance(r, TransformRecord) and r.adapter_id == "neptune.runtime"
+    ]
+    assert runtime.config["degraded"] == lost  # the receipt records the lost guarantees too
+    assert len(run.outcome.ingested) == 1  # the text landed; the crashing source is quarantined
+
+
 @pytest.mark.parametrize(
     ("options", "problem"),
     [
@@ -468,6 +506,11 @@ def test_a_host_that_cannot_sandbox_fails_the_job_before_any_work(
         ({"limits": {"cpu_seconds": 1}}, "limits must be Limits"),
         (
             {"isolation": Isolation.IN_PROCESS, "limits": Limits(cpu_seconds=1)},
+            "in-process calls have none",
+        ),
+        ({"allow_degraded_sandbox": "yes"}, "allow_degraded_sandbox must be a bool"),
+        (
+            {"isolation": Isolation.IN_PROCESS, "allow_degraded_sandbox": True},
             "in-process calls have none",
         ),
     ],

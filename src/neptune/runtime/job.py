@@ -175,10 +175,13 @@ class JobOptions:
 
     ``attempts`` is how many times a chunk is tried before it fails. ``isolation`` is where
     adapter code runs: a confined child process per call (the default), or this process, which
-    must be asked for. ``limits`` bound each sandboxed call. The three are the runtime
-    transform's config, so a package's runtime findings name the policy they were made under.
-    ``config`` gives each adapter, by id, the option values to configure it with. ``job`` names
-    the job in its envelope; by default a fresh random token.
+    must be asked for. ``limits`` bound each sandboxed call. ``allow_degraded_sandbox`` lets a
+    job run where the host's Landlock ABI is below the floor the source-immutability guarantee
+    needs (ADR 0030): off by default, so such a host fails the job; on, the job runs and the
+    receipt and ``sandbox_ready`` event record exactly which guarantees were lost. These are the
+    runtime transform's config, so a package's runtime findings name the policy they were made
+    under. ``config`` gives each adapter, by id, the option values to configure it with. ``job``
+    names the job in its envelope; by default a fresh random token.
     """
 
     attempts: int = DEFAULT_ATTEMPTS
@@ -186,6 +189,7 @@ class JobOptions:
     job: str | None = None
     isolation: Isolation = Isolation.SUBPROCESS
     limits: Limits = DEFAULT_LIMITS
+    allow_degraded_sandbox: bool = False
 
     def __post_init__(self) -> None:
         if isinstance(self.attempts, bool) or not isinstance(self.attempts, int):
@@ -198,8 +202,14 @@ class JobOptions:
             raise JobError(f"isolation must be an Isolation, got {self.isolation!r}")
         if not isinstance(self.limits, Limits):
             raise JobError(f"limits must be Limits, got {self.limits!r}")
+        if not isinstance(self.allow_degraded_sandbox, bool):
+            raise JobError(
+                f"allow_degraded_sandbox must be a bool, got {self.allow_degraded_sandbox!r}"
+            )
         if self.isolation is Isolation.IN_PROCESS and self.limits != DEFAULT_LIMITS:
             raise JobError("limits bound sandboxed calls; in-process calls have none to set")
+        if self.isolation is Isolation.IN_PROCESS and self.allow_degraded_sandbox:
+            raise JobError("allow_degraded_sandbox is a sandbox policy; in-process calls have none")
 
 
 @dataclass(frozen=True)
@@ -426,15 +436,24 @@ class IngestJob:
         self._on_event: EventSink = on_event if on_event is not None else (lambda event: None)
         self._cancel = cancel
         self.job = self.options.job if self.options.job is not None else uuid.uuid4().hex
-        self.transform = lineage.runtime_transform(
-            self.options.attempts, self.options.isolation, self.options.limits
-        )
         try:
-            self._runner = sandbox.runner(self.options.isolation, self.options.limits)
+            self._runner = sandbox.runner(
+                self.options.isolation,
+                self.options.limits,
+                allow_degraded=self.options.allow_degraded_sandbox,
+            )
         except SandboxError as exc:
             raise JobError(
                 f"{exc}; ingest with isolation in_process to run adapters unconfined"
             ) from exc
+        # Built after the runner, so a degraded host's lost guarantees enter the lineage: a job
+        # run under weaker isolation never shares a transform id with a fully sandboxed one.
+        self.transform = lineage.runtime_transform(
+            self.options.attempts,
+            self.options.isolation,
+            self.options.limits,
+            self._runner.lost_guarantees(),
+        )
         self.state = JobState.PENDING
         self._phase = Phase.DISCOVER
         self._started: set[Phase] = set()

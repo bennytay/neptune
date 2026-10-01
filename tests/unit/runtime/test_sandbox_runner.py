@@ -26,9 +26,10 @@ import pytest
 
 from neptune.adapters.contract import ContractError
 from neptune.discovery.reader import SourceChangedError
-from neptune.runtime import confine
+from neptune.runtime import confine, wire
 from neptune.runtime.sandbox import (
     DEFAULT_LIMITS,
+    REQUIRED_LANDLOCK_ABI,
     Codec,
     Crashed,
     Exceeded,
@@ -42,6 +43,7 @@ from neptune.runtime.sandbox import (
     Subprocess,
     decode_raised,
     encode_raised,
+    landlock_guarantees_lost,
     runner,
 )
 
@@ -76,14 +78,19 @@ def no_children_left() -> bool:
 
 
 def test_default_limits() -> None:
-    assert Limits(cpu_seconds=60, wall_seconds=120, memory_bytes=2 * 1024 * MIB) == DEFAULT_LIMITS
+    assert (
+        Limits(cpu_seconds=60, wall_seconds=120, memory_bytes=2 * 1024 * MIB, reply_bytes=64 * MIB)
+        == DEFAULT_LIMITS
+    )
     assert DEFAULT_LIMITS.to_json() == {
         "cpu_seconds": 60,
         "memory_bytes": 2 * 1024 * MIB,
+        "reply_bytes": 64 * MIB,
         "wall_seconds": 120,
     }
     assert DEFAULT_LIMITS.value(Limit.CPU) == 60 and DEFAULT_LIMITS.value(Limit.WALL) == 120
-    assert DEFAULT_LIMITS.value(Limit.MEMORY) == DEFAULT_LIMITS.value(Limit.REPLY) == 2 * 1024 * MIB
+    assert DEFAULT_LIMITS.value(Limit.MEMORY) == 2 * 1024 * MIB  # the address space
+    assert DEFAULT_LIMITS.value(Limit.REPLY) == 64 * MIB  # far below it: a separate cap
 
 
 @pytest.mark.parametrize(
@@ -95,6 +102,8 @@ def test_default_limits() -> None:
         {"wall_seconds": 86_400},
         {"memory_bytes": 64 * MIB},
         {"memory_bytes": 1 << 40},
+        {"reply_bytes": 64 * 1024},
+        {"reply_bytes": 1 << 40},
     ],
 )
 def test_limits_at_their_bounds_are_accepted(limits: dict[str, int]) -> None:
@@ -113,6 +122,9 @@ def test_limits_at_their_bounds_are_accepted(limits: dict[str, int]) -> None:
         {"wall_seconds": "60"},
         {"memory_bytes": 64 * MIB - 1},
         {"memory_bytes": (1 << 40) + 1},
+        {"reply_bytes": 64 * 1024 - 1},
+        {"reply_bytes": (1 << 40) + 1},
+        {"reply_bytes": True},
     ],
 )
 def test_limits_out_of_bounds_are_refused(limits: dict[str, object]) -> None:
@@ -238,17 +250,33 @@ def test_allocating_without_bound_is_stopped_at_the_memory_limit(box: Subprocess
     assert box.call(lambda: "x" * (8 * MIB), TEXT) == Returned("x" * (8 * MIB))  # within it
 
 
-def test_a_reply_larger_than_the_memory_limit_is_refused() -> None:
-    small = Subprocess(Limits(memory_bytes=64 * MIB))
-    inherited = b"x" * (80 * MIB)  # mapped before the fork: the child adds nothing to send it
-    assert small.call(lambda: inherited, RAW) == Exceeded(Limit.REPLY, 64 * MIB)
-    assert small.call(lambda: inherited[: 60 * MIB], RAW) == Returned(inherited[: 60 * MIB])
+def test_the_reply_cap_is_separate_from_and_far_below_the_memory_limit() -> None:
+    # A small reply cap holds, even when the child has plenty of address space: one hostile call
+    # that emits a giant reply cannot exhaust the job as the parent copies and decodes it.
+    box = Subprocess(Limits(memory_bytes=256 * MIB, reply_bytes=2 * MIB))
+    inherited = b"x" * (8 * MIB)  # mapped before the fork: well within the child's 256 MiB
+    assert box.call(lambda: inherited, RAW) == Exceeded(Limit.REPLY, 2 * MIB)
+    assert box.call(lambda: inherited[: 1 * MIB], RAW) == Returned(inherited[: 1 * MIB])
     # One byte over: the excess may still sit in the pipe when the child exits, and is the limit
     # every time, never a decoded reply.
-    over = inherited[: 64 * MIB + 1]
-    assert {small.call(lambda: over, RAW) for _ in range(5)} == {Exceeded(Limit.REPLY, 64 * MIB)}
-    exact = inherited[: 64 * MIB]
-    assert small.call(lambda: exact, RAW) == Returned(exact)
+    over = inherited[: 2 * MIB + 1]
+    assert {box.call(lambda: over, RAW) for _ in range(5)} == {Exceeded(Limit.REPLY, 2 * MIB)}
+    exact = inherited[: 2 * MIB]
+    assert box.call(lambda: exact, RAW) == Returned(exact)
+
+
+def test_a_reply_that_packs_the_byte_cap_with_values_is_refused_not_decoded() -> None:
+    # Under the byte cap but far over the node cap: a flat array of bare zeros, and a deeply
+    # nested one. Either would build millions of Python objects; the decode refuses both as the
+    # reply's own limit, so the chunk fails and the job carries on.
+    box = Subprocess(Limits(memory_bytes=512 * MIB, reply_bytes=128 * MIB))
+    elements = b"[" + b"0," * (wire._MAX_REPLY_NODES + 8) + b"0]"
+    nested = b"[" * (wire._MAX_REPLY_NODES + 8) + b"]" * (wire._MAX_REPLY_NODES + 8)
+    assert len(elements) < 128 * MIB and len(nested) < 128 * MIB  # both within the byte cap
+    flat_codec = Codec(object, lambda _: elements, wire._loads)
+    deep_codec = Codec(object, lambda _: nested, wire._loads)
+    assert box.call(lambda: [], flat_codec) == Exceeded(Limit.REPLY, 128 * MIB)
+    assert box.call(lambda: [], deep_codec) == Exceeded(Limit.REPLY, 128 * MIB)
 
 
 def test_outcomes_are_deterministic(box: Subprocess) -> None:
@@ -448,7 +476,12 @@ def test_the_sandbox_describes_its_limits_and_landlock(box: Subprocess) -> None:
     assert box.describe() == {
         "isolation": "subprocess",
         "landlock": confine.landlock_abi(),
-        "limits": {"cpu_seconds": 1, "memory_bytes": 128 * MIB, "wall_seconds": 2},
+        "limits": {
+            "cpu_seconds": 1,
+            "memory_bytes": 128 * MIB,
+            "reply_bytes": 64 * MIB,
+            "wall_seconds": 2,
+        },
     }
 
 
@@ -461,6 +494,49 @@ def test_a_host_without_the_controls_cannot_build_a_sandbox(
     monkeypatch.setattr(confine, "host", lacking)
     with pytest.raises(SandboxError, match="plan9"):
         Subprocess()
+
+
+def test_the_landlock_floor_names_what_each_abi_cannot_guarantee() -> None:
+    assert landlock_guarantees_lost(0) == (
+        "create or remove a file or directory",
+        "rename or hard-link a file",
+        "truncate a file, the source included",
+    )
+    assert landlock_guarantees_lost(1) == (
+        "rename or hard-link a file",
+        "truncate a file, the source included",
+    )
+    assert landlock_guarantees_lost(2) == ("truncate a file, the source included",)
+    assert landlock_guarantees_lost(REQUIRED_LANDLOCK_ABI) == ()
+    assert landlock_guarantees_lost(8) == ()  # the floor met: nothing lost
+
+
+@pytest.mark.skipif(
+    confine.landlock_abi() >= REQUIRED_LANDLOCK_ABI, reason="this host needs no forced floor"
+)
+def test_a_real_sub_floor_host_would_fail_closed() -> None:
+    # Where the real kernel is below the floor, the default sandbox refuses to build at all.
+    with pytest.raises(SandboxError, match="allow_degraded_sandbox"):
+        Subprocess()
+
+
+def test_below_the_floor_the_sandbox_fails_closed_unless_degraded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real = confine.host()
+    monkeypatch.setattr(confine, "host", lambda: confine.Host(real.arch, 0))
+    with pytest.raises(SandboxError, match="Landlock ABI 0 is below"):
+        Subprocess()  # fail closed: the source is not safe here
+    degraded = Subprocess(allow_degraded=True)  # by explicit choice, recording what is lost
+    assert degraded.lost_guarantees() == landlock_guarantees_lost(0)
+    described = degraded.describe()
+    assert described["landlock"] == 0 and described["degraded"] == list(degraded.lost_guarantees())
+    assert isinstance(degraded.call(lambda: "fine", TEXT), Returned)  # it still runs
+
+
+def test_allow_degraded_must_be_a_bool() -> None:
+    with pytest.raises(TypeError, match="allow_degraded"):
+        Subprocess(allow_degraded="yes")  # type: ignore[arg-type]
 
 
 def test_a_control_that_fails_in_the_child_is_the_hosts_fault(

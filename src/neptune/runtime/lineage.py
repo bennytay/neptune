@@ -186,13 +186,22 @@ def failure_from_json(data: JsonValue) -> Failure:
 
 
 def runtime_transform(
-    attempts: int, isolation: Isolation = Isolation.SUBPROCESS, limits: Limits = DEFAULT_LIMITS
+    attempts: int,
+    isolation: Isolation = Isolation.SUBPROCESS,
+    limits: Limits = DEFAULT_LIMITS,
+    degraded: tuple[str, ...] = (),
 ) -> TransformRecord:
     """The runtime's transform under one policy: ``attempts`` tries per chunk, adapter calls run
-    with ``isolation``, and bounded by ``limits`` when that is the sandbox."""
+    with ``isolation``, and bounded by ``limits`` when that is the sandbox. ``degraded`` names any
+    sandbox guarantee the host could not give (ADR 0030): empty on a host that gives them all, so
+    a sound host's lineage is unchanged, and present and hashed when a job ran degraded, so the
+    receipt records exactly what was lost and such output never shares a lineage with a sound run.
+    """
     config: dict[str, JsonValue] = {"attempts": attempts, "isolation": str(isolation)}
     if isolation is Isolation.SUBPROCESS:
         config |= limits.to_json()
+        if degraded:
+            config["degraded"] = list(degraded)
     return transform_record(adapter_id=RUNTIME_ID, adapter_version=RUNTIME_VERSION, config=config)
 
 

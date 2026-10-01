@@ -52,23 +52,41 @@ partial chunk in the workspace.
    - a seccomp filter, built in-process as classic BPF: no `socket`; no `fork`, `vfork`,
      `clone` without `CLONE_THREAD`, `clone3` (ENOSYS, so libc falls back), `execve`,
      `execveat`; no `kill` or `tgkill` but to itself, no `tkill`, `rt_*sigqueueinfo` or
-     `pidfd_send_signal`; no `ptrace`, `process_vm_*`, `pidfd_getfd`; no `unshare` or `setns`;
-     no `bpf`; no `io_uring` (ENOSYS). Another ABI's syscalls kill the process. Threads work.
+     `pidfd_send_signal`. It also closes the async-I/O path to a signal, which only Landlock
+     ABI 6 scopes, with argument filters that hold on every ABI: `fcntl`
+     `F_SETOWN`/`F_SETOWN_EX`/`F_SETSIG` and `ioctl` `FIOSETOWN`/`SIOCSPGRP`/`FIOASYNC` get
+     EPERM, as do `prctl` `PR_SET_PDEATHSIG` (so a child cannot shed its parent-death signal and
+     outlive a killed job) and `PR_SET_DUMPABLE` (so it cannot re-enable a core dump after
+     confinement). No `ptrace`, `process_vm_*`, `pidfd_getfd`; no `unshare` or `setns`; no `bpf`;
+     no `io_uring` (ENOSYS). Another ABI's syscalls kill the process. Threads work.
 
    Reads stay open: lazy imports, codecs, time zone data and shared libraries keep working, and
    nothing the child reads can leave but through its reply. Seccomp and `RLIMIT_FSIZE` are the
-   floor on every Linux; Landlock adds to it where present, and the `sandbox_ready` event says
-   which ABI applied. The child writes one status byte once confined; a control that fails
-   before that byte is the host's fault (`JobError`), never a finding, and a hostile adapter,
-   which runs only after it, cannot fake it.
+   floor on every Linux. **The sandbox fails closed below Landlock ABI 3**: below it a source is
+   not immutable (ABI 1 blocks a file being created, written or removed, ABI 2 a rename or
+   relink, ABI 3 a truncation; and below ABI 1 procfs with Yama `ptrace_scope` 0 reaches the
+   parent's memory, which seccomp does not cover), so `JobOptions.isolation = subprocess` on
+   such a host raises `JobError`. `allow_degraded_sandbox` runs on it by explicit choice and
+   records the exact guarantees lost in the `sandbox_ready` event and, hashed into the runtime
+   transform, in the receipt, so degraded output never shares a lineage with a sound run. ABI 5
+   adds device-`ioctl` scoping and ABI 6 Landlock signal and abstract-socket scoping; neither is
+   part of the floor, since the child holds no device descriptor and seccomp closes the signal
+   path on every ABI. The `sandbox_ready` event says which ABI applied. The child writes one
+   status byte once confined; a control that fails before that byte is the host's fault
+   (`JobError`), never a finding, and a hostile adapter, which runs only after it, cannot fake it.
 4. **Limits are job-wide, per call, with defaults**: `cpu_seconds` 60, `wall_seconds` 120,
-   `memory_bytes` 2 GiB of address space above what the process held at fork; a reply larger
-   than `memory_bytes` is refused (`reply_bytes`). The parent enforces wall time (it kills the
-   child at the deadline) and the reply's size; the kernel enforces the rest (SIGXCPU, then
-   SIGKILL a second later; `MemoryError` or a failed allocation). They are the runtime
-   transform's config with `attempts` and `isolation` (`neptune.runtime` 0.2.0), so the receipt
-   names the limits whenever a runtime finding is in it; in-process runs record no limits, since
-   none bound them, and refuse to be given any.
+   `memory_bytes` 2 GiB of address space above what the process held at fork, and `reply_bytes`
+   64 MiB — a separate cap far below `memory_bytes`, so one hostile call that emits a giant reply
+   cannot exhaust the job as the parent reads and decodes it. The parent reads the reply into one
+   buffer (no list joined into a second copy), decodes it once, and bounds the decode in count as
+   well as bytes: a reply under the byte cap that packs it with empty containers or bare numbers
+   would still build millions of objects, so a count past a fixed ceiling is refused as
+   `reply_bytes` too. The parent enforces wall time (it kills the child at the deadline) and both
+   reply caps; the kernel enforces the rest (SIGXCPU, then SIGKILL a second later; `MemoryError`
+   or a failed allocation). They are the runtime transform's config with `attempts`, `isolation`
+   and, on a degraded host, the guarantees lost (`neptune.runtime` 0.1.0), so the receipt names
+   the policy whenever a runtime finding is in it; in-process runs record no limits, since none
+   bound them, and refuse to be given any.
 5. **The reply is data, never code.** The child sends JSON: records and findings as their
    `to_json` (ADR 0024 §6 makes every record read back as itself), series cells by column type
    with every float as its eight IEEE-754 bytes (NaN payloads, infinities and `-0.0` cross
@@ -130,7 +148,11 @@ partial chunk in the workspace.
   MVL-8's engine and M9's scheduler can batch probes per source if that shows in profiles.
 - Residual risks, recorded in `security.md`: a compromised parser can read files the user can
   read and put them in its own output (the contract checks citations, not every text); the
-  parent holds a reply of up to `memory_bytes` and its decoded objects.
+  parent holds a reply of up to `reply_bytes` (64 MiB) and its bounded decode.
+- The sandbox is unavailable, not silently weaker, below Landlock ABI 3: a host there fails the
+  job unless `allow_degraded_sandbox` is set, and a degraded run is a distinct lineage that
+  names what it could not guarantee. The common Linux the hosts Neptune targets run — Ubuntu
+  24.04 (ABI 4+), Debian 12, RHEL 9 — are at or above the floor.
 - MVL-15 runs `inspect` through the runner with an `InspectResult` codec; MVL-8's engine runs
   probes through it when it replaces the job's selection; MVL-50 builds the escape and
   exhaustion suite on the `hostile` fixture adapter.
