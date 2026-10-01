@@ -6,9 +6,11 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 dependencies = [
+    "lz4>=4.4.5",
     "markdown-it-py>=4.2.0",
     "pyarrow>=25.0.1",
     "pypdf>=6.19.0",
+    "zstandard>=0.25.0",
 ]
 
 [dependency-groups]
@@ -29,12 +31,19 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/neptune"]
 
+# The compiler is the root project; every directory under packages/ is a member (ADR: packages/
+# neptune-platform/docs/adr/0001). packages/_template is the source scripts/new-package.sh copies.
+[tool.uv.workspace]
+members = ["packages/*"]
+exclude = ["packages/_template"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-# Docs contain illustrative code sketches; ruff must not reformat them.
-extend-exclude = ["*.md"]
+# Docs contain illustrative code sketches; ruff must not reformat them. The package template holds
+# placeholder names; packages generated from it are linted with their own (extending) config.
+extend-exclude = ["*.md", "packages/_template"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ANN", "TC", "PTH", "ERA", "T20"]
@@ -56,6 +65,11 @@ mypy_path = "src"
 # pyarrow ships no type information; its use is confined to neptune.store.
 [[tool.mypy.overrides]]
 module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
+# lz4 ships no type information either; only neptune.adapters.mcap imports it (ADR 0034).
+[[tool.mypy.overrides]]
+module = ["lz4", "lz4.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

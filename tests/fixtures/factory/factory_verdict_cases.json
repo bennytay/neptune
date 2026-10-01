@@ -1,0 +1,74 @@
+{
+  "head": "abcdef1234567890abcdef1234567890abcdef12",
+  "cases": {
+    "owner_merge": {
+      "expected": "MERGE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: MERGE @ abcdef1"}
+      ]
+    },
+    "member_review_body_with_emphasis": {
+      "expected": "MERGE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "MEMBER", "body": "Looks good.\n> **Review: merge @ ABCDEF12**"}
+      ]
+    },
+    "outsider_merge_is_ignored": {
+      "expected": null,
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "NONE", "body": "Review: MERGE @ abcdef1"},
+        {"at": "2026-10-01T10:01:00Z", "association": "CONTRIBUTOR", "body": "Review: MERGE @ abcdef1"},
+        {"at": "2026-10-01T10:02:00Z", "association": "FIRST_TIME_CONTRIBUTOR", "body": "Review: MERGE @ abcdef1"},
+        {"at": "2026-10-01T10:03:00Z", "association": null, "body": "Review: MERGE @ abcdef1"}
+      ]
+    },
+    "later_revise_overrides_merge": {
+      "expected": "REVISE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: MERGE @ abcdef1"},
+        {"at": "2026-10-01T11:00:00Z", "association": "COLLABORATOR", "body": "Review: REVISE @ abcdef1"}
+      ]
+    },
+    "later_merge_overrides_revise": {
+      "expected": "MERGE",
+      "events": [
+        {"at": "2026-10-01T11:00:00Z", "association": "OWNER", "body": "Review: MERGE @ abcdef1"},
+        {"at": "2026-10-01T10:00:00Z", "association": "MEMBER", "body": "Review: REVISE @ abcdef1"}
+      ]
+    },
+    "outsider_revise_does_not_block": {
+      "expected": "MERGE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "COLLABORATOR", "body": "Review: MERGE @ abcdef1"},
+        {"at": "2026-10-01T11:00:00Z", "association": "NONE", "body": "Review: REVISE @ abcdef1"}
+      ]
+    },
+    "outsider_merge_does_not_override_revise": {
+      "expected": "REVISE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: REVISE @ abcdef1"},
+        {"at": "2026-10-01T11:00:00Z", "association": "NONE", "body": "Review: MERGE @ abcdef1"}
+      ]
+    },
+    "verdict_for_another_head_is_ignored": {
+      "expected": "REVISE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: REVISE @ abcdef1"},
+        {"at": "2026-10-01T11:00:00Z", "association": "OWNER", "body": "Review: MERGE @ 1234567"}
+      ]
+    },
+    "last_line_of_one_comment_wins": {
+      "expected": "MERGE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: REVISE @ abcdef1\nfixed in place\nReview: MERGE @ abcdef1"}
+      ]
+    },
+    "no_verdict": {
+      "expected": null,
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": null},
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "LGTM"}
+      ]
+    }
+  }
+}

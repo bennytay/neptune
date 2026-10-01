@@ -46,6 +46,7 @@ exceptions. The fixtures are `tests/fixtures/hostile/` (README lists each file a
 | M2 (MVL-10) | done: every probe, plan and `ingest` in a forked, confined child per call (see below); CPU, wall-time and memory limits; a crash, hang or limit hit is a finding and the job goes on; the `hostile` fixture adapter (ADR 0030) |
 | M2 (MVL-16) | done: local-only mode on by default, network use refused until allowed; sources read in place and verified chunk by chunk; materialised and exported sources read through `LocalSource`, and package files opened with `O_NOFOLLOW`, regular files only (ADR 0026) |
 | M2 (MVL-57) | done: the probe engine, its container decoders included, runs in the sandbox, one call per source, its reply re-derived and refused unless exact; `plan` and `ingest` write only beneath a per-call scratch directory; short reads and changed sources verified; walk findings in every package; the hostile suite through a real job (ADR 0033) |
+| M4 (MVL-17) | done: MCAP: decompression bounded by the chunk's declared size, itself bounded by `max_chunk_bytes`; every length checked against its record before a read; the summary read only up to 64 MiB; source text kept out of finding messages; the first native decoders (`zstandard`, `lz4`) run only inside sandboxed calls (ADR 0034) |
 | M6 (MVL-28) | done: PDF parsed in pure Python (pypdf) under bounded inflation (`max_stream_bytes`), page content (`max_page_content_bytes`, `max_page_operations`), form and state depth; a broken cross-reference is rebuilt in memory, never written; RC4 with the empty password only, AES never decrypted; JavaScript and embedded files reported, never run or opened; no external decoder started; Markdown bounded by `max_document_bytes` and 64-deep nesting, inline never parsed (ADR 0038) |
 | M6 (MVL-29) | malformed image safeguards |
 | M9 | auth/profile handling for connectors; presigned uploads; idempotency keys |
@@ -111,3 +112,9 @@ it returns); and the probe engine asks every adapter in one call per source, so 
 head compromises can forge the other adapters' claims in that reply. The job re-derives
 everything but the claims and the container listing, and a forged claim yields at worst a wrong
 adapter (whose own calls are sandboxed and checked) or an `unsupported` finding.
+
+With M4 the first native decoders parse hostile bytes inside adapter calls: `zstandard` and `lz4`
+for MCAP chunks (ADR 0034). ADR 0030 named this as the time to revisit a read allowlist; it stays
+deferred, because the decoders run under the same confinement as any adapter code (no writes but
+scratch, no network, no processes, limits), so a memory-safety bug in one reaches what a
+compromised Python parser already could: the files the user can read, into its own reply.

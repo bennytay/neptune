@@ -206,8 +206,8 @@ def test_a_tie_below_the_top_is_not_ambiguous() -> None:
 
 
 def test_an_unclaimed_source_is_a_finding_that_says_what_was_seen() -> None:
-    data = GENERATOR.SIGNATURE_FILES["recording.mcap"][1]
-    probed = probe(data, "recording.mcap")
+    data = GENERATOR.SIGNATURE_FILES["capture.pcap"][1]
+    probed = probe(data, "capture.pcap")
     assert probed.selection.status is SelectionStatus.UNSUPPORTED
     (finding,) = probed.findings
     assert (finding.code, finding.category, finding.severity) == (
@@ -215,10 +215,10 @@ def test_an_unclaimed_source_is_a_finding_that_says_what_was_seen() -> None:
         FindingCategory.UNSUPPORTED,
         Severity.ERROR,
     )
-    assert finding.message == "no adapter claims the source (MCAP signature; binary)"
+    assert finding.message == "no adapter claims the source (pcap signature; binary)"
     assert finding.details == {
         "declined": {"tally": [], "text": ["text.nul"]},
-        "signatures": [{"name": "MCAP"}],
+        "signatures": [{"name": "pcap"}],
         "text": "binary",
     }
     assert finding.subject == EvidenceRef(probed.source, (ByteRange(0, len(data)),))
