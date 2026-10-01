@@ -1,0 +1,18 @@
+{
+  "api_version": "1.0.0",
+  "files_checked": 27,
+  "findings": [],
+  "package_id": "sha256:44b4309877e2ce74d1a82d2c872eaafec8f07325b299637dae59d8f07dfa76b1",
+  "registration_key": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "root_locator": {
+    "knowledge": "known",
+    "value": "/srv/neptune/packages/quadruped"
+  },
+  "verdict": "intact"
+}

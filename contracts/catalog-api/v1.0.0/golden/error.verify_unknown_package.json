@@ -1,0 +1,19 @@
+{
+  "api_version": "1.0.0",
+  "files_checked": 0,
+  "findings": [
+    {
+      "code": "unknown_package",
+      "detail": "no package with this id is registered",
+      "subject": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "package_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "registration_key": {
+    "knowledge": "not_covered"
+  },
+  "root_locator": {
+    "knowledge": "not_covered"
+  },
+  "verdict": "unknown_package"
+}

@@ -77,16 +77,18 @@ def test_package_schema_goldens_cover_four_robots_and_every_document() -> None:
         assert latest.goldens[f"{robot}.receipt.json"] == "#/$defs/IngestReceipt"
 
 
-def test_catalog_api_is_a_draft_pending_the_ledger() -> None:
+def test_catalog_api_is_owned_by_the_ledger_export() -> None:
+    """The Platform draft 0.0.0 stays; the Ledger's export (MVL-88) superseded it as 1.0.0."""
     registry = _registry()
     contract = registry.contract("catalog-api")
     assert contract.owner.package == "neptune-ledger"
     assert contract.owner.module == "neptune_ledger.api"
-    (version,) = registry.versions("catalog-api")
-    assert (version.status, version.version, version.owner_version) == ("draft", (0, 0, 0), None)
-    assert "superseded" in version.note
+    draft, export = registry.versions("catalog-api")[:2]
+    assert (draft.status, draft.version, draft.owner_version) == ("draft", (0, 0, 0), None)
+    assert "superseded" in draft.note
+    assert (export.version, export.owner_version) == ((1, 0, 0), "1.0.0")
     report = tool.check_owner(registry, "neptune-ledger")
-    assert report.problems == [] and "SKIPPED" in report.notes[0]
+    assert report.problems == []
 
 
 def test_golden_generator_is_deterministic() -> None:
