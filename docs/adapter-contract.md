@@ -189,6 +189,8 @@ For registers, geometry, photos, video files and documents:
 - Tables: one `StructuredTable` and one `StructuredRecord` per row, citing the row as `Row(r)` so each
   cell's place is its `RowCell`. Keep cells as the source types them; never infer a CSV cell's type.
   Blank is `Unknown`; only a token the source or its spec defines as none is `KnownAbsent`.
+  A row not cited as `Row(r)` (a JSON element, a table on a page) gives each cell its own
+  provenance. The `tabular` adapter (ADR 0042) is the worked example for CSV, JSON and Parquet.
 - A `Site` or `Asset` per row or feature that names one, with its ids and names each citing its cell or
   span. Don't copy the rest of the row into it.
 - Geometry: a `SpatialArtifact` per file, unit / CRS / frame as declared (`NotCovered` where the format

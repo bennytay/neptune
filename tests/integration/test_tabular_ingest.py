@@ -94,7 +94,7 @@ def test_every_table_lands_through_the_sandbox_with_its_adapter(package: Any) ->
         str(s.location.to_json()["path"]): sorted({adapters[t] for t in s.read_by})
         for s in read.receipt.sources
     }
-    for name in NAMES + ("renamed_no_extension",):
+    for name in (*NAMES, "renamed_no_extension"):
         assert by_source[name] == ["tabular"], name
     assert read.receipt.records  # record counts are in the receipt
     counts = dict(read.receipt.records)

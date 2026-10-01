@@ -62,7 +62,7 @@ RAGGED_CSV: Final = (
 )
 
 # Broken: a quoted field that never closes (the file was cut inside it).
-UNCLOSED_CSV: Final = b'id,comment\n1,fine\n2,"the operator wrote that the arm\n'
+UNCLOSED_CSV: Final = b'id,comment,by\n1,fine,ana\n2,"the operator wrote that the arm\n'
 
 # Broken: JSON Lines with one syntax error, one bad UTF-8 row, one duplicated key.
 DAMAGED_JSONL: Final = (
