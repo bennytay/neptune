@@ -395,8 +395,8 @@ class Declarations:
             FindingCategory.UNSUPPORTED,
             Severity.INFO,
             place,
-            f"channel {channel_id}'s message payloads ({shown or 'no encoding'}) are not decoded;"
-            " each row cites its message's bytes",
+            f"channel {channel_id}'s message payloads are not decoded; each row cites its"
+            " message's bytes",
             {"id": channel_id, "message_encoding": shown},
             records=(stream.id,),
         )
@@ -407,8 +407,8 @@ class Declarations:
                 FindingCategory.UNSUPPORTED,
                 Severity.INFO,
                 place,
-                f"channel {channel_id}'s message encoding {encoding_text!r} is not one the MCAP"
-                " specification registers",
+                f"channel {channel_id}'s message encoding is not one the MCAP specification"
+                " registers; it is kept as declared",
                 {"encoding": encoding_text, "field": "message_encoding", "id": channel_id},
                 records=(stream.id,),
             )
@@ -513,7 +513,7 @@ class Declarations:
                 FindingCategory.UNSUPPORTED,
                 Severity.INFO,
                 where,
-                f"schema {schema.id}'s encoding {encoding!r} is not one the MCAP specification"
-                " registers",
+                f"schema {schema.id}'s encoding is not one the MCAP specification registers; it"
+                " is kept as declared",
                 {"encoding": encoding, "field": "schema_encoding", "id": schema.id},
             )

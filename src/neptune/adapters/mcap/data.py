@@ -205,6 +205,7 @@ class Data:
 
     def _walk(self, start: int, end: int, index: ChunkIndex | None) -> None:
         """The records of ``[start, end)``; with ``index``, a unit starting at that chunk."""
+        self.read = None
         records = scan(self.source, start, end)
         if index is not None:
             first = next(records, None)
@@ -335,6 +336,7 @@ class Data:
 
         Returns how many messages it holds that could be read.
         """
+        self.read = None  # Message Index records after this chunk are checked against it only
         planned = index_counts(index) if index is not None else None
         if index is not None and skipped(self.selection, index, planned, self.slots):
             self._advance(planned or Counter())
@@ -553,8 +555,8 @@ class Data:
             FindingCategory.UNSUPPORTED,
             Severity.INFO,
             record.place,
-            f"attachment {head.name.shown!r} ({head.media_type.shown or 'no media type'},"
-            f" {size} bytes) is an embedded file no record kind holds yet; it is cited here",
+            f"an attachment of {size} bytes is an embedded file no record kind holds yet; it is"
+            " cited here, its name and media type in the details",
             {
                 "create_time": head.create_time,
                 "crc_checked": checked,

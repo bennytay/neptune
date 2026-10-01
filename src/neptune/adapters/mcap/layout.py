@@ -45,7 +45,7 @@ from neptune.adapters.mcap.scan import Place, read_exact
 
 DATA_START: Final = len(MAGIC)
 # A summary (or a Header) larger than this is not read: planning holds the summary in memory.
-MAX_SUMMARY_BYTES: Final = 256 * 1024 * 1024
+MAX_SUMMARY_BYTES: Final = 64 * 1024 * 1024
 
 
 # --- Head and tail ------------------------------------------------------------------------------

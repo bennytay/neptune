@@ -28,7 +28,7 @@ from neptune.adapters.mcap import DESCRIPTOR, McapAdapter
 from neptune.discovery.reader import BytesReader
 from neptune.identity import canonical_json
 from neptune.model.knowledge import Known, KnownAbsent, NotApplicable, Unknown
-from neptune.model.provenance import ByteRange, EvidenceRef, Row
+from neptune.model.provenance import ByteRange, EvidenceRef, Provenance, Row
 from neptune.model.reference import TimestampDomain
 from neptune.model.run import Run, Stream
 from neptune.model.series import SEQ, row_order
@@ -66,7 +66,9 @@ def fixture(name: str) -> bytes:
     return (FIXTURES / name).read_bytes()
 
 
-def run(data: bytes, chunk_bytes: int = 64 << 20, max_rows: int = 100_000, **config: Any) -> SourceOutput:
+def run(
+    data: bytes, chunk_bytes: int = 64 << 20, max_rows: int = 100_000, **config: Any
+) -> SourceOutput:
     return ingest_source(McapAdapter(chunk_bytes, max_rows), BytesReader(data), config)
 
 
@@ -177,7 +179,7 @@ def test_inspect_summarises_from_the_head_and_the_summary_alone() -> None:
     source = Recording(data)
     result = McapAdapter().inspect(source, configure(DESCRIPTOR))
     assert data_section_reads(data, source.reads) == 0
-    summary = result.summary
+    summary: Any = result.summary
     assert result.findings == ()
     assert (summary["planning"], summary["summary"], summary["format_version"]) == (
         "indexed",
@@ -185,11 +187,16 @@ def test_inspect_summarises_from_the_head_and_the_summary_alone() -> None:
         "0",
     )
     assert summary["header"] == {"library": "neptune-fixture/1", "profile": "ros2"}
-    assert [c["topic"] for c in summary["channels"]] == ["/imu", "/battery", "/diagnostics", "/imu_rear"]  # type: ignore[index, union-attr]
-    assert summary["statistics"]["message_count"] == 18  # type: ignore[index, call-overload]
-    assert summary["chunks"]["count"] == 3  # type: ignore[index, call-overload]
-    assert summary["attachments"][0]["name"] == "calibration.yaml"  # type: ignore[index]
-    assert summary["metadata"][0]["name"] == "recording"  # type: ignore[index]
+    assert [c["topic"] for c in summary["channels"]] == [
+        "/imu",
+        "/battery",
+        "/diagnostics",
+        "/imu_rear",
+    ]
+    assert summary["statistics"]["message_count"] == 18
+    assert summary["chunks"]["count"] == 3
+    assert summary["attachments"][0]["name"] == "calibration.yaml"
+    assert summary["metadata"][0]["name"] == "recording"
     canonical_json.dumps(summary)
 
 
@@ -226,6 +233,12 @@ def cites(data: bytes, evidence: EvidenceRef) -> bytes:
     return bytes(READING.resolve(data, evidence))
 
 
+def grounds(state: Known[Any]) -> EvidenceRef:
+    """The evidence a value's own provenance cites."""
+    assert isinstance(state.provenance, Provenance)
+    return state.provenance.evidence
+
+
 def test_the_run_cites_the_header_and_its_extent_the_statistics_fields() -> None:
     data = fixture("robot.mcap")
     (run_record,) = of(ROBOT, Run)
@@ -235,15 +248,22 @@ def test_the_run_cites_the_header_and_its_extent_the_statistics_fields() -> None
     assert isinstance(run_record.first, Known) and isinstance(run_record.last, Known)
     assert run_record.first.value == Timestamp(MAKE.T0 + 10 * MAKE.MS, log_time)
     assert run_record.last.value == Timestamp(MAKE.T0 + 90 * MAKE.MS, log_time)
-    for state, value in ((run_record.first, MAKE.T0 + 10 * MAKE.MS), (run_record.last, MAKE.T0 + 90 * MAKE.MS)):
-        assert cites(data, state.provenance.evidence) == value.to_bytes(8, "little")  # type: ignore[union-attr]
+    for state, value in (
+        (run_record.first, MAKE.T0 + 10 * MAKE.MS),
+        (run_record.last, MAKE.T0 + 90 * MAKE.MS),
+    ):
+        assert cites(data, grounds(state)) == value.to_bytes(8, "little")
 
 
 def test_each_clock_is_its_own_domain_as_the_specification_defines_it() -> None:
     domains = {domain.id: domain for domain in of(ROBOT, TimestampDomain)}
     imu, battery = streams(ROBOT)["/imu"], streams(ROBOT)["/battery"]
     log_time, publish = domains[imu.clocks[0]], domains[imu.clocks[1]]
-    assert (log_time.field, log_time.scope, log_time.role) == ("log_time", (), Known(ClockRole.RECEIVE))
+    assert (log_time.field, log_time.scope, log_time.role) == (
+        "log_time",
+        (),
+        Known(ClockRole.RECEIVE),
+    )
     assert (publish.field, publish.scope) == ("publish_time", ("/imu",))
     assert isinstance(publish.role, Known) and publish.role.value is ClockRole.PUBLISH
     for domain in (log_time, publish):
@@ -259,14 +279,16 @@ def test_a_stream_holds_its_channel_and_schema_as_declared() -> None:
     found = streams(ROBOT)
     imu = found["/imu"]
     assert cites(data, imu.provenance.evidence)[:1] == b"\x04"  # its Channel record
-    assert imu.schema_name == Known("sensor_msgs/msg/Imu", imu.schema_name.provenance)  # type: ignore[union-attr]
+    assert isinstance(imu.schema_name, Known) and imu.schema_name.value == "sensor_msgs/msg/Imu"
+    assert cites(data, grounds(imu.schema_name))[:1] == b"\x03"  # its Schema record
     assert isinstance(imu.schema_encoding, Known) and imu.schema_encoding.value == "ros2msg"
     assert isinstance(imu.schema_definition, Known)
     assert cites(data, imu.schema_definition.value) == MAKE.IMU_DEFINITION.encode()
     assert imu.message_encoding == Known("cdr")
     assert imu.metadata == (("offered_qos_profiles", MAKE.QOS),)
     assert isinstance(imu.message_count, Known) and imu.message_count.value == 11
-    assert cites(data, imu.message_count.provenance.evidence) == bytes.fromhex("0100") + (11).to_bytes(8, "little")  # type: ignore[union-attr]
+    entry = bytes.fromhex("0100") + (11).to_bytes(8, "little")  # channel 1, count 11
+    assert cites(data, grounds(imu.message_count)) == entry
     diagnostics = found["/diagnostics"]  # schema 0: the specification says it has none
     assert isinstance(diagnostics.schema_name, KnownAbsent)
     assert diagnostics.schema_name == diagnostics.schema_definition
@@ -290,7 +312,8 @@ def test_metadata_is_a_table_of_its_entries_and_attachments_are_cited() -> None:
     assert entries[0].provenance.evidence.locator[-1] == Row(0)
     assert cites(data, table.provenance.evidence)[:1] == b"\x0c"
     (attachment,) = [f for f in ROBOT.findings() if f.code == "mcap.attachment_not_extracted"]
-    offset, length = attachment.details["data"]  # type: ignore[misc]
+    details: Any = attachment.details
+    offset, length = details["data"]
     assert data[offset : offset + length] == MAKE.CALIBRATION
     assert attachment.details["crc_checked"] is True
 
@@ -314,7 +337,9 @@ def test_rows_are_the_official_readers_messages_in_file_order(name: str) -> None
         topic = stream.topic.value if isinstance(stream.topic, Known) else ""
         length = stream.row_evidence(row).locator[-1]
         assert isinstance(length, ByteRange)
-        found.append([topic, row["value/sequence"], row["time/0"], row["time/1"], length.length - 31])
+        found.append(
+            [topic, row["value/sequence"], row["time/0"], row["time/1"], length.length - 31]
+        )
     assert found == expected["messages"]
 
 
@@ -324,7 +349,7 @@ def test_every_row_cites_exactly_its_message(name: str) -> None:
     output = run(data)
     for stream, row in rows(output):
         stream.check_row(row)
-        opcode, record = READING.record_at(data, stream.row_evidence(row))
+        _opcode, record = READING.record_at(data, stream.row_evidence(row))
         message = READING.message(record)
         assert (row["time/0"], row["time/1"], row["value/sequence"]) == (
             message.log_time,
@@ -415,7 +440,7 @@ def test_a_log_time_window_keeps_each_rows_seq() -> None:
     output = run(fixture("robot.mcap"), log_time_start=start, log_time_end=end)
     windowed = {(str(s.topic), r[SEQ], r["time/0"]) for s, r in rows(output)}
     full = {(str(s.topic), r[SEQ], r["time/0"]) for s, r in rows(ROBOT)}
-    assert windowed == {item for item in full if start <= item[2] <= end}  # type: ignore[operator]
+    assert windowed == {item for item in full if start <= item[2] <= end}
 
 
 def test_a_window_outside_a_chunk_never_decompresses_it() -> None:

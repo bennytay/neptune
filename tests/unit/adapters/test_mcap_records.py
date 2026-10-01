@@ -1,5 +1,6 @@
 """MCAP records read from bytes: every field, every position, and every way bytes can lie."""
 
+import contextlib
 import struct
 import zlib
 
@@ -63,7 +64,9 @@ def test_a_field_that_runs_past_its_record_is_a_field_error() -> None:
 
 
 def test_a_channel_reads_its_metadata_in_order_repeats_included() -> None:
-    entries = string(b"b") + string(b"2") + string(b"a") + string(b"1") + string(b"b") + string(b"3")
+    entries = (
+        string(b"b") + string(b"2") + string(b"a") + string(b"1") + string(b"b") + string(b"3")
+    )
     content = struct.pack("<HH", 7, 2) + string(b"/imu") + string(b"cdr") + string(entries)
     channel = parse_channel(content)
     assert (channel.id, channel.schema_id, channel.topic.value) == (7, 2, "/imu")
@@ -246,8 +249,6 @@ def test_no_bytes_make_the_parsers_raise_anything_but_field_errors(data: bytes) 
         parse_metadata,
         parse_message_index,
     ):
-        try:
+        with contextlib.suppress(FieldError):
             parse(data)
-        except FieldError:
-            pass
     inner_records(data)

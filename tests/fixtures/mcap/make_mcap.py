@@ -32,7 +32,7 @@ import subprocess
 import sys
 import zlib
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
@@ -283,17 +283,13 @@ def write(options: Options) -> tuple[bytes, dict[str, tuple[int, int]]]:
             entries: dict[int, list[tuple[int, int]]] = {}
             for message in options.messages[first:last]:
                 records += declarations(channels[message.channel])
-                entries.setdefault(message.channel, []).append(
-                    (message.log_time, len(records))
-                )
+                entries.setdefault(message.channel, []).append((message.log_time, len(records)))
                 records += _record(0x05, message.content())
                 counts[message.channel] = counts.get(message.channel, 0) + 1
             stored = _compress(options.compression, bytes(records))
             name = dict(options.renamed).get(number, options.compression)
             span = [m.log_time for m in options.messages[first:last]]
-            fields = struct.pack(
-                "<QQQI", min(span), max(span), len(records), zlib.crc32(records)
-            )
+            fields = struct.pack("<QQQI", min(span), max(span), len(records), zlib.crc32(records))
             content = fields + _string(name) + struct.pack("<Q", len(stored))
             start = writer.add(f"chunk:{number}", _record(0x06, content + stored))
             chunk_length = len(writer.out) - start
