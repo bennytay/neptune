@@ -66,6 +66,16 @@ def test_contracts_run_every_member_but_not_the_compiler() -> None:
     assert _plan("contracts/ledger.schema.json") == (False, tuple(sorted(MEMBERS)), False)
 
 
+def test_harness_runs_the_platform_job_only() -> None:
+    """harness/ is the platform's: its tests live in packages/neptune-platform/tests."""
+    assert _plan("harness/runner.py") == (False, ("neptune-platform",), False)
+    assert _plan("harness/x.py", "docs/y.md")[:2] == (
+        True,
+        ("neptune-ledger", "neptune-platform", "neptune-recall"),
+    )
+    assert _plan("harnessy/x.py")[0] is True  # only the harness/ directory itself
+
+
 OWNERS = {"package-schema": "neptune", "catalog-api": "neptune-ledger"}
 
 

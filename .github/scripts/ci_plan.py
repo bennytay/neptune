@@ -7,8 +7,10 @@ For a pull request the changed paths are ``git diff --name-only base...head`` an
 
 * root plumbing (``pyproject.toml``, ``uv.lock``, ``Makefile``, ``.python-version``, ``.github/**``)
   runs every job;
-* the compiler runs when any path outside ``packages/`` and ``contracts/`` changed, or a path under
-  ``contracts/<id>/`` of a contract the compiler owns (so its owner check runs on the PR);
+* a root directory owned by a member runs that member, not the compiler (``harness/**`` is
+  ``neptune-platform``'s: its tests live in the package and import ``harness``);
+* the compiler runs when any other path outside ``packages/`` and ``contracts/`` changed, or a path
+  under ``contracts/<id>/`` of a contract the compiler owns (so its owner check runs on the PR);
 * a member runs when ``packages/<name>/**`` or ``contracts/**`` changed, or when a workspace
   project it depends on (the compiler is the project ``neptune``) runs;
 * the template smoke runs when ``packages/_template/**`` or ``scripts/new-package.sh`` changed.
@@ -31,6 +33,8 @@ from pathlib import Path
 COMPILER = "neptune"
 TEMPLATE_DIR = "packages/_template/"
 PLUMBING_FILES = frozenset({"pyproject.toml", "uv.lock", "Makefile", ".python-version"})
+# Root directories whose tests live in a member package: changing them runs that member only.
+MEMBER_DIRS = {"harness/": "neptune-platform"}
 _REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 
@@ -102,13 +106,15 @@ def plan(
         if p.startswith("contracts/") and p.count("/") >= 2
     }
     compiler = COMPILER in owned or any(
-        not p.startswith(("packages/", "contracts/")) for p in changed
+        not p.startswith(("packages/", "contracts/", *MEMBER_DIRS)) for p in changed
     )
     contracts = any(p.startswith("contracts/") for p in changed)
     affected = {
         name
         for name in members
-        if contracts or any(p.startswith(f"packages/{name}/") for p in changed)
+        if contracts
+        or any(p.startswith(f"packages/{name}/") for p in changed)
+        or any(MEMBER_DIRS.get(p.split("/", 1)[0] + "/") == name for p in changed)
     }
     projects = {_normalise(name): name for name in members}
     grew = True
