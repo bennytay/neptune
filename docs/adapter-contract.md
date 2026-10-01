@@ -1,28 +1,34 @@
 # Adapter contract
 
-Status: **approved 2026-09-30** (ADR 0008). Implemented in MVL-7. Supersedes the seven-method list in the
-Linear design contract (§8).
+Status: **implemented** (MVL-7). Shape approved 2026-09-30 (ADR 0008); exact types in ADR 0024
+(`neptune.adapters.contract`, `ABI_VERSION = 1`). Supersedes the seven-method list in the Linear
+design contract (§8). The reference adapter to copy is `neptune.adapters.text`.
 
 ## Shape
 
 ```python
 class Adapter(Protocol):
     descriptor: AdapterDescriptor
-    # id, semver, formats/magic, output record kinds, config schema,
-    # resource declaration (max memory, streaming), security notes. Static.
+    # id, SemVer version, ABI version, formats (media types, extensions, magic), evidence record
+    # kinds, config options, libraries, finding codes, locator steps, conventions, resources,
+    # security notes. Static, and checked: undeclared kinds, codes and steps are refused.
 
     def probe(self, head: bytes, hints: ProbeHints) -> ProbeResult: ...
-    # confidence in [0, 1] + structured reasons + detected version. Cheap; reads only `head`.
+    # confidence in [0, 1] + structured reasons + detected format version. Reads only `head`:
+    # the first min(size, PROBE_HEAD_SIZE = 64 KiB) bytes. Hints (name, size) are advisory.
 
-    def inspect(self, source: Source) -> InspectResult: ...
-    # cheap summary without full parse: streams/topics, time extents, counts, schema ids, attachments.
+    def inspect(self, source: SourceReader, config: AdapterConfig) -> InspectResult: ...
+    # cheap summary without decoding payloads: a JSON object the adapter documents, + findings.
 
-    def plan(self, source: Source, config: Config) -> list[Chunk]: ...
-    # deterministic chunk ids and cost estimates. Same inputs ⇒ same list, same order.
+    def plan(self, source: SourceReader, config: AdapterConfig) -> Plan: ...
+    # >= 1 chunk with deterministic ids, in order, + findings planning made.
 
-    def ingest(self, source: Source, chunk: Chunk, config: Config) -> ChunkOutput: ...
-    # pure per chunk: canonical records + findings. No cross-chunk state.
+    def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput: ...
+    # pure per chunk: evidence records + series batches + findings. No cross-chunk state.
 ```
+
+`SourceReader` is one artifact's bytes: `content_id`, `size`, `read(offset, length)`
+(`read_pieces` streams a range). `discovery.reader.BytesReader` serves bytes from memory.
 
 ## Laws
 
@@ -32,13 +38,51 @@ class Adapter(Protocol):
 3. **Findings, not exceptions.** Recoverable problems are `IngestFinding`s in `ChunkOutput`, built with
    `identity.findings.ingest_finding` and a documented `<adapter id>.<name>` code (ADR 0017 §9). An uncaught
    exception is treated by the runtime as a crash: the chunk is quarantined with a finding; the job continues.
-4. **Leaf packages.** Adapters import `model/` and `identity/`; never each other, never `runtime/`.
+4. **Leaf packages.** Adapters import `model/`, `identity/` and `adapters.contract`; never each other, the
+   registry or `runtime/`.
 5. **Locators are exact.** Every emitted record carries an `EvidenceRef` that resolves to the bytes it came from.
    Nested evidence is a locator path from the outermost source inward (ADR 0016); build the transform with
    `identity.provenance.transform_record` and tier-2 ids with `evidence_record_id`.
 6. **Declared, not assumed.** Units, frames, clocks are emitted as the source declares them; unknown stays
    `Unknown`.
 7. **Cheap before expensive.** `probe` reads a bounded head; `inspect` must not decode payloads.
+8. **Declared, then checked.** Every record kind, finding code (`<id>.<name>`) and adapter locator step
+   (`<id>:<name>`) the adapter emits is in its descriptor. Every record and finding names the config's
+   transform and cites only the source it was given; a finding cites bytes, never a location.
+9. **One chunk per output.** No record or finding is emitted by two chunks. A source's output cites the
+   source at least once, even when it is empty or unreadable, so the receipt always shows who read it.
+
+## Config, chunks and output (ADR 0024)
+
+- **Config.** Options are typed scalars with defaults (`ConfigOption`). `configure(descriptor, values)`
+  refuses unknown names and wrong types, fills in defaults and builds the `TransformRecord`; the adapter
+  gets `AdapterConfig(values, transform)` and reads settings with `text`, `integer`, `number`, `flag`.
+  A setting is part of the transform, so it re-lineages records. Planning granularity is therefore a
+  constructor argument, never an option: chunking must not change the output.
+- **Chunks.** `make_chunk(source, config, context, cost)`. `context` is everything `ingest` needs
+  besides the bytes (byte range, starting offsets, a schema table); document it in `conventions`. The
+  id hashes transform, source and context; `cost` (bytes to read) is for scheduling only.
+- **Output.** `ChunkOutput(records, series, findings)`. A `SeriesBatch(stream, columns)`
+  (`neptune.model.series`) holds one stream's rows from one chunk as typed `SeriesColumn`s (see
+  "Streams and series" below for names).
+
+## Choosing an adapter (ADR 0024 §7)
+
+Every registered adapter probes; the registry applies one rule. Confidence 0 is no claim. Candidates
+rank by confidence, then adapter id. No candidate: `unsupported`. A tie at the top: `ambiguous`, never
+broken silently (MVL-8 reports it, a manifest resolves it). Otherwise: `selected`.
+
+Calibrate against the bands, so equal evidence gives equal confidence across adapters:
+
+| Band | Value | Means |
+|---|---|---|
+| `VERIFIED` | 1.0 | structure parsed and checked beyond the signature |
+| `SIGNATURE` | 0.9 | magic bytes or signature matched |
+| `STRUCTURE` | 0.7 | a text format's grammar or root structure matched (JSON parses, `<robot>` root) |
+| `GENERIC` | 0.4 | only a generic decoding applies (UTF-8 text) |
+| `NAME_ONLY` | 0.1 | only a name, an extension or an empty file suggests it; damaged generic content |
+
+Never decide from the name alone when the bytes can say: a renamed file must still be read.
 
 ## Blank, default and sentinel fields (ADR 0004 §5, ADR 0011)
 
@@ -92,6 +136,10 @@ For formats with timestamped samples (logs, bags, flight logs, telemetry tables,
   `state/<column>` and leave the value null where the state is not `known`. `KnownAbsent` and `Ambiguous`
   do not fit one cell: write `unknown` plus a finding.
 - A payload you do not decode still gets its rows (times and locators) plus a finding.
+- The chunk that emits a `Stream` emits a `SeriesBatch` for it, empty if that chunk holds none of
+  its rows: the batch types the stream's columns, so a stream with no samples still has a series.
+- Give each `SeriesColumn` the `ColumnType` the source encodes (a ROS `float32` stays `float32`,
+  a `uint8` stays `uint8`); arrays are `repeated` columns. `seq` and `time/<i>` are `int64`.
 - Tests check every row with `Stream.check_row` and resolve `Stream.row_provenance` back to the bytes.
 
 ## Machine context (ADR 0019)
@@ -146,8 +194,13 @@ fifteen bespoke checkpoint formats — was judged worse.
 
 ## Adding an adapter
 
-1. New subpackage `adapters/<format>/` with `descriptor`, the four methods, and `probe` magic in the registry.
-2. Fixtures: at least one valid file, one truncated, one corrupted, one empty, one renamed/extensionless.
-3. Tests: determinism (ingest twice, byte-identical), partial corruption (findings, not failure), locator
-   round-trip (every EvidenceRef resolves).
-4. No changes to `runtime/` or `model/`. If you need one, stop and write an ADR.
+1. New subpackage `adapters/<format>/` exporting an adapter class and its `DESCRIPTOR`; copy
+   `adapters/text/`. Import only `neptune.model`, `neptune.identity` and `neptune.adapters.contract`.
+2. Add one line to `adapters/builtin.py`. Nothing else names a format.
+3. Fixtures: at least one valid file, one truncated, one corrupted, one empty, one renamed/extensionless
+   (`tests/fixtures/text/` is the model).
+4. Tests through `neptune.adapters.harness.ingest_source`, which runs every law: probe on each fixture,
+   exact citations (every `EvidenceRef` resolves to the bytes), partial corruption (findings, not
+   failure), determinism (ingest twice, byte-identical), output independent of chunk size, lineage
+   (another version or config gives new ids, the old output untouched).
+5. No changes to `runtime/`, `store/` or `model/`. If you need one, stop and write an ADR.

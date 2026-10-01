@@ -1,0 +1,10 @@
+Site visit — dock 4
+Robot spot-02 walked the north aisle twice.
+Battery swap at 14:05.
+
+Issues
+  - lidar dropout near the cold store door
+  - stair edge marker missing (日本語 label)
+
+
+Next: re-run with the 2026-09 map 🗺️

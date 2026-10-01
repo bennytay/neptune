@@ -21,14 +21,28 @@ last (``row_order``).
 
 Whatever a row's provenance shares with every other row is hoisted onto the ``Stream``; the rest
 is in the row's ``locator/`` columns.
+
+``SeriesBatch`` carries rows between an adapter and the store, column by column, each column typed
+as the source encodes it (ADR 0024 §5).
 """
 
-from collections.abc import Iterable, Mapping
+import math
+import re
+import struct
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Final, TypeAlias
 
 from neptune.model._fields import exact_object, json_array, json_str
-from neptune.model.ids import ContentId, check_text, check_token, parse_content_id
+from neptune.model.ids import (
+    ContentId,
+    RecordId,
+    check_text,
+    check_token,
+    parse_content_id,
+    parse_record_id,
+)
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import AssertionKind, KnowledgeState
 from neptune.model.provenance import (
@@ -309,3 +323,161 @@ def series_provenance_from_json(data: JsonValue) -> SeriesProvenance:
         tuple(step_template_from_json(step) for step in steps),
         AssertionKind(kind),
     )
+
+
+# --- Batches of rows, typed (ADR 0024 §5) ------------------------------------------------------
+
+
+class ColumnType(StrEnum):
+    """The type of a series column's cells, exactly as the source encodes the field."""
+
+    BOOL = "bool"
+    INT8 = "int8"
+    INT16 = "int16"
+    INT32 = "int32"
+    INT64 = "int64"
+    UINT8 = "uint8"
+    UINT16 = "uint16"
+    UINT32 = "uint32"
+    UINT64 = "uint64"
+    FLOAT32 = "float32"
+    FLOAT64 = "float64"
+    STRING = "string"
+    BINARY = "binary"
+
+
+_INTEGER_BITS: Final = {
+    ColumnType.INT8: (True, 8),
+    ColumnType.INT16: (True, 16),
+    ColumnType.INT32: (True, 32),
+    ColumnType.INT64: (True, 64),
+    ColumnType.UINT8: (False, 8),
+    ColumnType.UINT16: (False, 16),
+    ColumnType.UINT32: (False, 32),
+    ColumnType.UINT64: (False, 64),
+}
+
+ScalarCell: TypeAlias = bool | int | float | str | bytes
+# One cell: a scalar, a tuple of scalars in a repeated column, or None for null.
+Cell: TypeAlias = ScalarCell | tuple[ScalarCell, ...] | None
+
+_TIME_COLUMN: Final = re.compile(rf"{TIME}/(0|[1-9][0-9]*)")
+_LOCATOR_COLUMN: Final = re.compile(rf"{LOCATOR}/(0|[1-9][0-9]*)/[a-z][a-z0-9_.\-]*")
+
+
+def _check_scalar(column: str, kind: ColumnType, value: object) -> None:
+    if kind in _INTEGER_BITS:
+        signed, bits = _INTEGER_BITS[kind]
+        low, high = (-(2 ** (bits - 1)), 2 ** (bits - 1) - 1) if signed else (0, 2**bits - 1)
+        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+            raise ValueError(f"{column}: {value!r} is not a {kind}")
+    elif kind is ColumnType.BOOL:
+        if not isinstance(value, bool):
+            raise ValueError(f"{column}: {value!r} is not a bool")
+    elif kind in (ColumnType.FLOAT32, ColumnType.FLOAT64):
+        if not isinstance(value, float):
+            raise ValueError(f"{column}: {value!r} is not a {kind}")
+        if kind is ColumnType.FLOAT32 and math.isfinite(value):
+            try:
+                narrowed = struct.unpack("<f", struct.pack("<f", value))[0]
+            except OverflowError:
+                narrowed = None
+            if narrowed != value:
+                raise ValueError(f"{column}: {value!r} is not a float32 value")
+    elif kind is ColumnType.STRING:
+        if not isinstance(value, str):
+            raise ValueError(f"{column}: {value!r} is not a string")
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError(f"{column}: string is not valid Unicode") from exc
+    elif not isinstance(value, bytes):
+        raise ValueError(f"{column}: {value!r} is not binary")
+
+
+@dataclass(frozen=True)
+class SeriesColumn:
+    """One column of a series batch: its name, its cells' type, and one cell per row.
+
+    ``repeated`` makes every non-null cell a tuple of ``type`` values (a covariance array). The
+    name is in one of the series namespaces (``seq``, ``time/<i>``, ``locator/<i>/<field>``,
+    ``value/<name>``, ``state/<column>``), and Neptune's own columns have fixed types: ``seq`` and
+    ``time/<i>`` are int64, a locator field int64, float64 or string, a state string.
+    """
+
+    name: str
+    type: ColumnType
+    values: tuple[Cell, ...]
+    repeated: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.type, ColumnType):
+            raise TypeError(f"{self.name}: type must be a ColumnType, got {self.type!r}")
+        if not isinstance(self.values, tuple):
+            raise TypeError(f"{self.name}: values must be a tuple")
+        allowed = _fixed_types(self.name)
+        if allowed is not None and (self.repeated or self.type not in allowed):
+            raise ValueError(f"{self.name} is one of {sorted(map(str, allowed))}, not a list")
+        for value in self.values:
+            if value is None:
+                continue
+            if self.repeated:
+                if not isinstance(value, tuple):
+                    raise ValueError(f"{self.name}: a repeated cell is a tuple, got {value!r}")
+                for item in value:
+                    _check_scalar(self.name, self.type, item)
+            else:
+                _check_scalar(self.name, self.type, value)
+
+
+def _fixed_types(name: str) -> frozenset[ColumnType] | None:
+    """The types Neptune's own column ``name`` may have; ``None`` for a value column."""
+    if name == SEQ or _TIME_COLUMN.fullmatch(name):
+        return frozenset({ColumnType.INT64})
+    if _LOCATOR_COLUMN.fullmatch(name):
+        return frozenset({ColumnType.INT64, ColumnType.FLOAT64, ColumnType.STRING})
+    if name.startswith(f"{STATE}/") and len(name) > len(STATE) + 1:
+        return frozenset({ColumnType.STRING})
+    if _is_value(name):
+        return None
+    raise ValueError(f"{name!r} is not a series column (ADR 0018)")
+
+
+@dataclass(frozen=True)
+class SeriesBatch:
+    """Rows of one stream's series, column by column: what an adapter emits and the store writes.
+
+    ``stream`` is the id of the ``Stream`` the rows belong to. An adapter emits batches per chunk
+    (``neptune.adapters.contract.ChunkOutput``); the store writes a stream's batches into its
+    Parquet file (MVL-16). A batch may hold no rows: it still fixes the stream's column types, so
+    a stream with no samples has a typed, empty series. ``rows`` yields rows for
+    ``Stream.check_row``.
+    """
+
+    stream: RecordId
+    columns: tuple[SeriesColumn, ...]
+
+    def __post_init__(self) -> None:
+        parse_record_id(self.stream)
+        if not self.columns or not all(isinstance(c, SeriesColumn) for c in self.columns):
+            raise ValueError("a batch has at least one SeriesColumn")
+        names = [column.name for column in self.columns]
+        if len(set(names)) != len(names):
+            raise ValueError(f"a batch repeats a column: {names}")
+        if SEQ not in names:
+            raise ValueError("a batch has a seq column")
+        if len({len(column.values) for column in self.columns}) != 1:
+            raise ValueError("a batch's columns hold the same number of rows")
+
+    @property
+    def length(self) -> int:
+        return len(self.columns[0].values)
+
+    def schema(self) -> tuple[tuple[str, ColumnType, bool], ...]:
+        """Each column's name, type and repetition, sorted by name."""
+        return tuple(sorted((c.name, c.type, c.repeated) for c in self.columns))
+
+    def rows(self) -> Iterator[dict[str, object]]:
+        """Each row as column name to cell, as a Parquet reader yields it."""
+        for index in range(self.length):
+            yield {column.name: column.values[index] for column in self.columns}
