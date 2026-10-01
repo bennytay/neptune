@@ -61,6 +61,22 @@ Every record you emit carries one record-level `Provenance`, and its id is
 `evidence_record_id(kind, provenance.evidence, transform)`. Two records of one kind from one piece of evidence
 need finer locators (an adapter step if necessary), never a counter.
 
+## Times, several-field values and findings (ADR 0023)
+
+- **Civil date-times.** With a stated offset or `Z`, a time is an exact instant: count POSIX seconds from
+  1970-01-01T00:00:00Z (epoch `unix`, timescale `posix`). With no zone, count the same way on the source's own
+  civil clock: epoch `unix`, timescale `Unknown`. A date alone counts days (resolution 86,400 s). Never assume
+  UTC or the site's zone.
+- **Several fields, one value.** A value read from several fields (start plus duration, latitude plus longitude
+  columns) cites the smallest part that holds them all.
+- **Degrees, minutes and seconds** with a hemisphere (EXIF GPS) are read into signed degrees, exactly and then
+  rounded once to a float; the declared form stays in the bytes.
+- **One finding per affected range, never per sample.** A corrupt chunk is one finding naming the chunk and
+  the streams it touched.
+- **No new fields.** Record kinds are frozen from schema version 1. Something your format declares that no
+  field holds is a new record kind naming the record it extends, added by ADR; until then it stays cited
+  in the bytes.
+
 ## Streams and series (ADR 0018)
 
 For formats with timestamped samples (logs, bags, flight logs, telemetry tables, video):

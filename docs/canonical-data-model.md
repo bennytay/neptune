@@ -1,12 +1,13 @@
 # Canonical data model
 
-Status: **authoritative** for `SCHEMA_VERSION` 0 (MVL-1, closed by MVL-70). Primitives are specified by
+Status: **authoritative** and frozen at `SCHEMA_VERSION` 1 by the M1 gate (MVL-56, ADR 0023; review:
+`docs/reviews/m1-stress-test.md`). The model grows only by addition from here. Primitives are specified by
 MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66 (ADR 0017), runs, streams and series by MVL-67
 (ADR 0018), machine context by MVL-68 (ADR 0019) and world context by MVL-69 (ADR 0020). The JSON Schema
-(`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). From the M1 gate on,
-any change here needs an ADR and a schema-version bump (ADR 0017 §7).
+(`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). Any change here needs
+an ADR and a schema-version bump, and must be an addition (ADR 0023 §1).
 
-## Record kinds (v0)
+## Record kinds (schema version 1)
 
 Every record kind belongs to one family (ADR 0017 §4). The last four families are the design contract's source
 domains.
@@ -43,9 +44,11 @@ boundary to the memory learner.
 - A value defined by a format specification (MCAP `log_time` is ns) cites the bytes that establish the format
   plus the transform that applies the spec. When the source carries the definition itself (a ROS message
   definition in an MCAP schema record), it cites that instead.
-- `SCHEMA_VERSION` is 0 until the M1 gate, then 1. From then on every shape change bumps it through an ADR,
-  and older records are read through lossless, read-time migrations that keep ids. Stored packages are never
-  rewritten. A change that loses information is a new adapter version, not a migration.
+- `SCHEMA_VERSION` is 1, set at the M1 gate (ADR 0023). A record kind's fields never change from then on. The
+  model grows only by addition (new record kinds, including companion kinds naming the record they extend, new
+  enum members, new locator steps), each through an ADR and a version bump. So every record from version 1 on
+  stays valid, readers read versions 1 to their own unchanged, and ids never move. Version 0 drafts are refused.
+  Stored packages are never rewritten. Anything that is not an addition is a new kind and a new adapter version.
 - Records are frozen standard-library dataclasses with strict hand-written JSON; there is no modelling library.
   The JSON Schema is generated from them (MVL-70).
 
@@ -75,8 +78,10 @@ Scope rule: fields with epistemic weight — units, clocks, frames, versions, ca
 use the wrapper. Purely structural fields (the list of streams found) do not. A `None` in a canonical record is
 a bug, not a value.
 
-- Provenance: states hold `INHERITED` (the record's provenance, omitted from JSON) or their own. `KnownAbsent`
-  always cites what defines the absence.
+- Provenance: states hold `INHERITED` (the record's provenance, omitted from JSON) or their own. `INHERITED`
+  means the record-level provenance however deeply the state is nested (ADR 0023 §4). `KnownAbsent` always
+  cites what defines the absence.
+- A value read from several fields cites the smallest part holding them all (ADR 0023 §3).
 - JSON: `{"knowledge": "<state>", ...}`, e.g. `{"knowledge":"known","value":30}`. Full shape: ADR 0011.
 - No confidence scores on evidence; uncertainty is `Ambiguous` / `Unknown` / `NotCovered` (ADR 0004 §6).
 
@@ -99,6 +104,9 @@ a bug, not a value.
 - MCAP `log_time` and `publish_time`, ROS `header.stamp` and receive time, PX4 boot-time and GPS time are
   separate domains. Mappings between domains are `ClockAlignment` records produced in MVL-36 with method,
   evidence and error bounds.
+- Civil date-times (ADR 0023 §2): with a stated offset, ticks are POSIX seconds of the exact instant (epoch
+  `unix`, timescale `posix`); with no zone, POSIX-style seconds on the source's own civil clock (epoch `unix`,
+  timescale `Unknown`); a date alone counts days.
 
 ## Units (ADR 0013; `model/units.py`)
 
@@ -218,6 +226,8 @@ a bug, not a value.
   time.
 - `ReceiptEnvelope` holds the job id, wall clock, host, ingest root and durations, outside the manifest, so it
   never changes the package id. Sources are referenced by default; materialising is opt-in.
+- `derived/` is reserved for derived records, apart from `records/`; readers refuse it until the derived
+  layer's schema lands (ADR 0023 §5).
 
 ## Serialization (ADR 0002)
 
