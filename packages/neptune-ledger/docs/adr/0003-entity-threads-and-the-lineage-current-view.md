@@ -142,22 +142,30 @@ rounded before the last step.
    other mapping is not used, and the result reports it as `unsupported_mapping`. Supporting another drift
    model takes a superseding ADR.
 2. **Inversion.** Walking a mapping `A→B` backwards uses
-   `f⁻¹(t) = (t − b) / a`, with bound `bound / a` in A's ticks. The inverse is used over the image of the
-   mapping's validity window.
+   `f⁻¹(t) = (t − b) / a`, with bound `bound / a` in A's ticks. Its validity window is the image of the
+   mapping's window under `f`, expressed on B, which is the inverted hop's source clock.
 3. **Path.** For each clock, the Ledger considers every simple path of usable mappings to the reference.
    A path's **total bound** is the sum of its hops' bounds, each carried into reference ticks by the slopes
    of the hops after it. That equals the half-width the path adds to a point, which for affine hops does not
-   depend on the instant. The Ledger picks the path with the smallest total bound. Ties go to the path whose
-   sequence of mapping record ids, from the clock to the reference, is smallest as UTF-8 bytes, compared
-   element-wise with a shorter prefix first. A clock with no path stays in its own partition.
+   depend on the instant. Paths are ranked by smallest total bound. Ties go to the path whose sequence of
+   mapping record ids, from the clock to the reference, is smallest as UTF-8 bytes, compared element-wise
+   with a shorter prefix first. The ranking is per clock; whether a path can be used is decided per entry
+   (step 4). A clock with no path stays in its own partition.
 4. **Mapping an entry.** Start from `[s, s]`. Each hop sends both ends through its function (monotone, so
    ends stay ends) and widens by the hop's bound: `lo := f(lo) − bound`, `hi := f(hi) + bound`. At the end,
    `lo := floor(lo)` and `hi := ceil(hi)` in reference ticks. Entries already on the reference clock get
-   `lo = hi = s`. If `s` falls outside the validity window of any hop on the chosen path, the entry is not
-   mapped and stays in its native partition.
+   `lo = hi = s`.
+   - **Validity per hop.** Before each hop, the interval `[lo, hi]` as it stands at that point, expressed
+     on the hop's source clock, must lie entirely inside that hop's validity window. It is never checked
+     against the original `s` alone. If the interval only partly overlaps the window, the path is unusable
+     for this entry. The Ledger never extrapolates past a window and never clips the interval to fit one.
+   - The entry uses the highest-ranked path (step 3) that is usable for it. If paths exist but none is
+     usable, the entry stays in its own clock partition, and the result reports `mapping_out_of_range` for
+     it, naming the paths that were tried.
 5. **Order.** Merged entries are sorted by `(lo, hi, clock key bytes, then their native partition key)`.
-   Because hops are monotone and the native key follows, the merged order restricted to one clock equals
-   that clock's own order. Each entry carries its mapped interval and the mapping ids of its path. Stored
+   Because hops are monotone and the native key follows, entries of one clock mapped through the same path
+   keep that clock's own order. Entries of one clock that took different paths, because of validity
+   windows, are ordered by their mapped intervals, and each carries its path. Each entry carries its mapped interval and the mapping ids of its path. Stored
    ticks are never rewritten.
 
 **Transaction order**, only when the caller asks for it: `(registration key, record id, package id)` over
@@ -183,11 +191,14 @@ host wall clock, file mtime or source-declared ingest time for any order.
      chains are comparable iff their adapter-id sequences are equal. They compare element-wise from the
      root by SemVer §11 precedence. A candidate is **dominated** if some comparable candidate has strictly
      greater precedence. If exactly one candidate is undominated, the set resolves to `Known` with it.
-     Otherwise the result is `Ambiguous`, listing every undominated candidate sorted by transform id
-     (UTF-8 bytes). Candidates whose adapter ids or chain shapes differ, or whose version is not valid
-     SemVer, are incomparable. Equal precedence is also `Ambiguous`: the same versions with a different
-     `config_hash`, or versions that differ only in build metadata. Registration order never picks between
-     them, so "latest" never means "most recently ingested".
+     `Ambiguous` happens only when more than one candidate is undominated. It then lists every undominated
+     candidate sorted by transform id (UTF-8 bytes). Candidates whose adapter ids or chain shapes differ,
+     or whose version is not valid SemVer, are incomparable. Candidates of equal precedence (same versions
+     with a different `config_hash`, or versions differing only in build metadata) do not dominate each
+     other, so they give `Ambiguous` only when no candidate dominates them all. For example,
+     {v1 cfgA, v1 cfgB, v2} resolves to `Known(v2)`, and {v1 cfgA, v1 cfgB} resolves to
+     `Ambiguous[v1 cfgA, v1 cfgB]`. Registration order never picks between candidates, so "latest" never
+     means "most recently ingested".
    - `pinned(transform id)`: that transform in every lineage set where it appears; `NotCovered` elsewhere.
      Never a fallback.
    - `as_registered_by(package id)`: the transform that package used for the set; `NotCovered` where the
@@ -301,8 +312,8 @@ monotone and non-monotone `ClockMapping`s with validity windows.
 | P4 | **Clock isolation.** Without mappings, every partition holds exactly one `domain_id`, and lineage siblings with different domain ids never share a partition. Adding or removing entries on clock B never changes the relative order of entries on clock A. |
 | P5 | **Append-only history.** For `t1 < t2`, `history(as_of t1)` is a subsequence of `history(as_of t2)`, and the relative order of two entries on one clock never changes as packages are added. |
 | P6 | **Ingestion time only breaks ties.** Changing registration keys while keeping their relative order leaves world order unchanged. Inside a partition, entries with distinct `s` are ordered by `s` whatever their registration keys. |
-| P7 | **Merge consistency.** With monotone mappings, the merged order restricted to any one clock equals that clock's unmerged order. Unsupported mappings and out-of-window instants never move an entry out of its native partition. The chosen path has the smallest total bound, and equal totals are broken by mapping-id sequence. Inverting a mapping and then re-applying it returns the original instant exactly. Reference-clock entries have `lo = hi = s`. |
-| P8 | **Resolver.** `current` without a preference is rejected. `pinned(T)` returns only T's records. `as_registered_by(P)` returns only transforms that P registered. `latest_transform` resolves to `Known` exactly when one candidate is undominated. Otherwise `Ambiguous` lists all undominated candidates sorted by transform id, and equal precedence with a different `config_hash` is always `Ambiguous`. Every lineage set appears exactly once as `Known`, `Ambiguous` or `NotCovered`. `history` ⊇ `current` for every preference. |
+| P7 | **Merge consistency.** The merged order restricted to the entries of one clock that were mapped through the same path equals their unmerged order. Unsupported mappings are never used, although the entry may still be mapped through another path. A hop is used only when the incoming interval, expressed on the hop's source clock, lies entirely inside that hop's validity window; partial overlap makes the path unusable, with no extrapolation or clipping. An entry with no usable path stays in its native partition and is reported as `mapping_out_of_range`. The chosen path is the usable one with the smallest total bound, and equal totals are broken by mapping-id sequence. Inverting a mapping and then re-applying it returns the original instant exactly. Reference-clock entries have `lo = hi = s`. |
+| P8 | **Resolver.** `current` without a preference is rejected. `pinned(T)` returns only T's records. `as_registered_by(P)` returns only transforms that P registered. `latest_transform` resolves to `Known` exactly when one candidate is undominated. Otherwise `Ambiguous` lists all undominated candidates sorted by transform id, Examples: {v1 cfgA, v1 cfgB, v2} → `Known(v2)`; {v1 cfgA, v1 cfgB} → `Ambiguous[v1 cfgA, v1 cfgB]`. Every lineage set appears exactly once as `Known`, `Ambiguous` or `NotCovered`. `history` ⊇ `current` for every preference. |
 | P9 | **Worked examples.** §6 A–C are golden fixtures whose expected orders and resolutions are written out in full. |
 
 ### 8. Rebuild input
@@ -333,7 +344,8 @@ package. The log is append-only, and replaying a prefix of it reproduces the cat
   make it "latest". SemVer precedence on comparable chains reflects intent. Registration order never
   picks, not even between exact ties.
 - **Break equal-precedence ties (different `config_hash`) by latest registration.** Rejected: that is "most
-  recently ingested" choosing between two configurations. `Ambiguous` plus `pinned` makes the caller choose.
+  recently ingested" choosing between two configurations. When those configurations are the top candidates,
+  the result is `Ambiguous`, and `pinned` makes the caller choose.
 - **Treat lineage siblings' domains as one clock when field, scope, resolution, epoch and timescale match.**
   Rejected: it relates two domains without an alignment record (root ADR 0005 §3, §6). A v2 that corrects
   tick values would also interleave silently with v1. `current()` already orders cleanly, because it
