@@ -88,18 +88,22 @@ give byte-identical output on every host.
 7. **PDF: hostile input is bounded, reported and never run.**
    - Config bounds, each a `pdf.content_limit` finding when hit: `max_stream_bytes` (64 MiB, every
      stream pypdf inflates), `max_page_content_bytes` (16 MiB per page) and `max_page_operations`
-     (1,000,000). Forms nest 8 deep, `q` 1,024 deep, and the structure tree is read for each page
-     afresh within 200,000 visits (siblings and rows indexed once), so whether a page's tags are
-     read never depends on which pages share its chunk. Recursion
-     bombs end in `RecursionError`, a finding. `jbig2dec` is never started; images are never
-     decoded.
+     (1,000,000). Forms nest 8 deep, `q` 1,024 deep, and the structure tree is read within 200,000
+     visits per page (below), so whether a page's tags are read never depends on which pages
+     share its chunk. Recursion bombs end in `RecursionError`, a finding. `jbig2dec` is never
+     started; images are never decoded.
    - Every cost is bounded by work done, not by input size alone. The structure tree indexes each
      element's kids by MCID once and counts every step; past 200,000 the page is read as untagged
-     (`pdf.structure_limit`). A font's ToUnicode CMap, codespace and `W` ranges are indexed once
-     into disjoint segments (the first declared wins) and binary-searched, with a per-font glyph
-     cache; a table past 131,072 entries or 4 MiB is cut there and reported (`pdf.font_limit`).
-     A content stream is parsed only up to the operators the page may still run
-     (`max_page_operations`), so a 16 MiB run of `q` costs 200 MiB, not 1.2 GiB.
+     (`pdf.structure_limit`). Those indexes (kids, a table's rows and cells, a number tree's
+     entries) are shared by the pages of a chunk, so N pages naming one element of K kids cost K,
+     not N x K; each page is still charged what building them would have cost, so the limit
+     never depends on which pages share its chunk. Only the MCIDs a page's content uses are
+     placed. A font's ToUnicode CMap, codespace and `W` ranges are indexed once into disjoint
+     segments (the first declared wins) and binary-searched, with a per-font glyph cache; the
+     chunk's pages share one font cache, so a CMap many pages use is parsed once. A table past
+     131,072 entries or 4 MiB is cut there and reported (`pdf.font_limit`). A content stream is
+     parsed only up to the operators the page may still run (`max_page_operations`), so a 16 MiB
+     run of `q` costs 200 MiB, not 1.2 GiB.
    - A fault keeps what was read before it: a parse fault ends that stream's operators, and a
      form that cannot be parsed or run (or recurses past the stack) is skipped while the page's
      own text stays (`pdf.content_unreadable`, naming the form).

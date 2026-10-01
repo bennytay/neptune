@@ -250,12 +250,16 @@ def test_a_repaired_encrypted_file_is_never_read_as_plain_text() -> None:
 # --- Hostile costs: each shape is the review's reproduction, built here, never committed --------
 
 
-def one_element_owning(count: int) -> bytes:
+def one_element_owning(count: int, used: int = 1) -> bytes:
     """A tagged page whose parent tree lists ``count`` MCIDs, all owned by one ``P`` whose ``/K``
-    lists ``count`` other MCIDs: every lookup misses, the shape that made the reader quadratic."""
+    lists ``count`` other MCIDs: every lookup misses, the shape that made the reader quadratic.
+    The page's content uses the first ``used`` MCIDs (only those are placed)."""
     pdf = MAKE.Pdf()
     tree, root, element = pdf.reserve(), pdf.reserve(), pdf.reserve()
-    content = MAKE.text("F1", 12, 72, 700, b"Check the hydraulic line")
+    content = b"".join(
+        MAKE.marked("P", mcid, MAKE.text("F1", 12, 72, 700, b"Check the hydraulic line"))
+        for mcid in range(used)
+    )
     resources = {"Font": {"F1": pdf.add(MAKE.HELVETICA)}}
     page_ref = MAKE.page(pdf, tree, content, resources, StructParents=0)
     MAKE._element(pdf, element, "P", root, list(range(count, 2 * count)), page_ref)
@@ -267,20 +271,90 @@ def one_element_owning(count: int) -> bytes:
 
 
 def test_an_element_owning_thousands_of_mcids_is_indexed_once() -> None:
-    data = one_element_owning(8000)
+    data = one_element_owning(8000, used=8000)
     started = time.process_time()
     output = ingest(data)
     assert time.process_time() - started < 5  # a scan per MCID took about a minute
     assert [f.code for f in output.findings()] == []
-    assert roles(output) == ["Unknown"]  # the run itself carries no MCID: untagged content
+    assert roles(output) == ["paragraph"]  # 8,000 runs, one owner, one block
 
 
 def test_a_structure_past_its_step_bound_is_a_limit_and_the_page_is_read_untagged() -> None:
-    output = ingest(one_element_owning(120_000))
+    output = ingest(one_element_owning(250_000))
     assert [(f.code, f.details) for f in output.findings()] == [
         ("pdf.structure_limit", {"limit": 200_000, "page": 0})
     ]
     assert roles(output) == ["Unknown"]
+
+
+def shared_element(pages: int, kids: int, padding: int = 0) -> bytes:
+    """``pages`` tagged pages whose parent tree entries all name one ``P`` with ``kids`` kids,
+    after ``padding`` entries for other keys."""
+    pdf = MAKE.Pdf()
+    tree, root, element = pdf.reserve(), pdf.reserve(), pdf.reserve()
+    resources = {"Font": {"F1": pdf.add(MAKE.HELVETICA)}}
+    content = MAKE.marked("P", 0, MAKE.text("F1", 12, 72, 700, b"Check the hydraulic line"))
+    refs = [
+        MAKE.page(pdf, tree, content, resources, StructParents=number) for number in range(pages)
+    ]
+    MAKE._element(pdf, element, "P", root, list(range(1, kids + 1)), refs[0])
+    nums: list[Any] = [item for number in range(pages) for item in (number, [element])]
+    nums += [item for number in range(1000, 1000 + padding) for item in (number, [element])]
+    tree_root = {"Type": MAKE.Name("StructTreeRoot"), "K": [element]}
+    pdf.set(root, {**tree_root, "ParentTree": {"Nums": nums}})
+    MAKE.page_tree(pdf, refs, tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree, StructTreeRoot=root, MarkInfo={"Marked": True})))
+
+
+def test_pages_sharing_a_big_element_index_it_once() -> None:
+    # 100 pages x 100,000 kids rebuilt the kid index per page: 6.3 s, 12.4 s at 200 pages.
+    data = shared_element(100, 100_000)
+    started = time.process_time()
+    output = ingest(data, pages_per_chunk=100)
+    assert time.process_time() - started < 3
+    assert output.findings() == ()
+    assert roles(output) == ["paragraph"] * 100
+
+
+def two_elements(first: int, second: int) -> bytes:
+    """Page 0 uses an element with ``first`` kids; page 1 that one and another, ``second`` kids."""
+    pdf = MAKE.Pdf()
+    tree, root, big, other = pdf.reserve(), pdf.reserve(), pdf.reserve(), pdf.reserve()
+    resources = {"Font": {"F1": pdf.add(MAKE.HELVETICA)}}
+    run = MAKE.text("F1", 12, 72, 700, b"Check the hydraulic line")
+    one = MAKE.page(pdf, tree, MAKE.marked("P", 0, run), resources, StructParents=0)
+    both = MAKE.marked("P", 0, run) + MAKE.marked("P", 1, run)
+    two = MAKE.page(pdf, tree, both, resources, StructParents=1)
+    MAKE._element(pdf, big, "P", root, list(range(2, first + 2)), one)
+    MAKE._element(pdf, other, "P", root, list(range(2, second + 2)), two)
+    nums: list[Any] = [0, [big], 1, [big, other]]
+    tree_root = {"Type": MAKE.Name("StructTreeRoot"), "K": [big, other]}
+    pdf.set(root, {**tree_root, "ParentTree": {"Nums": nums}})
+    MAKE.page_tree(pdf, [one, two], tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree, StructTreeRoot=root, MarkInfo={"Marked": True})))
+
+
+def test_pages_sharing_a_big_number_tree_read_it_once() -> None:
+    data = shared_element(100, 10, padding=50_000)
+    started = time.process_time()
+    output = ingest(data, pages_per_chunk=100)
+    assert time.process_time() - started < 3
+    assert output.findings() == ()
+    assert roles(output) == ["paragraph"] * 100
+
+
+def test_a_pages_tags_do_not_depend_on_the_pages_sharing_its_chunk() -> None:
+    # Page 1 reads both elements: 150,000 + 60,000 kid steps pass the 200,000 bound. Page 0 builds
+    # the first index, but page 1 is charged for it all the same, in a chunk of its own or not.
+    data = two_elements(150_000, 60_000)
+    results = [ingest(data, pages_per_chunk=size) for size in (2, 1)]
+    for output in results:
+        assert [(f.code, f.details) for f in output.findings()] == [
+            ("pdf.structure_limit", {"limit": 200_000, "page": 1})
+        ]
+        assert roles(output) == ["paragraph", "Unknown", "Unknown"]
+    # Both within the bound: both pages tagged.
+    assert ingest(two_elements(100_000, 50_000), pages_per_chunk=2).findings() == ()
 
 
 def identity_font(pdf: Any, cmap: bytes) -> Any:
@@ -327,6 +401,22 @@ def page_with_codes(cmap: bytes, codes: list[int]) -> bytes:
 def texts(output: SourceOutput) -> list[Any]:
     found = [r for r in output.records() if isinstance(r, DocumentBlock)]
     return [state(block.text) for block in sorted(found, key=lambda block: block.order)]
+
+
+def test_pages_sharing_a_big_cmap_parse_it_once_per_chunk() -> None:
+    # One 60,000-range CMap on 60 pages: a parse per page took 60 x 0.3 s.
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    font = {"Font": {"F1": identity_font(pdf, ranges_cmap(60_000))}}
+    shown = b"BT /F1 12 Tf 72 700 Td <010001010102> Tj ET"
+    refs = [MAKE.page(pdf, tree, shown, font) for _ in range(60)]
+    MAKE.page_tree(pdf, refs, tree)
+    data = bytes(pdf.build(MAKE.catalog(pdf, tree)))
+    started = time.process_time()
+    output = ingest(data, pages_per_chunk=60)
+    assert time.process_time() - started < 3
+    assert texts(output) == ["ABC"] * 60
+    assert texts(ingest(data, pages_per_chunk=30)) == texts(output)
 
 
 def test_a_cmap_of_many_ranges_is_searched_not_scanned() -> None:

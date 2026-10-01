@@ -84,6 +84,7 @@ from neptune.model.world import (
 )
 
 from ._content import FormFailure, Interpreter, PageContent
+from ._fonts import Font
 from ._labels import MAX_LABEL_CHARS, page_labels
 from ._objects import (
     array,
@@ -770,14 +771,17 @@ def _pages(out: _Output, captured: Warnings, first: int, count: int) -> None:
     if opened.encryption == "unreadable":
         return
     numbers = {ref: index for index, page in enumerate(pages) if (ref := reference(page))}
+    try:  # one for the chunk: the indexes are shared, each page charged as if it built them
+        structure: Structure | None = Structure(opened.catalog, numbers)
+    except (MemoryError, ShortReadError):
+        raise
+    except Exception:
+        structure = None
+    fonts: dict[object, Font | None] = {}  # shared by the chunk's pages
     for index in range(first, min(first + count, len(pages), MAX_PAGES)):
-        try:  # one per page: a page's tags never depend on which pages share its chunk
-            structure: Structure | None = Structure(opened.catalog, numbers)
-        except (MemoryError, ShortReadError):
-            raise
-        except Exception:
-            structure = None
-        _page(out, opened, captured, structure, pages[index], index)
+        if structure is not None:
+            structure.begin_page()  # a page's tags never depend on which pages share its chunk
+        _page(out, opened, captured, structure, fonts, pages[index], index)
         opened.stream.check()
 
 
@@ -786,6 +790,7 @@ def _page(
     opened: Opened,
     captured: Warnings,
     structure: Structure | None,
+    fonts: dict[object, Font | None],
     page: DictionaryObject,
     index: int,
 ) -> None:
@@ -796,12 +801,14 @@ def _page(
         max_operations=config.integer("max_page_operations"),
         max_content_bytes=config.integer("max_page_content_bytes"),
         space_threshold=config.integer("space_threshold"),
+        fonts=fonts,
     )
     content = interpreter.run(page)  # what was drawn before any fault is kept
     placed: PageStructure | None = None
     if structure is not None and structure.tagged:
         try:
-            placed = structure.page(page)
+            wanted = {i.mcid for i in content.items if i.mcid is not None and i.artifact is None}
+            placed = structure.page(page, wanted)
         except (MemoryError, ShortReadError):
             raise
         except StructureLimit:

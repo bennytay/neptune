@@ -232,7 +232,8 @@ class ToUnicode:
                 if len(piece) < size:
                     continue
                 code = int.from_bytes(piece, "big")
-                if spaces[size].find(code) is not None:
+                space = spaces.get(size)  # none declared: codes are two bytes, below
+                if space is not None and space.find(code) is not None:
                     yield code, size
                     position += size
                     break

@@ -217,7 +217,12 @@ class _Marked:
 
 
 class Interpreter:
-    """Runs one page's content; ``run`` returns what it drew. A fresh instance per page."""
+    """Runs one page's content; ``run`` returns what it drew. A fresh instance per page.
+
+    ``fonts`` is the chunk's font cache, shared by its pages: a ToUnicode CMap many pages use is
+    parsed once. A page still counts each limited font it uses, so findings do not depend on
+    which pages share a chunk.
+    """
 
     def __init__(
         self,
@@ -226,13 +231,15 @@ class Interpreter:
         max_operations: int,
         max_content_bytes: int,
         space_threshold: int,
+        fonts: dict[object, Font | None] | None = None,
     ) -> None:
         self._reader = reader
         self._max_operations = max_operations
         self._max_content_bytes = max_content_bytes
         self._space = space_threshold / 1000.0
         self._content = PageContent()
-        self._fonts: dict[object, Font | None] = {}
+        self._fonts: dict[object, Font | None] = fonts if fonts is not None else {}
+        self._used: set[object] = set()
         self._forms: dict[object, list[tuple[object, bytes]] | None] = {}
         self._failed: set[object] = set()
         self._state = GraphicsState()
@@ -341,9 +348,12 @@ class Interpreter:
             except Exception:
                 loaded = None
             self._fonts[key] = loaded
+        loaded = self._fonts[key]
+        if key not in self._used:
+            self._used.add(key)
             if loaded is not None and loaded.limited:
                 self._content.fonts_limited += 1
-        return self._fonts[key]
+        return loaded
 
     def set_text_state(self, field_name: str, value: float) -> None:
         state = self._state

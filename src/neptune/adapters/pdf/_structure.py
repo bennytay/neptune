@@ -17,14 +17,22 @@ For each MCID on a page this module gives its **owner**, the element whose block
 and its **path**, the child indices from the root to the MCID, which orders content in the
 structure's reading order. Every walk is bounded in depth, and every step of every walk (an
 object read, a kid indexed, an ancestor climbed) counts against ``MAX_VISITS`` per page, so the
-cost of a page's tags is linear in what it reads. Each element's kids are indexed once: by
-identity for their positions, by MCID for marked content. A tree that loops or is malformed
-raises ``StructureError``, one past the bound ``StructureLimit``; either way the page is read as
-untagged.
+cost of a page's tags is linear in what it reads.
+
+The indexes that scale with an element (its kids by identity and by MCID, a table's rows and
+cells, a number tree's entries) are built once and shared by every page of a ``Structure``, so N
+pages that reach one element with K kids cost K, not N x K. Sharing must not change what a page
+reads, so the budget is charged as if each page had built them itself: a page pays an index's
+recorded cost (and its dependencies') the first time it touches it. Whether a page's tags are
+read then never depends on which pages came before it in a chunk. A tree that loops or is
+malformed raises ``StructureError``, one past the bound ``StructureLimit``; either way the page
+is read as untagged.
 """
 
+from bisect import bisect_right
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Final, TypeVar
 
 from pypdf.generic import DictionaryObject, IndirectObject
 
@@ -131,6 +139,7 @@ class StructureLimit(StructureError):
 
 
 Key = tuple[int, int] | int
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True)
@@ -158,7 +167,6 @@ class Placement:
 class Table:
     """A table's rows as the structure declares them, and where each cell's content starts."""
 
-    owner: Owner
     rows: list[list[str]] = field(default_factory=list)  # each cell's type: TH or TD
     row_pages: list[int | None] = field(default_factory=list)  # each row's first content page
     cell_pages: list[list[int | None]] = field(default_factory=list)
@@ -176,16 +184,46 @@ class _Node:
 
 
 @dataclass
+class _Cost:
+    """What building one shared index took: its own steps, and the indexes it read."""
+
+    own: int = 0
+    deps: list[object] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class _TreeKids:
+    """A number tree node's kids: those without limits, and those with, sorted by low limit."""
+
+    unlimited: tuple[tuple[int, DictionaryObject], ...]
+    lows: tuple[int, ...]
+    limited: tuple[tuple[int, int, int, DictionaryObject], ...]  # (low, high, index, kid)
+    highest: tuple[int, ...]  # the largest high limit among limited[:i + 1]
+
+    def holding(self, key: int) -> list[DictionaryObject]:
+        """The kids that may hold ``key``, in their order."""
+        found = list(self.unlimited)
+        at = bisect_right(self.lows, key) - 1
+        while at >= 0 and self.highest[at] >= key:
+            low, high, index, kid = self.limited[at]
+            if low <= key <= high:
+                found.append((index, kid))
+            at -= 1
+        found.sort(key=lambda pair: pair[0])
+        return [kid for _, kid in found]
+
+
+@dataclass
 class PageStructure:
     placements: dict[int, Placement] = field(default_factory=dict)
     tables: dict[Key, Table] = field(default_factory=dict)
 
 
 class Structure:
-    """The structure tree of one document as one page needs it, read lazily and bounded.
+    """The structure tree of one document as pages need it, read lazily and bounded.
 
-    Build one per page: its visit budget and caches are then the page's alone, so whether a
-    page's tags are read never depends on which other pages share its chunk.
+    Call ``begin_page`` before each page: the visit budget and the per-page caches start afresh,
+    while the shared indexes (see the module docstring) stay and are charged as if rebuilt.
     """
 
     def __init__(self, catalog: DictionaryObject, page_numbers: dict[tuple[int, int], int]) -> None:
@@ -193,14 +231,19 @@ class Structure:
         self._parent_tree = dictionary(entry(self._root, "/ParentTree")) if self._root else None
         self._role_map = dictionary(entry(self._root, "/RoleMap")) if self._root else None
         self._pages = page_numbers
+        self._indexes: dict[object, tuple[object, int, tuple[object, ...]]] = {}  # shared
+        self._frames: list[_Cost] = []
+        self.begin_page()
+
+    def begin_page(self) -> None:
+        """Start a page: its budget, and what it has touched, are its own."""
         self._nodes: dict[Key, _Node] = {}
-        self._tables: dict[Key, Table] = {}
-        self._positions: dict[object, dict[object, int]] = {}
-        self._table_rows: dict[Key, list[DictionaryObject]] = {}
-        self._mcids: dict[Key, tuple[dict[int, int], int]] = {}
         self._paths: dict[Key, tuple[int, ...]] = {}
         self._owners: dict[Key, tuple[Owner, int | None, int | None]] = {}
+        self._page_tables: dict[Key, Table] = {}
+        self._touched: set[object] = set()
         self._visits = 0
+        self._frames.clear()
 
     @property
     def tagged(self) -> bool:
@@ -208,10 +251,47 @@ class Structure:
 
     # --- Bounds and identity ----------------------------------------------------------------
 
-    def _visit(self) -> None:
-        self._visits += 1
+    def _charge(self, steps: int) -> None:
+        self._visits += steps
         if self._visits > MAX_VISITS:
             raise StructureLimit(f"reading the structure tree took over {MAX_VISITS} steps")
+
+    def _visit(self) -> None:
+        self._charge(1)
+        if self._frames:
+            self._frames[-1].own += 1
+
+    def _index(self, key: object, build: Callable[[], _T]) -> _T:
+        """The shared index ``key``, built by ``build`` the first time any page needs it.
+
+        Building counts its own steps; a page that finds it built pays those steps and its
+        dependencies' (each index once per page), exactly what building it would have cost.
+        """
+        if self._frames:
+            self._frames[-1].deps.append(key)
+        found = self._indexes.get(key)
+        if found is not None:
+            self._touch(key)
+            value: _T = found[0]  # type: ignore[assignment]
+            return value
+        self._touched.add(key)
+        frame = _Cost()
+        self._frames.append(frame)
+        try:
+            built = build()
+        finally:
+            self._frames.pop()
+        self._indexes[key] = (built, frame.own, tuple(frame.deps))
+        return built
+
+    def _touch(self, key: object) -> None:
+        if key in self._touched:
+            return
+        self._touched.add(key)
+        _, own, deps = self._indexes[key]
+        self._charge(own)
+        for dep in deps:
+            self._touch(dep)
 
     @staticmethod
     def _key(obj: object, raw: object) -> Key:
@@ -295,23 +375,26 @@ class Structure:
         return id(resolved)
 
     def _position_of(
-        self, holder_key: object, kids: list[object], raw: object, child: object
+        self, holder_key: object, kids: Callable[[], Sequence[object]], raw: object, child: object
     ) -> int:
-        """``child``'s position among ``kids``, indexed once per holder (the end if unlisted)."""
-        positions = self._positions.get(holder_key)
-        if positions is None:
-            positions = {}
-            for index, kid in enumerate(kids):
+        """``child``'s position among a holder's kids, indexed once (the end if unlisted)."""
+
+        def build() -> tuple[dict[object, int], int]:
+            listed = kids()
+            positions: dict[object, int] = {}
+            for index, kid in enumerate(listed):
                 self._visit()
                 positions.setdefault(self._identity(kid, kid), index)
-            self._positions[holder_key] = positions
+            return positions, len(listed)
+
+        positions, count = self._index(("positions", holder_key), build)
         found = positions.get(self._identity(raw, child))
-        return found if found is not None else len(kids)
+        return found if found is not None else count
 
     def _index_in(self, holder: DictionaryObject, child: DictionaryObject, raw: object) -> int:
         """The child's position among ``holder``'s kids (the end if it is not listed)."""
         holder_key = "root" if self._is_root(holder) else ("kids", self._key(holder, holder))
-        return self._position_of(holder_key, self.kids(holder), raw, child)
+        return self._position_of(holder_key, lambda: self.kids(holder), raw, child)
 
     def _path(self, node: _Node) -> tuple[int, ...]:
         """Child indices from the root to ``node``, each climbed step a visit (once per node)."""
@@ -360,11 +443,13 @@ class Structure:
                 if table is not None:
                     cell = chain[depth - 1] if depth > 0 else None
                     shape = self._table(table)
+                    self._page_tables[table.key] = shape
                     row = self._row_index(table, current)
                     column = cell.index if cell is not None else None
                     if column is not None and cell is not None:
                         column = self._cell_index(current, cell)
-                    return shape.owner, row, column
+                    owner = Owner(table.key, self._path(table), "Table", BlockRole.TABLE, None)
+                    return owner, row, column
         for current in chain:
             if current.kind in OWNER_ROLES:
                 return self._make_owner(current, chain), None, None
@@ -383,49 +468,59 @@ class Structure:
     # --- Tables -----------------------------------------------------------------------------
 
     def _rows(self, table: _Node) -> list[DictionaryObject]:
-        cached = self._table_rows.get(table.key)
-        if cached is not None:
-            return cached
-        rows: list[DictionaryObject] = []
-        for raw in self.kids(table.obj):
-            self._visit()
-            kid = dictionary(raw)
-            if kid is None:
-                continue
-            kind = self.standard_type(name(entry(kid, "/S")) or "")
-            if kind == "TR":
-                rows.append(kid)
-            elif kind in TABLE_GROUPS:
-                for inner in self.kids(kid):
-                    self._visit()
-                    row = dictionary(inner)
-                    if row is not None and self.standard_type(name(entry(row, "/S")) or "") == "TR":
-                        rows.append(row)
-        self._table_rows[table.key] = rows
-        return rows
+        def build() -> list[DictionaryObject]:
+            rows: list[DictionaryObject] = []
+            for raw in self.kids(table.obj):
+                self._visit()
+                kid = dictionary(raw)
+                if kid is None:
+                    continue
+                kind = self.standard_type(name(entry(kid, "/S")) or "")
+                if kind == "TR":
+                    rows.append(kid)
+                elif kind in TABLE_GROUPS:
+                    for inner in self.kids(kid):
+                        self._visit()
+                        row = dictionary(inner)
+                        if (
+                            row is not None
+                            and self.standard_type(name(entry(row, "/S")) or "") == "TR"
+                        ):
+                            rows.append(row)
+            return rows
+
+        return self._index(("rows", table.key), build)
 
     def _row_index(self, table: _Node, row: _Node) -> int:
-        rows: list[object] = list(self._rows(table))
-        index = self._position_of(("rows", table.key), rows, row.obj, row.obj)
+        rows = self._rows(table)
+        index = self._position_of(("rows", table.key), lambda: rows, row.obj, row.obj)
         if index == len(rows):
             raise StructureError("a table row is not among its table's rows")
         return index
 
+    def _read_cells(self, row: DictionaryObject) -> list[DictionaryObject]:
+        cells = []
+        for raw in self.kids(row):
+            self._visit()
+            if (cell := dictionary(raw)) is not None:
+                cells.append(cell)
+        return cells
+
     def _cells(self, row: DictionaryObject) -> list[DictionaryObject]:
-        return [kid for kid in (dictionary(raw) for raw in self.kids(row)) if kid is not None]
+        return self._index(("cells", self._key(row, row)), lambda: self._read_cells(row))
 
     def _cell_index(self, row: _Node, cell: _Node) -> int:
-        cells: list[object] = list(self._cells(row.obj))
-        index = self._position_of(("cells", row.key), cells, cell.obj, cell.obj)
+        cells = self._cells(row.obj)
+        index = self._position_of(("cells", row.key), lambda: cells, cell.obj, cell.obj)
         if index == len(cells):
             raise StructureError("a table cell is not among its row's cells")
         return index
 
     def _table(self, table: _Node) -> Table:
-        found = self._tables.get(table.key)
-        if found is not None:
-            return found
-        shape = Table(Owner(table.key, self._path(table), "Table", BlockRole.TABLE, None))
+        return self._index(("table", table.key), lambda: self._read_table(table))
+
+    def _read_table(self, table: _Node) -> Table:
+        shape = Table()
         for raw in self.kids(table.obj):
             kid = dictionary(raw)
             if kid is not None and self.standard_type(name(entry(kid, "/S")) or "") == "Caption":
@@ -435,14 +530,13 @@ class Structure:
         for row in self._rows(table):
             kinds, pages = [], []
             row_page = dictionary(entry(row, "/Pg")) or table_page
-            for cell in self._cells(row):
+            for cell in self._read_cells(row):
                 kinds.append(self.standard_type(name(entry(cell, "/S")) or ""))
                 pages.append(self._first_page(cell, row_page))
             shape.rows.append(kinds)
             shape.cell_pages.append(pages)
             shape.row_pages.append(next((p for p in pages if p is not None), None))
         shape.first_page = next((p for p in shape.row_pages if p is not None), None)
-        self._tables[table.key] = shape
         return shape
 
     def _first_page(
@@ -474,8 +568,11 @@ class Structure:
 
     # --- One page ---------------------------------------------------------------------------
 
-    def page(self, page: DictionaryObject) -> PageStructure | None:
-        """The placements of every MCID on ``page``, or ``None`` if the page is not tagged."""
+    def page(self, page: DictionaryObject, mcids: Collection[int]) -> PageStructure | None:
+        """The placements of the given MCIDs on ``page``, or ``None`` if the page is not tagged.
+
+        Only the MCIDs the page's content uses are placed: a parent tree entry may list far more.
+        """
         key = integer(entry(page, "/StructParents"))
         if key is None or self._parent_tree is None:
             return None
@@ -483,23 +580,23 @@ class Structure:
         if parents is None:
             raise StructureError("the parent tree has no entry for this page")
         result = PageStructure()
-        for mcid, raw in enumerate(parents):
+        for mcid in sorted(mcids):
             self._visit()
-            if dictionary(raw) is None:
+            if not 0 <= mcid < len(parents) or dictionary(parents[mcid]) is None:
                 continue
-            node = self._node(raw)
+            node = self._node(parents[mcid])
             owner, row, column = self._owner(node)
             own = self._mcid_index(node, mcid)
             result.placements[mcid] = Placement(owner, (*self._path(node), own), row, column)
-            if owner.role is BlockRole.TABLE and owner.key in self._tables:
-                result.tables[owner.key] = self._tables[owner.key]
+            if owner.key in self._page_tables:
+                result.tables[owner.key] = self._page_tables[owner.key]
         return result
 
     def _mcid_index(self, node: _Node, mcid: int) -> int:
         """``mcid``'s position among ``node``'s kids (the end if unlisted), indexed once per
         element: a lookup per MCID, never a scan, since one element may own thousands."""
-        indexed = self._mcids.get(node.key)
-        if indexed is None:
+
+        def build() -> tuple[dict[int, int], int]:
             kids = self.kids(node.obj)
             positions: dict[int, int] = {}
             for index, raw in enumerate(kids):
@@ -509,8 +606,9 @@ class Structure:
                     found = integer(entry(raw, "/MCID"))
                 if found is not None:
                     positions.setdefault(found, index)
-            indexed = self._mcids[node.key] = (positions, len(kids))
-        positions, count = indexed
+            return positions, len(kids)
+
+        positions, count = self._index(("mcids", node.key), build)
         return positions.get(mcid, count)
 
     def _number_tree(self, node: DictionaryObject, key: int) -> object:
@@ -521,22 +619,53 @@ class Structure:
             current, depth = stack.pop()
             if depth > MAX_DEPTH:
                 raise StructureError("the parent tree nests too deep")
-            nums = array(entry(current, "/Nums"))
-            if nums is not None:
-                for index in range(0, len(nums) - 1, 2):
-                    self._visit()
-                    if integer(nums[index]) == key:
-                        value = nums[index + 1]
-                        return value.get_object() if isinstance(value, IndirectObject) else value
-            for kid_raw in reversed(array(entry(current, "/Kids")) or []):
+            value = self._numbers(current).get(key)
+            if value is not None:
+                return value.get_object() if isinstance(value, IndirectObject) else value
+            kids = self._tree_kids(current).holding(key)
+            stack.extend((kid, depth + 1) for kid in reversed(kids))
+        return None
+
+    def _numbers(self, node: DictionaryObject) -> dict[int, object]:
+        """A number tree node's ``/Nums`` as key to value, the first of a repeated key winning."""
+
+        def build() -> dict[int, object]:
+            numbers: dict[int, object] = {}
+            nums: list[object] = list(array(entry(node, "/Nums")) or [])
+            for index in range(0, len(nums) - 1, 2):
+                self._visit()
+                found = integer(nums[index])
+                if found is not None:
+                    numbers.setdefault(found, nums[index + 1])
+            return numbers
+
+        return self._index(("numbers", self._key(node, node)), build)
+
+    def _tree_kids(self, node: DictionaryObject) -> _TreeKids:
+        """A number tree node's dictionary kids, by their ``/Limits``: found by bisection."""
+
+        def build() -> _TreeKids:
+            unlimited: list[tuple[int, DictionaryObject]] = []
+            limited: list[tuple[int, int, int, DictionaryObject]] = []
+            for index, kid_raw in enumerate(array(entry(node, "/Kids")) or []):
+                self._visit()
                 kid = dictionary(kid_raw)
                 if kid is None:
                     continue
                 limits = [integer(v) for v in array(entry(kid, "/Limits")) or []]
-                if len(limits) == 2 and None not in limits:
-                    low, high = limits
-                    assert low is not None and high is not None
-                    if not low <= key <= high:
-                        continue
-                stack.append((kid, depth + 1))
-        return None
+                if len(limits) == 2 and limits[0] is not None and limits[1] is not None:
+                    limited.append((limits[0], limits[1], index, kid))
+                else:
+                    unlimited.append((index, kid))
+            limited.sort(key=lambda item: (item[0], item[2]))
+            highest: list[int] = []
+            for _, high, _, _ in limited:
+                highest.append(max(high, highest[-1]) if highest else high)
+            return _TreeKids(
+                tuple(unlimited),
+                tuple(item[0] for item in limited),
+                tuple(limited),
+                tuple(highest),
+            )
+
+        return self._index(("tree_kids", self._key(node, node)), build)

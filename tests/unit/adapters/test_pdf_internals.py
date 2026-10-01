@@ -102,6 +102,12 @@ def test_a_cmap_of_exactly_the_entry_bound_is_read_whole_and_one_more_is_cut() -
     assert cut.limited and cut.lookup(MAX_TABLE_ENTRIES - 1, 3) is None
 
 
+def test_a_cmap_without_a_code_space_splits_into_two_byte_codes() -> None:
+    cmap = parse_to_unicode(b"1 beginbfchar <0041> <0042> endbfchar")
+    assert list(cmap.split(b"\x00A\x00B\x01")) == [(0x41, 2), (0x42, 2), (1, 1)]
+    assert list(cmap.split(b"")) == []
+
+
 def test_a_malformed_cmap_maps_what_parses_and_nothing_else() -> None:
     cmap = parse_to_unicode(b"2 beginbfchar <01> <0041> <02> endbfchar beginbfrange <zz> ] [ <00>")
     assert cmap.lookup(1, 1) == "A" and cmap.lookup(2, 1) is None
