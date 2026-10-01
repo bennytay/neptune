@@ -426,4 +426,4 @@ def test_docs_list_every_call_and_the_version() -> None:
         assert f"`{call}(" in text, call
     assert f"`{CATALOG_API_VERSION}`" in text
     for refusal in ("merge", "mutate", "infer"):
-        assert refusal in text
+        assert f"**{refusal.capitalize()}.**" in text, refusal
