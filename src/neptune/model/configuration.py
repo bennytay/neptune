@@ -21,6 +21,7 @@ binding (MVL-38). ``compare_configurations`` compares two snapshots field by fie
 ``neptune.identity.configuration.configuration_digest`` hashes the same comparison.
 """
 
+import json
 import math
 import re
 from collections import defaultdict
@@ -589,6 +590,12 @@ class ConfigurationChange:
     right: tuple[RecordId, ...]
 
 
+def _declared(values: list[ConfigurationValue]) -> str:
+    """The comparison keys as exact text: Python's ``==`` takes ``-0.0`` for ``0.0``, and the
+    digest, which hashes the keys' canonical JSON, does not."""
+    return json.dumps([comparison_key(value) for value in values], sort_keys=True)
+
+
 def compare_configurations(
     left: Iterable[ConfigurationValue], right: Iterable[ConfigurationValue]
 ) -> tuple[ConfigurationChange, ...]:
@@ -612,7 +619,7 @@ def compare_configurations(
             change = ChangeKind.ADDED
         elif not new:
             change = ChangeKind.REMOVED
-        elif [comparison_key(v) for v in old] != [comparison_key(v) for v in new]:
+        elif _declared(old) != _declared(new):
             change = ChangeKind.CHANGED
         else:
             continue

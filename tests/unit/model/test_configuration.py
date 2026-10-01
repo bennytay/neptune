@@ -344,6 +344,10 @@ def test_type_and_state_changes_are_changes() -> None:
         value(("v",), mapping(0)),
     ):
         assert changes([base], [other(changed)]) == [(("v",), ChangeKind.CHANGED)]
+    # -0.0 == 0.0 in Python; the declared values and their digests differ (found by Hypothesis).
+    zero, negative = value(("v",), scalar("float", 0.0)), value(("v",), scalar("float", -0.0))
+    assert configuration_digest([zero]) != configuration_digest([other(negative)])
+    assert changes([zero], [other(negative)]) == [(("v",), ChangeKind.CHANGED)]
 
 
 def test_a_value_with_no_reading_compares_by_its_text_and_tag() -> None:
