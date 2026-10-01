@@ -48,9 +48,11 @@ def migrations() -> tuple[Migration, ...]:
     """Every shipped migration, in version order. Versions run 1, 2, 3, ... with no gaps."""
     found: list[Migration] = []
     for entry in files("neptune_ledger.catalog").joinpath("migrations").iterdir():
+        if not entry.name.endswith(".sql"):
+            continue
         match = _MIGRATION.fullmatch(entry.name)
         if match is None:
-            continue
+            raise MigrationError(f"migration file {entry.name!r} is not named NNNN_name.sql")
         data = entry.read_bytes()
         found.append(
             Migration(

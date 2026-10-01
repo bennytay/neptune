@@ -62,6 +62,24 @@ BEGIN
 END
 $$;
 
+-- Advance the clock to a tick from the registration log, on a rebuild (ADR 0002 §4). The tick
+-- must come after the clock's last one, so a replay in tx_seq order reproduces the original
+-- transaction times and the next live tick continues after them.
+CREATE FUNCTION replay_tx(p_seq bigint, p_time text) RETURNS void
+LANGUAGE plpgsql
+SET search_path FROM CURRENT
+AS $$
+BEGIN
+  UPDATE tx_clock
+     SET last_seq = p_seq, last_time = p_time
+   WHERE p_seq > last_seq
+     AND (last_time IS NULL OR p_time COLLATE "C" >= last_time COLLATE "C");
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'tick (%, %) does not follow the transaction clock', p_seq, p_time;
+  END IF;
+END
+$$;
+
 -- One row per registered package. Re-registering the same package id changes nothing (§6).
 CREATE TABLE package (
   tenant_id text NOT NULL REFERENCES tenant (tenant_id),
@@ -172,8 +190,8 @@ CREATE TABLE record (
   PRIMARY KEY (tenant_id, kind, record_id, package_id),
   UNIQUE (tenant_id, kind, package_id, line),
   FOREIGN KEY (tenant_id, package_id) REFERENCES package (tenant_id, package_id),
-  CHECK (record_id ~ '^rec:sha256:[0-9a-f]{64}$'
-         OR (kind = 'source_artifact' AND record_id ~ '^sha256:[0-9a-f]{64}$')),
+  CHECK (CASE WHEN kind = 'source_artifact' THEN record_id ~ '^sha256:[0-9a-f]{64}$'
+              ELSE record_id ~ '^rec:sha256:[0-9a-f]{64}$' END),
   CHECK ((world_clock IS NULL) = (world_first IS NULL AND world_last IS NULL))
 ) PARTITION BY LIST (kind);
 

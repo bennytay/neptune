@@ -1,11 +1,13 @@
 """The catalog migrations apply to a clean PostgreSQL 16, per tenant, idempotently (ADR 0002)."""
 
 import re
+from pathlib import Path
 
 import psycopg
 import pytest
 
 from neptune.model.kinds import RECORD_KINDS
+from neptune_ledger.catalog import migrate
 from neptune_ledger.catalog.migrate import (
     MigrationError,
     apply_migrations,
@@ -185,3 +187,65 @@ def test_transaction_time_is_rfc3339_utc_with_microseconds_only(pg: Conn, bad: s
             "INSERT INTO tenant_acme.package VALUES ('acme', %s, 1, %s, 'root', '0.0.1', 1, %s)",
             (PACKAGE, ROBOT, bad),
         )
+
+
+def test_a_rebuild_replays_logged_ticks_and_live_ticks_continue_after_them(pg: Conn) -> None:
+    apply_migrations(pg, "acme")
+    logged = [(1, "2026-10-01T09:00:00.000000Z"), (2, "2026-10-01T09:00:00.000000Z")]
+    for seq, time in logged:
+        pg.execute("SELECT tenant_acme.replay_tx(%s, %s)", (seq, time))
+    tick = pg.execute("SELECT * FROM tenant_acme.next_tx()").fetchone()
+    assert tick is not None and tick[0] == 3 and str(tick[1]) >= logged[-1][1]
+
+
+@pytest.mark.parametrize(
+    "tick",
+    [
+        (2, "2026-10-01T08:59:59.999999Z"),  # earlier than the clock's time
+        (2, "2026-10-01T09:00:00Z"),  # not the tx_time shape
+        (1, "2026-10-01T10:00:00.000000Z"),  # not after the clock's sequence
+    ],
+)
+def test_a_replayed_tick_must_follow_the_clock(pg: Conn, tick: tuple[int, str]) -> None:
+    apply_migrations(pg, "acme")
+    pg.execute("SELECT tenant_acme.replay_tx(1, '2026-10-01T09:00:00.000000Z')")
+    with pytest.raises((psycopg.errors.RaiseException, psycopg.errors.CheckViolation)):
+        pg.execute("SELECT tenant_acme.replay_tx(%s, %s)", tick)
+    assert pg.execute("SELECT last_seq FROM tenant_acme.tx_clock").fetchone() == (1,)
+
+
+@pytest.mark.parametrize(
+    ("kind", "key"),
+    [("source_artifact", ROBOT), ("run", PACKAGE), ("run", "rec:sha256:" + "A" * 64)],
+)
+def test_a_record_key_must_have_its_kinds_shape(pg: Conn, kind: str, key: str) -> None:
+    apply_migrations(pg, "acme")
+    pg.execute(
+        "INSERT INTO tenant_acme.package VALUES ('acme', %s, 1, %s, 'root', '0.0.1', 1, %s)",
+        (PACKAGE, ROBOT, "2026-10-02T00:00:00.000000Z"),
+    )
+    with pytest.raises(psycopg.errors.CheckViolation):
+        pg.execute(
+            "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id, line,"
+            " schema_version) VALUES ('acme', %s, %s, %s, 1, 1)",
+            (kind, key, PACKAGE),
+        )
+
+
+@pytest.mark.parametrize(
+    ("names", "message"),
+    [
+        (["0001_catalog.sql", "0002_add-index.sql"], "not named"),
+        (["0001_catalog.sql", "0003_later.sql"], "without gaps"),
+    ],
+)
+def test_misnamed_or_missing_migration_files_are_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: list[str], message: str
+) -> None:
+    (tmp_path / "migrations").mkdir()
+    for name in names:
+        (tmp_path / "migrations" / name).write_text("SELECT 1;", encoding="utf-8")
+    (tmp_path / "migrations" / "README.txt").write_text("ignored", encoding="utf-8")
+    monkeypatch.setattr(migrate, "files", lambda _: tmp_path)
+    with pytest.raises(MigrationError, match=message):
+        migrations()

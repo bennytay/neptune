@@ -41,8 +41,9 @@ another's evidence.
    `tx_time`). *World time* is what the evidence states: `record.world_clock` (a
    `timestamp_domain` record id) with `world_first` / `world_last` ticks as `bigint`, unconverted.
    No column has a timestamp, date or interval type. The registration log (`package` in `tx_seq`
-   order) is the only input besides the packages; a rebuild replays it, so a rebuilt catalog equals
-   the original including transaction times.
+   order) is the only input besides the packages; a rebuild replays it, advancing the clock with
+   `replay_tx(tx_seq, tx_time)`, which accepts only a tick after the clock's last, so a rebuilt
+   catalog equals the original including transaction times and live ticks continue after it.
 5. **Tables.**
    - `package`: `package_id` (manifest sha256), `schema_version`, `receipt_id`, `root_locator` (where
      it was registered from), `ledger_version`, `tx_seq`, `tx_time`.
