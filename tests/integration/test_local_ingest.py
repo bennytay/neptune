@@ -26,13 +26,13 @@ from neptune.adapters.contract import PROBE_HEAD_SIZE, ProbeHints, configure
 from neptune.adapters.registry import AdapterRegistry
 from neptune.discovery.reader import LocalReader, SourceChangedError
 from neptune.discovery.scan import scan
-from neptune.discovery.source import LocalSource, SourceAccessError
+from neptune.discovery.source import LocalSource, SkipReason, SourceAccessError
 from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.package import Storage
 from neptune.model.source import LocalPath, SourceRevision
-from neptune.store.assemble import assemble, export, publish, stage
-from neptune.store.package import PackageError, read_package
+from neptune.store.assemble import _sibling, assemble, export, publish, stage
+from neptune.store.package import PackageError, copy_file, read_package
 from neptune.store.series import SERIES_SETTINGS, read_rows
 from neptune.store.workspace import Workspace
 
@@ -231,8 +231,27 @@ def test_an_exported_package_holds_every_source_and_the_same_receipt(
 
 
 def _nothing_at(destination: Path) -> bool:
-    """Neither the destination nor the hidden staging directory beside it was left behind."""
-    return not any(p.name.startswith(destination.name) for p in destination.parent.iterdir())
+    """Neither the destination nor a hidden staging directory beside it was left behind.
+
+    Staging is named ``.<name>.<hex>`` (``assemble._sibling``), so it starts with a dot.
+    """
+    return not any(
+        entry.name == destination.name or entry.name.startswith(f".{destination.name}.")
+        for entry in destination.parent.iterdir()
+    )
+
+
+def test_nothing_at_sees_leftover_staging(tmp_path: Path) -> None:
+    """The helper the failure tests rely on: a planted leftover of either kind is seen."""
+    destination = tmp_path / "portable"
+    (tmp_path / "portable-other").mkdir()  # a neighbour that only shares the prefix
+    assert _nothing_at(destination)
+    planted = _sibling(destination)  # exactly what a failed export would leave
+    assert planted.name.startswith(".portable.")
+    assert not _nothing_at(destination)
+    planted.rmdir()
+    destination.mkdir()
+    assert not _nothing_at(destination)
 
 
 def test_exporting_without_the_sources_fails_loudly(corpus: Path, tmp_path: Path) -> None:
@@ -251,13 +270,29 @@ def test_exporting_a_source_that_changed_since_hashing_fails(corpus: Path, tmp_p
     assert _nothing_at(tmp_path / "portable")
 
 
-def test_a_symlink_at_a_sources_location_is_not_that_source(corpus: Path, tmp_path: Path) -> None:
-    """The walk's policy applies to export: a link where the file was is refused, not followed."""
+SWAPS: Final = {"symlink": SkipReason.SYMLINK, "fifo": SkipReason.NOT_REGULAR_FILE}
+
+
+def _swap(path: Path, kind: str) -> None:
+    """Move the file at ``path`` aside and put a symlink to it, or a FIFO, in its place."""
+    moved = path.with_name(f"moved-{path.name}")
+    path.rename(moved)
+    if kind == "symlink":
+        path.symlink_to(moved.name)
+    else:
+        os.mkfifo(path)  # opened blocking, this would wait for a writer forever
+
+
+@pytest.mark.parametrize("kind", SWAPS)
+def test_a_link_or_fifo_at_a_sources_location_is_not_that_source(
+    corpus: Path, tmp_path: Path, kind: str
+) -> None:
+    """The walk's policy applies to export: what replaced the file is refused, never read."""
     ingest_local(corpus, Workspace(tmp_path / "home"), registry(), tmp_path / "package")
-    (corpus / "notes.txt").rename(corpus / "moved.txt")
-    (corpus / "notes.txt").symlink_to("moved.txt")
-    with pytest.raises(SourceAccessError, match="symlink"):
+    _swap(corpus / "notes.txt", kind)
+    with pytest.raises(SourceAccessError) as refused:
         export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
+    assert refused.value.reason is SWAPS[kind]
     assert _nothing_at(tmp_path / "portable")
 
 
@@ -307,9 +342,20 @@ def test_a_materialised_source_is_copied_into_the_package(corpus: Path, tmp_path
     workspace = Workspace(tmp_path / "home")
     ledger, ingested = ingest_into(corpus, workspace, registry())
     lift = _content_at(ledger, "lift.tally")
-    assemble(
-        tmp_path / "package", workspace, ledger, ingested, materialise={lift: corpus / "lift.tally"}
-    )
+    with pytest.raises(PackageError, match="needs the Source"):
+        assemble(tmp_path / "package", workspace, ledger, ingested, materialise=[lift])
+    source = LocalSource(corpus)
+    with pytest.raises(PackageError, match="no local location holds sources to materialise"):
+        assemble(
+            tmp_path / "package",
+            workspace,
+            ledger,
+            ingested,
+            materialise=[ContentId("sha256:" + "0" * 64)],
+            source=source,
+        )
+    assert _nothing_at(tmp_path / "package")
+    assemble(tmp_path / "package", workspace, ledger, ingested, materialise=[lift], source=source)
     package = read_package(tmp_path / "package")
     assert set(package.blobs) == {lift}
     storage = {h.content_id: h.storage for h in package.manifest.sources}
@@ -317,29 +363,64 @@ def test_a_materialised_source_is_copied_into_the_package(corpus: Path, tmp_path
     assert set(storage.values()) == {Storage.REFERENCED}
 
 
-def test_a_source_that_changes_while_it_is_copied_fails_the_package(
-    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("kind", SWAPS)
+def test_a_link_or_fifo_at_a_materialised_sources_location_is_refused(
+    corpus: Path, tmp_path: Path, kind: str
 ) -> None:
+    """Materialising reads as export does: through the walk's policy, never following a link."""
     workspace = Workspace(tmp_path / "home")
     ledger, ingested = ingest_into(corpus, workspace, registry())
-    lift = _content_at(ledger, "lift.tally")
-    copy = shutil.copyfile
-
-    def copy_then_change(source: Path, target: Path) -> None:
-        copy(source, target)
-        data = target.read_bytes()
-        target.write_bytes(data[:-1] + b"6")  # the same size, other bytes: as if written mid-copy
-
-    monkeypatch.setattr(shutil, "copyfile", copy_then_change)
-    with pytest.raises(PackageError, match="changed while it was copied"):
+    notes = _content_at(ledger, "notes.txt")  # bytes at one location only
+    _swap(corpus / "notes.txt", kind)
+    with pytest.raises(SourceAccessError) as refused:
         assemble(
             tmp_path / "package",
             workspace,
             ledger,
             ingested,
-            materialise={lift: corpus / "lift.tally"},
+            materialise=[notes],
+            source=LocalSource(corpus),
+        )
+    assert refused.value.reason is SWAPS[kind]
+    assert _nothing_at(tmp_path / "package")
+
+
+def test_a_materialised_source_that_changed_since_hashing_fails(
+    corpus: Path, tmp_path: Path
+) -> None:
+    workspace = Workspace(tmp_path / "home")
+    ledger, ingested = ingest_into(corpus, workspace, registry())
+    notes = _content_at(ledger, "notes.txt")  # bytes at one location only
+    data = (corpus / "notes.txt").read_bytes()
+    (corpus / "notes.txt").write_bytes(data[:-1] + bytes([data[-1] ^ 1]))  # same size, other bytes
+    with pytest.raises(PackageError, match="do not hash"):
+        assemble(
+            tmp_path / "package",
+            workspace,
+            ledger,
+            ingested,
+            materialise=[notes],
+            source=LocalSource(corpus),
         )
     assert _nothing_at(tmp_path / "package")
+
+
+def test_a_file_that_changes_while_it_is_copied_fails_the_export(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The export copies the original's series after hashing them, so it checks what landed."""
+    ingest_local(corpus, Workspace(tmp_path / "home"), registry(), tmp_path / "package")
+    copy = copy_file
+
+    def copy_then_change(path: Path, target: Path) -> None:
+        copy(path, target)
+        data = target.read_bytes()
+        target.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))  # same size: as if written mid-copy
+
+    monkeypatch.setattr("neptune.store.assemble.copy_file", copy_then_change)
+    with pytest.raises(PackageError, match="changed while it was copied"):
+        export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
+    assert _nothing_at(tmp_path / "portable")
 
 
 def test_only_copied_files_are_read_back(
@@ -363,27 +444,41 @@ def test_only_copied_files_are_read_back(
 def test_packages_and_exports_are_flushed_before_they_appear(
     corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every file and directory is fsynced, and so is the directory each one is renamed into."""
+    """Every file and directory is fsynced before the rename that publishes it, and the
+    directory it is renamed into is fsynced after."""
     workspace = Workspace(tmp_path / "home")
     ledger, ingested = ingest_into(corpus, workspace, registry())
-    flushed: set[tuple[int, int]] = set()
-    fsync = os.fsync
+    events: list[tuple[str, object]] = []
+    fsync, rename = os.fsync, os.rename
 
-    def recording(descriptor: int) -> None:
+    def recording_fsync(descriptor: int) -> None:
         held = os.fstat(descriptor)
-        flushed.add((held.st_dev, held.st_ino))
         fsync(descriptor)
+        events.append(("fsync", (held.st_dev, held.st_ino)))
 
-    monkeypatch.setattr(os, "fsync", recording)
+    def recording_rename(source: Any, target: Any, *args: Any, **kwargs: Any) -> None:
+        rename(source, target, *args, **kwargs)
+        events.append(("rename", Path(target)))
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    monkeypatch.setattr(os, "rename", recording_rename)
     out = tmp_path / "out"
     out.mkdir()
     assemble(out / "package", workspace, ledger, ingested)
     export(out / "package", out / "portable", LocalSource(corpus))
-    written = [out, *out.rglob("*")]
-    assert len(written) > 20
-    for path in written:
-        named = path.stat()
-        assert (named.st_dev, named.st_ino) in flushed, path
+
+    begun = 0  # each package's own window: from the previous publish to its own
+    for package in (out / "package", out / "portable"):
+        published = events.index(("rename", package))
+        before, after = events[begun:published], events[published + 1 :]
+        written = [package, *package.rglob("*")]
+        assert len(written) > 10
+        for path in written:
+            named = path.stat()
+            assert ("fsync", (named.st_dev, named.st_ino)) in before, path
+        parent = out.stat()
+        assert ("fsync", (parent.st_dev, parent.st_ino)) in after
+        begun = published + 1
 
 
 def test_a_package_is_made_under_the_umask_without_touching_it(

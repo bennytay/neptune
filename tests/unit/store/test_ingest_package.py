@@ -5,6 +5,7 @@ The four worked examples are packaged in tests/integration/test_example_packages
 """
 
 import io
+import os
 import random
 from dataclasses import replace
 from pathlib import Path
@@ -426,6 +427,32 @@ def test_symlinks_and_occupied_directories_are_refused(tmp_path: Path) -> None:
     (root / "records" / "link.jsonl").symlink_to(root / table_path("run"))
     with pytest.raises(PackageError, match="symlink"):
         read_package(root)
+
+
+@pytest.mark.parametrize(
+    ("kind", "refused"), [("symlink", "is a symlink"), ("fifo", "not a regular file")]
+)
+def test_the_store_never_follows_a_link_or_opens_a_special_file(
+    tmp_path: Path, kind: str, refused: str
+) -> None:
+    """Not as a blob it is given, not as a file of a package it reads; a FIFO is not waited on."""
+    blob, real = tmp_path / "log", tmp_path / "real"
+    real.write_bytes(LOG_BYTES)
+    root = tmp_path / "package"
+    write_package(root, package_files(records()))
+    if kind == "symlink":
+        blob.symlink_to(real.name)
+    else:
+        os.mkfifo(blob)
+        (root / RECEIPT_TEXT).unlink()
+        os.mkfifo(root / RECEIPT_TEXT)
+        with pytest.raises(PackageError, match=refused):
+            read_package(root)
+    with pytest.raises(PackageError, match=refused):
+        package_contents(records(), blobs={LOG: blob})
+    with pytest.raises(PackageError, match=refused):
+        write_package(tmp_path / "copy", {"log": blob})
+    assert package_contents(records(), blobs={LOG: real})[blob_path(LOG)] == real
 
 
 def test_only_records_of_known_kinds_are_packaged() -> None:

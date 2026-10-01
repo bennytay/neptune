@@ -2,12 +2,13 @@
 
 import importlib.util
 import os
+import stat
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
 from types import ModuleType
-from typing import Final
+from typing import Any, Final
 
 import pytest
 
@@ -16,6 +17,7 @@ from neptune.discovery.reader import BytesReader
 from neptune.discovery.scan import scan
 from neptune.discovery.source import LocalSource
 from neptune.identity import canonical_json
+from neptune.identity.revisions import SourceLedger
 from neptune.store.series import write_run
 from neptune.store.workspace import (
     HOME_VARIABLE,
@@ -220,6 +222,78 @@ def test_committing_a_chunk_again_changes_nothing(tmp_path: Path) -> None:
     after = {p: p.read_bytes() for p in (tmp_path / "chunks").rglob("*") if p.is_file()}
     assert after == before
     assert not any((tmp_path / "staging").iterdir())
+
+
+Flushed = list[tuple[int, frozenset[str]]]  # each fsync: the inode, and a directory's names
+
+
+def record_flushes(monkeypatch: pytest.MonkeyPatch, renamed: list[int]) -> Flushed:
+    """Record every fsync, and in ``renamed`` how many fsyncs came before each rename."""
+    flushed: Flushed = []
+    fsync, rename = os.fsync, os.rename
+
+    def recording_fsync(descriptor: int) -> None:
+        held = os.fstat(descriptor)
+        fsync(descriptor)
+        names = os.listdir(descriptor) if stat.S_ISDIR(held.st_mode) else []
+        flushed.append((held.st_ino, frozenset(names)))
+
+    def recording_rename(source: Any, target: Any) -> None:
+        rename(source, target)
+        renamed.append(len(flushed))
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    monkeypatch.setattr(os, "rename", recording_rename)
+    return flushed
+
+
+def flushed_holding(flushed: Flushed, directory: Path, name: str) -> bool:
+    """Whether ``directory`` was fsynced while it held ``name``."""
+    inode = directory.stat().st_ino
+    return any(flushed_inode == inode and name in names for flushed_inode, names in flushed)
+
+
+def test_a_commit_is_flushed_down_to_the_chunks_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The chunk's tree before its rename; its name in the prefix and the new prefix's name in
+    ``chunks/`` before the commit returns, so a returned commit survives a power loss."""
+    workspace, output = Workspace(tmp_path), tally_output()
+    chunk, out = output.plan.chunks[0], output.outputs[0]
+    renamed: list[int] = []
+    flushed = record_flushes(monkeypatch, renamed)
+    assert workspace.commit(chunk, out.records, out.findings, out.series)
+    final = workspace.chunk_path(chunk.id)
+    (published,) = renamed
+    before = {inode for inode, _ in flushed[:published]}
+    for path in [final, *final.rglob("*")]:
+        assert path.stat().st_ino in before, path
+    assert flushed_holding(flushed, final.parent, final.name)
+    assert flushed_holding(flushed, tmp_path / "chunks", final.parent.name)
+
+
+def test_opening_a_workspace_flushes_its_home_and_folders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flushed = record_flushes(monkeypatch, [])
+    Workspace(tmp_path / "home")
+    assert flushed_holding(flushed, tmp_path, "home")
+    (tmp_path / "home" / "plans").rmdir()
+    flushed.clear()
+    Workspace(tmp_path / "home")  # workspace.json exists: the remade folder is flushed anyway
+    assert flushed_holding(flushed, tmp_path / "home", "plans")
+
+
+def test_a_new_plan_or_ledger_directory_is_flushed_into_its_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace, output = Workspace(tmp_path / "home"), tally_output()
+    flushed = record_flushes(monkeypatch, [])
+    workspace.save_plan(output.config.transform, output.plan.chunks, output.plan.findings)
+    workspace.save_ledger(tmp_path, SourceLedger())
+    for kept in ("plans", "ledgers"):
+        (directory,) = (tmp_path / "home" / kept).iterdir()
+        assert flushed_holding(flushed, directory.parent, directory.name), kept
 
 
 def test_a_failed_commit_leaves_nothing_behind(

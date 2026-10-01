@@ -9,7 +9,7 @@ Status: stage contract agreed; the job runtime (MVL-6), the local store (MVL-16)
 |---|---|---|---|---|
 | 1 | discover | enumerate candidate sources through a `Source` (local FS now, object store later); apply ignore, symlink and traversal policy | discovery | MVL-2, MVL-45 |
 | 2 | fingerprint | size, magic bytes, streaming sha256 + per-chunk hashes; emit `SourceArtifact` / `SourceRevision` | identity | MVL-2 |
-| 3 | probe | ask registered adapters for confidence + reasons; rank; surface ties as ambiguity findings | discovery + adapters | MVL-8 |
+| 3 | probe | done: `discovery.probe.ProbeEngine` sniffs the head, asks every adapter (crashes isolated), applies the registry's rule, opens zip/tar/gzip/bzip2/xz within `ProbePolicy`, and reports ties, unclaimed sources and container problems as `neptune.probe.*` findings (ADR 0027) | discovery + adapters | MVL-8 |
 | 4 | inspect | cheap per-source summary (streams, extents, counts) without full parse | adapters | MVL-7 |
 | 5 | group | propose run/session groupings from filesystem signals (v0) and later from evidence (M7) | discovery | MVL-13, MVL-34 |
 | 6 | plan | adapters emit chunks with deterministic ids and cost estimates | adapters | MVL-7 |
@@ -57,7 +57,9 @@ state machine over the stages above, in nine phases (ADR 0028):
   changes under the job or cannot be opened, or output breaking a cross-chunk law quarantines that
   source: its output stays out of the package and a `neptune.runtime.*` finding citing it says why.
   Every other source lands. A `ContractError` is a bug and is never retried. Committed chunks of a
-  quarantined source stay in the workspace, so the rerun after a fix redoes only what failed.
+  quarantined source stay in the workspace, so the rerun after a fix redoes only what failed. The
+  finding names the step, law, exception class and ids, never an exception's text or a repr, so
+  the same failing job writes the same package (ADR 0028 §4).
 - **Cancellation.** A `threading.Event`, checked before each source, chunk and phase from `inspect`
   on (the walk and its ledger always finish). The chunk in hand finishes and commits; a staged
   package is discarded; the outcome is `cancelled` with no package.

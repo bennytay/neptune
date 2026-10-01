@@ -69,8 +69,18 @@ what to do with the rest of its source's output.
    (failed, error); `source_changed` (inconsistent, error); `source_unreadable` (skipped, error);
    `entry_skipped` (skipped; info for a special file, warning for one that vanished, error for one
    that could not be read). Messages and details carry ids, codes and exception class names,
-   never exception text. The transform enters the package only with its findings, so a package
-   with none is independent of the runtime's version.
+   never exception text or a repr, which can name a path or a memory address and would make two
+   identical jobs write different packages. So a `plan_failed` or `chunk_failed` names the `step`
+   it failed at (`plan`, `plan_result`, `check_plan`, `ingest`, `ingest_result`,
+   `check_chunk_output`, `chunk_series`, `commit`), the exception's class as `error`, the type an
+   adapter returned instead of a `Plan` or `ChunkOutput` as `returned` (`module.qualname`), and
+   for `chunk_series` the `law` and `stream`; an `output_invalid` lists `problems` as objects,
+   each a `law` (`runtime.lineage.Law`) with the chunk, stream and record ids it concerns; a
+   `source_unreadable` names its `reason` and the symbolic `errno`. Anything that raises while
+   checking a chunk's output, not only a `ContractError`, fails that chunk. Only the runtime's own
+   reads (opening a source, its head) make a source `source_unreadable`; an `OSError` raised
+   inside the adapter's `plan` or `ingest` is the adapter's failure. The transform enters the
+   package only with its findings, so a package with none is independent of the runtime's version.
 5. **Cross-chunk laws are checked in bounded memory, before anything is merged.** At
    `normalize`, `seq` must be unique within the chunk, per stream. At `assemble`, every run of a
    source is checked against its `Stream` as the merge and the package will see it
@@ -107,8 +117,9 @@ what to do with the rest of its source's output.
    this one method and brings the findings.
 10. **What fails the job** (`JobError`): a root that is not a directory or cannot be read, a
     destination that exists, options naming an adapter or option that does not exist, a
-    workspace or disk that will not read or write, and a staged package that does not verify.
-    Never one source.
+    workspace or disk that will not read or write (an `OSError` committing a chunk, a committed
+    run that will not open as Parquet), and a staged package that does not verify. Never one
+    source.
 
 ## Alternatives considered
 

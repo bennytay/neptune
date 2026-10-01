@@ -18,17 +18,21 @@ it: the manifest, every file's size and hash, no stray files, every table's orde
 lineage ids, every series against its stream, and a receipt that recomputes from the tables.
 
 A file's content is bytes or a path on disk. Series and blobs can be gigabytes, so they stay
-paths: hashed, checked and copied as streams, never held in memory (ADR 0025).
+paths: hashed, checked and copied as streams, never held in memory (ADR 0025). Every path is
+opened with ``open_file``: a symlink is refused, not followed, and so is a FIFO or device.
 """
 
+import errno
 import hashlib
+import os
 import re
 import shutil
+import stat
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, TypeAlias
+from typing import Any, BinaryIO, Final, TypeAlias
 
 from neptune.identity import canonical_json
 from neptune.identity.findings import check_ingest_finding
@@ -89,12 +93,40 @@ def _document(value: Any) -> bytes:
     return canonical_json.dumps(value.to_json())
 
 
+def open_file(path: Path) -> BinaryIO:
+    """Open a regular file to read, never through a symlink and never a special file.
+
+    A symlink at ``path`` is refused, not followed (``O_NOFOLLOW``), and a FIFO or device is
+    refused without waiting on it (``O_NONBLOCK``); either is a ``PackageError``.
+    """
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise PackageError(f"{path} is a symlink; the store never follows one") from exc
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise PackageError(f"{path} is not a regular file")
+        os.set_blocking(descriptor, True)
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def copy_file(path: Path, target: Path) -> None:
+    """Copy ``path``, opened with ``open_file``, to a new file ``target``, as a stream."""
+    with open_file(path) as data, target.open("xb") as copy:
+        shutil.copyfileobj(data, copy, _READ_SIZE)
+
+
 def _digest(content: Content) -> tuple[int, ContentId]:
     """Size and sha256 of ``content``, streamed from disk for a path."""
     if isinstance(content, bytes):
         return len(content), content_id(content)
     digest, size = hashlib.sha256(), 0
-    with content.open("rb") as stream:
+    with open_file(content) as stream:
         while block := stream.read(_READ_SIZE):
             digest.update(block)
             size += len(block)
@@ -102,7 +134,10 @@ def _digest(content: Content) -> tuple[int, ContentId]:
 
 
 def _bytes(content: Content) -> bytes:
-    return content if isinstance(content, bytes) else content.read_bytes()
+    if isinstance(content, bytes):
+        return content
+    with open_file(content) as stream:
+        return stream.read()
 
 
 # --- Writing -----------------------------------------------------------------------------------
@@ -213,7 +248,7 @@ def write_package(root: Path, files: Mapping[str, Content]) -> ContentId:
         if isinstance(data, bytes):
             path.write_bytes(data)
         else:
-            shutil.copyfile(data, path)
+            copy_file(data, path)
     return package_id(files)
 
 
@@ -287,7 +322,7 @@ def read_package(root: Path) -> IngestPackage:
         if relative == VOLATILE or relative.startswith(f"{VOLATILE}/") or path.is_dir():
             continue
         large = _SERIES.fullmatch(relative) or _BLOB.fullmatch(relative)
-        files[relative] = path if large else path.read_bytes()
+        files[relative] = path if large else _bytes(path)
     return read_files(files)
 
 
