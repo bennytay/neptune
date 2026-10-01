@@ -97,7 +97,7 @@ def test_committed_compatibility_matrix_is_current() -> None:
     assert text == (CONTRACTS / "compatibility.md").read_text("utf-8")
     assert text == tool.render_matrix(_registry())
     assert "| `neptune-ledger` | 1.0.0 current |" in text
-    assert "| `catalog-api` | `neptune-ledger` | active | — | 0.0.0 |" in text
+    assert "| `catalog-api` | `neptune-ledger` | active | — | 1.0.0 |" in text
 
 
 def test_golden_generator_is_deterministic() -> None:
