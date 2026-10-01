@@ -1,5 +1,7 @@
 """The SDK's error taxonomy: stable codes, one hierarchy, runtime errors mapped by cause."""
 
+from pathlib import Path
+
 import pytest
 
 import neptune.sdk
@@ -99,6 +101,23 @@ def test_a_job_error_maps_by_the_type_of_its_cause(
     error = from_job_error(_caused(cause))
     assert type(error) is kind
     assert str(error) == "the job says why"  # the runtime's message, unchanged
+
+
+def test_a_job_error_while_its_destination_is_taken_is_destination_exists(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "package"
+    assert type(from_job_error(_caused(None), destination)) is JobFailedError
+    destination.mkdir()  # another writer took it: the job publishes last, so it was not the job
+    assert type(from_job_error(_caused(OSError(39, "not empty")), destination)) is (
+        DestinationExistsError
+    )
+    # A cause that says more wins: the workspace, the sandbox and the config come first.
+    assert type(from_job_error(_caused(WorkspaceError("x")), destination)) is (
+        WorkspaceUnusableError
+    )
+    (tmp_path / "link").symlink_to(tmp_path / "nowhere")
+    assert type(from_job_error(_caused(None), tmp_path / "link")) is DestinationExistsError
 
 
 def test_the_mapping_never_reads_the_message() -> None:

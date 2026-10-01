@@ -68,9 +68,9 @@ sandbox without parsing text.
    with no destination (`destination=None`); such a job can only dry-run, and `run` refuses it
    before starting, so `JobOutcome.destination` is `Path | None`. The ledger and plans a dry run
    saves are the ones `run` saves, so the ingest that follows plans nothing again. The plan
-   phase now records which of a source's chunks the workspace already holds, so a dry run's
-   (or a cancelled job's) cache report marks them `committed`: what is left to parse is every
-   chunk that is not. MVL-15 adds adapters' `inspect`, grouping and the rendered explanation to
+   phase of a dry run records which of a source's chunks the workspace already holds, so its
+   cache report marks them `committed`: what is left to parse is every chunk that is not. (A
+   run marks a chunk `committed` only when it reaches and reuses it, as before.) MVL-15 adds adapters' `inspect`, grouping and the rendered explanation to
    this call; the SDK's `dry_run` returns it as an `IngestResult` in the `planned` state.
 5. **Results are the runtime's outcome, typed.** `IngestResult` holds the `JobOutcome` and reads
    it: `state`, `committed`, `cancelled`, `planned`, `job`, `destination`, `package`,
@@ -87,7 +87,9 @@ sandbox without parsing text.
    `job_failed`. The runtime's or the store's exception is the `__cause__`. A `JobError` is
    classified by its cause's type, never its text: `SandboxError` → `sandbox_unavailable`,
    `ConfigError` → `invalid_configuration`, `WorkspaceError` or `ScratchError` →
-   `workspace_unusable`, anything else `job_failed`. The SDK checks the call before it builds a
+   `workspace_unusable`; otherwise, if something is now at the job's destination, another
+   writer took it (publishing is the job's last step) → `destination_exists`; anything else
+   `job_failed`. The SDK checks the call before it builds a
    job: the source exists and is a directory; nothing is at the destination, not even a dangling
    symlink; the destination is not inside the source (the next ingest of that root would read
    the package as evidence; the runtime does not check this); the adapters register; the options
@@ -156,7 +158,5 @@ sandbox without parsing text.
   its folder. Ingesting one file alone needs a walk over a single entry, a runtime change.
 - Each async or `start`ed job holds one thread for its life; many concurrent jobs in one process
   are many threads, each forking per call. M9's scheduler revisits concurrency.
-- The plan phase reports committed chunks as hits even when the job stops before parsing; a
-  cancelled job's cache report is more accurate than before, and a committed job's is unchanged.
 - Revisit if adapters become async-native, if one process must run many jobs at once, or if the
   CLI or the HTTP API needs a code the taxonomy lacks (add a subclass; never reuse a code).

@@ -16,7 +16,7 @@ import pytest
 from neptune.adapters.builtin import builtin_adapters, default_registry
 from neptune.adapters.registry import AdapterRegistry
 from neptune.adapters.text import TextAdapter
-from neptune.runtime import PHASES, Isolation, JobEvent, JobOptions, JobState, Phase
+from neptune.runtime import PHASES, Isolation, JobError, JobEvent, JobOptions, JobState, Phase
 from neptune.sdk import (
     ConfigurationError,
     DestinationExistsError,
@@ -24,7 +24,6 @@ from neptune.sdk import (
     InvalidDestinationError,
     InvalidRequestError,
     InvalidSourceError,
-    JobFailedError,
     Neptune,
     NetworkRefusedError,
     PackageInvalidError,
@@ -479,7 +478,7 @@ def test_leaving_a_with_block_by_an_exception_cancels_the_job_and_waits(
     assert run.done() and run.result().cancelled
 
 
-def test_a_job_that_fails_raises_its_error_from_result(
+def test_a_destination_taken_while_the_job_runs_is_raised_from_result(
     root: Path, home: Path, tmp_path: Path
 ) -> None:
     gate = threading.Event()
@@ -489,6 +488,7 @@ def test_a_job_that_fails_raises_its_error_from_result(
     assert adapter.reached.wait(10)
     (tmp_path / "package").mkdir()  # something takes the destination while the job runs
     gate.set()
-    with pytest.raises(JobFailedError, match="a package is written once"):
+    with pytest.raises(DestinationExistsError, match="a package is written once") as caught:
         run.result(timeout=30)
+    assert isinstance(caught.value.__cause__, JobError)
     assert kinds(list(run))[-1] == "job_failed"

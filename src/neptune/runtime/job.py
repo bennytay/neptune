@@ -504,6 +504,7 @@ class IngestJob:
         self._engine = ProbeEngine(registry)
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
+        self._dry = False  # a dry run: stops after plan (ADR 0035)
 
     @staticmethod
     def _configure(
@@ -544,6 +545,7 @@ class IngestJob:
         if self.state is not JobState.PENDING:
             raise JobError("a job runs once")
         self.state = JobState.RUNNING
+        self._dry = dry
         started = _now()
         try:
             with self.workspace.in_use():  # collection waits until the job is done
@@ -1061,10 +1063,10 @@ class IngestJob:
                         ) from exc
                     chunks = plan.chunks
                 item.chunks, item.planned = chunks, True
-                # What the workspace holds already: the cache report says so even if the job
-                # stops before parsing (a dry run, a cancellation); ``_ingest`` judges them.
-                item.hits = {chunk.id for chunk in chunks if self.workspace.committed(chunk.id)}
-                done = len(item.hits)
+                held: set[str] = {c.id for c in chunks if self.workspace.committed(c.id)}
+                if self._dry:  # never parsed: the report says what the workspace holds
+                    item.hits = held
+                done = len(held)
                 planned += 1
                 chunks_total += len(chunks)
                 committed_total += done

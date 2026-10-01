@@ -157,7 +157,7 @@ def _execute(job: IngestJob, *, dry: bool) -> IngestResult:
     try:
         outcome = job.dry_run() if dry else job.run()
     except JobError as exc:
-        raise from_job_error(exc) from exc
+        raise from_job_error(exc, job.destination) from exc
     return IngestResult(outcome)
 
 
@@ -368,7 +368,7 @@ class Neptune:
                     cancel=cancel,
                 )
             except JobError as exc:
-                raise from_job_error(exc) from exc
+                raise from_job_error(exc, target) from exc
 
         return build
 

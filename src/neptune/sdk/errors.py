@@ -24,6 +24,7 @@ are reserved for the call and the job (ADR 0028 §10). ``JobOptions`` validates 
 built and raises the runtime's ``JobError`` there, before any SDK call.
 """
 
+from pathlib import Path
 from typing import ClassVar, Final
 
 from neptune.adapters.contract import ConfigError
@@ -128,8 +129,13 @@ ERRORS: Final[tuple[type[NeptuneError], ...]] = (
 )
 
 
-def from_job_error(error: JobError) -> NeptuneError:
-    """The SDK error for a runtime ``JobError``, chosen by its cause's type, never its text."""
+def from_job_error(error: JobError, destination: Path | None = None) -> NeptuneError:
+    """The SDK error for a runtime ``JobError``, chosen by its cause's type, never its text.
+
+    A job that fails while something is at its ``destination`` did not put it there (publishing
+    is its last step), so another writer took the place a package is written to once:
+    ``DestinationExistsError``, as if it had been there when the call was checked.
+    """
     cause = error.__cause__
     kind: type[NeptuneError] = JobFailedError
     if isinstance(cause, SandboxError):
@@ -138,4 +144,6 @@ def from_job_error(error: JobError) -> NeptuneError:
         kind = ConfigurationError
     elif isinstance(cause, WorkspaceError | ScratchError):
         kind = WorkspaceUnusableError
+    elif destination is not None and (destination.exists() or destination.is_symlink()):
+        kind = DestinationExistsError
     return kind(str(error))
