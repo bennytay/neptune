@@ -31,8 +31,11 @@ def test_today_the_compiler_is_real_and_the_rest_are_stubs(tmp_path: Path) -> No
     ]
     ledger = report["stages"][1]
     assert ledger["output"]["contract"] == "catalog-api"
-    assert ledger["output"]["contract_version"] == "0.0.0"
-    assert ledger["output"]["served"] == "goldens" and len(ledger["output"]["goldens"]) == 4
+    assert ledger["output"]["contract_version"] == "1.0.0"
+    served = contracts.registry().latest("catalog-api")
+    assert served is not None
+    assert ledger["output"]["served"] == "goldens"
+    assert len(ledger["output"]["goldens"]) == len(served.goldens)
     assert report["smoke"]["ok"] is True
     assert report["smoke"]["packet_source"].startswith("canned: query-packet")
     assert report["corpus"] == {"name": "worked-examples", "cases": list(corpus.EXAMPLE_NAMES)}
