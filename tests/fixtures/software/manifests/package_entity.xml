@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<!DOCTYPE package [
+  <!ENTITY a "aaaaaaaaaa">
+  <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+]>
+<package format="2"><name>&b;</name><version>1.0.0</version></package>
