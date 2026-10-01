@@ -556,7 +556,10 @@ class Workspace:
         except OSError as exc:
             raise WorkspaceError(f"the workspace's lock cannot be opened: {exc}") from exc
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_SH)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_SH)
+            except OSError as exc:
+                raise WorkspaceError(f"the workspace's lock cannot be taken: {exc}") from exc
             yield
         finally:
             os.close(descriptor)
