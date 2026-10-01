@@ -97,7 +97,7 @@ def test_committed_compatibility_matrix_is_current() -> None:
     assert text == (CONTRACTS / "compatibility.md").read_text("utf-8")
     assert text == tool.render_matrix(_registry())
     assert "| `neptune-ledger` | 1.0.0 current |" in text
-    assert "| `catalog-api` | `neptune-ledger` | active | — | 1.0.0 |" in text
+    assert "| `catalog-api` | `neptune-ledger` | active | 1.1.0 | — |" in text
 
 
 def test_golden_generator_is_deterministic() -> None:
@@ -170,9 +170,14 @@ def test_a_newer_draft_does_not_make_a_lock_behind(registry: Any) -> None:
 def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> None:
     current = tool.show(registry.latest("package-schema", stable=True).version)
     graph = tool.show(registry.latest("graph-schema", stable=True).version)
+    catalog = tool.show(registry.latest("catalog-api", stable=True).version)
     registry.write_lock(
         {
-            "neptune-deploy": {"graph-schema": graph, "package-schema": current},
+            "neptune-deploy": {
+                "catalog-api": catalog,
+                "graph-schema": graph,
+                "package-schema": current,
+            },
             "neptune-ledger": {"package-schema": current},
         }
     )
@@ -183,7 +188,7 @@ def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> Non
         return 0
 
     report = tool.check_packages(registry, registry.lock(), runner=runner)
-    assert report.ok and len(calls) == 2  # one per owner: the compiler and neptune-memory
+    assert report.ok and len(calls) == 3  # one per owner: compiler, neptune-ledger, neptune-memory
     assert sum("54 goldens checked" in n for n in report.notes) == 1
 
 
@@ -232,12 +237,13 @@ def test_check_cli_unions_packages_and_runs_each_owner_once(
         return 0
 
     monkeypatch.setattr(tool, "run_pytest", runner)
-    for target in registry.contract("package-schema").owner.contract_tests:  # the CLI's repo
-        (registry.root.parent / target).parent.mkdir(parents=True, exist_ok=True)
-        (registry.root.parent / target).touch()
+    for contract in ("package-schema", "catalog-api"):  # every contract the lock pins
+        for target in registry.contract(contract).owner.contract_tests:  # the CLI's repo
+            (registry.root.parent / target).parent.mkdir(parents=True, exist_ok=True)
+            (registry.root.parent / target).touch()
     argv = ["--root", str(registry.root), "check", "--all", "--package", "neptune-ledger"]
     assert tool.main([*argv, "--package", "neptune-ledger"]) == 0
-    assert len(calls) == 1
+    assert len(calls) == 2  # the compiler's and neptune-ledger's owner tests, once each
     assert tool.main(["--root", str(registry.root), "check", "--package", "demo"]) == 1
 
 

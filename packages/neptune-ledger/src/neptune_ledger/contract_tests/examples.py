@@ -9,16 +9,19 @@ Ledger ADRs 0002 and 0003, never from an implementation.
 Set ``NEPTUNE_WORKED_EXAMPLES`` to the examples directory when running outside this repository.
 """
 
+import hashlib
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, cast
 
 from neptune.identity import canonical_json
 from neptune.identity.provenance import evidence_record_id, transform_record
+from neptune.identity.revisions import absence_id, revision_id
 from neptune.model.kinds import RECORD_KINDS
 from neptune.model.knowledge import Knowledge, Known
+from neptune.model.source import SourceAbsence, SourceRevision, location_from_json
 from neptune.store.package import MANIFEST, blob_path, package_files, write_package
 from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
@@ -118,9 +121,19 @@ class WorkedPackage:
         return blob_path(content_id)  # type: ignore[arg-type]
 
     def locations(self, content_id: str) -> tuple[Record, ...]:
-        """The locations this package's source revisions state for the content, in table order."""
+        """The locations this package says hold the content, in table order (ADR 0006 §5).
+
+        A revision of the content that another revision or an absence in the same package
+        supersedes is left out: the package itself says the location no longer holds the bytes.
+        """
+        chain = [*self.records("source_revision"), *self.records("source_absence")]
+        superseded = {previous for entry in chain for previous in entry["supersedes"]}
         revisions = self.records("source_revision")
-        return tuple(r["location"] for r in revisions if r["content_id"] == content_id)
+        return tuple(
+            r["location"]
+            for r in revisions
+            if r["content_id"] == content_id and r["id"] not in superseded
+        )
 
 
 def materialise(name: str, root: Path, directory: Path | None = None) -> WorkedPackage:
@@ -342,6 +355,73 @@ def with_source_size(name: str, size: int, directory: Path | None = None) -> dic
             if kind == "source_artifact":
                 row = {**row, "size": size}
             records.append(_read(kind, row))
+    return package_files(records)
+
+
+def _records(name: str, directory: Path | None) -> list[Any]:
+    """Every record of one worked example, read by the package-schema readers."""
+    records: list[Any] = []
+    for path, data in sorted(package_bytes(name, directory).items()):
+        if path.startswith("records/") and path.endswith(".jsonl"):
+            kind = path.removeprefix("records/").removesuffix(".jsonl")
+            records += [_read(kind, canonical_json.loads(line)) for line in data.splitlines()]
+    return records
+
+
+def with_moved_source(name: str, path: str, directory: Path | None = None) -> dict[str, bytes]:
+    """The package a re-ingest gives after the example's referenced source moved to ``path``.
+
+    The same evidence records, plus what the compiler's source ledger records for a move (root
+    ADRs 0009, 0010): a new revision at the new location and an absence superseding the old
+    location's revision. Another manifest, so another package; every evidence record keeps its
+    id and its body.
+    """
+    records = _records(name, directory)
+    (revision,) = [r for r in records if r.kind == "source_revision"]
+    gone = SourceAbsence(
+        absence_id(revision.location, (revision.id,)), revision.location, (revision.id,)
+    )
+    moved = location_from_json({**revision.location.to_json(), "path": path})
+    there = SourceRevision(
+        revision_id(moved, revision.content_id, ()), moved, revision.content_id, ()
+    )
+    return package_files([*records, gone, there])
+
+
+def with_chunk_size(name: str, chunk_size: int, directory: Path | None = None) -> dict[str, bytes]:
+    """A worked example whose single source artifact is hashed at another ``chunk_size``.
+
+    The chunk hashes are computed from the source's real bytes (``<example>/sources/``). Same
+    content id and size, other chunking: an honest second package of the same bytes, which must
+    register beside the original (ADR 0005 §2: chunking is not identity).
+    """
+    root = (directory or examples_dir()) / name
+    records = _records(name, directory)
+    index = next(i for i, r in enumerate(records) if r.kind == "source_artifact")
+    artifact = records[index]
+    (revision,) = [r for r in records if r.kind == "source_revision"]
+    data = (root / "sources" / revision.location.to_json()["path"]).read_bytes()
+    assert "sha256:" + hashlib.sha256(data).hexdigest() == artifact.content_id
+    chunks = [
+        "sha256:" + hashlib.sha256(data[at : at + chunk_size]).hexdigest()
+        for at in range(0, len(data), chunk_size)
+    ]
+    row = {**cast("Record", artifact.to_json()), "chunk_size": chunk_size, "chunks": chunks}
+    records[index] = _read("source_artifact", row)
+    return package_files(records)
+
+
+def with_changed_body(
+    name: str, kind: str, change: Callable[[Record], Record], directory: Path | None = None
+) -> dict[str, bytes]:
+    """A worked example whose first ``kind`` record keeps its id but has another body.
+
+    A tier-2 id covers evidence and transform, not the body, so this is a valid package; after
+    the original it must be refused with ``conflicting_id`` (ADR 0005 §2).
+    """
+    records = _records(name, directory)
+    index = next(i for i, r in enumerate(records) if r.kind == kind)
+    records[index] = _read(kind, change(cast("Record", records[index].to_json())))
     return package_files(records)
 
 

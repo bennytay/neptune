@@ -7,7 +7,7 @@ interface under `contracts/`, its version, and the ADR that fixed it. Nothing el
 
 | Contract | Version | Version constant | Registry | Reference | Fixed by |
 |---|---|---|---|---|---|
-| `catalog-api` (register, verify, resolve, thread, threads_of, lineage, query) | **1.0.0** (draft until MVL-89) | `neptune_ledger.api.CATALOG_API_VERSION` | `contracts/catalog-api/v1.0.0/` | [catalog-api.md](catalog-api.md) | [ADR 0004](adr/0004-catalog-api-error-model-and-versioning.md), [0002](adr/0002-catalog-data-model.md), [0003](adr/0003-entity-threads-and-the-lineage-current-view.md) |
+| `catalog-api` (register, verify, resolve, thread, threads_of, lineage, query) | **1.1.0** (stable since the L1 gate, MVL-89) | `neptune_ledger.api.CATALOG_API_VERSION` | `contracts/catalog-api/v1.1.0/` | [catalog-api.md](catalog-api.md) | [ADR 0004](adr/0004-catalog-api-error-model-and-versioning.md), [0006](adr/0006-l1-gate-catalog-api-amendments.md), [0002](adr/0002-catalog-data-model.md), [0005](adr/0005-l1-gate-catalog-data-model-amendments.md), [0003](adr/0003-entity-threads-and-the-lineage-current-view.md) |
 
 Lakehouse table contracts are listed here when they land.
 
