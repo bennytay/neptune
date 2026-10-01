@@ -12,11 +12,14 @@ Rows are sorted by their clock-0 ticks (unknown last), then ``seq`` (ADR 0018 §
 rows: the same rows, cut into any chunks and merged in any order, give the same file.
 
 ``check_series`` verifies a series file against its stream without loading it whole: the stream
-line in its metadata, its columns and types, the order and the null rules.
+line in its metadata, its columns and types, the order and the null rules. ``check_run`` does the
+same for one run and reports its ``seq`` range and columns, so a run that would break the merge
+or the package is caught, and blamed on its source, before either is attempted.
 """
 
 import tempfile
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
@@ -286,30 +289,6 @@ def read_rows(source: Source) -> Iterator[dict[str, object]]:
         yield from batch.to_pylist()
 
 
-def run_seq_range(run: Path) -> tuple[int, int] | None:
-    """The least and greatest ``seq`` a run holds, or ``None`` for a run with no rows.
-
-    Read from the row groups' statistics, so it costs nothing per row: the runtime proves ``seq``
-    unique across a source's chunks by checking that their runs' ranges are disjoint (ADR 0029),
-    which keeps the check's memory at one pair per chunk.
-    """
-    metadata = _open(run).metadata
-    ranges: list[tuple[int, int]] = []
-    for index in range(metadata.num_row_groups):
-        group = metadata.row_group(index)
-        columns = [group.column(position) for position in range(group.num_columns)]
-        found = [column for column in columns if column.path_in_schema == SEQ]
-        if len(found) != 1:
-            raise SeriesError(f"{run} has no {SEQ} column")
-        statistics = found[0].statistics
-        if statistics is None or not statistics.has_min_max:
-            raise SeriesError(f"{run} holds rows without {SEQ} statistics")
-        ranges.append((int(statistics.min), int(statistics.max)))
-    if not ranges:
-        return None
-    return min(low for low, _ in ranges), max(high for _, high in ranges)
-
-
 def _check_columns(stream: Stream, schema: Any) -> None:
     """The column contract by name and type (ADR 0018 §4)."""
     names = set(schema.names)
@@ -382,20 +361,13 @@ def _check_nulls(table: Any) -> None:
             raise SeriesError(f"{name} holds nulls but has no state column")
 
 
-def check_series(stream: Stream, source: Source) -> int:
-    """Verify a series file against ``stream``; return its row count.
+def _check_rows(stream: Stream, series: Any) -> tuple[int, tuple[int, int] | None]:
+    """Check the rows of an opened run or series file, one batch at a time.
 
-    Reads one batch at a time. Every row is checked for order and the null rules; the first row
-    of each batch is checked in full by ``Stream.check_row``, which rebuilds its provenance.
-    ``seq`` is unique wherever two rows share clock-0 ticks; across ticks, the ingest's checks
-    (``neptune.adapters.check``) see it.
+    Every row keeps the order and the null rules; the first row of each batch is checked in full.
+    Returns the row count and the least and greatest ``seq`` (``None`` without rows).
     """
-    series = _open(source)
-    metadata = series.schema_arrow.metadata or {}
-    if metadata.get(STREAM_KEY) != canonical_json.dumps(stream.to_json()):
-        raise SeriesError(f"the series file does not hold stream {stream.id}'s line")
-    _check_columns(stream, series.schema_arrow)
-    rows, previous = 0, None
+    rows, previous, bounds = 0, None, None
     for batch in series.iter_batches(batch_size=READ_ROWS):
         table = pa.Table.from_batches([batch])
         _check_nulls(table)
@@ -406,5 +378,55 @@ def check_series(stream: Stream, source: Source) -> int:
             except ValueError as exc:
                 raise SeriesError(f"stream {stream.id}: {exc}") from exc
             previous = _key(table, table.num_rows - 1)
+            extremes = pc.min_max(table.column(SEQ)).as_py()  # seq is never null: checked above
+            low, high = int(extremes["min"]), int(extremes["max"])
+            bounds = (low, high) if bounds is None else (min(bounds[0], low), max(bounds[1], high))
         rows += table.num_rows
-    return rows
+    return rows, bounds
+
+
+def check_series(stream: Stream, source: Source) -> int:
+    """Verify a series file against ``stream``; return its row count.
+
+    Reads one batch at a time. Every row is checked for order and the null rules; the first row
+    of each batch is checked in full by ``Stream.check_row``, which rebuilds its provenance.
+    ``seq`` is unique wherever two rows share clock-0 ticks; across ticks, the ingest's checks
+    (``neptune.adapters.check``, and the runtime's ``check_run`` ranges) see it.
+    """
+    series = _open(source)
+    metadata = series.schema_arrow.metadata or {}
+    if metadata.get(STREAM_KEY) != canonical_json.dumps(stream.to_json()):
+        raise SeriesError(f"the series file does not hold stream {stream.id}'s line")
+    _check_columns(stream, series.schema_arrow)
+    return _check_rows(stream, series)[0]
+
+
+@dataclass(frozen=True)
+class RunCheck:
+    """What a run that keeps its stream's contract holds: rows, ``seq`` range and columns.
+
+    ``columns`` is the run's schema as (name, Arrow type, nullable) triples: two runs of one
+    stream merge only if theirs are equal.
+    """
+
+    rows: int
+    seq: tuple[int, int] | None  # least and greatest; None for a run with no rows
+    columns: tuple[tuple[str, str, bool], ...]
+
+
+def check_run(stream: Stream, run: Path) -> RunCheck:
+    """Verify one chunk's run of ``stream`` as ``merge_runs`` and ``check_series`` would see it.
+
+    The run names the stream, its columns keep the stream's contract, and its rows keep the
+    order and null rules, read one batch at a time. The runtime checks every run of a source
+    this way before assembling (ADR 0029 §5), so one source's broken series is a finding about
+    that source and never a package that will not merge or verify.
+    """
+    opened = _open(run)
+    if (named := _run_stream(opened)) != stream.id:
+        raise SeriesError(f"a run of {named} is not a run of {stream.id}")
+    schema = opened.schema_arrow.remove_metadata()
+    _check_columns(stream, schema)
+    rows, bounds = _check_rows(stream, opened)
+    columns = tuple((field.name, str(field.type), field.nullable) for field in schema)
+    return RunCheck(rows, bounds, columns)

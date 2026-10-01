@@ -79,7 +79,7 @@ from neptune.runtime import events, lineage
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
 from neptune.store.assemble import StagedPackage, publish, stage
 from neptune.store.package import PackageError, read_package, write_envelope
-from neptune.store.series import SeriesError, run_seq_range
+from neptune.store.series import RunCheck, SeriesError, check_run
 from neptune.store.workspace import Workspace, WorkspaceError
 
 DEFAULT_ATTEMPTS: Final = 2
@@ -178,6 +178,37 @@ def _check_chunk_seqs(output: ChunkOutput) -> None:
                         f"stream {batch.stream}: seq {value} appears twice in one chunk"
                     )
                 seen[batch.stream].add(value)
+
+
+def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[str]:
+    """What breaks the series laws among one stream's runs, each paired with its chunk's id.
+
+    Each run keeps the stream's contract, all agree on their columns, and their ``seq`` ranges
+    are disjoint.
+    """
+    problems: list[str] = []
+    checked: list[tuple[str, RunCheck]] = []
+    for chunk_id, run in runs:
+        try:
+            checked.append((chunk_id, check_run(stream, run)))
+        except (SeriesError, ValueError, OSError) as exc:
+            problems.append(f"stream {stream.id}: the run of chunk {chunk_id}: {exc}")
+    if checked:
+        first, expected = checked[0]
+        for chunk_id, result in checked[1:]:
+            if result.columns != expected.columns:
+                problems.append(
+                    f"stream {stream.id}: the runs of chunks {first} and {chunk_id} disagree"
+                    " on their columns"
+                )
+    ranges = sorted((r.seq[0], r.seq[1], chunk_id) for chunk_id, r in checked if r.seq is not None)
+    for (_, high, first), (low, _, second) in pairwise(ranges):
+        if low <= high:
+            problems.append(
+                f"stream {stream.id}: the seq ranges of chunks {first} and {second} overlap"
+                f" (seq {low} is in both)"
+            )
+    return problems
 
 
 class IngestJob:
@@ -748,16 +779,18 @@ class IngestJob:
     def _cross_chunk_problems(self, item: _Source) -> list[str]:
         """The contract's cross-chunk laws over a source's committed outputs, in bounded memory.
 
-        Ids are held in a set (the package holds every record in memory anyway, ADR 0022).
-        ``seq`` uniqueness across chunks is proven from each run's ``seq`` range, read from its
-        Parquet statistics: ranges that do not overlap, with ``seq`` unique inside each chunk
-        (checked at normalize), are unique overall. Memory is one pair per chunk, never per row.
+        Ids are held in a set (the package holds every record in memory anyway, ADR 0022). Each
+        run is checked against its stream as the merge and the package will see it (columns,
+        order, null rules), one batch at a time, and the runs of one stream must agree on their
+        columns. ``seq`` uniqueness across chunks is proven from each run's ``seq`` range:
+        ranges that do not overlap, with ``seq`` unique inside each chunk (checked at normalize),
+        are unique overall. Memory is one range per chunk, never one entry per row.
         """
         assert item.config is not None
         problems: list[str] = []
         record_ids: set[RecordId] = set()
         finding_ids: set[RecordId] = set()
-        streams: set[RecordId] = set()
+        streams: dict[RecordId, Stream] = {}
         runs: dict[RecordId, list[tuple[str, Path]]] = defaultdict(list)
         stored = self.workspace.load_plan(item.content_id, item.config.transform.id)
         if stored is None:
@@ -773,7 +806,7 @@ class IngestJob:
                     problems.append(f"{record.kind} {record.id} is emitted by two chunks")
                 record_ids.add(record.id)
                 if isinstance(record, Stream):
-                    streams.add(record.id)
+                    streams[record.id] = record
             for finding in output.findings:
                 if finding.id in finding_ids:
                     problems.append(f"finding {finding.id} is emitted by two chunks")
@@ -782,27 +815,13 @@ class IngestJob:
                 runs[stream].append((chunk.id, run))
         if not said_something:
             problems.append("the output says nothing about its source: no record, no finding")
-        for stream in sorted(set(runs) - streams):
+        for stream in sorted(set(runs) - set(streams)):
             problems.append(f"series rows name {stream}, which no chunk declares as a stream")
-        for stream in sorted(streams - set(runs)):
+        for stream in sorted(set(streams) - set(runs)):
             problems.append(f"stream {stream} has no series run")
         for stream, found in sorted(runs.items()):
-            ranges: list[tuple[int, int, str]] = []
-            for chunk_id, run in found:
-                try:
-                    bounds = run_seq_range(run)
-                except SeriesError as exc:
-                    problems.append(f"stream {stream}: the run of chunk {chunk_id}: {exc}")
-                    continue
-                if bounds is not None:
-                    ranges.append((bounds[0], bounds[1], chunk_id))
-            ranges.sort()
-            for (_, high, first), (low, _, second) in pairwise(ranges):
-                if low <= high:
-                    problems.append(
-                        f"stream {stream}: the seq ranges of chunks {first} and {second} overlap"
-                        f" (seq {low} is in both)"
-                    )
+            if stream in streams:
+                problems.extend(_run_problems(streams[stream], found))
         return problems
 
     def _assemble(self, ledger: SourceLedger) -> None:

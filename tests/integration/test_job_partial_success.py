@@ -18,10 +18,18 @@ from typing import Any, Final
 import pytest
 
 from neptune.adapters.builtin import builtin_adapters
-from neptune.adapters.contract import AdapterConfig, Plan, SourceReader, make_chunk
+from neptune.adapters.contract import (
+    AdapterConfig,
+    Chunk,
+    ChunkOutput,
+    Plan,
+    SourceReader,
+    make_chunk,
+)
 from neptune.adapters.registry import AdapterRegistry
 from neptune.model.finding import FindingCategory, Severity, subject_to_json
 from neptune.model.knowledge import Known
+from neptune.model.series import ColumnType, SeriesBatch, SeriesColumn
 from neptune.model.world import DocumentBlock, DocumentRecord
 from neptune.runtime import IngestJob, JobEvent, JobOptions, JobState, Phase
 from neptune.runtime import lineage as runtime_lineage
@@ -288,3 +296,77 @@ def test_an_unreadable_file_is_an_error_finding_and_the_rest_proceed(tmp_path: P
     (finding,) = outcome.findings
     assert finding.severity is Severity.ERROR and finding.details == {"reason": "unreadable"}
     assert read_by(package) == {"notes.txt": 1}  # the unreadable file was never fingerprinted
+
+
+class _RowBugTally(TALLY.TallyAdapter):  # type: ignore[misc, name-defined]
+    """A tally adapter that rewrites one column of every non-empty batch: a series bug that no
+    single chunk's check can see, since the stream is declared in another chunk."""
+
+    column: str = ""
+    kind: ColumnType | None = None
+
+    def convert(self, value: Any) -> Any:
+        return value
+
+    def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput:
+        output = super().ingest(source, chunk, config)
+        batches = []
+        for batch in output.series:
+            if batch.length:
+                batch = SeriesBatch(
+                    batch.stream,
+                    tuple(
+                        SeriesColumn(
+                            c.name,
+                            self.kind or c.type,
+                            tuple(self.convert(v) for v in c.values),
+                        )
+                        if c.name == self.column
+                        else c
+                        for c in batch.columns
+                    ),
+                )
+            batches.append(batch)
+        return ChunkOutput(output.records, tuple(batches), output.findings)
+
+
+class DriftingTally(_RowBugTally):
+    """Rows carry ``value/value`` as float64, the header's empty batch as int64."""
+
+    column, kind = "value/value", ColumnType.FLOAT64
+
+    def convert(self, value: Any) -> Any:
+        return float(value)
+
+
+class MisplacedTally(_RowBugTally):
+    """Every row's locator offset is negative: its provenance cannot be rebuilt."""
+
+    column = "locator/0/offset"
+
+    def convert(self, value: Any) -> Any:
+        return -1 - value
+
+
+@pytest.mark.parametrize(
+    ("adapter", "problem"),
+    [(DriftingTally, "disagree on their columns"), (MisplacedTally, "offset")],
+)
+def test_one_sources_broken_series_is_a_finding_and_the_rest_land(
+    tmp_path: Path, adapter: type, problem: str
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    (root / "lift.tally").write_bytes(b"TALLY1\n10 1\n20 2\n30 3\n")
+    adapters = AdapterRegistry([*builtin_adapters(), adapter(rows_per_chunk=2)])
+    outcome, package, seen = run(root, tmp_path, adapters)
+    assert codes(package) == ["neptune.runtime.output_invalid"]
+    assert len(outcome.ingested) == 1  # the notes
+    assert read_by(package) == {"lift.tally": 1, "notes.txt": 1}
+    (finding,) = outcome.findings
+    assert problem in finding.message
+    assert not package.series  # the tally's stream is not in the package
+    assert [e.details["codes"] for e in seen if e.kind == "source_quarantined"] == [
+        ["neptune.runtime.output_invalid"]
+    ]

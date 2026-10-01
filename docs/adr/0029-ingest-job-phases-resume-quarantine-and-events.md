@@ -71,14 +71,20 @@ what to do with the rest of its source's output.
    that could not be read). Messages and details carry ids, codes and exception class names,
    never exception text. The transform enters the package only with its findings, so a package
    with none is independent of the runtime's version.
-5. **Cross-chunk laws are checked in bounded memory.** At `normalize`, `seq` must be unique within
-   the chunk, per stream. At `assemble`, each run's `seq` range is read from its Parquet row-group
-   statistics (`store.series.run_seq_range`) and the ranges of one stream's chunks must not
-   overlap: with uniqueness inside each chunk, disjoint ranges prove uniqueness overall at one
-   pair per chunk. The other cross-chunk laws (no record or finding emitted twice, every run names
-   a declared stream, every stream has a run, the output says something) are checked over the
-   committed records, which the package holds in memory anyway (ADR 0022). Row contracts are
-   checked when `validate` reads every series back (ADR 0025 §6).
+5. **Cross-chunk laws are checked in bounded memory, before anything is merged.** At
+   `normalize`, `seq` must be unique within the chunk, per stream. At `assemble`, every run of a
+   source is checked against its `Stream` as the merge and the package will see it
+   (`store.series.check_run`: the stream it names, its columns, the order and null rules, the
+   first row of each batch in full), one batch at a time, and the runs of one stream must agree
+   on their columns. The check also yields each run's `seq` range, and the ranges of one
+   stream's chunks must not overlap: with uniqueness inside each chunk, disjoint ranges prove
+   uniqueness overall at one pair per chunk (`plan` gives each chunk the `seq` it starts from,
+   ADR 0024 §5, so a correct adapter's ranges are disjoint by construction). The other
+   cross-chunk laws (no record or finding emitted twice, every run names a declared stream,
+   every stream has a run, the output says something) are checked over the committed records,
+   which the package holds in memory anyway (ADR 0022). So a source whose series would break
+   the merge or the package is quarantined here, and `validate` failing means a bug in Neptune,
+   not in one source.
 6. **Cancellation** is a `threading.Event` checked before every source, every chunk and every
    phase. The job finishes the chunk in hand, commits it, discards any staged package and returns
    a `cancelled` outcome with no package; the workspace keeps the work and the next job resumes.
@@ -119,6 +125,12 @@ what to do with the rest of its source's output.
   scheduler's (M9), inside the chunk loop.
 - **Reusing `check_source_output`** for the cross-chunk laws. It needs every chunk's output in
   memory and a set of every `seq`; neither is bounded by chunk size.
+- **`seq` ranges from Parquet statistics alone**, without reading the runs. Free, but a run whose
+  columns or rows break the contract would then fail the merge or `validate` for the whole job,
+  with nothing to say which source caused it.
+- **Attributing a failed merge or `validate` after the fact** (find the source, drop it, stage
+  again). Cheaper when nothing is wrong, but `validate`'s errors are text, and the job would
+  loop over staging.
 - **Retrying contract violations.** A deterministic bug repeats; the retry only costs time.
 - **Phase events on every parse/normalize transition.** Two extra events per chunk for no
   information the chunk events do not carry.
@@ -132,8 +144,9 @@ what to do with the rest of its source's output.
   run is phases one to four plus `adapter.inspect`; MVL-41's validators run in `validate` over the
   staged package; MVL-8's engine replaces `IngestJob._select`.
 - A restart hashes every source again and reads each committed chunk's records twice (once for
-  the laws, once to stage). Both are proportional to what the package holds, not to the sources'
-  bytes beyond the hash; M9 may fold them together.
+  the laws, once to stage), and every series is read three times (each run checked, the runs
+  merged, the package verified). All are proportional to what the package holds, not to the
+  sources' bytes beyond the hash; M9 may fold them together.
 - A package's id does not depend on the runtime's version unless the runtime made a finding.
 - Staging debris a killed process leaves in the workspace is not cleared by the next job, since
   several processes may share a workspace (ADR 0026); `Workspace.clear_staging` is for MVL-9's
