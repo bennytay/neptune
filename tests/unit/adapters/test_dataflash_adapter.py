@@ -535,3 +535,11 @@ def test_two_hundred_fifty_types_are_declared_without_trouble() -> None:
 def test_a_source_that_is_not_a_log_says_so_and_reads_nothing() -> None:
     output = run(b"just some text, not a flight log\n")
     assert codes(output) == ["bad_magic"] and not output.records()
+
+
+def test_inspect_lists_the_declared_types_without_decoding_records() -> None:
+    result = FlightLogAdapter().inspect(BytesReader(fixture("copter.bin")), configure(DESCRIPTOR))
+    assert result.summary["types"] == sorted(
+        ["PARM", "MSG", "ATT", "GPS", "MODE", "ARR", "RCOU", "FMTU", "UNIT", "MULT"]
+    )
+    assert result.findings == ()

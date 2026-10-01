@@ -626,3 +626,31 @@ def test_a_log_of_only_noise_after_a_valid_header_is_findings_not_failure() -> N
 def test_a_source_that_is_not_a_log_says_so_and_reads_nothing() -> None:
     output = run(b"just some text, not a flight log\n")
     assert codes(output) == ["bad_magic"] and not output.records()
+
+
+def test_thousands_of_distinct_unknown_ids_fold_into_a_bounded_number_of_findings() -> None:
+    log = build(*ATT_SUB, *[MAKE.data(100 + n, bytes(12)) for n in range(2000)])
+    found = [f for f in run(log).findings() if f.code == "flightlog.unknown_message_id"]
+    assert len(found) == 65
+    other = next(f for f in found if f.details["key"] == "other")
+    assert other.details["count"] == 2000 - 64
+
+
+def test_inspect_reports_the_header_flags_and_definitions_without_reading_data() -> None:
+    result = FlightLogAdapter().inspect(BytesReader(fixture("copter.ulg")), configure(DESCRIPTOR))
+    summary = result.summary
+    assert summary["version"] == 1 and summary["start_timestamp"] == MAKE.BOOT
+    assert summary["formats"] == sorted(
+        [
+            "airspeed",
+            "esc_report",
+            "esc_status",
+            "vehicle_attitude",
+            "vehicle_gps_position",
+            "vehicle_status",
+        ]
+    )
+    assert summary["parameters"] == 3 and summary["info_messages"] == 5
+    assert result.findings == ()
+    bad = FlightLogAdapter().inspect(BytesReader(b"nope"), configure(DESCRIPTOR))
+    assert [f.code for f in bad.findings] == ["flightlog.bad_magic"]

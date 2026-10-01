@@ -1150,4 +1150,4 @@ def inspect(source: SourceReader, config: AdapterConfig) -> InspectResult:
     summary["parameters"] = walk.table_rows.get("parameters", 0)
     summary["info_messages"] = walk.table_rows.get("info", 0)
     summary["definitions_end"] = shared.defs_end if shared.defs_end is not None else limit
-    return InspectResult(summary, findings.flush())
+    return InspectResult(summary, findings.flush() if limit >= size else ())

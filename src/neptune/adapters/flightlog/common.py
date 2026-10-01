@@ -47,6 +47,7 @@ KNOWN, UNKNOWN, NOT_COVERED, NOT_APPLICABLE = "known", "unknown", "not_covered",
 # for this many series rows when a chunk is cut, so a chunk's memory stays about the same.
 TABLE_ROW_WEIGHT: Final = 16
 MAX_COLUMNS: Final = 2048
+MAX_KEYS: Final = 64  # distinct keys one finding code tallies before folding into "other"
 LOCATOR_STEP: Final = "byte_range"
 
 Place = tuple[int, int]  # (offset, length) in the source
@@ -143,6 +144,7 @@ class Findings:
         self.prefix = prefix
         self.items: list[IngestFinding] = []
         self._tallies: dict[tuple[str, str], _Tally] = {}
+        self._keys: dict[str, int] = {}
 
     def add(
         self,
@@ -181,7 +183,14 @@ class Findings:
         amount: int = 0,
         records: Iterable[RecordId] = (),
     ) -> None:
-        """Count one more occurrence of ``code`` for ``key``; ``message`` is that of the first."""
+        """Count one more occurrence of ``code`` for ``key``; ``message`` is that of the first.
+
+        A code keeps at most ``MAX_KEYS`` keys; further ones count under ``other``, so a log of
+        thousands of distinct unknown ids is a few findings, not thousands."""
+        if (code, key) not in self._tallies and self._keys.get(code, 0) >= MAX_KEYS:
+            key = "other"
+        if (code, key) not in self._tallies:
+            self._keys[code] = self._keys.get(code, 0) + 1
         found = self._tallies.get((code, key))
         if found is None:
             self._tallies[(code, key)] = _Tally(
