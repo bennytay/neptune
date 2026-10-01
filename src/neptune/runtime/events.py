@@ -59,6 +59,7 @@ PROBE_FAILED: Final = "probe_failed"
 SOURCE_SELECTED: Final = "source_selected"
 SOURCE_UNSUPPORTED: Final = "source_unsupported"
 SOURCE_AMBIGUOUS: Final = "source_ambiguous"
+SESSIONS_PROPOSED: Final = "sessions_proposed"  # grouping's counts, at the end of inspect
 SOURCE_UNREADABLE: Final = "source_unreadable"
 SOURCE_CHANGED: Final = "source_changed"
 SOURCE_SHORT_READ: Final = "source_short_read"  # a call read the source short (ADR 0033 §3)
