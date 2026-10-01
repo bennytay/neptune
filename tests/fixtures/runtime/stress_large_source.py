@@ -122,6 +122,7 @@ def measure(workdir: Path, gib: int) -> dict[str, Any]:
     rounded = {phase: round(seconds, 3) for phase, seconds in durations.items()}
     return {
         "adapter_inspect_seconds": round(inspect_seconds, 3),
+        "adapters": len(registry().adapters()),
         "assemble_seconds": rounded["assemble"],
         "child_peak_rss_mib": _mib(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss),
         "chunks": len(source.chunks),
