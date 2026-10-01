@@ -370,6 +370,44 @@ def test_a_gfm_table_is_a_structured_table_cell_by_cell() -> None:
     )
 
 
+def table_rows(output: SourceOutput) -> list[tuple[int, list[Any]]]:
+    rows = sorted(
+        (r for r in output.records() if isinstance(r, StructuredRecord)), key=lambda r: r.row
+    )
+    return [(row.row, [state(cell) for cell in row.cells]) for row in rows]
+
+
+def test_a_table_row_has_the_headers_width_as_gfm_says() -> None:
+    data = (
+        b"| a | b | c |\n|---|---|---|\n| 1 |\n| 1 | 2 | 3 | 4 | 5 |\n| 1 | 2 | 3 |\n|\n| x | y\n"
+    )
+    output = run(data)
+    assert table_rows(output) == [
+        (1, ["1", "Unknown", "Unknown"]),  # padded, never "" and never a guess
+        (2, ["1", "2", "3"]),  # the 4th and 5th cells stay in the bytes, not the record
+        (3, ["1", "2", "3"]),
+        (4, ["Unknown", "Unknown", "Unknown"]),
+        (5, ["x", "y", "Unknown"]),
+    ]
+    found = finding(output, "markdown.table_row_width")
+    assert (found.severity, found.details) == (
+        Severity.WARNING,
+        {"rows": 4, "padded": 3, "cut": 1},
+    )
+    assert len(found.records) == 4
+    (padded,) = [r for r in output.records() if isinstance(r, StructuredRecord) and r.row == 1]
+    cell = padded.cells[2]
+    assert isinstance(cell, Unknown)
+    assert span(cell.provenance)[0] == span(cell.provenance)[1] == span(padded.provenance)[1]
+    check_citations(data, output)
+
+
+def test_a_table_whose_rows_all_fit_has_no_width_finding() -> None:
+    output = run(b"| a | b |\n|---|---|\n| 1 | |\n| | 2 |\n")
+    assert table_rows(output) == [(1, ["1", "Unknown"]), (2, ["Unknown", "2"])]
+    assert output.findings() == ()
+
+
 def test_a_register_table_keeps_a_blank_cell_unknown() -> None:
     data = fixture("site_manifest.md")
     output = run(data)

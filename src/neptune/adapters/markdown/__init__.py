@@ -154,6 +154,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "containers nested past the parser's limit: their content is not parsed (limit, error)",
         ),
         Documented(
+            "markdown.table_row_width",
+            "a GFM table row writes more or fewer cells than its header: extra cells are not"
+            " records, missing ones are Unknown (inconsistent, warning)",
+        ),
+        Documented(
             "markdown.title_unreadable",
             "the front matter's title is YAML this adapter does not read: it is Unknown"
             " (unrepresentable, warning)",
@@ -181,7 +186,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "tables",
             "header row is row 0 and the table's header; body rows are records 1..n; cells split"
-            " at unescaped pipes and trimmed; a cell's value unescapes \\| ; blank is Unknown",
+            " at unescaped pipes and trimmed; a cell's value unescapes \\| ; blank is Unknown;"
+            " every row has the header's width (GFM: short rows padded, extra cells ignored)",
         ),
         Documented(
             "text",
@@ -561,6 +567,7 @@ def _blocks(out: _Output) -> None:
     parsed = parse(normalized)
     damaged: list[RecordId] = []
     definitions: list[RecordId] = []
+    resized: list[tuple[RecordId, int, int]] = []  # (row, cells it wrote, header's cells)
 
     def bad(start: int, end: int) -> bool:
         index = bisect_left(invalid, start)
@@ -590,7 +597,21 @@ def _blocks(out: _Output) -> None:
         if block.definition:
             definitions.append(block_id)
         if block.role is BlockRole.TABLE and block.rows:
-            _table(out, block, cited, lines_map, text, bad)
+            _table(out, block, cited, lines_map, text, bad, resized)
+    if resized:
+        out.finding(
+            "markdown.table_row_width",
+            FindingCategory.INCONSISTENT,
+            Severity.WARNING,
+            f"{len(resized)} table row(s) hold a different number of cells than their header;"
+            " GFM pads short rows with blank cells (unknown) and ignores the extra ones",
+            {
+                "rows": len(resized),
+                "padded": sum(wrote < width for _, wrote, width in resized),
+                "cut": sum(wrote > width for _, wrote, width in resized),
+            },
+            [row for row, _, _ in resized],
+        )
     if definitions:
         out.finding(
             "markdown.link_definitions",
@@ -637,6 +658,7 @@ def _table(
     lines_map: Lines,
     text: str,
     bad: Callable[[int, int], bool],
+    resized: list[tuple[RecordId, int, int]],
 ) -> None:
     table_id = out.record_id(StructuredTable.kind, cited)
     header_row = block.rows[0]
@@ -653,16 +675,23 @@ def _table(
     for row_number, row in enumerate(block.rows[1:], start=1):
         row_cited = out.cite(lines_map.to_source(row.start), lines_map.to_source(row.end))
         cells: list[Knowledge[CellValue]] = []
-        for cell in row.cells:
+        width = len(header_row.cells)
+        for cell in row.cells[:width]:
             start, end = lines_map.to_source(cell.start), lines_map.to_source(cell.end)
             cell_cited = out.cite(start, end)
             if not cell.value.strip() or bad(start, end):
                 cells.append(Unknown(cell_cited))
             else:
                 cells.append(Known(cell.value, cell_cited))
+        row_end = lines_map.to_source(row.end)
+        # GFM: a short row is padded with blank cells (here Unknown, at the row's end)
+        cells.extend(Unknown(out.cite(row_end, row_end)) for _ in range(width - len(cells)))
+        row_id = out.record_id(StructuredRecord.kind, row_cited)
+        if len(row.cells) != width:
+            resized.append((row_id, len(row.cells), width))
         out.records.append(
             StructuredRecord(
-                id=out.record_id(StructuredRecord.kind, row_cited),
+                id=row_id,
                 provenance=row_cited,
                 table=table_id,
                 row=row_number,
