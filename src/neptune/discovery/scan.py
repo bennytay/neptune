@@ -6,7 +6,7 @@ mid-walk, or an ancestor is now a symlink (not followed, so what lies behind it 
 symlink, FIFO or directory now sitting exactly at the location *is* coverage: the regular file is
 gone.
 
-Everything the walk saw and did not read is also a finding (ADR 0028 §1): every symlink, every
+Everything the walk saw and did not read is also a finding (ADR 0029 §1): every symlink, every
 skipped entry below the root, and every file whose size changed between the walk and the digest.
 ``ScanResult.transform`` is the discovery transform the findings name; store it with them.
 """

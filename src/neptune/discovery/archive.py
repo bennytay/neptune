@@ -1,4 +1,4 @@
-"""Archive inspection within limits (ADR 0028 §2).
+"""Archive inspection within limits (ADR 0029 §2).
 
 Zip and tar archives, plain or gzip/bzip2/xz compressed, and single compressed streams are
 inspected without extracting anything. ``ArchiveLimits`` bounds what one source may cost: how many
@@ -51,7 +51,7 @@ _BLOCK: Final = 1 << 20
 _SPOOL_MEMORY: Final = 1 << 20
 _TAR_BLOCK: Final = 512
 
-# Finding codes; each is documented in ADR 0028 §2.
+# Finding codes; each is documented in ADR 0029 §2.
 UNRECOGNISED: Final = "neptune.archive.unrecognised"
 TRUNCATED: Final = "neptune.archive.truncated"
 CORRUPT: Final = "neptune.archive.corrupt"

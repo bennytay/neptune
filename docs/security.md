@@ -21,7 +21,7 @@ receipts, logs, caches or cloud sync; supply-chain risk from parser dependencies
 - Local-only mode is a first-class configuration: no network, no cloud sync, receipts portable.
 - Raw customer data is never written to logs. Receipts reference blobs by id, not content.
 
-## File-handling controls (ADR 0028)
+## File-handling controls (ADR 0029)
 
 Everything below lives in `src/neptune/discovery/` and reports through `IngestFinding`s, never
 exceptions. The fixtures are `tests/fixtures/hostile/` (README lists each file and its finding).
@@ -41,7 +41,7 @@ Not in place yet (MVL-10): subprocess isolation, CPU/memory/time limits, crash c
 | Milestone | Control |
 |---|---|
 | M1 (MVL-2) | done: `LocalSource` walks with `O_NOFOLLOW` per component; symlinks recorded, never followed; special files never opened (ADRs 0009, 0010) |
-| M2 (MVL-75) | done: walk findings, archive-bomb limits, truncation detection, scratch-space policy, hostile fixture suite (ADR 0028) |
+| M2 (MVL-75) | done: walk findings, archive-bomb limits, truncation detection, scratch-space policy, hostile fixture suite (ADR 0029) |
 | M2 (MVL-10) | subprocess isolation, CPU/memory/time limits, crash capture (file handling and the adversarial seed landed with MVL-75) |
 | M2 (MVL-16) | local-only mode |
 | M6 (MVL-28/29) | malformed PDF/image safeguards; no active content execution |

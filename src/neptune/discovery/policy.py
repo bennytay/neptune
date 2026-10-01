@@ -1,4 +1,4 @@
-"""Discovery's own findings: what a walk saw and, by policy, did not read (ADR 0028 §1).
+"""Discovery's own findings: what a walk saw and, by policy, did not read (ADR 0029 §1).
 
 Discovery is a producer like an adapter. Its transform is ``neptune.discovery`` at one version with
 an empty config, so every finding it emits names what found it, and a policy change is a new
@@ -28,7 +28,7 @@ DISCOVERY_TRANSFORM: Final[TransformRecord] = transform_record(
     adapter_id=DISCOVERY_ADAPTER_ID, adapter_version=DISCOVERY_VERSION, config={}
 )
 
-# Finding codes. Every code is ``<producer>.<name>`` and is documented in ADR 0028.
+# Finding codes. Every code is ``<producer>.<name>`` and is documented in ADR 0029.
 SYMLINK_NOT_FOLLOWED: Final = "neptune.discovery.symlink_not_followed"
 SPECIAL_FILE: Final = "neptune.discovery.special_file"
 VANISHED: Final = "neptune.discovery.vanished"

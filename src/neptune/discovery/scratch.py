@@ -1,4 +1,4 @@
-"""Scratch space: the only place Neptune writes while handling untrusted input (ADR 0028 §4).
+"""Scratch space: the only place Neptune writes while handling untrusted input (ADR 0029 §4).
 
 - The caller names a **private root**. It is created ``0700`` if missing, must be a real directory
   owned by this user, is tightened to ``0700`` if looser, and must not overlap the ingest root in

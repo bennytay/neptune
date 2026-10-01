@@ -1,4 +1,4 @@
-"""Checking a source's bytes against the artifact hashed from them (ADR 0028 §3).
+"""Checking a source's bytes against the artifact hashed from them (ADR 0029 §3).
 
 A ``SourceArtifact`` declares a size and a hash per chunk. Before an adapter reads a source, or
 when a read comes up short, the runtime can re-read the file and learn exactly what differs:

@@ -116,7 +116,7 @@ READ_SIZE: Final = 1024 * 1024
 
 
 class ShortReadError(Exception):
-    """A reader served no bytes inside the size it declares (ADR 0028 §3).
+    """A reader served no bytes inside the size it declares (ADR 0029 §3).
 
     The source is shorter than the artifact it was hashed as, or changed under the reader. It is
     not an adapter bug, and it is not the adapter's to report: adapters let it propagate, and the

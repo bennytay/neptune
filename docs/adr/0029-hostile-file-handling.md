@@ -1,4 +1,4 @@
-# 0028 — Hostile file handling: walk findings, archive limits, source verification, scratch space
+# 0029 — Hostile file handling: walk findings, archive limits, source verification, scratch space
 
 - Status: Accepted
 - Date: 2026-10-01

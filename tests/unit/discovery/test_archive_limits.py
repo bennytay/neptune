@@ -1,4 +1,4 @@
-"""Archive inspection within limits (ADR 0028 §2): every bomb, lie and defect is a finding."""
+"""Archive inspection within limits (ADR 0029 §2): every bomb, lie and defect is a finding."""
 
 import gzip
 import io
