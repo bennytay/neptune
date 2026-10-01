@@ -26,13 +26,13 @@ from neptune.adapters.contract import PROBE_HEAD_SIZE, ProbeHints, configure
 from neptune.adapters.registry import AdapterRegistry
 from neptune.discovery.reader import LocalReader, SourceChangedError
 from neptune.discovery.scan import scan
-from neptune.discovery.source import LocalSource, SourceAccessError
+from neptune.discovery.source import LocalSource, SkipReason, SourceAccessError
 from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.package import Storage
 from neptune.model.source import LocalPath, SourceRevision
 from neptune.store.assemble import _sibling, assemble, export
-from neptune.store.package import PackageError, read_package
+from neptune.store.package import PackageError, copy_file, read_package
 from neptune.store.series import SERIES_SETTINGS, read_rows
 from neptune.store.workspace import Workspace
 
@@ -248,13 +248,29 @@ def test_exporting_a_source_that_changed_since_hashing_fails(corpus: Path, tmp_p
     assert _nothing_at(tmp_path / "portable")
 
 
-def test_a_symlink_at_a_sources_location_is_not_that_source(corpus: Path, tmp_path: Path) -> None:
-    """The walk's policy applies to export: a link where the file was is refused, not followed."""
+SWAPS: Final = {"symlink": SkipReason.SYMLINK, "fifo": SkipReason.NOT_REGULAR_FILE}
+
+
+def _swap(path: Path, kind: str) -> None:
+    """Move the file at ``path`` aside and put a symlink to it, or a FIFO, in its place."""
+    moved = path.with_name(f"moved-{path.name}")
+    path.rename(moved)
+    if kind == "symlink":
+        path.symlink_to(moved.name)
+    else:
+        os.mkfifo(path)  # opened blocking, this would wait for a writer forever
+
+
+@pytest.mark.parametrize("kind", SWAPS)
+def test_a_link_or_fifo_at_a_sources_location_is_not_that_source(
+    corpus: Path, tmp_path: Path, kind: str
+) -> None:
+    """The walk's policy applies to export: what replaced the file is refused, never read."""
     ingest_local(corpus, Workspace(tmp_path / "home"), registry(), tmp_path / "package")
-    (corpus / "notes.txt").rename(corpus / "moved.txt")
-    (corpus / "notes.txt").symlink_to("moved.txt")
-    with pytest.raises(SourceAccessError, match="symlink"):
+    _swap(corpus / "notes.txt", kind)
+    with pytest.raises(SourceAccessError) as refused:
         export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
+    assert refused.value.reason is SWAPS[kind]
     assert _nothing_at(tmp_path / "portable")
 
 
@@ -304,9 +320,20 @@ def test_a_materialised_source_is_copied_into_the_package(corpus: Path, tmp_path
     workspace = Workspace(tmp_path / "home")
     ledger, ingested = ingest_into(corpus, workspace, registry())
     lift = _content_at(ledger, "lift.tally")
-    assemble(
-        tmp_path / "package", workspace, ledger, ingested, materialise={lift: corpus / "lift.tally"}
-    )
+    with pytest.raises(PackageError, match="needs the Source"):
+        assemble(tmp_path / "package", workspace, ledger, ingested, materialise=[lift])
+    source = LocalSource(corpus)
+    with pytest.raises(PackageError, match="no local location holds sources to materialise"):
+        assemble(
+            tmp_path / "package",
+            workspace,
+            ledger,
+            ingested,
+            materialise=[ContentId("sha256:" + "0" * 64)],
+            source=source,
+        )
+    assert _nothing_at(tmp_path / "package")
+    assemble(tmp_path / "package", workspace, ledger, ingested, materialise=[lift], source=source)
     package = read_package(tmp_path / "package")
     assert set(package.blobs) == {lift}
     storage = {h.content_id: h.storage for h in package.manifest.sources}
@@ -314,29 +341,64 @@ def test_a_materialised_source_is_copied_into_the_package(corpus: Path, tmp_path
     assert set(storage.values()) == {Storage.REFERENCED}
 
 
-def test_a_source_that_changes_while_it_is_copied_fails_the_package(
-    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("kind", SWAPS)
+def test_a_link_or_fifo_at_a_materialised_sources_location_is_refused(
+    corpus: Path, tmp_path: Path, kind: str
 ) -> None:
+    """Materialising reads as export does: through the walk's policy, never following a link."""
     workspace = Workspace(tmp_path / "home")
     ledger, ingested = ingest_into(corpus, workspace, registry())
-    lift = _content_at(ledger, "lift.tally")
-    copy = shutil.copyfile
-
-    def copy_then_change(source: Path, target: Path) -> None:
-        copy(source, target)
-        data = target.read_bytes()
-        target.write_bytes(data[:-1] + b"6")  # the same size, other bytes: as if written mid-copy
-
-    monkeypatch.setattr(shutil, "copyfile", copy_then_change)
-    with pytest.raises(PackageError, match="changed while it was copied"):
+    notes = _content_at(ledger, "notes.txt")  # bytes at one location only
+    _swap(corpus / "notes.txt", kind)
+    with pytest.raises(SourceAccessError) as refused:
         assemble(
             tmp_path / "package",
             workspace,
             ledger,
             ingested,
-            materialise={lift: corpus / "lift.tally"},
+            materialise=[notes],
+            source=LocalSource(corpus),
+        )
+    assert refused.value.reason is SWAPS[kind]
+    assert _nothing_at(tmp_path / "package")
+
+
+def test_a_materialised_source_that_changed_since_hashing_fails(
+    corpus: Path, tmp_path: Path
+) -> None:
+    workspace = Workspace(tmp_path / "home")
+    ledger, ingested = ingest_into(corpus, workspace, registry())
+    notes = _content_at(ledger, "notes.txt")  # bytes at one location only
+    data = (corpus / "notes.txt").read_bytes()
+    (corpus / "notes.txt").write_bytes(data[:-1] + bytes([data[-1] ^ 1]))  # same size, other bytes
+    with pytest.raises(PackageError, match="do not hash"):
+        assemble(
+            tmp_path / "package",
+            workspace,
+            ledger,
+            ingested,
+            materialise=[notes],
+            source=LocalSource(corpus),
         )
     assert _nothing_at(tmp_path / "package")
+
+
+def test_a_file_that_changes_while_it_is_copied_fails_the_export(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The export copies the original's series after hashing them, so it checks what landed."""
+    ingest_local(corpus, Workspace(tmp_path / "home"), registry(), tmp_path / "package")
+    copy = copy_file
+
+    def copy_then_change(path: Path, target: Path) -> None:
+        copy(path, target)
+        data = target.read_bytes()
+        target.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))  # same size: as if written mid-copy
+
+    monkeypatch.setattr("neptune.store.assemble.copy_file", copy_then_change)
+    with pytest.raises(PackageError, match="changed while it was copied"):
+        export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
+    assert _nothing_at(tmp_path / "portable")
 
 
 def test_only_copied_files_are_read_back(

@@ -4,7 +4,7 @@
 chunk's records and findings, every stream's runs), merges each stream's runs into its series
 file, and writes the package beside its destination, flushed to disk, before renaming it into
 place: a package appears whole or not at all, and survives a crash once it has appeared. Sources
-stay where they are unless asked for.
+stay where they are unless asked for; one asked for is read as ``export`` reads it.
 
 ``export`` copies a package with every source it can reach materialised into ``blobs/``: the
 portable form, readable anywhere. Each source is read through a ``Source``
@@ -33,6 +33,8 @@ from neptune.store.package import (
     MANIFEST,
     Content,
     PackageError,
+    copy_file,
+    open_file,
     package_contents,
     package_id,
     read_package,
@@ -45,7 +47,7 @@ _COPY_SIZE: Final = 1024 * 1024
 
 
 class SourceOpener(Protocol):
-    """What ``export`` needs of a ``Source`` (``neptune.discovery.source``): to open a location.
+    """What materialising needs of a ``Source`` (``neptune.discovery.source``): to open a location.
 
     Opening applies the source's policy, so a symlink or special file at the location is refused,
     and raises the source's own error when the location cannot be opened; the export passes it on.
@@ -91,8 +93,9 @@ def _lay_out(
     staging: Path, contents: Mapping[str, Content], *, movable: Path | None = None
 ) -> list[str]:
     """Write ``contents`` under ``staging``: bytes as given, paths under ``movable`` moved, the
-    rest copied as streams. Returns the paths it copied: a copied file can have changed since it
-    was hashed, so what landed must be checked (``_check_copies``).
+    rest copied as streams (``copy_file``: no symlink followed, no special file opened). Returns
+    the paths it copied: a copied file can have changed since it was hashed, so what landed must
+    be checked (``_check_copies``).
     """
     copied = []
     for relative, data in sorted(contents.items()):
@@ -103,7 +106,7 @@ def _lay_out(
         elif movable is not None and data.parent == movable:
             data.rename(target)
         else:
-            shutil.copyfile(data, target)
+            copy_file(data, target)
             copied.append(relative)
     return copied
 
@@ -121,7 +124,7 @@ def _check_copies(staging: Path, contents: Mapping[str, Content], copied: Iterab
         for file in package_manifest_from_json(canonical_json.loads(manifest)).files
     }
     for relative in copied:
-        with (staging / relative).open("rb") as landed:
+        with open_file(staging / relative) as landed:
             artifact = digest_stream(landed)
         if (artifact.size, artifact.content_id) != listed[relative]:
             raise PackageError(f"{relative} changed while it was copied; it is not what was hashed")
@@ -133,25 +136,34 @@ def assemble(
     ledger: SourceLedger,
     ingested: Iterable[tuple[ContentId, RecordId]],
     *,
-    materialise: Mapping[ContentId, Path] | None = None,
+    materialise: Iterable[ContentId] = (),
+    source: SourceOpener | None = None,
 ) -> ContentId:
     """Write the package of ``ingested`` sources, each a (content id, transform id) pair.
 
     Every ingested source must be in ``ledger``, since the package lists the sources it cites,
     and every chunk of its plan must be committed in ``workspace``. ``materialise`` names sources
-    to copy into the package, with a path holding each one's bytes; every other source is
-    referenced. ``destination`` must not exist. Returns the package id.
+    to copy into the package. Each is read as ``export`` reads one: from the head of a location
+    chain in ``ledger`` that holds it, opened through ``source`` so its policy applies, and
+    hashed where it lands. Every other source is referenced. ``destination`` must not exist.
+    Returns the package id.
     """
     if destination.exists():
         raise PackageError(f"{destination} exists; a package is written once")
+    wanted = set(materialise)
+    if wanted and source is None:
+        raise PackageError("materialising sources needs the Source to read them through")
+    locations = _head_locations((*ledger.revisions(), *ledger.absences()), wanted)
+    if lost := sorted(wanted - set(locations)):
+        raise PackageError(f"no local location holds sources to materialise: {lost}")
     records: dict[tuple[str, str], Any] = {}
     runs: dict[RecordId, list[Path]] = defaultdict(list)
-    for source, transform in sorted(set(ingested)):
-        if ledger.artifact(source) is None:
-            raise PackageError(f"source {source} was ingested but the ledger does not hold it")
-        plan = workspace.load_plan(source, transform)
+    for content, transform in sorted(set(ingested)):
+        if ledger.artifact(content) is None:
+            raise PackageError(f"source {content} was ingested but the ledger does not hold it")
+        plan = workspace.load_plan(content, transform)
         if plan is None:
-            raise PackageError(f"no plan of {source} under transform {transform}")
+            raise PackageError(f"no plan of {content} under transform {transform}")
         found: list[Any] = [plan.transform, *plan.findings]
         for chunk in plan.chunks:
             output = workspace.load(str(chunk["id"]))
@@ -167,7 +179,7 @@ def assemble(
         raise PackageError(f"streams without a series run: {sorted(silent)}")
 
     with _staged(destination) as staging:
-        scratch = staging / ".series"
+        scratch = staging / ".scratch"
         scratch.mkdir()
         series: dict[RecordId, Content] = {}
         for stream_id, stream_runs in sorted(runs.items()):
@@ -178,12 +190,12 @@ def assemble(
         contents = package_contents(
             [*ledger_records, *records.values()],
             series=series,
-            blobs=dict(materialise or {}),
+            blobs=_land(scratch, locations, source) if source is not None else {},
             store={"series": SERIES_SETTINGS} if series else {},
         )
         copied = _lay_out(staging, contents, movable=scratch)
-        scratch.rmdir()  # every merged series was moved into place
-        _check_copies(staging, contents, copied)  # a source can change while it is copied
+        scratch.rmdir()  # every merged series and landed source was moved into place
+        _check_copies(staging, contents, copied)
     return package_id(contents)
 
 
@@ -209,6 +221,24 @@ def _head_locations(
     return found
 
 
+def _land(
+    scratch: Path, locations: Mapping[ContentId, LocalPath | RawLocalPath], source: SourceOpener
+) -> dict[ContentId, Content]:
+    """Stream each source from its location, opened through ``source``, into ``scratch``.
+
+    Opening applies the source's policy, so a symlink or special file where a source was is
+    refused, not followed. What lands is what ``package_contents`` hashes against the source's
+    content id, and what is moved into ``blobs/``: what is checked is what ships.
+    """
+    landed: dict[ContentId, Content] = {}
+    for content, location in sorted(locations.items()):
+        target = scratch / content.removeprefix("sha256:")
+        with source.open(location) as data, target.open("xb") as copy:
+            shutil.copyfileobj(data, copy, _COPY_SIZE)
+        landed[content] = target
+    return landed
+
+
 def export(package_root: Path, destination: Path, source: SourceOpener) -> ContentId:
     """Copy a package with its sources materialised, each read through ``source``.
 
@@ -225,14 +255,9 @@ def export(package_root: Path, destination: Path, source: SourceOpener) -> Conte
     if lost := sorted(cited_sources(package.records).intersection(wanted) - set(locations)):
         raise PackageError(f"no local location holds sources the package cites: {lost}")
     with _staged(destination) as staging:
-        scratch = staging / ".blobs"
+        scratch = staging / ".scratch"
         scratch.mkdir()
-        blobs: dict[ContentId, Content] = dict(package.blobs)
-        for content, location in sorted(locations.items()):
-            landed = scratch / content.removeprefix("sha256:")
-            with source.open(location) as data, landed.open("wb") as copy:
-                shutil.copyfileobj(data, copy, _COPY_SIZE)
-            blobs[content] = landed  # hashed as it lies here, so what is checked is what ships
+        blobs = {**package.blobs, **_land(scratch, locations, source)}
         contents = package_contents(
             package.records, series=package.series, blobs=blobs, store=package.manifest.store
         )

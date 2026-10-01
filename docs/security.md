@@ -27,7 +27,7 @@ receipts, logs, caches or cloud sync; supply-chain risk from parser dependencies
 |---|---|
 | M1 (MVL-2) | done: `LocalSource` walks with `O_NOFOLLOW` per component; symlinks recorded, never followed; special files never opened (ADRs 0009, 0010) |
 | M2 (MVL-10) | subprocess isolation, CPU/memory/time limits, archive-bomb limits, temp-file policy, crash capture; seed adversarial fixtures |
-| M2 (MVL-16) | done: local-only mode on by default, network use refused until allowed; sources read in place and verified chunk by chunk (ADR 0026) |
+| M2 (MVL-16) | done: local-only mode on by default, network use refused until allowed; sources read in place and verified chunk by chunk; materialised and exported sources read through `LocalSource`, and package files opened with `O_NOFOLLOW`, regular files only (ADR 0026) |
 | M6 (MVL-28/29) | malformed PDF/image safeguards; no active content execution |
 | M9 | auth/profile handling for connectors; presigned uploads; idempotency keys |
 | M10 (MVL-50) | consolidated adversarial suite; sandbox escape and exhaustion tests as acceptance |
