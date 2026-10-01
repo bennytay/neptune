@@ -64,8 +64,11 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
      unassigned: a directory boundary is never crossed by a guess.
    - Parts numbered by a session keyword (`episode_1`, `episode_2`) are separate recordings.
 4. **Conflicts are contested, never resolved by precedence.** Where two rules read the same files
-   differently, every reading becomes a proposal with status `contested`, each naming the others,
-   none chosen, and one `neptune.grouping.contested` finding (ambiguous, warning) names the rules:
+   differently, every reading becomes a proposal and none is chosen. Two proposals contest each
+   other exactly when they share a file (status `contested`, each naming the other), so the parts
+   of one reading never contest each other, and the relation costs one pass over the members.
+   One `neptune.grouping.contested` finding (ambiguous, warning) per connected set of contesting
+   proposals names their rules. The cases:
    - numbered parts with no start time: one recording split, or several numbered recordings;
    - a session directory whose recordings' name times are more than `gap_seconds` apart: the
      directory, or one session per cluster of times;
@@ -77,7 +80,9 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
 
    A context file that several loose sessions could each hold is a `session_unassigned` record,
    `ambiguous`, naming them as candidates, with one `neptune.grouping.ambiguous_member` finding per
-   directory. A file no rule places is `session_unassigned`, `unknown`. Every file of the layout is
+   directory; with more than 64 candidates it is `unknown` (`too_many_sessions`) instead, since no
+   one resolves a choice that wide by hand. A file no rule places is `session_unassigned`,
+   `unknown`. Every file of the layout is
    a member of some proposal or unassigned, exactly once; a file sits in two proposals only when
    all of them are contested (`check_grouping`, run on every grouping). Identical bytes at two
    locations stay two members; each proposal holding one says so (`same_bytes`, one reason per

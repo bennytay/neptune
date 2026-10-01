@@ -98,6 +98,7 @@ FINDING_CODES: Final = (AMBIGUOUS_MEMBER, CONTESTED, DECLARATION_UNMATCHED)
 NO_SESSION: Final = "no_session"
 SEVERAL_SESSIONS: Final = "several_sessions"
 SEVERAL_STEMS: Final = "several_stems"
+TOO_MANY_SESSIONS: Final = "too_many_sessions"
 
 # How many locations a reason or finding lists before it only counts; a duplicate's twins are
 # listed more briefly, since every proposal holding one says so.
@@ -432,7 +433,6 @@ class _Proposer:
         self.layout = layout
         self.files = {file.path: file for file in layout.files}
         self.drafts: list[_Draft] = []
-        self.contests: list[list[int]] = []
         self.unassigned: dict[bytes, tuple[str, list[int]]] = {}
         self.findings: list[IngestFinding] = []
         self._signals: dict[bytes, NameSignals] = {}
@@ -457,8 +457,7 @@ class _Proposer:
             for directory in ancestors(path):
                 if directory in singles:
                     under_single[directory].append(path)
-        # Deepest first, so an outer reading contests the inner outer readings too.
-        for node in sorted(singles, key=lambda d: (-d.count(b"/"), d)):
+        for node in sorted(singles):
             self._outer(node, singles[node], under_single[node], bags)
         self._links()
         self._same_bytes()
@@ -478,11 +477,6 @@ class _Proposer:
     def _draft(self, rule: Rule, directory: bytes) -> int:
         self.drafts.append(_Draft(rule, directory))
         return len(self.drafts) - 1
-
-    def _contest(self, indices: Iterable[int]) -> None:
-        group = sorted(set(indices))
-        if len(group) > 1:
-            self.contests.append(group)
 
     # --- 1. declared sessions ------------------------------------------------------------------
 
@@ -520,9 +514,7 @@ class _Proposer:
                     declared.to_json(),
                 )
             )
-        overlaps = sorted({tuple(indices) for indices in claims.values() if len(indices) > 1})
-        for overlap in overlaps:
-            self._contest(overlap)
+        # Two declarations claiming one file share it, so they contest each other (_build).
         return [path for path in sorted(self.files) if path not in claims]
 
     # --- 2. recording units --------------------------------------------------------------------
@@ -544,8 +536,8 @@ class _Proposer:
         wanted = set(paths)
         units: list[_Unit] = []
         in_bags: set[bytes] = set()
-        for directory, held in sorted(bags.items()):
-            files = [path for path in held if path in wanted]
+        for directory in sorted({parent(path) for path in wanted}.intersection(bags)):
+            files = [path for path in bags[directory] if path in wanted]
             if not files:
                 continue
             in_bags.update(files)
@@ -712,10 +704,13 @@ class _Proposer:
         chains = _chains(moments, self.config.gap_seconds)
         if len(chains) < 2:
             return
-        readings = [index]
-        for chain in chains:
+        # Each cluster shares its recordings with the whole directory, so they contest (_build).
+        chain_of = {moment: number for number, chain in enumerate(chains) for moment in chain}
+        clusters: list[list[_Unit]] = [[] for _ in chains]
+        for seconds, _, unit in timed:
+            clusters[chain_of[seconds]].append(unit)
+        for within in clusters:
             cluster = self._draft(Rule.NAME_TIME_CLUSTERS, leaf)
-            within = [unit for seconds, _, unit in timed if chain[0] <= seconds <= chain[-1]]
             for unit in within:
                 self.drafts[cluster].take(unit, Rule.NAME_TIME_CLUSTERS)
             self.drafts[cluster].reasons.append(
@@ -725,18 +720,16 @@ class _Proposer:
                     " reading splits it at those gaps",
                     {
                         "gap_seconds": self.config.gap_seconds,
-                        "times": sorted({unit.time.text for unit in within if unit.time}),
+                        "times": sorted({_time_text(unit) for unit in within}),
                     },
                 )
             )
-            readings.append(cluster)
-        self._contest(readings)
 
     def _outer(
         self, node: bytes, child: bytes, paths: list[bytes], bags: Mapping[bytes, list[bytes]]
     ) -> None:
         """A session directory holding exactly one other: if it has files of its own, its
-        reading as one session is contested with every reading inside it."""
+        reading as one session holds every file below it, so it contests every reading there."""
         if all(inside(path, child) for path in paths):
             return  # it adds nothing to the one inside it
         recordings = {path for unit in self._units(paths, bags) for path in unit.recordings}
@@ -754,14 +747,6 @@ class _Proposer:
                 details | _name("inner", child),
             )
         )
-        inner = [
-            i
-            for i, other in enumerate(self.drafts)
-            if i != index
-            and other.rule is not Rule.DECLARED
-            and (other.directory == node or inside(other.directory, node))
-        ]
-        self._contest([index, *inner])
 
     # --- 4 and 5. loose recordings and their context -------------------------------------------
 
@@ -832,30 +817,36 @@ class _Proposer:
                     },
                 )
             )
-            here.append(merged)
-            self._contest([merged, *(at_time[seconds] for seconds in chain)])
+            here.append(merged)  # it shares every file with the chain's drafts: contested
         for unit in numbered:
             whole = self._unit_draft(unit)
             parts = [self._unit_draft(part) for part in unit.parts]
-            here.extend([whole, *parts])
-            self._contest([whole, *parts])
+            here.extend([whole, *parts])  # the whole shares each part's file: contested
         self._place(position, here, context)
 
     def _place(self, position: bytes, here: list[int], context: list[bytes]) -> None:
+        """Context files at ``position``: by name time, then name stem, then the only session.
+        Each step looks its candidates up by key, so a directory of many files costs linear time;
+        a file that more than ``_LISTED`` sessions could hold is unknown, not ambiguous among
+        them all, since no one resolves a choice that wide by hand."""
+        at_time: dict[int, list[int]] = defaultdict(list)
+        for index in here:
+            for seconds in self.drafts[index].times:
+                at_time[seconds].append(index)
         pending: list[bytes] = []
+        alone: dict[int, list[bytes]] = defaultdict(list)
         for path in sorted(context):
             time = self._sig(path).time
-            matches = [i for i in here if time is not None and time.seconds in self.drafts[i].times]
+            matches = at_time.get(time.seconds, []) if time is not None else []
             for index in matches:
                 self.drafts[index].add(path, Role.CONTEXT, Rule.SHARED_NAME_TIME)
-            if not matches:
-                pending.append(path)
-        by_time: dict[int, list[bytes]] = defaultdict(list)
-        for path in pending:
-            time = self._sig(path).time
+            if matches:
+                continue
             if time is not None:
-                by_time[time.seconds].append(path)
-        for seconds, paths in sorted(by_time.items()):
+                alone[time.seconds].append(path)
+            pending.append(path)
+        joined: set[bytes] = set()
+        for seconds, paths in sorted(alone.items()):
             if len(paths) < 2:
                 continue
             index = self._draft(Rule.SHARED_NAME_TIME, position)
@@ -863,7 +854,7 @@ class _Proposer:
             for path in paths:
                 draft.add(path, Role.CONTEXT, Rule.SHARED_NAME_TIME)
                 draft.stems.add(self._sig(path).base)
-                pending.remove(path)
+            joined.update(paths)
             text = next(t.text for t in (self._sig(paths[0]).time,) if t is not None)
             draft.times[seconds] = text
             draft.reasons.append(
@@ -874,19 +865,30 @@ class _Proposer:
                 )
             )
             here.append(index)
+        by_stem: dict[bytes, list[int]] = defaultdict(list)
+        for index in here:
+            for stem in self.drafts[index].stems:
+                by_stem[stem].append(index)
         for path in pending:
-            base = self._sig(path).base
-            stems = [i for i in here if base in self.drafts[i].stems]
+            if path in joined:
+                continue
+            stems = by_stem.get(self._sig(path).base, [])
             if len(stems) == 1:
                 self.drafts[stems[0]].add(path, Role.CONTEXT, Rule.SHARED_STEM)
             elif stems:
-                self.unassigned[path] = (SEVERAL_STEMS, stems)
+                self._ambiguous(path, SEVERAL_STEMS, stems)
             elif len(here) == 1:
                 self.drafts[here[0]].add(path, Role.CONTEXT, Rule.SOLE_SESSION)
             elif here:
-                self.unassigned[path] = (SEVERAL_SESSIONS, list(here))
+                self._ambiguous(path, SEVERAL_SESSIONS, here)
             else:
                 self.unassigned[path] = (NO_SESSION, [])
+
+    def _ambiguous(self, path: bytes, reason: str, candidates: list[int]) -> None:
+        if len(candidates) > _LISTED:
+            self.unassigned[path] = (TOO_MANY_SESSIONS, [])
+        else:
+            self.unassigned[path] = (reason, list(candidates))
 
     # --- links and duplicates ------------------------------------------------------------------
 
@@ -956,15 +958,35 @@ class _Proposer:
         first: dict[RecordId, int] = {}
         for index, record in enumerate(ids):
             first.setdefault(record, index)
+        # Two proposals contest each other exactly when they share a file: each reading that
+        # holds a file another reading also holds was offered beside it, and none was chosen.
+        # A finding names each connected set of such readings once.
+        holders: dict[bytes, list[int]] = defaultdict(list)
+        for index, draft in enumerate(self.drafts):
+            if first[ids[index]] == index:
+                for path in draft.members:
+                    holders[path].append(index)
         contested: dict[RecordId, set[RecordId]] = defaultdict(set)
-        groups: list[list[int]] = []
-        for contest in self.contests:
-            members = sorted({first[ids[i]] for i in contest})
-            if len(members) < 2:
+        joined = list(range(len(self.drafts)))
+
+        def find(index: int) -> int:
+            while joined[index] != index:
+                joined[index] = joined[joined[index]]
+                index = joined[index]
+            return index
+
+        shared: set[int] = set()
+        for held in holders.values():
+            if len(held) < 2:
                 continue
-            groups.append(members)
-            for index in members:
-                contested[ids[index]].update(ids[other] for other in members if other != index)
+            shared.update(held)
+            for index in held:
+                contested[ids[index]].update(ids[other] for other in held if other != index)
+                joined[find(index)] = find(held[0])
+        components: dict[int, list[int]] = defaultdict(list)
+        for index in sorted(shared):
+            components[find(index)].append(index)
+        groups = sorted(components.values())
         proposals: dict[RecordId, SessionProposal] = {}
         for index, draft in enumerate(self.drafts):
             if first[ids[index]] != index:
@@ -1001,7 +1023,7 @@ class _Proposer:
                     transform=transform,
                     revision=file.revision,
                     location=file.location,
-                    reason=reason if len(named) > 1 else NO_SESSION,
+                    reason=reason if len(named) > 1 or not candidates else NO_SESSION,
                     candidates=named if len(named) > 1 else (),
                 )
             )

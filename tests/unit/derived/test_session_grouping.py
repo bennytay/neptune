@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
@@ -190,10 +191,11 @@ def test_numbered_parts_without_a_start_time_are_contested_never_merged(tmp_path
     second = found[frozenset({"parts/x_1.mcap"})]
     assert whole.rule == Rule.NUMBERED_SEQUENCE
     assert {m.rule for m in whole.members if m.role is Role.CONTEXT} == {Rule.SHARED_STEM}
-    for proposal in (whole, first, second):
-        assert proposal.status is Status.CONTESTED
-        others = {p.id for p in (whole, first, second)} - {proposal.id}
-        assert set(proposal.contested) == others
+    # Proposals contest each other exactly when they share a file: the whole contests each part;
+    # the parts, together one reading, do not contest each other.
+    assert all(p.status is Status.CONTESTED for p in (whole, first, second))
+    assert set(whole.contested) == {first.id, second.id}
+    assert first.contested == (whole.id,) and second.contested == (whole.id,)
     [finding] = grouping.findings
     assert finding.code == CONTESTED and finding.subject == LocalPath("parts/x.yaml")
     assert finding.details["rules"] == ["numbered_sequence", "recording_file"]
@@ -232,7 +234,8 @@ def test_a_session_directory_whose_recordings_are_days_apart_is_contested(
         ["session_04/2024-05-01_10-00-00.mcap"],
         ["session_04/2024-05-03_09-00-00.mcap"],
     ]
-    assert all(set(p.contested) == {whole.id, *(c.id for c in clusters)} - {p.id} for p in clusters)
+    assert all(p.contested == (whole.id,) for p in clusters)
+    assert set(whole.contested) == {c.id for c in clusters}
     assert codes(grouping) == [CONTESTED]
 
 
@@ -678,3 +681,28 @@ def test_duplicates_say_so_once_per_proposal_and_empty_files_never() -> None:
         assert same.details["locations"] == [proposal.members[1].location.to_json()]
         listed = same.details["same_as"]
         assert isinstance(listed, list) and len(listed) == 8
+
+
+def test_wide_directories_group_in_near_linear_time_with_bounded_candidates() -> None:
+    n = 2000
+    paths = [
+        *(b"flat/a%05d.mcap" % i for i in range(n)),
+        *(b"flat/n%05d.txt" % i for i in range(n)),
+        *(b"drive_1/camera_2024-05-01_12-30-00/f%05d.png" % i for i in range(n)),
+        *(b"drive_1/b%05d.mcap" % i for i in range(n)),
+        *(b"run_%05d/x.mcap" % i for i in range(n)),
+    ]
+    started = time.perf_counter()
+    grouping = LayoutGrouper().propose(synthetic(*paths))
+    assert time.perf_counter() - started < 15  # about 0.5 s; all-pairs work would take minutes
+    notes = [u for u in grouping.unassigned if text(u.location).startswith("flat/n")]
+    assert len(notes) == n
+    assert {(u.placement, u.reason) for u in notes} == {(Placement.UNKNOWN, "too_many_sessions")}
+    [outer] = [
+        p
+        for p in grouping.proposals
+        if p.directory == LocalPath("drive_1") and p.rule == Rule.SESSION_DIRECTORY
+    ]
+    assert len(outer.contested) == n + 1  # every recording beside the camera, and the camera
+    inner = [p for p in grouping.proposals if outer.id in p.contested]
+    assert all(p.contested == (outer.id,) for p in inner)
