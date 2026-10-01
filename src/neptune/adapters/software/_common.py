@@ -99,6 +99,9 @@ class Draft:
         return {name: getattr(self, name) for name in IDENTITY_FIELDS}
 
 
+CANDIDATE_LIMIT: Final = 32
+
+
 class _DuplicateKey(ValueError):
     """A JSON object repeats a key: which value is meant is not decidable."""
 
@@ -382,6 +385,10 @@ class Reading:
         distinct = list(first.values())
         if len(distinct) == 1:
             return distinct[0]
+        total = len(distinct)
+        # Ambiguous checks its candidates pairwise: a hostile file with thousands of distinct
+        # values keeps the first CANDIDATE_LIMIT, the finding says how many there were.
+        distinct = distinct[:CANDIDATE_LIMIT]
         places = [state.provenance for state in distinct]
         evidence = [place.evidence for place in places if isinstance(place, Provenance)]
         self.report(
@@ -389,8 +396,8 @@ class Reading:
             FindingCategory.AMBIGUOUS,
             Severity.WARNING,
             evidence[0],
-            f"the {self.label} gives this item {len(distinct)} different values of {name}",
-            {"field": name},
+            f"the {self.label} gives this item {total} different values of {name}",
+            {"distinct": total, "field": name, "kept": len(distinct)},
             related=evidence[1:],
             about_record=True,
         )
@@ -405,11 +412,15 @@ class Reading:
             return b""
         return b"".join(read_pieces(self.source, offset, end))
 
-    def document(self) -> bytes | None:
-        """The whole source, or ``None`` past ``max_document_bytes`` (``software.too_large``)."""
-        limit = self.config.integer("max_document_bytes")
+    def document(self, option: str = "max_document_bytes") -> bytes | None:
+        """The whole source, or ``None`` past ``option``'s size (``software.too_large``).
+
+        ``max_script_bytes`` is for sources decoded into a much larger tree (Python syntax,
+        CMake commands); ``max_document_bytes`` for data documents.
+        """
+        limit = self.config.integer(option)
         if self.source.size > limit:
-            self.too_large(self.whole, self.source.size, limit, "max_document_bytes")
+            self.too_large(self.whole, self.source.size, limit, option)
             return None
         return b"".join(read_pieces(self.source, 0, self.source.size))
 
@@ -471,6 +482,11 @@ class Reading:
 
     # --- The record ------------------------------------------------------------------------------
 
+    def full(self, drafts: Sequence[Draft]) -> bool:
+        """Whether ``drafts`` is one past ``max_items``: a reader stops there, so a hostile file
+        costs ``max_items`` drafts, not one per byte (``configuration`` then refuses the record)."""
+        return len(drafts) > self.config.integer("max_items")
+
     def configuration(self, drafts: Sequence[Draft]) -> tuple[SoftwareConfiguration, ...]:
         """The ``SoftwareConfiguration`` of the drafted items, and the findings about them."""
         record: SoftwareConfiguration | None = None
@@ -490,9 +506,9 @@ class Reading:
                 FindingCategory.LIMIT,
                 Severity.ERROR,
                 self.whole,
-                f"the {self.label} declares {len(drafts)} software items, over max_items"
-                f" ({limit}); no record is made",
-                {"items": len(drafts), "max_items": limit},
+                f"the {self.label} declares more than max_items ({limit}) software items;"
+                " no record is made",
+                {"max_items": limit},
             )
         else:
             for draft in drafts:

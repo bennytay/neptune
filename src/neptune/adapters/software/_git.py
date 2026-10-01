@@ -15,6 +15,7 @@ Resolving ``HEAD`` to a commit combines several files and is binding's (MVL-38).
 the working tree as well as the index, so nothing here claims it.
 """
 
+import io
 import re
 from dataclasses import dataclass
 from typing import Final
@@ -131,7 +132,9 @@ def _read_packed(reading: Reading) -> list[Draft]:
         pending = None
 
     offset = 0
-    for line in data.splitlines(keepends=True):
+    for line in io.BytesIO(data):  # lazily: a file of empty lines is not a list of them
+        if reading.full(drafts):
+            break
         start, content = offset, line.rstrip(b"\r\n")
         offset += len(line)
         end = start + len(content)

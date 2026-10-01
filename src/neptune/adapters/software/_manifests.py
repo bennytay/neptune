@@ -104,12 +104,16 @@ def _read_package_xml(reading: Reading) -> list[Draft]:
     depth = 0
     found: dict[str, list[tuple[str, int, int]]] = {"name": [], "version": []}
     capture: tuple[str, int, list[str]] | None = None
+    limit = reading.config.integer("max_items")
+    dropped: list[int] = []  # byte offset of the first element past max_items
 
     def start(name: str, attributes: dict[str, str]) -> None:
         nonlocal depth, capture
         depth += 1
         if depth == 1:
             root.append(name)
+        elif depth == 2 and name in found and len(found[name]) >= limit:
+            dropped.append(parser.CurrentByteIndex)
         elif depth == 2 and name in found:
             capture = (name, parser.CurrentByteIndex, [])
 
@@ -146,6 +150,8 @@ def _read_package_xml(reading: Reading) -> list[Draft]:
     if root != ["package"]:
         reading.malformed("has no <package> root element")
         return []
+    if dropped:
+        reading.too_many_entries(reading.span(dropped[0], 0), limit)
     draft = Draft(entry=reading.whole)
     absent = Unknown(reading.provenance(reading.whole))
     names = [
@@ -388,12 +394,17 @@ def _argument_value(
 
 
 def _read_cmake(reading: Reading) -> list[Draft]:
-    data = reading.document()
+    data = reading.document("max_script_bytes")
     if data is None:
         return []
     drafts: list[Draft] = []
     try:
-        projects = [command for command in _commands(data) if command.name == b"project"]
+        projects = []
+        for command in _commands(data):
+            if command.name == b"project":
+                projects.append(command)
+                if len(projects) > reading.config.integer("max_items"):
+                    break  # past the limit: the record is refused, the rest is not scanned
     except _Unterminated as exc:
         reading.malformed(
             f"has an argument or comment left open at byte {exc.offset}", {"byte": exc.offset}
@@ -480,7 +491,7 @@ def _is_setup(function: ast.expr, bindings: tuple[frozenset[str], frozenset[str]
 
 
 def _read_setup_py(reading: Reading) -> list[Draft]:
-    data = reading.document()
+    data = reading.document("max_script_bytes")
     if data is None:
         return []
     base = len(_BOM) if data.startswith(_BOM) else 0
@@ -508,6 +519,8 @@ def _read_setup_py(reading: Reading) -> list[Draft]:
     )
     drafts: list[Draft] = []
     for call in calls:
+        if reading.full(drafts):
+            break
         draft = Draft(entry=places.of(call))
         draft.name = _setup_keyword(places, draft, call, "name", "name")
         draft.release = _setup_keyword(places, draft, call, "version", "release")

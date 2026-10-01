@@ -307,6 +307,7 @@ def test_an_mcuboot_header_is_a_firmware_release() -> None:
 
 
 def test_px4_and_ardupilot_files_give_board_commit_and_describe() -> None:
+    assert assertion(read("firmware/firmware.px4")) is AssertionKind.STATED  # a script's JSON
     (px4,) = items(read("firmware/firmware.px4"))
     assert value(px4.device) == "PX4_FMU_V6X"
     assert value(px4.commit) == GitCommit(MAKE.SHA_MAIN)  # git_hash, full
@@ -342,7 +343,8 @@ def test_an_onnx_model_version_is_its_release_and_the_graph_is_skipped() -> None
     assert value(item.release) == DeclaredVersion("3")
     assert item.digest.state == "not_covered"
     unversioned = read("checkpoints/policy_noversion.onnx")
-    assert codes(unversioned) == ["software_identity_missing"]
+    (bare,) = items(unversioned)
+    assert bare.release.state == "not_covered" and codes(unversioned) == []
     cut = read("checkpoints/policy_truncated.onnx")
     assert len(items(cut)) == 1 and "truncated" in codes(cut)
 

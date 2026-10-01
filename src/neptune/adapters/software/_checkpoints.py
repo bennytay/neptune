@@ -40,7 +40,7 @@ from neptune.adapters.software._common import (
     loads_json,
     reason,
 )
-from neptune.model.knowledge import AssertionKind, NotCovered, Unknown
+from neptune.model.knowledge import AssertionKind, NotCovered
 from neptune.model.provenance import ByteRange, EvidenceRef
 from neptune.model.versions import DeclaredVersion
 
@@ -282,7 +282,9 @@ def _read_onnx(reading: Reading) -> list[Draft]:
         )
     draft = _checkpoint_draft(reading.whole)
     if model_version is None:
-        draft.release = Unknown(reading.provenance(reading.whole))
+        # An unversioned model is normal: a checkpoint's identity is its content id (ADR 0040 §8),
+        # so no release is not a gap in identity, and nothing is said to be missing.
+        draft.release = NotCovered()
     else:
         number, start, length = model_version
         signed = number - (1 << 64) if number >= 1 << 63 else number

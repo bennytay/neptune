@@ -104,7 +104,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ConfigOption(
             "max_document_bytes",
             8 * 1024 * 1024,
-            "a text, TOML, JSON, XML or Python file larger than this is reported, not parsed",
+            "a text, TOML, JSON or XML file larger than this is reported, not parsed",
         ),
         ConfigOption(
             "max_header_bytes",
@@ -116,6 +116,12 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "max_items",
             20000,
             "a file declaring more software items than this is reported and makes no record",
+        ),
+        ConfigOption(
+            "max_script_bytes",
+            256 * 1024,
+            "a CMake or Python script larger than this is reported, not parsed: its syntax tree"
+            " is many times its size",
         ),
     ),
     libraries=(),

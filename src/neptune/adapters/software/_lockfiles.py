@@ -103,8 +103,10 @@ def _read_cargo_lock(reading: Reading) -> list[Draft]:
     if found is None:
         return []
     doc, entries = found
-    drafts = []
+    drafts: list[Draft] = []
     for index, entry in entries:
+        if reading.full(drafts):
+            break
         draft = _package(reading, doc, ("package", index), entry, _semver)
         source = entry.get("source")
         if isinstance(source, str) and source.startswith("git+"):
@@ -120,8 +122,10 @@ def _read_uv_lock(reading: Reading) -> list[Draft]:
     if found is None:
         return []
     doc, entries = found
-    drafts = []
+    drafts: list[Draft] = []
     for index, entry in entries:
+        if reading.full(drafts):
+            break
         draft = _package(reading, doc, ("package", index), entry, _declared)
         source = entry.get("source")
         if isinstance(source, dict) and "git" in source:
@@ -139,8 +143,10 @@ def _read_poetry_lock(reading: Reading) -> list[Draft]:
     if found is None:
         return []
     doc, entries = found
-    drafts = []
+    drafts: list[Draft] = []
     for index, entry in entries:
+        if reading.full(drafts):
+            break
         draft = _package(reading, doc, ("package", index), entry, _declared)
         source = entry.get("source")
         if isinstance(source, dict) and source.get("type") == "git":

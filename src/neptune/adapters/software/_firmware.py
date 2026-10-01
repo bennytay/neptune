@@ -459,7 +459,7 @@ PX4_FIRMWARE: Final = Format(
     key="px4_firmware",
     label="PX4/ArduPilot firmware file",
     spec=FormatSpec("PX4 or ArduPilot firmware file", extensions=(".apj", ".px4")),
-    assertion=AssertionKind.OBSERVED,
+    assertion=AssertionKind.STATED,  # a build script's JSON declares these fields
     detect=_detect_px4,
     read=_read_px4,
 )

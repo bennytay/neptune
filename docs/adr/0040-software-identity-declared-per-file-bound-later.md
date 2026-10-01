@@ -38,8 +38,11 @@ gigabyte checkpoint hashed twice, a URDF-style guess turned into a binding.
    `machine` is `NotCovered` (none of these formats names a machine). The record cites the whole
    file. Each value cites its own exact bytes, or, decoded from TOML or JSON, `[ByteRange of the
    document, JsonPointer]`, plus a `Span` for part of a string (a commit in a URL's fragment).
-   `observed` where the bytes describe themselves (git refs, firmware and checkpoint headers),
-   `stated` where a file declares other software (manifests, lockfiles, SBOMs, image indexes).
+   `observed` where the bytes describe themselves (git refs, ELF, ESP-IDF and MCUboot images,
+   checkpoint headers), `stated` where a file declares software (manifests, lockfiles, SBOMs,
+   image indexes, and PX4/ArduPilot firmware files, whose JSON a build script wrote). A
+   checkpoint that states no version (ONNX without `model_version`) has `release`
+   `NotCovered`, not `Unknown`: its identity is its content id (§8), so nothing is missing.
 3. **The identifier contract** (what each format fills; everything else per §4):
 
    | Format | `name` | `device` | `commit` | `release` | `build` | `digest` |
@@ -103,10 +106,16 @@ gigabyte checkpoint hashed twice, a URDF-style guess turned into a binding.
     Every source is one chunk.
 11. **Nothing is executed or expanded, everything is bounded.** `setup.py` becomes a syntax tree
     only; XML entity declarations are refused; JSON repeating a key or holding `NaN` is
-    malformed, never a silent last value. `max_document_bytes` (8 MiB), `max_header_bytes`
-    (8 MiB) and `max_items` (20,000) bound every read, and decoded documents stay far inside
-    the 512 MiB the adapter declares; past one is a `limit` finding. Per-entry findings and ELF
-    notes stop at `max_items` too (`too_many_entries`).
+    malformed, never a silent last value. Bounds: `max_document_bytes` (8 MiB, data documents),
+    `max_script_bytes` (256 KiB, CMake and Python, whose trees are many times the source),
+    `max_header_bytes` (8 MiB) and `max_items` (20,000). A reader stops drafting one past
+    `max_items` (`too_many_items`, no record) and per-entry findings, XML name/version elements
+    and ELF notes stop at `max_items` too (`too_many_entries`, the rest unread); conflicting
+    values keep their first 32 candidates (`Ambiguous` checks pairs) and the finding counts all.
+    Measured, by `tests/integration/test_software_memory.py` (a process per hostile file at its
+    cap, interpreter included): peak 40-225 MiB before the script cap (a 512 KiB `setup.py`
+    reached 293 MiB, an 8 MiB one 2.6 GB; 8 MiB CMake 1.4 GB; an 8 MiB uv.lock 600 MiB before
+    drafting stopped), 40-175 MiB after. The test bounds the peak at 320 of the 512 MiB declared.
 12. **Not here.** Binding these records to runs, including a run-level "this run has no software
     identity", is MVL-38's; manifest overrides are MVL-14's; release notes and changelogs are
     documents (MVL-28): a source has one adapter, and a version in prose is interpretation.
