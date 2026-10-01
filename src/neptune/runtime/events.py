@@ -41,6 +41,7 @@ class JobState(StrEnum):
     PENDING = "pending"  # built, not run
     RUNNING = "running"  # in a phase
     COMMITTED = "committed"  # the package is in place
+    PLANNED = "planned"  # a dry run stopped after plan: nothing parsed, no package (ADR 0035)
     CANCELLED = "cancelled"  # stopped at a checkpoint on request; the workspace keeps the work
     FAILED = "failed"  # the job itself could not proceed (never one source's problem)
 
@@ -76,6 +77,7 @@ SOURCE_QUARANTINED: Final = "source_quarantined"
 PACKAGE_STAGED: Final = "package_staged"
 PACKAGE_VERIFIED: Final = "package_verified"
 JOB_COMMITTED: Final = "job_committed"
+JOB_PLANNED: Final = "job_planned"  # a dry run's end (ADR 0035)
 JOB_CANCELLED: Final = "job_cancelled"
 JOB_FAILED: Final = "job_failed"
 

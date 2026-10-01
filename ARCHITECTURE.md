@@ -3,8 +3,10 @@
 ```mermaid
 flowchart LR
   RAW["Raw robotics evidence<br/>logs · bags · URDF<br/>docs · images"]
+  DEV["Robotics code"]
 
   subgraph N["Neptune"]
+    SDK["Python SDK<br/>sync · async"]
     DISC["Discovery &amp; identity"]
     RT["Ingestion runtime"]
     WS[("Local workspace + cache<br/>ledgers · plans · chunks<br/>derivatives · scratch")]
@@ -23,6 +25,7 @@ flowchart LR
   end
 
   RAW --> DISC --> RT
+  DEV -->|ingest · dry run| SDK -->|runs jobs| RT
   RT <-->|probes / chunks / records| SB
   SB <-->|one call, limits| AD
   AD -.->|conforms to| CAN
@@ -49,6 +52,8 @@ flowchart LR
   class DISC,RT,AD,PKG,DER,K2 partial
   class VAL,K3 todo
   class SB built
+  class SDK built
+  class DEV ext
   class RAW,MEM,RET,USE ext
   style N fill:#8b949e0f,stroke:#8b949e
   style D fill:none,stroke:#8b949e,stroke-dasharray:2 3

@@ -10,7 +10,7 @@
   ``collect``, which removes from a workspace what no job with these adapters can reuse.
 
 Imports everything above it (``model``, ``identity``, ``discovery``, ``adapters``, ``store``);
-nothing imports the runtime but the CLI.
+nothing imports the runtime but the SDK (``neptune.sdk``, ADR 0035), and the CLI through it.
 """
 
 from neptune.runtime.cache import RULES, CacheReport, Rule, cache_report_from_json

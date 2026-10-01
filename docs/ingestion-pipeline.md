@@ -79,7 +79,9 @@ state machine over the stages above, in nine phases (ADR 0028):
   unopened (`neptune.probe.inspection_failed`).
 - **Cancellation.** A `threading.Event`, checked before each source, chunk and phase from `inspect`
   on (the walk and its ledger always finish). The chunk in hand finishes and commits; a staged
-  package is discarded; the outcome is `cancelled` with no package.
+  package is discarded; the outcome is `cancelled` with no package. The last checkpoint is the
+  start of `commit`: after it the package is published, and an exception `on_event` raises then
+  propagates with the job `committed` (`IngestJob.committed`), never `failed` (ADR 0035 §3).
 - **Events.** `on_event(JobEvent(kind, phase, details))` for every phase start and finish, the
   start's sweep (`workspace_swept`: scratch and staging entries removed), every source (hashed,
   selected, unsupported, ambiguous, short read, planned, admitted, quarantined, …) and chunk
@@ -132,10 +134,15 @@ needs, and nothing else decides: no clock, file time or flag.
 
 ## Dry-run
 
-`explain`/dry-run (MVL-15) executes stages 1–6 only and renders the plan. It must never call `ingest`.
+`IngestJob.dry_run()` (ADR 0035) runs `discover`, `fingerprint`, `inspect` and `plan`, then stops:
+state `planned`, a `job_planned` event, no package, never an `ingest` call. It needs no destination;
+the ledger and plans it saves are the ones `run` reuses, and its cache report marks the chunks the
+workspace already holds. The SDK's `dry_run` calls it (`sdk.md`); `explain` (MVL-15) adds adapters'
+`inspect`, grouping and the rendered plan on top. It must never call `ingest`.
 
 ## Determinism contract
 
 Given identical source bytes, adapter versions and config, stages 2–10 produce byte-identical package
-contents. Ordering is defined everywhere (sorted paths, sorted ids, sorted keys). Wall-clock, host and
+contents, whatever the workspace held: the package's ledger is the job's own scan, never the root's
+history (ADR 0035 §9). Ordering is defined everywhere (sorted paths, sorted ids, sorted keys). Wall-clock, host and
 duration live only in the receipt envelope.
