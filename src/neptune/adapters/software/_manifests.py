@@ -54,7 +54,7 @@ def _is_text(head: bytes) -> bool:
 _PACKAGE_ROOT: Final = re.compile(
     rb"(?:\xef\xbb\xbf)?(?:\s+|<\?.*?\?>|<!--.*?-->|<!DOCTYPE[^\[>]*(?:\[.*?\])?\s*>)*"
     rb"<package[\s>/]",
-    re.DOTALL
+    re.DOTALL,
 )
 
 
