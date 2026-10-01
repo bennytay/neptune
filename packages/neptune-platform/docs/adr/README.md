@@ -9,3 +9,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 |---|---|---|
 | [0001](0001-monorepo-workspace-and-merge-queue.md) | One uv workspace, path-selected CI jobs behind one `check`, and a merge queue on main | Accepted |
 | [0002](0002-contracts-registry-and-version-policy.md) | Contracts registry and version policy | Accepted |
+| [0003](0003-multi-coordinator-playbook-and-versioning.md) | Multi-coordinator playbook and release/versioning policy | Accepted |
