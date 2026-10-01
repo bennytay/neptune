@@ -121,7 +121,7 @@ def _array_from_json(data: JsonValue) -> Array:
     return Array(ArrayKind(json_str(obj["kind"], "kind")), _optional_int(obj, "length"))
 
 
-def _present(entries: Mapping[str, JsonValue | None]) -> JsonObject:
+def _present(entries: Mapping[str, "JsonValue | None"]) -> JsonObject:
     """``entries`` without the absent ones: canonical JSON has no null (ADR 0004)."""
     return {key: value for key, value in entries.items() if value is not None}
 
@@ -333,6 +333,15 @@ def _canonical(name: str, line: int | None) -> str:
     if len(parts) > 3 or not all(_NAME.fullmatch(part) for part in parts):
         raise _Malformed("malformed", f"{name!r} is not a message type name", line)
     return name
+
+
+def canonical_type_name(name: str) -> str | None:
+    """``pkg/Name`` for a ROS message type name (``pkg/msg/Name`` or ``pkg/Name``), the name
+    itself when it has no package, and ``None`` when it is not a ROS type name at all."""
+    try:
+        return _canonical(name, None)
+    except _Malformed:
+        return None
 
 
 def _root_name(schema_name: str | None) -> str:

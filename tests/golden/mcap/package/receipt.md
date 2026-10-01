@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:f59d7b85823f88cd2139eef91b0cfb622beb5fbe29addc24e99d0a481cae1e1d`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:1bcd8e84dbb476ffe52e73de45c8369af5ca1ff3fc437da0510c6f3b18c584b7`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -20,6 +20,7 @@ Receipt `rec:sha256:f59d7b85823f88cd2139eef91b0cfb622beb5fbe29addc24e99d0a481cae
 |---|---|---|---|---|
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
 | `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:a46247e2db11` |
+| `neptune.introspection` | `0.1.0` | `sha256:f3dfbed908b1` | none | `rec:5de20263f9c3` |
 
 ## Records
 
@@ -33,7 +34,7 @@ Receipt `rec:sha256:f59d7b85823f88cd2139eef91b0cfb622beb5fbe29addc24e99d0a481cae
 | `structured_record` | 3 |
 | `structured_table` | 1 |
 | `timestamp_domain` | 5 |
-| `transform_record` | 2 |
+| `transform_record` | 3 |
 
 ## Runs
 
