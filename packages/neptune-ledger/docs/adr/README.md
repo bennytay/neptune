@@ -8,3 +8,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-ledger-place-in-the-programme.md) | The Ledger is layer 1: it consumes compiler packages and serves the layers above | Accepted |
+| [0003](0003-entity-threads-and-the-lineage-current-view.md) | Entity threads: one declared key, per-clock order, and a named lineage preference | Accepted |
