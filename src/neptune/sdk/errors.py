@@ -8,10 +8,11 @@ message. Where the runtime or the store raised first, that exception is the ``__
 
     NeptuneError                        error
     ├── InvalidRequestError             invalid_request        the call was wrong; nothing ran
-    │   ├── InvalidSourceError          invalid_source         missing, not a directory, bad URI
+    │   ├── InvalidSourceError          invalid_source         missing, neither folder nor file
     │   ├── InvalidDestinationError     invalid_destination    inside the source
     │   │   └── DestinationExistsError  destination_exists     a package is written once
-    │   └── ConfigurationError          invalid_configuration  adapters, options, a remote URL
+    │   ├── ConfigurationError          invalid_configuration  adapters, options, ignore rules
+    │   └── NothingToResumeError        nothing_to_resume      resume asked; no earlier work
     ├── UnsupportedError                unsupported            a scheme or mode not in this version
     ├── NetworkRefusedError             network_refused        the workspace is local-only
     ├── SandboxUnavailableError         sandbox_unavailable    this host cannot confine adapters
@@ -27,7 +28,8 @@ A runtime ``JobError`` maps by its cause's type, never its text (``from_job_erro
   committed chunk, a chunk's runs or a kept derivative cannot be read or written; a call gets no
   scratch space, or scratch overlaps the source. The runtime raises each of these from a
   ``WorkspaceError`` or ``ScratchError`` (an ``OSError`` behind it, if there was one).
-- ``sandbox_unavailable``: from a ``SandboxError``; ``invalid_configuration``: a ``ConfigError``.
+- ``sandbox_unavailable``: from a ``SandboxError``; ``invalid_configuration``: a ``ConfigError``,
+  or an ``IgnoreError`` (ignore rules, the root's ``.neptune-ignore`` included, ADR 0043).
 - ``publish_incomplete``: from the store's ``NotDurableError``, raised only after the job renamed
   its package into place.
 - ``destination_exists``: anything else while something is at the destination: the job renames
@@ -44,6 +46,7 @@ from pathlib import Path
 from typing import ClassVar, Final
 
 from neptune.adapters.contract import ConfigError
+from neptune.discovery.ignore import IgnoreError
 from neptune.discovery.scratch import ScratchError
 from neptune.runtime import JobError
 from neptune.runtime.sandbox import SandboxError
@@ -64,7 +67,8 @@ class InvalidRequestError(NeptuneError):
 
 
 class InvalidSourceError(InvalidRequestError):
-    """The source does not exist, is not a directory, or is a URI that cannot name one."""
+    """The source does not exist, is neither a directory nor a regular file, or is a URI that
+    cannot name one."""
 
     code: ClassVar[str] = "invalid_source"
 
@@ -86,6 +90,13 @@ class ConfigurationError(InvalidRequestError):
     cannot take, or a remote URL that is not one."""
 
     code: ClassVar[str] = "invalid_configuration"
+
+
+class NothingToResumeError(InvalidRequestError):
+    """A resume was asked for (``resume=True``) and the workspace holds no earlier work on this
+    source: no job, dry run or interrupted ingest ever scanned it here (ADR 0043)."""
+
+    code: ClassVar[str] = "nothing_to_resume"
 
 
 class UnsupportedError(NeptuneError):
@@ -135,9 +146,18 @@ class JobFailedError(NeptuneError):
 class PublishIncompleteError(JobFailedError):
     """The job renamed its package into place, but the directory holding it could not be
     flushed: the package is whole at the destination, and a crash before the disk catches up may
-    lose it. ``read_package`` verifies it; it is the job's own, not another writer's."""
+    lose it. ``read_package`` verifies it; it is the job's own, not another writer's.
+
+    ``destination`` is where the package is (ADR 0043). The job did not commit, so
+    ``committed_result`` returns ``None`` for this error: this attribute is how a caller finds the
+    package.
+    """
 
     code: ClassVar[str] = "publish_incomplete"
+
+    def __init__(self, message: str, destination: Path | None = None) -> None:
+        super().__init__(message)
+        self.destination = destination
 
 
 ERRORS: Final[tuple[type[NeptuneError], ...]] = (
@@ -147,6 +167,7 @@ ERRORS: Final[tuple[type[NeptuneError], ...]] = (
     InvalidDestinationError,
     DestinationExistsError,
     ConfigurationError,
+    NothingToResumeError,
     UnsupportedError,
     NetworkRefusedError,
     SandboxUnavailableError,
@@ -171,12 +192,12 @@ def from_job_error(error: JobError, destination: Path | None = None) -> NeptuneE
     kind: type[NeptuneError] = JobFailedError
     if isinstance(cause, SandboxError):
         kind = SandboxUnavailableError
-    elif isinstance(cause, ConfigError):
+    elif isinstance(cause, ConfigError | IgnoreError):
         kind = ConfigurationError
     elif isinstance(cause, WorkspaceError | ScratchError):
         kind = WorkspaceUnusableError
     elif isinstance(cause, NotDurableError):
-        kind = PublishIncompleteError
+        return PublishIncompleteError(str(error), destination)
     elif destination is not None and (destination.exists() or destination.is_symlink()):
         kind = DestinationExistsError
     return kind(str(error))

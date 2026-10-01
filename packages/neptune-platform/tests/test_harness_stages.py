@@ -42,7 +42,8 @@ def test_today_only_the_compiler_resolves_to_real() -> None:
     assert "neptune_ledger.api is not importable" in resolved["ledger"].reason
     assert resolved["ledger"].contract_version == "0.0.0"
     assert resolved["context"].mode == "stub"
-    assert resolved["memory"].contract_version is None
+    assert resolved["memory"].mode == "stub"  # graph-schema 1.0.0 is published; no driver yet
+    assert resolved["memory"].contract_version == "1.0.0"
 
 
 def test_an_importable_package_without_a_driver_is_still_a_stub() -> None:
