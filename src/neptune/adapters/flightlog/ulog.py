@@ -178,7 +178,7 @@ class Shared:
                 layout = layout_of(name, self.parsed)
             except FormatError as exc:
                 if findings is not None:
-                    findings.tally(
+                    findings.aggregate(
                         "bad_format",
                         name,
                         FindingCategory.CORRUPT,
@@ -327,7 +327,7 @@ class Walk:
         if found is None:
             found = window.find(SYNC_MESSAGE, pos + 1)
         stop = found if found >= 0 else end
-        self.findings.tally(
+        self.findings.aggregate(
             "corrupt_bytes",
             why,
             FindingCategory.CORRUPT,
@@ -351,7 +351,7 @@ class Walk:
                 {"declared": total, "present": end - pos},
             )
         else:
-            self.findings.tally(
+            self.findings.aggregate(
                 "appended_misaligned",
                 "end",
                 FindingCategory.INCONSISTENT,
@@ -384,7 +384,7 @@ class Walk:
             self._dropout(place, payload)
         elif kind == ord("S"):
             if payload != SYNC_MAGIC:
-                self.findings.tally(
+                self.findings.aggregate(
                     "bad_sync",
                     "",
                     FindingCategory.CORRUPT,
@@ -396,7 +396,7 @@ class Walk:
         elif kind == ord("R"):
             pass  # an unsubscription: ids are never reused, so nothing changes
         else:
-            self.findings.tally(
+            self.findings.aggregate(
                 "unknown_message_type",
                 chr(kind),
                 FindingCategory.UNSUPPORTED,
@@ -408,7 +408,7 @@ class Walk:
             )
 
     def _misplaced(self, key: str, place: Place) -> None:
-        self.findings.tally(
+        self.findings.aggregate(
             "misplaced_message",
             key,
             FindingCategory.INCONSISTENT,
@@ -419,7 +419,7 @@ class Walk:
         )
 
     def _malformed(self, key: str, place: Place, why: str) -> None:
-        self.findings.tally(
+        self.findings.aggregate(
             "malformed_message",
             key,
             FindingCategory.CORRUPT,
@@ -440,7 +440,7 @@ class Walk:
             text = payload.decode("utf-8")
             parsed = parse_format(text)
         except (UnicodeDecodeError, FormatError) as exc:
-            self.findings.tally(
+            self.findings.aggregate(
                 "bad_format",
                 "parse",
                 FindingCategory.CORRUPT,
@@ -453,7 +453,7 @@ class Walk:
         known = shared.formats.get(parsed.name)
         if known is not None:
             if known.text != text:
-                self.findings.tally(
+                self.findings.aggregate(
                     "conflicting_format",
                     parsed.name,
                     FindingCategory.INCONSISTENT,
@@ -464,7 +464,7 @@ class Walk:
                 )
             return
         if len(shared.formats) >= MAX_FORMATS:
-            self.findings.tally(
+            self.findings.aggregate(
                 "limit_exceeded",
                 "formats",
                 FindingCategory.LIMIT,
@@ -491,7 +491,7 @@ class Walk:
             self._malformed("A", place, "name")
             return
         if msg_id in shared.subs:
-            self.findings.tally(
+            self.findings.aggregate(
                 "duplicate_subscription",
                 str(msg_id),
                 FindingCategory.INCONSISTENT,
@@ -502,7 +502,7 @@ class Walk:
             )
             return
         if len(shared.subs) >= MAX_STREAMS:
-            self.findings.tally(
+            self.findings.aggregate(
                 "limit_exceeded",
                 "streams",
                 FindingCategory.LIMIT,
@@ -514,7 +514,7 @@ class Walk:
             return
         layout = shared.layout(name, self.findings, place)
         if name not in shared.formats:
-            self.findings.tally(
+            self.findings.aggregate(
                 "unknown_format",
                 name,
                 FindingCategory.CORRUPT,
@@ -532,7 +532,7 @@ class Walk:
         (msg_id,) = struct.unpack_from("<H", payload)
         sub = self.shared.subs.get(msg_id)
         if sub is None or sub.layout is None or place[0] < sub.place[0]:
-            self.findings.tally(
+            self.findings.aggregate(
                 "unknown_message_id",
                 str(msg_id),
                 FindingCategory.CORRUPT,
@@ -546,7 +546,7 @@ class Walk:
         layout = sub.layout
         have = len(payload) - 2
         if have < layout.min_size:
-            self.findings.tally(
+            self.findings.aggregate(
                 "size_mismatch",
                 f"short:{sub.name}",
                 FindingCategory.INCONSISTENT,
@@ -557,7 +557,7 @@ class Walk:
             )
             return
         if have > layout.size:
-            self.findings.tally(
+            self.findings.aggregate(
                 "size_mismatch",
                 f"long:{sub.name}",
                 FindingCategory.INCONSISTENT,
@@ -571,7 +571,7 @@ class Walk:
             self.seq[key] = self.seq.get(key, 0) + 1
             self.piece_weight += 1
             if layout.time_offset is None:
-                self.findings.tally(
+                self.findings.aggregate(
                     "no_time_field",
                     sub.name,
                     FindingCategory.MISSING,
@@ -608,7 +608,7 @@ class Walk:
         )
 
     def _time_range(self, what: str, place: Place) -> None:
-        self.findings.tally(
+        self.findings.aggregate(
             "time_out_of_range",
             what,
             FindingCategory.UNREPRESENTABLE,
@@ -619,7 +619,7 @@ class Walk:
         )
 
     def _utf8(self, what: str, place: Place) -> None:
-        self.findings.tally(
+        self.findings.aggregate(
             "invalid_utf8",
             what,
             FindingCategory.UNREPRESENTABLE,
@@ -668,7 +668,7 @@ class Walk:
             self.shared.pseudo.setdefault(DROPOUT, place)
             self.seq[DROPOUT] = self.seq.get(DROPOUT, 0) + 1
             self.piece_weight += 1
-            self.findings.tally(
+            self.findings.aggregate(
                 "dropout",
                 "",
                 FindingCategory.MISSING,
@@ -765,7 +765,7 @@ class Walk:
         return out
 
     def _unreadable(self, table: str, place: Place, why: str) -> None:
-        self.findings.tally(
+        self.findings.aggregate(
             "unreadable_value",
             f"{table}:{why}",
             FindingCategory.UNREPRESENTABLE,
@@ -858,7 +858,7 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
                 if offset == 0:
                     continue
                 if offset <= last or offset >= size:
-                    findings.tally(
+                    findings.aggregate(
                         "appended_misaligned",
                         "offset",
                         FindingCategory.INCONSISTENT,

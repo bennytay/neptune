@@ -261,7 +261,7 @@ class Walk:
     def _corrupt(self, window: Window, pos: int, end: int, why: str) -> int:
         found = self._candidate(window, pos + 1, end)
         stop = found if found >= 0 else end
-        self.findings.tally(
+        self.findings.aggregate(
             "corrupt_bytes",
             why,
             FindingCategory.CORRUPT,
@@ -294,7 +294,7 @@ class Walk:
             return
         layout = fmt.layout
         if layout is None:
-            self.findings.tally(
+            self.findings.aggregate(
                 "unreadable_records",
                 str(fmt.type),
                 FindingCategory.CORRUPT,
@@ -312,7 +312,7 @@ class Walk:
                 if len(kept) < MAX_UNIT_RECORDS:
                     kept.append((place, payload))
                 else:
-                    self.findings.tally(
+                    self.findings.aggregate(
                         "limit_exceeded",
                         name,
                         FindingCategory.LIMIT,
@@ -330,7 +330,7 @@ class Walk:
             self.seq[key] = self.seq.get(key, 0) + 1
             self.piece_weight += 1
             if layout.time_label is None:
-                self.findings.tally(
+                self.findings.aggregate(
                     "no_time_field",
                     name,
                     FindingCategory.MISSING,
@@ -340,7 +340,7 @@ class Walk:
                     {"type": name},
                 )
             elif layout.time_char == "Q" and int.from_bytes(payload[:8], "little") > INT64_MAX:
-                self.findings.tally(
+                self.findings.aggregate(
                     "time_out_of_range",
                     name,
                     FindingCategory.UNREPRESENTABLE,
@@ -371,7 +371,7 @@ class Walk:
         )
 
     def _utf8(self, what: str, place: Place) -> None:
-        self.findings.tally(
+        self.findings.aggregate(
             "invalid_utf8",
             what,
             FindingCategory.UNREPRESENTABLE,
@@ -387,7 +387,7 @@ class Walk:
         known = fmts.get(kind)
         if known is not None:
             if known.payload != payload:
-                self.findings.tally(
+                self.findings.aggregate(
                     "conflicting_format",
                     str(kind),
                     FindingCategory.INCONSISTENT,
@@ -399,7 +399,7 @@ class Walk:
             return
         fmt, why = _make_fmt(payload, place, place[0])
         if fmt is None:
-            self.findings.tally(
+            self.findings.aggregate(
                 "bad_format",
                 "length",
                 FindingCategory.CORRUPT,
@@ -411,7 +411,7 @@ class Walk:
             return
         fmts[kind] = fmt
         if why is not None:
-            self.findings.tally(
+            self.findings.aggregate(
                 "bad_format",
                 why,
                 FindingCategory.CORRUPT,
@@ -434,7 +434,7 @@ class Walk:
             for index, char in enumerate(layout.chars):
                 start = layout.offsets[index]
                 if char == "Q" and int.from_bytes(payload[start : start + 8], "little") > INT64_MAX:
-                    self.findings.tally(
+                    self.findings.aggregate(
                         "unreadable_value",
                         f"{PARAMETERS_TABLE}:range",
                         FindingCategory.UNREPRESENTABLE,
@@ -510,7 +510,7 @@ def unit_rows(shared: Shared, cite: Cite, findings: Findings) -> list[UnitRow]:
                 )
                 text = text_value(label)
                 if text is None:
-                    findings.tally(
+                    findings.aggregate(
                         "invalid_utf8",
                         "unit",
                         FindingCategory.UNREPRESENTABLE,
@@ -553,7 +553,7 @@ def unit_rows(shared: Shared, cite: Cite, findings: Findings) -> list[UnitRow]:
             unit_text, unit_where = units.get(unit_char, (None, place))
             number, mult_where = mults.get(mult_char, (None, place))
             if unit_char not in units:
-                findings.tally(
+                findings.aggregate(
                     "unit_undeclared",
                     unit_char,
                     FindingCategory.MISSING,
@@ -563,7 +563,7 @@ def unit_rows(shared: Shared, cite: Cite, findings: Findings) -> list[UnitRow]:
                     {"unit_id": unit_char},
                 )
             if mult_char not in mults:
-                findings.tally(
+                findings.aggregate(
                     "unit_undeclared",
                     "multiplier:" + mult_char,
                     FindingCategory.MISSING,

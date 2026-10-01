@@ -46,7 +46,7 @@ KNOWN, UNKNOWN, NOT_COVERED, NOT_APPLICABLE = "known", "unknown", "not_covered",
 # for this many series rows when a chunk is cut, so a chunk's memory stays about the same.
 TABLE_ROW_WEIGHT: Final = 16
 MAX_COLUMNS: Final = 2048
-MAX_KEYS: Final = 64  # distinct keys one finding code tallies before folding into "other"
+MAX_KEYS: Final = 64  # distinct keys one finding code aggregates before folding into "other"
 LOCATOR_STEP: Final = "byte_range"
 
 Place = tuple[int, int]  # (offset, length) in the source
@@ -121,7 +121,7 @@ def time_field(name: str) -> Locator:
 
 
 @dataclass
-class _Tally:
+class _Group:
     count: int
     amount: int
     category: FindingCategory
@@ -142,7 +142,7 @@ class Findings:
         self.config = config
         self.prefix = prefix
         self.items: list[IngestFinding] = []
-        self._tallies: dict[tuple[str, str], _Tally] = {}
+        self._groups: dict[tuple[str, str], _Group] = {}
         self._keys: dict[str, int] = {}
 
     def add(
@@ -169,7 +169,7 @@ class Findings:
             )
         )
 
-    def tally(
+    def aggregate(
         self,
         code: str,
         key: str,
@@ -186,13 +186,13 @@ class Findings:
 
         A code keeps at most ``MAX_KEYS`` keys; further ones count under ``other``, so a log of
         thousands of distinct unknown ids is a few findings, not thousands."""
-        if (code, key) not in self._tallies and self._keys.get(code, 0) >= MAX_KEYS:
+        if (code, key) not in self._groups and self._keys.get(code, 0) >= MAX_KEYS:
             key = "other"
-        if (code, key) not in self._tallies:
+        if (code, key) not in self._groups:
             self._keys[code] = self._keys.get(code, 0) + 1
-        found = self._tallies.get((code, key))
+        found = self._groups.get((code, key))
         if found is None:
-            self._tallies[(code, key)] = _Tally(
+            self._groups[(code, key)] = _Group(
                 1, amount, category, severity, subject, message, dict(details or {}), tuple(records)
             )
         else:
@@ -200,7 +200,7 @@ class Findings:
             found.amount += amount
 
     def flush(self) -> tuple[IngestFinding, ...]:
-        for (code, key), t in sorted(self._tallies.items()):
+        for (code, key), t in sorted(self._groups.items()):
             details = dict(t.details)
             details["count"] = t.count
             if t.amount:
@@ -208,7 +208,7 @@ class Findings:
             if key:
                 details["key"] = key
             self.add(code, t.category, t.severity, t.subject, t.message, details, records=t.records)
-        self._tallies.clear()
+        self._groups.clear()
         return tuple(self.items)
 
 

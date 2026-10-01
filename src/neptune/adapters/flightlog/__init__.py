@@ -74,7 +74,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         FormatSpec(
             "ArduPilot DataFlash log", extensions=(".bin",), magic=(Magic(0, b"\xa3\x95\x80"),)
         ),
-        FormatSpec("PX4 ULog", extensions=(".ulg", ".ulog"), magic=(Magic(0, ULOG_MAGIC),)),
+        FormatSpec("ULog", extensions=(".ulg", ".ulog"), magic=(Magic(0, ULOG_MAGIC),)),
     ),
     record_kinds=("run", "stream", "structured_record", "structured_table", "timestamp_domain"),
     config=(),
