@@ -11,6 +11,9 @@ dependencies = [
     "zstandard>=0.25.0",
 ]
 
+[project.scripts]
+neptune = "neptune.cli:main"
+
 [dependency-groups]
 dev = [
   "hypothesis>=6.100",
