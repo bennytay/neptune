@@ -15,6 +15,12 @@ Every record here is an evidence record (ADR 0017) of the ``machine`` family, sp
 - ``Calibration``: what one declaration states about calibrating one subject: its parameters, what
   they apply to and when. Its extrinsics are ``FrameTransform`` records (ADR 0015) it lists.
 
+A robot description (ADR 0039) adds three kinds: a ``HardwareSpecification`` holds what a
+description states about one component or configuration beyond its name, category and frame (a
+joint's type and limits, a link's inertia and geometry, a sensor's settings), a
+``DescriptionExtension`` keeps a block for another tool opaque (a URDF's ``<gazebo>``), and a
+``DescriptionExpansion`` identifies the document a macro source (Xacro) expands to.
+
 Which of these applied to which run is a binding (MVL-38), never a field here.
 """
 
@@ -32,13 +38,22 @@ from neptune.model._fields import (
     identifiers_from_json,
     identifiers_to_json,
     json_array,
+    json_int,
     json_str,
     text_decoder,
     unit_json,
     values_of,
 )
 from neptune.model.frames import FrameRef, frame_ref_from_json
-from neptune.model.ids import LogicalId, RecordId, check_text, logical_id_from_json, parse_record_id
+from neptune.model.ids import (
+    ContentId,
+    LogicalId,
+    RecordId,
+    check_text,
+    logical_id_from_json,
+    parse_content_id,
+    parse_record_id,
+)
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import Knowledge, NotApplicable, from_json, to_json
 from neptune.model.provenance import (
@@ -486,15 +501,17 @@ def _parameter_value_from_json(data: JsonValue) -> ParameterValue:
 
 
 @dataclass(frozen=True)
-class CalibrationParameter:
-    """One parameter a calibration states, exactly as declared (ADR 0019 §6).
+class DeclaredParameter:
+    """One named value a declaration states, exactly as declared (ADR 0019 §6, ADR 0039 §2).
 
+    A calibration's parameters, and a hardware specification's, extension's or expansion's.
     ``name`` is the declared key, verbatim; a nested key is its path, as the adapter documents it
-    (``camera_matrix/data``), and each innermost array of a nested array is its own parameter.
-    ``value`` holds the declared numbers in source order, integers read with ``float()``, or the
-    declared text of a setting (``distortion_model: radtan``). ``unit`` is the numbers' declared
-    unit; text has none, so its unit is ``NotApplicable``. What the numbers mean (which is ``fx``)
-    is the declared model's, read by consumers or derived transforms, never reordered here.
+    (``camera_matrix/data``, ``limit/effort``), and each innermost array of a nested array is its
+    own parameter. ``value`` holds the declared numbers in source order, integers read with
+    ``float()``, or the declared text of a setting (``distortion_model: radtan``). ``unit`` is the
+    numbers' declared unit; text has none, so its unit is ``NotApplicable``. What the numbers mean
+    (which is ``fx``) is the declared model's, read by consumers or derived transforms, never
+    reordered here.
     """
 
     name: str
@@ -521,13 +538,34 @@ class CalibrationParameter:
         }
 
 
-def calibration_parameter_from_json(data: JsonValue) -> CalibrationParameter:
-    obj = exact_object(data, "calibration parameter", {"name", "unit", "value"})
-    return CalibrationParameter(
+def declared_parameter_from_json(data: JsonValue) -> DeclaredParameter:
+    obj = exact_object(data, "declared parameter", {"name", "unit", "value"})
+    return DeclaredParameter(
         name=json_str(obj["name"], "parameter name"),
         value=from_json(obj["value"], _parameter_value_from_json, provenance_from_json),
         unit=from_json(obj["unit"], unit_from_json, provenance_from_json),
     )
+
+
+# A calibration's parameters were the first declared parameters (ADR 0019 §6); the JSON is the same.
+CalibrationParameter = DeclaredParameter
+calibration_parameter_from_json = declared_parameter_from_json
+
+
+def _check_parameters(field: str, parameters: tuple[DeclaredParameter, ...]) -> None:
+    """Declared parameters: a tuple of them, sorted by name, each name once."""
+    if not isinstance(parameters, tuple):
+        raise TypeError(f"{field} must be a tuple, got {type(parameters).__name__}")
+    for parameter in parameters:
+        if not isinstance(parameter, DeclaredParameter):
+            raise TypeError(f"not a DeclaredParameter: {parameter!r}")
+    names = [parameter.name for parameter in parameters]
+    if names != sorted(set(names)):
+        raise ValueError(f"{field} names must be unique and sorted: {names}")
+
+
+def _parameters_from_json(data: JsonValue, field: str) -> tuple[DeclaredParameter, ...]:
+    return tuple(declared_parameter_from_json(item) for item in json_array(data, field))
 
 
 @dataclass(frozen=True)
@@ -557,7 +595,7 @@ class Calibration:
     performed: Knowledge[Timestamp]
     valid_from: Knowledge[Timestamp]
     valid_until: Knowledge[Timestamp]
-    parameters: tuple[CalibrationParameter, ...]
+    parameters: tuple[DeclaredParameter, ...]
     extrinsics: tuple[RecordId, ...]
 
     def __post_init__(self) -> None:
@@ -567,14 +605,7 @@ class Calibration:
         check_text_values("subject", self.subject)
         for name in ("performed", "valid_from", "valid_until"):
             check_type(name, getattr(self, name), Timestamp)
-        if not isinstance(self.parameters, tuple):
-            raise TypeError(f"parameters must be a tuple, got {type(self.parameters).__name__}")
-        for parameter in self.parameters:
-            if not isinstance(parameter, CalibrationParameter):
-                raise TypeError(f"not a CalibrationParameter: {parameter!r}")
-        names = [parameter.name for parameter in self.parameters]
-        if names != sorted(set(names)):
-            raise ValueError(f"parameter names must be unique and sorted: {names}")
+        _check_parameters("parameter", self.parameters)
         _record_ids("extrinsics", self.extrinsics)
         if not self.parameters and not self.extrinsics:
             raise ValueError("a calibration states at least one parameter or extrinsic")
@@ -624,12 +655,182 @@ def calibration_from_json(data: JsonValue) -> Calibration:
         performed=from_json(obj["performed"], timestamp_from_json, provenance_from_json),
         valid_from=from_json(obj["valid_from"], timestamp_from_json, provenance_from_json),
         valid_until=from_json(obj["valid_until"], timestamp_from_json, provenance_from_json),
-        parameters=tuple(
-            calibration_parameter_from_json(parameter)
-            for parameter in json_array(obj["parameters"], "parameters")
-        ),
+        parameters=_parameters_from_json(obj["parameters"], "parameters"),
         extrinsics=tuple(
             parse_record_id(json_str(extrinsic, "extrinsic"))
             for extrinsic in json_array(obj["extrinsics"], "extrinsics")
         ),
+    )
+
+
+# --- Robot descriptions (ADR 0039) ------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class HardwareSpecification:
+    """What one declaration states about one component or configuration beyond its name, category
+    and frame (ADR 0019 §4's extension rule, ADR 0039 §2).
+
+    ``provenance`` cites the element that declares the subject (a URDF ``<joint>``, ``<link>`` or
+    ``<sensor>``), and ``subject`` is the ``HardwareComponent`` or ``HardwareConfiguration`` the
+    same transform made from it. ``parameters`` are what the declaration states, by the adapter's
+    documented names (``type``, ``limit/effort``, ``visual/0/geometry/mesh/filename``), each with
+    its numbers in source order or its text, and its unit; each value cites the element it was
+    read from. What the file does not state is not a parameter: a format's defaults are its
+    specification's, applied by consumers or derived transforms, never written here.
+    """
+
+    kind: ClassVar[str] = "hardware_specification"
+    family: ClassVar[Family] = Family.MACHINE
+    id: RecordId
+    provenance: Provenance
+    subject: RecordId
+    parameters: tuple[DeclaredParameter, ...]
+
+    def __post_init__(self) -> None:
+        check_evidence_record(self.id, self.provenance)
+        parse_record_id(self.subject)
+        _check_parameters("parameter", self.parameters)
+        if not self.parameters:
+            raise ValueError("a hardware specification states at least one parameter")
+
+    def to_json(self) -> JsonObject:
+        return evidence_record_json(
+            self.kind,
+            self.id,
+            self.provenance,
+            {
+                "parameters": [parameter.to_json() for parameter in self.parameters],
+                "subject": self.subject,
+            },
+        )
+
+
+def hardware_specification_from_json(data: JsonValue) -> HardwareSpecification:
+    """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
+    obj, record_id, provenance = evidence_record_object(
+        data, HardwareSpecification.kind, {"parameters", "subject"}
+    )
+    return HardwareSpecification(
+        id=record_id,
+        provenance=provenance,
+        subject=parse_record_id(json_str(obj["subject"], "subject")),
+        parameters=_parameters_from_json(obj["parameters"], "parameters"),
+    )
+
+
+@dataclass(frozen=True)
+class DescriptionExtension:
+    """A block a robot description declares for another tool, kept opaque (ADR 0039 §3).
+
+    A URDF's ``<gazebo>`` or ``<ros2_control>`` element, or any top-level element the format does
+    not define. ``provenance`` cites the whole block, which stays in the source's bytes; nothing in
+    it is interpreted. ``configuration`` is the ``HardwareConfiguration`` of the description that
+    holds it, ``element`` the block's element name verbatim, and ``parameters`` the block's own
+    attributes and the plugins it names, as text, by the adapter's documented names.
+    """
+
+    kind: ClassVar[str] = "description_extension"
+    family: ClassVar[Family] = Family.MACHINE
+    id: RecordId
+    provenance: Provenance
+    configuration: RecordId
+    element: str
+    parameters: tuple[DeclaredParameter, ...]
+
+    def __post_init__(self) -> None:
+        check_evidence_record(self.id, self.provenance)
+        parse_record_id(self.configuration)
+        if not isinstance(self.element, str):
+            raise TypeError(f"element must be a str, got {type(self.element).__name__}")
+        check_text("element", self.element)
+        _check_parameters("parameter", self.parameters)
+
+    def to_json(self) -> JsonObject:
+        return evidence_record_json(
+            self.kind,
+            self.id,
+            self.provenance,
+            {
+                "configuration": self.configuration,
+                "element": self.element,
+                "parameters": [parameter.to_json() for parameter in self.parameters],
+            },
+        )
+
+
+def description_extension_from_json(data: JsonValue) -> DescriptionExtension:
+    """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
+    obj, record_id, provenance = evidence_record_object(
+        data, DescriptionExtension.kind, {"configuration", "element", "parameters"}
+    )
+    return DescriptionExtension(
+        id=record_id,
+        provenance=provenance,
+        configuration=parse_record_id(json_str(obj["configuration"], "configuration")),
+        element=json_str(obj["element"], "element"),
+        parameters=_parameters_from_json(obj["parameters"], "parameters"),
+    )
+
+
+@dataclass(frozen=True)
+class DescriptionExpansion:
+    """The document a macro language's source expands to, by its digest (ADR 0039 §4).
+
+    ``provenance`` cites the whole source (a Xacro file). The expansion is what the transform
+    decoded from it: records read from the expansion cite it through the adapter's expansion step,
+    and ``digest`` and ``size`` identify its bytes, which re-running the transform reproduces.
+    ``language`` names the macro language (``xacro``). ``arguments`` are the arguments the source
+    declares, as text, with the value the expansion used: a declared default, or ``NotCovered``
+    where only the environment could give one.
+    """
+
+    kind: ClassVar[str] = "description_expansion"
+    family: ClassVar[Family] = Family.MACHINE
+    id: RecordId
+    provenance: Provenance
+    language: str
+    digest: ContentId
+    size: int
+    arguments: tuple[DeclaredParameter, ...]
+
+    def __post_init__(self) -> None:
+        check_evidence_record(self.id, self.provenance)
+        if not isinstance(self.language, str):
+            raise TypeError(f"language must be a str, got {type(self.language).__name__}")
+        check_text("language", self.language)
+        parse_content_id(self.digest)
+        if isinstance(self.size, bool) or not isinstance(self.size, int) or self.size < 0:
+            raise ValueError(f"size must be a non-negative integer, got {self.size!r}")
+        _check_parameters("argument", self.arguments)
+        for argument in self.arguments:
+            if any(not isinstance(value, str) for value in values_of(argument.value)):
+                raise ValueError(f"argument {argument.name} is text")
+
+    def to_json(self) -> JsonObject:
+        return evidence_record_json(
+            self.kind,
+            self.id,
+            self.provenance,
+            {
+                "arguments": [argument.to_json() for argument in self.arguments],
+                "digest": self.digest,
+                "language": self.language,
+                "size": self.size,
+            },
+        )
+
+
+def description_expansion_from_json(data: JsonValue) -> DescriptionExpansion:
+    """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
+    obj, record_id, provenance = evidence_record_object(
+        data, DescriptionExpansion.kind, {"arguments", "digest", "language", "size"}
+    )
+    return DescriptionExpansion(
+        id=record_id,
+        provenance=provenance,
+        language=json_str(obj["language"], "language"),
+        digest=parse_content_id(json_str(obj["digest"], "digest")),
+        size=json_int(obj["size"], "size"),
+        arguments=_parameters_from_json(obj["arguments"], "arguments"),
     )

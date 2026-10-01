@@ -27,7 +27,8 @@ from neptune.model.jsonvalue import JsonObject, JsonValue
 # From then on the model only grows: a newer version adds record kinds, enum members or locator
 # steps, through an ADR, and never changes an existing field. A record of any version from
 # OLDEST_READABLE_VERSION on is therefore valid as it is: its migration is the identity.
-SCHEMA_VERSION: Final = 1
+# 2: hardware_specification, description_extension and description_expansion (ADR 0039).
+SCHEMA_VERSION: Final = 2
 OLDEST_READABLE_VERSION: Final = 1
 ENVELOPE_KEYS: Final = frozenset({"kind", "schema_version"})
 
