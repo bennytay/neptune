@@ -645,6 +645,7 @@ class IngestJob:
             reader: LocalReader | None = None
             try:
                 for chunk in item.chunks:
+                    self._phase = Phase.PARSE  # between chunks, the job is about to parse
                     self._check_cancel()
                     if self.workspace.committed(chunk.id):
                         skipped += 1
@@ -655,10 +656,13 @@ class IngestJob:
                         )
                         continue
                     if reader is None:
-                        try:
-                            reader = LocalReader(source, item.location, item.artifact)
-                        except _UNREADABLE as exc:
-                            self._unreadable(item, exc)
+                        with self._enter(Phase.PARSE):
+                            try:
+                                reader = LocalReader(source, item.location, item.artifact)
+                            except _UNREADABLE as exc:
+                                self._unreadable(item, exc)
+                        if reader is None:
+                            failed += 1
                             break
                     parsed = self._parse(item, reader, chunk)
                     if parsed is None:
@@ -697,6 +701,8 @@ class IngestJob:
             with self._enter(Phase.PARSE):
                 try:
                     output = adapter.ingest(reader, chunk, config)
+                    if not isinstance(output, ChunkOutput):
+                        raise ContractError(f"ingest returned a {type(output).__name__}")
                 except SourceChangedError as exc:
                     self._unreadable(item, exc)
                     return None

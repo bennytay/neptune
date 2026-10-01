@@ -406,3 +406,41 @@ def test_batches_of_one_chunk_that_disagree_fail_that_chunk_not_the_job(tmp_path
     assert finding.details["error"] == "ContractError" and finding.details["attempts"] == 1
     assert "disagree on their columns" in str(finding.details["problem"])
     assert len(outcome.ingested) == 1  # the notes
+
+
+class SilentTally(TALLY.TallyAdapter):  # type: ignore[misc, name-defined]
+    """Returns nothing at all, not a ``ChunkOutput``, for every chunk that holds rows."""
+
+    def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> Any:
+        output: ChunkOutput = super().ingest(source, chunk, config)
+        return None if output.series and output.series[0].length else output
+
+
+def test_ingest_returning_the_wrong_type_fails_that_chunk_not_the_job(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    (root / "lift.tally").write_bytes(b"TALLY1\n10 1\n20 2\n")
+    adapters = AdapterRegistry([*builtin_adapters(), SilentTally(rows_per_chunk=2)])
+    outcome, package, seen = run(root, tmp_path, adapters)
+    assert codes(package) == ["neptune.runtime.chunk_failed"]
+    (finding,) = outcome.findings
+    assert finding.details["problem"] == "ingest returned a NoneType"
+    assert finding.details["attempts"] == 1  # a contract violation: never retried
+    assert len(outcome.ingested) == 1 and not [e for e in seen if e.kind == "chunk_retried"]
+
+
+def test_a_file_removed_after_planning_is_unreadable_in_parse_and_the_rest_land(
+    corpus: Path, tmp_path: Path
+) -> None:
+    def remove_notes_after_planning(event: JobEvent) -> None:
+        if event.kind == "phase_finished" and event.phase is Phase.PLAN:
+            (corpus / "notes.txt").unlink()
+
+    _, package, seen = run(corpus, tmp_path, on_event=remove_notes_after_planning)
+    assert "neptune.runtime.source_unreadable" in codes(package)
+    (unreadable,) = [e for e in seen if e.kind == "source_unreadable"]
+    assert unreadable.phase is Phase.PARSE and path_of(unreadable.details) == "notes.txt"
+    (summary,) = [e for e in seen if e.kind == "phase_finished" and e.phase is Phase.PARSE]
+    assert summary.details["failed"] == 2  # the chunk notes.txt was opened for; the crash
+    assert read_by(package)["corrupted.txt"] == 1 and read_by(package)["lift.tally"] == 1
