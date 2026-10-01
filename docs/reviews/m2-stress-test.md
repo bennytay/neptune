@@ -156,6 +156,17 @@ concurrent job's sweep delete it mid-call).
 - **R6. A package staged beside its destination is left if the job is killed** (`.name.<hex>`):
   hidden and never the destination, but nothing removes it.
 
+### The independent review's verdicts on the risks
+
+- **R1, R2, R4, R6:** acceptable.
+- **R5:** pre-existing (ADR 0030), and only in degraded mode, which is opt-in and recorded.
+- **R3:** acceptable through M6. Every `plan` and `ingest` call gets scratch, whether or not its
+  adapter uses it, so a compromised parser can fill the disk until its wall limit. Revisit with
+  the first adapter that uses scratch (grant it per adapter, or bound it in total).
+
+The same review found a short read blamed on the source while it was intact, and a "no scratch"
+finding that a later sound run would have reused; both are fixed above (D2; law 11, ADR 0033 §2).
+
 ### Open for M3 and later
 
 - **O1.** MVL-15 renders `SourceProbe.to_json()` and calls `inspect` through `wire.INSPECT`.
