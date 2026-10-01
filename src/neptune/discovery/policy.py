@@ -71,7 +71,7 @@ def skipped_finding(entry: SkippedEntry) -> IngestFinding:
             details = {"detail": entry.detail}
         case SkipReason.SYMLINK:
             code, severity = SYMLINK_NOT_FOLLOWED, Severity.INFO
-            message = "symlink refused at open; not followed"
+            message = "a symlink at or above this path was refused at open; not followed"
             details = {"detail": entry.detail}
         case SkipReason.UNREADABLE:
             code, severity = UNREADABLE, Severity.ERROR

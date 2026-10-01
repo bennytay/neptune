@@ -181,10 +181,14 @@ class SwappedAtOpen(LocalSource):
     def open(self, location: SourceLocation) -> BinaryIO:
         assert isinstance(location, LocalPath)
         path = Path(self.root) / location.path
-        if path.is_file() and not path.is_symlink():
+        outside = Path(self.root).parent / "outside"
+        if self._swap == "parent" and not path.parent.is_symlink():
+            path.parent.rename(path.parent.with_name("moved"))
+            path.parent.symlink_to(outside)
+        elif path.is_file() and not path.is_symlink():
             path.unlink()
             if self._swap == "symlink":
-                path.symlink_to(Path(self.root).parent / "outside" / "canary.txt")
+                path.symlink_to(outside / "canary.txt")
             else:
                 os.mkfifo(path)
         return super().open(location)
@@ -192,24 +196,31 @@ class SwappedAtOpen(LocalSource):
 
 @pytest.mark.parametrize(
     ("swap", "code", "severity"),
-    [("symlink", SYMLINK_NOT_FOLLOWED, Severity.INFO), ("fifo", SPECIAL_FILE, Severity.INFO)],
+    [
+        ("symlink", SYMLINK_NOT_FOLLOWED, Severity.INFO),
+        ("parent", SYMLINK_NOT_FOLLOWED, Severity.INFO),
+        ("fifo", SPECIAL_FILE, Severity.INFO),
+    ],
 )
 def test_a_file_swapped_at_open_is_reported_as_what_open_found(
     tmp_path: Path, swap: str, code: str, severity: Severity
 ) -> None:
     root = tmp_path / "root"
-    root.mkdir()
+    (root / "d").mkdir(parents=True)
     (tmp_path / "outside").mkdir()
     (tmp_path / "outside" / "canary.txt").write_bytes(b"never read")
-    (root / "log.bin").write_bytes(b"abc")
+    (tmp_path / "outside" / "log.bin").write_bytes(b"never read")
+    (root / "d" / "log.bin").write_bytes(b"abc")
     ledger = SourceLedger()
     scan(LocalSource(root), ledger)
     result = scan(SwappedAtOpen(root, swap), ledger)
     [finding] = result.findings
     assert (finding.code, finding.severity) == (code, severity)
-    assert finding.subject == LocalPath("log.bin")
+    assert finding.subject == LocalPath("d/log.bin")
     if swap == "fifo":
         assert str(finding.details["mode"]).startswith("p")  # the FIFO's mode, as open found it
+    else:
+        assert str(finding.details["detail"]).startswith("at open: ")
     assert result.observations == ()
     assert result.absences == ()  # seen only at open: blind for this scan, the next one decides
 

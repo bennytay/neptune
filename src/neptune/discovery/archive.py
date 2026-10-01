@@ -673,12 +673,23 @@ def _zip_link(
     declared: int,
 ) -> int:
     """Record a zip symlink's target (its data, at most ``MAX_HEADER_SIZE``); bytes read."""
+    pieces: list[bytes] = []
+    got = 0
     try:
-        target = _read_up_to(fileobj, declared)
+        while got < declared:
+            block = fileobj.read(declared - got)
+            if not block:
+                break
+            pieces.append(block)
+            got += len(block)
     except _MEMBER_READ_ERRORS as exc:
+        # zipfile inflates no more than the declared size, and the bytes of the read that
+        # raised are not counted in ``got``: charge the declared size, the exact bound.
+        state.charge(declared)
         code = MEMBER_TRUNCATED if _is_truncation(exc) else MEMBER_CORRUPT
-        _member_defect(state, code, name, locator, 0, declared, exc)
-        return 0
+        _member_defect(state, code, name, locator, got, declared, exc)
+        return got
+    target = b"".join(pieces)
     state.charge(len(target))
     if len(target) < declared:
         state.finding(

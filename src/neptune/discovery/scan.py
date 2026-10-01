@@ -110,8 +110,11 @@ def _digest(
         with source.open(entry.location) as stream:
             artifact = digest_stream(stream, chunk_size=chunk_size)
     except SourceAccessError as exc:
-        # The reason is what open found (a symlink or FIFO swapped in is that, not unreadable).
-        return SkippedEntry(_raw(entry), exc.reason, exc.detail)
+        # The reason is what open found: a symlink at or above the file, a FIFO swapped in.
+        detail = (
+            exc.detail if exc.reason is SkipReason.NOT_REGULAR_FILE else f"at open: {exc.detail}"
+        )
+        return SkippedEntry(_raw(entry), exc.reason, detail)
     except OSError as exc:
         return SkippedEntry(_raw(entry), SkipReason.UNREADABLE, exc.strerror or str(exc))
     return ledger.observe(entry.location, artifact), artifact.size
