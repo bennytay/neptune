@@ -9,14 +9,17 @@ against; ``contracts/packages.toml`` routes announcements to each package's Line
 
 Subcommands:
 
-- ``check [--package P | --all]``: the registry is well formed, every golden validates against its
-  version's schema, and P's lock entries are not behind the registry; then P's upstream owners'
-  contract tests run (skipped, with a message, while an owner package is not installed yet).
+- ``check [--package P | --all]``: the registry is well formed, every golden validates against
+  its version's schema and every later minor/patch schema of its major, and P's lock entries are
+  not a major version behind (a minor or patch lag is a warning); then P's upstream owners'
+  contract tests run once each (skipped, with a message, while an owner is not installed yet).
 - ``check-owner --package P``: every schema P exports equals the registry's latest version, and
   P's version constant matches it. A changed export needs ``bump``.
 - ``bump CONTRACT VERSION [--post]``: write ``v<VERSION>/`` from the owner's export and golden
-  generator, then print the announcement comments for the consumers' gate issues; ``--post``
-  sends them through the Linear GraphQL API when ``LINEAR_API_KEY`` is set.
+  generator, refusing a minor/patch that rejects an earlier golden of its major; a major version
+  raises every lock entry for the contract. Then print the announcement comments for the
+  consumers' gate issues; ``--post`` sends them through the Linear GraphQL API, and needs
+  ``LINEAR_API_KEY`` before anything is written.
 
 Stdlib plus ``jsonschema`` (already a dev dependency). Output files are canonical JSON: sorted
 keys, two-space indent, UTF-8, one trailing newline, so the same inputs give the same bytes.
@@ -49,7 +52,12 @@ LINEAR_API: Final = "https://api.linear.app/graphql"
 CONTRACT_STATUSES: Final = frozenset({"active", "planned"})
 VERSION_STATUSES: Final = frozenset({"draft", "stable"})
 _SEMVER: Final = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
-_PACKAGE: Final = re.compile(r"^[a-z][a-z0-9-]*$")
+LOCK_HEADER: Final = """\
+# The contract versions each package in this repository is built against (platform ADR 0002).
+# `scripts/contracts.py check --package <name>` warns while an entry lags the registry's latest
+# stable version by a minor or patch release and fails when it lags by a major release. A major
+# `bump` raises every entry here in the same PR. Draft versions need not be declared.
+"""
 
 SemVer = tuple[int, int, int]
 
@@ -246,12 +254,24 @@ class Registry:
             lock[package] = dict(sorted(entries.items()))
         return lock
 
+    def write_lock(self, lock: Mapping[str, Mapping[str, str]]) -> None:
+        (self.root / "lock.toml").write_text(render_lock(lock), encoding="utf-8")
+
     def packages(self) -> dict[str, dict[str, str]]:
         data = _toml(self.root / "packages.toml")
         for name, table in data.items():
             if not isinstance(table, dict):
                 raise ContractError(f"packages.toml: [{name}] must be a table")
         return data
+
+
+def render_lock(lock: Mapping[str, Mapping[str, str]]) -> str:
+    """The canonical text of lock.toml: header, then packages and contracts in sorted order."""
+    sections = [
+        f"[{package}]\n" + "".join(f'{c} = "{v}"\n' for c, v in sorted(entries.items()))
+        for package, entries in sorted(lock.items())
+    ]
+    return LOCK_HEADER + "".join(f"\n{section}" for section in sections)
 
 
 # --- Validation --------------------------------------------------------------------------------
@@ -323,6 +343,31 @@ def _check_version(contract: Contract, version: Version) -> list[str]:
     return problems
 
 
+def compatibility_breaks(
+    registry: Registry, contract_id: str, version: SemVer, schema: Mapping[str, Any]
+) -> list[str]:
+    """Goldens of earlier versions with the same major that ``schema`` rejects.
+
+    Reader compatibility defines a breaking change: a minor or patch version must accept every
+    golden its major has published before it. Anything else needs a new major.
+    """
+    breaks: list[str] = []
+    for prior in registry.versions(contract_id):
+        if prior.version[0] != version[0] or prior.version >= version:
+            continue
+        for name, target in sorted(prior.goldens.items()):
+            path = prior.path / "golden" / name
+            if not path.is_file():
+                continue  # reported against the prior version itself
+            try:
+                errors = validate_golden(schema, target, json.loads(path.read_text("utf-8")))
+            except ContractError as error:
+                errors = [str(error)]
+            if errors:
+                breaks.append(f"v{show(prior.version)}/golden/{name}: {errors[0]}")
+    return breaks
+
+
 def check_registry(registry: Registry) -> Report:
     """Structure, schemas and goldens of every contract, plus the lock's consistency."""
     report = Report()
@@ -352,10 +397,22 @@ def check_registry(registry: Registry) -> Report:
             report.problems.append(f"{contract_id}: an active contract needs a version")
         for version in versions:
             report.problems += _check_version(contract, version)
+            try:
+                schema = json.loads(version.schema_text)
+            except (OSError, json.JSONDecodeError):
+                continue  # reported by _check_version
+            breaks = compatibility_breaks(registry, contract_id, version.version, schema)
+            if breaks:
+                report.problems.append(
+                    f"{contract_id} {show(version.version)} rejects an earlier golden of its "
+                    f"major, so it must be a major version: {breaks[0]}"
+                )
             report.notes.append(
                 f"{contract_id} {show(version.version)} ({version.status}): schema and "
                 f"{len(version.goldens)} goldens checked"
             )
+    if (registry.root / "lock.toml").read_text(encoding="utf-8") != render_lock(lock):
+        report.problems.append("lock.toml is not in canonical form (scripts/contracts.py)")
     for package, entries in lock.items():
         if package not in packages:
             report.problems.append(f"lock.toml: package {package!r} not in packages.toml")
@@ -393,15 +450,26 @@ def check_package(
     registry: Registry, package: str, *, runner: Runner | None = run_pytest
 ) -> Report:
     """A consumer's CI step: registry valid, lock current, upstream contract tests green."""
+    return check_packages(registry, [package], runner=runner)
+
+
+def check_packages(
+    registry: Registry, packages: Iterable[str], *, runner: Runner | None = run_pytest
+) -> Report:
+    """``check_package`` for several packages: the registry and each owner's tests run once."""
     report = check_registry(registry)
-    try:
-        _check_lock(registry, package, report, runner)
-    except (ContractError, json.JSONDecodeError) as error:
-        report.problems.append(str(error))
+    tested: set[str] = set()
+    for package in packages:
+        try:
+            _check_lock(registry, package, report, runner, tested)
+        except (ContractError, json.JSONDecodeError) as error:
+            report.problems.append(str(error))
     return report
 
 
-def _check_lock(registry: Registry, package: str, report: Report, runner: Runner | None) -> None:
+def _check_lock(
+    registry: Registry, package: str, report: Report, runner: Runner | None, tested: set[str]
+) -> None:
     lock = registry.lock()
     if package not in lock:
         report.problems.append(f"lock.toml has no [{package}] entry; declare its contracts")
@@ -430,14 +498,21 @@ def _check_lock(registry: Registry, package: str, report: Report, runner: Runner
             report.problems.append(f"{package} declares {contract_id} {text}, never published")
             continue
         latest = registry.latest(contract_id, stable=True)
-        if latest is not None and latest.version > version:
+        if latest is not None and latest.version[0] > version[0]:
             report.problems.append(
-                f"{package} is behind: declares {contract_id} {text}, registry has "
+                f"{package} is a major version behind: declares {contract_id} {text}, registry "
+                f"has {show(latest.version)}; a major bump raises in-repo locks in its own PR"
+            )
+        elif latest is not None and latest.version > version:
+            report.notes.append(
+                f"WARNING: {package} is behind: declares {contract_id} {text}, registry has "
                 f"{show(latest.version)}; its coordinator picks the bump up as an issue"
             )
         else:
             report.notes.append(f"{package}: {contract_id} {text} is current")
-        _run_owner_tests(registry, registry.contract(contract_id), report, runner)
+        if contract_id not in tested:
+            tested.add(contract_id)
+            _run_owner_tests(registry, registry.contract(contract_id), report, runner)
 
 
 def _run_owner_tests(
@@ -518,9 +593,12 @@ def check_owner(registry: Registry, package: str) -> Report:
                 f"then run scripts/contracts.py bump {contract.id} <next version>"
             )
         elif constant != latest.owner_version:
+            target = f"{constant}.0.0" if isinstance(constant, int) else str(constant)
             report.problems.append(
-                f"{contract.id}: version constant is {constant!r} but registry "
-                f"{show(latest.version)} records {latest.owner_version!r}; run bump"
+                f"{contract.id}: the schema is unchanged but the version constant is "
+                f"{constant!r} while registry {show(latest.version)} records "
+                f"{latest.owner_version!r}; restore the constant, or publish it with "
+                f"scripts/contracts.py bump {contract.id} {target}"
             )
         else:
             report.notes.append(f"{contract.id}: {package} matches {show(latest.version)}")
@@ -589,22 +667,35 @@ def write_version(
     (path / "version.json").write_text(canonical(meta), encoding="utf-8")
 
 
-def announcements(registry: Registry, contract: Contract, version: SemVer) -> list[Announcement]:
+def announcements(
+    registry: Registry,
+    contract: Contract,
+    version: SemVer,
+    before: Mapping[str, Mapping[str, str]],
+) -> list[Announcement]:
+    """One comment per consumer; ``before`` is the lock as it was before the bump."""
     packages = registry.packages()
     lock = registry.lock()
+    new = show(version)
     found: list[Announcement] = []
     for package in sorted(contract.consumers):
-        declared = lock.get(package, {}).get(contract.id)
+        declared = before.get(package, {}).get(contract.id)
         body = (
-            f"Contract `{contract.id}` {show(version)} is published by {contract.owner.package} "
-            f"(`contracts/{contract.id}/v{show(version)}/`). "
+            f"Contract `{contract.id}` {new} is published by {contract.owner.package} "
+            f"(`contracts/{contract.id}/v{new}/`). "
         )
-        if declared == show(version):
+        if declared == new:
             body += f"`{package}` already declares it in `contracts/lock.toml`; nothing to do."
+        elif lock.get(package, {}).get(contract.id) == new:
+            body += (
+                f"This is a major version: the same PR raises `{package}` from {declared} to "
+                f"{new} in `contracts/lock.toml`, and `{package}`'s contract tests must pass at "
+                f"{new} before it merges. Review the change for this project."
+            )
         else:
             body += (
                 f"`{package}` declares {declared or 'no version'} in `contracts/lock.toml`; "
-                f"`scripts/contracts.py check --package {package}` fails until the lock is "
+                f"`scripts/contracts.py check --package {package}` warns until the lock is "
                 "raised. Pick the bump up as an issue in this project."
             )
         found.append(Announcement(package, packages.get(package, {}).get("gate_issue"), body))
@@ -631,8 +722,14 @@ def bump(
     if not _installed(contract.owner.module):
         raise ContractError(f"{contract.owner.package} is not installed; cannot export")
     schema, constant = owner_export(contract)
-    if latest is not None and canonical(schema) == latest.schema_text:
-        raise ContractError(f"the exported schema equals {show(latest.version)}; nothing to bump")
+    if (
+        latest is not None
+        and canonical(schema) == latest.schema_text
+        and constant == latest.owner_version
+    ):
+        raise ContractError(
+            f"the exported schema and constant equal {show(latest.version)}; nothing to bump"
+        )
     if isinstance(constant, int) and constant != version[0]:
         raise ContractError(
             f"the version constant is {constant}; the new version's major must equal it "
@@ -645,10 +742,24 @@ def bump(
         errors = validate_golden(schema, target, value)
         if errors:
             raise ContractError(f"golden {name} does not validate: {errors[0]}")
+    breaks = compatibility_breaks(registry, contract_id, version, schema)
+    if breaks:
+        raise ContractError(
+            f"{text} is not reader-compatible with its major, so it cannot be a minor or patch "
+            f"version: {breaks[0]}. Publish a major version (raise the constant first)."
+        )
+    before = registry.lock()
     write_version(
         contract.path / f"v{text}", contract_id, version, status, constant, schema, goldens
     )
-    return announcements(registry, contract, version)
+    if status == "stable" and (latest is None or version[0] > latest.version[0]):
+        # A major version raises every in-repo consumer's lock in the same PR (ADR 0002 §4).
+        raised = {
+            package: {**entries, contract_id: text} if contract_id in entries else dict(entries)
+            for package, entries in before.items()
+        }
+        registry.write_lock(raised)
+    return announcements(registry, contract, version, before)
 
 
 def post_comment(
@@ -712,25 +823,21 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
         if args.command == "check":
             runner = None if args.no_tests else run_pytest
             if args.all:
-                packages = list(registry.lock())
-                return max(
-                    (_finish(check_package(registry, p, runner=runner)) for p in packages),
-                    default=0,
-                )
+                return _finish(check_packages(registry, registry.lock(), runner=runner))
             if args.package is None:
                 return _finish(check_registry(registry))
             return _finish(check_package(registry, args.package, runner=runner))
         if args.command == "check-owner":
             return _finish(check_owner(registry, args.package))
+        key = environ.get("LINEAR_API_KEY")
+        if args.post and not key:
+            raise ContractError("--post needs LINEAR_API_KEY; nothing was written")
         notes = bump(registry, args.contract, args.version, status=args.status)
         _print([f"wrote contracts/{args.contract}/v{args.version}/"])
         for note in notes:
             target = note.issue or f"<no gate issue for {note.package} in packages.toml>"
             _print([f"--- comment for {target} ({note.package})", note.body])
-        if args.post:
-            key = environ.get("LINEAR_API_KEY")
-            if not key:
-                raise ContractError("--post needs LINEAR_API_KEY; comments printed, not posted")
+        if args.post and key:
             for note in notes:
                 if note.issue is not None:
                     post_comment(note.issue, note.body, key)

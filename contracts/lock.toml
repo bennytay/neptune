@@ -1,6 +1,9 @@
-# The contract versions each consuming package is built against. A package's own coordinator
-# raises its entries; `scripts/contracts.py check --package <name>` fails while one is behind the
-# registry's latest stable version. Draft versions need not be declared.
+# The contract versions each package in this repository is built against (platform ADR 0002).
+# `scripts/contracts.py check --package <name>` warns while an entry lags the registry's latest
+# stable version by a minor or patch release and fails when it lags by a major release. A major
+# `bump` raises every entry here in the same PR. Draft versions need not be declared.
 
 [neptune-ledger]
 package-schema = "1.0.0"
+
+[neptune-platform]
