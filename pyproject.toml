@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 dependencies = [
+    "lz4>=4.4.5",
     "pyarrow>=25.0.1",
+    "zstandard>=0.25.0",
 ]
 
 [dependency-groups]
@@ -61,6 +63,11 @@ mypy_path = "src"
 # pyarrow ships no type information; its use is confined to neptune.store.
 [[tool.mypy.overrides]]
 module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
+# lz4 ships no type information either; only neptune.adapters.mcap imports it (ADR 0034).
+[[tool.mypy.overrides]]
+module = ["lz4", "lz4.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
