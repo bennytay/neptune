@@ -22,6 +22,8 @@ Chunk 0 emits the ``DocumentRecord``; every other chunk holds one line and emits
   ``kill-parent``: signals the job's process; ``write <path>``: writes ``<path>``;
 - ``setown``: aims a pipe's SIGIO at the job (``fcntl`` F_SETOWN); ``fioasync``: turns a pipe's
   async signal on (``ioctl`` FIOASYNC) — the signal path only Landlock ABI 6 scopes;
+- ``nap``: not an attack: sleeps two seconds, then reads as a block ``nap`` (a slow chunk to
+  kill a job in the middle of);
 - ``spool``: not an attack: spools 2 MiB through the call's scratch directory, as an archive
   adapter spools a nested member, and reads it back (a block ``spool``); ``flood``: writes one
   file past the scratch budget.
@@ -165,6 +167,8 @@ def attack(text: str) -> str:
         finally:
             os.close(read_fd)
             os.close(write_fd)
+    elif text == "nap":
+        time.sleep(2)
     elif text in ("spool", "flood"):
         directory = scratch_directory()
         if directory is None:
