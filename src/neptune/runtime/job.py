@@ -282,6 +282,7 @@ class _Source:
     locations: list[LocalPath | RawLocalPath] = field(default_factory=list)  # every one, walk order
     probe: SourceProbe | None = None  # what the probe engine found, once probed
     inspection: explain.Inspection | None = None  # the adapter's ``inspect``, in a dry run
+    pin: explain.Pin | None = None  # the manifest rule that chose its adapter (ADR 0047)
 
     @property
     def content_id(self) -> ContentId:
@@ -778,8 +779,11 @@ class IngestJob:
                     probe=item.probe,
                     adapter=adapter,
                     verdicts=(
-                        explain.adapter_verdicts(item.probe, descriptors) if item.probe else ()
+                        explain.adapter_verdicts(item.probe, descriptors, item.pin)
+                        if item.probe
+                        else ()
                     ),
+                    pin=item.pin,
                     inspection=item.inspection,
                     plan=plan,
                     heavy=heavy,
@@ -1305,6 +1309,14 @@ class IngestJob:
                     self._findings.pop(finding.id, None)
         item.adapter = self.registry.get(choice.candidate.adapter)
         item.config = choice.config
+        if choice.rule is not None:
+            loaded = self._declared.loaded
+            item.pin = explain.Pin(
+                choice.candidate.adapter,
+                choice.rule.pointer,
+                loaded.location.path,
+                loaded.content_id,
+            )
         return choice.candidate
 
     def _group(self) -> None:

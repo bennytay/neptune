@@ -35,13 +35,17 @@ kind and no change to the package layout.
    (options for every file an adapter reads); `grouping` (`gap_seconds`). Unknown keys, wrong types,
    dangling references, repeated ids and bad paths are `ManifestError`s naming the JSON pointer
    and line. `Manifest.to_json()` is canonical and is itself a valid manifest. Plain YAML scalars
-   keep their text, so a text field reads `version: 1.10` as `"1.10"`.
+   and JSON numbers keep their literal, so a text field reads `version: 1.10` as `"1.10"`; the
+   editor schema therefore accepts a number or boolean wherever text goes ("read as text").
 2. **Hostile input, refused whole.** At most 256 KiB, 16 levels, 20 000 values, 4096-character
    scalars; strict UTF-8, no control characters. JSON (a `.json` name) without duplicate keys or
    `NaN`. Otherwise a strict YAML subset (block and flow collections, plain and quoted scalars,
    comments) that refuses anchors and aliases (no alias bombs), tags, directives, several
    documents, block scalars, complex keys, tabs in indentation, duplicate keys and multi-line plain
-   values. Paths are root-relative with no `.`/`..`; globs are the ignore-rule syntax anchored at
+   values. YAML 1.2 core-schema forms it does not resolve (`.inf`, `.nan`, `0o17`, `0x1F`) and
+   numbers no float holds (`1e999`) are refused with a request to quote them, so a YAML 1.2 parser
+   reads what it accepts as the same tree. Lone surrogates in JSON escapes are refused. A seeded
+   mutation fuzz checks that every input ends in a manifest or a `ManifestError`. Paths are root-relative with no `.`/`..`; globs are the ignore-rule syntax anchored at
    the root, no negation. Any problem is a `ManifestError` → `ConfigurationError`
    (`invalid_configuration`, exit 6) before anything is walked: never half-applied (as ADR 0043 §7).
 3. **The manifest is a file in the folder it describes.** `neptune.yaml`, `neptune.yml` or
@@ -80,7 +84,11 @@ kind and no change to the package layout.
    guess is never written as a declaration; the user uncomments what is true and so states it.
    Deterministic text (sorted, no clock, no host paths); validated by the reader before it is
    written; written atomically; never over an existing file without `--force` (exit 5).
-8. **Machines, sites, tasks and software are stated in the manifest transform's config** and
+8. **`--explain` shows the manifest's choice** (extends ADR 0044 §2). A pinned source's
+   explanation carries `pin` (adapter, manifest location and content id, rule pointer); its
+   adapter's verdict is `pinned`, and the other verdicts stay the probe's (`tied`, `outranked`,
+   `declined`) with a `why` naming the rule that chose.
+9. **Machines, sites, tasks and software are stated in the manifest transform's config** and
    referenced by runs; this version emits no canonical `Machine`, `Site` or `Run` record from them
    and none for tasks (there is no task record kind, and adding one changes the package schema).
 

@@ -77,6 +77,7 @@ pointer) as its provenance. Nothing it declares overrides the evidence silently.
 | Declaration | Effect | When the evidence disagrees |
 |---|---|---|
 | `runs` | a declared session (ADR 0036 §6): stated, confidence 1.0; resolves the readings it holds whole | it cuts a reading: both stand, contested, `neptune.grouping.declared_contradicts_layout`; nothing matched: `declaration_unmatched` |
+| (any pin) | `--explain` shows it: the source's `pin`, its adapter's verdict `pinned`, the probe's other verdicts beside it | |
 | `sources` adapter, one of a tie | selects it; `neptune.manifest.adapter_pinned` (info) replaces the probe's `ambiguous` | — |
 | `sources` adapter, accepted but ranked lower | selects it; `pin_overrides_probe` (warning) | — |
 | `sources` adapter its probe declines | **not applied**; `pin_refused` (warning); the probe's selection stands | |
@@ -106,8 +107,10 @@ A manifest is untrusted input and is used whole or not at all: any problem is ex
 - YAML: a strict subset. No anchors or aliases (`&`, `*`), tags (`!`), directives, several
   documents, block scalars (`|`, `>`), complex keys (`?`), tabs in indentation, duplicate keys, or
   plain values continued on the next line. Quote anything unusual. Plain scalars keep their text:
-  `version: 1.10` is `"1.10"`.
-- JSON: no duplicate keys, no `NaN`/`Infinity`.
+  `version: 1.10` is `"1.10"` (the editor schema accepts numbers in text fields for that reason).
+  `.inf`, `.nan`, `0o17`, `0x1F` and `1e999` are refused unquoted: parsers disagree on them.
+- JSON: no duplicate keys, no `NaN`/`Infinity`, no lone-surrogate escapes; numbers keep their
+  literal as in YAML.
 - Unknown keys anywhere, unknown adapters, bad options, references to undeclared ids, repeated ids
   or run names, absolute paths, `.`/`..` components, `!` globs, a symlinked manifest, and a
   manifest that an ignore rule hides are all refused.

@@ -349,6 +349,7 @@ def parse_manifest(data: bytes, *, json_syntax: bool = False) -> Manifest:
     if (
         not isinstance(version, Scalar)
         or version.value != SCHEMA_VERSION
+        or not isinstance(version.value, int)
         or isinstance(version.value, bool)
     ):
         raise _fail("/neptune", version, f"this Neptune reads manifest version {SCHEMA_VERSION}")
@@ -507,13 +508,31 @@ def json_schema() -> JsonObject:
     It states the shapes; ``parse_manifest`` also checks what a schema cannot (references
     between entries, repeated ids, glob syntax) and is the authority.
     """
-    text: JsonObject = {"type": "string", "minLength": 1, "maxLength": _MAX_TEXT}
-    ident: JsonObject = {"type": "string", "pattern": f"^{_ID.pattern}$"}
+    # A plain number or boolean in a text field is read as text, exactly as written.
+    as_text = "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+    text: JsonObject = {
+        "anyOf": [
+            {"type": "string", "minLength": 1, "maxLength": _MAX_TEXT},
+            {"type": ["number", "boolean"]},
+        ],
+        "description": as_text,
+    }
+    ident: JsonObject = {
+        "anyOf": [
+            {"type": "string", "pattern": f"^{_ID.pattern}$"},
+            {"type": "integer", "minimum": 0},
+        ],
+        "description": "An id; a whole number here is read as text, exactly as written.",
+    }
     path: JsonObject = {
-        "type": "string",
-        "minLength": 1,
-        "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$",
-        "description": "Root-relative, '/'-separated: a file, or a directory and all below it.",
+        "anyOf": [
+            {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$"},
+            {"type": "number"},
+        ],
+        "description": (
+            "Root-relative, '/'-separated: a file, or a directory and all below it. A number "
+            "here is read as text, exactly as written."
+        ),
     }
     aliases: JsonObject = {
         "type": "object",

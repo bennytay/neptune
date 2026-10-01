@@ -4,15 +4,37 @@
       "additionalProperties": {
         "oneOf": [
           {
-            "maxLength": 1000,
-            "minLength": 1,
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": [
+                  "number",
+                  "boolean"
+                ]
+              }
+            ],
+            "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
           },
           {
             "items": {
-              "maxLength": 1000,
-              "minLength": 1,
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": [
+                    "number",
+                    "boolean"
+                  ]
+                }
+              ],
+              "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
             },
             "minItems": 1,
             "type": "array"
@@ -82,11 +104,36 @@
                 "$ref": "#/$defs/aliases"
               },
               "description": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               },
               "embodiment": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10').",
                 "examples": [
                   "manipulator",
                   "mobile_base",
@@ -98,19 +145,36 @@
                   "ground_vehicle",
                   "fleet",
                   "other"
-                ],
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                ]
               },
               "id": {
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "description": "An id; a whole number here is read as text, exactly as written."
               },
               "name": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               }
             },
             "required": [
@@ -137,43 +201,108 @@
             "description": "A declared session (ADR 0036 §6).",
             "properties": {
               "description": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               },
               "machine": {
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "description": "An id; a whole number here is read as text, exactly as written."
               },
               "name": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               },
               "paths": {
                 "items": {
-                  "description": "Root-relative, '/'-separated: a file, or a directory and all below it.",
-                  "minLength": 1,
-                  "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$",
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$",
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "description": "Root-relative, '/'-separated: a file, or a directory and all below it. A number here is read as text, exactly as written."
                 },
                 "minItems": 1,
                 "type": "array"
               },
               "site": {
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "description": "An id; a whole number here is read as text, exactly as written."
               },
               "software": {
                 "items": {
-                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                      "type": "string"
+                    },
+                    {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  ],
+                  "description": "An id; a whole number here is read as text, exactly as written."
                 },
                 "type": "array"
               },
               "task": {
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "description": "An id; a whole number here is read as text, exactly as written."
               }
             },
             "required": [
@@ -200,18 +329,49 @@
                 "$ref": "#/$defs/aliases"
               },
               "description": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               },
               "id": {
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "description": "An id; a whole number here is read as text, exactly as written."
               },
               "name": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               }
             },
             "required": [
@@ -237,23 +397,65 @@
                 "$ref": "#/$defs/aliases"
               },
               "description": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               },
               "id": {
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "description": "An id; a whole number here is read as text, exactly as written."
               },
               "name": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               },
               "version": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               }
             },
             "required": [
@@ -288,8 +490,17 @@
             ],
             "properties": {
               "adapter": {
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "description": "An id; a whole number here is read as text, exactly as written."
               },
               "glob": {
                 "description": "Ignore-rule glob syntax, anchored at the root.",
@@ -304,10 +515,17 @@
                 "type": "object"
               },
               "path": {
-                "description": "Root-relative, '/'-separated: a file, or a directory and all below it.",
-                "minLength": 1,
-                "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "description": "Root-relative, '/'-separated: a file, or a directory and all below it. A number here is read as text, exactly as written."
               }
             },
             "required": [
@@ -333,18 +551,49 @@
                 "$ref": "#/$defs/aliases"
               },
               "description": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               },
               "id": {
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                ],
+                "description": "An id; a whole number here is read as text, exactly as written."
               },
               "name": {
-                "maxLength": 1000,
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
               }
             },
             "required": [

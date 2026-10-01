@@ -157,5 +157,14 @@ def test_the_editor_schema_agrees_with_the_reader() -> None:
     validator.validate(json.loads(json.dumps(full)))
     again = parse_manifest(json.dumps(full).encode(), json_syntax=True)
     assert again.to_json() == full  # the canonical form is a manifest of the same declarations
+    # Plain numbers in text fields are read as text, and the editor's schema accepts them.
+    as_numbers = {
+        "neptune": 1,
+        "software": [{"id": 7, "version": 1.1}],
+        "sites": [{"id": "s", "name": True}],
+    }
+    validator.validate(as_numbers)
+    yaml = parse_manifest(b"neptune: 1\nsoftware:\n  - {id: 7, version: 1.10}\n")
+    assert yaml.section("software")[0].to_json() == {"id": "7", "version": "1.10"}
     assert not validator.is_valid({"neptune": 1, "robots": []})
     assert not validator.is_valid({"neptune": 2})

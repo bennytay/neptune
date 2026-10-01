@@ -104,4 +104,21 @@ def test_explain_applies_the_manifest(tmp_path: Path) -> None:
     )
     pinned = notes("--manifest", str(root / "pins.yaml"))
     assert pinned["status"] == "planned" and pinned["adapter"] == "markdown"
+    assert pinned["pin"] == {
+        "adapter": "markdown",
+        "manifest": "pins.yaml",
+        "pointer": "/sources/0",
+        "source": pinned["pin"]["source"],  # type: ignore[index]
+    }
+    verdicts = {v["adapter"]: v for v in pinned["verdicts"]}  # type: ignore[attr-defined]
+    assert verdicts["markdown"]["verdict"] == "pinned"
+    assert verdicts["tabular"]["verdict"] == "tied"  # the probe's word is still shown
+    assert "the manifest names markdown (/sources/0 in pins.yaml)" in verdicts["tabular"]["why"]
     assert notes("--no-manifest")["status"] == "ambiguous"
+
+    (root / "pins.yaml").write_text("neptune: 1\nsources:\n  - {path: notes.txt, adapter: text}\n")
+    over = notes("--manifest", str(root / "pins.yaml"))
+    verdicts = {v["adapter"]: v for v in over["verdicts"]}  # type: ignore[attr-defined]
+    assert over["adapter"] == "text" and verdicts["text"]["verdict"] == "pinned"
+    assert "the probe's top claim was markdown" in verdicts["text"]["why"]
+    assert {verdicts["markdown"]["verdict"], verdicts["tabular"]["verdict"]} == {"tied"}

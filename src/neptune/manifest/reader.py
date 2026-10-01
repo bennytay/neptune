@@ -6,19 +6,24 @@ line (YAML) or JSON pointer that says where. Nothing here raises anything but ``
 
 Two syntaxes give the same tree:
 
-- **JSON** (a ``.json`` manifest), strict: no duplicate keys, no ``NaN`` or ``Infinity``.
+- **JSON** (a ``.json`` manifest), strict: no duplicate keys, no ``NaN`` or ``Infinity``. A
+  number or boolean keeps its literal too, so text fields read it exactly as YAML does.
 - **A strict YAML subset** (anything else): block mappings and sequences indented with spaces,
   plain, single- and double-quoted scalars, flow collections (``[a, b]``, ``{path: x}``),
   ``#`` comments and one leading ``---``. Refused, each by name: anchors and aliases (``&``,
   ``*``: no alias bombs), tags (``!``), directives (``%``), several documents, block scalars
   (``|``, ``>``), complex keys (``?``), tabs in indentation, duplicate keys, and plain values that
-  continue on the next line. Every YAML parser reads what this one accepts the same way.
+  continue on the next line. A YAML 1.2 parser reads what this one accepts as the same tree.
 
 A plain YAML scalar keeps the text as written beside its YAML 1.2 core-schema value, so a field
-that wants text reads ``version: 1.10`` as ``"1.10"``, never as the number ``1.1``.
+that wants text reads ``version: 1.10`` as ``"1.10"``, never as the number ``1.1``. The core
+schema's other forms (``.inf``, ``.nan``, ``0o17``, ``0x1F``) and numbers no float can hold
+(``1e999``) are refused with a request to quote them: YAML parsers disagree on them, and none is a
+value a manifest needs.
 """
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from typing import Final, TypeAlias
@@ -32,6 +37,8 @@ ScalarValue: TypeAlias = str | int | float | bool | None
 
 _INT: Final = re.compile(r"[-+]?[0-9]+")
 _FLOAT: Final = re.compile(r"[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?")
+# YAML 1.2 core-schema forms this reader does not resolve: refused, so no parser reads them apart.
+_SPECIAL: Final = re.compile(r"[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN)|0o[0-7]+|0x[0-9a-fA-F]+")
 _TRUE: Final = frozenset({"true", "True", "TRUE"})
 _FALSE: Final = frozenset({"false", "False", "FALSE"})
 _NULL: Final = frozenset({"null", "Null", "NULL", "~"})
@@ -177,7 +184,13 @@ def _read_json(text: str, budget: _Budget) -> Node:
         raise ManifestError(f"{name} is not a JSON number")
 
     try:
-        value = json.loads(text, object_pairs_hook=pairs, parse_constant=constant)
+        value = json.loads(
+            text,
+            object_pairs_hook=pairs,
+            parse_constant=constant,
+            parse_int=lambda literal: _Number(int(literal), literal),
+            parse_float=lambda literal: _Number(float(literal), literal),
+        )
     except ManifestError:
         raise
     except (ValueError, RecursionError) as exc:
@@ -185,16 +198,41 @@ def _read_json(text: str, budget: _Budget) -> Node:
     return _from_json(value, budget)
 
 
+def _unicode(text: str) -> str:
+    """JSON escapes can spell a lone surrogate, which is no character: refused."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ManifestError(
+            "a JSON string escapes a lone surrogate, which is not a character"
+        ) from None
+    return text
+
+
+@dataclass(frozen=True)
+class _Number:
+    """A JSON number with its literal, so a text field reads ``1.10`` as written, as in YAML."""
+
+    value: int | float
+    literal: str
+
+
 def _from_json(value: object, budget: _Budget) -> Node:
     budget.take(None)
+    if isinstance(value, _Number):
+        number = _finite(value.value, None) if isinstance(value.value, float) else value.value
+        return Scalar(number, _scalar_text(value.literal, None), None)
+    if isinstance(value, bool):
+        return Scalar(value, "true" if value else "false", None)
     if isinstance(value, dict):
-        return Map(tuple((key, _from_json(item, budget)) for key, item in value.items()), None)
+        items = tuple((_unicode(key), _from_json(item, budget)) for key, item in value.items())
+        return Map(items, None)
     if isinstance(value, list):
         return Seq(tuple(_from_json(item, budget) for item in value), None)
     if isinstance(value, str):
-        return Scalar(_scalar_text(value, None), None, None)
-    if value is None or isinstance(value, bool | int | float):
-        return Scalar(value, None, None)
+        return Scalar(_scalar_text(_unicode(value), None), None, None)
+    if value is None:
+        return Scalar(None, None, None)
     raise ManifestError(f"not a JSON value: {value!r}")  # pragma: no cover - json gives no other
 
 
@@ -208,8 +246,12 @@ class _Line:
     content: str  # without indentation, comment or trailing spaces
 
 
-def _resolve(text: str) -> ScalarValue:
+def _resolve(text: str, line: int | None) -> ScalarValue:
     """A plain scalar's YAML 1.2 core-schema value."""
+    if _SPECIAL.fullmatch(text):
+        raise ManifestError(
+            f"line {line}: {text!r} means different things to different YAML parsers; quote it"
+        )
     if text in _TRUE:
         return True
     if text in _FALSE:
@@ -219,8 +261,15 @@ def _resolve(text: str) -> ScalarValue:
     if _INT.fullmatch(text):
         return int(text)
     if _FLOAT.fullmatch(text):
-        return float(text)
+        return _finite(float(text), line)
     return text
+
+
+def _finite(value: float, line: int | None) -> float:
+    if not math.isfinite(value):
+        where = f"line {line}: " if line is not None else ""
+        raise ManifestError(f"{where}a number too large for a float; quote it if it is text")
+    return value
 
 
 def _is_item(content: str) -> bool:
@@ -362,7 +411,7 @@ def _plain(text: str, line: int) -> Scalar:
     if " #" in text or "\t#" in text:  # pragma: no cover - comments are stripped before
         raise ManifestError(f"line {line}: a comment inside a value")
     text = _scalar_text(text, line)
-    return Scalar(_resolve(text), text, line)
+    return Scalar(_resolve(text, line), text, line)
 
 
 def _key_split(content: str, line: int) -> tuple[str, str] | None:
@@ -492,6 +541,8 @@ class _Flow:
 
     def scalar(self) -> Scalar:
         self.budget.take(self.line)
+        if self.at >= len(self.text):
+            raise self.fail("a flow collection ends early")
         if self.text[self.at] in "\"'":
             value, self.at = _quoted(self.text, self.at, self.line)
             return Scalar(value, None, self.line)

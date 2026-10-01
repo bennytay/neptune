@@ -80,6 +80,18 @@ def test_one_leading_document_marker_is_allowed() -> None:
         ("a: b: c\n", "must be quoted"),
         ("- a\nb: 1\n", "unexpected"),
         ("a: @x\n", "reserved"),
+        ("machines: {\n", "ends early"),
+        ("a: {b: 1,\n", "ends early"),
+        ("a: {b\n", "expected ':'"),
+        ("a: [\n", "ends early"),
+        ("a: [1,\n", "ends early"),
+        ("a: {b: \n", "ends early"),
+        ("a: .inf\n", "quote it"),
+        ("a: -.Inf\n", "quote it"),
+        ("a: .nan\n", "quote it"),
+        ("a: 0o17\n", "quote it"),
+        ("a: 0x1F\n", "quote it"),
+        ("a: 1e999\n", "too large"),
     ],
 )
 def test_refused_yaml(text: str, says: str) -> None:
@@ -120,6 +132,14 @@ def test_node_cap_bounds_wide_documents() -> None:
         tree(wide)
 
 
+def test_json_numbers_keep_their_literal() -> None:
+    node = read_tree(b'{"v": 1.10, "n": 7, "b": true}', json_syntax=True)
+    assert isinstance(node, Map)
+    values = dict(node.items)
+    assert values["v"] == Scalar(1.1, "1.10", None)
+    assert values["n"] == Scalar(7, "7", None) and values["b"] == Scalar(True, "true", None)
+
+
 def test_json_is_strict() -> None:
     assert isinstance(read_tree(b'{"a": [1, 2.5, true, null, "x"]}', json_syntax=True), Map)
     for bad, says in [
@@ -128,6 +148,9 @@ def test_json_is_strict() -> None:
         (b'{"a": Infinity}', "Infinity"),
         (b"{'a': 1}", "not JSON"),
         (b"[" * 10_000 + b"]" * 10_000, "levels deep"),
+        (b'{"a": 1e999}', "too large"),
+        (b'{"a": "\\ud800"}', "surrogate"),
+        (b'{"\\udfff": 1}', "surrogate"),
     ]:
         with pytest.raises(ManifestError, match=says):
             read_tree(bad, json_syntax=True)
