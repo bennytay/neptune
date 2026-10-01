@@ -35,11 +35,10 @@ from neptune_memory.consolidate.base import (
     ConsolidatorOutput,
     ModelRef,
 )
-from neptune_memory.consolidate.base import (
-    SAME_AS as SAME_AS,
-)
 from neptune_memory.schema.nodes import NodeRef, NodeType
-from neptune_memory.schema.predicates import CORE_PREDICATES, Cardinality, PredicateSpec
+from neptune_memory.schema.predicates import CORE_PREDICATES, is_declared_value
+from neptune_memory.schema.predicates import SAME_AS as SAME_AS
+from neptune_memory.schema.predicates import SAME_AS_CANDIDATE as SAME_AS_CANDIDATE
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -48,27 +47,9 @@ if TYPE_CHECKING:
     from neptune_memory.ledger import LedgerReader
     from neptune_memory.schema.claim import Claim
 
-SAME_AS_CANDIDATE: Final = "same_as_candidate"
-
-# The vocabulary identity claims are validated against: the core plus the two identity predicates.
-IDENTITY_PREDICATES: Final = CORE_PREDICATES.extend(
-    PredicateSpec(
-        SAME_AS,
-        1,
-        frozenset(NodeType),
-        frozenset(NodeType),
-        Cardinality.MANY,
-        "the same real-world thing: declared identifier, configuration lineage or operator",
-    ),
-    PredicateSpec(
-        SAME_AS_CANDIDATE,
-        1,
-        frozenset(NodeType),
-        frozenset(NodeType),
-        Cardinality.MANY,
-        "ambiguous: both cite the same source; whether they are one thing is undecided",
-    ),
-)
+# The vocabulary identity claims are validated against. Since graph-schema v1 the identity
+# predicates are core (ADR 0006 §4), so this is ``CORE_PREDICATES``; kept as a name for callers.
+IDENTITY_PREDICATES: Final = CORE_PREDICATES
 
 # Ledger record kinds this consolidator reads.
 THREAD: Final = "ledger_thread"
@@ -115,6 +96,14 @@ def _parsed(record: Mapping[str, object], name: str, parse: Callable[[JsonValue]
         raise _Malformed(f"{name!r}: {exc}") from exc
 
 
+def _logical_id(data: JsonValue) -> LogicalId:
+    """A declared logical id; a blank or whitespace-padded value is malformed (ADR 0006 §9)."""
+    parsed = logical_id_from_json(data)
+    if not is_declared_value(parsed.value):
+        raise ValueError(f"logical id value is blank or padded with whitespace: {parsed.value!r}")
+    return parsed
+
+
 def _record_id(record: Mapping[str, object]) -> RecordId:
     return _parsed(record, "id", lambda v: parse_record_id(v))  # type: ignore[arg-type]
 
@@ -153,7 +142,7 @@ class _Link:
 def _thread(record: Mapping[str, object]) -> _Thread:
     return _Thread(
         _record_id(record),
-        _parsed(record, "logical_id", logical_id_from_json),
+        _parsed(record, "logical_id", _logical_id),
         _parsed(record, "node_type", NodeType),  # type: ignore[arg-type]
         _parsed(record, "valid_from", timestamp_from_json),
         _evidence(record),
@@ -170,7 +159,7 @@ _SIDES: Final[Mapping[str, tuple[Ground, str, str]]] = {
 def _link(kind: str, record: Mapping[str, object]) -> _Link | None:
     """Parse one link-bearing record; ``None`` for an operator assertion about another predicate."""
     if kind == IDENTITY_LINK:
-        _parsed(record, "identifier", logical_id_from_json)
+        _parsed(record, "identifier", _logical_id)
     if kind == OPERATOR_ASSERTION:
         if _str(record, "predicate") != SAME_AS:
             return None
@@ -179,8 +168,8 @@ def _link(kind: str, record: Mapping[str, object]) -> _Link | None:
     return _Link(
         _record_id(record),
         ground,
-        _parsed(record, left, logical_id_from_json),
-        _parsed(record, right, logical_id_from_json),
+        _parsed(record, left, _logical_id),
+        _parsed(record, right, _logical_id),
         _parsed(record, "valid_from", timestamp_from_json),
         _evidence(record),
     )

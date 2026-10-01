@@ -27,8 +27,14 @@ if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonObject
     from neptune_memory.schema.claim import Claim
 
-# Bumped whenever CORE_PREDICATES changes. GRAPH_SCHEMA_VERSION (pins.py) is published by MVL-105.
-VOCABULARY_VERSION: Final = 1
+# Bumped whenever CORE_PREDICATES changes. 2: ``same_as`` and ``same_as_candidate`` joined the
+# core (ADR 0006 §4). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
+VOCABULARY_VERSION: Final = 2
+
+# Identity predicates (ADR 0003 §1). Only ``memory.identity`` grounds ``same_as``, never by
+# inference; ``same_as_candidate`` is pairwise, one claim each way. The runner enforces both.
+SAME_AS: Final = "same_as"
+SAME_AS_CANDIDATE: Final = "same_as_candidate"
 
 
 class Cardinality(StrEnum):
@@ -219,7 +225,16 @@ def _is_declared_identifier(node_id: str) -> bool:
         LogicalId(namespace, value)
     except (TypeError, ValueError):
         return False
-    return True
+    return is_declared_value(value)
+
+
+def is_declared_value(value: str) -> bool:
+    """A declared identifier's value is not blank and not padded with whitespace (ADR 0006 §9).
+
+    The compiler's ``LogicalId`` accepts ``" "`` and ``" 4411"``; Memory does not key a node,
+    or name a person, by one: a padded value is a different string that reads the same.
+    """
+    return bool(value.strip()) and value == value.strip()
 
 
 def check_claim(claim: Claim, registry: PredicateRegistry) -> None:
@@ -293,5 +308,19 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_V.RECORD},
         _MANY,
         "a Ledger record about the node (Episode tier, by id)",
+    ),
+    _p(
+        SAME_AS,
+        set(NodeType),
+        set(NodeType),
+        _MANY,
+        "the same real-world thing: declared identifier, configuration lineage or operator",
+    ),
+    _p(
+        SAME_AS_CANDIDATE,
+        set(NodeType),
+        set(NodeType),
+        _MANY,
+        "ambiguous: both cite the same source; whether they are one thing is undecided",
     ),
 )
