@@ -294,15 +294,22 @@ def test_every_way_of_dying_is_a_finding(
 
 
 @pytest.mark.parametrize(
-    "attack", ["socket", "fork", "exec", "kill-parent", "write", "setown", "fioasync"]
+    "attack", ["socket", "fork", "exec", "kill-parent", "write", "setown", "fioasync", "ttyasync"]
 )
 def test_a_parser_cannot_reach_the_network_processes_or_files(tmp_path: Path, attack: str) -> None:
     escaped = tmp_path / "escaped"
     line = f"write {escaped}" if attack == "write" else attack
+    terminal = os.openpty() if attack == "ttyasync" else ()  # readable, as the job's would be
+    if terminal:
+        line = f"ttyasync {os.ttyname(terminal[1])}"
     root = tmp_path / "root"
     root.mkdir()
     (root / "attack.hostile").write_bytes(HOSTILE.hostile("ok", line))
-    run = Run(root, tmp_path, sandboxed())
+    try:
+        run = Run(root, tmp_path, sandboxed())
+    finally:
+        for fd in terminal:
+            os.close(fd)
     finding = run.finding("neptune.runtime.chunk_failed")
     denied = "OSError" if attack == "write" and not confine.landlock_abi() else "PermissionError"
     assert (finding.details["error"], finding.details["step"]) == (denied, "ingest")

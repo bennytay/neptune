@@ -21,7 +21,9 @@ Chunk 0 emits the ``DocumentRecord``; every other chunk holds one line and emits
 - ``socket``: opens a socket; ``fork``: forks; ``exec``: runs ``/bin/true``;
   ``kill-parent``: signals the job's process; ``write <path>``: writes ``<path>``;
 - ``setown``: aims a pipe's SIGIO at the job (``fcntl`` F_SETOWN); ``fioasync``: turns a pipe's
-  async signal on (``ioctl`` FIOASYNC) — the signal path only Landlock ABI 6 scopes.
+  async signal on (``ioctl`` FIOASYNC) — the signal path only Landlock ABI 6 scopes;
+  ``ttyasync <path>``: opens the terminal ``<path>`` read-only and turns ``O_ASYNC`` on with
+  ``fcntl`` F_SETFL, which aims SIGIO at the terminal's foreground process group.
 
 A first line ``plan-hang`` or ``plan-segfault`` attacks ``plan`` instead, and a line
 ``probe-segfault`` anywhere in the head makes ``probe`` segfault.
@@ -160,6 +162,13 @@ def attack(text: str) -> str:
         finally:
             os.close(read_fd)
             os.close(write_fd)
+    elif text.startswith("ttyasync "):
+        terminal = os.open(text.removeprefix("ttyasync "), os.O_RDONLY)  # reads stay open
+        try:
+            flags = fcntl.fcntl(terminal, fcntl.F_GETFL)
+            fcntl.fcntl(terminal, fcntl.F_SETFL, flags | os.O_ASYNC)
+        finally:
+            os.close(terminal)
     elif text.startswith("write "):
         with open(text.removeprefix("write "), "wb") as target:  # noqa: PTH123 - the attack
             target.write(b"escaped")
