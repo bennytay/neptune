@@ -9,7 +9,7 @@ from neptune.identity.hashing import content_id
 from neptune.identity.ids import record_id
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.knowledge import AssertionKind
+from neptune.model.knowledge import AssertionKind, Known, NotApplicable
 from neptune.model.provenance import ByteRange, EvidenceRef
 from neptune.model.time import Timestamp
 from neptune_memory.consolidate.base import (
@@ -23,7 +23,7 @@ from neptune_memory.schema.claim import Claim, ClaimObject, LedgerRecordRef
 from neptune_memory.schema.interval import OPEN, LedgerTx, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES
-from neptune_memory.schema.supersede import as_of, resolve
+from neptune_memory.schema.supersede import LineageError, as_of, is_closure, lineage_of, resolve
 
 CLOCK = record_id("test.clock", {"name": "site"})
 AMR = NodeRef(NodeType.MACHINE, "serial:AMR-12")
@@ -40,6 +40,8 @@ class Locator:
     version: str = "1"
     consolidator_id: str = "test.locator"
     model: ModelRef | None = None
+    dock: NodeRef = DOCK
+    ticks: int = 10
 
     def consolidate(
         self,
@@ -47,18 +49,25 @@ class Locator:
         previous: Sequence[Claim],
         config: Mapping[str, JsonValue],
     ) -> ConsolidatorOutput:
+        kind = "inferred" if self.model else AssertionKind.OBSERVED
         return ConsolidatorOutput(
-            (_draft("located_at", DOCK), _draft("evidenced_by", LedgerRecordRef(RECORD)))
+            (
+                _draft("located_at", self.dock, self.ticks, kind),
+                _draft("evidenced_by", LedgerRecordRef(RECORD), self.ticks, kind),
+            )
         )
 
 
-def _draft(predicate: str, obj: ClaimObject) -> ClaimDraft:
+def _draft(
+    predicate: str, obj: ClaimObject, ticks: int = 10, kind: object = AssertionKind.OBSERVED
+) -> ClaimDraft:
     return ClaimDraft(
         subject=AMR,
         predicate=predicate,
         object=obj,
-        valid_from=Timestamp(10, CLOCK),
-        assertion_kind=AssertionKind.OBSERVED,
+        confidence=Known(0.9) if kind == "inferred" else NotApplicable(),
+        valid_from=Timestamp(ticks, CLOCK),
+        assertion_kind=kind,  # type: ignore[arg-type]
         evidence=(EvidenceRef(content_id(b"bag"), (ByteRange(0, 8),)),),
         records=(RecordId(RECORD),),
     )
@@ -67,8 +76,15 @@ def _draft(predicate: str, obj: ClaimObject) -> ClaimDraft:
 PRIORITIES = {"test.locator": 1, "test.other": 2}
 
 
-def _build(version: str, tx: LedgerTx, consolidator_id: str = "test.locator") -> tuple[Claim, ...]:
-    (result,) = rebuild(LEDGER, [(Locator(version, consolidator_id), {})], recorded_at=tx)
+def _build(
+    version: str,
+    tx: LedgerTx,
+    consolidator_id: str = "test.locator",
+    config: Mapping[str, JsonValue] | None = None,
+    **fields: object,
+) -> tuple[Claim, ...]:
+    consolidator = Locator(version, consolidator_id, **fields)  # type: ignore[arg-type]
+    (result,) = rebuild(LEDGER, [(consolidator, config or {})], recorded_at=tx)
     return result.claims
 
 
@@ -100,8 +116,55 @@ def test_upgrade_leaves_other_consolidators_alone() -> None:
 
 
 def test_two_versions_at_one_transaction_are_refused() -> None:
-    with pytest.raises(ValueError, match="two versions"):
+    with pytest.raises(LineageError, match="two lineages") as caught:
         _history(_build("1", TX1), _build("2", TX1))
+    assert caught.value.code == "lineage_clash"
+
+
+def test_a_lineage_is_never_reused_after_it_was_replaced() -> None:
+    with pytest.raises(LineageError, match="reappears") as caught:
+        _history(_build("1", TX1), _build("2", TX2), _build("1", ledger_tx(3)))
+    assert caught.value.code == "lineage_reuse"
+
+
+@pytest.mark.parametrize("priorities", [{"test.locator": 2, "test.other": 1}, PRIORITIES])
+def test_old_lineage_closure_made_at_the_upgrade_transaction_is_retired(
+    priorities: Mapping[str, int],
+) -> None:
+    dock4 = NodeRef(NodeType.SITE, "site:dock-4")
+    claims = [
+        *_build("1", TX1, ticks=10),
+        *_build("1", TX2, "test.other", dock=dock4, ticks=20),  # narrows x@v1 at TX2
+        *_build("2", TX2, ticks=30),
+    ]
+    history = resolve(claims, CORE_PREDICATES, priorities).claims
+    current = as_of(history, TX2)
+    assert not [c for c in current if lineage_of(c)[:2] == ("test.locator", "1")]
+    assert all(
+        c.provenance.consolidator_version == "2"
+        for c in current
+        if c.provenance.consolidator_id == "test.locator"
+    )
+    narrowed = [c for c in history if is_closure(c) and c.object == DOCK]
+    assert all(c.superseded_at == TX2 for c in narrowed)
+    # The closure exists only when the lower-priority narrowing arrives before the upgrade.
+    assert bool(narrowed) == (priorities["test.other"] < priorities["test.locator"])
+
+
+def test_a_config_change_is_a_new_lineage_and_retires_the_old_one() -> None:
+    old = _build("1", TX1, config={"window": 1})
+    new = _build("1", TX2, config={"window": 2})
+    current = {c.id for c in as_of(_history(old, new), TX2)}
+    assert current == {c.id for c in new}
+
+
+def test_a_model_swap_recorded_in_config_retires_the_old_model() -> None:
+    m1, m2 = ModelRef("vlm-x", "1"), ModelRef("vlm-x", "2")
+    old = _build("1", TX1, config={"model": m1.to_json()}, model=m1)
+    new = _build("1", TX2, config={"model": m2.to_json()}, model=m2)
+    assert old and new
+    current = {c.id for c in as_of(_history(old, new), TX2)}
+    assert current == {c.id for c in new}
 
 
 def test_re_running_the_same_version_retires_nothing() -> None:

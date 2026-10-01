@@ -29,10 +29,14 @@ from neptune.model.knowledge import AssertionKind
 from neptune.model.provenance import EvidenceRef, evidence_ref_from_json
 from neptune.model.time import Timestamp, timestamp_from_json
 from neptune_memory.consolidate.base import (
+    IDENTITY_CONSOLIDATOR_ID,
     ClaimDraft,
     ConsolidationFinding,
     ConsolidatorOutput,
     ModelRef,
+)
+from neptune_memory.consolidate.base import (
+    SAME_AS as SAME_AS,
 )
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES, Cardinality, PredicateSpec
@@ -44,7 +48,6 @@ if TYPE_CHECKING:
     from neptune_memory.ledger import LedgerReader
     from neptune_memory.schema.claim import Claim
 
-SAME_AS: Final = "same_as"
 SAME_AS_CANDIDATE: Final = "same_as_candidate"
 
 # The vocabulary identity claims are validated against: the core plus the two identity predicates.
@@ -214,6 +217,8 @@ def _read(ledger: LedgerReader) -> _View:
     threads: dict[bytes, dict[RecordId, _Thread]] = {}
     links: dict[RecordId, _Link] = {}
     findings: list[ConsolidationFinding] = []
+    seen: dict[RecordId, object] = {}
+    conflicted: set[RecordId] = set()
     for ref in ledger.list_packages():
         for index, record in enumerate(ledger.read_records(ref.package_id, THREAD) or ()):
             try:
@@ -221,7 +226,8 @@ def _read(ledger: LedgerReader) -> _View:
             except _Malformed as exc:
                 findings.append(_malformed(THREAD, ref.package_id, index, str(exc)))
                 continue
-            threads.setdefault(_key(thread.node), {})[thread.record] = thread
+            if _admit(seen, conflicted, thread.record, thread, findings):
+                threads.setdefault(_key(thread.node), {})[thread.record] = thread
         for kind in (IDENTITY_LINK, CONFIGURATION_LINEAGE, OPERATOR_ASSERTION):
             for index, record in enumerate(ledger.read_records(ref.package_id, kind) or ()):
                 try:
@@ -229,10 +235,15 @@ def _read(ledger: LedgerReader) -> _View:
                 except _Malformed as exc:
                     findings.append(_malformed(kind, ref.package_id, index, str(exc)))
                     continue
-                if link is not None:
+                if link is not None and _admit(seen, conflicted, link.record, link, findings):
                     links[link.record] = link
+    for group_of in threads.values():
+        for rid in conflicted & group_of.keys():
+            del group_of[rid]
+    for rid in conflicted & links.keys():
+        del links[rid]
     nodes: dict[bytes, _Node] = {}
-    for key in sorted(threads):
+    for key in sorted(k for k in threads if threads[k]):
         group = tuple(threads[key][rid] for rid in sorted(threads[key]))
         types = sorted({t.node_type for t in group})
         if len(types) > 1:
@@ -248,6 +259,31 @@ def _read(ledger: LedgerReader) -> _View:
             continue
         nodes[key] = _Node(node_ref(types[0], group[0].node), group)
     return _View(nodes, tuple(links[k] for k in sorted(links)), tuple(findings))
+
+
+def _admit(
+    seen: dict[RecordId, object],
+    conflicted: set[RecordId],
+    rid: RecordId,
+    parsed: object,
+    findings: list[ConsolidationFinding],
+) -> bool:
+    """Whether to keep a record; one id with two different contents is dropped with a finding."""
+    if rid in conflicted:
+        return False
+    previous = seen.setdefault(rid, parsed)
+    if previous == parsed:
+        return True
+    conflicted.add(rid)
+    findings.append(
+        ConsolidationFinding(
+            code="identity.record_conflict",
+            severity=Severity.ERROR,
+            message="one record id carries different content in two places; record not used",
+            records=(rid,),
+        )
+    )
+    return False
 
 
 class _Components:
@@ -280,7 +316,7 @@ def _ref_key(ref: EvidenceRef) -> bytes:
 class IdentityConsolidator:
     """Deterministic ``same_as`` / ``same_as_candidate`` claims. Takes no configuration."""
 
-    consolidator_id: Final = "memory.identity"
+    consolidator_id: Final = IDENTITY_CONSOLIDATOR_ID
     version: Final = "1"
     model: Final[ModelRef | None] = None
 

@@ -36,7 +36,9 @@ land.
      re-commissioned arm cell). `assertion_kind = observed`.
    - `operator_assertion` with `predicate = same_as`: an operator's recorded assertion.
      `assertion_kind = stated`.
-   Both ends must be nodes of the same type.
+   Both ends must be nodes of the same type. The runner enforces this for every consolidator, not just this
+   one: only `memory.identity` may emit `same_as`, and never `inferred`. Any other `same_as` draft becomes a
+   `consolidate.ungrounded_same_as` finding. `derived/` consolidators may emit only `same_as_candidate`.
 3. **Everything else is a candidate, never a fact.** Two same-type nodes whose threads cite an identical
    evidence ref (same source, same locator: one whole URDF), and whose logical ids are in different
    namespaces, get a `same_as_candidate` claim each way. Two values in one namespace (two serials) are
@@ -52,8 +54,10 @@ land.
    identity is superseding a claim, never splitting a node.
 5. **Vocabulary.** `same_as` and `same_as_candidate` (`many`, every node type) extend `CORE_PREDICATES` as
    `consolidate.identity.IDENTITY_PREDICATES`; MVL-105 may fold them into the published core.
-6. **Hostile input is findings.** A malformed record, a link naming a logical id with no node, a self-link or a
-   cross-type link yields a finding and no claim; the rest of the build is unaffected.
+6. **Hostile input is findings.** Each of these yields a finding and no claim, and the rest of the build is
+   unaffected: a malformed record, a link naming a logical id with no node, a self-link, a cross-type link,
+   or one record id carrying different content in two packages (`identity.record_conflict`; neither copy is
+   used, so the last one never wins).
 
 Consumed Ledger record kinds (read only through `LedgerReader`), pinned when MVL-82 / MVL-85 land. Every one
 carries `id` (record id), `valid_from` (compiler `Timestamp`) and `evidence` (non-empty `EvidenceRef` list):
@@ -90,22 +94,28 @@ input order is irrelevant; Ledger transaction time is bookkeeping and not hashed
 id; a version, config or model change gives a sibling id. An upgrade adds sibling claims; nothing edits or
 deletes a claim from an earlier lineage.
 
-**Upgrades over time** (amends ADR 0002 §4's resolver; code in `schema/supersede.py`):
+**Upgrades over time** (amends ADR 0002 §4's resolver; code in `schema/supersede.py`). A *lineage* is
+`(consolidator id, version, config hash)`. A new version, a new config, or a model swap recorded in the
+config is therefore a new lineage.
 
-- **(a) A new transaction.** Re-consolidating old records under a new version is a new build, recorded at a
-  new Ledger transaction, the `recorded_at` passed to `rebuild`. It never reuses the old claims'
-  transaction, so `as_of` at any earlier transaction answers exactly as it did before the upgrade.
-- **(b) A defined order.** One version per consolidator per transaction: `resolve` refuses claims from two
-  versions of one consolidator at one `recorded_at`, and `rebuild` already refuses a consolidator twice in one
-  plan. Two versions are therefore always ordered by transaction, and version strings are never compared.
-  Arrival order stays `(recorded_at, consolidator priority, claim id)`.
-- **(c) Retirement.** The first claim a consolidator records at a new version, at transaction `t`, retires
-  every current claim of that consolidator's other versions recorded before `t`, closure versions included.
-  Each gets `superseded_at = t`. Nothing is deleted and valid time is not cut. Claims equal across versions
-  are siblings (different ids), so the new lineage replaces the old one instead of duplicating it. Re-running
-  the same version retires nothing: its claims keep their ids and their first `recorded_at`. A rollback is a
-  new version string; a version string is never reused for different behaviour.
-- **Known gap.** Retirement is triggered by the new version's first claim, so an upgrade that emits no claims
+- **(a) A new transaction.** Re-consolidating old records in a new lineage is a new build, recorded at a new
+  Ledger transaction (the `recorded_at` passed to `rebuild`). It never reuses the old claims' transaction,
+  so `as_of` at any earlier transaction answers exactly as it did before the upgrade.
+- **(b) A defined order.** Each consolidator has one lineage per transaction: `resolve` raises
+  `LineageError("lineage_clash")` otherwise, and `rebuild` already refuses a consolidator twice in one plan.
+  Lineages are therefore always ordered by transaction, and version strings are never compared. Arrival order
+  stays `(recorded_at, consolidator priority, claim id)`.
+- **(c) Retirement.** The first claim a consolidator records in a new lineage, at transaction `t`, retires
+  every current claim of its other lineages, including closure versions. A closure the resolver cut at `t`
+  itself, when a lower-priority consolidator narrowed the old claim earlier in the same transaction, is
+  retired too. Each gets `superseded_at = t`. Nothing is deleted and valid time is not cut. Claims equal
+  across lineages are siblings (different ids), so the new lineage replaces the old one rather than
+  duplicating it. Re-running the same lineage retires nothing: its claims keep their ids and their first
+  `recorded_at`.
+- **No reuse.** A lineage that reappears after another replaced it (v1 → v2 → v1) raises
+  `LineageError("lineage_reuse")`. This is checked over every recording, so it is caught even when the rerun
+  reproduces the old claim ids. A rollback is a new version string.
+- **Known gap.** Retirement is triggered by the new lineage's first claim, so an upgrade that emits no claims
   retires nothing. Closing that needs the Ledger to record consolidation runs (MVL-85 / MVL-105).
 
 ### 4. Rebuild

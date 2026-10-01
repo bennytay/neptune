@@ -41,6 +41,10 @@ if TYPE_CHECKING:
     from neptune_memory.schema.claim import ClaimAssertionKind, ClaimId, ClaimObject
     from neptune_memory.schema.nodes import NodeRef
 
+# ADR 0003 §1.2: only the identity consolidator grounds ``same_as``, and never by inference.
+SAME_AS: Final = "same_as"
+IDENTITY_CONSOLIDATOR_ID: Final = "memory.identity"
+
 # Record kind hashed into finding ids. Changing it re-lineages every finding: new ADR.
 FINDING_KIND: Final = "memory.finding"
 MAX_MESSAGE: Final = 1000
@@ -243,6 +247,15 @@ def _stamp(
 ) -> Claim | ConsolidationFinding:
     try:
         records = tuple(sorted(set(draft.records)))
+        if draft.predicate == SAME_AS and (
+            transform.consolidator_id != IDENTITY_CONSOLIDATOR_ID
+            or is_inferred(draft.assertion_kind)
+        ):
+            message = (
+                f"same_as is grounded only by {IDENTITY_CONSOLIDATOR_ID} and never inferred; "
+                f"{transform.consolidator_id} may emit same_as_candidate instead"
+            )
+            return _finding("ungrounded_same_as", transform, message, records)
         if is_inferred(draft.assertion_kind) != (transform.model is not None):
             allowed = "inferred" if transform.model is not None else "observed or stated"
             message = f"{draft.predicate} claim is {draft.assertion_kind}; expected {allowed}"

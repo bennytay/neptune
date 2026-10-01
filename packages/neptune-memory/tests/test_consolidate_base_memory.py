@@ -24,6 +24,7 @@ from neptune_memory.consolidate.base import (
     rebuild,
     run_consolidator,
 )
+from neptune_memory.consolidate.identity import IDENTITY_PREDICATES
 from neptune_memory.ledger import LedgerReader, StubLedger
 from neptune_memory.schema.claim import Claim, LedgerRecordRef
 from neptune_memory.schema.interval import LedgerTx, ledger_tx
@@ -313,6 +314,52 @@ def test_rebuild_feeds_only_earlier_claims_forward() -> None:
 
     rebuild(_ledger(), [(Spy(), {}), (Spy(consolidator_id="test.spy"), {})], recorded_at=TX)
     assert seen == [("test.evidenced", 0), ("test.spy", 2)]
+
+
+@pytest.mark.parametrize(
+    ("consolidator", "config"),
+    [
+        (EvidencedBy(consolidator_id="test.other"), {}),
+        (EvidencedBy(model=MODEL, kind="inferred"), {"model": MODEL.to_json()}),
+        (
+            EvidencedBy(consolidator_id="memory.identity", model=MODEL, kind="inferred"),
+            {"model": MODEL.to_json()},
+        ),
+    ],
+    ids=["deterministic-non-identity", "derived", "inferred-under-identity-id"],
+)
+def test_only_the_identity_consolidator_grounds_same_as(
+    consolidator: EvidencedBy, config: Mapping[str, JsonValue]
+) -> None:
+    draft = _draft(predicate="same_as", object=NodeRef(NodeType.MACHINE, "serial:UR10E-2042"))
+    if consolidator.model:
+        draft = replace(draft, assertion_kind="inferred", confidence=Known(0.7))
+    wrapped = Returns(
+        ConsolidatorOutput((draft,)), consolidator.consolidator_id, "1", consolidator.model
+    )
+    result = run_consolidator(
+        wrapped, _ledger(), (), config, recorded_at=TX, registry=IDENTITY_PREDICATES
+    )
+    assert not result.claims
+    assert [f.code for f in result.findings] == ["consolidate.ungrounded_same_as"]
+
+
+def test_derived_consolidator_may_emit_a_same_as_candidate() -> None:
+    draft = replace(
+        _draft(predicate="same_as_candidate", object=NodeRef(NodeType.MACHINE, "serial:B")),
+        assertion_kind="inferred",
+        confidence=Known(0.7),
+    )
+    wrapped = Returns(ConsolidatorOutput((draft,)), "test.vlm", "1", MODEL)
+    result = run_consolidator(
+        wrapped,
+        _ledger(),
+        (),
+        {"model": MODEL.to_json()},
+        recorded_at=TX,
+        registry=IDENTITY_PREDICATES,
+    )
+    assert len(result.claims) == 1 and not result.findings
 
 
 def test_reserved_resolver_id_is_refused() -> None:

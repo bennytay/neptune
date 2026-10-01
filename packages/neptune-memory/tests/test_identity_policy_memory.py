@@ -294,6 +294,14 @@ def test_identical_thread_records_in_two_packages_are_one_node() -> None:
     assert not _run({"pkg-1": [thread], "pkg-2": [thread]}).claims
 
 
+def test_two_thread_records_with_one_logical_id_are_one_node() -> None:
+    first = _thread(LEG_A, SHARED_URDF)
+    second = {**_thread(LEG_A, content_id(b"bag a2")), "id": _rid("ledger_thread", "a-again")}
+    ledger = _ledger({"pkg-1": [first], "pkg-2": [second]})
+    assert nodes(ledger) == (node_ref(MACHINE, LEG_A),)
+    assert not _run({"pkg-1": [first], "pkg-2": [second]}).findings
+
+
 # --- hostile input -----------------------------------------------------------------------------
 
 
@@ -317,6 +325,21 @@ def test_dangling_self_and_cross_type_links_are_findings_not_claims() -> None:
         "identity.self_link",
         "identity.type_mismatch",
     ]
+
+
+def test_one_record_id_with_two_contents_is_a_conflict_not_last_wins() -> None:
+    link = _link("identity_link", "drone", DRONE_ASSET, DRONE_LOG, identifier=SYS_UUID)
+    forged = {**link, "right": SPOT_SERIAL.to_json()}
+    packages = _drone()
+    packages["pkg-spot"] = [_thread(SPOT_SERIAL, BAG2), forged]
+    result = _run(packages)
+    assert not _of(result, SAME_AS)
+    assert [f.code for f in result.findings] == ["identity.record_conflict"]
+    thread = _thread(LEG_A, SHARED_URDF)
+    altered = {**thread, "evidence": [_cite(content_id(b"other"))]}
+    clash = _run({"pkg-1": [thread], "pkg-2": [altered]})
+    assert [f.code for f in clash.findings] == ["identity.record_conflict"]
+    assert nodes(_ledger({"pkg-1": [thread], "pkg-2": [altered]})) == ()
 
 
 def test_conflicting_node_types_for_one_logical_id_make_no_node() -> None:
