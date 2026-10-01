@@ -359,7 +359,13 @@ class CatalogContract:
                     stated = world_time(records[(entry.packages[0], entry.record_id)])
                     assert codec.to_json(entry)["world"] == stated  # type: ignore[index, call-overload]
             assert got == members
-            assert all(s.resolution == NotApplicable() for s in thread.lineage_sets)
+            expected_sets = {
+                (records[(p, r)]["kind"], evidence_anchor(records[(p, r)]).source)  # type: ignore[union-attr]
+                for p, r, _ in members
+            }
+            got_sets = {(s.kind, s.source) for s in thread.lineage_sets}
+            assert got_sets == expected_sets and len(thread.lineage_sets) == len(expected_sets)
+            assert {s.resolution for s in thread.lineage_sets} == {NotApplicable()}
 
     def test_world_order_partitions_by_clock(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
@@ -373,6 +379,7 @@ class CatalogContract:
             for partition in thread.partitions:
                 if partition.kind == "untimed":
                     assert partition.clock_key is None
+                    assert partition.entries, "a partition is never empty"
                     assert all(not isinstance(e.world, Known) for e in partition.entries)
                     continue
                 assert partition.clock_key is not None
@@ -433,6 +440,21 @@ class CatalogContract:
         }
         return thread, entries
 
+    def _assert_resolved(
+        self, catalog: CatalogApi, sibling: WorkedPackage, thread: Any, expected: Any
+    ) -> None:
+        """The view lists exactly history's lineage sets, each resolved to ``expected``."""
+        (key,) = machine_threads([sibling])
+        history = catalog.thread(key, "world", History())
+        sets = {(s.kind, s.source) for s in history.lineage_sets}
+        assert sets, "the drone's machine thread has lineage sets"
+        assert len(history.lineage_sets) == len(sets)
+        got = {(s.kind, s.source): s.resolution for s in thread.lineage_sets}
+        assert len(thread.lineage_sets) == len(got) == len(sets)
+        assert set(got) == sets
+        for lineage_set, resolution in sorted(got.items()):
+            assert resolution == expected, lineage_set
+
     @staticmethod
     def _members(package: WorkedPackage) -> set[tuple[str, str]]:
         (members,) = machine_threads([package]).values()
@@ -451,9 +473,8 @@ class CatalogContract:
         thread, entries = self._current(catalog, siblings["v2"], LatestTransform())
         v2 = self._transform(siblings["v2"])
         everything = sorted(self._transform(siblings[n]) for n in ("v1a", "v1b", "v2"))
-        assert thread.lineage_sets, "the drone's machine thread has lineage sets"
+        self._assert_resolved(catalog, siblings["v2"], thread, Known(v2))  # {v1a, v1b, v2}
         for lineage_set in thread.lineage_sets:
-            assert lineage_set.resolution == Known(v2), "{v1 cfgA, v1 cfgB, v2} -> Known(v2)"
             assert list(lineage_set.transforms) == everything
         assert entries == self._members(siblings["v2"])
 
@@ -465,8 +486,7 @@ class CatalogContract:
         thread, entries = self._current(catalog, siblings["v1a"], LatestTransform())
         tied = sorted(self._transform(siblings[n]) for n in ("v1a", "v1b"))
         expected = Ambiguous(tuple(Candidate(t) for t in tied))
-        assert thread.lineage_sets
-        assert all(s.resolution == expected for s in thread.lineage_sets)
+        self._assert_resolved(catalog, siblings["v1a"], thread, expected)
         assert entries == set(), "an Ambiguous lineage set selects no records"
 
     def test_pinned_selects_exactly_one_transform(
@@ -476,11 +496,11 @@ class CatalogContract:
             catalog.register(siblings[name].root)
         v1b = self._transform(siblings["v1b"])
         thread, entries = self._current(catalog, siblings["v1b"], Pinned(v1b))
-        assert all(s.resolution == Known(v1b) for s in thread.lineage_sets)
+        self._assert_resolved(catalog, siblings["v1b"], thread, Known(v1b))
         assert entries == self._members(siblings["v1b"])
         absent = "rec:sha256:" + "9" * 64
         thread, entries = self._current(catalog, siblings["v1b"], Pinned(absent))
-        assert all(s.resolution == NotCovered() for s in thread.lineage_sets)
+        self._assert_resolved(catalog, siblings["v1b"], thread, NotCovered())
         assert entries == set(), "pinned never falls back"
 
     def test_as_registered_by_follows_one_package(
@@ -490,11 +510,11 @@ class CatalogContract:
             catalog.register(siblings[name].root)
         v1a = siblings["v1a"]
         thread, entries = self._current(catalog, v1a, AsRegisteredBy(v1a.package_id))
-        assert all(s.resolution == Known(self._transform(v1a)) for s in thread.lineage_sets)
+        self._assert_resolved(catalog, v1a, thread, Known(self._transform(v1a)))
         assert entries == self._members(v1a)
         other = siblings["other"].package_id
         thread, entries = self._current(catalog, v1a, AsRegisteredBy(other))
-        assert all(s.resolution == NotCovered() for s in thread.lineage_sets)
+        self._assert_resolved(catalog, v1a, thread, NotCovered())
         assert entries == set()
 
     def test_conflicting_id_is_refused_and_nothing_is_written(
