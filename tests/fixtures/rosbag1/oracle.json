@@ -3,7 +3,7 @@
   "connections": [
    {
     "callerid": "/arm_driver",
-    "count": 5,
+    "count": 6,
     "id": 0,
     "latching": 0,
     "md5sum": "3066dcd76a6cfaef579bd0f34173e9fd",
@@ -38,7 +38,7 @@
     "type": "tf2_msgs/msg/TFMessage"
    }
   ],
-  "end": 1790000000440000001,
+  "end": 1790000000520000001,
   "error": null,
   "messages": [
    [
@@ -136,6 +136,12 @@
     1790000000440000000,
     186,
     "28f46c7d9c6dbe5f623443ef37992d1ed39303e1d9cdee28908a0f7663bd8665"
+   ],
+   [
+    "/joint_states",
+    1790000000520000000,
+    296,
+    "2e4791299dedf0dbdebeaac282095ee4c4ec89d4830abe643deea3cb5818bba3"
    ]
   ],
   "start": 1790000000005000000
@@ -151,7 +157,7 @@
   "connections": [
    {
     "callerid": "/arm_driver",
-    "count": 5,
+    "count": 6,
     "id": 0,
     "latching": 0,
     "md5sum": "3066dcd76a6cfaef579bd0f34173e9fd",
@@ -186,7 +192,7 @@
     "type": "tf2_msgs/msg/TFMessage"
    }
   ],
-  "end": 1790000000440000001,
+  "end": 1790000000520000001,
   "error": null,
   "messages": [
    [
@@ -284,6 +290,12 @@
     1790000000440000000,
     186,
     "28f46c7d9c6dbe5f623443ef37992d1ed39303e1d9cdee28908a0f7663bd8665"
+   ],
+   [
+    "/joint_states",
+    1790000000520000000,
+    296,
+    "2e4791299dedf0dbdebeaac282095ee4c4ec89d4830abe643deea3cb5818bba3"
    ]
   ],
   "start": 1790000000005000000
@@ -292,7 +304,7 @@
   "connections": [
    {
     "callerid": "/arm_driver",
-    "count": 5,
+    "count": 6,
     "id": 0,
     "latching": 0,
     "md5sum": "3066dcd76a6cfaef579bd0f34173e9fd",
@@ -327,7 +339,7 @@
     "type": "tf2_msgs/msg/TFMessage"
    }
   ],
-  "end": 1790000000440000001,
+  "end": 1790000000520000001,
   "error": null,
   "messages": [
    [
@@ -425,6 +437,12 @@
     1790000000440000000,
     186,
     "28f46c7d9c6dbe5f623443ef37992d1ed39303e1d9cdee28908a0f7663bd8665"
+   ],
+   [
+    "/joint_states",
+    1790000000520000000,
+    296,
+    "2e4791299dedf0dbdebeaac282095ee4c4ec89d4830abe643deea3cb5818bba3"
    ]
   ],
   "start": 1790000000005000000
@@ -433,7 +451,7 @@
   "connections": [
    {
     "callerid": "/arm_driver",
-    "count": 5,
+    "count": 6,
     "id": 0,
     "latching": 0,
     "md5sum": "3066dcd76a6cfaef579bd0f34173e9fd",
@@ -468,7 +486,7 @@
     "type": "tf2_msgs/msg/TFMessage"
    }
   ],
-  "end": 1790000000440000001,
+  "end": 1790000000520000001,
   "error": null,
   "messages": [
    [
@@ -566,6 +584,12 @@
     1790000000440000000,
     186,
     "28f46c7d9c6dbe5f623443ef37992d1ed39303e1d9cdee28908a0f7663bd8665"
+   ],
+   [
+    "/joint_states",
+    1790000000520000000,
+    296,
+    "2e4791299dedf0dbdebeaac282095ee4c4ec89d4830abe643deea3cb5818bba3"
    ]
   ],
   "start": 1790000000005000000
@@ -574,7 +598,7 @@
   "connections": [
    {
     "callerid": "/arm_driver",
-    "count": 5,
+    "count": 6,
     "id": 0,
     "latching": 0,
     "md5sum": "3066dcd76a6cfaef579bd0f34173e9fd",
@@ -609,7 +633,7 @@
     "type": "tf2_msgs/msg/TFMessage"
    }
   ],
-  "end": 1790000000440000001,
+  "end": 1790000000520000001,
   "error": null,
   "messages": [
    [
@@ -707,6 +731,12 @@
     1790000000440000000,
     186,
     "28f46c7d9c6dbe5f623443ef37992d1ed39303e1d9cdee28908a0f7663bd8665"
+   ],
+   [
+    "/joint_states",
+    1790000000520000000,
+    296,
+    "2e4791299dedf0dbdebeaac282095ee4c4ec89d4830abe643deea3cb5818bba3"
    ]
   ],
   "start": 1790000000005000000

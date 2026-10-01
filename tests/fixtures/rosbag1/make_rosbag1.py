@@ -1,4 +1,4 @@
-"""Generate the ROS 1 bag adapter's fixtures: one recording, written several ways, and damaged copies.
+"""Generate the ROS 1 bag adapter's fixtures: one recording, written several ways, damaged too.
 
 Run ``uv run python tests/fixtures/rosbag1/make_rosbag1.py`` to rewrite every fixture, then
 ``uv run python tests/fixtures/rosbag1/make_rosbag1.py --oracle`` to read each one with the
@@ -8,12 +8,12 @@ interpreter's ``bz2``; ``tests/unit/adapters/test_rosbag1_fixtures.py`` checks t
 file is what ``build()`` gives and that ``oracle.json`` agrees with the adapter.
 
 The recording is a mobile manipulator (not a flight log): an arm's joint states, the base's
-odometry and the transform tree, 16 messages with real ROS 1 serialisation:
+odometry and the transform tree, 17 messages with real ROS 1 serialisation:
 
 - connections 0 ``/joint_states`` (sensor_msgs/JointState, six arm joints), 1 ``/odom``
   (nav_msgs/Odometry), 2 ``/tf`` (tf2_msgs/TFMessage) and 3 ``/tf_static`` (latched, one message);
   the message definitions are the real ones, their md5sums the ones ROS computes;
-- three chunks of 6, 6 and 4 messages, each followed by its Index Data records; Connection records
+- three chunks of 6, 6 and 5 messages, each followed by its Index Data records; Connection records
   inside the chunks before a connection's first message there, repeated after the chunks with one
   Chunk Info per chunk, and the Bag Header pointing at them.
 
@@ -28,7 +28,6 @@ Files (see ``README.md``): ``robot_none.bag``, ``robot_bz2.bag``, ``robot_lz4.ba
 
 import bz2
 import importlib.util
-import json
 import struct
 import subprocess
 import sys
@@ -228,23 +227,30 @@ def _messages() -> tuple[Message, ...]:
     out: list[Message] = []
     seqs = [0, 0, 0, 0]
 
-    def add(conn: int, ms: int, make: Callable[[int, int], bytes]) -> None:
+    def add(conn: int, ms: int, step: int) -> None:
         time = T0 + ms * MS
-        out.append(Message(conn, time, make(seqs[conn], time)))
+        seq = seqs[conn]
         seqs[conn] += 1
+        makers = (
+            lambda: _joint_state(seq, time, step),
+            lambda: _odom(seq, time, step),
+            lambda: _tf(seq, time, step),
+            lambda: _tf_static(seq, time),
+        )
+        out.append(Message(conn, time, makers[conn]()))
 
-    add(3, 5, lambda s, t: _tf_static(s, t))
+    add(3, 5, 0)
     for step in range(5):
         base = 10 + 100 * step
-        add(0, base, lambda s, t, k=step: _joint_state(s, t, k))
-        add(1, base + 20, lambda s, t, k=step: _odom(s, t, k))
-        add(2, base + 30, lambda s, t, k=step: _tf(s, t, k))
-    add(0, 520, lambda s, t: _joint_state(s, t, 5))
+        add(0, base, step)
+        add(1, base + 20, step)
+        add(2, base + 30, step)
+    add(0, 520, 5)
     return tuple(out)
 
 
 MESSAGES: Final = _messages()
-CHUNKS: Final = ((0, 6), (6, 12), (12, 16))
+CHUNKS: Final = ((0, 6), (6, 12), (12, 17))
 
 
 # --- Encoding -----------------------------------------------------------------------------------
@@ -334,9 +340,9 @@ def write(options: Options) -> tuple[bytes, dict[str, tuple[int, int]]]:
                 topic = None
                 if options.impostor and options.impostor[:2] == (number, message.conn):
                     topic = options.impostor[2]
-                connection = connection_record(by_id[message.conn], topic)
-                at[f"chunk_connection:{number}:{message.conn}"] = (len(records), len(connection))
-                records += connection
+                declaration = connection_record(by_id[message.conn], topic)
+                at[f"chunk_connection:{number}:{message.conn}"] = (len(records), len(declaration))
+                records += declaration
             entries.setdefault(message.conn, []).append((message.time, len(records)))
             records += message_record(message)
         stored = _compress(options.compression, bytes(records))

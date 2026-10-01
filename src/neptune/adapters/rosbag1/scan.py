@@ -138,12 +138,15 @@ class TopRecord:
         return self.end
 
 
-def scan(source: SourceReader, start: int, end: int, max_header: int) -> Iterator[TopRecord]:
+def scan(
+    source: SourceReader, start: int, end: int, max_header: int, window: int = _SCAN_READ
+) -> Iterator[TopRecord]:
     """The records of ``[start, end)`` in file order; the last is ``cut`` if it overruns ``end``.
 
     Reads in bounded pieces: small records come whole, larger ones only as their header. A header
     over ``max_header`` bytes is not read: its record is yielded with ``problem`` and the walk
     goes on from where its lengths say the data ends, so a lying length costs findings, not time.
+    ``window`` is how much it reads ahead when it must read.
     """
     buffer, at = b"", start
     pos = start
@@ -154,7 +157,7 @@ def scan(source: SourceReader, start: int, end: int, max_header: int) -> Iterato
 
     def load(offset: int, size: int) -> None:
         nonlocal buffer, at
-        buffer, at = read_exact(source, offset, min(max(size, _SCAN_READ), end - offset)), offset
+        buffer, at = read_exact(source, offset, min(max(size, window), end - offset)), offset
 
     while pos < end:
         if pos + LENGTH > end:

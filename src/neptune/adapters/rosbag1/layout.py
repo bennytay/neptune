@@ -14,6 +14,7 @@ from typing import Final
 
 from neptune.adapters.contract import SourceReader
 from neptune.adapters.rosbag1.records import (
+    BAG_HEADER_RECORD,
     MAGIC,
     MIN_MESSAGE_RECORD,
     BagHeader,
@@ -60,7 +61,10 @@ def read_head(source: SourceReader, limits: Limits) -> Head:
     magic = Place(((0, min(len(MAGIC), source.size)),))
     if source.size < len(MAGIC) or read_exact(source, 0, len(MAGIC)) != MAGIC:
         return Head(magic, None, 0, "magic")
-    first = next(scan(source, len(MAGIC), source.size, limits.header_bytes), None)
+    # the Bag Header is padded to 4096 bytes: read no further ahead than that
+    first = next(
+        scan(source, len(MAGIC), source.size, limits.header_bytes, BAG_HEADER_RECORD), None
+    )
     if first is None:
         return Head(magic, None, source.size, "missing")
     if first.cut:
