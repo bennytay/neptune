@@ -66,11 +66,12 @@ make fmt        format and auto-fix
 ## Workflow: one Linear issue → one branch → one PR
 
 Linear project: **Neptune — Robotics Ingestion Fabric** (`P-MVL-11`, team `MVL`). Issues carry
-dependencies as `blockedBy`; do not start an issue whose blockers are not Done.
+dependencies as `blockedBy`; start an issue only when its blockers are Done, or when a blocker's PR is
+CI-green and In Review (then branch from that PR). A coordinator agent runs the loop; implementers do 1–8.
 
 1. Read the full issue, its scope notes, and its blockers' PRs. Read the relevant `docs/`.
 2. Move the issue to **In Progress**. Create the branch using the issue's `gitBranchName`
-   (`benjamintay07/mvl-N-slug`).
+   (`benjamintay07/mvl-N-slug`) from `origin/main`, or from the blocker's PR branch if it is still open.
 3. Write a short plan in the issue as a comment if the work is non-trivial. Identify any decision that
    needs an ADR before implementing it. Make every decision yourself with your best judgement and record
    it; never hand one back to the maintainer.
@@ -84,26 +85,31 @@ dependencies as `blockedBy`; do not start an issue whose blockers are not Done.
    update `ARCHITECTURE.md` in the same PR and fill the template's **Architecture change** section.
    Otherwise leave both untouched.
 8. Move the issue to **In Review** only when every acceptance criterion is demonstrably met and CI is green.
-9. **Stop. Never merge.** The maintainer reviews and merges every PR personally. **Done** happens on
-   merge, never on "code exists"; after merge, comment the merge SHA on the issue.
+9. **Stop at In Review; implementers never merge.** The coordinator merges with
+   `scripts/factory-merge.sh <pr> <head-sha>` once an independent reviewer agent returns MERGE and CI is
+   green. **Done** happens on merge, never on "code exists"; the coordinator comments the merge SHA on the issue.
 
-**Picking the next issue** (when told "implement the next MVL issue"):
-1. If any issue is **In Progress**, resume it. Never start a second one alongside it.
-2. Otherwise, consider only **Todo** issues whose `blockedBy` issues are all **Done**. The previous milestone's
-   gate issue must also be Done.
+**Picking the next issue** (the coordinator runs several at once, one worktree each: at most 3 implementers
+during M2, 5 once the MVL-57 gate is Done; see `docs/developer-workflow.md` § Software factory):
+1. Resume any **In Progress** issue that has no live implementer before starting a new one.
+2. Otherwise, consider **Todo** issues whose `blockedBy` issues are all **Done**, or whose blocker's PR is
+   CI-green and **In Review** (branch from that PR). The previous milestone's gate issue must be Done.
 3. Take the lowest milestone first. Within a milestone, follow the order in `docs/audit-2026-09-30.md` §7.
-4. If nothing qualifies because blockers are **In Review**, say which PRs are waiting for a merge. If there is
-   still a tie, pick one with your best judgement and say why.
+4. If nothing qualifies, say which PRs or issues are in the way. If there is still a tie, pick one with your
+   best judgement and say why.
 5. Name the chosen issue before starting work.
 
 ## Git
 
 - `main` is protected: PR required, CI green, linear history, no force-push. Never commit to `main`.
-- Branch per issue (name above). Rebase on `main` before opening a PR. PR title = issue title.
-- Agents never merge, approve, or enable auto-merge. The maintainer squash-merges.
+- Branch per issue (name above). PR title = issue title. Keep a PR current with `git merge origin/main`
+  (`main` requires up-to-date branches); never rebase or force-push a branch that has been pushed.
+- Implementers never merge, approve, or enable auto-merge; the coordinator squash-merges.
 - Conventional commits with package scope: `feat(model): add TimestampDomain`, `docs(adr): 0005 timestamps`,
   `test(identity): chunked hash determinism`. Trailer line: `Refs: MVL-N`.
-- Never force-push a shared branch. Never rewrite `main` history.
+- Never rewrite `main` history.
+- ADR numbers: take the next free number after checking `main` and every open PR; the coordinator renumbers
+  on conflict.
 - One issue per PR. If an issue is too big for one reviewable PR, split it into Linear sub-issues first.
 - Commit only when asked or when the workflow step calls for it; never commit secrets, fixtures > 512 KB,
   or ingest output.
