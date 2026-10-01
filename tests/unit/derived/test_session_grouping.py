@@ -211,6 +211,26 @@ def test_parts_numbered_by_a_session_keyword_are_separate_runs(tmp_path: Path) -
     assert all(p.status is Status.PROPOSED for p in grouping.proposals)
 
 
+def test_split_parts_of_a_keyword_named_recording_are_contested_never_separated(
+    tmp_path: Path,
+) -> None:
+    # ``rosbag record -O run_3 --split``: the keyword names the recording, not each part.
+    grouping = group(built(tmp_path, "named_split"))
+    found = by_members(grouping)
+    whole = found[frozenset({"named_split/run_3_0.bag", "named_split/run_3_1.bag"})]
+    parts = [
+        found[frozenset({"named_split/run_3_0.bag"})],
+        found[frozenset({"named_split/run_3_1.bag"})],
+    ]
+    assert whole.rule == Rule.NUMBERED_SEQUENCE and whole.status is Status.CONTESTED
+    assert {p.rule for p in parts} == {Rule.RECORDING_FILE}
+    assert set(whole.contested) == {p.id for p in parts}
+    assert all(p.contested == (whole.id,) for p in parts)
+    [finding] = grouping.findings
+    assert finding.code == CONTESTED
+    assert finding.details["rules"] == ["numbered_sequence", "recording_file"]
+
+
 def test_media_named_by_the_same_time_are_one_session(tmp_path: Path) -> None:
     grouping = group(built(tmp_path, "dump"))
     assert set(by_members(grouping)) == {
@@ -375,6 +395,7 @@ TRUE_RUNS: Final = [
     },
     {"split/patrol_2024-05-01-15-00-00_0.bag"},
     {"parts/x_0.mcap", "parts/x_1.mcap"},
+    {"named_split/run_3_0.bag", "named_split/run_3_1.bag"},
     {"episodes/episode_1.mcap"},
     {"episodes/episode_2.mcap"},
     {"session_04/2024-05-01_10-00-00.mcap"},
@@ -413,6 +434,7 @@ def test_the_messy_tree_is_grouped_correctly_or_marked_ambiguous(tmp_path: Path)
     contested = {f.subject for f in grouping.findings if f.code == CONTESTED}
     assert contested == {
         LocalPath("drive_07/camera_2024-05-01_12-30-00/frame_0001.png"),
+        LocalPath("named_split/run_3_0.bag"),
         LocalPath("parts/x.yaml"),
         LocalPath("session_04/2024-05-01_10-00-00.mcap"),
         LocalPath("trials/trial_2024-05-01_12-30-00.mcap"),

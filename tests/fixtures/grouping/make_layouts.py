@@ -78,6 +78,11 @@ LAYOUTS: Final[dict[str, tuple[Entry, ...]]] = {
         File(b"episodes/episode_1.mcap"),
         File(b"episodes/episode_2.mcap"),
     ),
+    # rosbag1 ``-O run_3 --split``: the keyword names the recording, not each part. Contested.
+    "named_split": (
+        File(b"named_split/run_3_0.bag"),
+        File(b"named_split/run_3_1.bag"),
+    ),
     # A flat dump of media named by start time: two sessions, no recording among them.
     "dump": (
         File(b"dump/2024-05-01_12-30-00_front.mp4"),

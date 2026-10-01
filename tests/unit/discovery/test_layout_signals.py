@@ -121,6 +121,27 @@ def test_a_session_keyword_needs_its_own_number(name: bytes, keyword: bool) -> N
 
 
 @pytest.mark.parametrize(
+    ("name", "part_keyword"),
+    [
+        (b"episode_2.mcap", True),
+        (b"Run-007.bag", True),
+        (b"x_run_1.bag", True),  # the keyword stands alone before the number
+        (b"run_3_0.bag", False),  # rosbag1 ``-O run_3 --split``: part 0 of run 3
+        (b"run3_1.bag", False),
+        (b"prune_1.bag", False),  # inside a word
+        (b"x_0.bag", False),
+        (b"run_3.bag.active", False),  # no part on this stem
+    ],
+)
+def test_a_part_number_is_a_keywords_only_when_the_keyword_ends_its_prefix(
+    name: bytes, part_keyword: bool
+) -> None:
+    signals = name_signals(name)
+    assert signals.part_keyword is part_keyword
+    assert not part_keyword or signals.keyword  # a keyword's own number is a keyword's number
+
+
+@pytest.mark.parametrize(
     ("name", "base", "stem", "extension"),
     [
         (b"flight_03.params.yaml", b"flight_03", b"flight_03.params", "yaml"),

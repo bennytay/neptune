@@ -611,7 +611,7 @@ class _Proposer:
                         ),
                     )
                 )
-            elif not first.keyword:
+            elif not first.part_keyword:
                 grouped.update(parts)
                 units.append(
                     _Unit(
@@ -634,6 +634,8 @@ class _Proposer:
                     )
                 )
             # Numbered by a session keyword (run_1, episode_2): each part is its own recording.
+            # A keyword before the part number (run_3_0 and run_3_1 of ``-O run_3 --split``)
+            # numbers no session: those parts are contested above, like any others.
         units.extend(self._recording(directory, p) for p in recordings if p not in grouped)
         return units
 

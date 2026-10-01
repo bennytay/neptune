@@ -30,7 +30,8 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
      and what names say by fixed grammars: a civil date-time (`2024-05-01_12-30-00`, rosbag2's
      `2024_05_01-12_30_00`, `20240501T123000`, validated as a calendar date and time), a trailing
      part number (`_3`, never the tail of a date or time), a session keyword with a number
-     (`run_007`, `episode-3`, never a date's year), base, stem and extension. These are facts
+     (`run_007`, `episode-3`, never a date's year), whether a part number is such a keyword's
+     own (`episode_2`, not the `_0` of `run_3_0`), base, stem and extension. These are facts
      about names, carry no meaning, and are computed from bytes, so names that are not UTF-8 are
      read exactly.
    - `neptune.derived` holds everything grouping infers: the `Grouper` interface, v0's
@@ -62,7 +63,9 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
      its parent like a file. A date alone (`2024-05-01/`) names a day, not a session.
    - Context files above session directories, or in a directory with no loose session, are
      unassigned: a directory boundary is never crossed by a guess.
-   - Parts numbered by a session keyword (`episode_1`, `episode_2`) are separate recordings.
+   - Parts numbered by a session keyword (`episode_1`, `episode_2`) are separate recordings. Only
+     the part number counts: a keyword earlier in the name (`run_3_0.bag`, `run_3_1.bag` from
+     rosbag1 `-O run_3 --split`) numbers no session, so those parts are contested like any others.
 4. **Conflicts are contested, never resolved by precedence.** Where two rules read the same files
    differently, every reading becomes a proposal and none is chosen. Two proposals contest each
    other exactly when they share a file (status `contested`, each naming the other), so the parts

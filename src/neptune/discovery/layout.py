@@ -69,6 +69,12 @@ _KEYWORD: Final = re.compile(
     + rb")[-_ ]?([0-9]+)(?![0-9])",
     re.IGNORECASE,
 )
+# A part's prefix that ends in a session keyword: the part number is then the keyword's own
+# (``episode_2``), not a part of a recording a keyword names (``run_3_0`` of ``-O run_3 --split``).
+_KEYWORD_END: Final = re.compile(
+    rb"(?:^|[^a-z])(?:" + b"|".join(keyword.encode() for keyword in SESSION_KEYWORDS) + rb")$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -105,7 +111,9 @@ class NameSignals:
     - ``time`` is the first civil date-time the name states, if any.
     - ``part`` is ``(prefix, digits)`` when the stem ends in ``_<digits>`` or ``-<digits>`` that
       are not the end of ``time``.
-    - ``keyword`` is whether the name holds a session keyword followed by a number.
+    - ``keyword`` is whether the name holds a session keyword followed by a number, anywhere.
+    - ``part_keyword`` is whether ``part``'s number is a session keyword's own: its prefix ends
+      in the keyword (``episode_2``). A keyword earlier in the name (``run_3_0``) is not.
     """
 
     name: bytes
@@ -115,6 +123,7 @@ class NameSignals:
     time: CivilTime | None
     part: tuple[bytes, bytes] | None
     keyword: bool
+    part_keyword: bool
 
 
 def name_signals(name: bytes) -> NameSignals:
@@ -143,6 +152,7 @@ def name_signals(name: bytes) -> NameSignals:
         time=_civil_time(name),
         part=part,
         keyword=keyword,
+        part_keyword=part is not None and _KEYWORD_END.search(part[0]) is not None,
     )
 
 
