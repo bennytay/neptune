@@ -1,0 +1,13 @@
+{
+  "api_version": "0.0.0",
+  "as_of": 1,
+  "current": {
+    "package_id": "sha256:74f0761606322f58fe41abd43b24f12ffda223ecad2996404d7dd20bfd6e0b0f",
+    "record_id": "rec:sha256:e2c144c52c3f1c398b3a8f14738901a89d68bd7853dce97e558c112e596044f6",
+    "record_kind": "frame_transform",
+    "registered": 1
+  },
+  "kind": "current_view",
+  "superseded": [],
+  "thread_id": "manipulator-handeye"
+}

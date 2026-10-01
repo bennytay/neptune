@@ -1,0 +1,7 @@
+title = "Graph schema and claim model of bi-temporal deployment memory"
+status = "planned"
+consumers = ["neptune-context", "neptune-deploy", "neptune-learn"]
+
+[owner]
+package = "neptune-memory"
+module = "neptune_memory.schema"
