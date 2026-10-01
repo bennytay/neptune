@@ -113,19 +113,33 @@ class Array:
             raise ValueError(f"an array length is a non-negative integer, got {self.length!r}")
 
     def to_json(self) -> JsonObject:
-        return {"kind": str(self.kind), "length": self.length}
+        return _present({"kind": str(self.kind), "length": self.length})
 
 
-def _array_from_json(data: JsonValue) -> Array | None:
-    if data is None:
-        return None
-    obj = exact_object(data, "array", {"kind", "length"})
-    length = None if obj["length"] is None else json_int(obj["length"], "length")
-    return Array(ArrayKind(json_str(obj["kind"], "kind")), length)
+def _array_from_json(data: JsonValue) -> Array:
+    obj = _some(data, "array", {"kind"}, {"length"})
+    return Array(ArrayKind(json_str(obj["kind"], "kind")), _optional_int(obj, "length"))
 
 
-def _optional_str(value: JsonValue, what: str) -> str | None:
-    return None if value is None else json_str(value, what)
+def _present(entries: Mapping[str, JsonValue | None]) -> JsonObject:
+    """``entries`` without the absent ones: canonical JSON has no null (ADR 0004)."""
+    return {key: value for key, value in entries.items() if value is not None}
+
+
+def _some(
+    data: JsonValue, what: str, required: set[str], optional: set[str]
+) -> Mapping[str, JsonValue]:
+    """A JSON object with every ``required`` key and any of the ``optional`` ones, no other."""
+    present = set(data) & optional if isinstance(data, Mapping) else set()
+    return exact_object(data, what, required | present)
+
+
+def _optional_str(obj: Mapping[str, JsonValue], key: str) -> str | None:
+    return json_str(obj[key], key) if key in obj else None
+
+
+def _optional_int(obj: Mapping[str, JsonValue], key: str) -> int | None:
+    return json_int(obj[key], key) if key in obj else None
 
 
 @dataclass(frozen=True)
@@ -148,33 +162,36 @@ class Field:
     unit: str | None = None
 
     def to_json(self) -> JsonObject:
-        return {
-            "array": None if self.array is None else self.array.to_json(),
-            "bound": self.bound,
-            "constant": self.constant,
-            "default": self.default,
-            "name": self.name,
-            "primitive": self.primitive,
-            "type": self.type,
-            "unit": self.unit,
-        }
+        return _present(
+            {
+                "array": None if self.array is None else self.array.to_json(),
+                "bound": self.bound,
+                "constant": self.constant,
+                "default": self.default,
+                "name": self.name,
+                "primitive": self.primitive,
+                "type": self.type,
+                "unit": self.unit,
+            }
+        )
 
 
 def _field_from_json(data: JsonValue) -> Field:
-    obj = exact_object(
+    obj = _some(
         data,
         "field",
-        {"array", "bound", "constant", "default", "name", "primitive", "type", "unit"},
+        {"name", "primitive", "type"},
+        {"array", "bound", "constant", "default", "unit"},
     )
     return Field(
         name=json_str(obj["name"], "name"),
         type=json_str(obj["type"], "type"),
         primitive=json_bool(obj["primitive"]),
-        array=_array_from_json(obj["array"]),
-        bound=None if obj["bound"] is None else json_int(obj["bound"], "bound"),
-        constant=_optional_str(obj["constant"], "constant"),
-        default=_optional_str(obj["default"], "default"),
-        unit=_optional_str(obj["unit"], "unit"),
+        array=_array_from_json(obj["array"]) if "array" in obj else None,
+        bound=_optional_int(obj, "bound"),
+        constant=_optional_str(obj, "constant"),
+        default=_optional_str(obj, "default"),
+        unit=_optional_str(obj, "unit"),
     )
 
 
@@ -216,16 +233,18 @@ class FieldPath:
     unit: str | None = None
 
     def to_json(self) -> JsonObject:
-        return {"kind": str(self.kind), "path": self.path, "type": self.type, "unit": self.unit}
+        return _present(
+            {"kind": str(self.kind), "path": self.path, "type": self.type, "unit": self.unit}
+        )
 
 
 def _path_from_json(data: JsonValue) -> FieldPath:
-    obj = exact_object(data, "path", {"kind", "path", "type", "unit"})
+    obj = _some(data, "path", {"kind", "path", "type"}, {"unit"})
     return FieldPath(
         json_str(obj["path"], "path"),
         json_str(obj["type"], "type"),
         PathKind(json_str(obj["kind"], "kind")),
-        _optional_str(obj["unit"], "unit"),
+        _optional_str(obj, "unit"),
     )
 
 
@@ -254,7 +273,7 @@ class Problem:
     line: int | None = None
 
     def to_json(self) -> JsonObject:
-        return {"line": self.line, "message": self.message, "reason": self.reason}
+        return _present({"line": self.line, "message": self.message, "reason": self.reason})
 
 
 @dataclass(frozen=True)
@@ -464,9 +483,9 @@ def _pointer_token(name: str) -> str:
     return name.replace("~", "~0").replace("/", "~1")
 
 
-def _resolve(root: Mapping[str, JsonValue], pointer: str) -> JsonValue:
+def _resolve(root: Mapping[str, object], pointer: str) -> object:
     """The value at a local JSON pointer (``#/a/b``), or ``None`` when there is none."""
-    node: JsonValue = root
+    node: object = root
     for token in pointer[2:].split("/") if pointer != "#" else ():
         token = token.replace("~1", "/").replace("~0", "~")
         if isinstance(node, Mapping) and token in node:
@@ -488,11 +507,11 @@ def _parse_json_schema(text: str, root_name: str, limits: SchemaLimits) -> list[
     if not isinstance(document, Mapping):
         raise _Malformed("malformed", "a JSON Schema is an object")
     names: dict[int, str] = {}  # each object schema visited, by identity, to its type name
-    pending: list[tuple[str, Mapping[str, JsonValue]]] = []
+    pending: list[tuple[str, Mapping[str, object]]] = []
     types: list[MessageType] = []
     count = 0
 
-    def name_of(schema: Mapping[str, JsonValue], name: str) -> str:
+    def name_of(schema: Mapping[str, object], name: str) -> str:
         if id(schema) not in names:
             if len(names) >= limits.max_types:
                 raise _Malformed("type_limit", f"more than {limits.max_types} types")
@@ -500,7 +519,7 @@ def _parse_json_schema(text: str, root_name: str, limits: SchemaLimits) -> list[
             pending.append((name, schema))
         return names[id(schema)]
 
-    def field(name: str, schema: JsonValue, pointer: str, array: bool = False) -> Field:
+    def field(name: str, schema: object, pointer: str, array: bool = False) -> Field:
         if not isinstance(schema, Mapping):
             return Field(name, "any", True)
         unit = schema.get("unit")
@@ -534,8 +553,10 @@ def _parse_json_schema(text: str, root_name: str, limits: SchemaLimits) -> list[
         return Field(name, "any", True, unit=unit)
 
     name_of(document, root_name)
-    while pending:
-        name, schema = pending.pop(0)
+    done = 0
+    while done < len(pending):
+        name, schema = pending[done]
+        done += 1
         properties = schema.get("properties", {})
         if not isinstance(properties, Mapping):
             raise _Malformed("malformed", f"{name}'s properties are not an object")
@@ -673,70 +694,73 @@ class StreamLayout:
 
     def to_json(self) -> JsonObject:
         layout = self.layout
-        return {
-            "assertion_kind": OBSERVED,
-            "definition": None if self.definition is None else self.definition.to_json(),
-            "id": self.id,
-            "kind": LAYOUT_KIND,
-            "paths": None if layout is None else [p.to_json() for p in layout.paths],
-            "problem": None if self.problem is None else self.problem.to_json(),
-            "root": None if layout is None else layout.root,
-            "schema_encoding": self.schema_encoding,
-            "schema_name": self.schema_name,
-            "schema_version": DERIVED_SCHEMA_VERSION,
-            "state": str(self.state),
-            "stream": self.stream,
-            "transform": self.transform,
-            "truncated": None if layout is None else layout.truncated,
-            "types": None if layout is None else [t.to_json() for t in layout.types],
-        }
+        return _present(
+            {
+                "assertion_kind": OBSERVED,
+                "definition": None if self.definition is None else self.definition.to_json(),
+                "id": self.id,
+                "kind": LAYOUT_KIND,
+                "paths": None if layout is None else [p.to_json() for p in layout.paths],
+                "problem": None if self.problem is None else self.problem.to_json(),
+                "root": None if layout is None else layout.root,
+                "schema_encoding": self.schema_encoding,
+                "schema_name": self.schema_name,
+                "schema_version": DERIVED_SCHEMA_VERSION,
+                "state": str(self.state),
+                "stream": self.stream,
+                "transform": self.transform,
+                "truncated": None if layout is None else layout.truncated,
+                "types": None if layout is None else [t.to_json() for t in layout.types],
+            }
+        )
 
 
-_LAYOUT_KEYS: Final = {
+_LAYOUT_REQUIRED: Final = {"id", "state", "stream", "transform"}
+_LAYOUT_OPTIONAL: Final = {
     "definition",
-    "id",
     "paths",
     "problem",
     "root",
     "schema_encoding",
     "schema_name",
-    "state",
-    "stream",
-    "transform",
     "truncated",
     "types",
 }
+_LAYOUT_PARTS: Final = {"paths", "root", "truncated", "types"}
 
 
 def stream_layout_from_json(data: JsonValue) -> StreamLayout:
     """Parse strictly; the id must recompute from the stream and transform."""
-    obj = derived_object(data, LAYOUT_KIND, _LAYOUT_KEYS, frozenset({OBSERVED}))
+    present = set(data) & _LAYOUT_OPTIONAL if isinstance(data, Mapping) else set()
+    obj = derived_object(data, LAYOUT_KIND, _LAYOUT_REQUIRED | present, frozenset({OBSERVED}))
     state = LayoutState(json_str(obj["state"], "state"))
     layout = None
     if state is LayoutState.KNOWN:
+        if missing := _LAYOUT_PARTS - present:
+            raise ValueError(f"a known layout lacks {sorted(missing)}")
         layout = Layout(
             json_str(obj["root"], "root"),
             tuple(_type_from_json(t) for t in json_array(obj["types"], "types")),
             tuple(_path_from_json(p) for p in json_array(obj["paths"], "paths")),
             json_bool(obj["truncated"]),
         )
-    elif any(obj[key] is not None for key in ("paths", "root", "truncated", "types")):
+    elif present & _LAYOUT_PARTS:
         raise ValueError(f"a {state} layout has no types or paths")
     problem = None
-    if obj["problem"] is not None:
-        entry = exact_object(obj["problem"], "problem", {"line", "message", "reason"})
+    if "problem" in obj:
+        entry = _some(obj["problem"], "problem", {"message", "reason"}, {"line"})
         problem = Problem(
             json_str(entry["reason"], "reason"),
             json_str(entry["message"], "message"),
-            None if entry["line"] is None else json_int(entry["line"], "line"),
+            _optional_int(entry, "line"),
         )
     return StreamLayout(
         id=parse_record_id(json_str(obj["id"], "id")),
         transform=parse_record_id(json_str(obj["transform"], "transform")),
         stream=parse_record_id(json_str(obj["stream"], "stream")),
-        schema_name=_optional_str(obj["schema_name"], "schema_name"),
-        schema_encoding=_optional_str(obj["schema_encoding"], "schema_encoding"),
-        definition=None if obj["definition"] is None else evidence_ref_from_json(obj["definition"]),
+        schema_name=_optional_str(obj, "schema_name"),
+        schema_encoding=_optional_str(obj, "schema_encoding"),
+        definition=evidence_ref_from_json(obj["definition"]) if "definition" in obj else None,
         state=state,
         layout=layout,
         problem=problem,
