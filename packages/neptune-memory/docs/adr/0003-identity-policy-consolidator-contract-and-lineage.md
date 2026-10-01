@@ -90,6 +90,24 @@ input order is irrelevant; Ledger transaction time is bookkeeping and not hashed
 id; a version, config or model change gives a sibling id. An upgrade adds sibling claims; nothing edits or
 deletes a claim from an earlier lineage.
 
+**Upgrades over time** (amends ADR 0002 §4's resolver; code in `schema/supersede.py`):
+
+- **(a) A new transaction.** Re-consolidating old records under a new version is a new build, recorded at a
+  new Ledger transaction, the `recorded_at` passed to `rebuild`. It never reuses the old claims'
+  transaction, so `as_of` at any earlier transaction answers exactly as it did before the upgrade.
+- **(b) A defined order.** One version per consolidator per transaction: `resolve` refuses claims from two
+  versions of one consolidator at one `recorded_at`, and `rebuild` already refuses a consolidator twice in one
+  plan. Two versions are therefore always ordered by transaction, and version strings are never compared.
+  Arrival order stays `(recorded_at, consolidator priority, claim id)`.
+- **(c) Retirement.** The first claim a consolidator records at a new version, at transaction `t`, retires
+  every current claim of that consolidator's other versions recorded before `t`, closure versions included.
+  Each gets `superseded_at = t`. Nothing is deleted and valid time is not cut. Claims equal across versions
+  are siblings (different ids), so the new lineage replaces the old one instead of duplicating it. Re-running
+  the same version retires nothing: its claims keep their ids and their first `recorded_at`. A rollback is a
+  new version string; a version string is never reused for different behaviour.
+- **Known gap.** Retirement is triggered by the new version's first claim, so an upgrade that emits no claims
+  retires nothing. Closing that needs the Ledger to record consolidation runs (MVL-85 / MVL-105).
+
 ### 4. Rebuild
 
 Memory is a deterministic function of (Ledger snapshot, ordered consolidator set, versions, configs).

@@ -18,6 +18,10 @@ overlapping valid intervals on the same clock:
 
 Nothing is deleted. Claims on different clocks are never compared: the pair is reported as a
 ``clock_mismatch`` finding and both stay current.
+
+Consolidator upgrades (ADR 0003 §3): one version per consolidator per transaction, else
+``ValueError``. A consolidator's first claim at a new version retires, at that transaction, every
+current claim of its other versions (``superseded_at`` set, valid time untouched).
 """
 
 from __future__ import annotations
@@ -119,12 +123,28 @@ def resolve(
         raise ValueError(f"{RESOLVER_ID} is reserved for the resolver")
     for claim in inputs:
         check_claim(claim, registry)
+    builds: dict[tuple[int, str], set[str]] = {}
+    for claim in inputs:
+        build = (claim.recorded_at, claim.provenance.consolidator_id)
+        builds.setdefault(build, set()).add(claim.provenance.consolidator_version)
+    clashes = sorted(f"{cid}@{tx}" for (tx, cid), vs in builds.items() if len(vs) > 1)
+    if clashes:
+        # ADR 0003 §3: one version per consolidator per transaction; versions are never ordered.
+        raise ValueError(f"two versions of one consolidator at one transaction: {clashes}")
     versions: dict[ClaimId, Claim] = {}
     origin: dict[ClaimId, Claim] = {}  # version id -> the assertion it narrows
     current: dict[tuple[NodeRef, str], list[ClaimId]] = {}
     findings: list[ResolutionFinding] = []
 
+    lineage: dict[str, str] = {}  # consolidator id -> version of its latest build so far
+
     for arriving in sorted(inputs, key=lambda c: arrival_key(c, priorities)):
+        source = arriving.provenance
+        if lineage.get(source.consolidator_id, source.consolidator_version) != (
+            source.consolidator_version
+        ):
+            _retire(versions, origin, current, source, arriving.recorded_at)
+        lineage[source.consolidator_id] = source.consolidator_version
         origin[arriving.id] = arriving
         if registry.spec(arriving.predicate).cardinality is Cardinality.MANY:
             versions[arriving.id] = arriving
@@ -201,6 +221,32 @@ def as_of(history: Iterable[Claim], tx: LedgerTx) -> tuple[Claim, ...]:
 
 
 # --- Internals --------------------------------------------------------------------------------
+
+
+def _retire(
+    versions: dict[ClaimId, Claim],
+    origin: Mapping[ClaimId, Claim],
+    current: Mapping[tuple[NodeRef, str], list[ClaimId]],
+    upgrade: ClaimProvenance,
+    tx: LedgerTx,
+) -> None:
+    """ADR 0003 §3: a consolidator's new version retires every current claim of its other versions.
+
+    Each such version (closures of them included) gets ``superseded_at = tx``; nothing is deleted
+    and valid time is not cut, so ``as_of`` before ``tx`` still answers from the old lineage.
+    """
+    for vid, version in list(versions.items()):
+        root = origin[vid].provenance
+        if (
+            root.consolidator_id == upgrade.consolidator_id
+            and root.consolidator_version != upgrade.consolidator_version
+            and isinstance(version.superseded_at, Open)
+            and version.recorded_at < tx
+        ):
+            versions[vid] = replace(version, superseded_at=tx)
+            for live in current.values():
+                if vid in live:
+                    live.remove(vid)
 
 
 def _beats(arriving: Claim, held: Claim) -> bool:
