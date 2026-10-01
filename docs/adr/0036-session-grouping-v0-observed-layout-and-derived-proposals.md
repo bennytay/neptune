@@ -46,7 +46,7 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
 
    | Rule | Forms or places | Band |
    |---|---|---|
-   | `declared` | a session the config declares (§6) | 1.0 |
+   | `declared` | a session the config declares: stated, not inferred (§6) | 1.0 |
    | `rosbag2_directory` | one recording: a directory with `metadata.yaml` beside `.db3`/`.mcap` | 0.9 |
    | `split_sequence` | one recording: parts `<prefix>_<n>` of one extension whose prefix states a start time (rosbag1 `--split`); missing indices are listed | 0.8 |
    | `recording_file` | one recording: any other `.mcap`, `.bag`, `.ulg`, `.db3` | 0.7 |
@@ -90,8 +90,9 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
      started in steps, or several;
    - a session directory holding exactly one session-named directory and files of its own: the
      outer reading (which includes the inner one), or the readings inside it;
+   - a declared session that holds part of a rule's reading, and the reading (§6);
    - two declared sessions claiming one file (two claiming exactly the same files are one
-     proposal whose reasons name both).
+     proposal whose reasons and `declared` name both).
 
    A context file that several loose sessions could each hold is a `session_unassigned` record,
    `ambiguous`, naming them as candidates, with one `neptune.grouping.ambiguous_member` finding per
@@ -117,17 +118,35 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
    `inside` when the link sits in its directory. Links stay walk results with discovery's finding
    as their record; grouping adds no canonical record for them.
 6. **The override hook** is `GroupingConfig.sessions`: declared sessions by name and root-relative
-   paths (a file, or a directory meaning everything below it). They claim their files before any
-   rule runs, at confidence 1.0; one that matches nothing is a `neptune.grouping.
-   declaration_unmatched` finding (missing, warning). The config, with `gap_seconds` (default 60),
-   is the grouping transform's config, so an override is a new lineage. The job takes it as
-   `JobOptions.grouping`; MVL-14's manifest fills it.
+   paths (a file, or a directory meaning everything below it). A declared session is the user's
+   statement, so its proposal is `stated`, at confidence 1.0, and carries the declaration
+   (`declared`) as its provenance under the transform whose config holds it. It is set against
+   the rules, never above them: the rules still read the whole tree, and each of their readings
+   is compared with each declaration by its extent.
+   - A declaration that holds a reading whole resolves it: the reading is not offered (unless an
+     offered reading includes it), and a reason on the declaration lists what it holds. So
+     declaring a contested case's true session settles it.
+   - A declaration that holds part of a reading contradicts the observed layout (a stale or
+     mistyped declaration splits a rosbag2 directory or a run's directory): both are offered,
+     so they contest each other, and a `neptune.grouping.declared_contradicts_layout` finding
+     (inconsistent, warning) names the declaration and the readings it cuts. Nothing is
+     overridden silently.
+   - A file the rules left unassigned that a declaration holds is placed by it (a reason counts
+     them); one whose candidate sessions a declaration holds whole without it is `unknown`,
+     `outside_declaration`.
+   - A declaration that matches nothing is a `neptune.grouping.declaration_unmatched` finding
+     (missing, warning).
+
+   The config, with `gap_seconds` (default 60), is the grouping transform's config, so an
+   override is a new lineage. The job takes it as `JobOptions.grouping`; MVL-14's manifest
+   fills it.
 7. **Two derived record kinds**, derived schema version 1, `assertion_kind` `"inferred"` on every
-   line, so nothing reads one as evidence:
+   line but a declared session's, which is `"stated"`; nothing reads one as evidence:
    - `session_proposal`: `id`, `transform`, `rule`, `confidence`, `status`, `directory` (a
      location, or `{"kind": "root"}`), `members` (revision id, location, role `recording` or
      `context`, the rule that placed it and its band), `includes` (proposal ids it holds whole,
-     each also in `contested`), `links`, `reasons` (rule, one line, facts) and `contested`. The
+     each also in `contested`), `links`, `reasons` (rule, one line, facts), `contested` and
+     `declared` (the declarations it states, by name; empty exactly when it is inferred). The
      id is a record id over the transform, rule, directory, member revisions and includes only,
      so it never depends on what is said of the rest of the grouping.
    - `session_unassigned`: `id` (over transform and revision), `transform`, `revision`,
@@ -165,6 +184,9 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
 - **Classify recordings by the probe's selection.** It ties grouping to the registry, so adding
   an adapter would regroup unchanged trees under the same transform. Extensions are names; MVL-34
   reads the `Run` records adapters emit.
+- **Declarations claim their files before any rule runs.** A stale or mistyped declaration
+  would then cut a rosbag2 directory or a run in two without a word; setting it against the
+  rules' readings costs one pass over their extents and says so.
 - **Resolve conflicts by rule precedence** (innermost directory wins, splits beat merges). It
   is a silent choice between readings the names support equally, which non-negotiable 4 forbids.
   Contested proposals cost a consumer a choice; a wrong silent choice costs a wrong dataset.

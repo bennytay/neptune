@@ -157,6 +157,7 @@ def test_a_declared_session_reaches_the_package_under_its_own_transform(
     )
     [proposal] = [p for p in proposals(declared) if p.rule == Rule.DECLARED]
     assert proposal.confidence == 1.0 and len(proposal.members) == 2
+    assert proposal.assertion_kind == "stated" and proposal.status is Status.PROPOSED
     assert not any(p.rule == Rule.NAME_TIME_PROXIMITY for p in proposals(declared))
     transforms = {t.adapter_id: t for t in declared.receipt.transforms}
     assert transforms[GROUPING_ID].id == LayoutGrouper(config).transform.id

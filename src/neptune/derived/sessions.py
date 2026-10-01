@@ -18,10 +18,12 @@ it lives in the package's ``derived/`` tables, never beside the evidence in ``re
   readings that do not hold it), so a missing placement is never a blank.
 
 Derived records carry their own envelope: ``kind``, ``schema_version`` (``DERIVED_SCHEMA_VERSION``,
-not the canonical model's) and ``assertion_kind`` ``"inferred"``, so no reader can take one for
-evidence. They point at evidence (each member's ``SourceRevision`` id), never the reverse. Ids
-derive from content with ``identity.ids.record_id``, as findings' do: the same transform proposing
-the same files under the same rule at the same place is the same proposal.
+not the canonical model's) and ``assertion_kind``: ``"inferred"``, or ``"stated"`` for a session
+the user declared, which carries its ``DeclaredSession`` as provenance. Neither is evidence about
+the sources, and no reader can take one for it. They point at evidence (each member's
+``SourceRevision`` id), never the reverse. Ids derive from content with ``identity.ids.record_id``,
+as findings' do: the same transform proposing the same files under the same rule at the same place
+is the same proposal.
 """
 
 import math
@@ -36,12 +38,15 @@ from neptune.identity.ids import record_id
 from neptune.model._fields import exact_object, json_array, json_str
 from neptune.model.ids import RecordId, check_text, check_token, parse_record_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.model.knowledge import AssertionKind
 from neptune.model.source import LocalPath, RawLocalPath, local_location, location_from_json
 
 DERIVED_SCHEMA_VERSION: Final = 1
 PROPOSAL_KIND: Final = "session_proposal"
 UNASSIGNED_KIND: Final = "session_unassigned"
 _ENVELOPE: Final = frozenset({"assertion_kind", "kind", "schema_version"})
+# A session the user declares is their statement, not an inference (ADR 0036 §6).
+STATED: Final = str(AssertionKind.STATED)
 
 
 class Role(StrEnum):
@@ -118,6 +123,38 @@ def _bytes_from_json(obj: Mapping[str, JsonValue], name: str) -> bytes:
     if name in obj:
         return json_str(obj[name], name).encode("utf-8")
     return bytes.fromhex(json_str(obj[f"{name}_hex"], f"{name}_hex"))
+
+
+@dataclass(frozen=True)
+class DeclaredSession:
+    """A session the user declares: every file at or below ``paths`` (root-relative, ``/``-
+    separated, as ``LocalPath`` text); paths are kept sorted. A proposal of it is ``stated``,
+    with the declaration as its provenance, and is set against the rules' readings, never
+    above them (ADR 0036 §6)."""
+
+    name: str
+    paths: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        check_text("name", self.name)
+        if not isinstance(self.paths, tuple) or not self.paths:
+            raise ValueError("a declared session names at least one path")
+        for path in self.paths:
+            LocalPath(path)  # relative, no '.', '..' or empty parts, no NUL
+        if len(set(self.paths)) != len(self.paths):
+            raise ValueError(f"declared session {self.name!r} names a path twice")
+        object.__setattr__(self, "paths", tuple(sorted(self.paths)))
+
+    def to_json(self) -> JsonObject:
+        return {"name": self.name, "paths": list(self.paths)}
+
+
+def declared_session_from_json(data: JsonValue) -> DeclaredSession:
+    entry = exact_object(data, "declared session", {"name", "paths"})
+    paths = json_array(entry["paths"], "paths")
+    return DeclaredSession(
+        json_str(entry["name"], "name"), tuple(json_str(p, "path") for p in paths)
+    )
 
 
 @dataclass(frozen=True)
@@ -276,6 +313,7 @@ class SessionProposal:
     links: tuple[SessionLink, ...]
     reasons: tuple[Reason, ...]
     contested: tuple[RecordId, ...]
+    declared: tuple[DeclaredSession, ...] = ()
 
     def __post_init__(self) -> None:
         parse_record_id(self.id)
@@ -314,20 +352,33 @@ class SessionProposal:
             raise ValueError("contested must be other proposals' ids, sorted, each once")
         if (self.status is Status.CONTESTED) != bool(self.contested):
             raise ValueError("a proposal is contested exactly when another proposal contests it")
+        for declaration in self.declared:
+            if not isinstance(declaration, DeclaredSession):
+                raise TypeError(f"declared must be DeclaredSessions, got {declaration!r}")
+        names = [declaration.name for declaration in self.declared]
+        if names != sorted(set(names)):
+            raise ValueError("declared must be sorted by name, each name once")
         expected = proposal_id(
             self.transform, self.rule, self.directory, self.revisions(), self.includes
         )
         if self.id != expected:
             raise ValueError(f"proposal {self.id}: id does not match its content")
 
+    @property
+    def assertion_kind(self) -> str:
+        """``stated`` for a session the user declared (``declared`` is its provenance, under the
+        transform whose config holds it); ``inferred`` for every reading a rule made."""
+        return STATED if self.declared else INFERRED
+
     def revisions(self) -> tuple[RecordId, ...]:
         return tuple(sorted(member.revision for member in self.members))
 
     def to_json(self) -> JsonObject:
         return {
-            "assertion_kind": INFERRED,
+            "assertion_kind": self.assertion_kind,
             "confidence": self.confidence,
             "contested": list(self.contested),
+            "declared": [declaration.to_json() for declaration in self.declared],
             "directory": self.directory.to_json(),
             "id": self.id,
             "includes": list(self.includes),
@@ -353,6 +404,7 @@ def session_proposal(
     links: Iterable[SessionLink] = (),
     reasons: Iterable[Reason] = (),
     contested: Iterable[RecordId] = (),
+    declared: Iterable[DeclaredSession] = (),
 ) -> SessionProposal:
     """A proposal with its id derived, its members, includes and links in canonical order."""
     ordered = tuple(sorted(members, key=lambda member: member.location.raw))
@@ -370,11 +422,15 @@ def session_proposal(
         links=tuple(sorted(set(links), key=SessionLink.key)),
         reasons=tuple(reasons),
         contested=others,
+        declared=tuple(sorted(declared, key=lambda declaration: declaration.name)),
     )
 
 
-def _derived_object(data: JsonValue, kind: str, keys: set[str]) -> Mapping[str, JsonValue]:
-    """One derived record's JSON, strictly: this derived version, this kind, inferred, ``keys``."""
+def _derived_object(
+    data: JsonValue, kind: str, keys: set[str], assertions: frozenset[str] = frozenset({INFERRED})
+) -> Mapping[str, JsonValue]:
+    """One derived record's JSON, strictly: this derived version, this kind, one of
+    ``assertions`` (inferred, unless the kind may be stated), ``keys``."""
     if not isinstance(data, Mapping):
         raise ValueError(f"a {kind} must be a JSON object, got {type(data).__name__}")
     if data.get("schema_version") != DERIVED_SCHEMA_VERSION:
@@ -384,8 +440,9 @@ def _derived_object(data: JsonValue, kind: str, keys: set[str]) -> Mapping[str, 
         )
     if data.get("kind") != kind:
         raise ValueError(f"expected kind {kind!r}, got {data.get('kind')!r}")
-    if data.get("assertion_kind") != INFERRED:
-        raise ValueError(f"a derived record is {INFERRED!r}, got {data.get('assertion_kind')!r}")
+    if data.get("assertion_kind") not in assertions:
+        allowed = " or ".join(sorted(assertions))
+        raise ValueError(f"a {kind} is {allowed}, got {data.get('assertion_kind')!r}")
     return exact_object(data, kind, keys | _ENVELOPE)
 
 
@@ -397,6 +454,7 @@ def session_proposal_from_json(data: JsonValue) -> SessionProposal:
         {
             "confidence",
             "contested",
+            "declared",
             "directory",
             "id",
             "includes",
@@ -407,8 +465,9 @@ def session_proposal_from_json(data: JsonValue) -> SessionProposal:
             "status",
             "transform",
         },
+        frozenset({INFERRED, STATED}),
     )
-    return SessionProposal(
+    proposal = SessionProposal(
         id=parse_record_id(json_str(obj["id"], "id")),
         transform=parse_record_id(json_str(obj["transform"], "transform")),
         rule=json_str(obj["rule"], "rule"),
@@ -426,7 +485,13 @@ def session_proposal_from_json(data: JsonValue) -> SessionProposal:
             parse_record_id(json_str(other, "contested"))
             for other in json_array(obj["contested"], "contested")
         ),
+        declared=tuple(
+            declared_session_from_json(item) for item in json_array(obj["declared"], "declared")
+        ),
     )
+    if obj["assertion_kind"] != proposal.assertion_kind:
+        raise ValueError("a proposal is stated exactly when it carries the declarations it states")
+    return proposal
 
 
 def unassigned_id(transform: RecordId, revision: RecordId) -> RecordId:

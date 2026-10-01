@@ -193,8 +193,8 @@ class JobOptions:
     runtime transform's config, so a package's runtime findings name the policy they were made
     under. ``config`` gives each adapter, by id, the option values to configure it with. ``job``
     names the job in its envelope; by default a fresh random token. ``grouping`` configures
-    session grouping (ADR 0036): its gap, and the sessions the user declares, which override
-    every rule; it is the grouping transform's config.
+    session grouping (ADR 0036): its gap, and the sessions the user declares, stated and set
+    against the rules' readings; it is the grouping transform's config.
     """
 
     attempts: int = DEFAULT_ATTEMPTS

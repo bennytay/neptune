@@ -10,6 +10,7 @@ from neptune.derived.grouping import GROUPING_ID, LayoutGrouper
 from neptune.derived.sessions import (
     DERIVED_SCHEMA_VERSION,
     ROOT_DIRECTORY,
+    DeclaredSession,
     LinkRelation,
     Placement,
     Reason,
@@ -124,6 +125,14 @@ def edit(data: dict[str, Any], **changes: Any) -> dict[str, Any]:
         (lambda d: edit(d, status="contested"), "contested exactly when"),
         (lambda d: edit(d, members=[]), "at least one file"),
         (lambda d: edit(d, includes=[d["id"]]), "includes must be other"),
+        (lambda d: edit(d, assertion_kind="stated"), "stated exactly when"),
+        (
+            lambda d: edit(
+                d, declared=[{"name": "b", "paths": ["x"]}, {"name": "a", "paths": ["x"]}]
+            ),
+            "sorted by name",
+        ),
+        (lambda d: edit(d, declared=[{"name": "a", "paths": []}]), "at least one path"),
         (lambda d: edit(d, includes=["rec:sha256:" + "0" * 64]), "contests every proposal"),
         (lambda d: edit(d, members=d["members"] * 2), "each path once"),
         (lambda d: edit(d, directory={"kind": "external"}), "external"),
@@ -143,6 +152,27 @@ def test_an_include_is_part_of_what_the_proposal_is() -> None:
     outer = proposal(includes=[inner.id], contested=[inner.id])
     assert outer.includes == (inner.id,) and outer.id != proposal(contested=[inner.id]).id
     assert session_proposal_from_json(outer.to_json()) == outer
+
+
+def test_a_declared_session_is_stated_with_its_declaration_as_provenance() -> None:
+    take = DeclaredSession("take", ("a.mcap",))
+    stated = proposal(rule="declared", confidence=1.0, declared=[take])
+    data = stated.to_json()
+    assert stated.assertion_kind == "stated" and data["assertion_kind"] == "stated"
+    assert data["declared"] == [{"name": "take", "paths": ["a.mcap"]}]
+    assert session_proposal_from_json(data) == stated
+    with pytest.raises(ValueError, match="stated exactly when"):
+        session_proposal_from_json(dict(data) | {"assertion_kind": "inferred"})
+    # A file no proposal holds is the rules' to say: never stated.
+    layout_file = file(b"notes.txt")
+    entry = unassigned_file(
+        transform=TRANSFORM,
+        revision=layout_file.revision,
+        location=layout_file.location,
+        reason="no_session",
+    ).to_json()
+    with pytest.raises(ValueError, match="inferred"):
+        unassigned_file_from_json(dict(entry) | {"assertion_kind": "stated"})
 
 
 def test_contested_names_others_never_itself() -> None:

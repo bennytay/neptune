@@ -2,12 +2,16 @@
 
 A ``Grouper`` turns a ``Layout`` (``neptune.discovery.layout``: where files and links sit and what
 their names say) into a ``Grouping``: session proposals, the files no proposal holds, and findings
-for what it could not decide. Everything it says is inferred, so it lives here, in ``derived/``,
-and reaches a package as derived tables beside the evidence, never as ``Run`` records.
+for what it could not decide. Everything it says is inferred (save the sessions a user declares,
+which are stated), so it lives here, in ``derived/``, and reaches a package as derived tables
+beside the evidence, never as ``Run`` records.
 
 ``LayoutGrouper`` is v0: filesystem-level signals only, by named rules with named confidences.
 
-1. **Declared sessions** (``GroupingConfig.sessions``, the manual override) take their files first.
+1. **Declared sessions** (``GroupingConfig.sessions``, the manual override) are stated proposals.
+   The rules below still read the whole tree; a declaration that holds a rule's reading whole
+   resolves it, and one that holds only part of a reading contradicts the layout: both are
+   offered, contested, with a finding. Nothing is overridden silently.
 2. **Recording units.** A rosbag2 directory (``metadata.yaml`` beside ``.db3``/``.mcap`` storage) is
    one recording; so are the parts ``<prefix>_<n>`` of a recording whose prefix states a start time
    (rosbag1 ``--split``). Parts whose prefix states no time are contested: one recording split, or
@@ -52,11 +56,16 @@ from neptune.derived.sessions import (
     Status,
     UnassignedFile,
     bytes_json,
+    declared_session_from_json,
     directory_location,
     proposal_id,
     session_proposal,
     unassigned_file,
 )
+
+# ``DeclaredSession`` lives beside the records, which carry it as a stated proposal's provenance;
+# it is exported here too, with the config that holds it.
+from neptune.derived.sessions import DeclaredSession as DeclaredSession
 from neptune.discovery.layout import (
     ROOT,
     CivilTime,
@@ -71,9 +80,9 @@ from neptune.discovery.layout import (
 from neptune.identity.findings import ingest_finding
 from neptune.identity.hashing import content_id
 from neptune.identity.provenance import transform_record
-from neptune.model._fields import exact_object, json_array, json_int, json_str
+from neptune.model._fields import exact_object, json_array, json_int
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
-from neptune.model.ids import RecordId, check_text
+from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.provenance import TransformRecord
 from neptune.model.source import LocalPath, local_location
@@ -94,11 +103,19 @@ BAG_METADATA: Final = b"metadata.yaml"
 CONTESTED: Final = f"{GROUPING_ID}.contested"
 AMBIGUOUS_MEMBER: Final = f"{GROUPING_ID}.ambiguous_member"
 DECLARATION_UNMATCHED: Final = f"{GROUPING_ID}.declaration_unmatched"
+DECLARED_CONTRADICTS_LAYOUT: Final = f"{GROUPING_ID}.declared_contradicts_layout"
 DEPTH_LIMIT: Final = f"{GROUPING_ID}.grouping_depth_limit"
-FINDING_CODES: Final = (AMBIGUOUS_MEMBER, CONTESTED, DECLARATION_UNMATCHED, DEPTH_LIMIT)
+FINDING_CODES: Final = (
+    AMBIGUOUS_MEMBER,
+    CONTESTED,
+    DECLARATION_UNMATCHED,
+    DECLARED_CONTRADICTS_LAYOUT,
+    DEPTH_LIMIT,
+)
 
 # Unassigned reasons.
 NO_SESSION: Final = "no_session"
+OUTSIDE_DECLARATION: Final = "outside_declaration"
 SEVERAL_SESSIONS: Final = "several_sessions"
 SEVERAL_STEMS: Final = "several_stems"
 TOO_MANY_SESSIONS: Final = "too_many_sessions"
@@ -160,28 +177,6 @@ _PLACED: Final[Mapping[Rule, str]] = {
 
 
 @dataclass(frozen=True)
-class DeclaredSession:
-    """A session the user declares: every file at or below ``paths`` (root-relative, ``/``-
-    separated, as ``LocalPath`` text). It wins over every rule; paths are kept sorted."""
-
-    name: str
-    paths: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        check_text("name", self.name)
-        if not isinstance(self.paths, tuple) or not self.paths:
-            raise ValueError("a declared session names at least one path")
-        for path in self.paths:
-            LocalPath(path)  # relative, no '.', '..' or empty parts, no NUL
-        if len(set(self.paths)) != len(self.paths):
-            raise ValueError(f"declared session {self.name!r} names a path twice")
-        object.__setattr__(self, "paths", tuple(sorted(self.paths)))
-
-    def to_json(self) -> JsonObject:
-        return {"name": self.name, "paths": list(self.paths)}
-
-
-@dataclass(frozen=True)
 class GroupingConfig:
     """The grouper's config, and so its transform's: ``gap_seconds`` is the widest difference
     between two name times read as one moment; ``sessions`` are declared sessions."""
@@ -213,16 +208,10 @@ class GroupingConfig:
 
 def grouping_config_from_json(data: JsonValue) -> GroupingConfig:
     obj = exact_object(data, "grouping config", {"gap_seconds", "sessions"})
-    sessions = []
-    for item in json_array(obj["sessions"], "sessions"):
-        entry = exact_object(item, "declared session", {"name", "paths"})
-        paths = json_array(entry["paths"], "paths")
-        sessions.append(
-            DeclaredSession(
-                json_str(entry["name"], "name"), tuple(json_str(p, "path") for p in paths)
-            )
-        )
-    return GroupingConfig(json_int(obj["gap_seconds"], "gap_seconds"), tuple(sessions))
+    sessions = tuple(
+        declared_session_from_json(item) for item in json_array(obj["sessions"], "sessions")
+    )
+    return GroupingConfig(json_int(obj["gap_seconds"], "gap_seconds"), sessions)
 
 
 # --- The interface -----------------------------------------------------------------------------
@@ -303,6 +292,7 @@ def check_grouping(grouping: Grouping, layout: Layout) -> None:
     - A file both in an extent and unassigned is held only by contested proposals, and is
       ambiguous among others that could each hold it (or among too many to name): its
       placement in the readings that do not hold it.
+    - A proposal is ``stated`` (carries declarations) exactly when its rule is ``declared``.
     - Everything names the grouping's transform.
     """
     files = {file.revision: file.path for file in layout.files}
@@ -314,6 +304,8 @@ def check_grouping(grouping: Grouping, layout: Layout) -> None:
         proposal = proposals[pid]
         if proposal.transform != grouping.transform.id:
             raise ValueError(f"proposal {pid} names another transform")
+        if bool(proposal.declared) != (proposal.rule == Rule.DECLARED):
+            raise ValueError(f"proposal {pid} is stated exactly when it is declared")
         own: set[RecordId] = set()
         for member in proposal.members:
             if files.get(member.revision) != member.location.raw:
@@ -442,6 +434,7 @@ class _Draft:
     directory: bytes
     members: dict[bytes, tuple[Role, Rule]] = field(default_factory=dict)
     includes: list[int] = field(default_factory=list)
+    declared: list[DeclaredSession] = field(default_factory=list)
     reasons: list[Reason] = field(default_factory=list)
     times: dict[int, str] = field(default_factory=dict)
     stems: set[bytes] = field(default_factory=set)
@@ -515,9 +508,12 @@ class _Proposer:
         self._signals: dict[bytes, NameSignals] = {}
         self._near: dict[bytes, bytes] = {ROOT: ROOT}
         self._extents: dict[int, set[bytes]] = {}
+        self.claims: dict[bytes, list[int]] = defaultdict(list)  # file: declarations naming it
+        self.dropped: dict[int, list[int]] = {}  # a reading declarations hold whole: by which
 
     def run(self) -> Grouping:
-        remaining = self._declared()
+        self._declared()
+        remaining = sorted(self.files)  # the rules read the whole tree, declared or not
         bags = self._bag_directories(remaining)
         leaves, singles = self._session_directories(remaining, bags)
         # Each file under the nearest session-named directory above it (ROOT for none): a leaf
@@ -531,6 +527,7 @@ class _Proposer:
         loose = (path for node, held in under.items() if node not in leaves for path in held)
         self._loose(sorted(loose), bags)
         self._outers(singles, under, whole, bags)
+        self._reconcile()
         self._links()
         self._same_bytes()
         return self._build()
@@ -552,8 +549,8 @@ class _Proposer:
 
     # --- 1. declared sessions ------------------------------------------------------------------
 
-    def _declared(self) -> list[bytes]:
-        claims: dict[bytes, list[int]] = defaultdict(list)
+    def _declared(self) -> None:
+        """One stated proposal per declared session that names a file this scan saw."""
         for declared in self.config.sessions:
             prefixes = [path.encode("utf-8") for path in declared.paths]
             matched = [
@@ -576,18 +573,99 @@ class _Proposer:
                 continue
             index = self._draft(Rule.DECLARED, _common_directory(matched))
             draft = self.drafts[index]
+            draft.declared.append(declared)
             for path in matched:
                 draft.add(path, self._role(path), Rule.DECLARED)
-                claims[path].append(index)
+                self.claims[path].append(index)
             draft.reasons.append(
                 Reason(
                     Rule.DECLARED,
-                    "declared in the grouping config; it overrides every rule",
+                    "declared in the grouping config: stated by its user, not inferred",
                     declared.to_json(),
                 )
             )
         # Two declarations claiming one file share it, so they contest each other (_build).
-        return [path for path in sorted(self.files) if path not in claims]
+
+    def _reconcile(self) -> None:
+        """Set every rule's reading against the declared sessions (ADR 0036 §6).
+
+        A declaration that holds a reading whole resolves it: the reading is not offered beside
+        it (unless a reading that is offered includes it), and the declaration's reasons name
+        what it holds. A declaration that holds part of a reading cuts through the observed
+        layout: both are offered, so they contest each other, and a
+        ``declared_contradicts_layout`` finding says so. Nothing is overridden silently.
+        """
+        if not self.claims:
+            return
+        cuts: dict[int, list[int]] = defaultdict(list)
+        for index, draft in enumerate(self.drafts):
+            if draft.rule is Rule.DECLARED:
+                continue
+            extent = self._extent(index)
+            counts = Counter(d for path in extent for d in self.claims.get(path, ()))
+            whole = sorted(d for d, held in counts.items() if held == len(extent))
+            for declaration in sorted(set(counts) - set(whole)):
+                cuts[declaration].append(index)
+            if whole and len(whole) == len(counts):
+                self.dropped[index] = whole
+        # A reading that an offered reading includes is offered too: no include dangles.
+        pending = [
+            i for k, d in enumerate(self.drafts) if k not in self.dropped for i in d.includes
+        ]
+        while pending:
+            inner = pending.pop()
+            if self.dropped.pop(inner, None) is not None:
+                pending.extend(self.drafts[inner].includes)
+        held: dict[int, list[int]] = defaultdict(list)
+        for index, declarations in self.dropped.items():
+            for declaration in declarations:
+                held[declaration].append(index)
+        for index in sorted({d for ds in self.claims.values() for d in ds}):
+            draft = self.drafts[index]
+            if readings := held.get(index):
+                draft.reasons.append(
+                    Reason(
+                        Rule.DECLARED,
+                        "holds these readings of the layout whole; they are not offered beside it",
+                        self._readings(readings),
+                    )
+                )
+            if unplaced := sum(1 for path in draft.members if path in self.unassigned):
+                draft.reasons.append(
+                    Reason(
+                        Rule.DECLARED,
+                        "holds files the rules left unassigned",
+                        {"files": unplaced},
+                    )
+                )
+            if cut := cuts.get(index):
+                self.findings.append(self._contradiction(draft.declared[0], cut))
+
+    def _readings(self, indices: Sequence[int]) -> JsonObject:
+        """Readings, as findings and reasons list them: up to ``_LISTED``, and how many."""
+        return {
+            "count": len(indices),
+            "readings": [
+                {
+                    "directory": directory_location(self.drafts[i].directory).to_json(),
+                    "files": len(self._extent(i)),
+                    "rule": str(self.drafts[i].rule),
+                }
+                for i in indices[:_LISTED]
+            ],
+        }
+
+    def _contradiction(self, declared: DeclaredSession, cut: list[int]) -> IngestFinding:
+        return ingest_finding(
+            code=DECLARED_CONTRADICTS_LAYOUT,
+            category=FindingCategory.INCONSISTENT,
+            severity=Severity.WARNING,
+            subject=LocalPath(declared.paths[0]),
+            transform=self.transform,
+            message=f"a declared session holds part of {len(cut)} reading(s) of the layout;"
+            " both are offered, contested, and neither is chosen",
+            details={"declared": declared.to_json(), **self._readings(cut)},
+        )
 
     # --- 2. recording units --------------------------------------------------------------------
 
@@ -1056,6 +1134,8 @@ class _Proposer:
         by_member: dict[bytes, list[int]] = defaultdict(list)
         by_directory: dict[bytes, list[int]] = defaultdict(list)
         for index, draft in enumerate(self.drafts):
+            if index in self.dropped:
+                continue
             for path in draft.members:
                 by_member[path].append(index)
             if draft.rule in _OWN_DIRECTORY and draft.directory != ROOT:
@@ -1079,6 +1159,8 @@ class _Proposer:
             if file.content_id != _EMPTY:
                 by_content[file.content_id].append(path)
         for index, draft in enumerate(self.drafts):
+            if index in self.dropped:
+                continue
             extent = self._extent(index)
             within: Counter[str] | None = None
             if draft.includes:  # files of the proposals it includes are inside it too
@@ -1123,6 +1205,8 @@ class _Proposer:
             ids.append(proposal_id(transform, draft.rule, where, revisions, includes))
         first: dict[RecordId, int] = {}
         for index, record in enumerate(ids):
+            if index in self.dropped:
+                continue  # a declaration holds it whole and says so
             kept = first.setdefault(record, index)
             if kept != index:
                 # The same proposal reached twice (two declarations of one set of files): one
@@ -1130,13 +1214,14 @@ class _Proposer:
                 keep, again = self.drafts[kept], self.drafts[index]
                 keep.reasons.extend(r for r in again.reasons if r not in keep.reasons)
                 keep.links |= again.links
+                keep.declared.extend(again.declared)
         # Two proposals contest each other exactly when their extents share a file: each
         # reading that holds a file another reading also holds was offered beside it, and none
         # was chosen. A finding names each connected set of such readings once. Files held by
         # the same readings are one case, so the work is per distinct set of holders.
         holders: dict[bytes, list[int]] = defaultdict(list)
         for index in range(len(self.drafts)):
-            if first[ids[index]] == index:
+            if first.get(ids[index]) == index:
                 for path in self._extent(index):
                     holders[path].append(index)
         contested: dict[RecordId, set[RecordId]] = defaultdict(set)
@@ -1160,8 +1245,8 @@ class _Proposer:
         groups = sorted(components.values())
         proposals: dict[RecordId, SessionProposal] = {}
         for index, draft in enumerate(self.drafts):
-            if first[ids[index]] != index:
-                continue  # the same proposal, reached twice
+            if first.get(ids[index]) != index:
+                continue  # the same proposal reached twice, or one a declaration holds whole
             proposals[ids[index]] = session_proposal(
                 transform=transform,
                 rule=draft.rule,
@@ -1184,6 +1269,7 @@ class _Proposer:
                 ],
                 reasons=[*draft.reasons, *_placed(draft)],
                 contested=contested[ids[index]],
+                declared=draft.declared,
             )
         unassigned = []
         ambiguous: dict[bytes, list[bytes]] = defaultdict(list)
@@ -1191,7 +1277,13 @@ class _Proposer:
             holding = {ids[index] for index in holders.get(path, ())}
             if holding and not all(contested[pid] for pid in holding):
                 continue  # an uncontested reading holds it: that is its placement
-            named = {ids[first[ids[i]]] for i in candidates} - holding
+            # A candidate a declaration holds whole is that declaration now.
+            named = {
+                ids[first[ids[target]]]
+                for candidate in candidates
+                for target in self.dropped.get(candidate, [candidate])
+            }
+            named -= holding
             if holding and len(named) < 2 and reason != TOO_MANY_SESSIONS:
                 continue  # only contested readings hold it, and no other leaves it in doubt
             # Otherwise the record stays, beside any contested reading that holds the file: it
@@ -1202,7 +1294,7 @@ class _Proposer:
                     transform=transform,
                     revision=file.revision,
                     location=file.location,
-                    reason=reason if len(named) > 1 or not candidates else NO_SESSION,
+                    reason=reason if len(named) > 1 or not candidates else self._lost(candidates),
                     candidates=named if len(named) > 1 else (),
                 )
             )
@@ -1218,6 +1310,11 @@ class _Proposer:
             unassigned=tuple(sorted(unassigned, key=lambda u: u.id)),
             findings=tuple(sorted({f.id: f for f in self.findings}.values(), key=lambda f: f.id)),
         )
+
+    def _lost(self, candidates: list[int]) -> str:
+        """Why a file the rules found ambiguous has one candidate or none left: a declaration
+        holds every session that could hold it, but not the file; or two were one proposal."""
+        return OUTSIDE_DECLARATION if any(c in self.dropped for c in candidates) else NO_SESSION
 
     def _contested_finding(self, group: list[int]) -> IngestFinding:
         """One finding per connected set of contesting readings, listing up to ``_LISTED``."""

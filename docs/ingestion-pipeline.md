@@ -43,7 +43,7 @@ state machine over the stages above, in nine phases (ADR 0028):
 |---|---|---|
 | `discover` | 1 | sweeps the workspace's scratch and staging debris; walks the root; every symlink, special or unreadable entry is discovery's finding (ADR 0029 §1) |
 | `fingerprint` | 2 | hashes every file into the root's persisted ledger, reconciles absences, saves the ledger; a size that changed while hashing is a finding |
-| `inspect` | 3 | reads each distinct source's head once and runs the probe engine over it in one sandboxed call (every adapter's probe, the container listing); selects and configures; a tie, an unclaimed source or a container problem is a `neptune.probe.*` finding (ADR 0033 §1); then groups the scan's layout into session proposals (stage 5, no adapter call; `JobOptions.grouping` declares sessions that override every rule; ADR 0036) |
+| `inspect` | 3 | reads each distinct source's head once and runs the probe engine over it in one sandboxed call (every adapter's probe, the container listing); selects and configures; a tie, an unclaimed source or a container problem is a `neptune.probe.*` finding (ADR 0033 §1); then groups the scan's layout into session proposals (stage 5, no adapter call; `JobOptions.grouping` declares sessions, stated and set against the rules' readings; ADR 0036) |
 | `plan` | 6 | reuses the workspace's saved plan for (source, transform) or calls `plan`, checks it, saves it |
 | `parse` | 7 | `ingest` on one chunk the workspace has not committed; `attempts` tries (default 2) |
 | `normalize` | 7–8 | `check_chunk_output` plus `seq` unique within the chunk; commit, whole or not at all |

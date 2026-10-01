@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 import tracemalloc
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
@@ -22,8 +22,10 @@ from neptune.derived.grouping import (
     CONFIDENCE,
     CONTESTED,
     DECLARATION_UNMATCHED,
+    DECLARED_CONTRADICTS_LAYOUT,
     DEPTH_LIMIT,
     OUTER_NESTING_LIMIT,
+    OUTSIDE_DECLARATION,
     DeclaredSession,
     Grouping,
     GroupingConfig,
@@ -40,6 +42,7 @@ from neptune.derived.sessions import (
     SessionProposal,
     Status,
     session_proposal,
+    session_proposal_from_json,
 )
 from neptune.discovery.layout import Layout, LayoutFile, layout_from_scan, layout_of
 from neptune.discovery.scan import scan
@@ -47,6 +50,7 @@ from neptune.discovery.source import LocalSource
 from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id
 from neptune.identity.revisions import SourceLedger, revision_id
+from neptune.model.jsonvalue import JsonValue
 from neptune.model.source import LocalPath, RawLocalPath, local_location
 
 
@@ -110,6 +114,13 @@ def unassigned(grouping: Grouping) -> dict[str, tuple[Placement, str, int]]:
     return {
         text(u.location): (u.placement, u.reason, len(u.candidates)) for u in grouping.unassigned
     }
+
+
+def rules_of(details: Mapping[str, JsonValue]) -> list[str]:
+    """The rules of the readings a reason or finding lists."""
+    readings = details["readings"]
+    assert isinstance(readings, list)
+    return [str(reading["rule"]) for reading in readings if isinstance(reading, dict)]
 
 
 def codes(grouping: Grouping) -> list[str]:
@@ -465,23 +476,90 @@ def test_the_messy_tree_is_grouped_correctly_or_marked_ambiguous(tmp_path: Path)
 # --- Overrides ---------------------------------------------------------------------------------
 
 
-def test_a_declared_session_overrides_every_rule(tmp_path: Path) -> None:
+def test_a_declared_session_is_stated_and_resolves_the_readings_it_holds_whole(
+    tmp_path: Path,
+) -> None:
     root = built(tmp_path, "parts", "trials")
-    config = GroupingConfig(sessions=(DeclaredSession("calibration take", ("parts",)),))
-    grouping = group(root, config)
+    take = DeclaredSession("calibration take", ("parts",))
+    grouping = group(root, GroupingConfig(sessions=(take,)))
     [declared] = [p for p in grouping.proposals if p.rule == Rule.DECLARED]
     assert members(declared) == {"parts/x_0.mcap", "parts/x_1.mcap", "parts/x.yaml"}
     assert declared.confidence == 1.0 and declared.status is Status.PROPOSED
     assert declared.directory == LocalPath("parts")
-    assert declared.reasons[0].details == {"name": "calibration take", "paths": ["parts"]}
-    assert grouping.transform.config["sessions"] == [
-        {"name": "calibration take", "paths": ["parts"]}
+    # Stated, with the declaration as its provenance, under the transform whose config holds it.
+    data = declared.to_json()
+    assert data["assertion_kind"] == "stated" and declared.declared == (take,)
+    assert data["declared"] == [{"name": "calibration take", "paths": ["parts"]}]
+    assert session_proposal_from_json(data) == declared
+    assert grouping.transform.config["sessions"] == [take.to_json()]
+    # The rules read the parts too: the declaration holds each of their readings whole, so it
+    # resolves them, and says which.
+    stated, held = [r for r in declared.reasons if r.rule == Rule.DECLARED]
+    assert stated.details == take.to_json()
+    assert held.details["count"] == 3
+    assert sorted(rules_of(held.details)) == [
+        "numbered_sequence",
+        "recording_file",
+        "recording_file",
     ]
+    assert not [
+        p for p in grouping.proposals if p is not declared and members(p) & members(declared)
+    ]
+    assert all(p.assertion_kind == "inferred" for p in grouping.proposals if p is not declared)
     # The trials are still the rules' to read.
     assert {p.rule for p in grouping.proposals} - {Rule.DECLARED} == {
         Rule.NAME_TIME_PROXIMITY,
         Rule.RECORDING_FILE,
     }
+    assert codes(grouping) == [CONTESTED]  # the trials' own
+
+
+def test_a_stale_declaration_that_cuts_a_session_directory_is_contested_and_said(
+    tmp_path: Path,
+) -> None:
+    # Declared before the camera directory was copied in: it no longer covers the run.
+    stale = DeclaredSession("run one", ("runs/run_001/config.yaml", "runs/run_001/robot.mcap"))
+    grouping = group(built(tmp_path, "runs"), GroupingConfig(sessions=(stale,)))
+    found = by_members(grouping)
+    declared = found[frozenset({"runs/run_001/config.yaml", "runs/run_001/robot.mcap"})]
+    run_001 = found[
+        frozenset(
+            {"runs/run_001/robot.mcap", "runs/run_001/config.yaml", "runs/run_001/camera/front.mp4"}
+        )
+    ]
+    assert declared.assertion_kind == "stated" and run_001.rule == Rule.SESSION_DIRECTORY
+    assert declared.contested == (run_001.id,) and run_001.contested == (declared.id,)
+    assert codes(grouping) == [CONTESTED, DECLARED_CONTRADICTS_LAYOUT]
+    [said] = [f for f in grouping.findings if f.code == DECLARED_CONTRADICTS_LAYOUT]
+    assert said.category == "inconsistent" and said.subject == LocalPath(stale.paths[0])
+    assert said.details["declared"] == stale.to_json() and said.details["count"] == 1
+    assert said.details["readings"] == [
+        {"directory": run_001.directory.to_json(), "files": 3, "rule": "session_directory"}
+    ]
+    # The other run is untouched.
+    run_002 = {"runs/run_002/robot.mcap", "runs/run_002/config.yaml", "runs/run_002/Thumbs.db"}
+    assert found[frozenset(run_002)].status is Status.PROPOSED
+
+
+def test_a_mistyped_declaration_that_splits_a_rosbag2_directory_is_contested_and_said(
+    tmp_path: Path,
+) -> None:
+    bag = "ros2_bags/rosbag2_2024_05_01-12_30_00"
+    typo = DeclaredSession("morning bag", (f"{bag}/metadata.yaml",))  # meant the directory
+    grouping = group(built(tmp_path, "ros2_bags"), GroupingConfig(sessions=(typo,)))
+    [declared] = [p for p in grouping.proposals if p.rule == Rule.DECLARED]
+    [split] = [
+        p for p in grouping.proposals if p.rule == Rule.ROSBAG2_DIRECTORY and where(p) == bag
+    ]
+    assert members(declared) == {f"{bag}/metadata.yaml"} and len(split.members) == 3
+    assert declared.contested == (split.id,) and split.contested == (declared.id,)
+    [said] = [f for f in grouping.findings if f.code == DECLARED_CONTRADICTS_LAYOUT]
+    assert rules_of(said.details) == ["rosbag2_directory"]
+    assert unassigned(grouping)["ros2_bags/notes.txt"] == (
+        Placement.AMBIGUOUS,
+        "several_sessions",
+        2,
+    )
 
 
 def test_overlapping_declarations_are_contested_and_an_empty_one_is_a_finding(
@@ -498,10 +576,24 @@ def test_overlapping_declarations_are_contested_and_an_empty_one_is_a_finding(
     grouping = group(root, config)
     declared = [p for p in grouping.proposals if p.rule == Rule.DECLARED]
     assert len(declared) == 2 and all(p.status is Status.CONTESTED for p in declared)
-    assert codes(grouping) == [CONTESTED, DECLARATION_UNMATCHED]
+    # "front" leaves front.yaml out of the front recording's reading: it cuts through it.
+    assert codes(grouping) == [CONTESTED, DECLARATION_UNMATCHED, DECLARED_CONTRADICTS_LAYOUT]
     [ghost] = [f for f in grouping.findings if f.code == DECLARATION_UNMATCHED]
     assert ghost.subject == LocalPath("nowhere/at_all") and ghost.category == "missing"
+    front = by_members(grouping)[frozenset({"flat/front.mcap", "flat/front.yaml"})]
+    assert front.rule == Rule.RECORDING_FILE and front.status is Status.CONTESTED
     assert grouping.unassigned == ()
+
+
+def test_a_file_a_declaration_leaves_out_of_every_session_it_could_join_is_said() -> None:
+    declared = DeclaredSession("pair", ("d/front.mcap", "d/front.yaml", "d/rear.mcap"))
+    grouping = LayoutGrouper(GroupingConfig(sessions=(declared,))).propose(
+        synthetic(b"d/front.mcap", b"d/front.yaml", b"d/rear.mcap", b"d/robot.yaml")
+    )
+    [proposal] = grouping.proposals
+    assert proposal.declared == (declared,) and proposal.status is Status.PROPOSED
+    # robot.yaml could join either recording's session; the declaration holds both but not it.
+    assert unassigned(grouping) == {"d/robot.yaml": (Placement.UNKNOWN, OUTSIDE_DECLARATION, 0)}
 
 
 @pytest.mark.parametrize(
@@ -537,8 +629,10 @@ def test_two_declarations_of_the_same_files_are_one_proposal_naming_both() -> No
     )
     grouping = LayoutGrouper(config).propose(synthetic(b"x/a.bag", b"x/b.bag"))
     [proposal] = grouping.proposals
-    names = [r.details["name"] for r in proposal.reasons if r.rule == Rule.DECLARED]
+    names = [r.details["name"] for r in proposal.reasons if "name" in r.details]
     assert names == ["A", "B"] and proposal.status is Status.PROPOSED
+    assert [d.name for d in proposal.declared] == ["A", "B"]
+    assert proposal.to_json()["assertion_kind"] == "stated"
 
 
 def test_a_sidecar_goes_with_its_recording_in_every_reading() -> None:
@@ -726,6 +820,64 @@ def test_any_tree_keeps_the_laws_whatever_order_it_is_given_in(
     assert set(held) | placed == {f.revision for f in layout.files}
     for proposal in grouping.proposals:
         assert proposal.confidence in CONFIDENCE.values()
+
+
+@st.composite
+def declared_trees(draw: st.DrawFn) -> tuple[list[bytes], GroupingConfig]:
+    """A tree, and up to three sessions declared over its files and directories (UTF-8 only)."""
+    paths = draw(trees())
+    places = sorted(
+        {
+            text
+            for path in paths
+            for cut in range(path.count(b"/") + 1)
+            if (text := b"/".join(path.split(b"/")[: cut + 1]).decode("utf-8", "replace"))
+            and "�" not in text
+        }
+    )
+    sessions = []
+    if places:
+        for number in range(draw(st.integers(0, 3))):
+            chosen = draw(st.lists(st.sampled_from(places), min_size=1, max_size=3, unique=True))
+            sessions.append(DeclaredSession(f"s{number}", tuple(chosen)))
+    return paths, GroupingConfig(sessions=tuple(sessions))
+
+
+@settings(max_examples=150, deadline=None)
+@given(declared_trees())
+def test_any_declarations_over_any_tree_keep_the_laws(
+    case: tuple[list[bytes], GroupingConfig],
+) -> None:
+    paths, config = case
+    layout = synthetic(*paths)
+    grouping = LayoutGrouper(config).propose(layout)  # check_grouping runs inside
+    assert as_json(LayoutGrouper(config).propose(layout_of(layout.files[::-1]))) == as_json(
+        grouping
+    )
+    for proposal in grouping.proposals:
+        assert (proposal.assertion_kind == "stated") == (proposal.rule == Rule.DECLARED)
+    # A declaration contradicts the layout exactly when it shares files with a rule's reading
+    # that also holds files outside it; then they contest.
+    said = set()
+    for finding in grouping.findings:
+        if finding.code == DECLARED_CONTRADICTS_LAYOUT:
+            declaration = finding.details["declared"]
+            assert isinstance(declaration, dict)
+            said.add(declaration["name"])
+    for proposal in grouping.proposals:
+        if proposal.rule != Rule.DECLARED:
+            continue
+        inside = set(members(proposal))
+        cut = [
+            p
+            for p in grouping.proposals
+            if p.rule != Rule.DECLARED
+            and (whole := extent(grouping, p)) & inside
+            and not whole <= inside
+        ]
+        names = {d.name for d in proposal.declared}
+        assert bool(cut) == bool(names & said)
+        assert all(p.id in proposal.contested for p in cut)
 
 
 def paths_of(proposals: Iterable[SessionProposal]) -> list[list[str]]:

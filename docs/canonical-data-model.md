@@ -235,9 +235,9 @@ a bug, not a value.
 - `ReceiptEnvelope` holds the job id, wall clock, host, ingest root and durations, outside the manifest, so it
   never changes the package id. Sources are referenced by default; materialising is opt-in.
 - `derived/<kind>.jsonl` holds derived (inferred) tables apart from `records/` (ADR 0036, amending ADR 0023 §5):
-  canonical lines sorted by id, each `assertion_kind` `inferred` and naming a transform in the package, listed in
-  the manifest. The store checks their structure; `neptune.derived` reads their meaning and refuses kinds it does
-  not define. The first kinds are `session_proposal` and `session_unassigned` (run/session grouping); present
+  canonical lines sorted by id, each `assertion_kind` `inferred` (`stated` for a session the user declared) and
+  naming a transform in the package, listed in the manifest. The store checks their structure; `neptune.derived`
+  reads their meaning and refuses kinds it does not define. The first kinds are `session_proposal` and `session_unassigned` (run/session grouping); present
   and empty means the producer ran and inferred nothing, absent means it did not run.
 
 ## Serialization (ADR 0002)
