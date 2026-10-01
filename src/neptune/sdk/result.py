@@ -18,6 +18,7 @@ from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.package import IngestReceipt, ingest_receipt_from_json
 from neptune.runtime import CacheReport, JobOutcome, JobState
+from neptune.sdk.contents import RunContents, run_contents
 from neptune.sdk.errors import InvalidRequestError, PackageInvalidError
 from neptune.store.package import RECEIPT, IngestPackage, open_file
 from neptune.store.package import read_package as _read_package
@@ -115,6 +116,11 @@ class IngestResult:
     def read_package(self) -> IngestPackage:
         """The committed package, read back and verified."""
         return read_package(self._committed())
+
+    def contents(self) -> tuple[RunContents, ...]:
+        """What each run of the committed package contains: streams, declared field paths and
+        inferred semantics, read from its records and derived tables (ADR 0049)."""
+        return run_contents(self.read_package())
 
 
 # The attribute an interruption carries its job's committed result under (``committed_result``).
