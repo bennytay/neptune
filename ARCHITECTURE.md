@@ -6,6 +6,7 @@ flowchart LR
   DEV["Robotics code"]
 
   subgraph N["Neptune"]
+    CLI["neptune ingest CLI<br/>JSON Lines · exit codes"]
     SDK["Python SDK<br/>sync · async"]
     DISC["Discovery &amp; identity"]
     RT["Ingestion runtime"]
@@ -26,6 +27,7 @@ flowchart LR
 
   RAW --> DISC --> RT
   DEV -->|ingest · dry run| SDK -->|runs jobs| RT
+  DEV -->|one command| CLI -->|wraps| SDK
   RT <-->|probes / chunks / records| SB
   SB <-->|one call, limits| AD
   AD -.->|conforms to| CAN
@@ -52,7 +54,7 @@ flowchart LR
   class DISC,RT,AD,PKG,DER,K2 partial
   class VAL,K3 todo
   class SB built
-  class SDK built
+  class SDK,CLI built
   class DEV ext
   class RAW,MEM,RET,USE ext
   style N fill:#8b949e0f,stroke:#8b949e

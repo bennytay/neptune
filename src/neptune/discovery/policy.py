@@ -77,6 +77,8 @@ def skipped_finding(entry: SkippedEntry) -> IngestFinding:
             code, severity = UNREADABLE, Severity.ERROR
             message = "could not be read; nothing at or below it was seen"
             details = {"detail": entry.detail}
+        case SkipReason.IGNORED:
+            raise ValueError("an ignored entry is the ignore rules' finding (IgnoreRules.finding)")
     return ingest_finding(
         code=code,
         category=FindingCategory.SKIPPED,
