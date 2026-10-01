@@ -11,13 +11,14 @@ execution in the job's process.
   strings, binary as hex, and every float as the hex of its eight IEEE-754 bytes, so NaN
   payloads, infinities and ``-0.0`` cross unchanged. A null cell is ``null``.
 - Plans travel as their chunks' ``to_json`` and findings; probe results as their ``to_json``;
-  ``inspect``'s result as its summary and findings (for dry runs, MVL-15);
-  the probe engine's view of a source as ``SourceProbe.to_json``, read back by the engine.
+  ``inspect``'s result as its summary and findings (for dry runs, MVL-15); the probe engine's
+  view of a source as ``SourceProbe.to_json``, read back by the engine.
 
 A decoder raises on anything it does not recognise; the sandbox reports that as a crash. The byte
-size of a reply is already capped (``Limits.reply_bytes``); the decode is bounded in count too, so
-a reply that stays under the byte cap yet packs it with millions of empty containers or bare
-numbers is refused (``ReplyTooLarge``) and reported as ``Limit.REPLY``, not decoded.
+size of a reply is already capped (``Limits.reply_bytes``); the decode is bounded in count and in
+depth too, so a reply that stays under the byte cap yet packs it with millions of empty containers
+or short strings, or nests past the parser's recursion guard, is refused (``ReplyTooLarge``) and
+reported as ``Limit.REPLY``, never decoded and never a crash that is retried.
 """
 
 import json
@@ -61,7 +62,12 @@ _DOUBLE: Final = re.compile(r"[0-9a-f]{16}")
 
 # The reply's byte size is already capped (``Limits.reply_bytes``); this caps how many containers
 # and elements a decode may build from it, so a reply that stays under the byte cap but packs it
-# with empty lists or bare zeros — millions of tiny Python objects — cannot exhaust the parent.
+# with empty lists or short strings — millions of small Python objects — cannot exhaust the
+# parent. This cap, not the byte cap, bounds what a hostile reply decodes to: at the defaults the
+# job peaks at about 1 GiB for one object of distinct keys filling the byte cap (the parser
+# memoises keys as it goes) and 0.3 to 0.6 GiB for lists (``docs/security.md``). It is no lower
+# because integer and boolean series cells cost 2 to 6 bytes each on the wire, so a legitimate
+# reply of 8 Mi of them is 16 to 48 MiB, already short of the byte cap.
 # A value needs at least one byte, so a reply no larger than the cap can never exceed it: the
 # scan runs only for the rare reply above it, and stops the moment the count is passed.
 _MAX_REPLY_NODES: Final = 8 * 1024 * 1024
@@ -104,7 +110,10 @@ def _loads(data: bytes) -> object:
         upper_bound = data.count(b",") + data.count(b"[") + data.count(b"{")
         if upper_bound > _MAX_REPLY_NODES:  # might be over: the string-aware scan is exact
             _refuse_overlong(data)
-    return json.loads(data)
+    try:
+        return json.loads(data)
+    except RecursionError:  # nested past the parser's recursion guard, well under the node cap
+        raise ReplyTooLarge("a reply nested too deeply to decode is refused") from None
 
 
 def _dumps(value: object) -> bytes:

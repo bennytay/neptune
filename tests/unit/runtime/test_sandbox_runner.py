@@ -9,6 +9,8 @@ import ctypes
 import errno
 import fcntl
 import os
+import pty
+import select
 import signal
 import socket
 import struct
@@ -303,6 +305,28 @@ def test_a_reply_that_packs_the_byte_cap_with_values_is_refused_not_decoded() ->
     assert box.call(lambda: [], deep_codec) == Exceeded(Limit.REPLY, 128 * MIB)
 
 
+def rebuild_without_end(data: bytes) -> object:
+    """A decode that parses, then recurses as a rebuild of deeply nested JSON would."""
+
+    def descend(value: object) -> object:
+        return descend([value])
+
+    return descend(wire._loads(data))
+
+
+def test_a_reply_nested_too_deep_is_the_reply_limit_not_a_crash(box: Subprocess) -> None:
+    # Far under the node cap (200 KB), yet nested past the parser's recursion guard: the reply's
+    # limit, never a crash, which the job would retry only to meet the same bytes again. The same
+    # holds where the nesting strikes while the model rebuilds what parsed.
+    deep = b"[" * 100_000 + b"]" * 100_000
+    assert box.call(lambda: [], Codec(object, lambda _: deep, wire._loads)) == Exceeded(
+        Limit.REPLY, box.limits.reply_bytes
+    )
+    rebuilt = box.call(lambda: [], Codec(object, lambda _: b"[]", rebuild_without_end))
+    assert rebuilt == Exceeded(Limit.REPLY, box.limits.reply_bytes)
+    assert box.call(lambda: "fine", TEXT) == Returned("fine")  # the next call is unharmed
+
+
 def test_outcomes_are_deterministic(box: Subprocess) -> None:
     def calls() -> list[object]:
         return [
@@ -382,6 +406,73 @@ def test_no_signal_through_async_io_descriptor_ownership(box: Subprocess) -> Non
     assert box.call(set_async, TEXT) == Raised("PermissionError")
     # The job is unharmed: an ordinary call right after still returns.
     assert box.call(lambda: "alive", TEXT) == Returned("alive")
+
+
+def async_on_terminal(path: str) -> str:
+    """Sandboxed work: open the job's terminal read-only, as Landlock allows, and try to turn
+    ``O_ASYNC`` on with ``F_SETFL``; then wait for a keystroke, which would raise SIGIO in the
+    terminal's foreground process group, the job's, had the flag been set. Plain ``F_SETFL``
+    (``O_NONBLOCK``, via ``os.set_blocking``) is used on the way."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+        try:
+            fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_ASYNC)
+            refused = "set"
+        except PermissionError:
+            refused = "PermissionError"
+        os.set_blocking(fd, False)
+        nonblocking = not os.get_blocking(fd)
+        with contextlib.suppress(BlockingIOError):  # drain what was typed before
+            while os.read(fd, 64):
+                pass
+        os.set_blocking(fd, True)
+        os.read(fd, 64)  # a keystroke typed after the attempt
+        return f"{refused} nonblocking={nonblocking}"
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.filterwarnings("ignore:This process .* use of forkpty:DeprecationWarning")
+def test_no_signal_through_o_async_on_the_jobs_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``F_SETFL`` with ``O_ASYNC`` on a terminal makes the kernel aim SIGIO at the terminal's
+    foreground process group, the job's, with no ``F_SETOWN``; ``setsid`` cuts only ``/dev/tty``
+    and the job's ``/dev/pts/N`` stays readable. Seccomp refuses the flag on every ABI. The job
+    here is a session leader in its terminal's foreground, as in a shell, and runs at Landlock ABI
+    4 (Ubuntu 24.04), or the host's own if lower, so ABI 6 signal scoping cannot hide a gap; the
+    default action of SIGIO would end it at the next keystroke."""
+    real = confine.host()
+    monkeypatch.setattr(confine, "host", lambda: confine.Host(real.arch, min(real.landlock, 4)))
+    pid, master = pty.fork()
+    if pid == 0:  # the job, its controlling terminal the pty, in that terminal's foreground
+        code = 3
+        try:
+            box = Subprocess(Limits(cpu_seconds=5, wall_seconds=20, memory_bytes=128 * MIB))
+            outcome = box.call(partial(async_on_terminal, os.ttyname(0)), TEXT)
+            os.write(1, f"\noutcome: {outcome!r}\n".encode())
+            code = 0 if outcome == Returned("PermissionError nonblocking=True") else 4
+        finally:
+            os._exit(code)
+    output = bytearray()
+    status: int | None = None
+    deadline = time.monotonic() + 30
+    try:
+        while status is None and time.monotonic() < deadline:
+            os.write(master, b"k\n")  # a keystroke, again and again, while the call runs
+            if select.select([master], [], [], 0.05)[0]:
+                with contextlib.suppress(OSError):  # EIO once the job has closed the terminal
+                    output += os.read(master, 4096)
+            done, waited = os.waitpid(pid, os.WNOHANG)
+            status = waited if done else None
+    finally:
+        if status is None:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+        os.close(master)
+    assert status is not None, "the job did not finish"
+    if os.WIFSIGNALED(status):
+        pytest.fail(f"the job was killed by {signal.Signals(os.WTERMSIG(status)).name}")
+    assert os.waitstatus_to_exitcode(status) == 0, bytes(output)
 
 
 def test_a_child_cannot_clear_its_parent_death_signal(box: Subprocess) -> None:

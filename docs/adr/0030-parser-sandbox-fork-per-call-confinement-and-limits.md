@@ -41,10 +41,13 @@ partial chunk in the workspace.
    would end at the wall limit as a finding. The test suite filters that one warning.
 3. **The child is confined before any adapter code runs** (`neptune.runtime.confine`, Linux,
    x86_64 and aarch64):
-   - killed if the job dies (`PR_SET_PDEATHSIG`), and `setsid` so it has no controlling terminal
-     to reach the job through (`/dev/tty` SIGIO, `TIOCSTI` input injection); standard streams to
-     `/dev/null`; every other descriptor closed except the reply pipe and the source's read-only
-     descriptor;
+   - killed if the job dies (`PR_SET_PDEATHSIG`), and `setsid` so it has no controlling terminal:
+     `/dev/tty` does not open, and `TIOCSTI` input injection and `TIOCSPGRP` fail on any
+     terminal, since both need the caller's own. `setsid` does not stop SIGIO: the job's
+     `/dev/pts/N` stays readable, and `O_ASYNC` on it makes the kernel aim SIGIO at the
+     terminal's foreground group, the job's; the seccomp filter below closes that on every ABI
+     (ABI 6 scoping also blocks the delivery). Standard streams to `/dev/null`; every other
+     descriptor closed except the reply pipe and the source's read-only descriptor;
    - `RLIMIT_CPU`, `RLIMIT_AS` (the address space at fork plus the memory budget),
      `RLIMIT_CORE` 0 and not dumpable (no core dump, even through a piped `core_pattern`, holds
      source data), `RLIMIT_FSIZE` 0 (no byte is written to any file);
@@ -56,10 +59,11 @@ partial chunk in the workspace.
      `execveat`; no `kill` or `tgkill` but to itself, no `tkill`, `rt_*sigqueueinfo` or
      `pidfd_send_signal`. It also closes the async-I/O path to a signal, which only Landlock
      ABI 6 scopes, with argument filters that hold on every ABI: `fcntl`
-     `F_SETOWN`/`F_SETOWN_EX`/`F_SETSIG` and `ioctl` `FIOSETOWN`/`SIOCSPGRP`/`FIOASYNC` get
-     EPERM, as do `prctl` `PR_SET_PDEATHSIG` (so a child cannot shed its parent-death signal and
-     outlive a killed job) and `PR_SET_DUMPABLE` (so it cannot re-enable a core dump after
-     confinement). No file-metadata change (`chmod`, `chown`, `utimensat` and the `*xattr`
+     `F_SETOWN`/`F_SETOWN_EX`/`F_SETSIG`, `fcntl` `F_SETFL` with `O_ASYNC` (a JSET on the flag
+     argument's low word; any other `F_SETFL` is allowed) and `ioctl`
+     `FIOSETOWN`/`SIOCSPGRP`/`FIOASYNC` get EPERM, as do `prctl` `PR_SET_PDEATHSIG` (so a child
+     cannot shed its parent-death signal and outlive a killed job) and `PR_SET_DUMPABLE` (so it
+     cannot re-enable a core dump after confinement). No file-metadata change (`chmod`, `chown`, `utimensat` and the `*xattr`
      family) and no `fallocate` either: Landlock covers none of those, so without the filter a
      parser could make the source unreadable, world-write a user's file, punch its bytes, or
      retime it to defeat change detection even above the Landlock floor. No `ptrace`,
@@ -87,11 +91,15 @@ partial chunk in the workspace.
    `memory_bytes` 2 GiB of address space above what the process held at fork, and `reply_bytes`
    64 MiB — a separate cap far below `memory_bytes`, so one hostile call that emits a giant reply
    cannot exhaust the job as the parent reads and decodes it. The parent reads the reply into one
-   buffer (no list joined into a second copy), decodes it once, and bounds the decode in count as
-   well as bytes: a reply under the byte cap that packs it with empty containers or bare numbers
-   would still build millions of objects, so a count past a fixed ceiling is refused as
-   `reply_bytes` too. The parent enforces wall time (it kills the child at the deadline) and both
-   reply caps; the kernel enforces the rest (SIGXCPU, then SIGKILL a second later; `MemoryError`
+   buffer (no list joined into a second copy), decodes it once, and bounds the decode in count and
+   depth as well as bytes: a reply under the byte cap that packs it with empty containers or short
+   strings would still build millions of objects, so a count past 8 Mi values is refused as
+   `reply_bytes` too (no lower: integer and boolean series cells cost 2 to 6 bytes each, so a
+   lower cap would refuse legitimate replies well under the byte cap), as is a reply nested past the JSON parser's recursion guard (a
+   `RecursionError` anywhere in the decode), so neither is a crash the job retries. An exact
+   depth scan before parsing would cost 30 to 90% of the parse on a large legitimate reply; the
+   parser's guard costs nothing. The parent enforces wall time (it kills the child at the
+   deadline) and the reply caps; the kernel enforces the rest (SIGXCPU, then SIGKILL a second later; `MemoryError`
    or a failed allocation). They are the runtime transform's config with `attempts`, `isolation`
    and, on a degraded host, the guarantees lost (`neptune.runtime` 0.1.0), so the receipt names
    the policy whenever a runtime finding is in it; in-process runs record no limits, since none
@@ -156,8 +164,10 @@ partial chunk in the workspace.
 - Each call costs a fork and a JSON round trip; a job forks once per (source, adapter) to probe.
   MVL-8's engine and M9's scheduler can batch probes per source if that shows in profiles.
 - Residual risks, recorded in `security.md`: a compromised parser can read files the user can
-  read and put them in its own output (the contract checks citations, not every text); the
-  parent holds a reply of up to `reply_bytes` (64 MiB) and its bounded decode.
+  read and put them in its own output (the contract checks citations, not every text); while
+  it decodes one reply the parent holds it three times (buffer, payload, the parser's text) plus
+  the objects it decodes to, which the value cap bounds, not the byte cap: about 1 GiB at the
+  defaults for the worst shape measured (one object of distinct keys filling the byte cap).
 - A committed chunk's id (ADR 0024 §4, ADR 0031) covers the adapter, its version, config and the
   source, not the isolation or the Landlock ABI it ran under, so a workspace shared between a
   degraded and a sound run reuses chunk outputs across them — as it already does between

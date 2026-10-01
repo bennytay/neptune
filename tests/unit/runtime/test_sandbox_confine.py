@@ -3,6 +3,7 @@ syscall tables checked against the kernel's headers, and the controls a confined
 
 import errno
 import json
+import os
 import re
 import resource
 import struct
@@ -146,7 +147,7 @@ def test_the_numbers_are_the_kernels(name: str) -> None:
         for match in re.finditer(r"#define __NR(?:3264)?_(\w+)\s+(\d+)", header.read_text())
     }
     arch = ARCHES[name]
-    arg_denied = tuple((entry[0], entry[1]) for entry in arch.arg_denied)
+    arg_denied = tuple((rule.name, rule.nr) for rule in arch.arg_denied)
     for syscall, nr in (*arch.denied, *arch.self_only, *arg_denied, ("clone", arch.clone)):
         assert table[syscall] == nr, syscall
 
@@ -155,22 +156,37 @@ def test_the_numbers_are_the_kernels(name: str) -> None:
 def test_async_io_signal_ownership_and_dangerous_prctl_are_denied(arch: Arch) -> None:
     """The signal path the kernel delivers through descriptor ownership, which only Landlock ABI
     6 scopes, is refused on every ABI; a benign use of the same syscall is allowed."""
-    denied = {name: (nr, offset, values) for name, nr, offset, values in arch.arg_denied}
-    fcntl_nr, fcntl_off, fcntl_values = denied["fcntl"]
-    ioctl_nr, _, ioctl_values = denied["ioctl"]
-    prctl_nr, _, prctl_values = denied["prctl"]
-    assert fcntl_off == ARG1_LOW
-    for cmd in fcntl_values:  # F_SETOWN, F_SETSIG, F_SETOWN_EX
-        assert run(arch, fcntl_nr, 5, cmd) == EPERM, cmd
-    assert run(arch, fcntl_nr, 5, fcntl_values[0] | (1 << 32)) == EPERM  # the kernel truncates
+    denied = {rule.name: rule for rule in arch.arg_denied}
+    fcntl, ioctl, prctl = denied["fcntl"], denied["ioctl"], denied["prctl"]
+    assert fcntl.offset == ARG1_LOW
+    for cmd in fcntl.values:  # F_SETOWN, F_SETSIG, F_SETOWN_EX
+        assert run(arch, fcntl.nr, 5, cmd) == EPERM, cmd
+    assert run(arch, fcntl.nr, 5, fcntl.values[0] | (1 << 32)) == EPERM  # the kernel truncates
     for allowed in (3, 4):  # F_GETFL, F_SETFL (os.set_blocking): untouched
-        assert run(arch, fcntl_nr, 5, allowed) == ALLOW
-    for request in ioctl_values:  # FIOSETOWN, SIOCSPGRP, FIOASYNC
-        assert run(arch, ioctl_nr, 5, request) == EPERM, request
-    assert run(arch, ioctl_nr, 5, 0x5401) == ALLOW  # TCGETS, a harmless ioctl
-    for option in prctl_values:  # PR_SET_PDEATHSIG, PR_SET_DUMPABLE
-        assert run(arch, prctl_nr, option) == EPERM, option
-    assert run(arch, prctl_nr, 15) == ALLOW  # PR_SET_NAME: a thread may still name itself
+        assert run(arch, fcntl.nr, 5, allowed) == ALLOW
+    for request in ioctl.values:  # FIOSETOWN, SIOCSPGRP, FIOASYNC
+        assert run(arch, ioctl.nr, 5, request) == EPERM, request
+    assert run(arch, ioctl.nr, 5, 0x5401) == ALLOW  # TCGETS, a harmless ioctl
+    for option in prctl.values:  # PR_SET_PDEATHSIG, PR_SET_DUMPABLE
+        assert run(arch, prctl.nr, option) == EPERM, option
+    assert run(arch, prctl.nr, 15) == ALLOW  # PR_SET_NAME: a thread may still name itself
+
+
+@pytest.mark.parametrize("arch", ARCH_LIST, ids=lambda arch: arch.name)
+def test_o_async_through_f_setfl_is_denied(arch: Arch) -> None:
+    """``F_SETFL`` with ``O_ASYNC`` on a terminal aims SIGIO at the terminal's foreground group,
+    the job's, with no owner set by the caller: refused on every ABI. Any other ``F_SETFL``, and
+    ``O_ASYNC`` with any other command, is allowed."""
+    fcntl_nr = next(rule.nr for rule in arch.arg_denied if rule.name == "fcntl")
+    f_getfl, f_setfl, o_async = 3, 4, 0x2000
+    assert o_async == os.O_ASYNC  # FASYNC, the same on x86_64 and aarch64 (asm-generic)
+    for flags in (o_async, o_async | os.O_NONBLOCK | os.O_APPEND, o_async | 1 << 32):
+        assert run(arch, fcntl_nr, 5, f_setfl, flags) == EPERM, hex(flags)
+    assert run(arch, fcntl_nr, 5, f_setfl | 1 << 32, o_async) == EPERM  # the kernel truncates
+    for flags in (0, os.O_NONBLOCK, os.O_NONBLOCK | os.O_APPEND, ~o_async & 0xFFFFFFFF, 1 << 45):
+        assert run(arch, fcntl_nr, 5, f_setfl, flags) == ALLOW, hex(flags)  # os.set_blocking
+    assert run(arch, fcntl_nr, 5, f_getfl, o_async) == ALLOW  # only F_SETFL sets the flag
+    assert run(arch, fcntl_nr, 5, 1030, o_async) == ALLOW  # F_DUPFD_CLOEXEC, say: untouched
 
 
 # --- A confined process, from the inside --------------------------------------------------------

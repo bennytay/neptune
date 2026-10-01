@@ -3,7 +3,10 @@
 ``confine`` runs in the forked child before any adapter code, and applies, in order:
 
 1. ``PR_SET_PDEATHSIG``: the child is killed if the job's process dies first; then ``setsid`` so
-   it has no controlling terminal to reach the job through (``/dev/tty`` SIGIO, ``TIOCSTI``).
+   it has no controlling terminal: ``/dev/tty`` does not open, and ``TIOCSTI`` and
+   ``TIOCSPGRP``, which need the caller's own controlling terminal, fail on any terminal. A
+   terminal it can still open read-only (the job's ``/dev/pts/N``) is kept from raising SIGIO
+   by the seccomp filter's ``O_ASYNC`` rules (5), not by ``setsid``.
 2. Descriptors: standard input and output go to ``/dev/null`` and every other descriptor is
    closed except the ones the call keeps (the reply pipe, the source).
 3. Resource limits: ``RLIMIT_CPU`` (SIGXCPU at the limit, SIGKILL a second later),
@@ -22,9 +25,10 @@
    and the ``*xattr`` family) and no ``fallocate``: Landlock covers none of those, so without
    the filter a parser could make the source unreadable, world-write another file, or defeat
    change detection even above the Landlock floor. Threads stay allowed. The filter also denies
-   the async-I/O path
-   to a signal the kernel delivers through descriptor ownership, which only Landlock ABI 6
-   scopes: ``fcntl`` ``F_SETOWN``/``F_SETOWN_EX``/``F_SETSIG`` and ``ioctl``
+   the async-I/O path to a signal the kernel delivers through descriptor ownership, which only
+   Landlock ABI 6 scopes: ``fcntl`` ``F_SETOWN``/``F_SETOWN_EX``/``F_SETSIG``, ``fcntl``
+   ``F_SETFL`` with ``O_ASYNC`` (on a terminal, which stays readable, the kernel itself makes
+   the terminal's foreground process group the owner: the job's, in a shell), and ``ioctl``
    ``FIOSETOWN``/``SIOCSPGRP``/``FIOASYNC`` (EPERM), and ``prctl`` ``PR_SET_PDEATHSIG`` and
    ``PR_SET_DUMPABLE`` so a hostile child can neither outlive a killed job nor re-enable a
    core dump after confinement. These argument filters hold on every Landlock ABI.
@@ -44,7 +48,7 @@ import signal
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 # --- prctl -------------------------------------------------------------------------------------
 
@@ -72,6 +76,7 @@ _ARCH: Final = 4
 _ARG0_LOW: Final = 16  # little-endian: the low word first
 _ARG0_HIGH: Final = 20
 _ARG1_LOW: Final = 24  # args[1], its low word
+_ARG2_LOW: Final = 32  # args[2], its low word
 
 _CLONE_THREAD: Final = 0x00010000
 _X32_SYSCALL_BIT: Final = 0x40000000
@@ -86,6 +91,13 @@ _F_SETOWN_EX: Final = 15
 _FIOSETOWN: Final = 0x8901
 _SIOCSPGRP: Final = 0x8902
 _FIOASYNC: Final = 0x5452
+# ``F_SETFL`` with ``O_ASYNC`` (``FASYNC``, 0o20000 in asm-generic: the same on both architectures)
+# reaches the same path with no owner set by the caller: on a terminal the kernel makes the
+# terminal's foreground process group the owner, which is the job's when it runs in a shell. The
+# flag argument is an int too, so its low word holds the bit. Every other ``F_SETFL`` stays
+# allowed (``os.set_blocking``).
+_F_SETFL: Final = 4
+_O_ASYNC: Final = 0x2000
 # ``prctl`` options a confined child must never reach after setup: clearing its parent-death
 # signal (so it could outlive a killed job) or making itself dumpable again (a core dump holding
 # source data). Every other option — a thread naming itself, say — stays allowed.
@@ -148,6 +160,21 @@ _METADATA_AARCH64: Final = {
 }
 
 
+class ArgRule(NamedTuple):
+    """A syscall that is allowed but answers EPERM for some argument values.
+
+    EPERM when the argument whose low word sits at ``offset`` is one of ``values``, or, given a
+    ``flag`` ``(value, flag_offset, bits)``, when it is ``value`` and the argument whose low word
+    sits at ``flag_offset`` has any of ``bits`` set.
+    """
+
+    name: str
+    nr: int
+    offset: int
+    values: tuple[int, ...]
+    flag: tuple[int, int, int] | None = None
+
+
 @dataclass(frozen=True)
 class Arch:
     """One architecture's audit tag and syscall numbers (``asm/unistd_64.h``, ``unistd.h``)."""
@@ -158,8 +185,7 @@ class Arch:
     denied: tuple[tuple[str, int], ...]  # refused outright, by name and number
     clone: int  # allowed only with CLONE_THREAD: a thread, never a process
     self_only: tuple[tuple[str, int], ...]  # kill and tgkill: only towards this process
-    # Allowed, but EPERM for a few argument values: (name, number, arg's low-word offset, values).
-    arg_denied: tuple[tuple[str, int, int, tuple[int, ...]], ...]
+    arg_denied: tuple[ArgRule, ...]  # allowed, but EPERM for a few argument values
 
 
 ARCHES: Final = {
@@ -194,9 +220,15 @@ ARCHES: Final = {
         clone=56,
         self_only=(("kill", 62), ("tgkill", 234)),
         arg_denied=(
-            ("fcntl", 72, _ARG1_LOW, (_F_SETOWN, _F_SETSIG, _F_SETOWN_EX)),
-            ("ioctl", 16, _ARG1_LOW, (_FIOSETOWN, _SIOCSPGRP, _FIOASYNC)),
-            ("prctl", 157, _ARG0_LOW, (_PR_SET_PDEATHSIG_OPT, _PR_SET_DUMPABLE_OPT)),
+            ArgRule(
+                "fcntl",
+                72,
+                _ARG1_LOW,
+                (_F_SETOWN, _F_SETSIG, _F_SETOWN_EX),
+                (_F_SETFL, _ARG2_LOW, _O_ASYNC),
+            ),
+            ArgRule("ioctl", 16, _ARG1_LOW, (_FIOSETOWN, _SIOCSPGRP, _FIOASYNC)),
+            ArgRule("prctl", 157, _ARG0_LOW, (_PR_SET_PDEATHSIG_OPT, _PR_SET_DUMPABLE_OPT)),
         ),
     ),
     "aarch64": Arch(
@@ -228,9 +260,15 @@ ARCHES: Final = {
         clone=220,
         self_only=(("kill", 129), ("tgkill", 131)),
         arg_denied=(
-            ("fcntl", 25, _ARG1_LOW, (_F_SETOWN, _F_SETSIG, _F_SETOWN_EX)),
-            ("ioctl", 29, _ARG1_LOW, (_FIOSETOWN, _SIOCSPGRP, _FIOASYNC)),
-            ("prctl", 167, _ARG0_LOW, (_PR_SET_PDEATHSIG_OPT, _PR_SET_DUMPABLE_OPT)),
+            ArgRule(
+                "fcntl",
+                25,
+                _ARG1_LOW,
+                (_F_SETOWN, _F_SETSIG, _F_SETOWN_EX),
+                (_F_SETFL, _ARG2_LOW, _O_ASYNC),
+            ),
+            ArgRule("ioctl", 29, _ARG1_LOW, (_FIOSETOWN, _SIOCSPGRP, _FIOASYNC)),
+            ArgRule("prctl", 167, _ARG0_LOW, (_PR_SET_PDEATHSIG_OPT, _PR_SET_DUMPABLE_OPT)),
         ),
     ),
 }
@@ -410,12 +448,21 @@ def seccomp_program(arch: Arch, pid: int) -> list[tuple[int, int, int, int]]:
             (_RET_K, 0, 0, _RET_ALLOW),
             (_RET_K, 0, 0, _RET_ERRNO | errno.EPERM),
         ]
-    for _, nr, offset, values in arch.arg_denied:  # EPERM only for the named argument values
-        count = len(values)
-        program.append((_JEQ_K, 0, count + 3, nr))  # not this syscall: skip the block
-        program.append((_LD_W_ABS, 0, 0, offset))  # the argument's low word
-        for index, value in enumerate(values):
-            program.append((_JEQ_K, count - index, 0, value))  # a match jumps to the EPERM return
+    for rule in arch.arg_denied:  # EPERM only for the named argument values
+        flagged: list[tuple[int, int, int, int]] = []
+        if rule.flag is not None:  # this value, with a refused bit in another argument: EPERM
+            value, flag_offset, bits = rule.flag
+            flagged = [
+                (_JEQ_K, 0, 2, value),  # another value: allowed
+                (_LD_W_ABS, 0, 0, flag_offset),  # the flag argument's low word
+                (_JSET_K, 1, 0, bits),  # a refused bit set jumps to the EPERM return
+            ]
+        count = len(rule.values)
+        program.append((_JEQ_K, 0, count + len(flagged) + 3, rule.nr))  # another syscall: skip
+        program.append((_LD_W_ABS, 0, 0, rule.offset))  # the argument's low word
+        for index, value in enumerate(rule.values):  # a match jumps to the EPERM return
+            program.append((_JEQ_K, count - index + len(flagged), 0, value))
+        program += flagged
         program.append((_RET_K, 0, 0, _RET_ALLOW))  # this syscall, an argument we allow
         program.append((_RET_K, 0, 0, _RET_ERRNO | errno.EPERM))
     program.append((_RET_K, 0, 0, _RET_ALLOW))
@@ -533,10 +580,13 @@ def confine(
         _prctl("pdeathsig", _PR_SET_PDEATHSIG, signal.SIGKILL)
         if os.getppid() != parent:  # the job died before the line above took effect
             os._exit(1)
-        # A new session, with no controlling terminal: a forked child inherits the job's, and
-        # reads stay open, so it could otherwise open ``/dev/tty`` and reach the job through it
-        # (SIGIO via ``O_ASYNC`` on the terminal, ``TIOCSTI`` input injection, ``TIOCSPGRP``),
-        # a path seccomp's descriptor-owner filters do not cover. ``setsid`` severs it.
+        # A new session, with no controlling terminal (a forked child inherits the job's): then
+        # ``/dev/tty`` does not open, and ``TIOCSTI`` input injection and ``TIOCSPGRP`` fail on
+        # any terminal, since both need the caller's own controlling one. It does not stop
+        # SIGIO: reads stay open, so the job's ``/dev/pts/N`` still opens read-only, and
+        # ``O_ASYNC`` on it would aim SIGIO at the terminal's foreground group, the job's. The
+        # seccomp filter refuses ``O_ASYNC`` (``F_SETFL``, ``FIOASYNC``) on every Landlock ABI;
+        # ABI 6 signal scoping blocks that delivery as well.
         os.setsid()
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGXCPU):
             signal.signal(signum, signal.SIG_DFL)

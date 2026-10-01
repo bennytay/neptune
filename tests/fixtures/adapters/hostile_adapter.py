@@ -22,6 +22,8 @@ Chunk 0 emits the ``DocumentRecord``; every other chunk holds one line and emits
   ``kill-parent``: signals the job's process; ``write <path>``: writes ``<path>``;
 - ``setown``: aims a pipe's SIGIO at the job (``fcntl`` F_SETOWN); ``fioasync``: turns a pipe's
   async signal on (``ioctl`` FIOASYNC) — the signal path only Landlock ABI 6 scopes;
+  ``ttyasync <path>``: opens the terminal ``<path>`` read-only and turns ``O_ASYNC`` on with
+  ``fcntl`` F_SETFL, which aims SIGIO at the terminal's foreground process group;
 - ``nap``: not an attack: sleeps two seconds, then reads as a block ``nap`` (a slow chunk to
   kill a job in the middle of);
 - ``spool``: not an attack: spools 2 MiB through the call's scratch directory, as an archive
@@ -181,6 +183,13 @@ def attack(text: str) -> str:
             spooled.seek(0)
             if len(spooled.read()) != size:
                 raise RuntimeError("the spool lost bytes")
+    elif text.startswith("ttyasync "):
+        terminal = os.open(text.removeprefix("ttyasync "), os.O_RDONLY)  # reads stay open
+        try:
+            flags = fcntl.fcntl(terminal, fcntl.F_GETFL)
+            fcntl.fcntl(terminal, fcntl.F_SETFL, flags | os.O_ASYNC)
+        finally:
+            os.close(terminal)
     elif text.startswith("write "):
         with open(text.removeprefix("write "), "wb") as target:  # noqa: PTH123 - the attack
             target.write(b"escaped")
