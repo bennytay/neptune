@@ -67,7 +67,7 @@ def ingest(root: Path, tmp_path: Path, name: str = "package") -> IngestPackage:
 def paths_of(package: IngestPackage) -> dict[str, str]:
     """Each source's content id to the path it was found at."""
     return {
-        r.content_id: str(r.location.path)  # type: ignore[union-attr]
+        str(r.content_id): str(r.location.path)  # type: ignore[union-attr]
         for r in package.records
         if isinstance(r, SourceRevision)
     }
@@ -80,7 +80,7 @@ def test_every_photo_lands_as_images_and_every_damaged_one_as_findings(
     where = paths_of(package)
     found: dict[str, list[tuple[str, int, int]]] = {}
     for image in (r for r in package.records if isinstance(r, Image)):
-        path = where[image.provenance.evidence.source]
+        path = where[str(image.provenance.evidence.source)]
         found.setdefault(path, []).append((image.encoding, image.width, image.height))
     assert {p: sorted(v, key=lambda t: t[1]) for p, v in found.items() if p in GOOD} == {
         p: sorted(sizes, key=lambda t: t[1]) for p, (_, sizes) in GOOD.items()
@@ -88,7 +88,9 @@ def test_every_photo_lands_as_images_and_every_damaged_one_as_findings(
     findings = [r for r in package.records if isinstance(r, IngestFinding)]
     for path, (_, code) in DAMAGED.items():
         sources = {c for c, p in where.items() if p == path}
-        assert any(f.code == code and f.subject.source in sources for f in findings), path
+        assert any(
+            f.code == code and getattr(f.subject, "source", None) in sources for f in findings
+        ), path
     # the damaged images that still hold a raster are images too; the empty file is none
     assert "arm/empty.png" not in found and "arm/bomb.png" in found
     # no job-level failure: damage is the adapter's findings, not a quarantined source
@@ -107,7 +109,9 @@ def test_an_image_region_extends_the_images_own_citation_and_the_source_names_it
         region = EvidenceRef(
             evidence.source, (*evidence.locator, ImageRegion(0, 0, image.width, image.height))
         )
-        assert region.source in where  # the revision says where the image lives: a run's folder
+        assert (
+            str(region.source) in where
+        )  # the revision says where the image lives: a run's folder
         assert region.locator[:-1] == evidence.locator
 
 

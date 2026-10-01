@@ -92,12 +92,12 @@ class TiffLayout:
         header_size = 16 if self.big else 8
         sizes: dict[str, int] = {}
         for name, directory in self.directories.items():
-            values = sum(
+            spill = sum(
                 (n + 1) & ~1
                 for n in (self._count(t) * _SIZE[t.type] for t in directory.entries)
                 if n > inline
             )
-            sizes[name] = count_size + entry_size * len(directory.entries) + tail + values
+            sizes[name] = count_size + entry_size * len(directory.entries) + tail + spill
         offsets: dict[str, int] = {}
         position = header_size
         for name in self.directories:
@@ -108,7 +108,7 @@ class TiffLayout:
             position += (len(blob) + 1) & ~1
         out = bytearray()
         if self.big:
-            out += (b"II" if self.little else b"MM") + struct.pack(order + "HHHQ", 43, 8, 0, 0)[0:0]
+            out += b"II" if self.little else b"MM"
             out += struct.pack(order + "HHHQ", 43, 8, 0, offsets[self.first])
         else:
             out += (b"II" if self.little else b"MM") + struct.pack(
@@ -808,7 +808,7 @@ def _plain(value: Any) -> Any:
 
 def oracle() -> dict[str, Any]:
     """What Pillow reads from every valid fixture: size, mode, frames, EXIF, GPS, ICC, XMP."""
-    from PIL import Image
+    from PIL import Image  # type: ignore[import-not-found,unused-ignore]
 
     found: dict[str, Any] = {}
     for name in VALID:

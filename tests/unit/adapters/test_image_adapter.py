@@ -221,10 +221,15 @@ def test_each_source_is_one_chunk_and_inspect_summarises_without_records() -> No
     output = ingest_source(adapter, reader, {})
     assert len(output.plan.chunks) == 1
     summary = adapter.inspect(reader, output.config).summary
-    assert sorted(summary["images"], key=lambda image: image["width"]) == [  # type: ignore[index, call-overload]
-        {"encoding": "tiff", "height": 6, "width": 8},
-        {"encoding": "tiff", "height": 12, "width": 16},
-    ]
+    listed = summary["images"]
+    assert isinstance(listed, list)
+    assert sorted(listed, key=str) == sorted(
+        [
+            {"encoding": "tiff", "height": 6, "width": 8},
+            {"encoding": "tiff", "height": 12, "width": 16},
+        ],
+        key=str,
+    )
     assert summary["size"] == reader.size
 
 
