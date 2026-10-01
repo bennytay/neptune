@@ -404,28 +404,39 @@ def _clock_mismatches(
     priorities: Mapping[str, int],
 ) -> list[ResolutionFinding]:
     """One ``clock_mismatch`` per pair of versions of a ``one`` fact with different objects on
-    different clocks, active exactly while both are current. ``claim`` is the later arrival."""
-    facts: dict[tuple[NodeRef, str], list[Claim]] = {}
+    different clocks, active exactly while both are current. ``claim`` is the version recorded
+    later (on a tie, the one whose assertion arrives later); ``others`` is the earlier one.
+
+    Versions are grouped by clock, so only pairs across clocks are compared.
+    """
+    facts: dict[tuple[NodeRef, str], dict[RecordId, list[tuple[Claim, bytes]]]] = {}
     for version in versions:
         if registry.spec(version.predicate).cardinality is Cardinality.ONE:
-            facts.setdefault((version.subject, version.predicate), []).append(version)
+            clocks = facts.setdefault((version.subject, version.predicate), {})
+            clocks.setdefault(version.valid_from.domain_id, []).append(
+                (version, _object_key(version))
+            )
+
+    def order(v: Claim) -> tuple[int, tuple[int, int, str], str]:
+        return (v.recorded_at, arrival_key(origin[v.id], priorities), v.id)
+
     found: list[ResolutionFinding] = []
-    for group in facts.values():
-        group.sort(key=lambda v: (arrival_key(origin[v.id], priorities), v.id))
-        for i, later in enumerate(group):
-            for earlier in group[:i]:
-                if later.valid_from.domain_id == earlier.valid_from.domain_id or _object_key(
-                    later
-                ) == _object_key(earlier):
-                    continue
-                start = max(later.recorded_at, earlier.recorded_at)
-                pair = (later.superseded_at, earlier.superseded_at)
-                ends = [e for e in pair if not isinstance(e, Open)]
-                end: LedgerTx | Open = min(ends) if ends else OPEN
-                if isinstance(end, Open) or start < end:
-                    found.append(
-                        ResolutionFinding(
-                            FindingCode.CLOCK_MISMATCH, later.id, (earlier.id,), start, end
+    for clocks in facts.values():
+        for one, two in itertools.combinations(sorted(clocks), 2):
+            for a, a_key in clocks[one]:
+                for b, b_key in clocks[two]:
+                    if a_key == b_key:
+                        continue
+                    earlier, later = sorted((a, b), key=order)
+                    start = later.recorded_at
+                    ends = [
+                        e for e in (a.superseded_at, b.superseded_at) if not isinstance(e, Open)
+                    ]
+                    end: LedgerTx | Open = min(ends) if ends else OPEN
+                    if isinstance(end, Open) or start < end:
+                        found.append(
+                            ResolutionFinding(
+                                FindingCode.CLOCK_MISMATCH, later.id, (earlier.id,), start, end
+                            )
                         )
-                    )
     return found

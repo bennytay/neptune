@@ -138,7 +138,8 @@ class ViolationCode(StrEnum):
     OBJECT_TYPE = "object_type"
     DECLARED_ONLY = "declared_only"  # an inferred claim names a declared-only node (a person)
     # An observed or stated claim names a person by something other than a declared identifier
-    # (``<namespace>:<value>``) or cites no Ledger record that declares it (ADR 0005 §5).
+    # (``<namespace>:<value>``), or cites no Ledger record (ADR 0005 §5). The schema checks the
+    # shape and the citation; that the identifier comes from a declaration is consolidate/'s.
     UNDECLARED_PERSON = "undeclared_person"
 
 
@@ -169,14 +170,20 @@ def violations(claim: Claim, registry: PredicateRegistry) -> tuple[SchemaViolati
                     f" {node.node_id!r}",
                 )
             )
-        elif not _is_declared_identifier(node.node_id) or not claim.provenance.records:
-            found.append(
-                SchemaViolation(
-                    ViolationCode.UNDECLARED_PERSON,
-                    f"a {claim.assertion_kind} claim names {node.node_type} {node.node_id!r} only"
-                    " by a declared identifier (<namespace>:<value>) from a cited Ledger record",
+        else:
+            problems = [
+                *([] if _is_declared_identifier(node.node_id) else ["is not <namespace>:<value>"]),
+                *([] if claim.provenance.records else ["is cited with no Ledger record"]),
+            ]
+            if problems:
+                found.append(
+                    SchemaViolation(
+                        ViolationCode.UNDECLARED_PERSON,
+                        f"{node.node_type} {node.node_id!r} {' and '.join(problems)}; a"
+                        f" {claim.assertion_kind} claim names a person only by a declared"
+                        " identifier from a cited Ledger record",
+                    )
                 )
-            )
     if claim.predicate not in registry:
         found.append(
             SchemaViolation(

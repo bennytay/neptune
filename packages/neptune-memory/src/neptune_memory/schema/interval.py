@@ -94,7 +94,7 @@ class Interval:
         interval's clock (else ``DomainMismatchError``).
         """
         pieces = [self]
-        for cut in sorted(others, key=lambda i: i.start.ticks):
+        for cut in others:  # any order: each split keeps the pieces in valid-time order
             if cut.domain_id != self.domain_id:
                 raise DomainMismatchError(self.domain_id, cut.domain_id)
             kept: list[Interval] = []

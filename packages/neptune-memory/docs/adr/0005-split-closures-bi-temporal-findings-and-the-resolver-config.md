@@ -71,7 +71,8 @@ overlapping valid intervals on one clock.
 `(recorded_at, claim, code, others)`.
 
 - **`clock_mismatch`** names one pair: two versions of a `one` fact with different objects on different clocks.
-  `claim` is the later arrival and `others = (earlier,)`. The finding is recorded at the transaction where both
+  `claim` is the version recorded later (on a tie, the one whose assertion arrives later) and
+  `others = (earlier,)`. The finding is recorded at the transaction where both
   versions become current. It is superseded when the first of them stops being current. A narrowed version's
   pieces get their own findings, so the marker follows the versions it names.
 - **`overridden_on_arrival`** is recorded at the arrival and never superseded: that claim was never current.
@@ -169,6 +170,10 @@ tx)` has the claims and findings that `resolve(claims recorded ≤ tx)` leaves c
   marker.
 - **`config_hash` over `{narrows, winner}` only**: a priority change would keep the closure lineage. A hash of
   the config alone, without `narrows`, collides for corroborating claims with equal evidence.
+- **Hash only the priorities that competed on a fact**: adding an unrelated consolidator would then leave
+  closure ids alone. But the hash would depend on the data seen so far, so a replay to `tx` would give
+  different closure ids than the full history, and P4 would fail. The config must be fixed independently of
+  the data.
 - **Allow observed or stated claims to name any person node**: free text or perception would put people in the
   graph with no declared identity behind them.
 
@@ -178,7 +183,12 @@ tx)` has the claims and findings that `resolve(claims recorded ≤ tx)` leaves c
 - Changing priorities or the vocabulary changes every closure id. Stored histories are re-resolved from their
   assertions, never patched.
 - `as_of` takes and returns a `Resolution`. MVL-105's `MemoryReader` builds on this signature.
-- `clock_mismatch` is computed over version pairs per fact, which is quadratic in that fact's versions.
-  Revisit if one fact accumulates many cross-clock versions.
+- `clock_mismatch` compares version pairs across clocks within one fact. That is quadratic only in the
+  cross-clock versions of one fact. Revisit if one fact accumulates many.
+- When an arriving claim is split, the version that lists its losers in `supersedes` is never current. Its
+  pieces list only that version. A snapshot reader finds the displacement in the history, or in the losers'
+  pieces' evidence, which includes the arriving claim's.
+- `check_claim` checks a person's identifier shape and its record citation. That the identifier came from a
+  declaration is `consolidate/`'s contract (ADR 0003 §1), because the schema cannot read records.
 - Revisit when `ClockAlignment` (compiler MVL-36) is consumed, which turns some mismatches into comparisons.
   Revisit also if consumers need per-predicate superseding policies beyond `one`/`many`.

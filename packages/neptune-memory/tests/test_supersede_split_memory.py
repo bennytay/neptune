@@ -227,7 +227,7 @@ def test_clock_mismatch_findings_follow_the_versions_they_name() -> None:
     found = {(f.claim, f.others, f.recorded_at, f.superseded_at) for f in result.findings}
     assert found == {
         (boot.id, (civil.id,), 2, 3),  # ends when civil's open version is superseded
-        (boot.id, (piece.id,), 3, OPEN),
+        (piece.id, (boot.id,), 3, OPEN),  # the piece is the version recorded later
         (moved.id, (boot.id,), 3, OPEN),
     }
     assert all(f.code is FindingCode.CLOCK_MISMATCH for f in result.findings)
