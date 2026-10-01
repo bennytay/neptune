@@ -169,11 +169,13 @@ class Workspace:
     def __init__(self, home: Path | None = None) -> None:
         self.home = Path(home) if home is not None else default_home()
         self.home.mkdir(parents=True, exist_ok=True)
+        fsync_directory(self.home.parent)  # the home's own name, whoever made it
         settings = self.home / "workspace.json"
         if settings.exists():
             self._check(settings)
         for directory in ("ledgers", "plans", "chunks", "staging"):
             (self.home / directory).mkdir(exist_ok=True)
+        fsync_directory(self.home)  # its folders' names, every time: one may have been remade
         if not settings.exists():
             self._save_settings({"local_only": True})
         self._settings = self._check(settings)
@@ -245,9 +247,20 @@ class Workspace:
             finally:
                 os.close(descriptor)
 
+    def _directory(self, path: Path) -> None:
+        """Make ``path``, a directory in one of the home's folders, and flush its name into it.
+
+        A rename into a directory is only durable if the directory's own name is. The folder is
+        flushed even when ``path`` already exists: another process may have made it and not yet
+        flushed it. The folders themselves are made, and flushed, when the workspace is opened.
+        """
+        path.mkdir(exist_ok=True)
+        fsync_directory(path.parent)
+
     def _replace(self, path: Path, data: bytes) -> None:
         """Write ``path`` whole or not at all."""
-        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.parent != self.home:  # the home's own entries are flushed with workspace.json
+            self._directory(path.parent)
         with self._staging() as staging:
             staged = staging / path.name
             with staged.open("wb") as stream:
@@ -408,7 +421,7 @@ class Workspace:
             for stream, batches in sorted(by_stream.items()):
                 write_run(batches, staged / "runs" / f"{_hex(stream, 'rec')}.parquet")
             fsync_tree(staged)
-            final.parent.mkdir(parents=True, exist_ok=True)
+            self._directory(final.parent)  # chunks/<2 hex>/, whose name chunks/ must keep
             try:
                 staged.rename(final)
             except OSError:

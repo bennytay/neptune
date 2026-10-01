@@ -28,6 +28,9 @@ package is built from committed work, how it becomes portable, and what "local-o
    - `staging/`: work in progress, and nothing else.
 2. **Commits are atomic, durable and idempotent.** A chunk is written into its own directory in
    `staging/`, every file and directory flushed (`fsync`), and renamed into `chunks/` in one step.
+   Every directory a commit, plan or ledger lands in is flushed after it is made (its name in its
+   parent, even if another process made it) and after the rename (the new name in it); opening
+   a workspace flushes the home's name and its folders' names.
    A process killed before the rename leaves only staging debris; one killed after it leaves a
    whole chunk. The writer holds an `flock` on its staging directory from creation until it is
    renamed or removed, and `clear_staging` removes only entries whose lock it can take, so it
@@ -46,8 +49,11 @@ package is built from committed work, how it becomes portable, and what "local-o
    every stream must have runs. The package is built in a hidden sibling directory (made with
    `mkdir`, so the umask applies and is never read, which would mean setting it), flushed, and
    renamed into place, so it appears whole or not at all and stays once it has appeared; an
-   existing destination is refused, as packages are written once. A materialised source is
-   copied, so it is hashed again where it lands, against the manifest; nothing else is re-read.
+   existing destination is refused, as packages are written once. A source to materialise is
+   named by content id and read as an export reads one (§5): from the head of a location chain in
+   the ledger that holds it, through the caller's `Source`, and hashed where it lands; nothing
+   else is re-read. Every file the store itself reads or copies is opened with `O_NOFOLLOW` and
+   `O_NONBLOCK` and must be a regular file, so no path it is handed is followed or waited on.
    The manifest records `store.series` whenever there are series.
 5. **Portable export** (`export`) copies a package with every referenced source materialised into
    `blobs/`. Each source is read from the head of a location chain that holds it, opened through
