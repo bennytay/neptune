@@ -26,7 +26,7 @@ from neptune_memory.schema.supersede import Resolution
 from neptune_memory.schema.supersede import as_of as snapshot_of
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from neptune.model.frames import FrameRef
     from neptune.model.ids import ConfigHash
@@ -45,18 +45,12 @@ def _by_id(claims: Iterable[Claim]) -> tuple[Claim, ...]:
     return tuple(sorted(claims, key=lambda c: c.id))
 
 
-def _naming(
-    findings: Iterable[ResolutionFinding], claims: Iterable[Claim]
-) -> tuple[ResolutionFinding, ...]:
-    ids = {c.id for c in claims}
-    return tuple(f for f in findings if f.claim in ids or ids.intersection(f.others))
-
-
 class ReferenceReader:
     """A ``MemoryReader`` over one graph document (a resolved history and its generation)."""
 
     def __init__(self, document: GraphDocument) -> None:
         self._history: Resolution = document.resolution
+        self._versions = {c.id: c for c in document.resolution.claims}
         self._generation = document.generation
         self._head = document.head
 
@@ -73,11 +67,35 @@ class ReferenceReader:
         return self._head
 
     def _snapshot(self, as_of: LedgerTx, include_inferred: bool = True) -> Resolution:
+        """The snapshot at ``as_of``; without inference, its inferred claims are dropped (its
+        findings are filtered per query by ``_findings``)."""
         snapshot = snapshot_of(self._history, check_as_of(as_of, self._head))
         if include_inferred:
             return snapshot
         kept = tuple(c for c in snapshot.claims if not is_inferred(c.assertion_kind))
-        return Resolution(kept, _naming(snapshot.findings, kept))
+        return Resolution(kept, snapshot.findings)
+
+    def _findings(
+        self,
+        snapshot: Resolution,
+        returned: Iterable[Claim],
+        about: Callable[[Claim], bool],
+        include_inferred: bool = True,
+    ) -> tuple[ResolutionFinding, ...]:
+        """The snapshot's findings that name a returned claim, or whose own claim (``claim``,
+        possibly never current, as with ``overridden_on_arrival``) is ``about`` the query and
+        passes the inference filter. In resolver order."""
+        ids = {c.id for c in returned}
+
+        def wanted(finding: ResolutionFinding) -> bool:
+            if finding.claim in ids or ids.intersection(finding.others):
+                return True
+            own = self._versions.get(finding.claim)
+            if own is None or not about(own):
+                return False
+            return include_inferred or not is_inferred(own.assertion_kind)
+
+        return tuple(f for f in snapshot.findings if wanted(f))
 
     def node(self, node: NodeRef, as_of: LedgerTx) -> Knowledge[NodeView]:
         snapshot = self._snapshot(as_of)
@@ -85,7 +103,9 @@ class ReferenceReader:
         incoming = _by_id(c for c in snapshot.claims if c.object == node)
         if not out and not incoming:
             return NotCovered()
-        findings = _naming(snapshot.findings, (*out, *incoming))
+        findings = self._findings(
+            snapshot, (*out, *incoming), lambda c: node in (c.subject, c.object)
+        )
         return Known(NodeView(node, check_as_of(as_of, self._head), out, incoming, findings))
 
     def claims(
@@ -113,7 +133,20 @@ class ReferenceReader:
             as_of=check_as_of(as_of, self._head),
             claims=_by_id(matched),
             other_clocks=_by_id(elsewhere),
-            findings=_naming(snapshot.findings, (*matched, *elsewhere)),
+            findings=self._findings(
+                snapshot,
+                (*matched, *elsewhere),
+                lambda c: (
+                    c.subject == subject
+                    and (predicate is None or c.predicate == predicate)
+                    and (
+                        during is None
+                        or c.valid.domain_id != during.domain_id
+                        or c.valid.overlaps(during)
+                    )
+                ),
+                include_inferred,
+            ),
         )
 
     def neighbours(
@@ -151,7 +184,7 @@ class ReferenceReader:
             hops,
             check_as_of(as_of, self._head),
             found,
-            _naming(snapshot.findings, via_claims),
+            self._findings(snapshot, via_claims, lambda _: False),
         )
 
     def episodes(self, filter: EpisodeFilter) -> Knowledge[tuple[EpisodeView, ...]]:

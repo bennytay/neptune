@@ -28,6 +28,7 @@ from neptune_memory.schema.interval import OPEN, ledger_tx
 from neptune_memory.schema.nodes import NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES
 from neptune_memory.schema.supersede import (
+    FindingCode,
     FindingProvenance,
     ResolutionFinding,
     parse_finding_id,
@@ -211,6 +212,39 @@ def test_malformed_graph_documents_are_refused(key: str, value: Any) -> None:
     data[key] = value
     with pytest.raises(ValueError):
         graph_from_json(data)
+
+
+def test_graph_documents_must_hold_together() -> None:
+    data = _round(built().to_json())
+    duplicated = {**data, "claims": [data["claims"][0], *data["claims"]]}
+    with pytest.raises(ValueError, match="twice"):
+        graph_from_json(duplicated)
+    findings = data["findings"]
+    orphaned = {**data, "claims": [c for c in data["claims"] if c["id"] != findings[0]["claim"]]}
+    with pytest.raises(ValueError, match="does not hold"):
+        graph_from_json(orphaned)
+    foreign = copy.deepcopy(data)
+    foreign["findings"][0]["provenance"]["config_hash"] = "sha256:" + "0" * 64
+    foreign["findings"][0]["id"] = _refind(foreign)
+    with pytest.raises(ValueError, match="another generation"):
+        graph_from_json(foreign)
+
+
+def _refind(data: dict[str, Any]) -> str:
+    raw = dict(data["findings"][0])
+    raw.pop("id")
+    probe = ResolutionFinding(
+        code=FindingCode(raw["code"]),
+        claim=raw["claim"],
+        others=tuple(raw["others"]),
+        provenance=FindingProvenance(
+            raw["provenance"]["resolver_id"],
+            raw["provenance"]["resolver_version"],
+            ConfigHash(raw["provenance"]["config_hash"]),
+        ),
+        recorded_at=ledger_tx(raw["recorded_at"]),
+    )
+    return probe.id
 
 
 def test_graph_document_order_is_checked() -> None:

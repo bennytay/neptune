@@ -67,7 +67,9 @@ class ClaimsResult:
     ``claims`` match the query; ``other_clocks`` match subject and predicate but are on a clock
     other than ``during``'s, so they could not be compared with it (never coerced, never
     dropped). Both are sorted by claim id. ``findings`` are the findings active at ``as_of`` that
-    name any claim in either, in resolver order ``(recorded_at, claim, code, others)``.
+    name any claim in either, or whose own ``claim`` matches the query (subject, predicate,
+    ``during`` and the inference filter) even if that claim is not current, as with
+    ``overridden_on_arrival``; in resolver order ``(recorded_at, claim, code, others)``.
     """
 
     as_of: LedgerTx

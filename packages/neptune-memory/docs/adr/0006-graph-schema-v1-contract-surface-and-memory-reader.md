@@ -78,8 +78,9 @@ the runner still enforces it: only `memory.identity` grounds `same_as`, and neve
 `ResolutionFinding` gains `provenance = FindingProvenance(resolver_id, resolver_version, config_hash)` and a
 deterministic `id = "finding:" + sha256(canonical JSON of {code, claim, others, provenance})`. Like a claim id, it
 excludes bookkeeping (`recorded_at`, `superseded_at`). A store therefore keys a finding on arrival and closes it in
-place, in the same transaction as the claims it names. `MemoryReader` returns the findings active at `as_of` that
-name any returned claim, next to those claims.
+place, in the same transaction as the claims it names. `MemoryReader` returns the findings active at `as_of` next to
+the claims. These are the findings that name a returned claim, plus those whose own `claim` matches the query.
+The second group keeps an `overridden_on_arrival` finding visible after its winners are superseded.
 
 ### 6. A snapshot never leaks later knowledge: masking
 

@@ -141,10 +141,13 @@ def check_during_filters_on_one_clock(factory: ReaderFactory, golden: GraphDocum
             want = reference.claims(claim.subject, None, tx, during)
             _expect(got == want, f"claims(during={during.to_json()}) differs from the reference")
             kept = {c.id for c in (*got.claims, *got.other_clocks)}
-            every = {c.id for c in reader.claims(claim.subject, None, tx).claims}
-            _expect(
-                kept == every, "during dropped claims on another clock instead of setting aside"
-            )
+            every = reader.claims(claim.subject, None, tx).claims
+            due = {
+                c.id
+                for c in every
+                if c.valid.domain_id != during.domain_id or c.valid.overlaps(during)
+            }
+            _expect(kept == due, "during dropped a claim on another clock, or kept one outside it")
 
 
 def _after(start: Timestamp) -> Timestamp:
@@ -240,7 +243,8 @@ def check_provenance_always_present(factory: ReaderFactory, golden: GraphDocumen
 
 
 def check_findings_travel_with_claims(factory: ReaderFactory, golden: GraphDocument) -> None:
-    """Each finding active at ``as_of`` comes back with a query for the claim it names."""
+    """Each finding active at ``as_of`` comes back with a query about its own claim's subject,
+    even when that claim is no longer (or never was) current; an inactive one never does."""
     reader = factory(golden)
     by_id = {c.id: c for c in golden.resolution.claims}
     _expect(bool(golden.resolution.findings), "the golden graph must contain a finding")

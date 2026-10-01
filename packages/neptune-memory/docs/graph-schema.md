@@ -117,10 +117,11 @@ def test_graph_schema_contract(check):
    no later knowledge leaks in. This equals resolving only what was recorded by `tx`.
 5. **Superseding is visible exactly.** A version superseded at `s` is returned for `as_of < s`, if it was recorded
    by then, and never for `as_of ≥ s`. The claim that displaced it lists it in `supersedes`.
-6. **Inference filter.** `include_inferred=False` returns exactly the observed and stated claims, and only the
-   findings that name them.
+6. **Inference filter.** `include_inferred=False` returns exactly the observed and stated claims. A finding whose
+   own claim is inferred comes back only if it also names a returned claim.
 7. **Findings travel with claims.** A finding active at `as_of` comes back with any query that returns a claim it
-   names.
+   names. It also comes back with any query its own `claim` matches, even when that claim is no longer, or never
+   was, current: an `overridden_on_arrival` stays visible after its winners are superseded.
 8. **Clocks are never coerced.** `during` filters on its own clock. Claims on other clocks are returned in
    `other_clocks`, never dropped and never compared.
 9. **One answer per `as_of`.** An `as_of` later than `head` raises `AsOfBeyondHeadError`.

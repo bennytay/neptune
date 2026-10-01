@@ -298,4 +298,22 @@ def graph_from_json(data: JsonValue) -> GraphDocument:
     )
     if parse_config_hash(_str(obj["generation"], "generation")) != document.generation:
         raise ValueError("generation does not match the resolver configuration")
+    _check_consistent(document)
     return document
+
+
+def _check_consistent(document: GraphDocument) -> None:
+    """One history: unique ids, every reference resolvable, findings from this generation."""
+    claims, findings = document.resolution.claims, document.resolution.findings
+    ids = {c.id for c in claims}
+    if len(ids) != len(claims):
+        raise ValueError("a claim id appears twice")
+    if len({f.id for f in findings}) != len(findings):
+        raise ValueError("a finding id appears twice")
+    dangling = sorted({i for c in claims for i in c.supersedes} - ids)
+    dangling += sorted({i for f in findings for i in (f.claim, *f.others)} - ids)
+    if dangling:
+        raise ValueError(f"references to claims the document does not hold: {dangling[:3]}")
+    foreign = [f.id for f in findings if f.provenance.config_hash != document.generation]
+    if foreign:
+        raise ValueError(f"findings from another generation: {foreign[:3]}")
