@@ -9,6 +9,7 @@ resolution-markers = [
 [manifest]
 members = [
     "neptune",
+    "neptune-ledger",
     "neptune-platform",
 ]
 
@@ -471,6 +472,17 @@ dev = [
     { name = "ruff", specifier = ">=0.8" },
     { name = "types-jsonschema", specifier = ">=4.23" },
 ]
+
+[[package]]
+name = "neptune-ledger"
+version = "0.0.1"
+source = { editable = "packages/neptune-ledger" }
+dependencies = [
+    { name = "neptune" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "neptune", editable = "." }]
 
 [[package]]
 name = "neptune-platform"
