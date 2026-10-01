@@ -7,10 +7,11 @@ indexes and the HNSW index. An Apache AGE graph snapshot can optionally be built
 writes, it goes stale at the first write, and nothing on the ``MemoryStore`` seam reads it.
 
 The driver is not a dependency. Pass a DB-API 2.0 connection that uses ``%(name)s`` parameters
-and is not in autocommit mode (psycopg 3's default). The store owns transaction boundaries: every
-call needs an idle connection, runs in its own transaction, and commits (writes) or rolls back
-(reads, errors) before it returns. Every SQL text comes from a pure function, testable without a
-database.
+and is not in autocommit mode (psycopg 3's default), and that reports its transaction status as
+``info.transaction_status`` (psycopg 3; psycopg2 >= 2.8). The store owns transaction boundaries:
+every call needs an idle connection, runs in its own transaction, and commits (writes) or rolls
+back (reads, errors) before it returns; a rollback that fails after an error never hides that
+error. Every SQL text comes from a pure function, testable without a database.
 """
 
 from __future__ import annotations
@@ -32,8 +33,13 @@ if TYPE_CHECKING:
 
 _IDENT = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 MAX_HOPS: Final = 6
-#: Measured setting (ADR 0004); pgvector's own default is 40.
-DEFAULT_EF_SEARCH: Final = 100
+#: Unfiltered HNSW search only (ADR 0007 §7: recall@10 0.93 on 200 queries at 10^6 embeddings);
+#: pgvector's own default is 40. Graph-filtered search is exact and never uses the index.
+DEFAULT_EF_SEARCH: Final = 400
+#: Largest graph scope, in embeddings, searched exactly (ADR 0007 §7): 25k took 8 ms at 10^7
+#: claims and cost is linear, so this bounds the exact branch near 160 ms, and the same 2-hop
+#: scopes at 10^8 claims (about 250k) still take it.
+DEFAULT_EXACT_SCOPE_LIMIT: Final = 500_000
 VALID_RANGE: Final = "int8range(valid_from, valid_to, '[)')"
 TX_RANGE: Final = "int8range(recorded_at, superseded_at, '[)')"
 
@@ -47,7 +53,16 @@ class Cursor(Protocol):
     def rowcount(self) -> int: ...
 
 
+class ConnectionInfo(Protocol):
+    @property
+    def transaction_status(self) -> int: ...
+
+
 class Connection(Protocol):
+    """What the store needs: psycopg 3 (and psycopg2 >= 2.8) connections have all of it."""
+
+    @property
+    def info(self) -> ConnectionInfo: ...
     def cursor(self) -> Cursor: ...
     def commit(self) -> None: ...
     def rollback(self) -> None: ...
@@ -204,15 +219,22 @@ ORDER BY c.predicate, c.valid_from, c.claim_id"""
 
 
 def _walk_cte(schema: str) -> str:
-    """Breadth-first walk that expands each entity once (a ``seen`` set), so cost is bounded by
-    the entities and edges reached, not by the number of paths through hubs or cycles."""
+    """Breadth-first walk that expands each entity once, so cost is bounded by the entities and
+    edges reached, not by the number of paths through hubs or cycles.
+
+    The visited set is a ``jsonb`` object keyed by entity (MVL-106): ``jsonb_exists`` is a keyed
+    lookup, logarithmic in the entities seen, where the earlier ``text[]`` with ``<> ALL`` scanned
+    every seen entity for every edge (quadratic around a hub). A level adds its entities with one
+    ``||``. The lookup is a function call, not the ``?`` operator, so no driver mistakes it for a
+    placeholder."""
     s = _ident(schema)
     return f"""WITH RECURSIVE bfs(depth, ents, paths, seen) AS (
-  SELECT 0, ARRAY[%(start)s::text], ARRAY[''::text], ARRAY[%(start)s::text]
+  SELECT 0, ARRAY[%(start)s::text], ARRAY[''::text], jsonb_build_object(%(start)s::text, 0)
   UNION ALL
-  SELECT b.depth + 1, n.ents, n.paths, b.seen || n.ents
+  SELECT b.depth + 1, n.ents, n.paths, b.seen || n.added
   FROM bfs b CROSS JOIN LATERAL (
-    SELECT array_agg(x.other ORDER BY x.other) AS ents, array_agg(x.path ORDER BY x.other) AS paths
+    SELECT array_agg(x.other ORDER BY x.other) AS ents, array_agg(x.path ORDER BY x.other) AS paths,
+      jsonb_object_agg(x.other, b.depth + 1) AS added
     FROM (
       SELECT DISTINCT ON (e.other) e.other,
         concat_ws(',', NULLIF(f.path, ''), e.claim_id::text) AS path
@@ -224,7 +246,7 @@ def _walk_cte(schema: str) -> str:
         SELECT c.subject, c.claim_id FROM {s}.claim c
         WHERE c.object_entity = f.entity AND {_visible("c")}
       ) e
-      WHERE e.other <> ALL (b.seen)
+      WHERE NOT jsonb_exists(b.seen, e.other)
       ORDER BY e.other, e.claim_id
     ) x
   ) n
@@ -246,9 +268,22 @@ ORDER BY u.entity"""
 
 
 def vector_top_k_sql(schema: str, *, filtered: bool) -> str:
-    """Nearest neighbours by L2 distance; with ``filtered``, only subjects reached by the walk
-    (the anchor included). Hits are re-sorted, since ``relaxed_order`` scans may return them
-    slightly out of order."""
+    """Nearest neighbours by L2 distance, ties broken by claim id.
+
+    Unfiltered: the HNSW index, re-sorted, since an iterative ``relaxed_order`` scan may return
+    hits slightly out of order. Filtered (only subjects the walk reaches, the anchor included):
+    an **exact** scan of the scope's embeddings through the subject index when the scope holds
+    at most ``exact_limit`` of them, else the HNSW index filtered by the scope. A 2-hop scope is
+    a tiny fraction of all embeddings, and a filtered HNSW scan exhausts its tuple budget before
+    it finds them (recall@10 0.88, some queries 0), while the exact scan costs about the same
+    (8 ms against 6). A scope above the fixed cutoff (many hops, a hub) keeps the filtered HNSW
+    scan so that cost stays bounded; its recall is below budget wherever measured, a risk owned
+    by MVL-132 (ADR 0007 §7). Both branches are gated on the scope
+    size, computed once, so only one runs. The exact distances live in a materialized CTE the
+    vector index cannot serve, and a ``LATERAL`` lookup per scope entity, fenced with
+    ``OFFSET 0`` so it is not flattened into a join, keeps the subject index in the plan (a join
+    was planned as a hash join over every embedding: 75 ms instead of 8).
+    """
     s = _ident(schema)
     if not filtered:
         return f"""SELECT claim_id, distance FROM (
@@ -259,12 +294,24 @@ def vector_top_k_sql(schema: str, *, filtered: bool) -> str:
         _walk_cte(schema)
         + f""", scope AS (
   SELECT u.entity FROM bfs b CROSS JOIN LATERAL unnest(b.ents) AS u(entity)
+), size AS MATERIALIZED (
+  SELECT count(*) AS n FROM scope CROSS JOIN LATERAL (
+    SELECT 1 FROM {s}.claim_embedding e WHERE e.subject = scope.entity
+  ) x
+), candidates AS MATERIALIZED (
+  SELECT x.claim_id, x.distance FROM scope CROSS JOIN LATERAL (
+    SELECT e.claim_id, e.embedding <-> %(query)s::vector AS distance
+    FROM {s}.claim_embedding e WHERE e.subject = scope.entity OFFSET 0
+  ) x
+  WHERE (SELECT n FROM size) <= %(exact_limit)s
 )
 SELECT claim_id, distance FROM (
-  SELECT e.claim_id, e.embedding <-> %(query)s::vector AS distance
-  FROM {s}.claim_embedding e
-  WHERE e.subject IN (SELECT entity FROM scope)
-  ORDER BY e.embedding <-> %(query)s::vector LIMIT %(k)s
+  (SELECT claim_id, distance FROM candidates ORDER BY distance, claim_id LIMIT %(k)s)
+  UNION ALL
+  (SELECT e.claim_id, e.embedding <-> %(query)s::vector AS distance
+   FROM {s}.claim_embedding e
+   WHERE (SELECT n FROM size) > %(exact_limit)s AND e.subject IN (SELECT entity FROM scope)
+   ORDER BY e.embedding <-> %(query)s::vector LIMIT %(k)s)
 ) hits ORDER BY distance, claim_id"""
     )
 
@@ -316,11 +363,24 @@ def _check_hops(hops: int) -> None:
 # --- adapter -------------------------------------------------------------------------------------
 
 
+def _transaction_status(conn: object) -> int | None:
+    """The driver's transaction status (0 = idle), or ``None`` if the connection reports none."""
+    status = getattr(getattr(conn, "info", None), "transaction_status", None)
+    if status is None or isinstance(status, bool):
+        return None
+    try:
+        return int(status)
+    except (TypeError, ValueError):
+        return None
+
+
 class PostgresStore:
     """:class:`MemoryStore` over one PostgreSQL schema. Call :meth:`create` once per schema.
 
     ``graph`` names an optional AGE snapshot that only :meth:`rebuild` refreshes (default: none).
-    ``ef_search`` is set per query with ``SET LOCAL``; the default is the value ADR 0004 measured.
+    ``ef_search`` is set per query with ``SET LOCAL`` for HNSW search; ``exact_scope_limit`` is the
+    largest graph scope, in embeddings, that filtered search scans exactly. Both defaults are
+    ADR 0007 §7's.
     """
 
     def __init__(
@@ -331,30 +391,49 @@ class PostgresStore:
         dimensions: int = 128,
         graph: str | None = None,
         ef_search: int = DEFAULT_EF_SEARCH,
+        exact_scope_limit: int = DEFAULT_EXACT_SCOPE_LIMIT,
     ) -> None:
         if getattr(conn, "autocommit", False):
             raise ValueError("PostgresStore needs a connection with autocommit off")
+        if _transaction_status(conn) is None:
+            raise TypeError(
+                "PostgresStore needs a connection that reports its transaction status"
+                " (``info.transaction_status``, as psycopg 3 and psycopg2 >= 2.8 do): without it"
+                " the store cannot tell whether committing would end the caller's work"
+            )
         if not 1 <= ef_search <= 1000:
             raise ValueError("ef_search must be in [1, 1000] (pgvector's range)")
+        if exact_scope_limit < 0:
+            raise ValueError("exact_scope_limit must be >= 0")
         self.conn = conn
         self.schema = _ident(schema)
         self.dimensions = dimensions
         self.graph = None if graph is None else _ident(graph)
         self.ef_search = ef_search
+        self.exact_scope_limit = exact_scope_limit
 
     def _require_idle(self) -> None:
         """Refuse to run inside a transaction the caller opened: committing or rolling back here
-        would end the caller's work. psycopg exposes ``info.transaction_status`` (0 = idle)."""
-        status = getattr(getattr(self.conn, "info", None), "transaction_status", 0)
-        if int(status) != 0:
+        would end the caller's work. The constructor guarantees the status is readable."""
+        if _transaction_status(self.conn) != 0:
             raise RuntimeError("PostgresStore needs an idle connection; end the open transaction")
+
+    def _abort(self, error: BaseException) -> None:
+        """Roll back after ``error`` without hiding it: a rollback that fails too (a dropped
+        connection) is attached to ``error`` as a note, and ``error`` is what propagates."""
+        try:
+            self.conn.rollback()
+        except Exception as rollback_error:
+            error.add_note(
+                f"rollback also failed: {type(rollback_error).__name__}: {rollback_error}"
+            )
 
     def _write(self, work: Callable[[Cursor], None]) -> None:
         self._require_idle()
         try:
             work(self.conn.cursor())
-        except BaseException:
-            self.conn.rollback()
+        except BaseException as error:
+            self._abort(error)
             raise
         self.conn.commit()
 
@@ -366,9 +445,12 @@ class PostgresStore:
             for statement in setup:
                 cur.execute(statement)
             cur.execute(sql, params)
-            return cur.fetchall()
-        finally:
-            self.conn.rollback()
+            rows = cur.fetchall()
+        except BaseException as error:
+            self._abort(error)
+            raise
+        self.conn.rollback()
+        return rows
 
     def _run(self, statements: Iterable[str]) -> None:
         def work(cur: Cursor) -> None:
@@ -440,12 +522,21 @@ class PostgresStore:
         if within is not None:
             anchor, hops, at = within
             _check_hops(hops)
-            params |= {"start": anchor, "hops": hops, **as_of_params(at)}
-        # SET LOCAL lasts until the read's rollback. Iterative scans (pgvector >= 0.8) keep a
-        # filtered HNSW scan going until k rows pass the filter.
+            params |= {
+                "start": anchor,
+                "hops": hops,
+                "exact_limit": self.exact_scope_limit,
+                **as_of_params(at),
+            }
+        # SET LOCAL lasts until the read's rollback. It steers unfiltered search and the wide-
+        # scope branch of filtered search; iterative scans (pgvector >= 0.8) keep a filtered HNSW
+        # scan going until k rows pass the filter. A small scope is searched exactly. Custom
+        # plans only: psycopg prepares a statement after five executions and the server may then
+        # choose a generic plan, while every measured latency (ADR 0007 §7) is a custom plan's.
         setup = (
             f"SET LOCAL hnsw.ef_search = {int(self.ef_search)}",
             "SET LOCAL hnsw.iterative_scan = relaxed_order",
+            "SET LOCAL plan_cache_mode = force_custom_plan",
         )
         rows = self._read(vector_top_k_sql(self.schema, filtered=within is not None), params, setup)
         return [VectorHit(int(cid), float(d)) for cid, d in rows]
