@@ -399,9 +399,10 @@ def test_links_are_aliases_or_inside_never_members(tmp_path: Path) -> None:
 
 # --- The acceptance: grouped correctly or marked ambiguous; no silent cross-run merge ----------
 
-# The true runs of the messy tree, by their recordings. Where the names cannot tell (numbered
-# parts, a session directory days apart, trials seconds apart, a camera directory inside a drive)
-# the grouper must contest, not choose.
+# The true sessions of the messy tree, each with every file it holds: recordings and context.
+# Where the names cannot tell (numbered parts, a session directory days apart, trials seconds
+# apart, a camera directory inside a drive) the grouper must contest, and one of the contested
+# readings must be the true session, context included.
 TRUE_RUNS: Final = [
     {
         "ros2_bags/rosbag2_2024_05_01-12_30_00/metadata.yaml",
@@ -415,18 +416,20 @@ TRUE_RUNS: Final = [
     {"px4/log/2024-05-01/12_30_00.ulg"},
     {"px4/log/2024-05-01/13_45_10.ulg"},
     {"px4/log/2024-05-02/09_00_00.ulg"},
-    {"runs/run_001/robot.mcap"},
-    {"runs/run_002/robot.mcap"},
+    {"runs/run_001/robot.mcap", "runs/run_001/config.yaml", "runs/run_001/camera/front.mp4"},
+    {"runs/run_002/robot.mcap", "runs/run_002/config.yaml", "runs/run_002/Thumbs.db"},
     {
         "split/patrol_2024-05-01-12-30-00_0.bag",
         "split/patrol_2024-05-01-12-30-00_1.bag",
         "split/patrol_2024-05-01-12-30-00_3.bag",
     },
     {"split/patrol_2024-05-01-15-00-00_0.bag"},
-    {"parts/x_0.mcap", "parts/x_1.mcap"},
+    {"parts/x_0.mcap", "parts/x_1.mcap", "parts/x.yaml"},
     {"named_split/run_3_0.bag", "named_split/run_3_1.bag"},
     {"episodes/episode_1.mcap"},
     {"episodes/episode_2.mcap"},
+    {"dump/2024-05-01_12-30-00_front.mp4", "dump/2024-05-01_12-30-00_imu.csv"},
+    {"dump/2024-05-01_14-02-11_front.mp4", "dump/2024-05-01_14-02-11_imu.csv"},
     {"session_04/2024-05-01_10-00-00.mcap"},
     {"session_04/2024-05-03_09-00-00.mcap"},
     {"copies/run_1/flight.ulg"},
@@ -435,23 +438,51 @@ TRUE_RUNS: Final = [
     {"trials/trial_2024-05-01_12-30-25.mcap"},
     {"campaign_2024-05-01_08-00-00/run_1/a.mcap"},
     {"campaign_2024-05-01_08-00-00/run_2/b.mcap"},
-    {"drive_07/robot.mcap"},
-    {"flat/front.mcap"},
+    {
+        "drive_07/robot.mcap",
+        "drive_07/camera_2024-05-01_12-30-00/frame_0001.png",
+        "drive_07/camera_2024-05-01_12-30-00/frame_0002.png",
+    },
+    {"flat/front.mcap", "flat/front.yaml"},
     {"flat/rear.mcap"},
-    {"séance_2024-05-01T12-00-00/données.mcap"},
+    {"séance_2024-05-01T12-00-00/données.mcap", "séance_2024-05-01T12-00-00/notes_ü.txt"},
 ]
+# The run under a directory whose name is not UTF-8, where the filesystem takes one.
+RAW_RUN: Final = {"raw/\\xffrun_3\\xfe/log.ulg"}
+# Files no true session holds, or that the names cannot place: each must stay unassigned.
+STRAYS: Final = {
+    ".DS_Store",
+    "campaign_2024-05-01_08-00-00/plan.pdf",
+    "flat/robot.yaml",
+    "px4/log/desktop.ini",
+    "ros2_bags/notes.txt",
+    "runs/README.md",
+    "shared/calib.yaml",
+}
 
 
-def assert_grouped_correctly_or_contested(grouping: Grouping) -> None:
-    run_of = {path: index for index, run in enumerate(TRUE_RUNS) for path in run}
+def assert_grouped_correctly_or_contested(grouping: Grouping, runs: list[set[str]]) -> None:
+    """Every file is in one true session or a stray; no uncontested reading spans two sessions
+    or holds a stray; and every true session is a reading, exactly (context too): the only one
+    holding its files, or one of readings that all contest."""
+    run_of = {path: index for index, run in enumerate(runs) for path in run}
+    extents = {p.id: extent(grouping, p) for p in grouping.proposals}
+    unplaced = {text(u.location) for u in grouping.unassigned}
+    assert set(run_of).isdisjoint(STRAYS)
+    assert set(run_of) | STRAYS == set().union(*extents.values()) | unplaced
+    assert unplaced == STRAYS
     for proposal in grouping.proposals:
-        runs = {run_of[path] for path in recordings(proposal) if path in run_of}
+        held = extents[proposal.id]
+        assert held.isdisjoint(STRAYS), f"a stray in a session: {sorted(held & STRAYS)}"
         if proposal.status is Status.PROPOSED:
-            assert len(runs) <= 1, f"silent cross-run merge: {sorted(recordings(proposal))}"
-    for run in TRUE_RUNS:
-        holders = [p for p in grouping.proposals if recordings(p) & run]
-        exact = [p for p in holders if p.status is Status.PROPOSED and recordings(p) == run]
-        assert exact or all(p.status is Status.CONTESTED for p in holders), sorted(run)
+            spanned = {run_of[path] for path in held}
+            assert len(spanned) == 1, f"silent cross-run merge: {sorted(held)}"
+    for run in runs:
+        holders = [p for p in grouping.proposals if extents[p.id] & run]
+        exact = [p for p in holders if extents[p.id] == run]
+        assert exact, f"no reading is exactly {sorted(run)}"
+        alone = holders == exact[:1] and exact[0].status is Status.PROPOSED
+        assert alone or all(p.status is Status.CONTESTED for p in holders), sorted(run)
 
 
 def test_the_messy_tree_is_grouped_correctly_or_marked_ambiguous(tmp_path: Path) -> None:
@@ -459,7 +490,8 @@ def test_the_messy_tree_is_grouped_correctly_or_marked_ambiguous(tmp_path: Path)
     root.mkdir()
     LAYOUTS.build_all(root)
     grouping = group(root)
-    assert_grouped_correctly_or_contested(grouping)
+    raw = [RAW_RUN] if LAYOUTS.raw_names_supported(root) else []
+    assert_grouped_correctly_or_contested(grouping, [*TRUE_RUNS, *raw])
     contested = {f.subject for f in grouping.findings if f.code == CONTESTED}
     assert contested == {
         LocalPath("drive_07/camera_2024-05-01_12-30-00/frame_0001.png"),
