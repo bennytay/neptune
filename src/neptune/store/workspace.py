@@ -3,8 +3,8 @@
 Everything an ingest needs to remember between runs lives here, never beside the evidence:
 
     workspace.json                     format version and settings (local-only mode)
-    ledgers/<root key>/ledger.jsonl    one ingest root's source ledger
-    ledgers/<root key>/root            the root's path, as the host names it
+    ledgers/<root key>/ledger.jsonl    one ingest root's source ledger, keyed by its resolved path
+    ledgers/<root key>/root            the root's resolved path, as the host names it
     plans/<2 hex>/<62 hex>.json        one source's plan under one transform, with the transform
     chunks/<2 hex>/<62 hex>/           one committed chunk output, by chunk id:
         chunk.json                     the chunk
@@ -25,6 +25,7 @@ The workspace is local-first. It is local-only by default: anything that would u
 import fcntl
 import hashlib
 import os
+import re
 import shutil
 import stat
 import tempfile
@@ -58,8 +59,12 @@ class WorkspaceError(ValueError):
     """The workspace is not one this version can use, or what it holds is inconsistent."""
 
 
-class LocalOnlyError(PermissionError):
-    """Something asked for the network while the workspace is local-only."""
+class LocalOnlyError(Exception):
+    """Something asked for the network while the workspace is local-only.
+
+    A policy refusal, not an I/O failure: it is no ``OSError``, so code that retries or skips on
+    ``OSError`` cannot swallow it.
+    """
 
 
 def default_home() -> Path:
@@ -70,12 +75,22 @@ def default_home() -> Path:
     return Path(cache) / "neptune"
 
 
-def _hex(identifier: str) -> str:
-    """The 64 hex digits of a ``…sha256:<hex>`` id."""
-    digest = identifier.rsplit(":", 1)[-1]
-    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
-        raise WorkspaceError(f"not a sha256 id: {identifier!r}")
-    return digest
+_PREFIX: Final = re.compile(r"[0-9a-f]{2}")
+_REST: Final = re.compile(r"[0-9a-f]{62}")
+_RUN: Final = re.compile(r"([0-9a-f]{64})\.parquet")
+
+
+def _hex(identifier: str, scheme: str) -> str:
+    """The 64 hex digits of a ``<scheme>:sha256:<hex>`` id; any other id is refused."""
+    match = re.fullmatch(rf"{scheme}:sha256:([0-9a-f]{{64}})", identifier)
+    if match is None:
+        raise WorkspaceError(f"not a {scheme}:sha256 id: {identifier!r}")
+    return match[1]
+
+
+def _root_key(root: Path) -> bytes:
+    """An ingest root as the ledger knows it: resolved, so every spelling of it is one root."""
+    return os.fsencode(Path(root).resolve())
 
 
 def _lines(items: Iterable[Any]) -> bytes:
@@ -93,6 +108,11 @@ def _read_lines(data: bytes) -> list[Any]:
             raise WorkspaceError(f"a stored line is not a record: {line[:80]!r}")
         records.append(RECORD_KINDS[kind][1](value))
     return records
+
+
+def _is_directory(path: Path, name: re.Pattern[str]) -> bool:
+    """A real directory (not a link to one) whose name is ``name``."""
+    return bool(name.fullmatch(path.name)) and not path.is_symlink() and path.is_dir()
 
 
 def _same_file(path: Path, descriptor: int) -> bool:
@@ -271,11 +291,14 @@ class Workspace:
     # --- Ledgers -------------------------------------------------------------------------------
 
     def _ledger_dir(self, root: Path) -> Path:
-        path = os.fsencode(Path(root).absolute())
-        return self.home / "ledgers" / hashlib.sha256(path).hexdigest()
+        return self.home / "ledgers" / hashlib.sha256(_root_key(root)).hexdigest()
 
     def load_ledger(self, root: Path) -> SourceLedger:
-        """The source ledger of ``root``'s earlier scans, or an empty one."""
+        """The source ledger of ``root``'s earlier scans, or an empty one.
+
+        ``root`` is resolved: a relative path, ``..``, or a symlink to the same directory all
+        name one ledger.
+        """
         table = self._ledger_dir(root) / "ledger.jsonl"
         if not table.exists():
             return SourceLedger()
@@ -290,7 +313,7 @@ class Workspace:
         directory = self._ledger_dir(root)
         records = (*ledger.artifacts(), *ledger.revisions(), *ledger.absences())
         self._replace(directory / "ledger.jsonl", _lines(records))
-        self._replace(directory / "root", os.fsencode(Path(root).absolute()))
+        self._replace(directory / "root", _root_key(root))
 
     # --- Plans ---------------------------------------------------------------------------------
 
@@ -304,7 +327,11 @@ class Workspace:
         chunks: Iterable[ChunkLike],
         findings: Iterable[IngestFinding],
     ) -> None:
-        """Keep a source's plan: its chunks, in order, and the findings planning made."""
+        """Keep a source's plan: its chunks, in order, and the findings planning made.
+
+        Planning is deterministic, so a source has one plan under one transform: saving it again
+        changes nothing, and saving a different one is refused.
+        """
         chunks = tuple(chunks)
         if not chunks:
             raise WorkspaceError("a plan has at least one chunk")
@@ -316,8 +343,16 @@ class Workspace:
             "findings": [f.to_json() for f in sorted(findings, key=lambda f: f.id)],
             "transform": transform.to_json(),
         }
-        path = self._plan_path(ContentId(sources.pop()), transform.id)
-        self._replace(path, canonical_json.dumps(document))
+        source = ContentId(sources.pop())
+        path, data = self._plan_path(source, transform.id), canonical_json.dumps(document)
+        if path.exists():
+            if path.read_bytes() != data:
+                raise WorkspaceError(
+                    f"a different plan of {source} under transform {transform.id} is already"
+                    " kept; planning must be deterministic"
+                )
+            return
+        self._replace(path, data)
 
     def load_plan(self, source: ContentId, transform: RecordId) -> StoredPlan | None:
         path = self._plan_path(source, transform)
@@ -341,7 +376,7 @@ class Workspace:
     # --- Chunks --------------------------------------------------------------------------------
 
     def chunk_path(self, chunk: str) -> Path:
-        digest = _hex(chunk)
+        digest = _hex(chunk, "chunk")
         return self.home / "chunks" / digest[:2] / digest[2:]
 
     def committed(self, chunk: str) -> bool:
@@ -371,7 +406,7 @@ class Workspace:
             for batch in series:
                 by_stream[batch.stream].append(batch)
             for stream, batches in sorted(by_stream.items()):
-                write_run(batches, staged / "runs" / f"{_hex(stream)}.parquet")
+                write_run(batches, staged / "runs" / f"{_hex(stream, 'rec')}.parquet")
             fsync_tree(staged)
             final.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -392,9 +427,14 @@ class Workspace:
         if not isinstance(data, dict) or data.get("id") != chunk:
             raise WorkspaceError(f"{path} does not hold chunk {chunk}")
         findings = _read_lines((path / "findings.jsonl").read_bytes())
-        runs = {
-            RecordId(f"rec:sha256:{run.stem}"): run for run in sorted((path / "runs").iterdir())
-        }
+        runs: dict[RecordId, Path] = {}
+        for run in sorted((path / "runs").iterdir()):
+            match = _RUN.fullmatch(run.name)
+            if match is None or run.is_symlink() or not run.is_file():
+                raise WorkspaceError(
+                    f"{run} is not a stream's run; a chunk's runs/ holds only those"
+                )
+            runs[RecordId(f"rec:sha256:{match[1]}")] = run
         return CommittedChunk(
             chunk=data,
             records=tuple(_read_lines((path / "records.jsonl").read_bytes())),
@@ -403,7 +443,11 @@ class Workspace:
         )
 
     def chunks(self) -> Iterator[str]:
-        """Every committed chunk's id."""
+        """Every committed chunk's id. Anything else in ``chunks/`` is a ``WorkspaceError``."""
         for prefix in sorted((self.home / "chunks").iterdir()):
+            if not _is_directory(prefix, _PREFIX):
+                raise WorkspaceError(f"{prefix} is not a committed chunk's prefix directory")
             for entry in sorted(prefix.iterdir()):
+                if not _is_directory(entry, _REST):
+                    raise WorkspaceError(f"{entry} is not a committed chunk")
                 yield f"chunk:sha256:{prefix.name}{entry.name}"
