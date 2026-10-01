@@ -105,9 +105,11 @@ frames, 16 per chunk, through the sandboxed job, then again) and `... WORKDIR ma
 - **D8. Nothing could write in the sandbox, so the archive inspector could run nowhere.** Plan and
   ingest calls get a private scratch directory, bounded per file.
 
-The gate's own new code was stress-tested the same way: forging the probe reply 15 ways
-(`tests/unit/discovery/test_probe_reply.py`) caught one gap before merge, a container member
-citing another source, now refused.
+The gate's own new code was stress-tested the same way: forging the probe reply 18 ways
+(`tests/unit/discovery/test_probe_reply.py`) and a code review caught three gaps before merge, all
+closed: a container member citing another source, a container report dropped or invented against
+the head, and a call able to remove the lock of its own scratch directory (which would let a
+concurrent job's sweep delete it mid-call).
 
 ### Decisions
 

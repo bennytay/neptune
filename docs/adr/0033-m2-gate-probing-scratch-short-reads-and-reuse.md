@@ -37,9 +37,11 @@ them did not all hold, and the coordinator recorded follow-ups the gate had to l
    adapter's probe, the sniff and the container listing, whose decoders (zlib, bz2, lzma) read
    hostile bytes, run there. The reply is `SourceProbe.to_json()` and is never trusted:
    `ProbeEngine.source_probe_from_json` takes the sniff again from the head, requires every
-   registered adapter to be asked once in id order at its own version (or to have failed), parses
-   the container report and the findings strictly (every member and finding cites this source, the
-   nesting is within `ProbePolicy.max_depth`, every finding is the engine's), derives the selection
+   registered adapter to be asked once in id order at its own version (or to have failed), requires
+   a container report exactly when the head sniffs as a container the policy opens, of that kind
+   (and the `container_limit` finding when it does not open one), parses the report and the
+   findings strictly (every member and finding cites this source, the nesting is within
+   `ProbePolicy.max_depth`, every finding is the engine's), derives the selection
    and the concluding findings (`ambiguous`, `unsupported`, `name_mismatch`) itself, and refuses
    the reply unless the whole is exactly what the engine writes. A refused reply is a crash.
    - If the call dies, hits a limit, raises or is refused, the job emits `probe_failed` naming
@@ -59,7 +61,8 @@ them did not all hold, and the coordinator recorded follow-ups the gate had to l
    and writers left, never what a live process holds (`workspace_swept` event with the counts).
    A scratch root that overlaps the ingest root (a workspace inside the root) fails the job, since
    the walk would read the workspace as evidence. Each `plan` and `ingest` call gets a fresh
-   `0700` directory (`scratch_space`), removed when the call returns:
+   `0700` directory (`scratch_space`), removed when the call returns; the call writes in a
+   subdirectory of it, so it cannot remove the lock that tells a sweep the directory is live:
    - in the sandbox, a Landlock rule grants writing, making and removing regular files and
      directories beneath it (renames within it from ABI 2, truncation from ABI 3), nothing else
      anywhere; `RLIMIT_FSIZE` becomes `Limits.scratch_bytes` (default 1 GiB, 0 for none); a write

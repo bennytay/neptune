@@ -22,6 +22,7 @@ import pytest
 from neptune.adapters.builtin import builtin_adapters
 from neptune.adapters.contract import PROBE_HEAD_SIZE
 from neptune.adapters.registry import AdapterRegistry
+from neptune.discovery.containers import ProbePolicy
 from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe, ask_in_process
 from neptune.discovery.reader import BytesReader
 from neptune.runtime import wire
@@ -115,6 +116,12 @@ FORGERIES: Final[dict[str, tuple[str, Callable[[Any], None]]]] = {
         "members.zip",
         lambda r: r["findings"][0]["subject"]["ref"].update(source="sha256:" + "1" * 64),
     ),
+    "the_container_dropped": ("members.zip", lambda r: r.pop("container")),
+    "a_container_invented": (
+        "notes.txt",
+        lambda r: r.update(container={"complete": True, "kind": "zip", "members": []}),
+    ),
+    "a_container_of_another_kind": ("members.zip", lambda r: r["container"].update(kind="tar")),
     "a_finding_of_another_producer": (
         "corrupt.gz",
         lambda r: r["findings"][0].update(transform="rec:sha256:" + "2" * 64),
@@ -131,6 +138,19 @@ def test_a_forged_reply_is_refused(forgery: str) -> None:
     tamper(reply)
     with pytest.raises(ValueError):
         read_back(data, path.stem, reply)
+
+
+def test_an_engine_that_opens_no_container_must_say_so() -> None:
+    shallow = ProbeEngine(ENGINE.registry, ProbePolicy(max_depth=0))
+    data = (FIXTURES / "probe" / "containers" / "members.zip").read_bytes()
+    reader = BytesReader(data)
+    probed = shallow.probe(reader, "bundle")
+    reply = json.loads(json.dumps(probed.to_json()))
+    kwargs: Any = {"source": reader.content_id, "size": reader.size, "name": "bundle"}
+    assert shallow.source_probe_from_json(reply, head=data, **kwargs) == probed
+    reply["findings"] = [f for f in reply["findings"] if "container_limit" not in f["code"]]
+    with pytest.raises(ValueError, match="unopened"):
+        shallow.source_probe_from_json(reply, head=data, **kwargs)
 
 
 def test_a_fallback_probe_names_the_cause_and_leaves_the_container_closed() -> None:

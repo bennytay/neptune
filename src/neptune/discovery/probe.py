@@ -253,19 +253,25 @@ class ProbeEngine:
                     report=self._reporter(findings),
                 )
             else:
-                self._report(
-                    findings,
-                    "container_limit",
-                    FindingCategory.LIMIT,
-                    Severity.WARNING,
-                    whole,
-                    f"a {sniffed.container} container is not opened (max_depth 0)",
-                    {"container": str(sniffed.container), "limit": "depth", "max_depth": 0},
-                )
+                findings.append(self._unopened(sniffed, whole))
         self._conclude(findings, sniffed, probes, selection, name, whole, container)
         return SourceProbe(
             reader.content_id, size, name, sniffed, probes, selection, container, tuple(findings)
         )
+
+    def _unopened(self, sniffed: Sniff, whole: EvidenceRef) -> IngestFinding:
+        """The finding for a container the policy does not open (``max_depth`` 0)."""
+        found: list[IngestFinding] = []
+        self._report(
+            found,
+            "container_limit",
+            FindingCategory.LIMIT,
+            Severity.WARNING,
+            whole,
+            f"a {sniffed.container} container is not opened (max_depth 0)",
+            {"container": str(sniffed.container), "limit": "depth", "max_depth": 0},
+        )
+        return found[0]
 
     def probe_head(
         self, source: ContentId, size: int, name: str, head: bytes, ask: Ask, failed: JsonObject
@@ -357,6 +363,14 @@ class ProbeEngine:
             )
         )
         findings = [self._finding(item, source) for item in data["findings"]]
+        # The head decides whether a container is opened: one is reported exactly when the head
+        # sniffs as a container the policy opens, of that kind, and an unopened one says so.
+        opened = sniffed.container if self.policy.max_depth >= 1 else None
+        if (None if container is None else container.kind) != opened:
+            raise ValueError("the container report is not the one the head calls for")
+        unreported = sniffed.container is not None and opened is None
+        if unreported and self._unopened(sniffed, whole).id not in {f.id for f in findings}:
+            raise ValueError("an unopened container is not reported")
         failed = sorted(
             str(f.details.get("adapter"))
             for f in findings

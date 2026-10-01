@@ -28,7 +28,7 @@ Chunk 0 emits the ``DocumentRecord``; every other chunk holds one line and emits
   kill a job in the middle of);
 - ``spool``: not an attack: spools 2 MiB through the call's scratch directory, as an archive
   adapter spools a nested member, and reads it back (a block ``spool``); ``flood``: writes one
-  file past the scratch budget.
+  file past the scratch budget; ``unlock``: removes the lock of the directory its scratch is in.
 
 A first line ``plan-hang`` or ``plan-segfault`` attacks ``plan`` instead, and a line
 ``probe-segfault`` anywhere in the head makes ``probe`` segfault.
@@ -169,6 +169,11 @@ def attack(text: str) -> str:
         finally:
             os.close(read_fd)
             os.close(write_fd)
+    elif text == "unlock":
+        directory = scratch_directory()
+        if directory is None:
+            raise RuntimeError("this call has no scratch directory")
+        (directory.parent / ".lock").unlink()
     elif text == "nap":
         time.sleep(2)
     elif text in ("spool", "flood"):

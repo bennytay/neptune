@@ -665,7 +665,10 @@ class IngestJob:
         with ExitStack() as stack:
             try:
                 space = scratch_space(self.workspace.scratch, ingest_root=self.root)
-                directory = stack.enter_context(space)
+                # The call writes beneath a directory of its own inside the locked one, so it
+                # cannot remove the lock that tells a sweep the directory is in use.
+                directory = stack.enter_context(space) / "call"
+                directory.mkdir(mode=0o700)
             except (ScratchError, OSError) as exc:
                 raise JobError(f"the workspace cannot give a call scratch space: {exc}") from exc
             return self._run(work, codec, (reader.fileno(),), directory)
@@ -752,7 +755,8 @@ class IngestJob:
         One that names this source and a range inside it is the source's fault: discovery's
         ``short_read`` finding for the unserved range, then ``verify_artifact``'s account, and
         the source is quarantined. One that names any other reader or range is the adapter's
-        failure at ``step``, as any other raise.
+        failure at ``step`` (``plan_failed``, ``chunk_failed``), not retried either: the same
+        bytes raise it again.
         """
         assert raised.short_read is not None and item.adapter is not None
         source, offset, length = raised.short_read

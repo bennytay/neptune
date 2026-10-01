@@ -330,14 +330,21 @@ def test_a_call_spools_through_its_scratch_and_a_flood_is_the_scratch_limit(
     root.mkdir()
     (root / "spool.hostile").write_bytes(HOSTILE.hostile("before", "spool", "after"))
     (root / "flood.hostile").write_bytes(HOSTILE.hostile("flood"))
+    (root / "unlock.hostile").write_bytes(HOSTILE.hostile("unlock"))
     run = Run(root, tmp_path, sandboxed(scratch_bytes=4 * MIB))
-    assert run.codes() == ["neptune.runtime.limit_exceeded"]
+    assert run.codes() == ["neptune.runtime.chunk_failed", "neptune.runtime.limit_exceeded"]
+    unlock = run.finding("neptune.runtime.chunk_failed")  # the lock is outside its scratch
+    assert (unlock.details["error"], unlock.details["step"]) == ("PermissionError", "ingest")
     finding = run.finding("neptune.runtime.limit_exceeded")
     assert (finding.details["limit"], finding.details["value"]) == ("scratch_bytes", 4 * MIB)
     assert [source for source, _ in run.outcome.ingested] == [run.source("spool.hostile")]
     assert {"before", "spool", "after"} <= set(run.texts())
     assert list((run.home / "scratch").iterdir()) == [] and run.staging_is_empty()
-    assert sorted(p.name for p in root.iterdir()) == ["flood.hostile", "spool.hostile"]
+    assert sorted(p.name for p in root.iterdir()) == [
+        "flood.hostile",
+        "spool.hostile",
+        "unlock.hostile",
+    ]
 
 
 def test_a_probe_that_crashes_takes_only_its_adapter_out(tmp_path: Path) -> None:
