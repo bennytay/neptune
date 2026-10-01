@@ -48,7 +48,7 @@ The L1 gate walked ADR 0002's catalog through hostile cases and measured it at 1
    log lookup names `tenant_id`. Live registrations (ADR 0004 §4: log, package and indexes in one
    transaction holding the clock) and rebuilds (`replay_tx`, log, package in turn) already write
    in this order.
-2. **One body per record id.** `record.body_digest` (`content_id`, `NOT NULL`) is the sha256 of the
+2. **One body per record id (except `source_artifact`).** `record.body_digest` (`content_id`, `NOT NULL`) is the sha256 of the
    record's canonical JSON line in its table, without the newline. Within a tenant, one
    `(kind, record_id)` has one digest. Registration refuses a package that brings another digest
    for an existing record id, with `conflicting_id` and the record id as subject. That extends
@@ -56,6 +56,16 @@ The L1 gate walked ADR 0002's catalog through hostile cases and measured it at 1
    trigger `record_body_agrees` refuses such a row if anything gets that far. The same id with
    the same digest from another package is normal: a re-ingest after a move, or a backfill. So in
    ADR 0003 §4.3, an entry listed once with several packages is guaranteed to be one statement.
+   - **Exception: `source_artifact`.** Its key is the content id. Its `chunk_size` and `chunks`
+     are verification metadata, not identity (`neptune.model.source.SourceArtifact`): the same
+     bytes hashed at two chunk sizes, or re-ingested after the compiler changes its default
+     chunk size, are two honest bodies. For this kind a conflict is the same content id with
+     another `size`, the rule the `source` table already enforces (ADR 0002 §6). Chunking
+     differences are accepted. Each package's `body_digest` and chunking stay as that package
+     states them, and the trigger skips the kind. Every other kind keeps the body digest rule.
+     Tests: contract `test_the_same_bytes_at_two_chunk_sizes_register_as_two_packages` (two
+     chunk sizes register; another size is `conflicting_id`), migration
+     `test_a_source_artifact_may_differ_in_chunking_only`.
    The column is `NOT NULL` without a default. That is safe because `apply_migrations` runs all
    pending migrations in one transaction, and no registration implementation predates 0002.
 3. **`location_absence`** holds `(absence_id, package_id, location, supersedes)` for each
@@ -98,6 +108,8 @@ The L1 gate walked ADR 0002's catalog through hostile cases and measured it at 1
   Rejected for now. It would forbid the log-only inserts that the clock tests use. ADR 0004 §4's
   single transaction already gives the guarantee, and the contract tests check that a refusal
   writes nothing.
+- **Apply the body rule to `source_artifact` too.** Rejected. Its body holds chunking, which
+  is not identity, so honest re-ingests at another chunk size would be refused.
 - **Recompute record ids instead of digesting bodies.** Rejected. An id that recomputes proves
   nothing about the fields outside the id, which is exactly the gap.
 - **Keep both bodies as separate entries.** Rejected. An entry's identity is (package, record id),

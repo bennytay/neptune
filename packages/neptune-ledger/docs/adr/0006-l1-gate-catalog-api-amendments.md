@@ -59,9 +59,23 @@ caveat deferred from ADR 0003: say what a clock merge may reorder.
    there (§1). The catalog still records no second root (ADR 0002 §6 stands), so the registration
    log and rebuilds are unchanged.
 3. **Tenant package roots.** A catalog object serves one tenant (ADR 0004 §1) and is configured
-   with that tenant's package roots: absolute directories, resolved without following symlinks.
-   `register` refuses a root outside them with `package_unreadable`, with the same detail as a
-   root that does not exist, so the answer reveals nothing about another tenant's files.
+   with that tenant's package roots: absolute directories.
+   - **Containment is decided on fully resolved paths.** `register` computes the realpath of
+     `package_root`. That is ADR 0004 §1's `root_locator`, with every symlink and every `..`
+     resolved. It also computes the realpath of each tenant root at that moment. The package is
+     inside a root only if its resolved path is that root's resolved path or below it, compared
+     by path components (`Path.is_relative_to` on resolved paths). It is never compared by string
+     prefix, so `/srv/b-evil` is not inside `/srv/b`. A `package_root` that, once resolved, is
+     inside no tenant root is refused. That covers `B_root/link/pkg` with `link → A's tree`, and
+     `B_root/../A_root/pkg`.
+   - **The check comes before the §1 walk.** The walk then starts from the resolved path and
+     follows nothing, so no link swapped in after the check is followed.
+   - `register` refuses a root outside every tenant root with `package_unreadable`, worded as for
+     a root that does not exist and with `package_id` `Unknown`, so the answer reveals nothing
+     about another tenant's files.
+   - Contract test: `test_register_stays_inside_the_tenants_package_roots`, with the symlink and
+     `..` escapes. Implementations provide `CatalogContract.make_tenant_catalog(workdir, roots)`.
+     The stub runs it as a strict expected failure.
    `access/` (MVL-99) owns the configuration, alongside the per-tenant database role it already
    needs (ADR 0002 §2). Every other cross-tenant probe already answers as for an unknown id:
    `resolve` gives `unresolvable` with `unresolvable_evidence`, `verify` gives

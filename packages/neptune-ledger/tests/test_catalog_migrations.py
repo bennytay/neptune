@@ -423,3 +423,25 @@ def test_migrations_commit_on_a_connection_outside_autocommit(pg: Conn) -> None:
     assert pg.execute("SELECT count(*) FROM tenant_acme.schema_migration").fetchone() == (
         len(migrations()),
     )
+
+
+def test_a_source_artifact_may_differ_in_chunking_only(pg: Conn) -> None:
+    """ADR 0005 §2: chunk_size and chunks are not identity, so source_artifact bodies may differ;
+    its conflict rule is the source table's (content id, size)."""
+    apply_migrations(pg, "acme")
+    first, second = "sha256:" + "1" * 64, "sha256:" + "2" * 64
+    content = "sha256:" + "a" * 64
+    insert = (
+        "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
+        " registration_key, line, schema_version, body_digest)"
+        " VALUES ('acme', 'source_artifact', %s, %s, %s, 1, 1, %s)"
+    )
+    add_package(pg, "tenant_acme", first, 1)
+    pg.execute(insert, (content, first, 1, "sha256:" + "c" * 64))  # hashed in 8 MiB chunks
+    add_package(pg, "tenant_acme", second, 2)
+    pg.execute(insert, (content, second, 2, "sha256:" + "d" * 64))  # the same bytes, 256 B chunks
+    rows = pg.execute(
+        "SELECT count(DISTINCT body_digest) FROM tenant_acme.record WHERE record_id = %s",
+        (content,),
+    ).fetchone()
+    assert rows == (2,), "each package's chunking stays as it stated it"

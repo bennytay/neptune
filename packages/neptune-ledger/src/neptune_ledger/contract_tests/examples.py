@@ -9,6 +9,7 @@ Ledger ADRs 0002 and 0003, never from an implementation.
 Set ``NEPTUNE_WORKED_EXAMPLES`` to the examples directory when running outside this repository.
 """
 
+import hashlib
 import os
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
@@ -385,6 +386,29 @@ def with_moved_source(name: str, path: str, directory: Path | None = None) -> di
         revision_id(moved, revision.content_id, ()), moved, revision.content_id, ()
     )
     return package_files([*records, gone, there])
+
+
+def with_chunk_size(name: str, chunk_size: int, directory: Path | None = None) -> dict[str, bytes]:
+    """A worked example whose single source artifact is hashed at another ``chunk_size``.
+
+    The chunk hashes are computed from the source's real bytes (``<example>/sources/``). Same
+    content id and size, other chunking: an honest second package of the same bytes, which must
+    register beside the original (ADR 0005 §2: chunking is not identity).
+    """
+    root = (directory or examples_dir()) / name
+    records = _records(name, directory)
+    index = next(i for i, r in enumerate(records) if r.kind == "source_artifact")
+    artifact = records[index]
+    (revision,) = [r for r in records if r.kind == "source_revision"]
+    data = (root / "sources" / revision.location.to_json()["path"]).read_bytes()
+    assert "sha256:" + hashlib.sha256(data).hexdigest() == artifact.content_id
+    chunks = [
+        "sha256:" + hashlib.sha256(data[at : at + chunk_size]).hexdigest()
+        for at in range(0, len(data), chunk_size)
+    ]
+    row = {**cast("Record", artifact.to_json()), "chunk_size": chunk_size, "chunks": chunks}
+    records[index] = _read("source_artifact", row)
+    return package_files(records)
 
 
 def with_changed_body(

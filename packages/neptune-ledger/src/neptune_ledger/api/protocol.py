@@ -52,7 +52,8 @@ class CatalogApi(Protocol):
 
         The whole package is verified first, outside the transaction and without following any
         symlink: a symlink or special file anywhere under the root is ``refused`` with
-        ``unsafe_entry``, and a root outside the tenant's package roots is ``package_unreadable``.
+        ``unsafe_entry``, and a root that, fully resolved, lies outside every tenant package root
+        (compared by path components) is ``package_unreadable``.
         One database transaction writes the registration-log row, the package row and every
         index row together, or nothing. It locks the ``tx_clock`` row before looking the package
         up and holds it to commit, so READ COMMITTED suffices; at REPEATABLE READ or SERIALIZABLE
@@ -60,9 +61,9 @@ class CatalogApi(Protocol):
         because a retry either registers or finds the package registered. A known package id is a
         no-op returning the stored ids (``already_registered``), which also certifies that
         ``package_root`` holds that package's bytes; a package bringing an existing source or
-        transform id with different fields, or an existing record id with another body, is
-        ``refused`` with a ``conflicting_id`` finding, and a corrupt or tampered package is
-        ``refused`` too.
+        transform id with different fields, or an existing record id with another body (a source
+        artifact's chunking aside), is ``refused`` with a ``conflicting_id`` finding, and a
+        corrupt or tampered package is ``refused`` too.
         """
         ...
 

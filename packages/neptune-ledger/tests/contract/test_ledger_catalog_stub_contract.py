@@ -16,3 +16,6 @@ class TestStubCatalog(CatalogContract):
 
     def make_catalog(self, workdir: Path) -> CatalogApi:
         return StubCatalog()
+
+    def make_tenant_catalog(self, workdir: Path, package_roots: tuple[Path, ...]) -> CatalogApi:
+        return StubCatalog()

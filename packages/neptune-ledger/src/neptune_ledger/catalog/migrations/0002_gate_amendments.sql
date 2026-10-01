@@ -75,6 +75,11 @@ $$;
 -- sha256 of the record's canonical JSON line in its table (without the newline). One (kind,
 -- record_id) has one digest in a tenant: registration refuses a package that brings another one
 -- (a conflicting_id finding), and this trigger refuses the row if anything gets that far.
+-- Exception: source_artifact. Its key is the content id, and its chunk_size and chunks are
+-- verification metadata, not identity (neptune.model.source.SourceArtifact), so the same bytes
+-- hashed at two chunk sizes are two honest bodies. Its conflict rule is the content id with
+-- another size, which the source table holds (ADR 0002 §6); each package's chunking stays as
+-- that package states it.
 -- NOT NULL without a default: 0002 must be applied before the first registration, which it is,
 -- because apply_migrations runs every pending migration in one transaction and no registration
 -- implementation predates it.
@@ -87,6 +92,9 @@ AS $$
 DECLARE
   stored text;
 BEGIN
+  IF NEW.kind = 'source_artifact' THEN
+    RETURN NEW;  -- chunking is not identity; size conflicts are the source table's rule
+  END IF;
   SELECT body_digest INTO stored FROM record
    WHERE kind = NEW.kind AND record_id = NEW.record_id AND body_digest <> NEW.body_digest
    LIMIT 1;

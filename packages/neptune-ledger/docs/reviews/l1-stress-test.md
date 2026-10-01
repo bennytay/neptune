@@ -26,7 +26,7 @@
 | 7 | Tampered `manifest.json` | **breaks** (a self-consistent tampered package can bring an existing record id with another body) | ADR 0005 §2: `body_digest`, `conflicting_id` for records, DB trigger |
 | 8 | Package missing a table | **breaks** (no defined finding) | ADR 0006 §1: `file_missing` / `manifest_invalid` |
 | 9 | Symlink in a package | **breaks** (only a symlinked root was defined) | ADR 0006 §1: `unsafe_entry`, never followed |
-| 10 | Thread on two clocks, no mapping | holds | Carried caveat on merges stated (ADR 0006 §8) |
+| 10 | Thread on two clocks, no mapping | holds (two contract tests) | Carried caveat on merges stated (ADR 0006 §8) |
 | 11 | Tenant boundary probe | **breaks** (`register` takes any path) | ADR 0006 §3: tenant package roots |
 | 12 | 10⁵-package registry | holds, with the conditions in ADR 0005 §4–§5 | Measured below; `query` paging added (ADR 0006 §6) |
 
@@ -110,8 +110,10 @@ tests: `test_a_moved_source_registers_as_another_package`,
 
 **Walk.** P1 = ulog 1.0.0 and P2 = ulog 2.0.0 over the same bytes. In the *data model*, `source`
 is shared, `transform` has two rows, and record ids and clock ids differ by transform. The
-Ledger records (`source_artifact`, `source_revision`) have equal ids and equal bodies in both
-packages. In *threads*, declared keys put both machines in one machine thread, and equal locators
+Ledger records (`source_artifact`, `source_revision`) have equal ids in both packages, and
+`source_revision` has equal bodies. A `source_artifact` body may differ only in chunking (a
+compiler hashing at another chunk size), which is accepted. Its conflict rule is content id plus
+size (ADR 0005 §2). In *threads*, declared keys put both machines in one machine thread, and equal locators
 put both in one anchored thread. Records and locators that differ are siblings or members of one
 lineage set (ADR 0003 §4.1). Each transform's clocks are separate partitions. `latest_transform`
 picks 2.0.0 per lineage set whatever the registration order, so a backfilled 1.0.0 never becomes
@@ -137,7 +139,12 @@ picks 2.0.0 per lineage set whatever the registration order, so a backfilled 1.0
 **Resolution.** ADR 0005 §2 adds `record.body_digest`, the sha256 of the record's canonical line.
 One (kind, record id) has one digest per tenant. Registration refuses another digest with
 `conflicting_id` (subject: the record id), and a trigger enforces the rule in the database.
-Honest packages never trip it, because the compiler is deterministic. Contract test
+Honest packages never trip it, because the compiler is deterministic. The one kind whose body
+legitimately varies, `source_artifact` (its `chunk_size` and `chunks` are verification metadata,
+not identity), is exempt: there a conflict is the same content id with another size, already the
+`source` table's rule, and the same bytes at two chunk sizes register as two packages
+(`test_the_same_bytes_at_two_chunk_sizes_register_as_two_packages`,
+`test_a_source_artifact_may_differ_in_chunking_only`). Contract test
 `test_an_existing_record_id_with_another_body_is_refused`; migration tests
 `test_a_record_id_keeps_one_body` and
 `test_an_existing_record_id_with_another_body_is_refused`.
@@ -168,7 +175,7 @@ contract test uses byte-identical link targets, so only a non-following implemen
 that escape the root can never equal a present entry, so they are `file_missing`, and nothing
 outside the root is opened.
 
-## 10. A thread with records on two clocks and no mapping — holds
+## 10. A thread with records on two clocks and no mapping — holds (contract-tested)
 
 **Walk.** The run of example C in ADR 0003 spans two MCAP splits, with `log_time` of c0 (L0) and
 of c1 (L1). In the *data model*, each record's `world_clock` names its own domain, and the window
@@ -178,6 +185,19 @@ it. A calibration whose `valid_until` sits on another clock than `valid_from` ha
 returned as stated with its own `domain_id`. A merge naming mappings that do not reach L1 leaves
 L1 as its own partition. In the *API*, `query` windows never cross a clock
 (`test_query_time_window_stays_on_one_clock`).
+
+**Evidence.** Two strict-xfail contract tests build such threads deterministically from the
+drone, without MVL-82. Each asserts two separate clock partitions, the cross-partition order, no
+merged partition and no mapped interval. They fail only with the stub's `NotImplementedError` and
+bind MVL-90/L2.
+- `test_two_clocks_across_packages_stay_apart_in_registration_order`: the drone and its 2.0.0
+  re-parse put two runs on two clocks in one machine thread. The package whose clock sorts later
+  as bytes is registered first, so the order must follow the smallest registration key, not the
+  clock bytes.
+- `test_two_clocks_in_one_package_order_by_clock_key_bytes`: one package. The run sits on
+  `timestamp`, and one stream is given a Known start on another clock it carries. Both
+  partitions share the registration key, so they fall back to clock key bytes, and the untimed
+  stream comes last.
 
 **Carried caveat** (deferred at ADR 0003's review). When mappings *are* named, two entries of one
 clock that took different paths reorder only if their mapped intervals overlap or the mappings
@@ -197,9 +217,12 @@ contradict each other, and the unmerged order stays available. Stated with its p
   register A's package by path and then read A's evidence in its own catalog. **Breaks.**
 
 **Resolution.** ADR 0006 §3. Each tenant's catalog is configured with its package roots. A root
-outside them is `package_unreadable`, worded exactly as a missing root. `access/` (MVL-99) owns
-the configuration with the per-tenant role. No contract test is possible at the protocol level,
-because the roots are deployment configuration. MVL-99's acceptance must include it.
+outside them is `package_unreadable`, worded exactly as a missing root. Containment is decided
+on the fully resolved `package_root` and fully resolved tenant roots, compared by path
+components, never by string prefix. `access/` (MVL-99) owns the configuration with the
+per-tenant role. Contract test `test_register_stays_inside_the_tenants_package_roots` (strict
+xfail) probes `B_root/link → A's tree` and a `..` escape. Implementations configure roots through
+`CatalogContract.make_tenant_catalog`.
 
 ## 12. A 10⁵-package registry — holds, under conditions
 
@@ -337,7 +360,7 @@ index each query uses.
 
 ## What L2 inherits
 
-- **MVL-90 (register/verify):** ADR 0006 §1–§5 and the ten new contract test cases. Index from the
+- **MVL-90 (register/verify):** ADR 0006 §1–§5 and the fifteen new contract test cases. Index from the
   verified bytes, read once. Include `tenant_id` in every keyed lookup (ADR 0005 §4).
 - **The derived thread index (L2):** the catalog alone cannot resolve `part_of` (tier-2
   references inside record bodies), the sensor `category`, `software_version` keys or `unresolved`
