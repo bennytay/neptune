@@ -23,7 +23,7 @@ from neptune.model.knowledge import AssertionKind, Knowledge, Known
 
 # The catalog API's registry version (contracts/catalog-api). It equals the registry version
 # exactly (platform ADR 0002 §3); a reader-incompatible change raises the major (ADR 0004 §5).
-CATALOG_API_VERSION: Final = "1.0.0"
+CATALOG_API_VERSION: Final = "1.1.0"
 API_MAJOR: Final = int(CATALOG_API_VERSION.split(".", 1)[0])
 
 
@@ -133,6 +133,7 @@ FindingCode: TypeAlias = Literal[
     "unknown_package",
     "unknown_record",
     "unresolvable_evidence",
+    "unsafe_entry",
     "unsupported_mapping",
     "unsupported_schema_version",
 ]
@@ -319,12 +320,15 @@ class VerifyReport:
     """Whether a registered package's bytes still match its id and its manifest.
 
     ``unknown_package``: the tenant never registered the id; ``registration_key`` and
-    ``root_locator`` are ``NotCovered``. ``damaged``: ``findings`` list every mismatch. Verify
-    reads and reports; it never repairs, re-registers or edits the catalog.
+    ``root_locator`` are ``NotCovered``. ``damaged``: ``findings`` list every mismatch.
+    ``unreachable`` (1.1.0): the stored root locator cannot be read (moved, removed, not a
+    directory or a symlink); nothing was compared, ``files_checked`` is 0 and a
+    ``package_unreadable`` finding names the root. Verify reads and reports; it never repairs,
+    re-registers or edits the catalog (Ledger ADR 0006 §2).
     """
 
     package_id: Text
-    verdict: Literal["damaged", "intact", "unknown_package"]
+    verdict: Literal["damaged", "intact", "unknown_package", "unreachable"]
     registration_key: Knowledge[TransactionKey]
     root_locator: Knowledge[str]
     files_checked: Count
@@ -734,6 +738,15 @@ class TimeWindow:
 
 
 @dataclass(frozen=True)
+class QueryCursor:
+    """A ``query`` row's sort key; ``QuerySpec.after`` returns the rows strictly after it."""
+
+    kind: RecordKind
+    record_id: RecordId
+    package_id: PackageId
+
+
+@dataclass(frozen=True)
 class QuerySpec:
     """The filter contract ``query`` implements (MVL-98): kinds, a window, a thread, packages.
 
@@ -741,7 +754,9 @@ class QuerySpec:
     is ``window.clock`` and whose stated extent ``[world_first, world_last or world_first]``
     meets it; records without world time never match a window. ``thread_id`` keeps the thread's
     history entries. ``packages`` absent means every registered package. Rows are sorted by
-    ``(kind, record_id, package_id)`` as UTF-8 bytes; ``limit`` keeps the first rows.
+    ``(kind, record_id, package_id)`` as UTF-8 bytes; ``after`` (1.1.0) keeps the rows whose key
+    is strictly greater than the cursor, and ``limit`` keeps the first rows, so the last row of
+    one page is the next page's cursor (Ledger ADR 0006 §6).
     """
 
     kinds: Annotated[tuple[RecordKind, ...], Constraint(min_items=1, unique_items=True)]
@@ -750,6 +765,7 @@ class QuerySpec:
     packages: Annotated[tuple[PackageId, ...], Constraint(unique_items=True)] | None = None
     as_of: TxSeq | None = None
     limit: Annotated[int, Constraint(minimum=1)] | None = None
+    after: QueryCursor | None = None
 
 
 @dataclass(frozen=True)

@@ -28,6 +28,7 @@ from neptune_ledger.api.types import (
     LineageSet,
     MappingPath,
     Partition,
+    QueryCursor,
     QueryMeta,
     QueryRow,
     QuerySpec,
@@ -270,6 +271,13 @@ def goldens() -> dict[str, dict[str, Any]]:
         documents["query_spec.window.json"] = QuerySpec(
             kinds=("run", "stream"), window=TimeWindow(clock, 0, 2**40), as_of=last
         )
+        run = query_rows(drone, 1)[0]
+        documents["query_spec.page.json"] = QuerySpec(
+            kinds=("run",),
+            as_of=last,
+            limit=1000,
+            after=QueryCursor(run.kind, run.record_id, run.package_id),
+        )
         documents["query_meta.json"] = QueryMeta(Known(tx(last)), ())
         # Error cases: a tampered package refused; an unknown package; unresolvable evidence.
         documents["error.registration_refused.json"] = Registration(
@@ -285,6 +293,39 @@ def goldens() -> dict[str, dict[str, Any]]:
                     "file_digest_mismatch",
                     "records/frame.jsonl",
                     "the file's sha256 differs from the manifest's",
+                ),
+            ),
+        )
+        # A package holding a symlink is refused, and the link is never followed (ADR 0006 §1).
+        documents["error.registration_refused_unsafe_entry.json"] = Registration(
+            outcome="refused",
+            package_id=Known(packages[2].package_id),
+            registration_key=NotApplicable(),
+            root_locator="/srv/neptune/packages/mobile_robot-linked",
+            ledger_version=LEDGER_VERSION,
+            schema_version=Known(1),
+            record_counts=(),
+            findings=(
+                CatalogFinding(
+                    "unsafe_entry",
+                    "records/run.jsonl",
+                    "a symlink; a package holds regular files and directories only",
+                ),
+            ),
+        )
+        # A registered package whose stored root is gone: nothing compared (ADR 0006 §2).
+        documents["error.verify_unreachable.json"] = VerifyReport(
+            drone.package_id,
+            "unreachable",
+            Known(tx(1)),
+            Known("/srv/neptune/packages/drone"),
+            0,
+            Known(tx(last)),
+            (
+                CatalogFinding(
+                    "package_unreadable",
+                    "/srv/neptune/packages/drone",
+                    "the stored root locator does not exist",
                 ),
             ),
         )

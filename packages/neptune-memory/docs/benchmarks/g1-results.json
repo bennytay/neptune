@@ -1,0 +1,320 @@
+{
+ "budgets": [
+  {
+   "budget": 300,
+   "direction": "<",
+   "label": "extrapolated",
+   "name": "thread_warm_1e8_p50_ms",
+   "note": "ADR 0004 upper bound, data in cache",
+   "value": 2.041
+  },
+  {
+   "budget": 1000,
+   "direction": "<",
+   "label": "extrapolated",
+   "name": "thread_warm_1e8_p99_ms",
+   "note": "ADR 0004 upper bound, data in cache",
+   "value": 3.483
+  },
+  {
+   "budget": 300,
+   "direction": "<",
+   "label": "measured",
+   "name": "thread_cold_1e7_p50_ms",
+   "note": "OS page cache evicted before every query, shared_buffers 16MB",
+   "value": 3.375
+  },
+  {
+   "budget": 1000,
+   "direction": "<",
+   "label": "measured",
+   "name": "thread_cold_1e7_p99_ms",
+   "note": "OS page cache evicted before every query, shared_buffers 16MB",
+   "value": 6.531
+  },
+  {
+   "budget": 300,
+   "direction": "<",
+   "label": "estimated",
+   "name": "thread_cold_1e8_p50_ms",
+   "note": "2x the 1e7 measurement, from the one 1e6->1e7 step (x1.71)",
+   "value": 6.75
+  },
+  {
+   "budget": 1000,
+   "direction": "<",
+   "label": "estimated",
+   "name": "thread_cold_1e8_p99_ms",
+   "note": "2x the 1e7 measurement, from the one 1e6->1e7 step (x1.32)",
+   "value": 13.062
+  },
+  {
+   "budget": 300,
+   "direction": "<",
+   "label": "measured",
+   "name": "traverse_3hop_1e7_p50_ms",
+   "note": "jsonb visited set",
+   "value": 0.893
+  },
+  {
+   "budget": 300,
+   "direction": "<",
+   "label": "extrapolated",
+   "name": "traverse_3hop_1e8_p50_ms",
+   "note": "ADR 0004 upper bound (text[] walk; equal at ordinary sites)",
+   "value": 1.885
+  },
+  {
+   "budget": 0.9,
+   "direction": ">=",
+   "label": "measured",
+   "name": "graph_filtered_recall_at_10_scope_up_to_500k",
+   "note": "200 queries; scopes up to the 500k cutoff only (exact scan)",
+   "value": 1.0
+  },
+  {
+   "budget": 0.9,
+   "direction": ">=",
+   "label": "measured",
+   "name": "graph_filtered_recall_at_10_wide_scope",
+   "note": "scopes above the 500k cutoff (filtered HNSW, ef_search 400): not measured there; value is that branch's recall on 2.5%-selective 2-hop scopes, below budget",
+   "owner": "MVL-132",
+   "status": "gap",
+   "value": 0.899
+  },
+  {
+   "budget": 300,
+   "direction": "<",
+   "label": "measured",
+   "name": "graph_filtered_1e7_p50_ms",
+   "note": "exact over 25003 scope embeddings",
+   "value": 7.998
+  },
+  {
+   "budget": 300,
+   "direction": "<",
+   "label": "extrapolated",
+   "name": "graph_filtered_1e8_p50_ms",
+   "note": "10x: linear in scope embeddings, which grow with history depth",
+   "value": 79.98
+  },
+  {
+   "budget": 200,
+   "direction": ">=",
+   "label": "measured",
+   "name": "supersedes_per_s_1e7",
+   "note": "ADR 0004, 4 writers",
+   "value": 1064.5
+  },
+  {
+   "budget": 1000,
+   "direction": "<",
+   "label": "measured",
+   "name": "thread_p99_under_write_load_1e7_ms",
+   "note": "ADR 0004, 8 readers",
+   "value": 1.678
+  },
+  {
+   "budget": 7200,
+   "direction": "<",
+   "label": "extrapolated",
+   "name": "rebuild_1e8_s",
+   "note": "ADR 0004 upper bound; not evidence (GAP, MVL-132)",
+   "owner": "MVL-132",
+   "status": "gap",
+   "value": 5383.54
+  }
+ ],
+ "host": "i5-13600K, 20 threads, NVMe, ~5 GB free RAM; Postgres 16.15 + pgvector 0.8.1",
+ "issue": "MVL-106",
+ "raw": {
+  "g1_10000000_cold": {
+   "blocks_hit_mean": 59.76,
+   "blocks_read_mean": 30.46,
+   "eviction": "posix_fadvise(DONTNEED) on every cluster file before every query",
+   "eviction_ms_mean": 7.7,
+   "io_read_ms": {
+    "mean_ms": 2.569,
+    "n": 200,
+    "p50_ms": 2.581,
+    "p99_ms": 4.758
+   },
+   "mean_ms": 3.348,
+   "n": 200,
+   "p50_ms": 3.375,
+   "p99_ms": 6.531,
+   "rows_mean": 14.69,
+   "shared_buffers": "16MB"
+  },
+  "g1_10000000_recall": {
+   "graph_filtered_hnsw_ef100": {
+    "mean_ms": 6.178,
+    "n": 200,
+    "p50_ms": 6.096,
+    "p99_ms": 8.922,
+    "queries_below_0_9": 55,
+    "recall_at_10": 0.8765,
+    "recall_min": 0.0
+   },
+   "graph_filtered_hnsw_ef200": {
+    "mean_ms": 6.563,
+    "n": 200,
+    "p50_ms": 6.34,
+    "p99_ms": 9.391,
+    "queries_below_0_9": 43,
+    "recall_at_10": 0.8895,
+    "recall_min": 0.0
+   },
+   "graph_filtered_hnsw_ef40": {
+    "mean_ms": 6.235,
+    "n": 200,
+    "p50_ms": 6.16,
+    "p99_ms": 9.358,
+    "queries_below_0_9": 66,
+    "recall_at_10": 0.8665,
+    "recall_min": 0.0
+   },
+   "graph_filtered_hnsw_ef400": {
+    "mean_ms": 6.677,
+    "n": 200,
+    "p50_ms": 6.022,
+    "p99_ms": 9.261,
+    "queries_below_0_9": 37,
+    "recall_at_10": 0.899,
+    "recall_min": 0.0
+   },
+   "graph_filtered_shipped": {
+    "mean_ms": 8.081,
+    "n": 200,
+    "p50_ms": 7.998,
+    "p99_ms": 10.786,
+    "queries_below_0_9": 0,
+    "recall_at_10": 1.0,
+    "recall_min": 1.0
+   },
+   "k": 10,
+   "queries": 200,
+   "scope_embeddings": {
+    "max": 25058,
+    "mean": 25002.65
+   },
+   "unfiltered_ef100": {
+    "mean_ms": 1.604,
+    "n": 200,
+    "p50_ms": 1.617,
+    "p99_ms": 1.926,
+    "queries_below_0_9": 102,
+    "recall_at_10": 0.8125,
+    "recall_min": 0.0
+   },
+   "unfiltered_ef200": {
+    "mean_ms": 2.661,
+    "n": 200,
+    "p50_ms": 2.679,
+    "p99_ms": 3.313,
+    "queries_below_0_9": 41,
+    "recall_at_10": 0.885,
+    "recall_min": 0.0
+   },
+   "unfiltered_ef40": {
+    "mean_ms": 0.958,
+    "n": 200,
+    "p50_ms": 0.876,
+    "p99_ms": 2.178,
+    "queries_below_0_9": 174,
+    "recall_at_10": 0.668,
+    "recall_min": 0.0
+   },
+   "unfiltered_ef400": {
+    "mean_ms": 4.09,
+    "n": 200,
+    "p50_ms": 4.077,
+    "p99_ms": 5.198,
+    "queries_below_0_9": 16,
+    "recall_at_10": 0.9285,
+    "recall_min": 0.0
+   }
+  },
+  "g1_10000000_walk": {
+   "hub_100000_jsonb_set": {
+    "ms_min": 790.7,
+    "rows": 200001
+   },
+   "hub_100000_text_array": {
+    "ms_min": 173159.4,
+    "rows": 200001
+   },
+   "hub_10000_jsonb_set": {
+    "ms_min": 378.6,
+    "rows": 20001
+   },
+   "hub_10000_text_array": {
+    "ms_min": 2091.3,
+    "rows": 20001
+   },
+   "traverse_3hop": {
+    "mean_ms": 0.913,
+    "n": 200,
+    "p50_ms": 0.893,
+    "p99_ms": 1.355,
+    "rows_mean": 86.95
+   }
+  },
+  "g1_1000000_cold": {
+   "blocks_hit_mean": 53.275,
+   "blocks_read_mean": 20.995,
+   "eviction": "posix_fadvise(DONTNEED) on every cluster file before every query",
+   "eviction_ms_mean": 7.3,
+   "io_read_ms": {
+    "mean_ms": 1.429,
+    "n": 200,
+    "p50_ms": 1.317,
+    "p99_ms": 3.146
+   },
+   "mean_ms": 2.116,
+   "n": 200,
+   "p50_ms": 1.969,
+   "p99_ms": 4.942,
+   "rows_mean": 14.69,
+   "shared_buffers": "16MB"
+  },
+  "pg_10000000_rebuild": {
+   "ANALYZE claim_embedding_ms": 109.3,
+   "ANALYZE claim_ms": 261.5,
+   "claim_bitemporal_ix_ms": 317109.3,
+   "claim_edge_in_ix_ms": 198.2,
+   "claim_edge_out_ix_ms": 205.2,
+   "claim_embedding_hnsw_ix_ms": 64872.2,
+   "claim_embedding_subject_ix_ms": 253.7,
+   "copy_claims_ms": 12196.6,
+   "copy_embeddings_ms": 8445.9,
+   "total_ms": 404285.1
+  },
+  "pg_10000000_write": {
+   "readers": 8,
+   "seconds": 30.0,
+   "supersedes_per_s": 1064.5,
+   "thread_under_load": {
+    "mean_ms": 0.927,
+    "n": 256722,
+    "p50_ms": 0.929,
+    "p99_ms": 1.678
+   },
+   "write_latency": {
+    "mean_ms": 3.771,
+    "n": 31936,
+    "p50_ms": 3.572,
+    "p99_ms": 6.815
+   },
+   "writers": 4
+  }
+ },
+ "recall": {
+  "chosen": {
+   "ef_search": 400,
+   "graph_filtered": "exact"
+  },
+  "queries": 200,
+  "unfiltered_recall_at_10": 0.9285
+ }
+}

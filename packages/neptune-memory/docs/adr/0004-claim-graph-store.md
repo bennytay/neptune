@@ -1,6 +1,6 @@
 # 0004 — Claim graph store: PostgreSQL 16 + pgvector over Neo4j 5 (Apache AGE optional, measured)
 
-- Status: Accepted
+- Status: Accepted; final per 0007, which supersedes Decision 4 (budgets) and the recall consequence
 - Date: 2026-10-02
 - Issue: MVL-104
 
