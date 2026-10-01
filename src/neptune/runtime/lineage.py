@@ -1,4 +1,4 @@
-"""The runtime as a producer: its transform record and the findings it makes (ADR 0028 §4).
+"""The runtime as a producer: its transform record and the findings it makes (ADR 0029 §4).
 
 What an adapter could not say about a source, the runtime says: an adapter crashed on a chunk, a
 plan could not be made, a source's chunks broke a cross-chunk law, a file changed under the job or

@@ -1,4 +1,4 @@
-"""The ingest job's state machine: phases, events, options, cancellation, determinism (ADR 0028)."""
+"""The ingest job's state machine: phases, events, options, cancellation, determinism (ADR 0029)."""
 
 import os
 import shutil

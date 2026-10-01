@@ -1,4 +1,4 @@
-"""The ingestion runtime: the job that drives every adapter (ADR 0008 §5, ADR 0028).
+"""The ingestion runtime: the job that drives every adapter (ADR 0008 §5, ADR 0029).
 
 - ``events``: the nine phases, the job's states, and the structured events a job emits.
 - ``lineage``: the runtime as a producer: its transform record and the findings it makes.

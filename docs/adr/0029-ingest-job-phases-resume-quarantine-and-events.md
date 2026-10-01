@@ -1,4 +1,4 @@
-# 0028 — The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events
+# 0029 — The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events
 
 - Status: Accepted
 - Date: 2026-10-01
@@ -64,7 +64,7 @@ what to do with the rest of its source's output.
      a source's complete output under a transform or none of it, and the finding says which.
 4. **The runtime is a producer.** Its findings name a `TransformRecord` of adapter id
    `neptune.runtime`, its version, and config `{"attempts": N}`, so a package records who said
-   what under which policy (as ADR 0027 did for `neptune.probe`). Codes, in
+   what under which policy (as the probe engine, MVL-8, does for `neptune.probe`). Codes, in
    `neptune.runtime.lineage.FINDING_CODES`: `chunk_failed`, `plan_failed`, `output_invalid`
    (failed, error); `source_changed` (inconsistent, error); `source_unreadable` (skipped, error);
    `entry_skipped` (skipped; info for a special file, warning for one that vanished, error for one
@@ -95,7 +95,7 @@ what to do with the rest of its source's output.
    restart.
 9. **Selection** applies the registry's rule (ADR 0024 §7) with each adapter's probe isolated: a
    probe that raises is an event and that adapter is out of the source's candidates. Unsupported
-   and ambiguous sources are events, not findings, here; the probe engine (ADR 0027) replaces
+   and ambiguous sources are events, not findings, here; the probe engine (MVL-8) replaces
    this one method and brings the findings.
 10. **What fails the job** (`JobError`): a root that is not a directory or cannot be read, a
     destination that exists, options naming an adapter or option that does not exist, a

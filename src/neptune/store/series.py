@@ -290,7 +290,7 @@ def run_seq_range(run: Path) -> tuple[int, int] | None:
     """The least and greatest ``seq`` a run holds, or ``None`` for a run with no rows.
 
     Read from the row groups' statistics, so it costs nothing per row: the runtime proves ``seq``
-    unique across a source's chunks by checking that their runs' ranges are disjoint (ADR 0028),
+    unique across a source's chunks by checking that their runs' ranges are disjoint (ADR 0029),
     which keeps the check's memory at one pair per chunk.
     """
     metadata = _open(run).metadata
