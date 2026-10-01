@@ -308,14 +308,16 @@ def test_remote_execution_with_the_network_allowed_is_unsupported_in_this_versio
 # --- Sources and destinations ------------------------------------------------------------------
 
 
-def test_a_source_that_does_not_exist_or_is_a_file_is_invalid(
+def test_a_source_that_does_not_exist_or_is_not_a_regular_file_is_invalid(
     root: Path, home: Path, tmp_path: Path
 ) -> None:
     client = Neptune(home)
     with pytest.raises(InvalidSourceError, match="does not exist"):
         client.ingest(tmp_path / "missing", tmp_path / "package")
-    with pytest.raises(InvalidSourceError, match="not a directory"):
-        client.dry_run(root / "notes.txt")
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    with pytest.raises(InvalidSourceError, match="neither a directory nor a regular file"):
+        client.dry_run(fifo)
     assert not any((home / "ledgers").iterdir())  # nothing ran
 
 

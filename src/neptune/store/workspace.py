@@ -611,6 +611,11 @@ class Workspace:
             return SourceLedger()
         return _ledger(table)
 
+    def has_ledger(self, root: Path) -> bool:
+        """Whether a job (an ingest, a dry run, or one interrupted after its scan) saved a ledger
+        of ``root`` here: the earlier work a resume continues (ADR 0043)."""
+        return (self._ledger_dir(root) / "ledger.jsonl").is_file()
+
     def save_ledger(self, root: Path, ledger: SourceLedger) -> None:
         directory = self._ledger_dir(root)
         records = (*ledger.artifacts(), *ledger.revisions(), *ledger.absences())

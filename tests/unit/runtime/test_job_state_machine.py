@@ -192,11 +192,10 @@ def test_options_are_checked_before_any_work(root: Path, tmp_path: Path) -> None
     assert not (tmp_path / "p").exists()
 
 
-def test_the_root_must_be_a_directory_and_the_destination_free(root: Path, tmp_path: Path) -> None:
+def test_the_root_must_exist_and_the_destination_be_free(root: Path, tmp_path: Path) -> None:
     home, registry = Workspace(tmp_path / "home"), default_registry()
-    with pytest.raises(JobError, match="not a directory"):
-        IngestJob(root / "notes.txt", tmp_path / "p", home, registry)
-    with pytest.raises(JobError, match="not a directory"):
+    IngestJob(root / "notes.txt", tmp_path / "p", home, registry)  # one file is a root (ADR 0043)
+    with pytest.raises(JobError, match="neither a directory nor a regular file"):
         IngestJob(tmp_path / "missing", tmp_path / "p", home, registry)
     (tmp_path / "taken").mkdir()
     with pytest.raises(JobError, match="written once"):

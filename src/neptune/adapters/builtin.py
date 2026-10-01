@@ -6,7 +6,9 @@ registry and the contract. A job may also build its own ``AdapterRegistry`` from
 
 from neptune.adapters.contract import Adapter
 from neptune.adapters.image import ImageAdapter
+from neptune.adapters.markdown import MarkdownAdapter
 from neptune.adapters.mcap import McapAdapter
+from neptune.adapters.pdf import PdfAdapter
 from neptune.adapters.registry import AdapterRegistry
 from neptune.adapters.tabular import TabularAdapter
 from neptune.adapters.text import TextAdapter
@@ -14,7 +16,14 @@ from neptune.adapters.text import TextAdapter
 
 def builtin_adapters() -> tuple[Adapter, ...]:
     """A fresh instance of every shipped adapter, in id order."""
-    return (ImageAdapter(), McapAdapter(), TabularAdapter(), TextAdapter())
+    return (
+        ImageAdapter(),
+        MarkdownAdapter(),
+        McapAdapter(),
+        PdfAdapter(),
+        TabularAdapter(),
+        TextAdapter(),
+    )
 
 
 def default_registry() -> AdapterRegistry:
