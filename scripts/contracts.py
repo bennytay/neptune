@@ -161,9 +161,9 @@ def _toml(path: Path) -> dict[str, Any]:
 class Registry:
     """The ``contracts/`` directory, read on demand."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, repo: Path | None = None) -> None:
         self.root = root
-        self.repo = root.parent
+        self.repo = root.parent if repo is None else repo  # where owner paths are relative to
 
     def contract_ids(self) -> list[str]:
         return sorted(p.name for p in self.root.iterdir() if (p / "contract.toml").is_file())
