@@ -106,7 +106,7 @@ class Law(StrEnum):
     FINDING_REPEATED = "finding_repeated"  # a finding emitted twice (by the plan or two chunks)
     OUTPUT_SILENT = "output_silent"  # no record and no finding about the source at all
     STREAM_UNDECLARED = "stream_undeclared"  # series rows of a stream no chunk declares
-    STREAM_WITHOUT_RUN = "stream_without_run"  # a stream no chunk wrote rows (or an empty run) of
+    STREAM_WITHOUT_RUN = "stream_without_run"  # a declared stream no chunk wrote a run of
     RUN_BREAKS_STREAM = "run_breaks_stream"  # a chunk's run breaks its stream's row contract
     RUN_COLUMNS_DISAGREE = "run_columns_disagree"  # two chunks' runs of a stream differ in columns
     SEQ_RANGES_OVERLAP = "seq_ranges_overlap"  # two chunks' seq ranges of a stream overlap
