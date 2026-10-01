@@ -25,6 +25,7 @@ from neptune.adapters.contract import (
     ProbeReason,
     ProbeResult,
     Resources,
+    ShortReadError,
     chunk_from_json,
     chunk_id,
     configure,
@@ -33,6 +34,7 @@ from neptune.adapters.contract import (
 )
 from neptune.discovery.reader import BytesReader
 from neptune.identity.ids import config_hash
+from neptune.model.ids import ContentId
 from neptune.model.kinds import RECORD_KINDS
 
 
@@ -344,3 +346,33 @@ def test_a_bytes_reader_serves_its_bytes_and_their_content_id() -> None:
     for offset, length in ((4, 1), (-1, 1), (0, -1)):
         with pytest.raises(ValueError):
             source.read(offset, length)
+
+
+class _CutAfterHash:
+    """A reader over a file cut after it was hashed: declares the artifact, serves what is left."""
+
+    def __init__(self, declared: bytes, present: int) -> None:
+        self._declared = BytesReader(declared)
+        self._present = present
+
+    @property
+    def content_id(self) -> ContentId:
+        return self._declared.content_id
+
+    @property
+    def size(self) -> int:
+        return self._declared.size
+
+    def read(self, offset: int, length: int) -> bytes:
+        return self._declared.read(offset, length)[: max(self._present - offset, 0)]
+
+
+def test_a_short_read_is_a_structured_error_naming_the_unserved_range() -> None:
+    source = _CutAfterHash(bytes(range(100)), 42)
+    assert b"".join(read_pieces(source, 0, 40, 7)) == bytes(range(40))
+    with pytest.raises(ShortReadError) as info:
+        list(read_pieces(source, 30, 100, 7))
+    error = info.value
+    assert (error.source, error.offset, error.length) == (source.content_id, 42, 58)
+    assert not isinstance(error, ValueError)  # a caller's bad range is one; a short read is not
+    assert str(error) == f"{source.content_id} served no bytes at 42; 58 declared bytes unread"

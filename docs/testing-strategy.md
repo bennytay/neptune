@@ -30,8 +30,9 @@ Status: policy agreed 2026-09-30; suites grow with each milestone.
 - Fixtures over 512 KB are rejected by pre-commit. Large corpora (MVL-49) live outside the repo and are
   fetched by a script with pinned hashes.
 - Fixtures **grow with the milestone that needs them**: security fixtures (path traversal, symlink loop,
-  archive bomb, truncation) land with MVL-10; per-format corruption fixtures land with each adapter;
-  MVL-50 consolidates and audits coverage, it does not start from zero.
+  archive bomb, truncation) landed with MVL-75 in `tests/fixtures/hostile/` (generator plus committed
+  archives; the symlink tree is built at test time); per-format corruption fixtures land with each
+  adapter; MVL-50 consolidates and audits coverage, it does not start from zero.
 - Every adversarial fixture has an expected structured outcome: salvage, explicit ambiguity, unsupported,
   or safe rejection.
 

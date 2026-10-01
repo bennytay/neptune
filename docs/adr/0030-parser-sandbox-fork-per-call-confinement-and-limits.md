@@ -118,8 +118,13 @@ partial chunk in the workspace.
 ## Consequences
 
 - An adapter cannot keep state between calls, write a temporary file, start a helper process
-  or open a socket; ADR 0008 already forbade all four, and now they fail. A library that needs
-  scratch space must be given it by a future ADR, not by the sandbox's absence.
+  or open a socket; ADR 0008 already forbade all four, and now they fail. A call that needs
+  scratch space, an archive adapter spooling nested members through ADR 0029's
+  `scratch_space` for one, must be given that one directory explicitly (a Landlock write rule
+  and a file-size budget for it) when it is wired in, never by lifting the sandbox.
+- A `ShortReadError` raised inside a call is, for now, a raise like any other in either
+  isolation; when the job treats it as the source's fault (ADR 0028's and ADR 0029's
+  follow-up), `Raised` carries it as it carries `SourceChangedError`.
 - The sandbox is Linux-only. Elsewhere a job must ask for `in_process`; `JobError` says so.
 - Each call costs a fork and a JSON round trip; a job forks once per (source, adapter) to probe.
   MVL-8's engine and M9's scheduler can batch probes per source if that shows in profiles.

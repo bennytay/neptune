@@ -99,6 +99,11 @@ class LocalSource:
         if not Path(self._root).is_dir():
             raise NotADirectoryError(self._root)
 
+    @property
+    def root(self) -> str:
+        """The ingest root as the caller named it. Never recorded; findings use relative paths."""
+        return self._root
+
     def walk(self) -> Iterator[WalkEntry]:
         stack: list[Iterator[WalkEntry | _Directory]] = [iter(self._list(()))]
         while stack:
@@ -126,13 +131,13 @@ class LocalSource:
         finally:
             os.close(dir_fd)
         try:
-            is_regular = stat.S_ISREG(os.fstat(fd).st_mode)
+            mode = os.fstat(fd).st_mode
         except OSError:
             os.close(fd)
             raise
-        if not is_regular:
+        if not stat.S_ISREG(mode):
             os.close(fd)
-            raise SourceAccessError(location, SkipReason.NOT_REGULAR_FILE, "not a regular file")
+            raise SourceAccessError(location, SkipReason.NOT_REGULAR_FILE, stat.filemode(mode))
         os.set_blocking(fd, True)
         return os.fdopen(fd, "rb")
 
