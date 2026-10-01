@@ -6,10 +6,12 @@ and strict JSON readers (unexpected or missing keys and wrongly typed values are
 
 from collections.abc import Callable, Mapping
 from enum import StrEnum
-from typing import Any, TypeGuard, TypeVar
+from types import UnionType
+from typing import Any, TypeAlias, TypeGuard, TypeVar
 
-from neptune.model.jsonvalue import JsonValue
-from neptune.model.knowledge import Ambiguous, Knowledge, Known
+from neptune.model.ids import LogicalId, check_text, logical_id_from_json
+from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.model.knowledge import Ambiguous, Grounding, Knowledge, Known, from_json, to_json
 from neptune.model.units import Dimension, Unit
 
 T = TypeVar("T")
@@ -27,11 +29,28 @@ def values_of(knowledge: Knowledge[T]) -> list[T]:
             return []
 
 
-def check_type(field: str, knowledge: Knowledge[Any], kind: type) -> None:
+def check_type(field: str, knowledge: Knowledge[Any], kind: type | UnionType) -> None:
     """Runtime guard: every value the state asserts or offers is a ``kind``."""
     for value in values_of(knowledge):
         if not isinstance(value, kind):
-            raise ValueError(f"{field} must be a {kind.__name__}, got {value!r}")
+            name = getattr(kind, "__name__", str(kind))
+            raise ValueError(f"{field} must be a {name}, got {value!r}")
+
+
+def check_text_values(field: str, knowledge: Knowledge[str]) -> None:
+    """Every value the state asserts or offers is non-empty text: a blank is ``Unknown``."""
+    check_type(field, knowledge, str)
+    for value in values_of(knowledge):
+        check_text(field, value)
+
+
+def text_decoder(what: str) -> Callable[[JsonValue], str]:
+    """Decoder for ``Knowledge[str]`` fields; ``check_text_values`` then refuses a blank."""
+
+    def decode(data: JsonValue) -> str:
+        return json_str(data, what)
+
+    return decode
 
 
 def check_unit(field: str, unit: Knowledge[Unit], dimension: Dimension) -> None:
@@ -89,3 +108,49 @@ def json_bool(value: JsonValue) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"expected a boolean, got {type(value).__name__}")
     return value
+
+
+# --- Declared identifiers (ADR 0019 §2) ----------------------------------------------------------
+
+# The tier-3 ids one declaration gives one real-world thing (a machine, a sensor, a site, an asset),
+# each with its own citation: ``Known``, or ``Ambiguous`` where the evidence gives conflicting
+# readings of one id. Sorted by (namespace, value), first candidate first; no id repeats.
+Identifiers: TypeAlias = tuple[Knowledge[LogicalId], ...]
+
+
+def _identifier_key(knowledge: Knowledge[LogicalId]) -> tuple[str, str]:
+    first = values_of(knowledge)[0]
+    return (first.namespace, first.value)
+
+
+def check_identifiers(field: str, identifiers: Identifiers) -> None:
+    """Runtime guard for ``Identifiers``: stated ids only, each once, in canonical order."""
+    if not isinstance(identifiers, tuple):
+        raise TypeError(f"{field} must be a tuple, got {type(identifiers).__name__}")
+    seen: set[LogicalId] = set()
+    for knowledge in identifiers:
+        if not isinstance(knowledge, Known | Ambiguous):
+            raise ValueError(
+                f"{field} lists the ids the evidence states, Known or Ambiguous; got {knowledge!r}"
+            )
+        check_type(field, knowledge, LogicalId)
+        for value in values_of(knowledge):
+            if value in seen:
+                raise ValueError(f"{field} repeat {value}")
+            seen.add(value)
+    keys = [_identifier_key(knowledge) for knowledge in identifiers]
+    if keys != sorted(keys):
+        raise ValueError(f"{field} must be sorted by namespace, then value: {keys}")
+
+
+def identifiers_to_json(identifiers: Identifiers) -> list[JsonValue]:
+    return [to_json(knowledge, LogicalId.to_json) for knowledge in identifiers]
+
+
+def identifiers_from_json(
+    data: JsonValue, decode_provenance: Callable[[JsonObject], Grounding]
+) -> Identifiers:
+    return tuple(
+        from_json(item, logical_id_from_json, decode_provenance)
+        for item in json_array(data, "identifiers")
+    )

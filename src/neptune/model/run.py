@@ -12,15 +12,22 @@ Both are evidence records (ADR 0017) of the ``run`` family, specified by ADR 001
   holds what every row's provenance shares, so any row's provenance can be rebuilt from the two.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import ClassVar
 
-from neptune.model._fields import check_type, json_array, json_int, json_str, values_of
+from neptune.model._fields import (
+    check_text_values,
+    check_type,
+    json_array,
+    json_int,
+    json_str,
+    text_decoder,
+    values_of,
+)
 from neptune.model.ids import (
     LogicalId,
     RecordId,
-    check_text,
     check_verbatim,
     logical_id_from_json,
     parse_record_id,
@@ -58,20 +65,6 @@ from neptune.model.series import (
     time_column,
 )
 from neptune.model.time import Timestamp, timestamp_from_json
-
-
-def _check_text(field: str, knowledge: Knowledge[str]) -> None:
-    """Every value the state asserts or offers is non-empty text: a blank is ``Unknown``."""
-    check_type(field, knowledge, str)
-    for value in values_of(knowledge):
-        check_text(field, value)
-
-
-def _text(what: str) -> Callable[[JsonValue], str]:
-    def decode(data: JsonValue) -> str:
-        return json_str(data, what)
-
-    return decode
 
 
 def _count(data: JsonValue) -> int:
@@ -185,7 +178,7 @@ class Stream:
         check_evidence_record(self.id, self.provenance)
         parse_record_id(self.run)
         for name in ("topic", "schema_name", "schema_encoding", "message_encoding"):
-            _check_text(name, getattr(self, name))
+            check_text_values(name, getattr(self, name))
         check_type("schema_definition", self.schema_definition, EvidenceRef)
         if not isinstance(self.metadata, tuple):
             raise TypeError(
@@ -305,16 +298,18 @@ def stream_from_json(data: JsonValue) -> Stream:
         id=record_id,
         provenance=provenance,
         run=parse_record_id(json_str(obj["run"], "run")),
-        topic=from_json(obj["topic"], _text("topic"), provenance_from_json),
-        schema_name=from_json(obj["schema_name"], _text("schema_name"), provenance_from_json),
+        topic=from_json(obj["topic"], text_decoder("topic"), provenance_from_json),
+        schema_name=from_json(
+            obj["schema_name"], text_decoder("schema_name"), provenance_from_json
+        ),
         schema_encoding=from_json(
-            obj["schema_encoding"], _text("schema_encoding"), provenance_from_json
+            obj["schema_encoding"], text_decoder("schema_encoding"), provenance_from_json
         ),
         schema_definition=from_json(
             obj["schema_definition"], evidence_ref_from_json, provenance_from_json
         ),
         message_encoding=from_json(
-            obj["message_encoding"], _text("message_encoding"), provenance_from_json
+            obj["message_encoding"], text_decoder("message_encoding"), provenance_from_json
         ),
         metadata=tuple(sorted((key, json_str(value, key)) for key, value in metadata.items())),
         clocks=tuple(

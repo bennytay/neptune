@@ -78,6 +78,23 @@ For formats with timestamped samples (logs, bags, flight logs, telemetry tables,
 - A payload you do not decode still gets its rows (times and locators) plus a finding.
 - Tests check every row with `Stream.check_row` and resolve `Stream.row_provenance` back to the bytes.
 
+## Machine context (ADR 0019)
+
+For sources that describe machines (manifests, robot descriptions, flight logs, calibration files):
+
+- Emit a `Machine` only where the source states an identifier for it, and list every id it states in
+  `identifiers`, each citing where it is stated. Document the namespaces you use (`px4.sys_uuid`).
+  Never turn a model name, hostname, topic prefix or folder name into a machine.
+- A robot description (URDF, SDF, MJCF) is a `HardwareConfiguration` with `machine` `NotCovered`, plus a
+  `HardwareComponent` per declared part citing its element, and the `FrameGraph` / `FrameTransform`s of
+  its kinematics. Another tool set or revision is another configuration; never edit one.
+- Software: one `SoftwareConfiguration` per declaration of what ran, one item per software unit.
+  Put each identity in its own field. Where your format could state an identity and the file does not,
+  write `Unknown` citing where you looked and emit `<adapter>.software_identity_missing`.
+- Calibration: one `Calibration` per calibrated subject, parameters under their declared names with
+  numbers in source order, and extrinsics as `FrameTransform`s in the calibration file's own graph,
+  direction `Ambiguous` unless the format says which way they map.
+
 ## What the runtime owns (and adapters must not reimplement)
 
 | Concern | Runtime mechanism |

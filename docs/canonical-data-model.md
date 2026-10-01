@@ -1,8 +1,8 @@
 # Canonical data model
 
 Status: **draft**. Primitives are specified by MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66
-(ADR 0017), and runs, streams and series by MVL-67 (ADR 0018). Machine and world entities are specified by
-MVL-68 / MVL-69. This page becomes authoritative when MVL-1 closes.
+(ADR 0017), runs, streams and series by MVL-67 (ADR 0018), and machine context by MVL-68 (ADR 0019). World
+entities are specified by MVL-69. This page becomes authoritative when MVL-1 closes.
 
 ## Record kinds (v0)
 
@@ -16,7 +16,7 @@ domains.
 | `finding` | `IngestFinding` | `model/finding.py` |
 | `reference` | `TimestampDomain`, `FrameGraph`, `Frame`, `FrameTransform` | `model/reference.py` |
 | `run` | `Run`, `Stream` | `model/run.py`, series contract in `model/series.py` (ADR 0018) |
-| `machine` | `Machine`, `HardwareConfiguration`, `SoftwareConfiguration`, `Calibration` | MVL-68 |
+| `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration` | `model/machine.py` (ADR 0019) |
 | `world` | `Site`, `Asset`, `SpatialArtifact`, images, `DocumentRecord`, `StructuredRecord` | MVL-69 |
 | `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
 
@@ -124,7 +124,8 @@ a bug, not a value.
 ## Versions and software identity (ADR 0014; `model/versions.py`)
 
 - One type per kind: `GitCommit`, `SemanticVersion`, `DeclaredVersion`, `BuildId`, `FirmwareVersion`,
-  `ModelCheckpointHash`, `ContainerImageDigest`. Each is `Knowledge`-wrapped on `SoftwareConfiguration`.
+  `ModelCheckpointHash`, `ContainerImageDigest`. Each is `Knowledge`-wrapped in its own field of a
+  `SoftwareConfiguration` item (ADR 0019 §5).
 - Kinds never compare equal and never sort together. Only `SemanticVersion` is ordered (SemVer precedence).
 - Stored verbatim: no `v` stripping, no case folding. Semver prerelease and build are views of the full text.
 - A value takes a kind because the source says so, never because it looks like one. Otherwise it is a
@@ -154,6 +155,30 @@ a bug, not a value.
   stream's transform applies. The row's `locator/` columns fill the template. `Stream.row_provenance(row)`
   rebuilds it, and the file's metadata holds the `Stream` line under `neptune.stream`.
 - Rows are sorted by their clock-0 ticks (unknown last), then `seq`.
+
+## Machine context (ADR 0019; `model/machine.py`)
+
+- `Machine`: a robot or vehicle one declaration names by at least one id: a manifest's robot entry, a
+  fleet register's row, a log's vehicle information. `identifiers` lists every id it gives, each cited;
+  `manufacturer` and `model` are declared text. A URDF names a model, never a machine.
+- Declared identifiers (shared with `Site` / `Asset`): `tuple[Knowledge[LogicalId], ...]`, each `Known`
+  or `Ambiguous`, no repeats, sorted by namespace then value. Ids in one declaration are what MVL-35
+  links by; equal ids in two declarations are two records.
+- `HardwareConfiguration`: what one declaration says a machine is made of: `machine`, `name`,
+  `revision` (declared text). A snapshot, never edited: a tool change is a new record.
+- `HardwareComponent`: one declared part, naming its `configuration`. `category` is `link`, `joint`,
+  `sensor`, `actuator`, `computer`, `power`, `payload` or `tool`; `name`, `model`, `identifiers` and
+  `frame` (a `FrameRef` in a declared graph) are as declared. Kinematics are the source graph's
+  `FrameTransform`s. Detail only one category has (joint limits, inertia) arrives as new record kinds.
+- `SoftwareConfiguration`: the software one declaration says ran: `machine` plus items. Each item has
+  `name`, `device` (firmware per device) and one field per identity: `commit`, `release`, `build`,
+  `digest`. A missing identity is `Unknown` or `NotCovered` plus a finding, never blank.
+- `Calibration`: what one declaration states about one `subject`, for which `machine` and
+  `hardware_revision`, and when (`performed`, `valid_from`, `valid_until`). `parameters` are declared
+  names with their numbers in source order (or a setting's text) and units; `extrinsics` lists the
+  `FrameTransform` records it declares.
+- Which configuration or calibration applied to which run is a binding (MVL-38); nothing here points
+  at a run.
 
 ## Serialization (ADR 0002)
 

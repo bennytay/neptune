@@ -17,6 +17,8 @@ Consequences:
 - Downstream references must point at tier 1, tier 3, or `EvidenceRef`s — never at tier-2 ids.
 - Two robots with byte-identical URDFs are two robots. Logical identity is never inferred from content equality;
   conservative resolution with explicit unresolved state is MVL-35.
+- A declaration's ids for one thing are kept together, each cited, as `identifiers` on `Machine` and
+  `HardwareComponent` (ADR 0019 §2). They are the evidence MVL-35 links by.
 
 ## Id strings (ADR 0009)
 
