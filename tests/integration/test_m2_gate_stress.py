@@ -9,11 +9,15 @@ fixture suite end to end. The large-source measurements are
 """
 
 import importlib.util
+import io
 import json
+import random
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import zipfile
 from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
@@ -39,13 +43,18 @@ from neptune.adapters.contract import (
     ProbeResult,
     Resources,
     SourceReader,
+    scratch_directory,
 )
 from neptune.adapters.registry import AdapterRegistry
+from neptune.discovery.archive import inspect_archive
+from neptune.discovery.probe import ProbeEngine
+from neptune.discovery.reader import BytesReader
 from neptune.identity.findings import ingest_finding
 from neptune.identity.hashing import content_id
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.provenance import ByteRange, EvidenceRef
-from neptune.runtime import IngestJob, JobEvent, JobOptions, JobOutcome, JobState, Limits
+from neptune.runtime import IngestJob, JobEvent, JobOptions, JobOutcome, JobState, Limits, confine
+from neptune.runtime.sandbox import Codec, Returned, Subprocess
 from neptune.store.package import read_package
 from neptune.store.workspace import Workspace
 
@@ -445,6 +454,83 @@ def test_the_hostile_suite_through_a_real_job(hostile: ModuleType, tmp_path: Pat
     assert list((home / "scratch").iterdir()) == [] and list((home / "staging").iterdir()) == []
     second = Job(root, tmp_path / "other", tmp_path / "second", registry())
     assert second.outcome.package == first.outcome.package
+
+
+# --- Archives: the probe's listing and the hardening inspector (ADR 0032) -------------------------
+
+
+def nested_archive() -> bytes:
+    """A zip holding a 2 MiB zip of incompressible bytes: inspecting it spools the inner zip."""
+    inner = io.BytesIO()
+    with zipfile.ZipFile(inner, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr("frames.bin", random.Random(57).randbytes(2 * 1024 * 1024))
+    outer = io.BytesIO()
+    with zipfile.ZipFile(outer, "w", zipfile.ZIP_STORED) as archive:
+        archive.writestr("inner.zip", inner.getvalue())
+    return outer.getvalue()
+
+
+def test_the_probe_lists_within_its_budget_while_the_inspector_reads_everything() -> None:
+    """Why the two archive passes stay apart (ADR 0032): the probe's listing reads a bounded
+    budget whatever the archive holds, the hardening inspector inflates every member."""
+    data = nested_archive()
+
+    class Counting(BytesReader):
+        served = 0
+
+        def read(self, offset: int, length: int) -> bytes:
+            piece = super().read(offset, length)
+            Counting.served += len(piece)
+            return piece
+
+    probed = ProbeEngine(registry()).probe(Counting(data), "bundle.zip")
+    assert probed.container is not None and probed.container.complete
+    assert Counting.served < 512 * 1024 < len(data)  # heads and directories, not the frames
+    counted = Counting(data)
+    with tempfile.TemporaryDirectory() as scratch:
+        report = inspect_archive(
+            io.BytesIO(data), source=counted.content_id, size=len(data), scratch=Path(scratch)
+        )
+    (member,) = report.members
+    assert member.nested is not None and member.nested.members[0].read_bytes == 2 * 1024 * 1024
+
+
+@pytest.mark.skipif(not confine.landlock_abi(), reason="no Landlock: calls get no scratch")
+def test_the_archive_inspector_runs_in_a_sandboxed_call_through_its_scratch(
+    tmp_path: Path,
+) -> None:
+    """What an M4 archive adapter will do inside ``plan``: inspect a nested archive in the
+    sandbox, spooling the inner archive through the call's scratch directory, and nowhere else."""
+    data = nested_archive()
+    source = BytesReader(data).content_id
+    scratch = tmp_path / "scratch"
+    scratch.mkdir(mode=0o700)
+
+    def inspect() -> str:
+        directory = scratch_directory()
+        assert directory is not None
+        report = inspect_archive(io.BytesIO(data), source=source, size=len(data), scratch=directory)
+        (member,) = report.members
+        assert member.nested is not None
+        spooled = sorted(p.name for p in directory.iterdir())  # the spool is gone by now
+        return json.dumps(
+            {
+                "complete": report.complete,
+                "findings": [f.code for f in report.findings],
+                "inner": [m.name for m in member.nested.members],
+                "left": spooled,
+            }
+        )
+
+    box = Subprocess(Limits(cpu_seconds=20, wall_seconds=40))
+    outcome = box.call(inspect, Codec(str, str.encode, bytes.decode), scratch=scratch)
+    assert isinstance(outcome, Returned), outcome
+    assert json.loads(outcome.value) == {
+        "complete": True,
+        "findings": [],
+        "inner": ["frames.bin"],
+        "left": [],
+    }
 
 
 # --- A large source, measured --------------------------------------------------------------------
