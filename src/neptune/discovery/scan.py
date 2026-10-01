@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from neptune.discovery.policy import (
     DISCOVERY_TRANSFORM,
     ROOT_ENTRY,
-    root_forms,
     size_changed_finding,
     skipped_finding,
     symlink_finding,
@@ -55,11 +54,10 @@ def scan(
     findings: list[IngestFinding] = []
     seen: set[bytes] = set()
     blind_at_open: set[bytes] = set()
-    forms = root_forms(source.root)
     for entry in source.walk():
         if isinstance(entry, SymlinkEntry):
             symlinks.append(entry)
-            findings.append(symlink_finding(forms, entry))
+            findings.append(symlink_finding(entry))
         elif isinstance(entry, SkippedEntry):
             skipped.append(entry)
             if entry.raw_path != ROOT_ENTRY:

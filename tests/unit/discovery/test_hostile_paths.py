@@ -14,7 +14,6 @@ from neptune.discovery.policy import (
     SYMLINK_NOT_FOLLOWED,
     UNREADABLE,
     path_problem,
-    root_forms,
     symlink_details,
 )
 from neptune.discovery.scan import ScanResult, scan
@@ -34,7 +33,7 @@ LINKS = {
     "escape_rel": False,
     "escape_dir": False,
     "inside": True,
-    "inside_abs": True,
+    "inside_abs": False,  # absolute: whether it lands in the root depends on the mount
     "dangling": True,
     "chain": True,
     "dotdot_inside": True,
@@ -270,19 +269,28 @@ def test_path_problem(name: str, problem: str | None) -> None:
     ],
 )
 def test_symlink_details_are_lexical(
-    tmp_path: Path, link: bytes, target: bytes, absolute: bool, inside: bool
+    link: bytes, target: bytes, absolute: bool, inside: bool
 ) -> None:
-    details = symlink_details(root_forms(tmp_path), link, target)
+    details = symlink_details(link, target)
     assert (details["absolute"], details["inside_root"]) == (absolute, inside)
 
 
-def test_an_absolute_target_under_the_root_counts_as_inside(tmp_path: Path) -> None:
-    forms = root_forms(tmp_path)
-    inside = os.fsencode(tmp_path / "real" / "f")
-    assert symlink_details(forms, b"x", inside)["inside_root"] is True
-    assert symlink_details(forms, b"x", inside + b"/../../../etc")["inside_root"] is False
-    sibling = os.fsencode(tmp_path.parent / (tmp_path.name + "2") / "f")
-    assert symlink_details(forms, b"x", sibling)["inside_root"] is False
+def test_a_symlink_finding_does_not_depend_on_where_the_root_is_mounted(tmp_path: Path) -> None:
+    """The same tree at ``/data/x`` and ``/mnt/y`` must give byte-identical findings."""
+    first, second = tmp_path / "data" / "x", tmp_path / "mnt" / "y"
+    target = first / "real" / "f"  # points into the first root, wherever the tree is mounted
+    for root in (first, second):
+        (root / "real").mkdir(parents=True)
+        (root / "real" / "f").write_bytes(b"f")
+        (root / "abs").symlink_to(target)
+        (root / "rel").symlink_to(Path("real") / "f")
+    found = [scan(LocalSource(root), SourceLedger()).findings for root in (first, second)]
+    assert [[canonical_json.dumps(f.to_json()) for f in findings] for findings in found] == [
+        [canonical_json.dumps(f.to_json()) for f in found[0]]
+    ] * 2
+    details = {path_of(f.subject): f.details for f in found[0]}
+    assert details["abs"] == {"absolute": True, "inside_root": False, "target": str(target)}
+    assert details["rel"] == {"absolute": False, "inside_root": True, "target": "real/f"}
 
 
 def test_the_root_appears_only_as_a_declared_link_target(tree: Path) -> None:

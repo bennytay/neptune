@@ -109,7 +109,7 @@ def test_hostile_tree_yields_findings_and_benign_sources_still_ingest(
 
     links = [f for f in result.findings if f.code == SYMLINK_NOT_FOLLOWED]
     assert len(links) == len(result.symlinks) == 11
-    assert sum(1 for f in links if not f.details["inside_root"]) == 3
+    assert sum(1 for f in links if not f.details["inside_root"]) == 4  # 3 escapes, 1 absolute
     for finding in result.findings:
         assert finding.transform == DISCOVERY_TRANSFORM.id == result.transform.id
         assert isinstance(finding.subject, LocalPath) and finding.subject.path != "."

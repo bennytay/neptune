@@ -7,11 +7,11 @@ followed, special files are never opened, and nothing a walk could not examine i
 
 Each finding's subject is the location it is about. Finding details hold nothing host-specific
 except what the source itself declares: a symlink's target is the link's content, recorded exactly
-as stored (ADR 0010 §2), with a lexical classification of where it points.
+as stored (ADR 0010 §2), with a lexical classification of where it points that depends only on the
+link, never on where the root is mounted.
 """
 
 import os
-from pathlib import Path
 from typing import Final
 
 from neptune.discovery.source import SkippedEntry, SkipReason, SymlinkEntry
@@ -44,16 +44,16 @@ SHORT_READ: Final = "neptune.discovery.short_read"
 ROOT_ENTRY: Final = b"."
 
 
-def symlink_finding(root_forms: frozenset[bytes], entry: SymlinkEntry) -> IngestFinding:
-    details = symlink_details(root_forms, entry.location.raw, entry.target)
-    where = "inside" if details["inside_root"] else "outside"
+def symlink_finding(entry: SymlinkEntry) -> IngestFinding:
+    details = symlink_details(entry.location.raw, entry.target)
+    where = "stays inside" if details["inside_root"] else "leaves"
     return ingest_finding(
         code=SYMLINK_NOT_FOLLOWED,
         category=FindingCategory.SKIPPED,
         severity=Severity.INFO,
         subject=entry.location,
         transform=DISCOVERY_TRANSFORM,
-        message=f"symlink recorded and not followed; its target points {where} the root",
+        message=f"symlink recorded and not followed; its target {where} the root",
         details=details,
     )
 
@@ -103,17 +103,19 @@ def size_changed_finding(
     )
 
 
-def symlink_details(root_forms: frozenset[bytes], link: bytes, target: bytes) -> JsonObject:
+def symlink_details(link: bytes, target: bytes) -> JsonObject:
     """The target as declared, whether it is absolute, and whether it lexically stays in the root.
 
-    Lexical means ``..`` is collapsed and nothing is resolved on disk: the walk never follows
-    links, so this is a statement about the declared target, not about what it reaches.
+    ``link`` is the link's path relative to the root. Lexical means ``..`` is collapsed against the
+    link's own directory and nothing is resolved on disk: the walk never follows links, so this is
+    a statement about the declared target, not about what it reaches. An absolute target is never
+    inside: it names a host path, and whether that lands back in the root depends on where the
+    root is mounted, which is host state, not evidence. The same tree gives the same finding
+    wherever it is mounted (non-negotiable 5).
     """
     absolute = target.startswith(b"/")
-    if absolute:
-        resolved = os.path.normpath(target)
-        inside = any(resolved == form or resolved.startswith(form + b"/") for form in root_forms)
-    else:
+    inside = False
+    if not absolute:
         parent = link.rsplit(b"/", 1)[0] if b"/" in link else b""
         resolved = os.path.normpath(parent + b"/" + target if parent else target)
         inside = resolved != b".." and not resolved.startswith(b"../")
@@ -148,11 +150,3 @@ def path_problem(name: str) -> str | None:
     if any(part == ".." for part in name.split("/")):
         return "parent_reference"
     return None
-
-
-def root_forms(root: str | os.PathLike[str]) -> frozenset[bytes]:
-    """The root as given (made absolute) and as resolved, so either spelling counts as inside."""
-    path = Path(root)
-    return frozenset(
-        {os.fsencode(os.path.normpath(path.absolute())), os.fsencode(path.resolve(strict=False))}
-    )
