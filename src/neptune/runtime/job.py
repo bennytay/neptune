@@ -622,7 +622,6 @@ class IngestJob:
             self.state = JobState.FAILED
             raise
         if package is None:  # a dry run, stopped after plan
-            self._explanation = self._explain_job()
             self.state = JobState.PLANNED
             planned = sum(1 for item in self._sources if item.planned)
             self._emit(events.JOB_PLANNED, {"sources": planned})
@@ -651,6 +650,7 @@ class IngestJob:
         self._inspect(source)
         self._plan(source)
         if dry:
+            self._explanation = self._explain_job()
             return None
         self._ingest(source)
         self._assemble(scanned)
@@ -722,12 +722,12 @@ class IngestJob:
                 )
                 descriptor = descriptors[item.config.transform.adapter_id]
                 heavy = explain.heavy_reasons(item.artifact.size, plan, descriptor, limits)
-            if item.quarantined:
+            if item.probe is None:  # quarantined before it could be probed
+                status = explain.SourceStatus.UNREADABLE
+            elif item.quarantined:
                 status = explain.SourceStatus.QUARANTINED
             elif plan is not None:
                 status = explain.SourceStatus.PLANNED
-            elif item.probe is None:
-                status = explain.SourceStatus.UNREADABLE
             elif item.probe.selection.status is SelectionStatus.AMBIGUOUS:
                 status = explain.SourceStatus.AMBIGUOUS
             else:

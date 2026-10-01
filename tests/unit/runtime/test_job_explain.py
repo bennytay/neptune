@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import shutil
 from collections import Counter
 from collections.abc import Mapping
@@ -28,7 +29,17 @@ from neptune.adapters.contract import (
 from neptune.adapters.registry import AdapterRegistry
 from neptune.adapters.text import TextAdapter
 from neptune.model.ids import RecordId
-from neptune.runtime import IngestJob, Isolation, JobOptions, JobOutcome, JobState, Limits, Rule
+from neptune.runtime import (
+    IngestJob,
+    Isolation,
+    JobEvent,
+    JobOptions,
+    JobOutcome,
+    JobState,
+    Limits,
+    Phase,
+    Rule,
+)
 from neptune.runtime.explain import (
     HEAVY_BYTES,
     HEAVY_CHUNKS,
@@ -216,6 +227,33 @@ def test_a_dry_run_after_an_ingest_explains_that_nothing_is_left(
             assert item.plan.bytes_to_read == 0
     assert explanation.work.ingest_calls == 0 and explanation.work.sources_to_parse == 0
     assert explanation.work.calls["plan"] == 0
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file whatever its mode")
+def test_a_source_unreadable_when_probed_is_explained_as_unreadable(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    victim = root / "notes.txt"
+
+    def revoke(event: JobEvent) -> None:  # hashed, then unreadable before inspect opens it
+        if event.kind == "phase_finished" and event.phase is Phase.FINGERPRINT:
+            victim.chmod(0)
+
+    job = IngestJob(
+        root, None, Workspace(tmp_path / "home"), default_registry(), IN_PROCESS, on_event=revoke
+    )
+    try:
+        explanation = job.dry_run().explanation
+    finally:
+        victim.chmod(0o644)
+    assert explanation is not None
+    (item,) = explanation.sources
+    assert item.status is SourceStatus.UNREADABLE and item.probe is None
+    assert item.quarantined == ("neptune.runtime.source_unreadable",)
+    (left,) = explanation.left_out
+    assert left.disposition is Disposition.UNREADABLE
+    assert left.reason == "neptune.runtime.source_unreadable"
 
 
 # --- What it does not do -----------------------------------------------------------------------

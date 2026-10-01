@@ -44,8 +44,9 @@ def hostile(tmp_path: Path) -> Path:
     secret.write_text("never readable\n")
     secret.chmod(0)
     os.mkfifo(root / "pipe")
-    with open(os.path.join(os.fsencode(root), RAW_NAME), "wb") as handle:
-        handle.write(b"caf\xe9 log line\n")
+    descriptor = os.open(os.fsencode(root) + b"/" + RAW_NAME, os.O_WRONLY | os.O_CREAT, 0o644)
+    os.write(descriptor, b"caf\xe9 log line\n")
+    os.close(descriptor)
     return root
 
 
