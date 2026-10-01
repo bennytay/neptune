@@ -33,11 +33,32 @@ python -m neptune.cli ingest ...        # the same command
 | `--ignore PATTERN` | leave matching entries unread; repeatable |
 | `--no-default-ignores` | read version-control internals and OS metadata too |
 | `--no-ignore-file` | do not apply the source's `.neptune-ignore` |
+| `--manifest FILE` | apply this manifest, a file inside the source ([manifest](manifest.md)); default the source's `neptune.yaml`, `neptune.yml` or `neptune.json`, if it has one |
+| `--no-manifest` | apply no manifest, even if the source has one |
 | `--isolation {subprocess,in_process}` | adapters run in a confined child process per call (default) or, for trusted adapters only, in this process |
 | `--allow-degraded-sandbox` | run where not every sandbox guarantee is available; the receipt records which were lost |
 | `--job NAME` | the job's name in the package's envelope (`volatile/`); default a random token |
 | `--json` | JSON Lines on stdout (below) |
 | `-v, --verbose` | one progress line per job event on stderr |
+
+## Manifests
+
+A folder may carry an optional `neptune.yaml` ([manifest](manifest.md), ADR 0047): declared runs,
+machines, sites, tasks and software, and which adapter reads which paths. `neptune ingest`
+applies it automatically. A manifest that cannot be used (a syntax or schema error, unknown keys,
+an adapter that is not registered, more than 256 KiB, a symlink, a path outside the source, two
+manifest names at the root) fails the run with exit 6 before anything is read. A declaration the
+evidence contradicts is a finding, never an override.
+
+```
+neptune init-manifest FOLDER [-o FILE|-] [--force] [-w DIR] [--isolation ...] [--allow-degraded-sandbox]
+```
+
+writes `FOLDER/neptune.yaml` (or `FILE`, or stdout for `-`) from one sandboxed dry run: the
+probe's ties, the session readings grouping contests, the uncontested proposals and the probe's
+winners, each as a commented choice, plus templates for machines, sites, tasks and software. As
+written it declares nothing; uncomment what is true. The same folder gives the same bytes. An
+existing file is never overwritten without `--force` (exit 5); a missing folder is exit 3.
 
 ## Ignore rules
 

@@ -104,7 +104,20 @@ client = Neptune(
 
 `options` is the runtime's `JobOptions` (attempts, isolation, limits, per-adapter config, job name):
 there is no SDK copy of it. Selection is still the probe engine's rule; pinning an adapter to a file
-is the manifest's (MVL-14). A config change is a new lineage: new record ids, a new package.
+is the manifest's. A config change is a new lineage: new record ids, a new package.
+
+## Manifests
+
+Every `ingest`, `dry_run`, `start` and `start_dry_run` (sync and async, and the shorthands) takes
+`manifest=`: `None` (the default) applies the root's `neptune.yaml`, `neptune.yml` or
+`neptune.json` if it has one; a path names a manifest file inside the root; `False` applies none.
+It is read and checked when the call is made, before the job starts: one that cannot be used is a
+`ConfigurationError` (`invalid_configuration`). The read manifest reaches the job as
+`JobOptions.manifest` (a `neptune.manifest.LoadedManifest`); setting it there directly skips the
+lookup. With a manifest, `JobOptions.grouping` must stay default (runs and `gap_seconds` are the
+manifest's) and its adapter options may not set a key `JobOptions.config` also sets.
+`neptune.manifest.generate.generate(root, client)` is `neptune init-manifest` as a function.
+See [manifest](manifest.md).
 
 ## Errors
 
