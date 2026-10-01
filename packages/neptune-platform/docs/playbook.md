@@ -30,8 +30,9 @@ the current wave, and raises a cap only when the weekly check (§ 6) shows the b
   Done or (b) when it has had nothing selectable for more than one hour because of another project. It reports
   as one comment on the programme document: `[P-MVL-<n>] gate <code> Done @ <merge-sha>` or
   `[P-MVL-<n>] blocked: <MVL-x> waits on <MVL-y> (<project>) since <time>`.
-- **Cross-project blockers.** The programme coordinator owns every `blockedBy` edge between projects (§6 gate
-  edges). A dependent issue becomes selectable when its cross-project blocker is **Done**; a coordinator never
+- **Cross-project blockers.** The programme coordinator owns the cross-project gate edges of programme
+  document §6. The only cross-project edge a project coordinator adds is the `blocks` edge of a contract
+  request (below). A dependent issue becomes selectable when its cross-project blocker is **Done**; a coordinator never
   branches from another project's open PR (stacking stays inside one project). To clear a blocker the
   programme coordinator either raises the blocker's priority on its project or, if the edge is wrong, removes
   it with a comment saying why.
@@ -95,7 +96,7 @@ This file is its source; change it here and re-copy it, never edit a copy.
 |---|---|---|---|
 | ADRs; anything in `contracts/`; gate issues; code under `store/`, `schema/`, `consolidate/`, `query/`, `runtime/`, `model/`; a module that exports a contract schema or version constant | opus | opus | up to two full reviews |
 | Adapters, connectors, fixtures and generators, exporters, docs, scaffolds, console UI, dashboards | sonnet | sonnet | one review; REVISE blockers re-checked by the same reviewer |
-| Mechanical: branch refresh, PR body edits, ADR index, renames | sonnet | none | coordinator checks the diff |
+| Mechanical: branch refresh, PR body edits, ADR index, renames | sonnet | sonnet | as a commit on a PR that already has a reviewer: that PR's review covers it; as a standalone PR: one review and a posted verdict |
 
 An issue that touches both tiers runs at the higher one. Every implementer and reviewer prompt includes the
 token rules: read `AGENTS.md`, this file, the issue and only the files the issue names; no exploratory reads;
@@ -106,6 +107,9 @@ stop and report instead of grinding.
 Budget pauses: before each selection, read this project's latest Linear status update. If it begins
 `Paused:`, start no new issue of the classes it names; in-flight issues finish. Contracts and gates are never
 paused.
+
+Cross-project rules (reporting up, blockers, contract requests) are in
+`packages/neptune-platform/docs/playbook.md` § 2; the merge flow is in § 5 of the same file.
 <!-- END model-policy -->
 ```
 
@@ -122,6 +126,9 @@ Open the PR with the template; wait for CI green; move <MVL-N> to In Review. Nev
 enable auto-merge. Stop and report after three fix rounds or two hours.
 Report, at most 15 lines: PR number · head SHA · files · ADR number taken · actions for the coordinator.
 ```
+
+Reports are at most 15 lines (programme document §6); this supersedes the 12-line implementer report in
+`docs/developer-workflow.md` until that file is aligned.
 
 **Reviewer prompt:**
 
@@ -162,7 +169,7 @@ organisation-owned repository. MVL-192 moves the repository to an organisation. 
 - `main` keeps classic protection with the strict up-to-date rule. `factory-merge.sh` falls back to the REST
   squash merge pinned to the head, which needs `mergeable_state` `clean`.
 - After every merge to `main` (this project's or another's), each coordinator hand-refreshes its open PRs:
-  `git merge origin/main`, push, wait for `check` (`docs/developer-workflow.md` loop step 4). It re-posts the
+  `git merge origin/main`, push, wait for `check` (`docs/developer-workflow.md` loop step 4). It posts the
   carried verdict for the new head as in step 3 above and merges one PR at a time.
 - Expect contention: only one PR across all projects can be up to date at a time, so keep at most 3
   coordinators live until the queue is live.
@@ -197,31 +204,32 @@ audit-log line. Lifting it is a status update beginning `Resumed:`.
 ## 7. Versioning and releases
 
 - **Package versions.** Semver in each package's `[project].version` (the compiler's is the root
-  `pyproject.toml`). Before a layer's final gate and the X4 integration gate are both Done, a package is
-  `0.<m>.<p>`: passing gate `<m>` sets `0.<m>.0`, and a fix released between gates bumps `<p>`. At the final
-  gate it becomes `1.0.0`; after that, major = breaking change to its public API or a major bump of a
-  contract it owns, minor = feature, patch = fix. Versions change only in the gate PR (or a release-fix PR),
-  never in feature PRs.
+  `pyproject.toml`). Every package, the compiler included, is `0.<m>.<p>` until the programme gate: passing
+  its gate `<m>` (the milestone number) sets `0.<m>.0`, and a fix released between gates bumps `<p>`. The
+  compiler adopts this at its next gate tag (`m3-gate` → `neptune` 0.3.0); its current 0.0.1 is not bumped
+  retroactively. Every package becomes `1.0.0` at the programme gate (X4). After that, major = breaking change
+  to its public API or a major bump of a contract it owns, minor = feature, patch = fix. Versions change only
+  in the gate PR (or a release-fix PR), never in feature PRs.
 - **Contract versions** are separate and follow ADR 0002; a package release lists the contract versions it
   owns and locks.
-- **Tags** (annotated, on the gate PR's merge commit, never moved or deleted):
-  gate tag `<layer>-<milestone>-gate` with layer ∈ `compiler ledger memory context deploy learn platform` and
-  the Linear milestone code (`compiler-m3-gate`, `ledger-l2-gate`, `memory-g1-gate`, `context-c4-gate`,
-  `deploy-d4-gate`, `learn-f3-gate`, `platform-x4-gate`); release tag `<package>-v<version>`
-  (`neptune-v0.3.0`, `neptune-ledger-v0.2.0`). The compiler's earlier `m1-gate` and `m2-gate` stay as they are.
+- **Tags** (annotated, on the gate PR's merge commit, never moved or deleted): gate tag
+  `<milestone code>-gate` with the lowercase Linear milestone code, which is unique across projects (`m3-gate`,
+  `l4-gate`, `g4-gate`, `d1-gate`, `f1-gate`, `x3-gate`), and `programme-gate` for X4. These are the names the
+  gate issues already use; the existing `m1-gate` and `m2-gate` follow the same scheme. Release tag
+  `<package>-v<version>` (`neptune-v0.3.0`, `neptune-ledger-v0.4.0`).
 - **Gate release procedure** (project coordinator, after the gate PR merges at `<sha>`):
 
   ```bash
-  git tag -a <layer>-<code>-gate <sha> -m "<gate issue title> (<MVL-N>)"
+  git tag -a <code>-gate <sha> -m "<gate issue title> (<MVL-N>)"
   git tag -a <package>-v<version> <sha> -m "<package> <version>"
-  git push origin <layer>-<code>-gate <package>-v<version>
+  git push origin <code>-gate <package>-v<version>
   gh release create <package>-v<version> --verify-tag --title "<package> <version>" --notes-file <notes.md>
   ```
 
   Then advance `gate_issue` for the package in `contracts/packages.toml` (it may ride in the gate PR).
 - **Release notes from conventional commits.** Squash commits on `main` carry PR titles, so the notes come
   from each merged PR's branch commits: for every squash commit in `<previous release tag>..<sha>` that
-  touches the package path, read `gh api repos/bennytay/neptune/pulls/<pr>/commits` and file the PR under its
+  touches the package path (for a package's first release, from the commit that created the package), read `gh api repos/bennytay/neptune/pulls/<pr>/commits` and file the PR under its
   highest conventional type (`feat` > `fix` > `perf` > `refactor` > `test` > `docs` > `build`/`ci`/`chore`);
   any `!` or `BREAKING CHANGE:` footer puts it under **Breaking**. Each line is
   `<PR title> (#<pr>, <MVL-N>)`. A final **Contracts** section lists versions published in the range and the

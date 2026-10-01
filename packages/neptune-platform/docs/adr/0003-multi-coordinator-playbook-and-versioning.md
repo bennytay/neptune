@@ -27,10 +27,14 @@ those choices; `packages/neptune-platform/docs/playbook.md` is the operating pro
    `schema/`, `consolidate/`, `query/`, `runtime/`, `model/` or any module exporting a contract; Sonnet for
    adapters, connectors, fixtures, exporters, docs, scaffolds, UI and mechanical work. Mixed issues run at
    the higher tier. Opus-tier work may get two full reviews; Sonnet-tier work gets one review, with REVISE
-   blockers re-checked by the same reviewer.
+   blockers re-checked by the same reviewer. A mechanical commit on a PR that already has a reviewer is
+   covered by that review; a standalone mechanical PR gets a Sonnet reviewer and a posted verdict, as root
+   `AGENTS.md` step 9 and `factory-merge.sh` require. The block also points coordinators to playbook § 2
+   and § 5.
 4. **Linear as the bus.** Coordinators report up only at a gate or when blocked by another project for more
-   than an hour, as one comment on the programme document. Cross-project `blockedBy` edges belong to the
-   programme coordinator; a cross-project blocker counts only when Done (no stacking on another project's
+   than an hour, as one comment on the programme document. The cross-project gate edges of programme document §6
+   belong to the programme coordinator; the only cross-project edge a project coordinator adds is a
+   contract request's `blocks` edge; a cross-project blocker counts only when Done (no stacking on another project's
    PR). A contract change request is an issue on the owning project titled `Contract <id>: <change>` with a
    `blocks` edge to the consumer's issue; the owner's bump announces on consumers' gate issues (ADR 0002 §7);
    each consumer raises its own lock entry.
@@ -46,17 +50,21 @@ those choices; `packages/neptune-platform/docs/playbook.md` is the operating pro
    coordinators hand-refresh as in `docs/developer-workflow.md`. Once the queue rule is live, the REST
    fallback is rejected by design (the ruleset has no bypass actors). A verdict counts only from an
    OWNER, MEMBER or COLLABORATOR author, and the latest one wins (MVL-193 enforces this in the script).
-7. **Package versions.** Semver in each package's `[project].version`. Before a layer's final gate and the
-   X4 integration gate are Done, versions are `0.<m>.<p>` where `<m>` is the number of the last gate passed;
-   `1.0.0` at the final gate; after that, standard semver with a major bump of an owned contract counting as
-   breaking. Versions change only in gate or release-fix PRs, never in feature PRs. Contract versions stay
-   independent (ADR 0002).
-8. **Tags.** Annotated, on the gate PR's merge commit, never moved: gate tag `<layer>-<milestone>-gate`
-   (layer word + Linear milestone code, e.g. `compiler-m3-gate`, `ledger-l2-gate`) and release tag
-   `<package>-v<version>`. The existing `m1-gate` and `m2-gate` stay.
+7. **Package versions.** Semver in each package's `[project].version`. Every package, the compiler
+   included, is `0.<m>.<p>` until the programme gate, where `<m>` is the number of the last gate it passed.
+   The compiler adopts this at `m3-gate` (`neptune` 0.3.0); its 0.0.1 is not bumped retroactively. Every
+   package becomes `1.0.0` at the programme gate (X4); after that, standard semver, with a major bump of an
+   owned contract counting as breaking. Versions change only in gate or release-fix PRs, never in feature
+   PRs. Contract versions stay independent (ADR 0002).
+8. **Tags.** Annotated, on the gate PR's merge commit, never moved. The gate tag is
+   `<lowercase milestone code>-gate` (`m3-gate`, `l4-gate`, `g4-gate`, `x3-gate`). Milestone codes are
+   unique across projects, and these are the names the gate issues in Linear already use, so the existing
+   `m1-gate` and `m2-gate` fit and nothing is renamed. X4 is tagged `programme-gate`. The release tag is
+   `<package>-v<version>`.
 9. **Release notes from conventional commits.** Because squash commits on `main` carry PR titles, notes are
    built from each merged PR's branch commits (via the GitHub API), grouped by the highest conventional type
-   with breaking changes first, plus a Contracts section. A script is a follow-up.
+   with breaking changes first, plus a Contracts section. A package's first notes run from the commit that
+   created the package. A script is a follow-up.
 10. **Compatibility matrix.** `contracts/compatibility.md` lists each contract's owner, status and latest
     versions and each consumer's lock, hand-maintained in any PR that edits `contracts/lock.toml` or
     publishes a version, until `scripts/contracts.py matrix` generates and checks it (follow-up).
@@ -71,8 +79,9 @@ those choices; `packages/neptune-platform/docs/playbook.md` is the operating pro
   resumed session; Linear already holds the dependency graph.
 - **Stacking on another project's open PR.** Lost: the other coordinator controls that branch's refreshes and
   REVISE rounds; a cross-project stack couples two loops for a saving of hours.
-- **Unprefixed gate tags (`l2-gate`, `g1-gate`).** Lost: milestone letters are not self-describing and
-  collide with the compiler's `m<n>-gate` style once more layers exist; the layer word costs nothing.
+- **Layer-prefixed gate tags (`ledger-l2-gate`).** Lost: milestone codes are already unique, the gate
+  issues in Linear already name the unprefixed tags, and the compiler's `m1-gate`/`m2-gate` exist; a prefix
+  would split the scheme or force renames.
 - **Release notes from `main`'s commit titles.** Lost: those are PR titles, not conventional commits, so
   types and breaking markers would be lost.
 - **One repository-wide version.** Lost: layers ship at different gates; a single number would claim
@@ -88,7 +97,8 @@ those choices; `packages/neptune-platform/docs/playbook.md` is the operating pro
   holds live coordinators at three until it is.
 - Until the release-notes script and `contracts.py matrix` exist, gate releases and the matrix are manual and
   can drift; the reviewer of any PR touching `contracts/lock.toml` checks the matrix.
-- Root `docs/developer-workflow.md` still describes a single coordinator and hand refresh; it should point
-  to this playbook (dedicated PR, outside this issue's paths).
+- Root `docs/developer-workflow.md` still describes a single coordinator, hand refresh and a 12-line
+  implementer report; the playbook's 15-line limit (programme document §6) supersedes it. Aligning that
+  file and pointing it to the playbook is a dedicated PR, outside this issue's paths.
 - Revisit when the budget plan changes, when a fourth or later coordinator is routinely live, or when the
   queue is live and the fallback section can be removed.
