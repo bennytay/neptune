@@ -27,6 +27,7 @@ from neptune.runtime.lineage import (
     runtime_transform,
     type_name,
 )
+from neptune.runtime.sandbox import DEFAULT_LIMITS, Isolation, Limits
 
 if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonObject
@@ -36,15 +37,34 @@ TRANSFORM = runtime_transform(2)
 CHUNK = "chunk:sha256:" + "ab" * 32
 STREAM = "rec:sha256:" + "cd" * 32
 CRASH = Failure.raised(Step.INGEST, RuntimeError("at 0x7f00 in /home/someone/x"))
+ADAPTER = (TRANSFORM, SOURCE, 10, "mcap", "1.2.0")
+INGEST, PLAN = Step.INGEST, Step.PLAN
 
 
-def test_the_runtime_transform_is_its_id_version_and_retry_policy() -> None:
+def test_the_runtime_transform_is_its_id_version_retry_and_isolation_policy() -> None:
     assert TRANSFORM.adapter_id == RUNTIME_ID == "neptune.runtime"
     assert TRANSFORM.adapter_version == RUNTIME_VERSION
-    assert dict(TRANSFORM.config) == {"attempts": 2}
+    assert dict(TRANSFORM.config) == {
+        "attempts": 2,
+        "cpu_seconds": 60,
+        "isolation": "subprocess",
+        "memory_bytes": 2 * 1024**3,
+        "reply_bytes": 64 * 1024 * 1024,
+        "wall_seconds": 120,
+    }
     assert TRANSFORM.libraries == () and TRANSFORM.upstream == ()
     assert runtime_transform(2) == TRANSFORM
+    assert runtime_transform(2, Isolation.SUBPROCESS, DEFAULT_LIMITS) == TRANSFORM
     assert runtime_transform(3).id != TRANSFORM.id  # another policy is another lineage
+    assert runtime_transform(2, limits=Limits(cpu_seconds=61)).id != TRANSFORM.id
+    assert runtime_transform(2, limits=Limits(reply_bytes=32 * 1024 * 1024)).id != TRANSFORM.id
+
+
+def test_in_process_records_no_limits_since_none_bound_it() -> None:
+    trusted = runtime_transform(2, Isolation.IN_PROCESS)
+    assert dict(trusted.config) == {"attempts": 2, "isolation": "in_process"}
+    assert trusted.id != TRANSFORM.id
+    assert runtime_transform(2, Isolation.IN_PROCESS, Limits(cpu_seconds=5)) == trusted
 
 
 def test_finding_codes_are_declared_sorted_and_prefixed() -> None:
@@ -56,7 +76,7 @@ def test_finding_codes_are_declared_sorted_and_prefixed() -> None:
 
 def every_finding() -> list[tuple[str, IngestFinding]]:
     return [
-        ("chunk", lineage.chunk_failed(TRANSFORM, SOURCE, 10, "text", CHUNK, 2, CRASH)),
+        ("chunk", lineage.chunk_failed(TRANSFORM, SOURCE, 10, "text", "0.1.0", CHUNK, 2, CRASH)),
         (
             "chunk-series",
             lineage.chunk_failed(
@@ -64,6 +84,7 @@ def every_finding() -> list[tuple[str, IngestFinding]]:
                 SOURCE,
                 10,
                 "text",
+                "0.1.0",
                 CHUNK,
                 1,
                 Failure(Step.CHUNK_SERIES, "ContractError", {"law": "seq_repeated", "seq": 3}),
@@ -72,7 +93,7 @@ def every_finding() -> list[tuple[str, IngestFinding]]:
         (
             "plan",
             lineage.plan_failed(
-                TRANSFORM, SOURCE, 10, "text", Failure.returned(Step.PLAN_RESULT, [])
+                TRANSFORM, SOURCE, 10, "text", "0.1.0", Failure.returned(Step.PLAN_RESULT, [])
             ),
         ),
         (
@@ -87,6 +108,11 @@ def every_finding() -> list[tuple[str, IngestFinding]]:
             lineage.source_unreadable(TRANSFORM, LocalPath("a"), SkipReason.UNREADABLE, "EACCES"),
         ),
         ("skipped", lineage.entry_skipped(TRANSFORM, RawLocalPath(b"\xff"), SkipReason.MISSING)),
+        ("signal", lineage.adapter_crashed(*ADAPTER, INGEST, CHUNK, {"signal": "SIGSEGV"}, 2)),
+        ("exit", lineage.adapter_crashed(*ADAPTER, PLAN, None, {"exit_status": 3}, 1)),
+        ("reply", lineage.adapter_crashed(*ADAPTER, INGEST, CHUNK, {"reply": "malformed"}, 2)),
+        ("wall", lineage.limit_exceeded(*ADAPTER, INGEST, CHUNK, "wall_seconds", 120)),
+        ("memory", lineage.limit_exceeded(*ADAPTER, PLAN, None, "memory_bytes", 2**31)),
     ]
 
 
@@ -103,7 +129,7 @@ def test_every_finding_is_declared_checks_and_is_deterministic() -> None:
 
 
 def test_chunk_failed_cites_the_whole_source_and_names_only_the_step_and_error_class() -> None:
-    finding = lineage.chunk_failed(TRANSFORM, SOURCE, 10, "text", CHUNK, 2, CRASH)
+    finding = lineage.chunk_failed(TRANSFORM, SOURCE, 10, "text", "0.1.0", CHUNK, 2, CRASH)
     assert subject_to_json(finding.subject) == {
         "kind": "evidence",
         "ref": {"locator": [{"kind": "byte_range", "length": 10, "offset": 0}], "source": SOURCE},
@@ -115,11 +141,77 @@ def test_chunk_failed_cites_the_whole_source_and_names_only_the_step_and_error_c
         "chunk": CHUNK,
         "error": "RuntimeError",
         "step": "ingest",
+        "version": "0.1.0",
     }
+    assert "text 0.1.0 failed on chunk" in finding.message
     assert "after 2 attempts (RuntimeError at ingest)" in finding.message
     assert "0x" not in finding.message and "/home" not in finding.message  # never the text
-    once = lineage.chunk_failed(TRANSFORM, SOURCE, 10, "text", CHUNK, 1, CRASH)
+    once = lineage.chunk_failed(TRANSFORM, SOURCE, 10, "text", "0.1.0", CHUNK, 1, CRASH)
     assert "after 1 attempt (RuntimeError at ingest)" in once.message and once.id != finding.id
+    upgraded = lineage.chunk_failed(TRANSFORM, SOURCE, 10, "text", "0.2.0", CHUNK, 2, CRASH)
+    assert upgraded.id != finding.id  # another adapter version is another finding
+
+
+def test_a_crash_names_the_adapter_version_step_chunk_and_how_it_died() -> None:
+    finding = lineage.adapter_crashed(*ADAPTER, INGEST, CHUNK, {"signal": "SIGSEGV"}, 2)
+    assert finding.code == "neptune.runtime.adapter_crashed"
+    assert (finding.category, finding.severity) == (FindingCategory.FAILED, Severity.ERROR)
+    assert finding.details == {
+        "adapter": "mcap",
+        "attempts": 2,
+        "chunk": CHUNK,
+        "signal": "SIGSEGV",
+        "step": "ingest",
+        "version": "1.2.0",
+    }
+    assert "mcap 1.2.0 crashed on chunk" in finding.message
+    assert "after 2 attempts (killed by SIGSEGV)" in finding.message
+    planning = lineage.adapter_crashed(*ADAPTER, PLAN, None, {"exit_status": 3}, 1)
+    assert planning.details == {
+        "adapter": "mcap",
+        "attempts": 1,
+        "exit_status": 3,
+        "step": "plan",
+        "version": "1.2.0",
+    }
+    assert "while planning the source after 1 attempt (exit status 3)" in planning.message
+    garbled = lineage.adapter_crashed(*ADAPTER, INGEST, CHUNK, {"reply": "malformed"}, 1)
+    assert "a reply that does not decode" in garbled.message
+
+
+@pytest.mark.parametrize(
+    "cause",
+    [{}, {"signal": "SIGSEGV", "exit_status": 1}, {"error": "RuntimeError"}],
+)
+def test_a_crash_has_exactly_one_cause(cause: "JsonObject") -> None:
+    with pytest.raises(ValueError, match="one cause"):
+        lineage.adapter_crashed(*ADAPTER, INGEST, CHUNK, cause, 1)
+
+
+@pytest.mark.parametrize(
+    ("step", "chunk"),
+    [(Step.INGEST, None), (Step.PLAN, CHUNK), (Step.CHECK_PLAN, None), (Step.COMMIT, CHUNK)],
+)
+def test_a_sandboxed_call_is_a_plan_or_a_chunks_ingest(step: Step, chunk: str | None) -> None:
+    with pytest.raises(ValueError, match="plan, or ingest of a chunk"):
+        lineage.limit_exceeded(*ADAPTER, step, chunk, "wall_seconds", 1)
+
+
+def test_a_limit_names_the_adapter_version_step_chunk_limit_and_value() -> None:
+    finding = lineage.limit_exceeded(*ADAPTER, INGEST, CHUNK, "memory_bytes", 268435456)
+    assert finding.code == "neptune.runtime.limit_exceeded"
+    assert finding.details == {
+        "adapter": "mcap",
+        "chunk": CHUNK,
+        "limit": "memory_bytes",
+        "step": "ingest",
+        "value": 268435456,
+        "version": "1.2.0",
+    }
+    assert "at its memory_bytes limit (268435456)" in finding.message
+    planning = lineage.limit_exceeded(*ADAPTER, PLAN, None, "wall_seconds", 120)
+    assert planning.details["step"] == "plan" and "chunk" not in planning.details
+    assert "while planning the source" in planning.message
 
 
 def test_a_failure_is_a_step_an_error_class_and_facts_never_a_repr() -> None:
@@ -130,8 +222,8 @@ def test_a_failure_is_a_step_an_error_class_and_facts_never_a_repr() -> None:
         "step": "plan_result",
     }
     assert type_name(None) == "builtins.NoneType" and type_name(Law.SEQ_REPEATED).endswith(".Law")
-    finding = lineage.plan_failed(TRANSFORM, SOURCE, 10, "text", returned)
-    assert finding.details == {**returned.details(), "adapter": "text"}
+    finding = lineage.plan_failed(TRANSFORM, SOURCE, 10, "text", "0.1.0", returned)
+    assert finding.details == {**returned.details(), "adapter": "text", "version": "0.1.0"}
     assert "(ContractError at plan_result)" in finding.message
     with pytest.raises(ValueError, match="never name its error or step"):
         Failure(Step.INGEST, "ValueError", {"step": "elsewhere"}).details()

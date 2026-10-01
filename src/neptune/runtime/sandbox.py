@@ -1,0 +1,607 @@
+"""Running an adapter's call in a confined child process, or in this one when asked (ADR 0030).
+
+The job hands a runner one unit of adapter work at a time (a probe, a plan, one chunk's
+``ingest``) and gets back one of four outcomes, never an exception:
+
+- ``Returned``: the call's value, of the type its codec names;
+- ``Raised``: the call raised, or returned a value of another type; the exception's class (never
+  its text), whether it was a contract violation or a source that changed, and the wrong type;
+- ``Crashed``: the process died without a reply: killed by a signal, an exit, or a reply that
+  does not decode;
+- ``Exceeded``: a limit stopped it: CPU seconds, wall seconds, memory, or the reply's size.
+
+``Subprocess`` is the default. It forks once per call, so the child runs the adapter object the
+job built with nothing to import or pickle, confines it (``neptune.runtime.confine``: limits,
+descriptors, Landlock, seccomp) before any adapter code runs, and reads its reply from a pipe as
+JSON (``neptune.runtime.wire``). Nothing the child does reaches the workspace: the job commits
+what the parent decoded and checked, so a killed child leaves no partial chunk anywhere.
+``InProcess`` calls the adapter directly, for tests and trusted adapters, and only when chosen.
+"""
+
+import contextlib
+import json
+import math
+import os
+import re
+import select
+import signal
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Final, Generic, NoReturn, Protocol, TypeAlias, TypeVar
+
+from neptune.adapters.contract import ContractError
+from neptune.discovery.reader import SourceChangedError
+from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.runtime import confine
+
+T = TypeVar("T")
+
+_MIB: Final = 1024 * 1024
+_MAX_SECONDS: Final = 24 * 60 * 60
+_MIN_MEMORY: Final = 64 * _MIB  # below this the interpreter itself cannot run a call
+_MAX_MEMORY: Final = 1 << 40
+_MIN_REPLY: Final = 64 * 1024  # a reply never has to be smaller than its own envelope
+_ERROR_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,99}")
+_TYPE_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.<>]{0,299}")
+
+# The Landlock ABI below which a source is not safe from a compromised parser, so the sandbox
+# fails closed: ABI 3 completes file-system immutability. ABI 1 already blocks a file being
+# created, written, removed, renamed or relinked (reparenting is denied whenever the REFER right
+# is not handled, which it is not below ABI 2; a same-directory rename or link needs the MAKE and
+# REMOVE rights, which the ruleset handles and grants to nothing). ABI 3 adds truncation. Below
+# ABI 1 there is no Landlock at all, and procfs plus Yama ptrace_scope 0 can even reach the
+# parent's memory, which seccomp does not cover. The signal path Landlock scopes only at ABI 6 is
+# already closed by seccomp on every ABI (``confine``), so it is not part of the floor.
+# ``allow_degraded`` runs below the floor and records what is lost.
+REQUIRED_LANDLOCK_ABI: Final = 3
+
+
+def landlock_guarantees_lost(abi: int) -> tuple[str, ...]:
+    """What a child could still do to a user-writable file, the source included, at ``abi``; empty
+    at or above the required floor. ``RLIMIT_FSIZE`` 0 still bars appending bytes, but not an empty
+    file, a deletion, a rename or a truncation, and Landlock gives none of those below ABI 1."""
+    lost: list[str] = []
+    if abi < 1:  # no Landlock: nothing structural is blocked
+        lost.append("create, remove, rename or hard-link a file or directory")
+    if abi < REQUIRED_LANDLOCK_ABI:  # the truncate right arrived at ABI 3
+        lost.append("truncate a file, the source included")
+    return tuple(lost)
+
+
+class Isolation(StrEnum):
+    """Where adapter code runs."""
+
+    SUBPROCESS = "subprocess"  # a confined child process per call: the default
+    IN_PROCESS = "in_process"  # this process, unconfined: tests and trusted adapters, by choice
+
+
+class Limit(StrEnum):
+    """What can stop a sandboxed call, by the name of the setting that bounds it."""
+
+    CPU = "cpu_seconds"
+    WALL = "wall_seconds"
+    MEMORY = "memory_bytes"
+    REPLY = "reply_bytes"  # the reply's size, and the count and depth of what it decodes to
+
+
+@dataclass(frozen=True)
+class Limits:
+    """The bounds of one sandboxed call (one probe, one plan, one chunk's ``ingest``).
+
+    ``cpu_seconds`` is CPU time; ``wall_seconds`` elapsed time; ``memory_bytes`` the address
+    space the call may add to what the process held when it forked. ``reply_bytes`` bounds the
+    reply the parent reads and decodes — kept far below ``memory_bytes`` (64 MiB by default), so
+    one hostile call that emits a giant reply cannot exhaust the job while it copies and decodes
+    it; the decode is bounded in count and depth as well (``neptune.runtime.wire``).
+    """
+
+    cpu_seconds: int = 60
+    wall_seconds: int = 120
+    memory_bytes: int = 2 * 1024 * _MIB
+    reply_bytes: int = 64 * _MIB
+
+    def __post_init__(self) -> None:
+        for name, value, low, high in (
+            ("cpu_seconds", self.cpu_seconds, 1, _MAX_SECONDS),
+            ("wall_seconds", self.wall_seconds, 1, _MAX_SECONDS),
+            ("memory_bytes", self.memory_bytes, _MIN_MEMORY, _MAX_MEMORY),
+            ("reply_bytes", self.reply_bytes, _MIN_REPLY, _MAX_MEMORY),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+                raise ValueError(f"{name} is an integer in [{low}, {high}], got {value!r}")
+
+    def value(self, limit: Limit) -> int:
+        if limit is Limit.CPU:
+            return self.cpu_seconds
+        if limit is Limit.WALL:
+            return self.wall_seconds
+        if limit is Limit.REPLY:
+            return self.reply_bytes
+        return self.memory_bytes
+
+    def to_json(self) -> JsonObject:
+        return {
+            "cpu_seconds": self.cpu_seconds,
+            "memory_bytes": self.memory_bytes,
+            "reply_bytes": self.reply_bytes,
+            "wall_seconds": self.wall_seconds,
+        }
+
+
+DEFAULT_LIMITS: Final = Limits()
+
+
+# --- Outcomes ----------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Returned(Generic[T]):
+    value: T
+
+
+@dataclass(frozen=True)
+class Raised:
+    """The call raised, or returned what cannot be its result. ``error`` is a class name, never
+    an exception's text.
+
+    ``contract`` marks a ``ContractError`` (a bug: never retried); ``changed`` a
+    ``SourceChangedError`` (the source's bytes are not the ones fingerprinted: never retried,
+    reported as the source's problem, not the adapter's). ``returned`` is the ``module.qualname``
+    of a value of the wrong type the call returned; ``unencodable`` marks a value of the right
+    type that could not be encoded to cross back (a record with no JSON form), ``error`` being
+    what encoding raised. Both are contract errors: the value breaks the contract.
+    """
+
+    error: str
+    contract: bool = False
+    changed: bool = False
+    returned: str | None = None
+    unencodable: bool = False
+
+    def __post_init__(self) -> None:
+        if not _ERROR_NAME.fullmatch(self.error):
+            raise ValueError(f"not an exception class name: {self.error!r}")
+        if self.returned is not None and (
+            not _TYPE_NAME.fullmatch(self.returned) or not self.contract
+        ):
+            raise ValueError(f"a wrong result is a contract error naming a type: {self.returned!r}")
+        if self.unencodable and (not self.contract or self.returned is not None or self.changed):
+            raise ValueError("an unencodable result is a contract error of the right type")
+
+    @classmethod
+    def of(cls, exc: BaseException) -> "Raised":
+        name = type(exc).__name__
+        return cls(
+            error=name if _ERROR_NAME.fullmatch(name) else "Exception",
+            contract=isinstance(exc, ContractError),
+            changed=isinstance(exc, SourceChangedError),
+        )
+
+    @classmethod
+    def unencoded(cls, exc: BaseException) -> "Raised":
+        """Encoding the call's value raised ``exc``: the value is not what the contract allows."""
+        name = type(exc).__name__
+        return cls(
+            name if _ERROR_NAME.fullmatch(name) else "Exception", contract=True, unencodable=True
+        )
+
+    @classmethod
+    def mistyped(cls, value: object) -> "Raised":
+        """The call returned ``value`` where its codec's type was due."""
+        kind = type(value)
+        name = f"{kind.__module__}.{kind.__qualname__}"  # as ``lineage.type_name`` writes it
+        return cls(
+            ContractError.__name__,
+            contract=True,
+            returned=name if _TYPE_NAME.fullmatch(name) else "builtins.object",
+        )
+
+    def cause(self) -> dict[str, JsonValue]:
+        return {"error": self.error}
+
+
+@dataclass(frozen=True)
+class Crashed:
+    """The process died without a valid reply: by ``signal``, with ``exit_status``, or neither
+    (its reply did not decode)."""
+
+    signal: str | None = None
+    exit_status: int | None = None
+
+    def cause(self) -> dict[str, JsonValue]:
+        if self.signal is not None:
+            return {"signal": self.signal}
+        if self.exit_status is not None:
+            return {"exit_status": self.exit_status}
+        return {"reply": "malformed"}
+
+
+@dataclass(frozen=True)
+class Exceeded:
+    """A limit stopped the call: which one, and its value."""
+
+    limit: Limit
+    value: int
+
+    def cause(self) -> dict[str, JsonValue]:
+        return {"limit": str(self.limit), "value": self.value}
+
+
+Outcome: TypeAlias = Returned[T] | Raised | Crashed | Exceeded
+
+
+class SandboxError(Exception):
+    """The sandbox cannot run on this host. A job fails with it: no adapter code has run."""
+
+
+class ReplyTooLarge(Exception):
+    """A reply within the byte cap still holds more containers or elements, or nests deeper, than
+    a decode may build. Raised by a codec's ``decode`` (``neptune.runtime.wire``) and turned into
+    an ``Exceeded(Limit.REPLY)`` by the runner, so the chunk fails, unretried, and the job carries
+    on."""
+
+
+@dataclass(frozen=True)
+class Codec(Generic[T]):
+    """The type a call returns and how a value of it crosses the process boundary.
+
+    A runner checks the value is a ``kind`` before anything else: another type is a ``Raised``
+    contract error naming it. ``decode`` must refuse what is not a valid encoding: its input
+    comes from a process that read hostile bytes.
+    """
+
+    kind: type[T]
+    encode: Callable[[T], bytes]
+    decode: Callable[[bytes], T]
+
+
+class Runner(Protocol):
+    isolation: Isolation
+
+    def call(
+        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
+    ) -> Returned[T] | Raised | Crashed | Exceeded:
+        """Run ``work``; ``keep`` lists the descriptors it reads (a source's)."""
+        ...
+
+    def describe(self) -> JsonObject:
+        """What isolates the calls: for the job's ``sandbox_ready`` event."""
+        ...
+
+    def lost_guarantees(self) -> tuple[str, ...]:
+        """The guarantees this runner does not give, for the receipt; empty when it gives them
+        all. In-process gives none by the caller's explicit choice, which the isolation records."""
+        ...
+
+
+class InProcess:
+    """Adapter code runs here, unconfined and unlimited. Chosen explicitly, never a default."""
+
+    isolation = Isolation.IN_PROCESS
+
+    def call(
+        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
+    ) -> Returned[T] | Raised | Crashed | Exceeded:
+        try:
+            value = work()
+        except Exception as exc:
+            return Raised.of(exc)
+        if not isinstance(value, codec.kind):
+            return Raised.mistyped(value)
+        return Returned(value)
+
+    def describe(self) -> JsonObject:
+        return {"isolation": str(self.isolation)}
+
+    def lost_guarantees(self) -> tuple[str, ...]:
+        return ()  # none to lose: in-process is unconfined by the caller's explicit choice
+
+
+# --- The reply -----------------------------------------------------------------------------------
+
+# The child writes one status byte once it is confined, before any adapter code runs, so a
+# hostile adapter can never claim the sandbox failed to start; then the call's reply.
+_CONFINED: Final = b"C"
+_UNCONFINED: Final = b"U"
+_RETURNED: Final = b"R"
+_RAISED: Final = b"E"
+_OUT_OF_MEMORY: Final = b"M"
+_UNREPORTED: Final = 70  # the child's exit status when it could not even write its reply
+
+
+_RAISED_KEYS: Final = frozenset({"changed", "contract", "error", "returned", "unencodable"})
+# A sound raised reply is five short fields; anything larger is a forged reply a compromised child
+# wrote, so it is refused before ``json.loads`` builds anything, never decoded unbounded.
+_MAX_RAISED_REPLY: Final = 4096
+
+
+def encode_raised(raised: Raised) -> bytes:
+    return json.dumps(
+        {
+            "changed": raised.changed,
+            "contract": raised.contract,
+            "error": raised.error,
+            "returned": raised.returned,
+            "unencodable": raised.unencodable,
+        },
+        separators=(",", ":"),
+    ).encode("ascii")
+
+
+def decode_raised(data: bytes) -> Raised:
+    """A ``Raised`` reply, strictly: exactly its five fields, each of its type. Refused unread if
+    it is larger than any sound raised reply, so the ``E`` tag cannot smuggle a giant payload
+    past the value-count bound the returned reply gets."""
+    if len(data) > _MAX_RAISED_REPLY:
+        raise ValueError(f"a raised reply is at most {_MAX_RAISED_REPLY} bytes")
+    value = json.loads(data)
+    if not isinstance(value, dict) or value.keys() != _RAISED_KEYS:
+        raise ValueError(f"a raised reply is exactly {sorted(_RAISED_KEYS)}")
+    error, returned = value["error"], value["returned"]
+    flags = (value["contract"], value["changed"], value["unencodable"])
+    if not isinstance(error, str) or not all(isinstance(flag, bool) for flag in flags):
+        raise ValueError("a raised reply's error is text and its flags booleans")
+    if not (returned is None or isinstance(returned, str)):
+        raise ValueError("a raised reply's returned is a type name or null")
+    contract, changed, unencodable = flags
+    return Raised(error, contract, changed, returned, unencodable)
+
+
+def _send(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view) :]
+
+
+def _read(fd: int) -> bytes | None:
+    """What the pipe holds now: ``b""`` at its end, ``None`` if nothing yet."""
+    try:
+        return os.read(fd, _MIB)
+    except BlockingIOError:
+        return None
+
+
+def _kill(pidfd: int) -> None:
+    with contextlib.suppress(ProcessLookupError):  # it exited first
+        signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+
+
+def _signal_name(signum: int) -> str:
+    try:
+        return signal.Signals(signum).name
+    except ValueError:
+        return f"SIG{signum}"
+
+
+def _nothing(data: bytes) -> None:
+    if data:
+        raise ValueError("expected an empty reply")
+
+
+_NOTHING: Final = Codec[None](type(None), lambda _: b"", _nothing)
+
+
+class Subprocess:
+    """Each call in a fresh child process, confined and bounded by ``limits`` (Linux).
+
+    Building one checks the host and runs one empty call through every control, so a host that
+    cannot confine fails here, before any source is read, with a ``SandboxError``. A host whose
+    Landlock ABI is below the floor needed to keep a source immutable (``REQUIRED_LANDLOCK_ABI``)
+    also fails here, unless ``allow_degraded`` is set to run on it and record what is lost.
+    """
+
+    isolation = Isolation.SUBPROCESS
+
+    def __init__(self, limits: Limits = DEFAULT_LIMITS, *, allow_degraded: bool = False) -> None:
+        if not isinstance(limits, Limits):
+            raise TypeError(f"limits must be Limits, got {limits!r}")
+        if not isinstance(allow_degraded, bool):
+            raise TypeError(f"allow_degraded must be a bool, got {allow_degraded!r}")
+        try:
+            self._host = confine.host()
+        except confine.ConfineError as exc:
+            raise SandboxError(f"this host cannot run the sandbox: {exc}") from exc
+        self._lost = landlock_guarantees_lost(self._host.landlock)
+        if self._lost and not allow_degraded:
+            raise SandboxError(
+                f"this host's Landlock ABI {self._host.landlock} is below the "
+                f"{REQUIRED_LANDLOCK_ABI} a sandbox needs to keep a source immutable: a parser "
+                f"could {'; '.join(self._lost)}. Pass allow_degraded_sandbox to run anyway and "
+                f"record what is lost"
+            )
+        self.limits = limits
+        if not isinstance(self.call(lambda: None, _NOTHING), Returned):
+            raise SandboxError("this host cannot run the sandbox: an empty call failed")
+
+    @property
+    def landlock(self) -> int:
+        """The Landlock ABI the children apply; 0 where the kernel has none."""
+        return self._host.landlock
+
+    def lost_guarantees(self) -> tuple[str, ...]:
+        """The file-system guarantees this host's Landlock ABI cannot give; empty at or above the
+        floor. Non-empty only in degraded mode, which the caller opted into."""
+        return self._lost
+
+    def describe(self) -> JsonObject:
+        described: dict[str, JsonValue] = {
+            "isolation": str(self.isolation),
+            "landlock": self._host.landlock,
+            "limits": self.limits.to_json(),
+        }
+        if self._lost:  # degraded: the sandbox_ready event names exactly what is not guaranteed
+            described["degraded"] = list(self._lost)
+        return described
+
+    def call(
+        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
+    ) -> Returned[T] | Raised | Crashed | Exceeded:
+        for fd in keep:
+            if isinstance(fd, bool) or not isinstance(fd, int) or fd < 0:
+                raise ValueError(f"not a descriptor: {fd!r}")
+        try:
+            reply, write_end = os.pipe()
+        except OSError as exc:  # out of descriptors: the host, not the source
+            raise SandboxError(f"cannot start a sandboxed call: {exc}") from exc
+        parent = os.getpid()
+        try:
+            pid = os.fork()
+        except OSError as exc:
+            os.close(reply)
+            os.close(write_end)
+            raise SandboxError(f"cannot start a sandboxed call: {exc}") from exc
+        if pid == 0:  # pragma: no cover - the child's coverage is not collected
+            self._child(work, codec, frozenset(keep) | {write_end}, write_end, parent)
+        os.close(write_end)
+        try:
+            try:
+                pidfd = os.pidfd_open(pid)
+            except OSError as exc:
+                os.kill(pid, signal.SIGKILL)  # not yet reaped, so the pid is still the child's
+                os.waitpid(pid, 0)
+                raise SandboxError(f"cannot watch a sandboxed call: {exc}") from exc
+            try:
+                return self._await(pid, pidfd, reply, codec)
+            finally:
+                os.close(pidfd)
+        finally:
+            os.close(reply)
+
+    def _child(
+        self,
+        work: Callable[[], object],
+        codec: Codec[T],
+        keep: frozenset[int],
+        reply: int,
+        parent: int,
+    ) -> NoReturn:  # pragma: no cover - runs in the child, whose coverage is not collected
+        try:
+            try:
+                confine.confine(
+                    self._host, keep, parent, self.limits.cpu_seconds, self.limits.memory_bytes
+                )
+            except confine.ConfineError as exc:
+                _send(reply, _UNCONFINED + exc.control.encode("ascii", "replace"))
+                os._exit(0)
+            _send(reply, _CONFINED)
+            # The tag and the payload are sent apart, so the reply is never copied to prefix it.
+            tag, payload = _OUT_OF_MEMORY, b""  # held before the call: needs no allocation
+            try:
+                try:
+                    value = work()
+                    if not isinstance(value, codec.kind):
+                        payload, tag = encode_raised(Raised.mistyped(value)), _RAISED
+                    else:
+                        try:
+                            payload, tag = codec.encode(value), _RETURNED
+                        except MemoryError:
+                            raise
+                        except Exception as exc:
+                            payload, tag = encode_raised(Raised.unencoded(exc)), _RAISED
+                except MemoryError:
+                    pass
+                except BaseException as exc:
+                    payload = encode_raised(Raised.of(exc))
+                    tag = _RAISED
+            except MemoryError:
+                tag, payload = _OUT_OF_MEMORY, b""
+            _send(reply, tag)
+            _send(reply, payload)
+            os._exit(0)
+        except BaseException:
+            os._exit(_UNREPORTED)
+
+    def _await(self, pid: int, pidfd: int, reply: int, codec: Codec[T]) -> Outcome[T]:
+        """Read the reply until the child exits or a limit is hit; reap it; classify.
+
+        The child is always reaped before this returns or raises: on any error here (an
+        interrupt included) it is killed first, so no call outlives the job's attention.
+        """
+        os.set_blocking(reply, False)
+        cap = self.limits.reply_bytes + 2  # the status byte and the reply's tag, over the cap
+        buffer = bytearray()  # one growing buffer, never a list joined into a second copy
+        killed: Limit | None = None
+        reaped = False
+        poller = select.poll()
+        poller.register(reply, select.POLLIN)
+        poller.register(pidfd, select.POLLIN)
+        deadline = time.monotonic() + self.limits.wall_seconds
+        try:
+            exited = False
+            while not exited and killed is None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    killed = Limit.WALL
+                    break
+                for fd, _ in poller.poll(math.ceil(remaining * 1000)):
+                    if fd == pidfd:
+                        exited = True
+                        continue
+                    piece = _read(reply)
+                    if piece == b"":
+                        poller.unregister(reply)
+                    elif piece:
+                        buffer += piece
+                        if len(buffer) > cap:
+                            killed = Limit.REPLY
+            while killed is None and (piece := _read(reply)):  # what is left after the exit
+                buffer += piece
+                if len(buffer) > cap:
+                    killed = Limit.REPLY
+            if killed is not None:
+                _kill(pidfd)
+            _, status, usage = os.wait4(pid, 0)
+            reaped = True
+        finally:
+            if not reaped:
+                _kill(pidfd)
+                os.waitpid(pid, 0)
+        if buffer[:1] == _UNCONFINED:  # written before any adapter code ran: the host's fault
+            control = bytes(buffer[1:]).decode("ascii", "replace")
+            raise SandboxError(f"this host cannot run the sandbox: {control} failed")
+        return self._classify(status, usage.ru_utime + usage.ru_stime, killed, buffer, codec)
+
+    def _classify(
+        self, status: int, cpu: float, killed: Limit | None, buffer: bytearray, codec: Codec[T]
+    ) -> Outcome[T]:
+        limits = self.limits
+        if killed is not None:
+            # Whatever the status: a reply found too long only after the child exited, or a
+            # deadline passed as it exited, is the limit, every time, not a decoded reply.
+            return Exceeded(killed, limits.value(killed))
+        if os.WIFSIGNALED(status):
+            signum = os.WTERMSIG(status)
+            if signum == signal.SIGXCPU or (signum == signal.SIGKILL and cpu >= limits.cpu_seconds):
+                return Exceeded(Limit.CPU, limits.cpu_seconds)
+            return Crashed(signal=_signal_name(signum))
+        code = os.waitstatus_to_exitcode(status)
+        if code != 0 or buffer[:1] != _CONFINED or len(buffer) < 2:
+            return Crashed(exit_status=code)
+        tag = bytes(buffer[1:2])
+        payload = bytes(memoryview(buffer)[2:])  # one slice-copy, never the list-join of before
+        try:
+            if tag == _RETURNED:
+                return Returned(codec.decode(payload))
+            if tag == _RAISED:
+                return decode_raised(payload)
+            if tag == _OUT_OF_MEMORY and not payload:
+                return Exceeded(Limit.MEMORY, limits.memory_bytes)
+        except (ReplyTooLarge, RecursionError):  # too many values, or nested too deep, to build
+            # A RecursionError is the reply's nesting, met as the model rebuilds it from parsed
+            # JSON; the same bytes would meet it again, so it is the reply's limit, not a crash.
+            return Exceeded(Limit.REPLY, limits.reply_bytes)
+        except Exception:  # any failure to decode: the reply is not one a sound child writes
+            pass
+        return Crashed()
+
+
+def runner(
+    isolation: Isolation, limits: Limits = DEFAULT_LIMITS, *, allow_degraded: bool = False
+) -> Runner:
+    """The runner for ``isolation``; ``SandboxError`` if this host cannot confine a call, or its
+    Landlock ABI is below the floor and ``allow_degraded`` was not set."""
+    if isolation is Isolation.IN_PROCESS:
+        return InProcess()
+    return Subprocess(limits, allow_degraded=allow_degraded)

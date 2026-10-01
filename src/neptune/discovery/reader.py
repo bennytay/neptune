@@ -83,6 +83,10 @@ class LocalReader:
     def close(self) -> None:
         self._file.close()
 
+    def fileno(self) -> int:
+        """The read-only descriptor the reader reads through: the one a sandboxed call keeps."""
+        return self._file.fileno()
+
     @property
     def content_id(self) -> ContentId:
         return self._artifact.content_id

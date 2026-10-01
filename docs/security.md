@@ -15,8 +15,10 @@ receipts, logs, caches or cloud sync; supply-chain risk from parser dependencies
 ## Principles
 
 - Discovery enforces path, symlink and archive policy before any adapter sees a file.
-- Adapters declare resource expectations in their descriptor; the runtime enforces limits.
-- The adapter contract is subprocess-safe so isolation is a runtime feature, not an adapter rewrite.
+- Adapters declare resource expectations in their descriptor; the runtime enforces limits per call
+  (job-wide values today, ADR 0030).
+- Every adapter call runs in a confined child process unless in-process isolation is chosen
+  explicitly; isolation is a runtime feature, not an adapter rewrite (ADR 0030).
 - Crashes become findings; a hostile file cannot fail the job or escape its chunk.
 - Local-only mode is a first-class configuration: no network, no cloud sync, receipts portable.
 - Raw customer data is never written to logs. Receipts reference blobs by id, not content.
@@ -43,7 +45,7 @@ Not in place yet (MVL-10): subprocess isolation, CPU/memory/time limits, crash c
 | M1 (MVL-2) | done: `LocalSource` walks with `O_NOFOLLOW` per component; symlinks recorded, never followed; special files never opened (ADRs 0009, 0010) |
 | M2 (MVL-8) | done: containers are inspected, never extracted: member names listed verbatim and never resolved; decoding bounded by `ProbePolicy` (members, decoded bytes, depth, declared ratio); a crashing probe is a finding (ADR 0027) |
 | M2 (MVL-75) | done: walk findings, archive-bomb limits, truncation detection, scratch-space policy, hostile fixture suite (ADR 0029) |
-| M2 (MVL-10) | subprocess isolation, CPU/memory/time limits, crash capture (file handling and the adversarial seed landed with MVL-75) |
+| M2 (MVL-10) | done: every probe, plan and `ingest` in a forked, confined child per call (see below); CPU, wall-time and memory limits; a crash, hang or limit hit is a finding and the job goes on; the `hostile` fixture adapter (ADR 0030) |
 | M2 (MVL-16) | done: local-only mode on by default, network use refused until allowed; sources read in place and verified chunk by chunk; materialised and exported sources read through `LocalSource`, and package files opened with `O_NOFOLLOW`, regular files only (ADR 0026) |
 | M6 (MVL-28/29) | malformed PDF/image safeguards; no active content execution |
 | M9 | auth/profile handling for connectors; presigned uploads; idempotency keys |
@@ -51,3 +53,49 @@ Not in place yet (MVL-10): subprocess isolation, CPU/memory/time limits, crash c
 
 Secret scanning / redaction hooks are noted in the design contract and not yet scheduled; raise an issue when
 the first document adapter lands.
+
+## Parser sandbox (ADR 0030)
+
+By default (`JobOptions.isolation = subprocess`) each adapter call runs in a child forked for it,
+confined before any adapter code runs. A sandboxed call:
+
+- is stopped at `cpu_seconds` (60), `wall_seconds` (120) and `memory_bytes` (2 GiB of address
+  space above the job's); its reply may not exceed `reply_bytes` (64 MiB, a separate cap far
+  below `memory_bytes`) in size, in the number of containers and elements it decodes to (8 Mi),
+  or in nesting (the JSON parser's recursion guard);
+- opens no socket, starts no process or program, and signals no other process — neither directly
+  (`kill`, `tgkill`, `tkill`, `rt_*sigqueueinfo`, `pidfd_send_signal`) nor through a descriptor's
+  async-I/O owner (`fcntl` F_SETOWN/F_SETOWN_EX/F_SETSIG and F_SETFL with O_ASYNC, `ioctl`
+  FIOSETOWN/SIOCSPGRP/FIOASYNC), the path only Landlock ABI 6 scopes, which seccomp closes on
+  every ABI — including the job's own terminal, which stays readable and on which O_ASYNC alone
+  would make the kernel aim SIGIO at the job's process group;
+- cannot shed its parent-death signal or re-enable a core dump (`prctl` PR_SET_PDEATHSIG and
+  PR_SET_DUMPABLE are refused after setup); has no controlling terminal (`setsid`: `/dev/tty`
+  does not open, and `TIOCSTI` injection and `TIOCSPGRP` fail on any terminal; SIGIO through a
+  terminal is the O_ASYNC filter above, not `setsid`); traces nothing and enters no namespace
+  (seccomp);
+- writes no byte to any file (`RLIMIT_FSIZE` 0), changes no file's mode, owner, times or xattrs
+  and punches no bytes (`chmod`/`chown`/`utimensat`/`*xattr`/`fallocate` refused — Landlock
+  covers none of these), and, under Landlock, creates, truncates, renames or removes nothing;
+- holds only its source's read-only descriptor and its reply pipe; prints to `/dev/null`;
+  leaves no core dump; dies if the job dies;
+- answers in JSON that the job decodes strictly, bounded, and checks like any adapter's output;
+  only the job writes the workspace, so a killed call leaves nothing behind.
+
+The sandbox fails closed below **Landlock ABI 3**, the floor at which a source is immutable: ABI 1
+already blocks a file being created, written, removed, renamed or relinked, ABI 3 adds truncation,
+and below ABI 1 procfs plus Yama `ptrace_scope` 0 can even reach the parent's memory. A host below
+it fails the job unless `allow_degraded_sandbox` is set, which runs anyway and records the exact
+guarantees lost in the `sandbox_ready` event and the receipt's runtime transform. Ubuntu 24.04
+(kernel 6.8, ABI 4) is above the floor; Debian 12 (kernel 6.1, ABI 2) and RHEL 9 are below it and
+need a 6.2+ kernel or degraded mode by choice. A host that cannot apply the controls at all (not
+Linux, no seccomp filter for its architecture) also fails the job before any source is read;
+`isolation = in_process` runs adapters unconfined, by explicit choice. Residual risks: a
+compromised parser can read files the user can read and put them into its own output; and while
+the job decodes one reply it holds it three times (the read buffer, the payload and the text the
+parser reads: up to 3 × `reply_bytes`) plus the Python objects it decodes to, which the 8 Mi value
+cap bounds, not the byte cap. Measured at the defaults, a hostile reply peaks the job at about
+1 GiB (one object of distinct keys filling the byte cap, which the parser memoises as it decodes),
+0.3 to 0.6 GiB for lists of short strings, floats or empty containers, and 256 MiB for one 64 MiB
+string. A lower value cap would refuse legitimate replies first: integer and boolean series cells
+cost 2 to 6 bytes each on the wire.

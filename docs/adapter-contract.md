@@ -54,6 +54,11 @@ source's fault, not the adapter's, so it propagates, and the runtime records
    transform and cites only the source it was given; a finding cites bytes, never a location.
 9. **One chunk per output.** No record or finding is emitted by two chunks. A source's output cites the
    source at least once, even when it is empty or unreadable, so the receipt always shows who read it.
+10. **Sandboxed by default** (ADR 0030). Every call runs in a fresh child process: nothing an adapter
+    keeps on itself survives to the next call, and opening a socket, writing a file (temporary files
+    included), starting a process or signalling another one fails with an `OSError`. Reading files
+    (lazy imports, codec and time-zone tables) works. A crash, a hang or runaway memory is a
+    finding about the source, never a failed job.
 
 ## Config, chunks and output (ADR 0024)
 
@@ -185,7 +190,7 @@ For registers, geometry, photos, video files and documents:
 | resume | skip chunks whose id is already committed in the store |
 | cache | the chunk id, which covers source id, adapter id and version, config hash, libraries and context; a version or config change recomputes only that adapter's chunks (ADR 0031) |
 | validation across sources | `validate/` engine over the store |
-| sandboxing | subprocess with limits; the contract is picklable/serialisable so this needs no adapter change |
+| sandboxing | each `probe`, `plan` and `ingest` call in a child forked for it, with CPU, wall-time and memory limits, no network, no writes, no new processes (ADR 0030); the result crosses back as JSON, so it must be what the contract says (records with their `to_json`) |
 | explanation | assembles `ProbeResult`, `plan` output and `descriptor` into the receipt |
 | scheduling / backpressure | bounded worker queues (M9) |
 

@@ -32,7 +32,7 @@ from neptune.model.finding import FindingCategory, Severity, subject_to_json
 from neptune.model.knowledge import Known
 from neptune.model.series import ColumnType, SeriesBatch, SeriesColumn
 from neptune.model.world import DocumentBlock, DocumentRecord
-from neptune.runtime import IngestJob, JobError, JobEvent, JobOptions, JobState, Phase
+from neptune.runtime import IngestJob, Isolation, JobError, JobEvent, JobOptions, JobState, Phase
 from neptune.runtime import lineage as runtime_lineage
 from neptune.store.package import read_package
 from neptune.store.workspace import Workspace
@@ -171,7 +171,10 @@ def test_a_transient_fault_is_retried_and_the_source_lands(tmp_path: Path) -> No
     root = tmp_path / "root"
     root.mkdir()
     (root / "wobbly.brittle").write_bytes(BRITTLE.brittle("x", "flaky", "y"))
-    outcome, package, seen = run(root, tmp_path, options=JobOptions(attempts=2))
+    # The fault counter lives on the adapter instance, which only an in-process call updates:
+    # a sandboxed call runs in a fresh child each attempt and never sees the first one.
+    trusted = JobOptions(attempts=2, isolation=Isolation.IN_PROCESS)
+    outcome, package, seen = run(root, tmp_path, options=trusted)
     assert codes(package) == []
     assert len(outcome.ingested) == 1
     retried = [e for e in seen if e.kind == "chunk_retried"]
@@ -540,22 +543,31 @@ class ImpostorBrittle(BRITTLE.BrittleAdapter):  # type: ignore[misc, name-define
         return output
 
 
-def test_a_check_that_raises_on_odd_output_fails_that_chunk_not_the_job(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("isolation", "phase"),
+    [
+        (Isolation.IN_PROCESS, Phase.NORMALIZE),  # the check meets the impostor
+        (Isolation.SUBPROCESS, Phase.PARSE),  # the impostor has no JSON form to cross back in
+    ],
+)
+def test_a_check_that_raises_on_odd_output_fails_that_chunk_not_the_job(
+    tmp_path: Path, isolation: Isolation, phase: Phase
+) -> None:
     root = tmp_path / "root"
     root.mkdir()
     shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
     (root / "odd.brittle").write_bytes(BRITTLE.brittle("fine", "impostor"))
     adapters = AdapterRegistry([*builtin_adapters(), ImpostorBrittle()])
-    outcome, package, seen = run(root, tmp_path, adapters)
+    outcome, package, seen = run(root, tmp_path, adapters, options=JobOptions(isolation=isolation))
     assert codes(package) == ["neptune.runtime.chunk_failed"]
     (finding,) = outcome.findings
     assert finding.details["step"] == "check_chunk_output"
-    assert finding.details["error"] == "AttributeError"  # the check met no provenance
+    assert finding.details["error"] == "AttributeError"  # no provenance, no to_json
     assert finding.details["attempts"] == 1
     assert read_by(package) == {"notes.txt": 1, "odd.brittle": 1}  # read by the runtime only
     assert len(outcome.ingested) == 1
     (failed,) = [e for e in seen if e.kind == "chunk_failed"]
-    assert failed.phase is Phase.NORMALIZE and failed.details["step"] == "check_chunk_output"
+    assert failed.phase is phase and failed.details["step"] == "check_chunk_output"
 
 
 class DiskFaultBrittle(BRITTLE.BrittleAdapter):  # type: ignore[misc, name-defined]
@@ -576,7 +588,12 @@ def test_an_os_error_from_plan_is_the_adapters_failure_not_an_unreadable_source(
     outcome, package, seen = run(root, tmp_path, adapters)
     assert codes(package) == ["neptune.runtime.plan_failed"]
     (finding,) = outcome.findings
-    assert finding.details == {"adapter": "brittle", "error": "OSError", "step": "plan"}
+    assert finding.details == {
+        "adapter": "brittle",
+        "error": "OSError",
+        "step": "plan",
+        "version": "1.0.0",
+    }
     assert "/home/someone" not in finding.message
     assert not [e for e in seen if e.kind == "source_unreadable"]
     assert len(outcome.ingested) == 1

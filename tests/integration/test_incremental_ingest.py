@@ -43,6 +43,7 @@ from neptune.model.series import SEQ
 from neptune.runtime import (
     CacheReport,
     IngestJob,
+    Isolation,
     JobError,
     JobEvent,
     JobOptions,
@@ -181,7 +182,9 @@ class Runner:
             self.out / f"package-{self.count}",
             Workspace(self.home),
             chosen.registry,
-            JobOptions(config=config or {}),
+            # These trusted test adapters count their own calls in process, which a forked
+            # sandbox child could not report back; the cache logic is isolation-independent.
+            JobOptions(config=config or {}, isolation=Isolation.IN_PROCESS),
             on_event=on_event,
             cancel=cancel,
         )
