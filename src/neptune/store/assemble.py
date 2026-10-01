@@ -1,10 +1,12 @@
 """Assembling an ingest package from a workspace, and exporting a portable copy (ADR 0026).
 
-``assemble`` gathers what an ingest committed (each source's plan under its transform, every
+``stage`` gathers what an ingest committed (each source's plan under its transform, every
 chunk's records and findings, every stream's runs), merges each stream's runs into its series
-file, and writes the package beside its destination, flushed to disk, before renaming it into
-place: a package appears whole or not at all, and survives a crash once it has appeared. Sources
-stay where they are unless asked for; one asked for is read as ``export`` reads it.
+file, and builds the package in a hidden directory beside its destination. ``publish`` flushes it
+to disk and renames it into place: a package appears whole or not at all, and survives a crash
+once it has appeared. ``assemble`` is the two in one call; the runtime (MVL-6) verifies the staged
+package and writes its envelope between them. Sources stay where they are unless asked for; one
+asked for is read as ``export`` reads it.
 
 ``export`` copies a package with every source it can reach materialised into ``blobs/``: the
 portable form, readable anywhere. Each source is read through a ``Source``
@@ -18,6 +20,7 @@ import shutil
 from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO, Final, Protocol
 
@@ -67,23 +70,36 @@ def _sibling(destination: Path) -> Path:
         return staging
 
 
+def _open_staging(destination: Path) -> Path:
+    """A hidden sibling of ``destination`` to build a package in. ``destination`` must not exist."""
+    if destination.exists():
+        raise PackageError(f"{destination} exists; a package is written once")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return _sibling(destination)
+
+
+def _rename_into_place(staging: Path, destination: Path) -> None:
+    """Flush ``staging`` to disk, rename it to ``destination`` in one step, flush where it landed.
+
+    The package appears whole or not at all, and once it has appeared it stays.
+    """
+    if destination.exists():
+        raise PackageError(f"{destination} exists; a package is written once")
+    fsync_tree(staging)
+    staging.rename(destination)
+    fsync_directory(destination.parent)
+
+
 @contextmanager
 def _staged(destination: Path) -> Iterator[Path]:
     """A hidden sibling of ``destination`` that becomes it on success and is removed otherwise.
 
-    ``destination`` must not exist: a package is written once. Everything in it is flushed to disk
-    before the rename, which is one step, so the package appears whole or not at all, and the
-    directory it lands in is flushed after, so it stays there.
+    ``destination`` must not exist: a package is written once.
     """
-    if destination.exists():
-        raise PackageError(f"{destination} exists; a package is written once")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    staging = _sibling(destination)
+    staging = _open_staging(destination)
     try:
         yield staging
-        fsync_tree(staging)
-        staging.rename(destination)
-        fsync_directory(destination.parent)
+        _rename_into_place(staging, destination)
     finally:
         if staging.exists():
             shutil.rmtree(staging)
@@ -130,7 +146,21 @@ def _check_copies(staging: Path, contents: Mapping[str, Content], copied: Iterab
             raise PackageError(f"{relative} changed while it was copied; it is not what was hashed")
 
 
-def assemble(
+@dataclass(frozen=True)
+class StagedPackage:
+    """A package built whole beside ``destination`` and not yet renamed into place."""
+
+    path: Path
+    destination: Path
+    id: ContentId
+
+    def discard(self) -> None:
+        """Remove the staged package. Nothing was published."""
+        if self.path.exists():
+            shutil.rmtree(self.path)
+
+
+def stage(
     destination: Path,
     workspace: Workspace,
     ledger: SourceLedger,
@@ -138,15 +168,17 @@ def assemble(
     *,
     materialise: Iterable[ContentId] = (),
     source: SourceOpener | None = None,
-) -> ContentId:
-    """Write the package of ``ingested`` sources, each a (content id, transform id) pair.
+    extra: Iterable[Any] = (),
+) -> StagedPackage:
+    """Build the package of ``ingested`` sources, each a (content id, transform id) pair.
 
     Every ingested source must be in ``ledger``, since the package lists the sources it cites,
-    and every chunk of its plan must be committed in ``workspace``. ``materialise`` names sources
-    to copy into the package. Each is read as ``export`` reads one: from the head of a location
-    chain in ``ledger`` that holds it, opened through ``source`` so its policy applies, and
-    hashed where it lands. Every other source is referenced. ``destination`` must not exist.
-    Returns the package id.
+    and every chunk of its plan must be committed in ``workspace``. ``extra`` adds records that
+    are no adapter's output: the runtime's own transform and findings. ``materialise`` names
+    sources to copy into the package. Each is read as ``export`` reads one: from the head of a
+    location chain in ``ledger`` that holds it, opened through ``source`` so its policy applies,
+    and hashed where it lands. Every other source is referenced. ``destination`` must not exist.
+    The package waits in a hidden sibling directory until ``publish`` renames it into place.
     """
     if destination.exists():
         raise PackageError(f"{destination} exists; a package is written once")
@@ -157,6 +189,8 @@ def assemble(
     if lost := sorted(wanted - set(locations)):
         raise PackageError(f"no local location holds sources to materialise: {lost}")
     records: dict[tuple[str, str], Any] = {}
+    for item in extra:
+        records[item.kind, item.id] = item
     runs: dict[RecordId, list[Path]] = defaultdict(list)
     for content, transform in sorted(set(ingested)):
         if ledger.artifact(content) is None:
@@ -178,7 +212,8 @@ def assemble(
     if silent := set(streams) - set(runs):
         raise PackageError(f"streams without a series run: {sorted(silent)}")
 
-    with _staged(destination) as staging:
+    staging = _open_staging(destination)
+    try:
         scratch = staging / ".scratch"
         scratch.mkdir()
         series: dict[RecordId, Content] = {}
@@ -196,7 +231,46 @@ def assemble(
         copied = _lay_out(staging, contents, movable=scratch)
         scratch.rmdir()  # every merged series and landed source was moved into place
         _check_copies(staging, contents, copied)
-    return package_id(contents)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return StagedPackage(staging, destination, package_id(contents))
+
+
+def publish(staged: StagedPackage) -> ContentId:
+    """Flush a staged package and rename it into place. Its destination must still not exist."""
+    _rename_into_place(staged.path, staged.destination)
+    return staged.id
+
+
+def assemble(
+    destination: Path,
+    workspace: Workspace,
+    ledger: SourceLedger,
+    ingested: Iterable[tuple[ContentId, RecordId]],
+    *,
+    materialise: Iterable[ContentId] = (),
+    source: SourceOpener | None = None,
+    extra: Iterable[Any] = (),
+) -> ContentId:
+    """``stage`` then ``publish``: write the package of ``ingested`` sources at ``destination``.
+
+    Returns the package id; the package appears whole or not at all.
+    """
+    staged = stage(
+        destination,
+        workspace,
+        ledger,
+        ingested,
+        materialise=materialise,
+        source=source,
+        extra=extra,
+    )
+    try:
+        return publish(staged)
+    except BaseException:
+        staged.discard()
+        raise
 
 
 def _head_locations(

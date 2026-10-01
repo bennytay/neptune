@@ -28,10 +28,12 @@ from neptune.model.series import (
 )
 from neptune.store import series as series_module
 from neptune.store.series import (
+    RUN_KEY,
     SERIES_SETTINGS,
     STREAM_KEY,
     SeriesError,
     arrow_schema,
+    check_run,
     check_series,
     check_settings,
     merge_runs,
@@ -426,6 +428,76 @@ def test_every_row_is_checked_wherever_it_sits(
     seqs = table.set_column(seq, table.schema.field(seq), pa.array([0, 1, 2, 3, -4, 5, 6]))
     with pytest.raises(SeriesError, match="never negative"):
         check_series(STREAM, raw(tmp_path, seqs))
+
+
+# --- Checking one run (the runtime's cross-chunk check, ADR 0028 §5) ---------------------------
+
+
+def test_a_run_reports_its_rows_least_and_greatest_seq_and_columns(tmp_path: Path) -> None:
+    run = tmp_path / "run.parquet"
+    write_run([batch([(5, 1), (3, 9), (9, None)]), batch([(4, 0)])], run)  # sorted by time
+    checked = check_run(STREAM, run)
+    assert (checked.rows, checked.seq) == (4, (3, 9))
+    assert [name for name, _, _ in checked.columns] == sorted(c.name for c in batch([]).columns)
+    write_run([batch([(42, 7)])], tmp_path / "one.parquet")
+    one = check_run(STREAM, tmp_path / "one.parquet")
+    assert (one.rows, one.seq, one.columns) == (1, (42, 42), checked.columns)
+    write_run([batch([])], tmp_path / "empty.parquet")
+    empty = check_run(STREAM, tmp_path / "empty.parquet")
+    assert (empty.rows, empty.seq, empty.columns) == (0, None, checked.columns)
+
+
+def test_a_seq_range_spans_batches_of_a_long_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(series_module, "READ_ROWS", 3)
+    rows = [(seq, 100 - seq) for seq in range(10, 20)]  # time falls as seq rises
+    write_run([batch(rows)], tmp_path / "run.parquet")
+    assert check_run(STREAM, tmp_path / "run.parquet").seq == (10, 19)
+
+
+def test_runs_that_merge_differently_report_different_columns(tmp_path: Path) -> None:
+    extra = SeriesColumn("value/w", ColumnType.INT8, (1,))
+    write_run([batch([(0, 1)])], tmp_path / "narrow.parquet")
+    write_run([batch([(1, 2)], extra=(extra,))], tmp_path / "wide.parquet")
+    narrow = check_run(STREAM, tmp_path / "narrow.parquet")
+    assert narrow.columns != check_run(STREAM, tmp_path / "wide.parquet").columns
+
+
+def raw_run(tmp_path: Path, table: Any, stream: bytes | None = None) -> Path:
+    """A run written around the series writer, for what it would never write."""
+    path = tmp_path / "raw-run.parquet"
+    metadata = {RUN_KEY: STREAM.id.encode() if stream is None else stream}
+    pq.write_table(table.replace_schema_metadata(metadata), path)
+    return path
+
+
+def test_check_run_refuses_what_would_break_the_merge_or_the_package(tmp_path: Path) -> None:
+    assert check_run(STREAM, raw_run(tmp_path, good_table([(0, 1), (1, 2)]))).rows == 2
+    other = make_stream(declared_at=64)
+    write_run([batch([(0, 1)])], tmp_path / "mine.parquet")
+    with pytest.raises(SeriesError, match="is not a run of"):
+        check_run(other, tmp_path / "mine.parquet")
+    with pytest.raises(SeriesError, match="names its stream"):
+        check_run(STREAM, raw_run(tmp_path, good_table([(0, 1)]), b"not an id"))
+    two_clocks = make_stream((CLOCK, CLOCK_1))
+    write_run([batch([(0, 1)], stream=two_clocks)], tmp_path / "one-clock.parquet")
+    with pytest.raises(SeriesError, match=r"lacks columns \['time/1'\]"):
+        check_run(two_clocks, tmp_path / "one-clock.parquet")
+    table = good_table([(0, 1), (1, 2)])
+    value = table.schema.get_field_index("value/v")
+    nulled = table.set_column(value, "value/v", pa.array([1.0, None], type=pa.float32()))
+    with pytest.raises(SeriesError, match="holds nulls but has no state column"):
+        check_run(STREAM, raw_run(tmp_path, nulled))
+    with pytest.raises(SeriesError, match="not sorted"):
+        check_run(STREAM, raw_run(tmp_path, good_table([(1, 2), (0, 1)])))
+    locator = table.schema.get_field_index("locator/0/offset")
+    negative = table.set_column(locator, table.schema.field(locator), pa.array([-4, 12]))
+    with pytest.raises(SeriesError, match="offset"):
+        check_run(STREAM, raw_run(tmp_path, negative))
+    (tmp_path / "junk.parquet").write_bytes(b"PAR1 not really")
+    with pytest.raises(SeriesError, match="not a readable Parquet file"):
+        check_run(STREAM, tmp_path / "junk.parquet")
 
 
 def test_the_settings_name_the_writer() -> None:

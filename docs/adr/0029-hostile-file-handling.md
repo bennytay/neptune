@@ -177,9 +177,10 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
   a zip central directory of at most 1 KiB per allowed member (about 10 MiB by default) holding
   at most `max_members` entries; a report holds every member's declared name. The committed
   hostile fixtures peak near 1 MiB, the bombs the unit tests generate under 4 MiB (tracemalloc).
-- The workspace wiring (a `<workspace>/scratch` root beside ADR 0026's `staging/`, `clear_scratch`
-  at start-up) is a follow-up; MVL-6 catches `ShortReadError` and `SourceChangedError` per source
-  and records `short_read_finding` and `verify_artifact`'s findings.
+- Wiring is a follow-up: a `<workspace>/scratch` root beside ADR 0026's `staging/`, with
+  `clear_scratch` at start-up; and in the job runtime (ADR 0028), which already turns
+  `SourceChangedError` into a per-source finding, catching `ShortReadError` beside it and
+  recording `short_read_finding` and `verify_artifact`'s findings.
 - MVL-8's probe engine (ADR 0027) lists container members under its own bounded policy to select
   adapters; `inspect_archive` is the ingest-time limit. Whether the two fuse into one pass is a
   follow-up decision.

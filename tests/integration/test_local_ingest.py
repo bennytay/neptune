@@ -31,7 +31,7 @@ from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.package import Storage
 from neptune.model.source import LocalPath, SourceRevision
-from neptune.store.assemble import _sibling, assemble, export
+from neptune.store.assemble import _sibling, assemble, export, publish, stage
 from neptune.store.package import PackageError, copy_file, read_package
 from neptune.store.series import SERIES_SETTINGS, read_rows
 from neptune.store.workspace import Workspace
@@ -191,6 +191,28 @@ def test_a_second_run_resumes_and_builds_the_same_package(corpus: Path, tmp_path
     assert first == second == fresh
     with pytest.raises(PackageError, match="written once"):
         ingest_local(corpus, workspace, registry(), tmp_path / "a")
+
+
+def test_a_staged_package_waits_beside_its_destination_until_published(
+    corpus: Path, tmp_path: Path
+) -> None:
+    workspace = Workspace(tmp_path / "home")
+    ledger, ingested = ingest_into(corpus, workspace, registry())
+    destination = tmp_path / "package"
+    staged = stage(destination, workspace, ledger, ingested)
+    assert not destination.exists()
+    assert staged.path.parent == tmp_path and staged.path.name.startswith(".package.")
+    assert read_package(staged.path).id == staged.id  # whole before it is published
+    assert publish(staged) == staged.id == assemble(tmp_path / "b", workspace, ledger, ingested)
+    assert read_package(destination).id == staged.id and not staged.path.exists()
+
+    late = stage(tmp_path / "late", workspace, ledger, ingested)
+    (tmp_path / "late").mkdir()  # the destination appeared while the package was staged
+    with pytest.raises(PackageError, match="written once"):
+        publish(late)
+    assert list((tmp_path / "late").iterdir()) == []  # never replaced
+    late.discard()
+    assert not late.path.exists()
 
 
 def test_an_exported_package_holds_every_source_and_the_same_receipt(

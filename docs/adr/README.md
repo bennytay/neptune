@@ -32,4 +32,5 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0025](0025-series-files-sorted-merged-and-pinned.md) | Series files: one sorted Parquet file per stream, merged from runs, pinned settings | Accepted |
 | [0026](0026-local-workspace-in-place-reads-and-assembly.md) | The local workspace, reading sources in place, and assembling packages | Accepted |
 | [0027](0027-probe-engine-sniffing-containers-and-selection-findings.md) | The probe engine: sniffing, bounded container inspection, and selection as findings | Accepted |
+| [0028](0028-ingest-job-phases-resume-quarantine-and-events.md) | The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events | Accepted |
 | [0029](0029-hostile-file-handling.md) | Hostile file handling: walk findings, archive limits, source verification, scratch space | Accepted |
