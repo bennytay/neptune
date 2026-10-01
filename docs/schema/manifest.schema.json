@@ -154,11 +154,13 @@
                     "type": "string"
                   },
                   {
-                    "minimum": 0,
-                    "type": "integer"
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
                   }
                 ],
-                "description": "An id; a whole number here is read as text, exactly as written."
+                "description": "An id; a number or boolean here is read as text, exactly as written."
               },
               "name": {
                 "anyOf": [
@@ -223,11 +225,13 @@
                     "type": "string"
                   },
                   {
-                    "minimum": 0,
-                    "type": "integer"
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
                   }
                 ],
-                "description": "An id; a whole number here is read as text, exactly as written."
+                "description": "An id; a number or boolean here is read as text, exactly as written."
               },
               "name": {
                 "anyOf": [
@@ -254,10 +258,13 @@
                       "type": "string"
                     },
                     {
-                      "type": "number"
+                      "type": [
+                        "number",
+                        "boolean"
+                      ]
                     }
                   ],
-                  "description": "Root-relative, '/'-separated: a file, or a directory and all below it. A number here is read as text, exactly as written."
+                  "description": "Root-relative, '/'-separated: a file, or a directory and all below it. A number or boolean here is read as text, exactly as written."
                 },
                 "minItems": 1,
                 "type": "array"
@@ -269,11 +276,13 @@
                     "type": "string"
                   },
                   {
-                    "minimum": 0,
-                    "type": "integer"
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
                   }
                 ],
-                "description": "An id; a whole number here is read as text, exactly as written."
+                "description": "An id; a number or boolean here is read as text, exactly as written."
               },
               "software": {
                 "items": {
@@ -283,11 +292,13 @@
                       "type": "string"
                     },
                     {
-                      "minimum": 0,
-                      "type": "integer"
+                      "type": [
+                        "number",
+                        "boolean"
+                      ]
                     }
                   ],
-                  "description": "An id; a whole number here is read as text, exactly as written."
+                  "description": "An id; a number or boolean here is read as text, exactly as written."
                 },
                 "type": "array"
               },
@@ -298,11 +309,13 @@
                     "type": "string"
                   },
                   {
-                    "minimum": 0,
-                    "type": "integer"
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
                   }
                 ],
-                "description": "An id; a whole number here is read as text, exactly as written."
+                "description": "An id; a number or boolean here is read as text, exactly as written."
               }
             },
             "required": [
@@ -351,11 +364,13 @@
                     "type": "string"
                   },
                   {
-                    "minimum": 0,
-                    "type": "integer"
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
                   }
                 ],
-                "description": "An id; a whole number here is read as text, exactly as written."
+                "description": "An id; a number or boolean here is read as text, exactly as written."
               },
               "name": {
                 "anyOf": [
@@ -419,11 +434,13 @@
                     "type": "string"
                   },
                   {
-                    "minimum": 0,
-                    "type": "integer"
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
                   }
                 ],
-                "description": "An id; a whole number here is read as text, exactly as written."
+                "description": "An id; a number or boolean here is read as text, exactly as written."
               },
               "name": {
                 "anyOf": [
@@ -496,11 +513,13 @@
                     "type": "string"
                   },
                   {
-                    "minimum": 0,
-                    "type": "integer"
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
                   }
                 ],
-                "description": "An id; a whole number here is read as text, exactly as written."
+                "description": "An id; a number or boolean here is read as text, exactly as written."
               },
               "glob": {
                 "description": "Ignore-rule glob syntax, anchored at the root.",
@@ -522,10 +541,13 @@
                     "type": "string"
                   },
                   {
-                    "type": "number"
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
                   }
                 ],
-                "description": "Root-relative, '/'-separated: a file, or a directory and all below it. A number here is read as text, exactly as written."
+                "description": "Root-relative, '/'-separated: a file, or a directory and all below it. A number or boolean here is read as text, exactly as written."
               }
             },
             "required": [
@@ -573,11 +595,13 @@
                     "type": "string"
                   },
                   {
-                    "minimum": 0,
-                    "type": "integer"
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
                   }
                 ],
-                "description": "An id; a whole number here is read as text, exactly as written."
+                "description": "An id; a number or boolean here is read as text, exactly as written."
               },
               "name": {
                 "anyOf": [

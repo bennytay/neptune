@@ -520,18 +520,18 @@ def json_schema() -> JsonObject:
     ident: JsonObject = {
         "anyOf": [
             {"type": "string", "pattern": f"^{_ID.pattern}$"},
-            {"type": "integer", "minimum": 0},
+            {"type": ["number", "boolean"]},
         ],
-        "description": "An id; a whole number here is read as text, exactly as written.",
+        "description": "An id; a number or boolean here is read as text, exactly as written.",
     }
     path: JsonObject = {
         "anyOf": [
             {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$"},
-            {"type": "number"},
+            {"type": ["number", "boolean"]},
         ],
         "description": (
-            "Root-relative, '/'-separated: a file, or a directory and all below it. A number "
-            "here is read as text, exactly as written."
+            "Root-relative, '/'-separated: a file, or a directory and all below it. A number or "
+            "boolean here is read as text, exactly as written."
         ),
     }
     aliases: JsonObject = {
