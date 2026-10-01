@@ -1,12 +1,12 @@
 """MemoryStore seam: records, Protocol conformance, SQL text, the Neo4j stub, a live Postgres run.
 
 Nothing here needs a database except the ``@slow`` live tests, which run only when
-``NEPTUNE_MEMORY_PG_DSN`` names a PostgreSQL with pgvector + Apache AGE and psycopg imports.
+``NEPTUNE_MEMORY_PG_DSN`` names a PostgreSQL with pgvector and psycopg imports. Apache AGE is
+optional (ADR 0004): only the snapshot check needs it, and it skips without it.
 """
 
 from __future__ import annotations
 
-import os
 import re
 from collections import deque
 from dataclasses import replace
@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from memory_pg_live import has_age, open_live
 from neptune_memory.store import (
     AsOf,
     ClaimEmbedding,
@@ -186,7 +187,7 @@ def test_query_parameters_are_exactly_what_the_adapter_binds() -> None:
     assert _placeholders(pg.vector_top_k_sql("memory", filtered=False)) == {"query", "k"}
     assert (
         _placeholders(pg.vector_top_k_sql("memory", filtered=True))
-        == {"query", "k", "start", "hops"} | at
+        == {"query", "k", "start", "hops", "exact_limit"} | at
     )
     assert _placeholders(pg.insert_claim_sql("memory")) == set(CLAIM_COLUMNS)
     assert _placeholders(pg.close_claim_sql("memory")) == {"old", "at"}
@@ -217,9 +218,10 @@ def test_thread_sql_returns_every_visible_claim_not_one_per_predicate() -> None:
 def test_walk_expands_each_entity_once() -> None:
     """A visited set bounds the walk by entities, not by paths through hubs or cycles."""
     sql = pg.neighbours_sql("memory")
-    assert "e.other <> ALL (b.seen)" in sql
-    assert "b.seen || n.ents" in sql
+    assert "NOT jsonb_exists(b.seen, e.other)" in sql  # keyed lookup, not a scan (MVL-106)
+    assert "b.seen || n.added" in sql
     assert "DISTINCT ON (e.other)" in sql
+    assert "<> ALL" not in sql
 
 
 def test_ddl_is_schema_qualified_and_rejects_bad_dimensions() -> None:
@@ -278,6 +280,8 @@ def test_adapter_bounds_are_checked_before_any_query() -> None:
         store.write_embeddings([ClaimEmbedding(1, "robot:arm-001", (0.0,))])
     with pytest.raises(ValueError, match="ef_search"):
         PostgresStore(conn, ef_search=0)
+    with pytest.raises(ValueError, match="exact_scope_limit"):
+        PostgresStore(conn, exact_scope_limit=-1)
     assert conn.log == []
 
 
@@ -339,6 +343,38 @@ def test_failed_read_rolls_back() -> None:
     assert (conn.commits, conn.rollbacks) == (0, 1)
 
 
+def test_graph_filtered_search_is_exact_for_a_small_scope_and_hnsw_for_a_wide_one() -> None:
+    """A filtered HNSW scan misses most of a small scope (ADR 0007 §7), so a scope of at most
+    ``exact_limit`` embeddings is scanned exactly, in a materialized CTE the vector index cannot
+    serve; a wider one uses the index. Both branches are gated on one count, so one runs."""
+    sql = pg.vector_top_k_sql("memory", filtered=True)
+    assert "size AS MATERIALIZED" in sql and "candidates AS MATERIALIZED" in sql
+    assert "WHERE (SELECT n FROM size) <= %(exact_limit)s" in sql
+    assert "WHERE (SELECT n FROM size) > %(exact_limit)s" in sql
+    exact = sql.split("candidates AS MATERIALIZED", 1)[1].split("UNION ALL", 1)[0]
+    assert "ORDER BY e.embedding" not in exact  # only the wide branch orders by the index
+    assert "CROSS JOIN LATERAL" in exact and "WHERE e.subject = scope.entity OFFSET 0" in exact
+    assert sql.rstrip().endswith(") hits ORDER BY distance, claim_id")
+    conn = RecordingConnection()
+    PostgresStore(conn, dimensions=2, exact_scope_limit=7).vector_top_k(
+        [0.0, 1.0], 3, within=("site:01", 2, AT)
+    )
+    (params,) = [p for q, p in conn.log if not q.startswith("SET")]
+    assert params["exact_limit"] == 7
+
+
+@pytest.mark.parametrize("filtered", [False, True])
+def test_vector_search_forces_custom_plans_in_its_own_transaction(filtered: bool) -> None:
+    """A generic plan after psycopg's fifth execution would not be the plan G1 measured."""
+    conn = RecordingConnection()
+    within = ("site:01", 2, AT) if filtered else None
+    PostgresStore(conn, dimensions=2).vector_top_k([0.0, 1.0], 3, within=within)
+    statements = [q for q, _ in conn.log]
+    assert "SET LOCAL plan_cache_mode = force_custom_plan" in statements
+    assert statements.index("SET LOCAL plan_cache_mode = force_custom_plan") < len(statements) - 1
+    assert (conn.commits, conn.rollbacks) == (0, 1)  # SET LOCAL ends with the read
+
+
 def test_vector_search_sets_ef_search_locally_from_the_constructor() -> None:
     conn = RecordingConnection()
     PostgresStore(conn, dimensions=2, ef_search=250).vector_top_k([0.0, 1.0], 3)
@@ -346,6 +382,7 @@ def test_vector_search_sets_ef_search_locally_from_the_constructor() -> None:
     assert setup == [
         "SET LOCAL hnsw.ef_search = 250",
         "SET LOCAL hnsw.iterative_scan = relaxed_order",
+        "SET LOCAL plan_cache_mode = force_custom_plan",
     ]
     conn = RecordingConnection()
     PostgresStore(conn, dimensions=2).vector_top_k([0.0, 1.0], 3)
@@ -361,6 +398,49 @@ def test_rebuild_drops_and_recreates_indexes_and_the_optional_graph() -> None:
     conn = RecordingConnection()
     PostgresStore(conn, graph="claimgraph").rebuild()
     assert any("create_graph('claimgraph')" in q for q, _ in conn.log)
+
+
+def test_a_connection_that_cannot_report_its_transaction_status_is_refused() -> None:
+    """Without a status the idle check would pass anything, and the store's commit could end the
+    caller's transaction (MVL-106)."""
+
+    class Silent(RecordingConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            del self.info
+
+    with pytest.raises(TypeError, match="transaction status"):
+        PostgresStore(Silent())
+    conn = RecordingConnection()
+    conn.info.transaction_status = None  # type: ignore[assignment]
+    with pytest.raises(TypeError, match="transaction status"):
+        PostgresStore(conn)
+
+
+@pytest.mark.parametrize("kind", ["read", "write"])
+def test_a_failing_rollback_never_hides_the_original_error(kind: str) -> None:
+    class Broken(RecordingConnection):
+        def cursor(self) -> RecordingCursor:
+            cur = RecordingCursor(self)
+
+            def boom(query: str, params: Any = None) -> None:
+                raise RuntimeError("canceling statement due to statement timeout")
+
+            cur.execute = boom  # type: ignore[method-assign]
+            cur.executemany = boom  # type: ignore[method-assign,assignment]
+            return cur
+
+        def rollback(self) -> None:
+            super().rollback()
+            raise ConnectionError("server closed the connection unexpectedly")
+
+    store = PostgresStore(Broken())
+    with pytest.raises(RuntimeError, match="statement timeout") as caught:
+        if kind == "read":
+            store.as_of_thread("robot:arm-001", AT)
+        else:
+            store.write_claims([claim()])
+    assert any("rollback also failed: ConnectionError" in n for n in caught.value.__notes__)
 
 
 def test_failed_bulk_write_rolls_back_so_the_connection_stays_usable() -> None:
@@ -445,23 +525,7 @@ def _hub(first_id: int) -> list[ClaimRecord]:
 
 @pytest.fixture
 def live() -> Iterator[tuple[Any, PostgresStore]]:
-    dsn = os.environ.get("NEPTUNE_MEMORY_PG_DSN")
-    if not dsn:
-        pytest.skip("NEPTUNE_MEMORY_PG_DSN not set (no PostgreSQL with pgvector + AGE)")
-    psycopg = pytest.importorskip("psycopg")
-    with psycopg.connect(dsn) as conn:
-        conn.execute("DROP SCHEMA IF EXISTS memory_test CASCADE")
-        conn.commit()
-        store = PostgresStore(conn, schema="memory_test", dimensions=3)
-        store.create()
-        yield conn, store
-        conn.rollback()
-        conn.execute("DROP SCHEMA memory_test CASCADE")
-        conn.execute(
-            "SELECT ag_catalog.drop_graph(name, true) FROM ag_catalog.ag_graph "
-            "WHERE name = 'memory_test_graph'"
-        )
-        conn.commit()
+    yield from open_live()
 
 
 @pytest.mark.slow
@@ -501,8 +565,14 @@ def test_live_thread_neighbours_and_vectors_match_the_reference(
         return float(sum((a - b) ** 2 for a, b in zip(e.vector, query, strict=True)) ** 0.5)
 
     exact = sorted((e for e in vectors if e.subject in scope), key=lambda e: (dist(e), e.claim_id))
+    nearest = [round(dist(e), 4) for e in exact[:5]]
     hits = store.vector_top_k(query, 5, within=("site:00", 2, at))
-    assert [round(h.distance, 4) for h in hits] == [round(dist(e), 4) for e in exact[:5]]
+    assert [round(h.distance, 4) for h in hits] == nearest
+    # The wide-scope branch (the HNSW index, filtered) on the same scope: a small index is exact.
+    wide = PostgresStore(conn, schema="memory_test", dimensions=3, exact_scope_limit=0)
+    assert [
+        round(h.distance, 4) for h in wide.vector_top_k(query, 5, within=("site:00", 2, at))
+    ] == nearest
     assert conn.info.transaction_status == 0  # no read left a transaction open
 
 
@@ -528,7 +598,38 @@ def test_live_corroboration_and_supersede_across_known_at(live: tuple[Any, Postg
     with pytest.raises(LookupError):
         store.supersede(3, replace(fix, claim_id=5))
     assert conn.info.transaction_status == 0
-    # The optional AGE snapshot is a rebuild-time copy of the edges.
+
+
+@pytest.mark.slow
+def test_live_repeated_filtered_search_keeps_its_answer_past_auto_prepare(
+    live: tuple[Any, PostgresStore],
+) -> None:
+    """psycopg prepares a statement after five executions; ten identical filtered searches on one
+    connection must return the same hits, with custom plans, and leave the connection idle."""
+    conn, store = live
+    claims = list(generate(DeploymentSpec(claims=2_000, robots=8, sites=2)))
+    store.write_claims(claims)
+    store.write_embeddings(
+        ClaimEmbedding(c.claim_id, c.subject, (float(c.claim_id % 31), float(c.claim_id % 7), 1.0))
+        for c in claims[::2]
+    )
+    store.rebuild()
+    at = AsOf("fleet_utc", SPAN // 2, 2 * SPAN)
+    answers = [store.vector_top_k((3.0, 2.0, 1.0), 5, within=("site:00", 2, at)) for _ in range(10)]
+    assert answers[0] and all(answer == answers[0] for answer in answers)
+    assert conn.info.transaction_status == 0
+    mode = conn.execute("SHOW plan_cache_mode").fetchone()[0]
+    conn.rollback()
+    assert mode == "auto"  # SET LOCAL did not leak out of the read's transaction
+
+
+@pytest.mark.slow
+def test_live_age_snapshot_is_a_rebuild_time_copy_of_the_edges(
+    live: tuple[Any, PostgresStore],
+) -> None:
+    conn, store = live
+    if not has_age(conn):
+        pytest.skip("Apache AGE not installed: the optional snapshot is not checked")
     snap = PostgresStore(conn, schema="memory_test", dimensions=3, graph="memory_test_graph")
     store.write_claims([claim(claim_id=6, object_value=None, object_entity="site:01")])
     snap.rebuild()
