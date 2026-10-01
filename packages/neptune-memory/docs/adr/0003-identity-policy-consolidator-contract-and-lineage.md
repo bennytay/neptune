@@ -37,9 +37,13 @@ land.
    - `operator_assertion` with `predicate = same_as`: an operator's recorded assertion.
      `assertion_kind = stated`.
    Both ends must be nodes of the same type.
-3. **Everything else is a candidate, never a fact.** Two same-type nodes that only cite a common source (one
-   URDF, one register CSV) get a `same_as_candidate` claim each way. Its evidence is every ref into the shared
-   sources and its records are the threads that cite them, so each candidate carries its own evidence. ADR
+3. **Everything else is a candidate, never a fact.** Two same-type nodes whose threads cite an identical
+   evidence ref (same source, same locator: one whole URDF), and whose logical ids are in different
+   namespaces, get a `same_as_candidate` claim each way. Two values in one namespace (two serials) are
+   declared distinct, and different parts of one file (rows of a register, channels of a log) are not shared
+   evidence, so neither yields a candidate; this also keeps candidates from growing with the square of a
+   fleet. Its evidence is the shared refs and its records are the threads that cite them, so each candidate
+   carries its own evidence. ADR
    0002's `ClaimObject` cannot be `Ambiguous`, so the ambiguity is the predicate: a subject's candidate claims
    plus the subject itself (the "distinct" reading) are its `Ambiguous` readings (`same_as_candidates`), at
    least two by construction. Nodes already joined by `same_as` are not candidates for each other.

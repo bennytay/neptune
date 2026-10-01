@@ -264,13 +264,24 @@ def test_crashing_consolidator_is_a_finding(error: Exception, message: str) -> N
     assert [(f.code, f.message) for f in result.findings] == [("consolidate.failed", message)]
 
 
-@pytest.mark.parametrize(
-    "output",
-    [None, ConsolidatorOutput(("not a draft",)), ConsolidatorOutput((), ("x",))],  # type: ignore[arg-type]
-)
+@pytest.mark.parametrize("output", [None, "claims", (_draft(),)])
 def test_wrong_output_type_is_a_finding(output: object) -> None:
     result = _run(Returns(output))
     assert [f.code for f in result.findings] == ["consolidate.bad_output"]
+
+
+@pytest.mark.parametrize(
+    ("drafts", "findings"),
+    [(None, ()), (("not a draft",), ()), ((), ("not a finding",))],
+)
+def test_malformed_output_is_refused_at_construction(drafts: object, findings: object) -> None:
+    with pytest.raises(TypeError):
+        ConsolidatorOutput(drafts, findings)  # type: ignore[arg-type]
+
+
+def test_generator_output_is_materialised_once() -> None:
+    output = ConsolidatorOutput(d for d in (_draft(),))  # type: ignore[arg-type]
+    assert len(_run(Returns(output)).claims) == 1
 
 
 PLAN: list[tuple[Consolidator, Mapping[str, JsonValue]]] = [
@@ -318,3 +329,10 @@ def test_finding_id_is_content_derived_and_records_are_sorted() -> None:
         ConsolidationFinding("nodot", Severity.INFO, "m")
     with pytest.raises(ValueError, match="representable"):
         ConsolidationFinding("x.y", Severity.INFO, "m", details={"v": float("nan")})
+    with pytest.raises(ValueError, match="record id"):
+        ConsolidationFinding("x.y", Severity.INFO, "m", ("not-a-record-id",))  # type: ignore[arg-type]
+    nested: list[JsonValue] = [1]
+    finding = ConsolidationFinding("x.y", Severity.INFO, "m", details={"v": nested})
+    before = finding.id
+    nested.append(2)
+    assert finding.id == before

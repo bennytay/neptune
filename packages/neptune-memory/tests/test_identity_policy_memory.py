@@ -230,9 +230,36 @@ def test_two_robots_same_urdf_stay_two_nodes() -> None:
     a, b = node_ref(MACHINE, LEG_A), node_ref(MACHINE, LEG_B)
     assert nodes(_ledger(_same_urdf())) == (a, b)
     result = _run(_same_urdf())
+    # Two serials in one namespace are declared distinct: no same_as, not even a candidate.
+    assert not result.claims and not result.findings
+
+
+LEG_B_BAG = LogicalId("ros2.namespace", "/anymal_b")
+
+
+def _same_urdf_undeclared() -> dict[str, list[Record]]:
+    return {
+        "pkg-a": [_thread(LEG_A, SHARED_URDF, content_id(b"bag a"))],
+        "pkg-b": [_thread(LEG_B_BAG, SHARED_URDF, content_id(b"bag b"))],
+    }
+
+
+def test_same_urdf_without_comparable_identifiers_is_at_most_a_candidate() -> None:
+    a, b = node_ref(MACHINE, LEG_A), node_ref(MACHINE, LEG_B_BAG)
+    assert nodes(_ledger(_same_urdf_undeclared())) == (b, a)
+    result = _run(_same_urdf_undeclared())
     assert not _of(result, SAME_AS)
     assert {(c.subject, c.object) for c in _of(result, SAME_AS_CANDIDATE)} == {(a, b), (b, a)}
     assert same_as_candidates(result.claims, a) == (a, b)
+
+
+def test_different_parts_of_one_file_are_not_shared_evidence() -> None:
+    row = {**_thread(AMR_ROW, BAG1), "evidence": [_cite(REGISTER, 20)]}
+    other = {
+        **_thread(AMR_BAG, BAG1),
+        "evidence": [EvidenceRef(REGISTER, (ByteRange(20, 20),)).to_json()],
+    }
+    assert not _run({"pkg": [row, other]}).claims
 
 
 def test_shared_source_across_node_types_is_not_a_candidate() -> None:
@@ -337,7 +364,7 @@ GOOD = _thread(LEG_A, SHARED_URDF)
     ],
 )
 def test_malformed_records_are_findings_and_the_build_survives(record: Record) -> None:
-    packages = _same_urdf()
+    packages = _same_urdf_undeclared()
     packages["pkg-x"] = [record]
     result = _run(packages)
     assert [f.code for f in result.findings] == ["identity.malformed_record"]

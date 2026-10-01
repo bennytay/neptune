@@ -23,6 +23,7 @@ from neptune.model.ids import (
     check_text,
     check_token,
     parse_config_hash,
+    parse_record_id,
 )
 from neptune.model.knowledge import Knowledge, NotApplicable
 from neptune_memory.schema.claim import Claim, ClaimProvenance, is_inferred
@@ -123,9 +124,13 @@ class ConsolidationFinding:
         if "." not in self.code:
             raise ValueError(f"finding code is <producer>.<name>: {self.code!r}")
         check_text("message", self.message)
-        canonical_json.dumps(dict(self.details))  # CanonicalJsonError (a ValueError) if not
+        for record in self.records:
+            parse_record_id(record)
+        # A deep, canonical copy: CanonicalJsonError (a ValueError) if not representable, and
+        # immune to the caller mutating what it passed in.
+        details = canonical_json.loads(canonical_json.dumps(dict(self.details)))
         object.__setattr__(self, "records", tuple(sorted(set(self.records))))
-        object.__setattr__(self, "details", dict(self.details))
+        object.__setattr__(self, "details", details)
 
     @property
     def id(self) -> RecordId:
@@ -150,6 +155,15 @@ class ConsolidatorOutput:
 
     drafts: tuple[ClaimDraft, ...] = ()
     findings: tuple[ConsolidationFinding, ...] = ()
+
+    def __post_init__(self) -> None:
+        drafts, findings = tuple(self.drafts), tuple(self.findings)  # TypeError if not iterable
+        if not all(isinstance(d, ClaimDraft) for d in drafts):
+            raise TypeError("drafts must be ClaimDrafts")
+        if not all(isinstance(f, ConsolidationFinding) for f in findings):
+            raise TypeError("findings must be ConsolidationFindings")
+        object.__setattr__(self, "drafts", drafts)
+        object.__setattr__(self, "findings", findings)
 
 
 @runtime_checkable
@@ -283,18 +297,14 @@ def run_consolidator(
         model=model,
     )
     try:
-        output = consolidator.consolidate(ledger, tuple(previous), config)
+        output: object = consolidator.consolidate(ledger, tuple(previous), config)
     except Exception as exc:  # partial success: a crashing consolidator is a finding
         message = f"{type(exc).__name__}: {exc}"
         if _safe_text(message) != message:
             message = type(exc).__name__
         return Consolidation(transform, (), (_finding("failed", transform, message),))
-    if not (
-        isinstance(output, ConsolidatorOutput)
-        and all(isinstance(d, ClaimDraft) for d in output.drafts)
-        and all(isinstance(f, ConsolidationFinding) for f in output.findings)
-    ):
-        message = "consolidate() must return a ConsolidatorOutput of ClaimDrafts and findings"
+    if not isinstance(output, ConsolidatorOutput):  # its own fields are checked on construction
+        message = "consolidate() must return a ConsolidatorOutput"
         return Consolidation(transform, (), (_finding("bad_output", transform, message),))
     claims: dict[ClaimId, Claim] = {}
     findings: dict[RecordId, ConsolidationFinding] = {f.id: f for f in output.findings}

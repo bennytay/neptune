@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Final, Literal, TypeVar
 from neptune.identity import canonical_json
 from neptune.model.finding import Severity
 from neptune.model.ids import (
-    ExternalObjectRef,
     LogicalId,
     RecordId,
     check_text,
@@ -274,11 +273,8 @@ def nodes(ledger: LedgerReader) -> tuple[NodeRef, ...]:
     return tuple(node.ref for node in _read(ledger).nodes.values())
 
 
-def _source_key(ref: EvidenceRef) -> bytes:
-    source = ref.source
-    return canonical_json.dumps(
-        source.to_json() if isinstance(source, ExternalObjectRef) else source
-    )
+def _ref_key(ref: EvidenceRef) -> bytes:
+    return canonical_json.dumps(ref.to_json())
 
 
 class IdentityConsolidator:
@@ -364,22 +360,25 @@ def _same_as(view: _View, link: _Link) -> ClaimDraft | ConsolidationFinding:
 
 
 def _candidates(view: _View, components: _Components) -> list[ClaimDraft]:
-    """One claim per ordered pair of same-type nodes citing a common source, not already same_as.
+    """One claim each way per pair of nodes that cite one identical evidence ref and nothing more.
 
-    Evidence is every ref of either node's threads into the shared sources; records are those
-    threads. Valid from the subject's first thread (by record id) citing a shared source.
+    A pair qualifies when both nodes have the same type, logical ids in different namespaces (two
+    values in one namespace are declared distinct), and are not already joined by ``same_as``.
+    Evidence is the shared refs; records are the threads citing them. Valid from the subject's
+    first such thread (by record id). Citing different parts of one file (rows of a register,
+    channels of a log) is not shared evidence.
     """
     citing: dict[bytes, set[bytes]] = {}
     for key, node in view.nodes.items():
         for thread in node.threads:
             for ref in thread.evidence:
-                citing.setdefault(_source_key(ref), set()).add(key)
+                citing.setdefault(_ref_key(ref), set()).add(key)
     pairs: dict[tuple[bytes, bytes], set[bytes]] = {}
-    for source, keys in citing.items():
+    for ref_key, keys in citing.items():
         for a in keys:
             for b in keys:
-                if a != b and view.nodes[a].ref.node_type is view.nodes[b].ref.node_type:
-                    pairs.setdefault((a, b), set()).add(source)
+                if a != b and _comparable(view.nodes[a], view.nodes[b]):
+                    pairs.setdefault((a, b), set()).add(ref_key)
     drafts: list[ClaimDraft] = []
     for (a, b), shared in sorted(pairs.items()):
         if components.find(a) == components.find(b):
@@ -389,7 +388,7 @@ def _candidates(view: _View, components: _Components) -> list[ClaimDraft]:
             for key in (a, b)
             for thread in view.nodes[key].threads
             for ref in thread.evidence
-            if _source_key(ref) in shared
+            if _ref_key(ref) in shared
         ]
         first = next(thread for thread, _ in cited if _key(thread.node) == a)
         drafts.append(
@@ -404,6 +403,11 @@ def _candidates(view: _View, components: _Components) -> list[ClaimDraft]:
             )
         )
     return drafts
+
+
+def _comparable(a: _Node, b: _Node) -> bool:
+    same_type = a.ref.node_type is b.ref.node_type
+    return same_type and a.threads[0].node.namespace != b.threads[0].node.namespace
 
 
 def same_as_candidates(claims: Sequence[Claim], subject: NodeRef) -> tuple[NodeRef, ...]:
