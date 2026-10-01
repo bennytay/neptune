@@ -7,4 +7,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 
 | ADR | Title | Status |
 |---|---|---|
-| — | _No decisions yet._ | — |
+| [0001](0001-monorepo-workspace-and-merge-queue.md) | One uv workspace, path-selected CI jobs behind one `check`, and a merge queue on main | Accepted |

@@ -26,5 +26,7 @@ Linear, review, merge) apply unchanged; this file adds what is specific to this 
 <!-- BEGIN layer-specific: owned by this package's coordinator; replace the stub below. -->
 ## Layer-specific rules
 
-_Stub._ State what this layer is, what it must never become, and its own non-negotiables.
+_Stub; Platform fills this in._ Platform owns the cross-layer contracts, security, deployment and
+integration, plus the monorepo plumbing (workspace, package template, CI plan, merge queue;
+[ADR 0001](docs/adr/0001-monorepo-workspace-and-merge-queue.md)).
 <!-- END layer-specific -->
