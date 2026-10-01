@@ -107,6 +107,11 @@ Calibrate against the bands, so equal evidence gives equal confidence across ada
 
 Never decide from the name alone when the bytes can say: a renamed file must still be read.
 
+Two adapters are generic: `text` claims any UTF-8 at `GENERIC`, and `config` claims any JSON, TOML or YAML
+document with a mapping or sequence root at `STRUCTURE` (ADR 0037 §7). A format carried in one of those
+(rosbag2 `metadata.yaml`, a calibration YAML, GeoJSON) must check its own structure and claim `VERIFIED`,
+or it ties with or loses to them.
+
 ## Blank, default and sentinel fields (ADR 0004 §5, ADR 0011)
 
 | Source shows | Emit | Never |
@@ -142,7 +147,8 @@ need finer locators (an adapter step if necessary), never a counter.
   the streams it touched.
 - **No new fields.** Record kinds are frozen from schema version 1. Something your format declares that no
   field holds is a new record kind naming the record it extends, added by ADR; until then it stays cited
-  in the bytes.
+  in the bytes. A new kind declares `since`, the version that adds it, so no other package's bytes change
+  (ADR 0037 §1).
 
 ## Streams and series (ADR 0018)
 
@@ -181,6 +187,21 @@ For sources that describe machines (manifests, robot descriptions, flight logs, 
 - Calibration: one `Calibration` per calibrated subject, parameters under their declared names with
   numbers in source order, and extrinsics as `FrameTransform`s in the calibration file's own graph,
   direction `Ambiguous` unless the format says which way they map.
+
+## Configuration (ADR 0037)
+
+For parameter files and other configuration documents (the `config` adapter reads JSON, YAML and TOML):
+
+- One `ConfigurationSnapshot` per document and one `ConfigurationValue` per node, in document order,
+  each citing a `JsonPointer` to it and its value citing its exact span. A repeated key keeps every
+  entry, addressed by position; a finding says it repeats.
+- A scalar keeps its declared `text` beside its typed `value`. Type only by what the format defines:
+  JSON's and TOML's grammars, YAML's tag or the YAML version the document declares. Where versions
+  disagree and none is declared, the value is `Ambiguous`. A null the format defines is `KnownAbsent`.
+- Never follow a reference out of the document or expand one inside it: a YAML alias is a value that
+  names its anchor's path, and an `!include` tag is the application's to read (`Unknown` plus a finding).
+- A value's meaning is not yours: a key named `wheel_radius` is a number, with a unit only where the
+  document states one.
 
 ## World and record context (ADR 0020)
 
