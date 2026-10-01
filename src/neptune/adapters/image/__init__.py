@@ -160,8 +160,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "max_value_bytes",
             DEFAULT_MAX_VALUE_BYTES,
             "the largest value copied into a row cell (an IFD value, a PNG or JPEG text, an XMP"
-            " namespace, path or value). A larger one is not copied and the bytes hold it: a text or"
-            " XMP cell is NotCovered and one image.value_not_copied per table cites the first"
+            " namespace, path or value). A larger one is not copied and the bytes hold it: a text"
+            " or XMP cell is NotCovered and one image.value_not_copied per table cites the first"
             " cells and counts the rest; an IFD value is left out of its row, with a finding"
             " citing its bytes",
         ),
@@ -184,9 +184,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "assertion_kinds",
             "stated: what the file's writer or camera declares (every IFD, XMP, ICC and text table"
             " and row, JFIF, Adobe, capture time, position, device, orientation); observed: the"
-            " measured raster structure (IHDR, SOFn, VP8*, the BMP file header, the PNM header) and"
-            " the Image's size; a BMP DIB header and an ANIM chunk declare density, colour endpoints,"
-            " intent and background, so they are stated",
+            " measured raster structure (IHDR, SOFn, VP8*, the BMP file header, the PNM header)"
+            " and the Image's size; a BMP DIB header and an ANIM chunk declare density, colour"
+            " endpoints, intent and background, so they are stated",
         ),
         Documented(
             "capture",
