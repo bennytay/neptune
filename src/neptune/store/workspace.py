@@ -183,7 +183,7 @@ class Workspace:
     def allow_network(self, allowed: bool) -> None:
         """Leave or enter local-only mode. Remembered by the workspace."""
         self._settings = {**self._settings, "local_only": not allowed}
-        self._save_settings({"local_only": not allowed})
+        self._save_settings(self._settings)
 
     def require_network(self, purpose: str) -> None:
         """Call before any network use; refused while the workspace is local-only."""

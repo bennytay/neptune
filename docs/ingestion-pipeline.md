@@ -25,8 +25,8 @@ records with their own provenance and never rewrites what stages 1–10 produced
 
 | Concern | Owner | Mechanism |
 |---|---|---|
-| Resume after crash | runtime | deterministic chunk ids + the workspace's committed chunks and saved plans (ADR 0028 §2) |
-| Cache | runtime | key = chunk id, which covers (source id, adapter id, adapter version, config hash, context) |
+| Resume after crash | runtime | deterministic chunk ids + the workspace's committed chunks and saved plans (ADR 0026; ADR 0028 §2) |
+| Cache | runtime | key = chunk id, which covers (source id, adapter id, adapter version, config hash, context) (ADR 0024 §4) |
 | Partial failure | runtime | per-chunk isolation and retries; adapter crash → finding, the source is quarantined, the job continues (ADR 0028 §3) |
 | Sandboxing | runtime | subprocess with CPU/memory/time limits (MVL-10) |
 | Adapter-local problems | adapter | `IngestFinding`s in the chunk output |

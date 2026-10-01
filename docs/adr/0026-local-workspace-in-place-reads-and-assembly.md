@@ -40,9 +40,14 @@ package is built from committed work, how it becomes portable, and what "local-o
    place, so it appears whole or not at all; an existing destination is refused, as packages are
    written once. The manifest records `store.series` whenever there are series.
 5. **Portable export** (`export`) copies a package with every referenced source materialised into
-   `blobs/`, read from the locations its revisions record under a given root and verified as they
-   land. The records and the receipt are the original's; the manifest, and so the package id,
-   differ because the package now holds the bytes. A source not found is an error, not a gap.
+   `blobs/`. Each source is read from the head of a location chain that holds it, opened through
+   the `Source` the caller gives (the store never imports discovery), so the walk's policy applies:
+   a symlink where the file was is refused, not followed. The bytes are streamed into the export
+   and hashed where they land, so what is checked is what ships. The records and the receipt are
+   the original's; the manifest, and so the package id, differ because the package now holds the
+   bytes. A source with no local location, one that cannot be opened, or one that changed since
+   it was hashed is an error, not a gap. The export is written like a package: staged beside its
+   destination, which must not exist, and renamed into place.
 6. **Local-only by default.** A new workspace is local-only. Anything that would use the network
    (object-store connectors, uploads, remote models) calls `require_network(purpose)` first and is
    refused with `LocalOnlyError` until the workspace explicitly allows it; the choice is remembered.
