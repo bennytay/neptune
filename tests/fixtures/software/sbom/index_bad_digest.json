@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.index.v1+json",
+  "manifests": [
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:4b29940e806f2daaa4457597e69375ff0fde556dfba48851b1882db5145842dc",
+      "size": 1024,
+      "platform": {
+        "architecture": "arm64",
+        "os": "linux"
+      },
+      "annotations": {
+        "org.opencontainers.image.ref.name": "amr-runtime",
+        "org.opencontainers.image.version": "1.2.0",
+        "org.opencontainers.image.revision": "8f3c2a1d9e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a"
+      }
+    },
+    {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "md5:00000000000000000000000000000000",
+      "size": 1024,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    }
+  ]
+}

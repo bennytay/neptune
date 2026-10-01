@@ -30,6 +30,7 @@ from neptune_memory.ledger import StubLedger
 from neptune_memory.schema.claim import Claim
 from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.nodes import NodeType
+from neptune_memory.schema.predicates import CORE_PREDICATES
 
 Record = dict[str, object]
 TX = ledger_tx(3)
@@ -369,6 +370,9 @@ GOOD = _thread(LEG_A, SHARED_URDF)
         {**_link("operator_assertion", "o1", LEG_A, LEG_B, operator="ana")},
         _link("operator_assertion", "o2", LEG_A, LEG_B, predicate="same_as", operator=""),
         _link("operator_assertion", "o3", LEG_A, LEG_B, predicate="same_as", operator="\ud800"),
+        {**GOOD, "logical_id": {"namespace": "serial", "value": "   "}},
+        {**GOOD, "logical_id": {"namespace": "serial", "value": " SPOT-1"}},
+        {**_link("identity_link", "pad", LEG_A, LEG_B), "right": {"namespace": "s", "value": "B "}},
     ],
     ids=[
         "bad-id",
@@ -384,6 +388,9 @@ GOOD = _thread(LEG_A, SHARED_URDF)
         "assertion-no-predicate",
         "assertion-empty-operator",
         "assertion-lone-surrogate",
+        "whitespace-only-logical-id",
+        "padded-logical-id",
+        "padded-link-side",
     ],
 )
 def test_malformed_records_are_findings_and_the_build_survives(record: Record) -> None:
@@ -407,10 +414,11 @@ def test_unknown_config_is_a_warning() -> None:
     assert [f.code for f in result.findings] == ["identity.unknown_config"]
 
 
-def test_identity_claims_need_the_identity_vocabulary() -> None:
+def test_identity_predicates_are_core_since_graph_schema_v1() -> None:
     result = run_consolidator(IdentityConsolidator(), _ledger(_drone()), (), {}, recorded_at=TX)
-    assert not result.claims
-    assert {f.code for f in result.findings} == {"consolidate.schema_violation"}
+    assert IDENTITY_PREDICATES is CORE_PREDICATES
+    assert _of(result, SAME_AS)
+    assert not result.findings
 
 
 # --- determinism -------------------------------------------------------------------------------
