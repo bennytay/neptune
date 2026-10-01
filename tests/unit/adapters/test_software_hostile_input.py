@@ -225,6 +225,35 @@ def test_packed_refs_split_lines_on_line_feed_only_as_git_does() -> None:
     assert [ORACLE.known(item.name) for item in ORACLE.items(output)] == ["refs/heads/a"]
 
 
+def test_packed_refs_names_that_are_not_ascii_are_read_or_skipped_never_raised() -> None:
+    sha, peel = "a" * 40, "^" + "b" * 40
+    lines = [
+        f"{sha} refs/heads/caf\u00e9".encode(),  # valid UTF-8, not ASCII: a name
+        sha.encode() + b" refs/heads/bad\xc3(",  # invalid UTF-8: skipped
+        peel.encode(),  # the skipped ref's peel line goes with it
+        sha.encode() + b" refs/tags/\xff\xfe",
+        f"{sha} refs/heads/ok".encode(),
+    ]
+    output = ORACLE.run(b"# pack-refs with: peeled\n" + b"\n".join(lines) + b"\n")
+    assert [ORACLE.known(item.name) for item in ORACLE.items(output)] == [
+        "refs/heads/caf\u00e9",
+        "refs/heads/ok",
+    ]
+    assert ORACLE.codes(output) == ["malformed_entry", "malformed_entry"]
+
+
+def test_a_packed_ref_name_damaged_in_the_fixture_is_a_finding() -> None:
+    data = bytearray(ORACLE.fixture("git/packed-refs"))
+    data[data.index(b"refs/heads/main") + 12] = 0xC3  # the exact case Hypothesis found
+    output = ORACLE.run(bytes(data))
+    assert "malformed_entry" in ORACLE.codes(output)
+    assert all(
+        isinstance(item.name.value, str)
+        for item in ORACLE.items(output)
+        if isinstance(item.name, Known)
+    )
+
+
 def test_a_parser_stack_overflow_in_setup_py_is_a_finding_not_a_crash() -> None:
     data = b'from setuptools import setup\nsetup(name="a", version=' + b"-" * 100_000 + b"1)\n"
     output = ORACLE.run(data)
