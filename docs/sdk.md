@@ -109,9 +109,10 @@ Every SDK call raises only `NeptuneError` subclasses; branch on `error.code`, ne
 | `workspace_unusable` | `WorkspaceUnusableError` | cannot open, write, sweep or lock the workspace |
 | `package_invalid` | `PackageInvalidError` | a package or receipt that does not verify |
 | `job_failed` | `JobFailedError` | the job itself could not proceed |
+| `publish_incomplete` | `PublishIncompleteError` | the job renamed its package into place but could not flush its directory: the package is there, whole, and may not survive a crash |
 
-`invalid_request` (`InvalidRequestError`) is the parent of the first four and `error`
-(`NeptuneError`) of all. A corrupt or unsupported *file* is never an error: it is a finding.
+`invalid_request` (`InvalidRequestError`) is the parent of the first four, `job_failed` of
+`publish_incomplete`, and `error` (`NeptuneError`) of all. A corrupt or unsupported *file* is never an error: it is a finding.
 `JobOptions(...)` with a bad value raises the runtime's `JobError` when you build it.
 
 ## Local-only and remote

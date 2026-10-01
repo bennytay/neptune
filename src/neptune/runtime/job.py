@@ -130,7 +130,7 @@ from neptune.runtime.sandbox import (
     Returned,
     SandboxError,
 )
-from neptune.store.assemble import StagedPackage, publish, stage
+from neptune.store.assemble import NotDurableError, StagedPackage, publish, stage
 from neptune.store.package import (
     PackageError,
     read_package,
@@ -1713,6 +1713,11 @@ class IngestJob:
                 write_envelope(staged.path, envelope)
                 write_cache_report(staged.path, self._cache_report().to_json())
                 package = publish(staged)
+            except NotDurableError as exc:
+                self._staged = None  # renamed into place: nothing staged is left to discard
+                raise JobError(
+                    f"package {staged.id} is in place, but may not survive a crash: {exc}"
+                ) from exc
             except (PackageError, OSError) as exc:
                 raise JobError(f"the package cannot be committed: {exc}") from exc
             self._staged = None

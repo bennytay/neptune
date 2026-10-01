@@ -5,6 +5,7 @@ scan into the root's persisted ledger, read each source in place, select an adap
 each chunk not yet committed, commit it, and assemble the package from the workspace.
 """
 
+import errno
 import importlib.util
 import os
 import shutil
@@ -20,6 +21,7 @@ from typing import Any, Final
 import pyarrow as pa
 import pytest
 
+import neptune.store.assemble
 from neptune.adapters.builtin import builtin_adapters
 from neptune.adapters.check import check_chunk_output, check_plan
 from neptune.adapters.contract import PROBE_HEAD_SIZE, ProbeHints, configure
@@ -31,7 +33,14 @@ from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.package import Storage
 from neptune.model.source import LocalPath, SourceRevision
-from neptune.store.assemble import _sibling, assemble, export, publish, stage
+from neptune.store.assemble import (
+    NotDurableError,
+    _sibling,
+    assemble,
+    export,
+    publish,
+    stage,
+)
 from neptune.store.package import PackageError, copy_file, read_package
 from neptune.store.series import SERIES_SETTINGS, read_rows
 from neptune.store.workspace import Workspace
@@ -213,6 +222,27 @@ def test_a_staged_package_waits_beside_its_destination_until_published(
     assert list((tmp_path / "late").iterdir()) == []  # never replaced
     late.discard()
     assert not late.path.exists()
+
+
+def test_a_publish_whose_last_flush_fails_says_the_package_is_in_place(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the flush after the rename can fail once the package is renamed: ``NotDurableError``,
+    a ``PackageError``, with the package whole at its destination and nothing removed. (No disk
+    fails on cue; the flush is the seam.)"""
+    workspace = Workspace(tmp_path / "home")
+    ledger, ingested = ingest_into(corpus, workspace, registry())
+    staged = stage(tmp_path / "package", workspace, ledger, ingested)
+
+    def unflushable(directory: Path) -> None:
+        raise OSError(errno.EIO, "Input/output error", str(directory))
+
+    monkeypatch.setattr(neptune.store.assemble, "fsync_directory", unflushable)
+    with pytest.raises(NotDurableError, match="is in place") as caught:
+        publish(staged)
+    assert isinstance(caught.value, PackageError)
+    assert isinstance(caught.value.__cause__, OSError)
+    assert read_package(tmp_path / "package").id == staged.id and not staged.path.exists()
 
 
 def test_an_exported_package_holds_every_source_and_the_same_receipt(

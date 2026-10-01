@@ -150,16 +150,31 @@ def _open_staging(destination: Path) -> Path:
     return _sibling(destination)
 
 
+class NotDurableError(PackageError):
+    """The package was renamed into place, but flushing the directory that names it failed.
+
+    It is whole at its destination, and a crash before the disk catches up may still lose its
+    name. Nothing is removed: what failed is the guarantee, not the package. Every other failure
+    of a publish happens before the rename, so the destination is not the publisher's.
+    """
+
+
 def _rename_into_place(staging: Path, destination: Path) -> None:
     """Flush ``staging`` to disk, rename it to ``destination`` in one step, flush where it landed.
 
-    The package appears whole or not at all, and once it has appeared it stays.
+    The package appears whole or not at all, and once it has appeared it stays. If the last
+    flush fails, ``NotDurableError``: the package is in place, but may not survive a crash.
     """
     if destination.exists():
         raise PackageError(f"{destination} exists; a package is written once")
     fsync_tree(staging)
     staging.rename(destination)
-    fsync_directory(destination.parent)
+    try:
+        fsync_directory(destination.parent)
+    except OSError as exc:
+        raise NotDurableError(
+            f"{destination} is in place, but its directory cannot be flushed: {exc}"
+        ) from exc
 
 
 @contextmanager
@@ -328,7 +343,11 @@ def stage(
 
 
 def publish(staged: StagedPackage) -> ContentId:
-    """Flush a staged package and rename it into place. Its destination must still not exist."""
+    """Flush a staged package and rename it into place. Its destination must still not exist.
+
+    ``NotDurableError`` means the rename happened and only the flush after it failed; any other
+    error, that nothing was renamed.
+    """
     _rename_into_place(staged.path, staged.destination)
     return staged.id
 

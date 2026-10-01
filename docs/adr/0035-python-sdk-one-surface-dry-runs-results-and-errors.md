@@ -85,12 +85,16 @@ sandbox without parsing text.
    a `code` that never changes meaning: `invalid_request` (`invalid_source`,
    `invalid_destination`, `destination_exists`, `invalid_configuration`), `unsupported`,
    `network_refused`, `sandbox_unavailable`, `workspace_unusable`, `package_invalid`,
-   `job_failed`. The runtime's or the store's exception is the `__cause__`. A `JobError` is
-   classified by its cause's type, never its text: `SandboxError` → `sandbox_unavailable`,
-   `ConfigError` → `invalid_configuration`, `WorkspaceError` or `ScratchError` →
-   `workspace_unusable`; otherwise, if something is now at the job's destination, another
-   writer took it (publishing is the job's last step) → `destination_exists`; anything else
-   `job_failed`. The SDK checks the call before it builds a
+   `job_failed` (`publish_incomplete`). The runtime's or the store's exception is the
+   `__cause__`. A `JobError` is classified by its cause's type, never its text: `SandboxError` →
+   `sandbox_unavailable`, `ConfigError` → `invalid_configuration`, `WorkspaceError` or
+   `ScratchError` → `workspace_unusable`; the store's `NotDurableError` → `publish_incomplete`.
+   That cause is how the job knows it renamed: the store raises it only when the rename into
+   place succeeded and the flush of the directory holding the package failed, so the package at
+   the destination is the job's, whole, and may not survive a crash. Any other failure happened
+   before the job renamed anything, so if something is now at its destination, another writer
+   took it → `destination_exists`; anything else `job_failed`. The SDK checks the call before it
+   builds a
    job: the source exists and is a directory; nothing is at the destination, not even a dangling
    symlink; the destination is not inside the source (the next ingest of that root would read
    the package as evidence; the runtime does not check this); the adapters register; the options

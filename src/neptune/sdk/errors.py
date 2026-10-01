@@ -18,6 +18,7 @@ message. Where the runtime or the store raised first, that exception is the ``__
     ├── WorkspaceUnusableError          workspace_unusable     cannot open, write, sweep or lock it
     ├── PackageInvalidError             package_invalid        a package that does not verify
     └── JobFailedError                  job_failed             the job itself could not proceed
+        └── PublishIncompleteError      publish_incomplete     in place, but may not survive a crash
 
 A problem with one source is never an error: it is an ``IngestFinding`` in the result. Errors
 are reserved for the call and the job (ADR 0028 §10). ``JobOptions`` validates itself when it is
@@ -31,6 +32,7 @@ from neptune.adapters.contract import ConfigError
 from neptune.discovery.scratch import ScratchError
 from neptune.runtime import JobError
 from neptune.runtime.sandbox import SandboxError
+from neptune.store.assemble import NotDurableError
 from neptune.store.workspace import WorkspaceError
 
 
@@ -113,6 +115,14 @@ class JobFailedError(NeptuneError):
     code: ClassVar[str] = "job_failed"
 
 
+class PublishIncompleteError(JobFailedError):
+    """The job renamed its package into place, but the directory holding it could not be
+    flushed: the package is whole at the destination, and a crash before the disk catches up may
+    lose it. ``read_package`` verifies it; it is the job's own, not another writer's."""
+
+    code: ClassVar[str] = "publish_incomplete"
+
+
 ERRORS: Final[tuple[type[NeptuneError], ...]] = (
     NeptuneError,
     InvalidRequestError,
@@ -126,14 +136,18 @@ ERRORS: Final[tuple[type[NeptuneError], ...]] = (
     WorkspaceUnusableError,
     PackageInvalidError,
     JobFailedError,
+    PublishIncompleteError,
 )
 
 
 def from_job_error(error: JobError, destination: Path | None = None) -> NeptuneError:
     """The SDK error for a runtime ``JobError``, chosen by its cause's type, never its text.
 
-    A job that fails while something is at its ``destination`` did not put it there (publishing
-    is its last step), so another writer took the place a package is written to once:
+    Whether the job renamed its package into place is the job's own knowledge, and its cause
+    says so: ``NotDurableError`` is raised only after the rename (only the flush after it
+    failed), so the package at ``destination`` is the job's: ``PublishIncompleteError``. Any
+    other failure happened before the job renamed anything, so something at its ``destination``
+    now is another writer's, which took the place a package is written to once:
     ``DestinationExistsError``, as if it had been there when the call was checked.
     """
     cause = error.__cause__
@@ -144,6 +158,8 @@ def from_job_error(error: JobError, destination: Path | None = None) -> NeptuneE
         kind = ConfigurationError
     elif isinstance(cause, WorkspaceError | ScratchError):
         kind = WorkspaceUnusableError
+    elif isinstance(cause, NotDurableError):
+        kind = PublishIncompleteError
     elif destination is not None and (destination.exists() or destination.is_symlink()):
         kind = DestinationExistsError
     return kind(str(error))

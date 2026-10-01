@@ -20,11 +20,13 @@ from neptune.sdk import (
     NeptuneError,
     NetworkRefusedError,
     PackageInvalidError,
+    PublishIncompleteError,
     SandboxUnavailableError,
     UnsupportedError,
     WorkspaceUnusableError,
 )
 from neptune.sdk.errors import from_job_error
+from neptune.store.assemble import NotDurableError
 from neptune.store.workspace import WorkspaceBusyError, WorkspaceError
 
 # The codes are a contract: a program, and the CLI's exit codes, branch on them. Never change one.
@@ -41,6 +43,7 @@ CODES = {
     WorkspaceUnusableError: "workspace_unusable",
     PackageInvalidError: "package_invalid",
     JobFailedError: "job_failed",
+    PublishIncompleteError: "publish_incomplete",
 }
 
 PARENTS = {
@@ -55,6 +58,7 @@ PARENTS = {
     WorkspaceUnusableError: NeptuneError,
     PackageInvalidError: NeptuneError,
     JobFailedError: NeptuneError,
+    PublishIncompleteError: JobFailedError,
 }
 
 
@@ -90,6 +94,7 @@ def _caused(cause: BaseException | None) -> JobError:
         (WorkspaceError("format 9"), WorkspaceUnusableError),
         (WorkspaceBusyError("collecting"), WorkspaceUnusableError),
         (ScratchError("overlaps the root"), WorkspaceUnusableError),
+        (NotDurableError("renamed, not flushed"), PublishIncompleteError),
         (OSError(28, "No space left on device"), JobFailedError),
         (ValueError("anything else"), JobFailedError),
         (None, JobFailedError),
@@ -118,6 +123,16 @@ def test_a_job_error_while_its_destination_is_taken_is_destination_exists(
     )
     (tmp_path / "link").symlink_to(tmp_path / "nowhere")
     assert type(from_job_error(_caused(None), tmp_path / "link")) is DestinationExistsError
+
+
+def test_a_package_the_job_renamed_into_place_is_never_another_writers(tmp_path: Path) -> None:
+    """The cause says whether the job renamed: after its own rename, the package at the
+    destination is the job's, and only the flush after it failed."""
+    destination = tmp_path / "package"
+    destination.mkdir()  # the job's own package, renamed into place
+    error = from_job_error(_caused(NotDurableError("renamed, not flushed")), destination)
+    assert type(error) is PublishIncompleteError and error.code == "publish_incomplete"
+    assert isinstance(error, JobFailedError)  # the job did fail: it could not promise durability
 
 
 def test_the_mapping_never_reads_the_message() -> None:

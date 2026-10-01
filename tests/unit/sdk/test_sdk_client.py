@@ -4,6 +4,7 @@ Jobs here run the real runtime; they run in process only where a test needs an a
 holds still (``gated_adapter``), and through the sandbox otherwise.
 """
 
+import errno
 import importlib.util
 import shutil
 import threading
@@ -13,6 +14,7 @@ from typing import Final
 
 import pytest
 
+import neptune.store.assemble
 from neptune.adapters.builtin import builtin_adapters, default_registry
 from neptune.adapters.registry import AdapterRegistry
 from neptune.adapters.text import TextAdapter
@@ -27,6 +29,7 @@ from neptune.sdk import (
     Neptune,
     NetworkRefusedError,
     PackageInvalidError,
+    PublishIncompleteError,
     UnsupportedError,
     Workspace,
     WorkspaceUnusableError,
@@ -34,6 +37,7 @@ from neptune.sdk import (
     ingest,
     read_package,
 )
+from neptune.store.assemble import NotDurableError
 from neptune.store.package import read_package as store_read_package
 from neptune.store.workspace import LocalOnlyError
 
@@ -492,3 +496,27 @@ def test_a_destination_taken_while_the_job_runs_is_raised_from_result(
         run.result(timeout=30)
     assert isinstance(caught.value.__cause__, JobError)
     assert kinds(list(run))[-1] == "job_failed"
+
+
+def test_a_package_renamed_into_place_whose_flush_fails_is_publish_incomplete(
+    root: Path, home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No disk fails on cue, so the flush after the rename is made to (the only seam): the job
+    renamed its package, so it is the job's, whole, and the error says so, not
+    ``destination_exists``."""
+
+    def unflushable(directory: Path) -> None:
+        raise OSError(errno.EIO, "Input/output error", str(directory))
+
+    monkeypatch.setattr(neptune.store.assemble, "fsync_directory", unflushable)
+    seen: list[JobEvent] = []
+    with pytest.raises(PublishIncompleteError, match="may not survive a crash") as caught:
+        Neptune(home).ingest(root, tmp_path / "package", on_event=seen.append)
+    assert caught.value.code == "publish_incomplete"
+    assert isinstance(caught.value.__cause__, JobError)
+    assert isinstance(caught.value.__cause__.__cause__, NotDurableError)
+    assert kinds(seen)[-1] == "job_failed" and "job_committed" not in kinds(seen)
+    package = read_package(tmp_path / "package")  # whole, and verifies
+    staged = next(e for e in seen if e.kind == "package_staged")
+    assert package.id == staged.details["package"]
+    assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".package.")] == []
