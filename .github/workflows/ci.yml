@@ -1,12 +1,41 @@
 name: ci
 
+# One job per workspace package, selected by .github/scripts/ci_plan.py from the PR's changed paths;
+# merge-queue groups and pushes to main run every job. `check` aggregates them and is the only
+# required status: a skipped package job counts as success, a failed or cancelled one fails it.
 on:
   pull_request:
+  merge_group:
   push:
     branches: [main]
 
 jobs:
-  check:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      compiler: ${{ steps.plan.outputs.compiler }}
+      packages: ${{ steps.plan.outputs.packages }}
+      template: ${{ steps.plan.outputs.template }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: plan
+        name: Select jobs from changed paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            python3 .github/scripts/ci_plan.py "$EVENT" "$BASE" "$HEAD"
+          else
+            python3 .github/scripts/ci_plan.py "$EVENT"
+          fi
+
+  neptune:
+    needs: plan
+    if: needs.plan.outputs.compiler == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,7 +44,61 @@ jobs:
           enable-cache: true
       - name: Install Python from .python-version
         run: uv python install
-      - name: Install project and dev tools
+      - name: Install workspace and dev tools
         run: make setup
       - name: Lint, type-check, test
-        run: make check
+        run: make check PKG=neptune
+
+  package:
+    needs: plan
+    if: needs.plan.outputs.packages != '[]'
+    name: ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.plan.outputs.packages) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python from .python-version
+        run: uv python install
+      - name: Install workspace and dev tools
+        run: make setup
+      - name: Lint, type-check, test
+        run: make check PKG=${{ matrix.package }}
+
+  template:
+    needs: plan
+    if: needs.plan.outputs.template == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python from .python-version
+        run: uv python install
+      - name: Generate a package from the template
+        run: scripts/new-package.sh ci-template-smoke
+      - name: Install workspace and dev tools
+        run: make setup
+      - name: Check the generated package
+        run: make check PKG=ci-template-smoke
+
+  check:
+    needs: [plan, neptune, package, template]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every selected job to succeed or be skipped
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if echo "$RESULTS" | grep -Eq '"(failure|cancelled)"'; then
+            echo "a required job failed or was cancelled" >&2
+            exit 1
+          fi
