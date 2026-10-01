@@ -141,25 +141,24 @@ RAW: Final = (File(b"raw/\xffrun_3\xfe/log.ulg"),)
 def build(root: Path, name: str) -> None:
     """Write layout ``name`` below ``root`` (``RAW`` as ``"raw"``, where the filesystem allows)."""
     entries = RAW if name == "raw" else LAYOUTS[name]
-    base = os.fsencode(root)
     for entry in entries:
-        path = os.path.join(base, entry.path)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        # fsdecode keeps bytes that are not UTF-8 as surrogate escapes, which Path writes back.
+        path = root / os.fsdecode(entry.path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(entry, Link):
-            os.symlink(entry.target, path)
+            path.symlink_to(os.fsdecode(entry.target))
         else:
-            with open(path, "wb") as out:
-                out.write(entry.data())
+            path.write_bytes(entry.data())
 
 
 def raw_names_supported(root: Path) -> bool:
     """Whether the filesystem under ``root`` stores a name that is not UTF-8."""
-    probe = os.path.join(os.fsencode(root), b"\xff-probe")
+    probe = root / os.fsdecode(b"\xff-probe")
     try:
-        os.mkdir(probe)
+        probe.mkdir()
     except OSError:
         return False
-    os.rmdir(probe)
+    probe.rmdir()
     return True
 
 
