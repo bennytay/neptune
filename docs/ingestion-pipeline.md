@@ -132,7 +132,11 @@ needs, and nothing else decides: no clock, file time or flag.
 
 ## Dry-run
 
-`explain`/dry-run (MVL-15) executes stages 1–6 only and renders the plan. It must never call `ingest`.
+`IngestJob.dry_run()` (ADR 0035) runs `discover`, `fingerprint`, `inspect` and `plan`, then stops:
+state `planned`, a `job_planned` event, no package, never an `ingest` call. It needs no destination;
+the ledger and plans it saves are the ones `run` reuses, and its cache report marks the chunks the
+workspace already holds. The SDK's `dry_run` calls it (`sdk.md`); `explain` (MVL-15) adds adapters'
+`inspect`, grouping and the rendered plan on top. It must never call `ingest`.
 
 ## Determinism contract
 
