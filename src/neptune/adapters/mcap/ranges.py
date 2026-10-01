@@ -281,6 +281,13 @@ def _indexed(
         declared = {channel: count for channel, count, _ in stats.channel_message_counts if count}
         if declared and declared != {c: n for c, n in totals.items() if n}:
             return "channel_message_counts", place
+    # A summary need not repeat the Schema and Channel records (the specification makes them
+    # optional there); then only the data section declares them, and only a scan finds them.
+    if any(n and c not in directory.channels for c, n in totals.items()):
+        return None
+    schemas = {channel.schema_id for _, channel in directory.channels.values()}
+    if any(schema and schema not in directory.schemas for schema in schemas):
+        return None
 
     wanted = _wanted(directory, selection)
     if indexes[0][1].chunk_start > DATA_START:

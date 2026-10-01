@@ -229,6 +229,9 @@ class Options:
     metadata: bool = True
     drop_index_entry: bool = False  # chunk 0's /imu Message Index and the statistics lie alike
     renamed: tuple[tuple[int, str], ...] = ()  # chunks that declare a compression they don't use
+    statistics: bool = True
+    summary_declarations: bool = True  # the summary repeats the Schema and Channel records
+    unindexed: tuple[int, ...] = ()  # chunks the summary's chunk index leaves out
 
 
 def _compress(compression: str, data: bytes) -> bytes:
@@ -347,9 +350,10 @@ def write(options: Options) -> tuple[bytes, dict[str, tuple[int, int]]]:
                 writer.add(f"summary:{opcode}:{i}", record)
             groups.append((opcode, start, len(writer.out) - start))
 
-    group(0x03, [s.record() for s in options.schemas])
-    group(0x04, [c.record() for c in options.channels])
-    group(0x08, chunk_indexes)
+    if options.summary_declarations:
+        group(0x03, [s.record() for s in options.schemas])
+        group(0x04, [c.record() for c in options.channels])
+    group(0x08, [index for i, index in enumerate(chunk_indexes) if i not in options.unindexed])
     attachments, metadata = [], []
     if "attachment" in writer.at:
         offset, length = writer.at["attachment"]
@@ -378,7 +382,8 @@ def write(options: Options) -> tuple[bytes, dict[str, tuple[int, int]]]:
         min(times) if times else 0,
         max(times) if times else 0,
     ) + _bytes32(channel_counts)
-    group(0x0B, [_record(0x0B, statistics)])
+    if options.statistics:
+        group(0x0B, [_record(0x0B, statistics)])
     offsets_start = len(writer.out)
     for opcode, start, length in groups:
         writer.add(

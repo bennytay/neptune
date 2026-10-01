@@ -255,7 +255,9 @@ class Data:
     def _record(self, record: TopRecord, read: _Read | None) -> None:
         opcode = record.opcode
         if opcode == Opcode.CHUNK:
-            if self.chunked:
+            if self.indexes is not None:
+                self._unlisted(record)
+            elif self.chunked:
                 self._chunk(record, None)
             else:
                 self._outside(record)
@@ -283,6 +285,17 @@ class Data:
                 " skipped",
                 {"opcodes": {opcode_name(opcode): 1}},
             )
+
+    def _unlisted(self, record: TopRecord) -> None:
+        """A chunk the summary's index does not list: planning numbered no message of it."""
+        self.report(
+            "index_mismatch",
+            FindingCategory.INCONSISTENT,
+            Severity.ERROR,
+            record.place,
+            "a chunk the summary's chunk index does not list; its messages have no rows",
+            {"reason": "unindexed_chunk"},
+        )
 
     def _outside(self, record: TopRecord) -> None:
         what = "chunk" if record.opcode == Opcode.CHUNK else "top-level message"

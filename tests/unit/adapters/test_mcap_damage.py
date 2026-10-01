@@ -15,6 +15,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+from neptune.adapters.contract import configure
 from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.mcap import McapAdapter
 from neptune.discovery.reader import BytesReader
@@ -297,3 +298,35 @@ def test_a_damaged_header_leaves_the_run_citing_the_magic() -> None:
     assert finding(output, "corrupt_record").details == {"reason": "header"}
     (run_record,) = [r for r in output.records() if isinstance(r, Run)]
     assert run_record.provenance.evidence.locator[0].length == 8  # type: ignore[union-attr]
+
+
+def test_a_chunk_the_index_leaves_out_has_no_rows_however_the_file_is_cut() -> None:
+    data, at = MAKE.write(MAKE.Options(unindexed=(1,), statistics=False))
+    reference = None
+    for chunk_bytes, max_rows in ((64 << 20, 100_000), (1, 1), (2_000, 5)):
+        output = run(data, chunk_bytes, max_rows)
+        found = finding(output, "index_mismatch")
+        assert found.details == {"reason": "unindexed_chunk"}
+        assert READING.resolve(data, found.subject) == data[slice(*_span(at["chunk:1"]))]
+        keys = row_keys(output)
+        reference = reference or keys
+        assert keys == reference  # numbered alike whatever the plan cuts
+    assert reference is not None and len(reference) == 7 + 5  # chunks 0 and 2
+    unnumbered = {(topic, time, sequence) for topic, _, time, sequence in reference}
+    assert unnumbered < {(topic, time, sequence) for topic, _, time, sequence in FULL}
+    for topic in {key[0] for key in reference}:  # numbered as the index counts: no gap, no repeat
+        seqs = sorted(int(str(key[1])) for key in reference if key[0] == topic)
+        assert seqs == list(range(len(seqs)))
+
+
+def _span(place: tuple[int, int]) -> tuple[int, int]:
+    return place[0], place[0] + place[1]
+
+
+def test_a_summary_without_declarations_is_planned_by_scanning_and_loses_nothing() -> None:
+    data, _ = MAKE.write(MAKE.Options(summary_declarations=False))
+    plan = McapAdapter().plan(BytesReader(data), configure(McapAdapter.descriptor))
+    assert all("index" not in chunk.context for chunk in plan.chunks)
+    output = run(data)
+    assert codes(output) == ["mcap.attachment_not_extracted"]
+    assert row_keys(output) == FULL

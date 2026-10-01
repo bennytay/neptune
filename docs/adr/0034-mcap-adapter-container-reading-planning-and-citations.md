@@ -69,7 +69,10 @@ costs a full pass. The model is frozen (ADR 0023): no new fields, no new record 
      malformed is a `summary_unusable` finding and is not used.
    - *Indexed* when the summary has chunk indexes (one per chunk, if Statistics count them), the
      indexes neither overlap nor leave the data section, the first and last chunk are where their
-     indexes say, and the counts agree with the Statistics where there are Statistics. Each chunk's count per
+     indexes say, the counts agree with the Statistics where there are Statistics, and the
+     summary declares every channel the index counts and every schema those channels name (the
+     specification lets a summary leave the declarations to the data section; such a file is
+     scanned, without a finding). Each chunk's count per
      channel comes from its Message Index records' offsets alone (each record's length is the gap
      to the next); a chunk whose offsets do not give counts is decompressed once. Nothing else of
      the data section is read to plan. An index that fails a check is an `index_invalid` finding.
@@ -87,7 +90,8 @@ costs a full pass. The model is frozen (ADR 0023): no new fields, no new record 
    bytes), so `seq` is the same however chunks are grouped; a message past its chunk's indexed
    count has no row and the chunk gets a `message_count_mismatch` finding, so `seq` ranges never
    overlap whatever an index claims. In the indexed layout, every unit starts at its indexed chunk
-   or is skipped with an `index_mismatch` finding. Every finding cites one record or one chunk and
+   or is skipped with an `index_mismatch` finding, and a chunk the index does not list gets no
+   rows and the same finding: planning numbered none of its messages. Every finding cites one record or one chunk and
    is made by the one planned chunk that starts at it; problems with top-level messages in an
    unchunked file (undeclared channel, too short, time past 2^63 − 1) are summed once by the plan,
    and undeclared channels in any file likewise.

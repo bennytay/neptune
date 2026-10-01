@@ -136,8 +136,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         _code(
             "index_mismatch",
-            "a Message Index or a chunk's declared times disagree with the chunk's messages"
-            " (inconsistent, warning)",
+            "an index disagrees with the data: a Message Index or a chunk's times (warning), a"
+            " chunk not where indexed or not indexed, its messages without rows (error)",
         ),
         _code(
             "invalid_utf8",
