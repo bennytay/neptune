@@ -1,0 +1,107 @@
+name: harness
+
+# The integration harness (MVL-123, packages/neptune-platform ADR 0004): contracts check, the corpus
+# through compiler -> ledger -> memory -> context, a smoke query, one report. It needs no Docker
+# while every stage is the real compiler or a contract stub. It is not a required status yet:
+# `ci.yml`'s `check` is the only one.
+#
+# - merge_group and the nightly schedule run it unconditionally (a merge group has no path filter);
+# - pull_request runs it for contracts, the harness and any package's exported-schema paths. If
+#   you add a package whose contract.toml names another module, add its path here too (a unit test,
+#   test_harness_workflow.py, fails until you do);
+# - workflow_dispatch runs it on demand, and posts to the Linear gate issues.
+#
+# Never `pull_request_target`: the harness runs the PR's own code, so it runs with a read-only
+# token. The PR comment is a separate job that checks out nothing and only posts the finished
+# report; Linear is posted to only on schedule and dispatch, when LINEAR_API_KEY is set.
+on:
+  merge_group:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "contracts/**"
+      - "harness/**"
+      - "scripts/contracts.py"
+      - ".github/workflows/harness.yml"
+      # package-schema, alignment-records, lifecycle-records: the compiler's model
+      - "src/neptune/model/**"
+      # each member's exported schemas: catalog-api (api), graph-schema (schema), query-packet
+      # (contract), dataset-manifest (manifest); a module or a package of that name
+      - "packages/*/src/*/api.py"
+      - "packages/*/src/*/api/**"
+      - "packages/*/src/*/schema.py"
+      - "packages/*/src/*/schema/**"
+      - "packages/*/src/*/contract.py"
+      - "packages/*/src/*/contract/**"
+      - "packages/*/src/*/manifest.py"
+      - "packages/*/src/*/manifest/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install Python from .python-version
+        run: uv python install
+      - name: Install workspace and dev tools
+        run: make setup
+      - name: Harness unit tests (ci.yml's plan does not map harness/** to a package job)
+        run: make check PKG=neptune-platform
+      - name: Run the harness
+        run: make harness HARNESS_RUN_DIR="$RUNNER_TEMP/harness"
+      - name: Show the report
+        if: always()
+        run: cat "$RUNNER_TEMP/harness/report.md" >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-report
+          path: |
+            ${{ runner.temp }}/harness/report.json
+            ${{ runner.temp }}/harness/report.md
+          if-no-files-found: ignore
+      - name: Post to the Linear gate issues
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ONLY_FAILED: ${{ github.event_name == 'schedule' && '--only-failed' || '' }}
+        # Without LINEAR_API_KEY it posts nothing. A nightly green run stays quiet
+        # (--only-failed); a manual run always reports.
+        run: uv run --all-packages python -m harness.publish --report "$RUNNER_TEMP/harness/report.json" --link "$RUN_URL" $ONLY_FAILED
+
+  comment:
+    # Same-repository pull requests only: a fork's token cannot write, and its report is not ours.
+    needs: harness
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: harness-report
+          path: report
+      - name: Comment on the pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr comment "$PR" --body-file report/report.md --edit-last --create-if-none
