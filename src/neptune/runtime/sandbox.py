@@ -114,15 +114,14 @@ class Raised:
     """The call raised. ``error`` is the exception's class name, never its text.
 
     ``contract`` marks a ``ContractError`` (a bug: never retried), with its message as
-    ``problem``; ``changed`` a ``SourceChangedError``; ``os_error`` an ``OSError``'s
-    operating-system message (or class name, when it has none).
+    ``problem``; ``changed`` a ``SourceChangedError`` (the source's bytes are not the ones
+    fingerprinted: never retried, reported as the source's, not the adapter's).
     """
 
     error: str
     contract: bool = False
     changed: bool = False
     problem: str | None = None
-    os_error: str | None = None
 
     def __post_init__(self) -> None:
         if not _ERROR_NAME.fullmatch(self.error):
@@ -137,7 +136,6 @@ class Raised:
             contract=contract,
             changed=isinstance(exc, SourceChangedError),
             problem=str(exc) if contract else None,
-            os_error=(exc.strerror or name) if isinstance(exc, OSError) else None,
         )
 
     def cause(self) -> dict[str, JsonValue]:
@@ -230,38 +228,32 @@ _OUT_OF_MEMORY: Final = b"M"
 _UNREPORTED: Final = 70  # the child's exit status when it could not even write its reply
 
 
-def _encode_raised(raised: Raised) -> bytes:
+def encode_raised(raised: Raised) -> bytes:
     return json.dumps(
         {
             "changed": raised.changed,
             "contract": raised.contract,
             "error": raised.error,
-            "os_error": raised.os_error,
             "problem": raised.problem,
         },
         separators=(",", ":"),
     ).encode("ascii")
 
 
-def _decode_raised(data: bytes) -> Raised:
+def decode_raised(data: bytes) -> Raised:
+    """A ``Raised`` reply, strictly: exactly its four fields, each of its type."""
     value = json.loads(data)
-    if not isinstance(value, dict) or value.keys() != {
-        "changed",
-        "contract",
-        "error",
-        "os_error",
-        "problem",
-    }:
-        raise ValueError("not a raised reply")
-    error, contract, changed = value["error"], value["contract"], value["changed"]
-    problem, os_error = value["problem"], value["os_error"]
+    if not isinstance(value, dict) or value.keys() != {"changed", "contract", "error", "problem"}:
+        raise ValueError("a raised reply is exactly {changed, contract, error, problem}")
+    error, contract = value["error"], value["contract"]
+    changed, problem = value["changed"], value["problem"]
     if not isinstance(error, str) or not isinstance(contract, bool):
-        raise ValueError("not a raised reply")
-    if not isinstance(changed, bool) or not all(
-        item is None or isinstance(item, str) for item in (problem, os_error)
-    ):
-        raise ValueError("not a raised reply")
-    return Raised(error, contract, changed, problem, os_error)
+        raise ValueError("a raised reply's error is text and contract a boolean")
+    if not isinstance(changed, bool) or not (problem is None or isinstance(problem, str)):
+        raise ValueError("a raised reply's changed is a boolean and problem text or null")
+    if problem is not None and not contract:
+        raise ValueError("only a contract violation has a problem")
+    return Raised(error, contract, changed, problem)
 
 
 def _send(fd: int, data: bytes) -> None:
@@ -376,7 +368,7 @@ class Subprocess:
                 except MemoryError:
                     data = out_of_memory
                 except BaseException as exc:
-                    data = _RAISED + _encode_raised(Raised.of(exc))
+                    data = _RAISED + encode_raised(Raised.of(exc))
             except MemoryError:
                 data = out_of_memory
             _send(reply, data)
@@ -455,7 +447,7 @@ class Subprocess:
             if tag == _RETURNED:
                 return Returned(codec.decode(payload))
             if tag == _RAISED:
-                return _decode_raised(payload)
+                return decode_raised(payload)
             if tag == _OUT_OF_MEMORY and not payload:
                 return Exceeded(Limit.MEMORY, limits.memory_bytes)
         except Exception:  # any failure to decode: the reply is not one a sound child writes

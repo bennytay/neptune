@@ -64,3 +64,9 @@ markers = [
   "integration: exercises multiple components against real fixtures",
   "slow: takes more than a few seconds; excluded by `make test-fast`",
 ]
+# The sandbox forks once per adapter call, after pyarrow's thread pool exists; CPython warns
+# about any fork from a threaded process. The child runs no Arrow code of the job's, and a
+# deadlock there would end at the wall-time limit as a finding (ADR 0030 §2).
+filterwarnings = [
+  "ignore:This process \\(pid=\\d+\\) is multi-threaded, use of fork\\(\\) may lead to deadlocks in the child:DeprecationWarning",
+]

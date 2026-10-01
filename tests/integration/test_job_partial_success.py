@@ -32,7 +32,7 @@ from neptune.model.finding import FindingCategory, Severity, subject_to_json
 from neptune.model.knowledge import Known
 from neptune.model.series import ColumnType, SeriesBatch, SeriesColumn
 from neptune.model.world import DocumentBlock, DocumentRecord
-from neptune.runtime import IngestJob, JobEvent, JobOptions, JobState, Phase
+from neptune.runtime import IngestJob, Isolation, JobEvent, JobOptions, JobState, Phase
 from neptune.runtime import lineage as runtime_lineage
 from neptune.store.package import read_package
 from neptune.store.workspace import Workspace
@@ -171,7 +171,10 @@ def test_a_transient_fault_is_retried_and_the_source_lands(tmp_path: Path) -> No
     root = tmp_path / "root"
     root.mkdir()
     (root / "wobbly.brittle").write_bytes(BRITTLE.brittle("x", "flaky", "y"))
-    outcome, package, seen = run(root, tmp_path, options=JobOptions(attempts=2))
+    # The fault counter lives on the adapter instance, which only an in-process call updates:
+    # a sandboxed call runs in a fresh child each attempt and never sees the first one.
+    trusted = JobOptions(attempts=2, isolation=Isolation.IN_PROCESS)
+    outcome, package, seen = run(root, tmp_path, options=trusted)
     assert codes(package) == []
     assert len(outcome.ingested) == 1
     retried = [e for e in seen if e.kind == "chunk_retried"]

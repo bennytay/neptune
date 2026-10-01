@@ -52,6 +52,7 @@ ENTRY_SKIPPED: Final = "entry_skipped"
 SYMLINK_RECORDED: Final = "symlink_recorded"
 SOURCE_HASHED: Final = "source_hashed"
 SOURCE_ABSENT: Final = "source_absent"
+SANDBOX_READY: Final = "sandbox_ready"  # isolation, and the limits and Landlock ABI if sandboxed
 PROBE_FAILED: Final = "probe_failed"
 SOURCE_SELECTED: Final = "source_selected"
 SOURCE_UNSUPPORTED: Final = "source_unsupported"
