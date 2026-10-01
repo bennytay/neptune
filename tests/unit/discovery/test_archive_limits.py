@@ -645,6 +645,24 @@ def test_a_sparse_member_is_held_to_the_ratio_before_it_is_read(
     assert [m.read_bytes for m in report.members] == [0]
 
 
+def test_a_sparse_members_unread_data_still_counts_against_the_stream_ratio(
+    tmp_path: Path,
+) -> None:
+    """A sparse map of one byte, a header size of 20 MiB: tarfile inflates all of it to skip it."""
+    raw = 20 * MiB
+    info = tarfile.TarInfo("m")
+    info.size = raw
+    info.pax_headers = {"GNU.sparse.map": "0,1", "GNU.sparse.size": "1"}
+    header = info.tobuf(tarfile.PAX_FORMAT)
+    zeros = (bytes(MiB) for _ in range(raw // MiB))
+    data = gzip_chunks([header, *zeros, bytes(1024)])
+    assert len(data) < raw // 500
+    report = inspect(data, tmp_path)
+    assert codes(report) == [COMPRESSION_RATIO_EXCEEDED]
+    assert report.findings[0].details["uncompressed"] == len(header) + raw
+    assert (report.members, report.complete) == ((), False)
+
+
 def test_a_sparse_member_within_the_ratio_is_read_to_its_expanded_size(tmp_path: Path) -> None:
     data = pax_tar({"GNU.sparse.map": "0,512", "GNU.sparse.size": "40000"}, b"x" * 512)
     report = inspect(data, tmp_path)

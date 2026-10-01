@@ -82,7 +82,9 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
      `max_members` (`member_count_exceeded`), because the end record's count can lie low.
    - A tar member's declared size is its expanded size. A sparse member stores only its chunks and
      `tarfile` fills the holes with zeros, so the member, total and ratio limits hold the expanded
-     size against the stored chunks before the member is read or skipped.
+     size against the stored chunks before the member is read or skipped. A compressed tar's
+     inflated position counts as far as the header's own size field reaches, which `tarfile`
+     inflates to skip even where the sparse map reads less.
    - A zip member is a regular file unless its attributes positively say otherwise: the high 16
      bits are a mode only from a Unix or OS X host and only when they hold a file type (CPython's
      `writestr` stores permissions alone); otherwise a trailing `/` or the MS-DOS directory

@@ -1113,11 +1113,15 @@ def _tar_members(
             )
             return members, False
         stored = _stored_size(info)
-        length = info.offset_data - info.offset + _round_up(stored)
+        # What tarfile reads or skips of the stream for this member's data: its stored chunks, or
+        # as far as the header's own size field puts the next header, whichever is further. A
+        # sparse member declares the two separately; the second is inflated even though unread.
+        extent = max(_round_up(stored), archive.offset - info.offset_data)
+        length = info.offset_data - info.offset + extent
         # A plain tar's members are bytes of the archive; a compressed one's, of its inflated
         # stream, whose length is not known before it is inflated.
         locator = (*tar_prefix, _span(info.offset, length, INT64_MAX if compressed else size))
-        inflated = info.offset_data + stored
+        inflated = info.offset_data + extent
         if compressed and inflated > limits.max_compression_ratio * max(size, 1):
             state.limit(
                 COMPRESSION_RATIO_EXCEEDED,
