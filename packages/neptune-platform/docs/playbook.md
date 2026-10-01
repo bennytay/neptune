@@ -1,0 +1,222 @@
+# Multi-coordinator factory playbook
+
+The operating procedure for running Neptune's seven Linear projects in parallel in one repository. Sources:
+the programme document *Neptune Program — Stack, Tracks & Contracts* (§5 contracts, §6 tracks, §7b model
+policy), ADR [0001](adr/0001-monorepo-workspace-and-merge-queue.md) (workspace, merge queue),
+ADR [0002](adr/0002-contracts-registry-and-version-policy.md) (contracts) and
+ADR [0003](adr/0003-multi-coordinator-playbook-and-versioning.md) (this playbook, versioning). The per-PR
+loop itself is `docs/developer-workflow.md` § Software factory; this file adds what changes when several
+coordinators share the repository, the budget and Linear.
+
+## 1. Roles
+
+| Role | Model | Owns | Never |
+|---|---|---|---|
+| Programme coordinator (one Zed thread) | Fable | programme document, `contracts/` registry policy, cross-project `blockedBy` edges, capacity split, budget, starting and pausing coordinators, the integration gate | is spawned as a subagent; writes feature code |
+| Project coordinator (one Zed thread per live project) | Opus | its project's issues, implementers, reviewers, merges, Linear state, its package's gate tags and releases | edits outside `packages/<name>/` except `contracts/` with a version bump; talks to another coordinator directly |
+| Implementer (worktree subagent) | per § 4 | one issue, one branch, one PR, stops at In Review | merges, approves, enables auto-merge, touches another branch |
+| Reviewer (fresh subagent) | same tier as the work | one verdict on one head SHA | edits the branch, merges |
+
+**Caps.** Default 3–4 project coordinators live; each runs at most 3 implementers and 1 reviewer. The compiler
+keeps 5 implementers + 2 reviewers while M7 is on the critical path. Which projects are live is the current
+wave in programme document §6; the programme coordinator starts a coordinator only for a project with work in
+the current wave, and raises a cap only when the weekly check (§ 6) shows the budget idle.
+
+## 2. Linear is the bus
+
+- Coordinators never message each other. Every cross-project fact is a Linear issue, relation or comment;
+  every artefact is a GitHub PR.
+- **Reporting up.** A project coordinator reports to the programme coordinator only (a) when a gate issue is
+  Done or (b) when it has had nothing selectable for more than one hour because of another project. It reports
+  as one comment on the programme document: `[P-MVL-<n>] gate <code> Done @ <merge-sha>` or
+  `[P-MVL-<n>] blocked: <MVL-x> waits on <MVL-y> (<project>) since <time>`.
+- **Cross-project blockers.** The programme coordinator owns every `blockedBy` edge between projects (§6 gate
+  edges). A dependent issue becomes selectable when its cross-project blocker is **Done**; a coordinator never
+  branches from another project's open PR (stacking stays inside one project). To clear a blocker the
+  programme coordinator either raises the blocker's priority on its project or, if the edge is wrong, removes
+  it with a comment saying why.
+- **Contract change requests.** A consumer that needs a change in a contract it does not own:
+  1. files an issue in the **owning** project titled `Contract <contract-id>: <change>`, stating the need,
+     the consuming issue and whether it is breaking, additive or editorial;
+  2. adds a `blocks` edge from that issue to its own consuming issue;
+  3. waits. The owner's coordinator schedules it (contract work is Opus tier and is never paused); its PR
+     bumps the owner's version constant and runs `scripts/contracts.py bump` (ADR 0002 §7), whose
+     announcement lands on each consumer's current gate issue (`contracts/packages.toml`);
+  4. on the announcement, each consumer's coordinator files an issue in its own project to raise its entry in
+     `contracts/lock.toml`. Nobody edits another package's lock entry.
+
+  If the owner declines or the two disagree on breaking vs additive, either side comments on the programme
+  document and the programme coordinator decides on the issue; a design decision becomes an ADR in the owner.
+
+## 3. Starting and resuming a project coordinator
+
+**Starting** (programme coordinator):
+
+1. Confirm the project has work in the current wave and its first issue's blockers are Done (§6).
+2. Confirm `packages/<name>/` exists. If not, the project's scaffold issue is its first issue:
+   `scripts/new-package.sh <name>`; the root `uv.lock` change it makes is the one permitted edit outside the
+   package. The scaffold PR pastes the § 4 block into `packages/<name>/AGENTS.md`.
+3. Confirm `contracts/packages.toml` names the project's current `gate_issue` and `contracts/lock.toml` has
+   an entry if the package consumes a stable contract.
+4. Move the Linear project to In Progress; its description links this playbook.
+5. Open a Zed thread on Opus and paste the prompt below with the three placeholders filled from the table.
+6. Comment on the programme document: `[P-MVL-<n>] coordinator started <date>`.
+
+**Coordinator prompt (verbatim from programme document §6; fill the placeholders, change nothing else):**
+
+> You coordinate <project name> (P-MVL-<n>) in `packages/<name>/` of `bennytay/neptune`. Read `AGENTS.md`, `packages/<name>/AGENTS.md` and the programme document's model policy. Run the software-factory loop in `docs/developer-workflow.md`. Caps: 3 implementers, 1 reviewer. Pick only issues in this project whose blockers are Done. Implementers and reviewers run on `sonnet` unless the issue is an ADR, a contract, a gate, or touches `store/`, `schema/`, `consolidate/`, `query/`; those run on `opus`. Merge through the merge queue with `scripts/factory-merge.sh`. Never edit outside `packages/<name>/` except `contracts/` with a version bump. Keep your context lean: never read agent transcripts, require 15-line reports, do not re-read the repo. Report to the programme coordinator only at a gate or when blocked for more than one hour.
+
+| `<project name>` | `<n>` | `<name>` |
+|---|---|---|
+| Neptune Ledger — Catalog & Lakehouse | 12 | `neptune-ledger` |
+| Neptune Memory — Bi-temporal Deployment Memory | 13 | `neptune-memory` |
+| Neptune Context — Retrieval & Context Engine | 14 | `neptune-context` |
+| Neptune Deploy — Deployment Record Layer & Connectors | 15 | `neptune-deploy` |
+| Neptune Learn — Datasets & Flywheel | 16 | `neptune-learn` |
+| Neptune Platform — Contracts, Security, Deployment & Integration | 17 | `neptune-platform` (also owns `contracts/`, `harness/`) |
+
+The compiler (P-MVL-11, repository root) keeps its existing factory session under root `AGENTS.md`; it is not
+started from this prompt.
+
+**Resuming.** A dead coordinator thread is replaced by a new Zed thread with the same filled prompt. The loop's
+first selection rule (resume In Progress issues with no live implementer) does the rest; the state to read is
+`docs/developer-workflow.md` § Resuming the factory, restricted to this project's issues and branches.
+
+## 4. Model map and token rules (block for every package `AGENTS.md`)
+
+Each package's `AGENTS.md` carries this block verbatim, between the markers, after its layer-specific section.
+This file is its source; change it here and re-copy it, never edit a copy.
+
+```markdown
+<!-- BEGIN model-policy: copied from packages/neptune-platform/docs/playbook.md § 4; do not edit here -->
+## Model policy and token rules
+
+| Work | Implementer | Reviewer | Review rounds |
+|---|---|---|---|
+| ADRs; anything in `contracts/`; gate issues; code under `store/`, `schema/`, `consolidate/`, `query/`, `runtime/`, `model/`; a module that exports a contract schema or version constant | opus | opus | up to two full reviews |
+| Adapters, connectors, fixtures and generators, exporters, docs, scaffolds, console UI, dashboards | sonnet | sonnet | one review; REVISE blockers re-checked by the same reviewer |
+| Mechanical: branch refresh, PR body edits, ADR index, renames | sonnet | none | coordinator checks the diff |
+
+An issue that touches both tiers runs at the higher one. Every implementer and reviewer prompt includes the
+token rules: read `AGENTS.md`, this file, the issue and only the files the issue names; no exploratory reads;
+`make test-fast` (or `make check PKG=<this package>`) while iterating and `make check` once before the PR;
+commit and push after every coherent step; report in at most 15 lines; after three fix rounds or two hours,
+stop and report instead of grinding.
+
+Budget pauses: before each selection, read this project's latest Linear status update. If it begins
+`Paused:`, start no new issue of the classes it names; in-flight issues finish. Contracts and gates are never
+paused.
+<!-- END model-policy -->
+```
+
+**Implementer prompt** (coordinator fills `<…>`):
+
+```text
+You are the implementer for <MVL-N> (<title>; <project> P-MVL-<n>) in bennytay/neptune.
+Worktree: <path>, branch <gitBranchName> based on <base>; open the PR against <base>. Work only in the
+worktree. The issue is already In Progress.
+Follow AGENTS.md and packages/<name>/AGENTS.md. Read the issue and only: <files>. No exploratory reads.
+`make test-fast` while iterating; `make check` once before the PR. Commit and push per coherent step
+(conventional commit with package scope, trailer `Refs: <MVL-N>`).
+Open the PR with the template; wait for CI green; move <MVL-N> to In Review. Never merge, approve or
+enable auto-merge. Stop and report after three fix rounds or two hours.
+Report, at most 15 lines: PR number · head SHA · files · ADR number taken · actions for the coordinator.
+```
+
+**Reviewer prompt:**
+
+```text
+Review PR #<n> at head <sha> for <MVL-N> in bennytay/neptune, cold. `git worktree add <path> <sha>`.
+Read AGENTS.md, packages/<name>/AGENTS.md, the issue, the PR body, the full diff and the ADRs it cites;
+nothing else. Run `make check` once. Apply the review checklist in docs/developer-workflow.md and the
+non-negotiables; check every acceptance item against the code. Do not edit, push, approve or merge.
+Report, at most 15 lines:
+Verdict: MERGE | REVISE | REJECT · PR #<n> · head <sha>
+Acceptance: k/n met · make check: green | <what failed>
+- [blocker|should|nit] path:line — one finding per line
+```
+
+## 5. Merge flow
+
+1. Reviewer returns a verdict. The coordinator posts it on the PR as a comment whose first line is
+   `Review: MERGE @ <sha>` (or `REVISE` / `REJECT`), followed by the findings.
+2. `scripts/factory-merge.sh <pr> <sha>`. It refuses unless the PR is open, not draft, based on `main`,
+   conflict-free, at the reviewed head with a matching `Review: MERGE` line, `check` green, and (if it edits an
+   `ARCHITECTURE.md`) a filled **Architecture change** section. It then runs
+   `gh pr merge --squash --auto --match-head-commit <sha>`: the merge queue rebuilds the PR on top of `main`
+   and the PRs ahead of it, runs `check` on `merge_group`, merges, and the script prints the merge SHA.
+3. If the queue ejects the PR (conflict or red `check` in the group): merge `origin/main` into the branch,
+   push, and get a new verdict for the new head. A conflict-free merge of `main` keeps the review valid; the
+   coordinator posts `Review: MERGE @ <new-sha> (carried from <old-sha>, clean merge of main)`. A
+   hand-resolved conflict needs a fresh review.
+4. Linear: comment the merge SHA on the issue, set Done if the integration did not, remove the worktree.
+5. Stacked PR whose base just merged: `gh api -X PATCH repos/bennytay/neptune/pulls/<n> -f base=main`, then
+   step 3.
+
+**Fallback until the ruleset is live.** Until the programme coordinator has applied
+`.github/rulesets/main.json` (ADR 0001 §5; a user-owned repository may first have to move to a free
+organisation), `main` keeps classic protection with the strict up-to-date rule and `factory-merge.sh` falls
+back to the REST squash merge pinned to the head, which needs `mergeable_state` `clean`. In that mode every
+coordinator hand-refreshes as in `docs/developer-workflow.md` loop step 4 after every merge to `main`
+(theirs or another project's), re-posts the carried verdict for the new head as in step 3 above, and merges
+one PR at a time. Expect contention: only one PR across all projects can be up to date at once, so keep live
+coordinators at 3 until the queue works.
+
+## 6. Budget: weekly usage check and pause order
+
+The budget is one Claude Max 20× plan shared by every thread. Every Monday the programme coordinator reads
+the weekly usage figure (Claude Code `/usage` or the claude.ai usage page) and records one line in the
+programme document's audit log:
+
+`<YYYY-Www> · usage <p>% of weekly limit at <day> · live: <projects and caps> · merged last week: <n> PRs · action: <hold | raise <project> | pause <step>>`
+
+It re-checks mid-week (Thursday). Thresholds, by usage at the check: ≤ 40% on Thursday may raise one
+project's cap by one; > 70% on Thursday or > 50% on Monday applies the next pause step; > 90% at any check
+applies all three. Pause order, one step at a time, never skipping:
+
+1. model-derived work (Memory G4: hypotheses, anomaly scores, consolidators that call a model);
+2. connectors (Deploy D2);
+3. adapters (compiler M3–M6, Deploy lifecycle record adapters).
+
+Contracts and gates are never paused. A pause is a Linear project status update on each affected project
+beginning `Paused: <classes> until <date or next check>` (the § 4 block makes coordinators read it), plus the
+audit-log line. Lifting it is a status update beginning `Resumed:`.
+
+## 7. Versioning and releases
+
+- **Package versions.** Semver in each package's `[project].version` (the compiler's is the root
+  `pyproject.toml`). Before a layer's final gate and the X4 integration gate are both Done, a package is
+  `0.<m>.<p>`: passing gate `<m>` sets `0.<m>.0`, and a fix released between gates bumps `<p>`. At the final
+  gate it becomes `1.0.0`; after that, major = breaking change to its public API or a major bump of a
+  contract it owns, minor = feature, patch = fix. Versions change only in the gate PR (or a release-fix PR),
+  never in feature PRs.
+- **Contract versions** are separate and follow ADR 0002; a package release lists the contract versions it
+  owns and locks.
+- **Tags** (annotated, on the gate PR's merge commit, never moved or deleted):
+  gate tag `<layer>-<milestone>-gate` with layer ∈ `compiler ledger memory context deploy learn platform` and
+  the Linear milestone code (`compiler-m3-gate`, `ledger-l2-gate`, `memory-g1-gate`, `context-c4-gate`,
+  `deploy-d4-gate`, `learn-f3-gate`, `platform-x4-gate`); release tag `<package>-v<version>`
+  (`neptune-v0.3.0`, `neptune-ledger-v0.2.0`). The compiler's earlier `m1-gate` and `m2-gate` stay as they are.
+- **Gate release procedure** (project coordinator, after the gate PR merges at `<sha>`):
+
+  ```bash
+  git tag -a <layer>-<code>-gate <sha> -m "<gate issue title> (<MVL-N>)"
+  git tag -a <package>-v<version> <sha> -m "<package> <version>"
+  git push origin <layer>-<code>-gate <package>-v<version>
+  gh release create <package>-v<version> --verify-tag --title "<package> <version>" --notes-file <notes.md>
+  ```
+
+  Then advance `gate_issue` for the package in `contracts/packages.toml` (it may ride in the gate PR).
+- **Release notes from conventional commits.** Squash commits on `main` carry PR titles, so the notes come
+  from each merged PR's branch commits: for every squash commit in `<previous release tag>..<sha>` that
+  touches the package path, read `gh api repos/bennytay/neptune/pulls/<pr>/commits` and file the PR under its
+  highest conventional type (`feat` > `fix` > `perf` > `refactor` > `test` > `docs` > `build`/`ci`/`chore`);
+  any `!` or `BREAKING CHANGE:` footer puts it under **Breaking**. Each line is
+  `<PR title> (#<pr>, <MVL-N>)`. A final **Contracts** section lists versions published in the range and the
+  package's `contracts/lock.toml` entries at the tag. A `scripts/release-notes.py` that does this is a
+  follow-up; until then the coordinator assembles the notes with the commands above.
+- **Compatibility matrix.** `contracts/compatibility.md` shows each contract's owner, status and latest
+  versions, and each consumer's locked version. It is hand-maintained now: any PR that edits
+  `contracts/lock.toml` or publishes a contract version updates it in the same PR. Generating it with
+  `scripts/contracts.py matrix` and checking it in `make check` is a follow-up. The matrix at a release tag is
+  the compatibility statement for that release.
