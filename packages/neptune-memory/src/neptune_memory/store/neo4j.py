@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     )
 
 UNSUPPORTED = (
-    "Neo4jStore is an interface stub: the claim graph store is PostgreSQL + Apache AGE + pgvector "
+    "Neo4jStore is an interface stub: the claim graph store is PostgreSQL + pgvector "
     "(packages/neptune-memory/docs/adr/0004-claim-graph-store.md). Implement this class only "
     "with a superseding ADR."
 )

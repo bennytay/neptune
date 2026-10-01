@@ -3,7 +3,7 @@
 ```mermaid
 flowchart LR
   LED[("Ledger catalog API")]
-  PG[("PostgreSQL 16 + AGE + pgvector")]
+  PG[("PostgreSQL 16 + pgvector")]
   subgraph M["neptune-memory"]
     SEAM["ledger.py: LedgerReader + StubLedger"]
     CON["consolidate/"]

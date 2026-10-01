@@ -2,9 +2,10 @@
 
     uv run --with numpy python bench/report.py docs/benchmarks/mvl-104-results.csv
 
-Every row says whether it was ``measured`` or ``extrapolated``. Extrapolations fit
-``log(value) = a + b * log(claims)`` by least squares over the measured ladder points of the
-metric.
+Every row says whether it was ``measured`` or ``extrapolated``. An extrapolation is an upper
+bound: the larger of two power-law projections, ``log(value) = a + b * log(claims)`` fitted by
+least squares over all three ladder points and the 10**6 -> 10**7 segment alone. The last segment is
+the steeper one wherever data outgrows the cache, so the three-point fit alone is biased low.
 """
 
 from __future__ import annotations
@@ -31,7 +32,6 @@ EXTRAPOLATE = [
     ("age", "traverse", "p99_ms"),
     ("pg", "vector", "graph_filtered.p50_ms"),
     ("pg", "vector", "unfiltered.p50_ms"),
-    ("pg", "write", "supersedes_per_s"),
     ("pg", "rebuild", "total_ms"),
     ("pg", "footprint", "database_bytes"),
     ("neo4j", "thread", "p50_ms"),
@@ -41,8 +41,6 @@ EXTRAPOLATE = [
     ("neo4j", "directed", "p50_ms"),
     ("neo4j", "vector", "graph_filtered.p50_ms"),
     ("neo4j", "vector", "unfiltered.p50_ms"),
-    ("neo4j", "write", "supersedes_per_s"),
-    ("neo4j", "rebuild", "total_ms"),
     ("neo4j", "footprint", "store_bytes"),
 ]
 
@@ -141,15 +139,22 @@ NO_FIT = {
     "Thread p99 under write load",
     "Largest server process RSS, GB",
 }
+#: Neo4j's rebuild is a large fixed cost (CSV preparation, JVM start) plus a linear term; neither
+#: fit describes that shape, so no 10**8 figure is given.
+NO_FIT_KEYS = {("neo4j", "rebuild", "total_ms")}
 
 
 def _fit(points: dict[int, float]) -> float | None:
+    """Upper of the three-point fit and the 10**6 -> 10**7 segment, projected to 10**8."""
     if len(points) < 3 or min(points.values()) <= 0:
         return None
     x = np.log10(np.array(sorted(points), dtype=float))
     y = np.log10(np.array([points[k] for k in sorted(points)], dtype=float))
     slope, intercept = np.polyfit(x, y, 1)
-    return float(10 ** (intercept + slope * np.log10(FULL)))
+    whole = float(10 ** (intercept + slope * np.log10(FULL)))
+    seg = (y[-1] - y[-2]) / (x[-1] - x[-2])
+    last = float(10 ** (y[-1] + seg * (np.log10(FULL) - x[-1])))
+    return max(whole, last)
 
 
 def markdown(series: dict[tuple[str, str, str], dict[int, float]]) -> str:
@@ -157,9 +162,9 @@ def markdown(series: dict[tuple[str, str, str], dict[int, float]]) -> str:
     head = "| Workload | " + " | ".join(
         [
             *(f"PG {s:.0e} m" for s in scales),
-            "PG 1e8 x",
+            "PG 1e8 x (upper)",
             *(f"Neo4j {s:.0e} m" for s in scales),
-            "Neo4j 1e8 x",
+            "Neo4j 1e8 x (upper)",
         ]
     )
     lines = [head.replace("e+0", "e") + " |", "|---" * 9 + "|"]
@@ -168,7 +173,8 @@ def markdown(series: dict[tuple[str, str, str], dict[int, float]]) -> str:
         for key in (pgk, neok):
             pts = series.get(key, {})
             cells += [f"{pts[s] * unit:.3g}" if s in pts else "n/m" for s in scales]
-            fit = None if label in NO_FIT or "recall" in key[2] else _fit(pts)
+            skip = label in NO_FIT or key in NO_FIT_KEYS or "recall" in key[2]
+            fit = None if skip else _fit(pts)
             cells.append("—" if fit is None else f"{fit * unit:.3g}")
         lines.append(f"| {label} | " + " | ".join(cells) + " |")
     return "\n".join(lines)

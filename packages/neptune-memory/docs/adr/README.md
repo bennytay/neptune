@@ -10,4 +10,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0001](0001-place-in-the-programme-and-contract-pins.md) | Memory's place in the programme, declared contract versions, and the stub Ledger | Accepted |
 | [0002](0002-graph-tiers-and-the-bi-temporal-claim-model.md) | Graph tiers, node and edge schema, and the bi-temporal claim model | Accepted |
 | [0003](0003-identity-policy-consolidator-contract-and-lineage.md) | Identity policy, the consolidator contract, and consolidator lineage | Accepted |
-| [0004](0004-claim-graph-store.md) | Claim graph store: PostgreSQL 16 + Apache AGE + pgvector, measured against Neo4j 5 | Accepted |
+| [0004](0004-claim-graph-store.md) | Claim graph store: PostgreSQL 16 + pgvector over Neo4j 5 (Apache AGE optional, measured) | Accepted |

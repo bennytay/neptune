@@ -41,6 +41,12 @@ def rebuild(n: int) -> None:
     with conn() as c:
         c.autocommit = True
         c.execute(f"DROP SCHEMA IF EXISTS {S} CASCADE")
+        # The AGE snapshot is optional and measured separately (age_load); keep it out of footprint.
+        c.execute("LOAD 'age'")
+        c.execute(
+            "SELECT ag_catalog.drop_graph(name, true) FROM ag_catalog.ag_graph WHERE name = %s",
+            (GRAPH,),
+        )
         c.execute("SET maintenance_work_mem = '1GB'")
         c.execute("SET max_parallel_maintenance_workers = 7")
         t0 = time.perf_counter()
@@ -246,6 +252,8 @@ def write(n: int, seconds: float = 30.0, writers: int = 4, readers: int = 8) -> 
                     new_id = next_id[0]
                     next_id[0] += 1
                 t0 = time.perf_counter()
+                # Same statements as PostgresStore.supersede (close_claim_sql + insert_claim_sql),
+                # inlined with RETURNING so the correction copies the closed row in one round trip.
                 with c.transaction():
                     cur = c.execute(
                         f"UPDATE {S}.claim SET superseded_at = %(at)s WHERE claim_id = %(old)s "

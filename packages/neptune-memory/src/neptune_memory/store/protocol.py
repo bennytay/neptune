@@ -1,8 +1,13 @@
 """The ``MemoryStore`` seam: what Memory needs from a persistence engine, and nothing more.
 
-Chosen implementation: :class:`neptune_memory.store.postgres.PostgresStore` (PostgreSQL 16 + Apache
-AGE + pgvector). Kept as a swappable stub: :class:`neptune_memory.store.neo4j.Neo4jStore`. The
-decision and the measurements behind it are in ``docs/adr/0004-claim-graph-store.md``.
+Chosen implementation: :class:`neptune_memory.store.postgres.PostgresStore` (PostgreSQL 16 +
+pgvector, queried with SQL). Kept as a swappable stub:
+:class:`neptune_memory.store.neo4j.Neo4jStore`. The decision and the measurements behind it are
+in ``docs/adr/0004-claim-graph-store.md``.
+
+Provisional: this interface changes in G2 (MVL-105). Claim ids become ADR 0002's ``ClaimId``
+(``claim:<sha256>``) in every signature, and ``supersede(old, new)`` is replaced by an atomic write
+of one ADR 0002/0005 resolution (several closures plus new claims at one transaction time).
 """
 
 from __future__ import annotations

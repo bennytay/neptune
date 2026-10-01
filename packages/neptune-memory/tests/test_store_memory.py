@@ -1,13 +1,14 @@
 """MemoryStore seam: records, Protocol conformance, SQL text, the Neo4j stub, a live Postgres run.
 
-Nothing here needs a database except ``test_postgres_store_end_to_end`` (``@slow``), which runs only
-when ``NEPTUNE_MEMORY_PG_DSN`` names a PostgreSQL with pgvector + Apache AGE and psycopg imports.
+Nothing here needs a database except the ``@slow`` live tests, which run only when
+``NEPTUNE_MEMORY_PG_DSN`` names a PostgreSQL with pgvector + Apache AGE and psycopg imports.
 """
 
 from __future__ import annotations
 
 import os
 import re
+from collections import deque
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -26,7 +27,7 @@ from neptune_memory.store.bench.generator import DeploymentSpec, generate
 from neptune_memory.store.records import CLAIM_COLUMNS
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Iterator, Mapping
 
 AT = AsOf("fleet_utc", valid_at=100, known_at=200)
 
@@ -111,8 +112,16 @@ class RecordingCursor:
         return None
 
 
+class _Info:
+    def __init__(self) -> None:
+        self.transaction_status = 0  # psycopg TransactionStatus.IDLE
+
+
 class RecordingConnection:
+    autocommit = False
+
     def __init__(self, rowcount: int = 1) -> None:
+        self.info = _Info()
         self.rowcount = rowcount
         self.log: list[tuple[str, dict[str, Any]]] = []
         self.commits = 0
@@ -185,9 +194,32 @@ def test_query_parameters_are_exactly_what_the_adapter_binds() -> None:
 
 def test_thread_sql_selects_columns_in_record_order() -> None:
     sql = pg.as_of_thread_sql("memory")
-    select = sql.split("SELECT x.", 1)[1].split("\nFROM", 1)[0]
-    assert [c.strip().removeprefix("x.") for c in select.split(",")] == list(CLAIM_COLUMNS)
+    select = sql.split("SELECT ", 1)[1].split("\nFROM", 1)[0]
+    assert [c.strip().removeprefix("c.") for c in select.split(",")] == list(CLAIM_COLUMNS)
     assert tuple(f.name for f in ClaimRecord.__dataclass_fields__.values()) == CLAIM_COLUMNS
+
+
+def test_thread_sql_returns_every_visible_claim_not_one_per_predicate() -> None:
+    """Corroborating claims (same object, different evidence) are current together (ADR 0002);
+    the thread is a containment query on both intervals with no per-predicate limit."""
+    sql = pg.as_of_thread_sql("memory")
+    assert "LIMIT" not in sql.upper()
+    assert "int8range(c.valid_from, c.valid_to, '[)') @> %(valid_at)s" in sql
+    assert "int8range(c.recorded_at, c.superseded_at, '[)')\n      @> %(known_at)s" in sql
+    # ...and it matches the GiST index expression exactly, so the index is usable.
+    gist = next(x for x in pg.index_ddl("memory") if "gist" in x)
+    assert pg.VALID_RANGE in gist and pg.TX_RANGE in gist
+    a = claim(claim_id=1, valid_from=50, valid_to=150, source_id="ev:log:a")
+    b = claim(claim_id=2, valid_from=80, valid_to=None, source_id="ev:log:b")
+    assert all(c.visible(valid_clock="fleet_utc", valid_at=100, known_at=200) for c in (a, b))
+
+
+def test_walk_expands_each_entity_once() -> None:
+    """A visited set bounds the walk by entities, not by paths through hubs or cycles."""
+    sql = pg.neighbours_sql("memory")
+    assert "e.other <> ALL (b.seen)" in sql
+    assert "b.seen || n.ents" in sql
+    assert "DISTINCT ON (e.other)" in sql
 
 
 def test_ddl_is_schema_qualified_and_rejects_bad_dimensions() -> None:
@@ -244,76 +276,91 @@ def test_adapter_bounds_are_checked_before_any_query() -> None:
         store.vector_top_k([0.0, 1.0], 0)
     with pytest.raises(ValueError, match="dimensions"):
         store.write_embeddings([ClaimEmbedding(1, "robot:arm-001", (0.0,))])
+    with pytest.raises(ValueError, match="ef_search"):
+        PostgresStore(conn, ef_search=0)
     assert conn.log == []
 
 
-def test_rebuild_drops_and_recreates_indexes_and_the_graph() -> None:
+def test_autocommit_connections_are_refused() -> None:
     conn = RecordingConnection()
-    PostgresStore(conn, graph="claimgraph").rebuild()
+    conn.autocommit = True  # SET LOCAL and the store's transactions would be no-ops
+    with pytest.raises(ValueError, match="autocommit"):
+        PostgresStore(conn)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda s: s.as_of_thread("robot:arm-001", AT),
+        lambda s: s.neighbours("site:01", 2, AT),
+        lambda s: s.vector_top_k([0.0, 1.0], 3),
+        lambda s: s.write_claims([claim()]),
+        lambda s: s.supersede(1, claim(claim_id=2, supersedes=1)),
+    ],
+    ids=["thread", "neighbours", "vector", "write", "supersede"],
+)
+def test_every_call_refuses_a_transaction_the_caller_left_open(call: Any) -> None:
+    conn = RecordingConnection()
+    conn.info.transaction_status = 2  # INTRANS: the caller has uncommitted work
+    with pytest.raises(RuntimeError, match="idle connection"):
+        call(PostgresStore(conn, dimensions=2))
+    assert (conn.log, conn.commits, conn.rollbacks) == ([], 0, 0)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda s: s.as_of_thread("robot:arm-001", AT),
+        lambda s: s.neighbours("site:01", 2, AT),
+        lambda s: s.vector_top_k([0.0, 1.0], 3, within=("site:01", 2, AT)),
+    ],
+    ids=["thread", "neighbours", "vector"],
+)
+def test_reads_always_end_their_transaction_and_never_commit(call: Any) -> None:
+    conn = RecordingConnection()
+    call(PostgresStore(conn, dimensions=2))
+    assert (conn.commits, conn.rollbacks) == (0, 1)
+
+
+def test_failed_read_rolls_back() -> None:
+    class Failing(RecordingConnection):
+        def cursor(self) -> RecordingCursor:
+            cur = RecordingCursor(self)
+
+            def boom(query: str, params: Mapping[str, Any] | None = None) -> None:
+                raise RuntimeError("canceling statement")
+
+            cur.execute = boom  # type: ignore[method-assign]
+            return cur
+
+    conn = Failing()
+    with pytest.raises(RuntimeError, match="canceling"):
+        PostgresStore(conn).as_of_thread("robot:arm-001", AT)
+    assert (conn.commits, conn.rollbacks) == (0, 1)
+
+
+def test_vector_search_sets_ef_search_locally_from_the_constructor() -> None:
+    conn = RecordingConnection()
+    PostgresStore(conn, dimensions=2, ef_search=250).vector_top_k([0.0, 1.0], 3)
+    setup = [q for q, _ in conn.log if q.startswith("SET")]
+    assert setup == [
+        "SET LOCAL hnsw.ef_search = 250",
+        "SET LOCAL hnsw.iterative_scan = relaxed_order",
+    ]
+    conn = RecordingConnection()
+    PostgresStore(conn, dimensions=2).vector_top_k([0.0, 1.0], 3)
+    assert f"SET LOCAL hnsw.ef_search = {pg.DEFAULT_EF_SEARCH}" in [q for q, _ in conn.log]
+
+
+def test_rebuild_drops_and_recreates_indexes_and_the_optional_graph() -> None:
+    conn = RecordingConnection()
+    PostgresStore(conn).rebuild()  # default: no AGE snapshot
     text = [q for q, _ in conn.log]
     assert text[: len(pg.drop_index_ddl("memory"))] == pg.drop_index_ddl("memory")
-    assert any("create_graph('claimgraph')" in q for q in text)
+    assert not any("ag_catalog" in q for q in text)
     conn = RecordingConnection()
-    PostgresStore(conn, graph=None).rebuild()
-    assert not any("ag_catalog" in q for q, _ in conn.log)
-
-
-# --- live engine ---------------------------------------------------------------------------------
-
-
-@pytest.mark.slow
-def test_postgres_store_end_to_end() -> None:
-    dsn = os.environ.get("NEPTUNE_MEMORY_PG_DSN")
-    if not dsn:
-        pytest.skip("NEPTUNE_MEMORY_PG_DSN not set (no PostgreSQL with pgvector + AGE)")
-    psycopg = pytest.importorskip("psycopg")
-    claims = list(generate(DeploymentSpec(claims=3_000, robots=12, sites=3)))
-    with psycopg.connect(dsn) as conn:
-        conn.execute("DROP SCHEMA IF EXISTS memory_test CASCADE")
-        conn.commit()
-        store = PostgresStore(conn, schema="memory_test", dimensions=3, graph="memory_test_graph")
-        store.create()
-        assert store.write_claims(claims) == len(claims)
-        store.write_embeddings(
-            ClaimEmbedding(c.claim_id, c.subject, (c.claim_id % 7, 1.0, 0.5)) for c in claims[:500]
-        )
-        store.rebuild()
-        robot = claims[0].subject
-        span = DeploymentSpec(claims=1).span
-        for valid_at in range(span // 7, span, span // 7):
-            at = AsOf("fleet_utc", valid_at, valid_at + 10**15)
-            want = sorted(
-                c.claim_id
-                for c in claims
-                if c.subject == robot
-                and c.visible(
-                    valid_clock=at.valid_clock, valid_at=at.valid_at, known_at=at.known_at
-                )
-            )
-            assert sorted(c.claim_id for c in store.as_of_thread(robot, at)) == want
-        at = AsOf("fleet_utc", span // 2, span * 2)
-        hood = store.neighbours("site:00", 3, at)
-        assert hood and all(1 <= n.depth <= 3 and len(n.via) == n.depth for n in hood)
-        current = next(
-            c
-            for c in claims
-            if c.subject == robot and c.superseded_at is None and c.object_value is not None
-        )
-        fix = replace(
-            current,
-            claim_id=10**9,
-            recorded_at=span * 3,
-            object_value="corrected",
-            supersedes=current.claim_id,
-        )
-        store.supersede(current.claim_id, fix)
-        with pytest.raises(LookupError):
-            store.supersede(current.claim_id, replace(fix, claim_id=10**9 + 1))
-        hits = store.vector_top_k([0.0, 1.0, 0.5], 5)
-        assert len(hits) == 5 and hits[0].distance == 0.0
-        conn.execute("DROP SCHEMA memory_test CASCADE")
-        conn.execute("SELECT ag_catalog.drop_graph('memory_test_graph', true)")
-        conn.commit()
+    PostgresStore(conn, graph="claimgraph").rebuild()
+    assert any("create_graph('claimgraph')" in q for q, _ in conn.log)
 
 
 def test_failed_bulk_write_rolls_back_so_the_connection_stays_usable() -> None:
@@ -331,3 +378,160 @@ def test_failed_bulk_write_rolls_back_so_the_connection_stays_usable() -> None:
     with pytest.raises(RuntimeError, match="duplicate"):
         PostgresStore(conn).write_claims([claim()])
     assert (conn.commits, conn.rollbacks) == (0, 1)
+
+
+# --- live engine ---------------------------------------------------------------------------------
+
+SPAN = DeploymentSpec(claims=1).span
+
+
+def _visible(c: ClaimRecord, at: AsOf) -> bool:
+    return c.visible(valid_clock=at.valid_clock, valid_at=at.valid_at, known_at=at.known_at)
+
+
+def _bfs(claims: list[ClaimRecord], start: str, hops: int, at: AsOf) -> dict[str, int]:
+    """Reference walk: shortest depth of every entity within ``hops`` over visible edges."""
+    adj: dict[str, set[str]] = {}
+    for c in claims:
+        if c.object_entity is not None and _visible(c, at):
+            adj.setdefault(c.subject, set()).add(c.object_entity)
+            adj.setdefault(c.object_entity, set()).add(c.subject)
+    depth = {start: 0}
+    queue = deque([start])
+    while queue:
+        node = queue.popleft()
+        if depth[node] == hops:
+            continue
+        for nxt in sorted(adj.get(node, ())):
+            if nxt not in depth:
+                depth[nxt] = depth[node] + 1
+                queue.append(nxt)
+    del depth[start]
+    return depth
+
+
+def _hub(first_id: int) -> list[ClaimRecord]:
+    """A dense hub with cycles: 40 robots at one site, each mounting 3 components that are all
+    calibrated by one shared rig, which is itself located at the site."""
+    out: list[ClaimRecord] = []
+    ids = iter(range(first_id, first_id + 10_000))
+
+    def edge(subject: str, predicate: str, obj: str) -> None:
+        out.append(
+            claim(
+                claim_id=next(ids),
+                subject=subject,
+                predicate=predicate,
+                object_entity=obj,
+                object_value=None,
+                valid_from=0,
+                valid_to=None,
+                recorded_at=0,
+                assertion_kind="stated",
+                source_id="ev:site:hub",
+            )
+        )
+
+    edge("calibration:rig", "located_at", "site:hub")
+    for r in range(40):
+        robot = f"robot:hub-{r:02d}"
+        edge(robot, "located_at", "site:hub")
+        for slot in range(3):
+            component = f"component:hub-{r:02d}/s{slot}"
+            edge(robot, f"mounts/s{slot}", component)
+            edge(component, "calibrated_by", "calibration:rig")
+    return out
+
+
+@pytest.fixture
+def live() -> Iterator[tuple[Any, PostgresStore]]:
+    dsn = os.environ.get("NEPTUNE_MEMORY_PG_DSN")
+    if not dsn:
+        pytest.skip("NEPTUNE_MEMORY_PG_DSN not set (no PostgreSQL with pgvector + AGE)")
+    psycopg = pytest.importorskip("psycopg")
+    with psycopg.connect(dsn) as conn:
+        conn.execute("DROP SCHEMA IF EXISTS memory_test CASCADE")
+        conn.commit()
+        store = PostgresStore(conn, schema="memory_test", dimensions=3)
+        store.create()
+        yield conn, store
+        conn.rollback()
+        conn.execute("DROP SCHEMA memory_test CASCADE")
+        conn.execute(
+            "SELECT ag_catalog.drop_graph(name, true) FROM ag_catalog.ag_graph "
+            "WHERE name = 'memory_test_graph'"
+        )
+        conn.commit()
+
+
+@pytest.mark.slow
+def test_live_thread_neighbours_and_vectors_match_the_reference(
+    live: tuple[Any, PostgresStore],
+) -> None:
+    conn, store = live
+    claims = list(generate(DeploymentSpec(claims=3_000, robots=12, sites=3)))
+    claims += _hub(len(claims) + 1)
+    assert store.write_claims(claims) == len(claims)
+    vectors = [
+        ClaimEmbedding(c.claim_id, c.subject, (float(c.claim_id % 97), float(c.claim_id % 13), 0.5))
+        for c in claims[::3]
+    ]
+    store.write_embeddings(vectors)
+    store.rebuild()
+    robots = sorted({c.subject for c in claims if c.subject.startswith("robot:")})
+    for i, valid_at in enumerate(range(SPAN // 7, SPAN, SPAN // 7)):
+        at = AsOf("fleet_utc", valid_at, valid_at + (10**15 if i % 2 else 2 * SPAN))
+        for robot in robots[:: max(1, len(robots) // 5)]:
+            want = sorted(c.claim_id for c in claims if c.subject == robot and _visible(c, at))
+            assert sorted(c.claim_id for c in store.as_of_thread(robot, at)) == want
+        for start in ("site:00", "site:hub"):
+            got = store.neighbours(start, 3, at)
+            assert {n.entity: n.depth for n in got} == _bfs(claims, start, 3, at)
+            assert len({n.entity for n in got}) == len(got)  # each entity once
+            assert all(len(n.via) == n.depth for n in got)
+    # The hub: 40 robots, 120 components and the rig are each reached once, by depth 2.
+    hub = {n.entity: n.depth for n in store.neighbours("site:hub", 6, AsOf("fleet_utc", 1, 1))}
+    assert len(hub) == 1 + 40 + 120 and max(hub.values()) == 2
+    # Filtered top-k equals an exact search over the walk's scope.
+    at = AsOf("fleet_utc", SPAN // 2, 2 * SPAN)
+    scope = {"site:00", *_bfs(claims, "site:00", 2, at)}
+    query = (5.0, 3.0, 0.5)
+
+    def dist(e: ClaimEmbedding) -> float:
+        return float(sum((a - b) ** 2 for a, b in zip(e.vector, query, strict=True)) ** 0.5)
+
+    exact = sorted((e for e in vectors if e.subject in scope), key=lambda e: (dist(e), e.claim_id))
+    hits = store.vector_top_k(query, 5, within=("site:00", 2, at))
+    assert [round(h.distance, 4) for h in hits] == [round(dist(e), 4) for e in exact[:5]]
+    assert conn.info.transaction_status == 0  # no read left a transaction open
+
+
+@pytest.mark.slow
+def test_live_corroboration_and_supersede_across_known_at(live: tuple[Any, PostgresStore]) -> None:
+    conn, store = live
+    a = claim(claim_id=1, valid_from=50, valid_to=150, recorded_at=60, source_id="ev:log:a")
+    b = claim(claim_id=2, valid_from=80, valid_to=None, recorded_at=70, source_id="ev:log:b")
+    other = claim(claim_id=3, predicate="health_status", object_value="ok", valid_to=None)
+    store.write_claims([a, b, other])
+    # Two corroborating claims on one predicate are both current.
+    assert [c.claim_id for c in store.as_of_thread(a.subject, AsOf("fleet_utc", 100, 200))] == [
+        3,
+        1,
+        2,
+    ]
+    fix = replace(other, claim_id=4, object_value="degraded", recorded_at=300, supersedes=3)
+    store.supersede(3, fix)
+    before = AsOf("fleet_utc", 100, 299)
+    after = AsOf("fleet_utc", 100, 300)
+    assert {c.claim_id for c in store.as_of_thread(a.subject, before)} == {1, 2, 3}
+    assert {c.claim_id for c in store.as_of_thread(a.subject, after)} == {1, 2, 4}
+    with pytest.raises(LookupError):
+        store.supersede(3, replace(fix, claim_id=5))
+    assert conn.info.transaction_status == 0
+    # The optional AGE snapshot is a rebuild-time copy of the edges.
+    snap = PostgresStore(conn, schema="memory_test", dimensions=3, graph="memory_test_graph")
+    store.write_claims([claim(claim_id=6, object_value=None, object_entity="site:01")])
+    snap.rebuild()
+    edges = conn.execute('SELECT count(*) FROM memory_test_graph."CLAIM"').fetchone()[0]
+    conn.rollback()
+    assert edges == 1
