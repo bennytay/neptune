@@ -60,6 +60,8 @@ jobs:
         run: uv python install
       - name: Install workspace and dev tools
         run: make setup
+      - name: Harness unit tests (ci.yml's plan does not map harness/** to a package job)
+        run: make check PKG=neptune-platform
       - name: Run the harness
         run: make harness HARNESS_RUN_DIR="$RUNNER_TEMP/harness"
       - name: Show the report
