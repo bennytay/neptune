@@ -87,9 +87,10 @@ def run(
         entry = run_stage(stage, ctx, services_up=up, upstream_ok=healthy)
         entries.append(entry)
         healthy = healthy and entry["status"] == "ok"
-    smoke_source: Json = (
-        next((e["output"].get("smoke") for e in entries if e["stage"] == "context"), None) or {}
-    )
+    smoke_source: Json = {}
+    for entry in entries:
+        if entry["stage"] == "context":
+            smoke_source = entry["output"].get("smoke") or {}
     smoke = {
         "ok": bool(smoke_source.get("packet")),
         "query": smoke_source.get("query"),
