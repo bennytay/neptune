@@ -98,7 +98,7 @@ class _Read:
 
 
 @dataclass
-class _Tally:
+class _Held:
     """What one chunk's messages hold, counted over the whole chunk by every planned chunk."""
 
     found: Counter[int] = field(default_factory=Counter)
@@ -346,56 +346,56 @@ class Data:
             self._chunk_problem(record, problem)
             return 0
         outer = chunk.place.steps[0]
-        tally = _Tally()
+        held = _Held()
         entries: dict[int, list[tuple[int, int]]] = {}
         base = {channel: slot.seq for channel, slot in self.slots.items()}
         for inner in chunk.records:
             place = Place((outer, (inner.offset, inner.end - inner.offset)))
             if inner.opcode not in (Opcode.MESSAGE, Opcode.SCHEMA, Opcode.CHANNEL):
-                tally.unknown[opcode_name(inner.opcode)] += 1
-                tally.first_unknown = tally.first_unknown or place
+                held.unknown[opcode_name(inner.opcode)] += 1
+                held.first_unknown = held.first_unknown or place
             if inner.opcode != Opcode.MESSAGE:
                 continue
             if inner.length < 2:
-                tally.malformed += 1
+                held.malformed += 1
                 continue
             ordinal = self.ordinal
             self.ordinal += 1
             channel = int.from_bytes(chunk.data[inner.content : inner.content + 2], "little")
-            j = tally.found[channel]
-            tally.found[channel] += 1
+            j = held.found[channel]
+            held.found[channel] += 1
             if inner.length < MESSAGE_FIELDS:
-                tally.malformed += 1
+                held.malformed += 1
                 continue
             head = parse_message_head(chunk.data, inner.content)
             entries.setdefault(channel, []).append((head.log_time, inner.offset))
             if max(head.log_time, head.publish_time) > INT64_MAX:
-                tally.out_of_range[channel] += 1
+                held.out_of_range[channel] += 1
             slot = self.slots.get(channel)
             if slot is None or (planned is not None and j >= planned[channel]):
                 continue
             if ordinal < self.first or (self.last is not None and ordinal >= self.last):
                 continue
             self._row(slot, base[channel] + j, chunk.data, inner.content, place)
-        self._advance(planned if planned is not None else tally.found)
-        self._chunk_findings(chunk, tally, planned, entries)
-        return sum(tally.found.values())
+        self._advance(planned if planned is not None else held.found)
+        self._chunk_findings(chunk, held, planned, entries)
+        return sum(held.found.values())
 
     def _chunk_findings(
         self,
         chunk: OpenedChunk,
-        tally: _Tally,
+        held: _Held,
         planned: Counter[int] | None,
         entries: dict[int, list[tuple[int, int]]],
     ) -> None:
         place, outer = chunk.place, chunk.place.steps[0]
-        if planned is not None and +planned != +tally.found:
+        if planned is not None and +planned != +held.found:
             channels: dict[str, JsonValue] = {
-                str(c): [planned[c], tally.found[c]]
-                for c in sorted(set(planned) | set(tally.found))
-                if planned[c] != tally.found[c]
+                str(c): [planned[c], held.found[c]]
+                for c in sorted(set(planned) | set(held.found))
+                if planned[c] != held.found[c]
             }
-            lost = any(tally.found[c] > planned[c] for c in tally.found)
+            lost = any(held.found[c] > planned[c] for c in held.found)
             self.report(
                 "message_count_mismatch",
                 FindingCategory.INCONSISTENT,
@@ -406,17 +406,17 @@ class Data:
                 {"channels": channels},
                 records=sorted(self.slots[int(c)].stream for c in channels if int(c) in self.slots),
             )
-        if tally.malformed:
+        if held.malformed:
             self.report(
                 "corrupt_record",
                 FindingCategory.CORRUPT,
                 Severity.ERROR,
                 place,
-                f"{tally.malformed} Message record(s) in this chunk are shorter than their fixed"
+                f"{held.malformed} Message record(s) in this chunk are shorter than their fixed"
                 " fields; they have no rows",
-                {"count": tally.malformed, "reason": "malformed"},
+                {"count": held.malformed, "reason": "malformed"},
             )
-        if tally.out_of_range:
+        if held.out_of_range:
             self.report(
                 "time_out_of_range",
                 FindingCategory.UNREPRESENTABLE,
@@ -424,17 +424,17 @@ class Data:
                 place,
                 "message times in this chunk that do not fit a signed 64-bit tick count are"
                 " unknown in their rows",
-                {"channels": {str(c): n for c, n in sorted(tally.out_of_range.items())}},
+                {"channels": {str(c): n for c, n in sorted(held.out_of_range.items())}},
             )
-        if tally.first_unknown is not None:
+        if held.first_unknown is not None:
             self.report(
                 "unknown_record",
                 FindingCategory.UNSUPPORTED,
                 Severity.INFO,
-                tally.first_unknown,
-                f"{sum(tally.unknown.values())} record(s) a chunk does not hold are skipped; the"
+                held.first_unknown,
+                f"{sum(held.unknown.values())} record(s) a chunk does not hold are skipped; the"
                 " first is cited",
-                {"opcodes": dict(sorted(tally.unknown.items()))},
+                {"opcodes": dict(sorted(held.unknown.items()))},
             )
         if chunk.partial:
             return
