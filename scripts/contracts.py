@@ -1,0 +1,745 @@
+#!/usr/bin/env python3
+"""The cross-layer contracts registry tool (packages/neptune-platform ADR 0002).
+
+``contracts/`` holds one directory per contract: ``contract.toml`` (owner, consumers, where the
+owner exports the schema and keeps its version constant, the owner's contract tests) and one
+``v<semver>/`` directory per published version with ``schema.json``, ``version.json`` and
+``golden/*.json``. ``contracts/lock.toml`` records which version each consuming package is built
+against; ``contracts/packages.toml`` routes announcements to each package's Linear gate issue.
+
+Subcommands:
+
+- ``check [--package P | --all]``: the registry is well formed, every golden validates against its
+  version's schema, and P's lock entries are not behind the registry; then P's upstream owners'
+  contract tests run (skipped, with a message, while an owner package is not installed yet).
+- ``check-owner --package P``: every schema P exports equals the registry's latest version, and
+  P's version constant matches it. A changed export needs ``bump``.
+- ``bump CONTRACT VERSION [--post]``: write ``v<VERSION>/`` from the owner's export and golden
+  generator, then print the announcement comments for the consumers' gate issues; ``--post``
+  sends them through the Linear GraphQL API when ``LINEAR_API_KEY`` is set.
+
+Stdlib plus ``jsonschema`` (already a dev dependency). Output files are canonical JSON: sorted
+keys, two-space indent, UTF-8, one trailing newline, so the same inputs give the same bytes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import importlib
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+import tomllib
+import urllib.request
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Final
+
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
+REPO: Final = Path(__file__).resolve().parents[1]
+DEFAULT_ROOT: Final = REPO / "contracts"
+LINEAR_API: Final = "https://api.linear.app/graphql"
+CONTRACT_STATUSES: Final = frozenset({"active", "planned"})
+VERSION_STATUSES: Final = frozenset({"draft", "stable"})
+_SEMVER: Final = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+_PACKAGE: Final = re.compile(r"^[a-z][a-z0-9-]*$")
+
+SemVer = tuple[int, int, int]
+
+
+class ContractError(Exception):
+    """A registry operation that cannot proceed; the message says what to do."""
+
+
+# --- Canonical JSON and versions ---------------------------------------------------------------
+
+
+def canonical(value: Any) -> str:
+    """The registry's file text for a JSON value: sorted keys, indent 2, UTF-8, final newline."""
+    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+def sha256(text: str) -> str:
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def parse_semver(text: str) -> SemVer:
+    match = _SEMVER.match(text)
+    if match is None:
+        raise ContractError(f"not a semantic version (MAJOR.MINOR.PATCH): {text!r}")
+    major, minor, patch = (int(part) for part in match.groups())
+    return major, minor, patch
+
+
+def show(version: SemVer) -> str:
+    return ".".join(str(part) for part in version)
+
+
+# --- The registry model ------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Owner:
+    package: str
+    module: str
+    schema_export: str | None
+    version_constant: str | None
+    golden_generator: str | None
+    contract_tests: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Contract:
+    id: str
+    title: str
+    status: str
+    owner: Owner
+    consumers: tuple[str, ...]
+    part_of: str | None
+    path: Path
+
+
+@dataclass(frozen=True)
+class Version:
+    contract: str
+    version: SemVer
+    status: str
+    owner_version: int | str | None
+    schema_sha256: str
+    goldens: Mapping[str, str]
+    note: str | None
+    path: Path
+
+    @property
+    def schema_text(self) -> str:
+        return (self.path / "schema.json").read_text(encoding="utf-8")
+
+
+@dataclass
+class Report:
+    """What a check found: problems fail it, notes are informational (skips, passes)."""
+
+    problems: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return not self.problems
+
+
+def _str(table: Mapping[str, Any], key: str, where: str, *, optional: bool = False) -> Any:
+    value = table.get(key)
+    if value is None and optional:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ContractError(f"{where}: {key} must be a non-empty string")
+    return value
+
+
+def _strings(table: Mapping[str, Any], key: str, where: str) -> tuple[str, ...]:
+    value = table.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
+        raise ContractError(f"{where}: {key} must be a list of non-empty strings")
+    return tuple(value)
+
+
+def _toml(path: Path) -> dict[str, Any]:
+    try:
+        with path.open("rb") as handle:
+            return tomllib.load(handle)
+    except tomllib.TOMLDecodeError as error:
+        raise ContractError(f"{path}: {error}") from error
+
+
+class Registry:
+    """The ``contracts/`` directory, read on demand."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.repo = root.parent
+
+    def contract_ids(self) -> list[str]:
+        return sorted(p.name for p in self.root.iterdir() if (p / "contract.toml").is_file())
+
+    def contract(self, contract_id: str) -> Contract:
+        path = self.root / contract_id
+        if not (path / "contract.toml").is_file():
+            raise ContractError(f"unknown contract {contract_id!r}")
+        where = f"contracts/{contract_id}/contract.toml"
+        data = _toml(path / "contract.toml")
+        owner = data.get("owner")
+        if not isinstance(owner, dict):
+            raise ContractError(f"{where}: needs an [owner] table")
+        status = _str(data, "status", where)
+        if status not in CONTRACT_STATUSES:
+            raise ContractError(f"{where}: status must be one of {sorted(CONTRACT_STATUSES)}")
+        return Contract(
+            id=contract_id,
+            title=_str(data, "title", where),
+            status=status,
+            owner=Owner(
+                package=_str(owner, "package", where),
+                module=_str(owner, "module", where),
+                schema_export=_str(owner, "schema_export", where, optional=True),
+                version_constant=_str(owner, "version_constant", where, optional=True),
+                golden_generator=_str(owner, "golden_generator", where, optional=True),
+                contract_tests=_strings(owner, "contract_tests", where),
+            ),
+            consumers=_strings(data, "consumers", where),
+            part_of=_str(data, "part_of", where, optional=True),
+            path=path,
+        )
+
+    def versions(self, contract_id: str) -> list[Version]:
+        """Every published version, oldest first."""
+        found: list[Version] = []
+        for path in sorted((self.root / contract_id).glob("v*")):
+            if path.is_dir():
+                found.append(self._version(contract_id, path))
+        return sorted(found, key=lambda v: v.version)
+
+    def _version(self, contract_id: str, path: Path) -> Version:
+        where = f"contracts/{contract_id}/{path.name}"
+        version = parse_semver(path.name[1:])
+        meta_path = path / "version.json"
+        if not meta_path.is_file():
+            raise ContractError(f"{where}: missing version.json")
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if not isinstance(meta, dict):
+            raise ContractError(f"{where}/version.json must be an object")
+        goldens = meta.get("goldens", {})
+        if not isinstance(goldens, dict) or not all(isinstance(t, str) for t in goldens.values()):
+            raise ContractError(f"{where}/version.json: goldens must map file name to pointer")
+        owner_version = meta.get("owner_version")
+        if owner_version is not None and not isinstance(owner_version, int | str):
+            raise ContractError(f"{where}/version.json: owner_version must be int, str or null")
+        return Version(
+            contract=contract_id,
+            version=version,
+            status=_str(meta, "status", where),
+            owner_version=owner_version,
+            schema_sha256=_str(meta, "schema_sha256", where),
+            goldens=goldens,
+            note=_str(meta, "note", where, optional=True),
+            path=path,
+        )
+
+    def latest(self, contract_id: str, *, stable: bool = False) -> Version | None:
+        versions = [v for v in self.versions(contract_id) if not stable or v.status == "stable"]
+        return versions[-1] if versions else None
+
+    def lock(self) -> dict[str, dict[str, str]]:
+        data = _toml(self.root / "lock.toml")
+        lock: dict[str, dict[str, str]] = {}
+        for package, entries in sorted(data.items()):
+            if not isinstance(entries, dict) or not all(
+                isinstance(v, str) for v in entries.values()
+            ):
+                raise ContractError(f"lock.toml: [{package}] must map contract id to version")
+            lock[package] = dict(sorted(entries.items()))
+        return lock
+
+    def packages(self) -> dict[str, dict[str, str]]:
+        data = _toml(self.root / "packages.toml")
+        for name, table in data.items():
+            if not isinstance(table, dict):
+                raise ContractError(f"packages.toml: [{name}] must be a table")
+        return data
+
+
+# --- Validation --------------------------------------------------------------------------------
+
+
+def _subschema(schema: Mapping[str, Any], pointer: str) -> dict[str, Any]:
+    """A schema that validates against ``pointer`` within ``schema`` (``#`` is the root)."""
+    if pointer == "#":
+        return dict(schema)
+    if not pointer.startswith("#/$defs/"):
+        raise ContractError(f"golden target must be '#' or '#/$defs/<name>', got {pointer!r}")
+    name = pointer.removeprefix("#/$defs/")
+    if name not in schema.get("$defs", {}):
+        raise ContractError(f"golden target {pointer} is not in the schema")
+    wrapper = {k: v for k, v in schema.items() if k in ("$defs", "$id", "$schema")}
+    return {**wrapper, "$ref": pointer}
+
+
+def validate_golden(schema: Mapping[str, Any], pointer: str, value: Any) -> list[str]:
+    validator = Draft202012Validator(_subschema(schema, pointer))
+    errors = sorted(validator.iter_errors(value), key=lambda e: list(e.absolute_path))
+    return [f"{'/'.join(map(str, e.absolute_path)) or '<root>'}: {e.message}" for e in errors]
+
+
+def _check_version(contract: Contract, version: Version) -> list[str]:
+    where = f"contracts/{contract.id}/{version.path.name}"
+    problems: list[str] = []
+    meta = json.loads((version.path / "version.json").read_text(encoding="utf-8"))
+    if meta.get("contract") != contract.id or meta.get("version") != show(version.version):
+        problems.append(f"{where}/version.json: contract/version disagree with the directory")
+    if (version.path / "version.json").read_text(encoding="utf-8") != canonical(meta):
+        problems.append(f"{where}/version.json is not canonical JSON")
+    if version.status not in VERSION_STATUSES:
+        problems.append(f"{where}: status must be one of {sorted(VERSION_STATUSES)}")
+    if isinstance(version.owner_version, int) and version.owner_version != version.version[0]:
+        problems.append(
+            f"{where}: an integer owner version ({version.owner_version}) must equal the major"
+        )
+    if isinstance(version.owner_version, str) and version.owner_version != show(version.version):
+        problems.append(f"{where}: a string owner version must equal the registry version")
+    if not (version.path / "schema.json").is_file():
+        return [*problems, f"{where}: missing schema.json"]
+    text = version.schema_text
+    schema = json.loads(text)
+    if text != canonical(schema):
+        problems.append(f"{where}/schema.json is not canonical JSON")
+    if sha256(text) != version.schema_sha256:
+        problems.append(f"{where}: schema.json does not match version.json's schema_sha256")
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as error:
+        return [*problems, f"{where}/schema.json is not a valid JSON Schema: {error.message}"]
+    golden_dir = version.path / "golden"
+    present = sorted(p.name for p in golden_dir.glob("*.json")) if golden_dir.is_dir() else []
+    if present != sorted(version.goldens):
+        problems.append(f"{where}: golden/ files differ from version.json's goldens list")
+    if not version.goldens:
+        problems.append(f"{where}: a version needs at least one golden example")
+    for name in sorted(set(present) & set(version.goldens)):
+        golden_text = (golden_dir / name).read_text(encoding="utf-8")
+        value = json.loads(golden_text)
+        if golden_text != canonical(value):
+            problems.append(f"{where}/golden/{name} is not canonical JSON")
+        try:
+            errors = validate_golden(schema, version.goldens[name], value)
+        except ContractError as error:
+            errors = [str(error)]
+        problems += [f"{where}/golden/{name}: {message}" for message in errors]
+    return problems
+
+
+def check_registry(registry: Registry) -> Report:
+    """Structure, schemas and goldens of every contract, plus the lock's consistency."""
+    report = Report()
+    try:
+        packages = registry.packages()
+        lock = registry.lock()
+    except ContractError as error:
+        report.problems.append(str(error))
+        return report
+    contracts: dict[str, Contract] = {}
+    for contract_id in registry.contract_ids():
+        try:
+            contract = registry.contract(contract_id)
+            versions = registry.versions(contract_id)
+        except (ContractError, json.JSONDecodeError) as error:
+            report.problems.append(f"{contract_id}: {error}")
+            continue
+        contracts[contract_id] = contract
+        for package in (contract.owner.package, *contract.consumers):
+            if package not in packages:
+                report.problems.append(f"{contract_id}: package {package!r} not in packages.toml")
+        if contract.part_of is not None and contract.part_of not in registry.contract_ids():
+            report.problems.append(f"{contract_id}: part_of names no contract")
+        if contract.status == "planned" and versions:
+            report.problems.append(f"{contract_id}: a planned contract has no versions")
+        if contract.status == "active" and not versions:
+            report.problems.append(f"{contract_id}: an active contract needs a version")
+        for version in versions:
+            report.problems += _check_version(contract, version)
+            report.notes.append(
+                f"{contract_id} {show(version.version)} ({version.status}): schema and "
+                f"{len(version.goldens)} goldens checked"
+            )
+    for package, entries in lock.items():
+        if package not in packages:
+            report.problems.append(f"lock.toml: package {package!r} not in packages.toml")
+        for contract_id in entries:
+            if contract_id not in contracts:
+                report.problems.append(f"lock.toml: {package} declares unknown {contract_id}")
+                continue
+            if package not in contracts[contract_id].consumers:
+                report.problems.append(
+                    f"lock.toml: {package} is not a consumer in {contract_id}/contract.toml"
+                )
+    return report
+
+
+# --- Consumer side -----------------------------------------------------------------------------
+
+
+def _installed(module: str) -> bool:
+    top = module.split(".", 1)[0]
+    try:
+        return importlib.util.find_spec(top) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+Runner = Callable[[Sequence[str], Path], int]
+
+
+def run_pytest(targets: Sequence[str], cwd: Path) -> int:
+    command = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *targets]
+    return subprocess.run(command, cwd=cwd, check=False).returncode
+
+
+def check_package(
+    registry: Registry, package: str, *, runner: Runner | None = run_pytest
+) -> Report:
+    """A consumer's CI step: registry valid, lock current, upstream contract tests green."""
+    report = check_registry(registry)
+    try:
+        _check_lock(registry, package, report, runner)
+    except (ContractError, json.JSONDecodeError) as error:
+        report.problems.append(str(error))
+    return report
+
+
+def _check_lock(registry: Registry, package: str, report: Report, runner: Runner | None) -> None:
+    lock = registry.lock()
+    if package not in lock:
+        report.problems.append(f"lock.toml has no [{package}] entry; declare its contracts")
+        return
+    declared = lock[package]
+    for contract_id in registry.contract_ids():
+        contract = registry.contract(contract_id)
+        if (
+            package in contract.consumers
+            and contract_id not in declared
+            and registry.latest(contract_id, stable=True) is not None
+        ):
+            report.problems.append(
+                f"{package} consumes {contract_id} but lock.toml does not declare a version"
+            )
+    for contract_id, text in declared.items():
+        if contract_id not in registry.contract_ids():
+            continue  # reported by check_registry
+        try:
+            version = parse_semver(text)
+        except ContractError as error:
+            report.problems.append(f"lock.toml [{package}] {contract_id}: {error}")
+            continue
+        published = {v.version for v in registry.versions(contract_id)}
+        if version not in published:
+            report.problems.append(f"{package} declares {contract_id} {text}, never published")
+            continue
+        latest = registry.latest(contract_id, stable=True)
+        if latest is not None and latest.version > version:
+            report.problems.append(
+                f"{package} is behind: declares {contract_id} {text}, registry has "
+                f"{show(latest.version)}; its coordinator picks the bump up as an issue"
+            )
+        else:
+            report.notes.append(f"{package}: {contract_id} {text} is current")
+        _run_owner_tests(registry, registry.contract(contract_id), report, runner)
+
+
+def _run_owner_tests(
+    registry: Registry, contract: Contract, report: Report, runner: Runner | None
+) -> None:
+    owner = contract.owner
+    if not owner.contract_tests:
+        report.notes.append(f"{contract.id}: owner {owner.package} declares no contract tests")
+        return
+    if not _installed(owner.module):
+        report.notes.append(
+            f"{contract.id}: SKIPPED owner contract tests, {owner.package} is not installed "
+            f"({owner.module} is not importable)"
+        )
+        return
+    missing = [t for t in owner.contract_tests if not (registry.repo / t).exists()]
+    if missing:
+        report.problems.append(f"{contract.id}: owner contract tests missing: {missing}")
+        return
+    if runner is None:
+        report.notes.append(f"{contract.id}: owner contract tests not run (--no-tests)")
+        return
+    if runner(owner.contract_tests, registry.repo) != 0:
+        report.problems.append(f"{contract.id}: owner {owner.package}'s contract tests failed")
+    else:
+        report.notes.append(f"{contract.id}: owner {owner.package}'s contract tests passed")
+
+
+# --- Owner side --------------------------------------------------------------------------------
+
+
+def _resolve(reference: str) -> Any:
+    module, _, name = reference.partition(":")
+    if not name:
+        raise ContractError(f"expected 'module:attribute', got {reference!r}")
+    value = getattr(importlib.import_module(module), name)
+    return value() if callable(value) else value
+
+
+def owner_export(contract: Contract) -> tuple[Any, int | str | None]:
+    """The owner's exported schema and its version constant, imported from the owner package."""
+    owner = contract.owner
+    if owner.schema_export is None:
+        raise ContractError(f"{contract.id}: the owner declares no schema_export")
+    schema = _resolve(owner.schema_export)
+    constant = _resolve(owner.version_constant) if owner.version_constant else None
+    if constant is not None and not isinstance(constant, int | str):
+        raise ContractError(f"{contract.id}: version constant must be an int or a str")
+    return schema, constant
+
+
+def check_owner(registry: Registry, package: str) -> Report:
+    """The owner-side rule: an exported schema equals the registry's latest version."""
+    report = Report()
+    owned = [
+        c
+        for c in (registry.contract(i) for i in registry.contract_ids())
+        if c.owner.package == package and c.owner.schema_export is not None
+    ]
+    if not owned:
+        report.notes.append(f"{package} exports no registered schema")
+    for contract in owned:
+        if not _installed(contract.owner.module):
+            report.notes.append(f"{contract.id}: SKIPPED, {package} is not installed")
+            continue
+        schema, constant = owner_export(contract)
+        latest = registry.latest(contract.id)
+        if latest is None:
+            report.problems.append(
+                f"{contract.id}: {package} exports a schema the registry has no version of; "
+                f"run scripts/contracts.py bump {contract.id} <version>"
+            )
+            continue
+        if canonical(schema) != latest.schema_text:
+            report.problems.append(
+                f"{contract.id}: {package}'s exported schema differs from registry "
+                f"{show(latest.version)}; bump the version constant if the change is breaking, "
+                f"then run scripts/contracts.py bump {contract.id} <next version>"
+            )
+        elif constant != latest.owner_version:
+            report.problems.append(
+                f"{contract.id}: version constant is {constant!r} but registry "
+                f"{show(latest.version)} records {latest.owner_version!r}; run bump"
+            )
+        else:
+            report.notes.append(f"{contract.id}: {package} matches {show(latest.version)}")
+    return report
+
+
+# --- Bump and announce -------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Announcement:
+    package: str
+    issue: str | None
+    body: str
+
+
+def generate_goldens(registry: Registry, contract: Contract) -> dict[str, tuple[str, Any]]:
+    """Run the owner's golden generator: it prints ``{name: {"target", "value"}}`` as JSON."""
+    generator = contract.owner.golden_generator
+    if generator is None:
+        raise ContractError(f"{contract.id}: the owner declares no golden_generator")
+    result = subprocess.run(
+        [sys.executable, str(registry.repo / generator)],
+        cwd=registry.repo,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise ContractError(f"{generator} failed:\n{result.stderr}")
+    produced = json.loads(result.stdout)
+    goldens: dict[str, tuple[str, Any]] = {}
+    for name, entry in sorted(produced.items()):
+        if not name.endswith(".json") or "/" in name:
+            raise ContractError(f"{generator}: golden name {name!r} must be a plain *.json name")
+        goldens[name] = (entry["target"], entry["value"])
+    return goldens
+
+
+def write_version(
+    path: Path,
+    contract: str,
+    version: SemVer,
+    status: str,
+    owner_version: int | str | None,
+    schema: Any,
+    goldens: Mapping[str, tuple[str, Any]],
+    note: str | None = None,
+) -> None:
+    """Write ``v<version>/``: schema, goldens and version.json, all canonical."""
+    schema_text = canonical(schema)
+    (path / "golden").mkdir(parents=True)
+    (path / "schema.json").write_text(schema_text, encoding="utf-8")
+    for name, (_, value) in sorted(goldens.items()):
+        (path / "golden" / name).write_text(canonical(value), encoding="utf-8")
+    meta: dict[str, Any] = {
+        "contract": contract,
+        "goldens": {name: target for name, (target, _) in sorted(goldens.items())},
+        "owner_version": owner_version,
+        "schema_sha256": sha256(schema_text),
+        "status": status,
+        "version": show(version),
+    }
+    if note is not None:
+        meta["note"] = note
+    (path / "version.json").write_text(canonical(meta), encoding="utf-8")
+
+
+def announcements(registry: Registry, contract: Contract, version: SemVer) -> list[Announcement]:
+    packages = registry.packages()
+    lock = registry.lock()
+    found: list[Announcement] = []
+    for package in sorted(contract.consumers):
+        declared = lock.get(package, {}).get(contract.id)
+        body = (
+            f"Contract `{contract.id}` {show(version)} is published by {contract.owner.package} "
+            f"(`contracts/{contract.id}/v{show(version)}/`). "
+        )
+        if declared == show(version):
+            body += f"`{package}` already declares it in `contracts/lock.toml`; nothing to do."
+        else:
+            body += (
+                f"`{package}` declares {declared or 'no version'} in `contracts/lock.toml`; "
+                f"`scripts/contracts.py check --package {package}` fails until the lock is "
+                "raised. Pick the bump up as an issue in this project."
+            )
+        found.append(Announcement(package, packages.get(package, {}).get("gate_issue"), body))
+    return found
+
+
+def bump(
+    registry: Registry,
+    contract_id: str,
+    text: str,
+    *,
+    status: str = "stable",
+) -> list[Announcement]:
+    """Publish a new version from the owner's export and golden generator."""
+    contract = registry.contract(contract_id)
+    version = parse_semver(text)
+    if status not in VERSION_STATUSES:
+        raise ContractError(f"status must be one of {sorted(VERSION_STATUSES)}")
+    if contract.status != "active":
+        raise ContractError(f"{contract_id} is {contract.status}; set status = 'active' first")
+    latest = registry.latest(contract_id)
+    if latest is not None and version <= latest.version:
+        raise ContractError(f"{text} is not newer than {show(latest.version)}")
+    if not _installed(contract.owner.module):
+        raise ContractError(f"{contract.owner.package} is not installed; cannot export")
+    schema, constant = owner_export(contract)
+    if latest is not None and canonical(schema) == latest.schema_text:
+        raise ContractError(f"the exported schema equals {show(latest.version)}; nothing to bump")
+    if isinstance(constant, int) and constant != version[0]:
+        raise ContractError(
+            f"the version constant is {constant}; the new version's major must equal it "
+            "(raise the constant for a breaking change)"
+        )
+    if isinstance(constant, str) and constant != text:
+        raise ContractError(f"the version constant is {constant!r}; bump it to {text!r} first")
+    goldens = generate_goldens(registry, contract)
+    for name, (target, value) in goldens.items():
+        errors = validate_golden(schema, target, value)
+        if errors:
+            raise ContractError(f"golden {name} does not validate: {errors[0]}")
+    write_version(
+        contract.path / f"v{text}", contract_id, version, status, constant, schema, goldens
+    )
+    return announcements(registry, contract, version)
+
+
+def post_comment(
+    issue: str,
+    body: str,
+    api_key: str,
+    urlopen: Callable[..., Any] = urllib.request.urlopen,
+) -> None:
+    """Create one Linear comment through the GraphQL API."""
+    payload = {
+        "query": "mutation($input: CommentCreateInput!) { commentCreate(input: $input) "
+        "{ success } }",
+        "variables": {"input": {"issueId": issue, "body": body}},
+    }
+    request = urllib.request.Request(
+        LINEAR_API,
+        data=json.dumps(payload, sort_keys=True).encode("utf-8"),
+        headers={"Authorization": api_key, "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=30) as response:
+        result = json.loads(response.read())
+    if result.get("errors") or not result.get("data", {}).get("commentCreate", {}).get("success"):
+        raise ContractError(f"Linear refused the comment on {issue}: {result}")
+
+
+# --- CLI ---------------------------------------------------------------------------------------
+
+
+def _print(lines: Iterable[str], stream: Any = None) -> None:
+    for line in lines:
+        print(line, file=stream or sys.stdout)
+
+
+def _finish(report: Report) -> int:
+    _print(report.notes)
+    _print((f"FAIL: {problem}" for problem in report.problems), sys.stderr)
+    return 0 if report.ok else 1
+
+
+def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="contracts.py", description=__doc__.splitlines()[0])
+    parser.add_argument("--root", type=Path, default=DEFAULT_ROOT, help="the contracts/ dir")
+    commands = parser.add_subparsers(dest="command", required=True)
+    check = commands.add_parser("check", help="validate the registry and a consumer's lock")
+    which = check.add_mutually_exclusive_group()
+    which.add_argument("--package", help="consumer package to check (default: registry only)")
+    which.add_argument("--all", action="store_true", help="every package in lock.toml")
+    check.add_argument("--no-tests", action="store_true", help="skip owner contract tests")
+    owner = commands.add_parser("check-owner", help="owner's export equals the registry")
+    owner.add_argument("--package", required=True)
+    bumper = commands.add_parser("bump", help="publish a new version of a contract")
+    bumper.add_argument("contract")
+    bumper.add_argument("version")
+    bumper.add_argument("--status", default="stable", choices=sorted(VERSION_STATUSES))
+    bumper.add_argument("--post", action="store_true", help="post comments (LINEAR_API_KEY)")
+    args = parser.parse_args(argv)
+    environ = os.environ if environ is None else environ
+    registry = Registry(args.root.resolve())
+    try:
+        if args.command == "check":
+            runner = None if args.no_tests else run_pytest
+            if args.all:
+                packages = list(registry.lock())
+                return max(
+                    (_finish(check_package(registry, p, runner=runner)) for p in packages),
+                    default=0,
+                )
+            if args.package is None:
+                return _finish(check_registry(registry))
+            return _finish(check_package(registry, args.package, runner=runner))
+        if args.command == "check-owner":
+            return _finish(check_owner(registry, args.package))
+        notes = bump(registry, args.contract, args.version, status=args.status)
+        _print([f"wrote contracts/{args.contract}/v{args.version}/"])
+        for note in notes:
+            target = note.issue or f"<no gate issue for {note.package} in packages.toml>"
+            _print([f"--- comment for {target} ({note.package})", note.body])
+        if args.post:
+            key = environ.get("LINEAR_API_KEY")
+            if not key:
+                raise ContractError("--post needs LINEAR_API_KEY; comments printed, not posted")
+            for note in notes:
+                if note.issue is not None:
+                    post_comment(note.issue, note.body, key)
+                    _print([f"posted to {note.issue}"])
+    except ContractError as error:
+        _print([f"FAIL: {error}"], sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

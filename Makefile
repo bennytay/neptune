@@ -4,7 +4,7 @@
 .DEFAULT_GOAL := help
 UV ?= uv
 
-.PHONY: help setup fmt lint type test test-fast check schema examples
+.PHONY: help setup fmt lint type test test-fast check schema examples contracts-check
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -37,3 +37,7 @@ schema: ## Regenerate docs/schema/canonical.schema.json from the model's types
 examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/fixtures/model/make_examples.py
 > $(UV) run python tests/golden/packages/make_packages.py
+
+contracts-check: ## Contracts registry, every consumer's lock, and the compiler's owner-side rule
+> $(UV) run python scripts/contracts.py check-owner --package neptune
+> $(UV) run python scripts/contracts.py check --all

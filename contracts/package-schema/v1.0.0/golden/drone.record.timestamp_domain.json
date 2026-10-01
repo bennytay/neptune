@@ -1,0 +1,42 @@
+{
+  "declared_monotonic": {
+    "knowledge": "unknown"
+  },
+  "epoch": {
+    "knowledge": "unknown"
+  },
+  "field": "time_utc_usec",
+  "id": "rec:sha256:2cc49276ad09ca7f401000c838f09649480b62e881be9954925ffd76f3b06b9e",
+  "kind": "timestamp_domain",
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 90,
+          "offset": 163
+        },
+        {
+          "kind": "ulog:field",
+          "name": "time_utc_usec"
+        }
+      ],
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+    },
+    "transform": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+  },
+  "resolution": {
+    "knowledge": "unknown"
+  },
+  "role": {
+    "knowledge": "unknown"
+  },
+  "schema_version": 1,
+  "scope": [
+    "vehicle_gps_position"
+  ],
+  "timescale": {
+    "knowledge": "unknown"
+  }
+}
