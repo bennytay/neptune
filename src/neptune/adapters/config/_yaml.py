@@ -38,8 +38,10 @@ from neptune.adapters.config._tree import (
     Limits,
     Node,
     NodeValue,
+    Null,
     Parse,
     Problem,
+    Reading,
     SkippedEntry,
     Spot,
     TooDeep,
@@ -137,6 +139,7 @@ class _Frame:
     path: Path
     count: int = 0  # entries or items begun
     key: str | None = None  # a mapping's pending key, once read
+    key_type: str | None = None  # the pending key's type: its tag, resolved
     key_start: int = 0
     skip_value: bool = False  # the pending entry's key cannot be held: skip its value
     children: list[int] = field(default_factory=list)
@@ -162,7 +165,9 @@ class _Document:
         self.version = version
         self.nodes: list[Node] = []
         self.frames: list[_Frame] = []
-        self.anchors: dict[str, int] = {}
+        # Each anchor's node, or the key it marks: a key is no node, so an alias to one reads as
+        # the key's scalar again.
+        self.anchors: dict[str, int | ScalarEvent] = {}
         self.skipped: list[SkippedEntry] = []
         self.skip_depth = 0  # events of an entry being skipped
         self.too_deep = False
@@ -217,12 +222,19 @@ class _Document:
     def _key(self, frame: _Frame, event: NodeEvent) -> None:
         frame.key_start = _start(event)
         key: str | None = None
+        key_type: str | None = None
         if isinstance(event, ScalarEvent):
-            key = event.value
+            key, key_type = event.value, self._key_type(event.value, _tag(event))
+            if isinstance(event.anchor, str):
+                self.anchors[event.anchor] = event
         elif isinstance(event, AliasEvent) and event.anchor in self.anchors:
-            target = self.nodes[self.anchors[event.anchor]]
-            if not isinstance(target.value, Collection | Alias):
-                key = target.text
+            target = self.anchors[event.anchor]
+            if isinstance(target, ScalarEvent):
+                key, key_type = target.value, self._key_type(target.value, _tag(target))
+            else:
+                node = self.nodes[target]
+                if not isinstance(node.value, Collection | Alias) and node.text is not None:
+                    key, key_type = node.text, self._key_type(node.text, node.tag or PLAIN)
         if key is None or len(key) > self.limits.max_scalar or not representable(key):
             frame.key = None
             if isinstance(event, CollectionStartEvent):
@@ -230,16 +242,26 @@ class _Document:
             else:
                 frame.skip_value = True
             return
-        frame.key = key
+        frame.key, frame.key_type = key, key_type
+
+    def _key_type(self, text: str, tag: str) -> str:
+        """A key's type, so that ``1`` and ``"1"`` are two keys and ``a`` and ``"a"`` one: a
+        quoted or ``!!str`` key is a string, a plain one the type each version reads it as."""
+        if tag in (NON_PLAIN, _STR):
+            return _STR
+        if tag != PLAIN or len(text) > self.limits.max_scalar:
+            return tag
+        return "|".join(sorted({_reading_type(implicit(text, v)) for v in self.versions}))
 
     def _value(self, frame: _Frame | None, event: NodeEvent) -> None:
+        key_type: str | None = None
         if frame is None:
             path: Path = ()
             order, parent = 0, -1
         elif frame.mapping:
             assert frame.key is not None
             path, order, parent = (*frame.path, frame.key), frame.count, frame.index
-            frame.key = None
+            key_type, frame.key, frame.key_type = frame.key_type, None, None
         else:
             path, order, parent = (*frame.path, frame.count), frame.count, frame.index
         if frame is not None:
@@ -257,6 +279,8 @@ class _Document:
                 value: NodeValue = Unreadable(Issue.UNDEFINED_ALIAS, reason)
                 node = Node(path, order, parent, value, None, None, (start, end))
                 node.issues = (Issue.UNDEFINED_ALIAS,)
+            elif isinstance(target, ScalarEvent):  # a key's anchor: the key's scalar again
+                node = self._scalar(path, order, parent, target)
             else:
                 alias = Alias(anchor, self.nodes[target].path)
                 node = Node(path, order, parent, alias, None, None, (start, end))
@@ -269,6 +293,7 @@ class _Document:
             node = Node(path, order, parent, Collection(kind, 0), None, tag, (start, end))
             flow = bool(getattr(event, "flow_style", False))
             self.frames.append(_Frame(index, mapping, path, flow=flow, last_end=end))
+        node.key_type = key_type
         self.nodes.append(node)
         if frame is not None:
             frame.children.append(index)
@@ -279,9 +304,8 @@ class _Document:
             self.anchors[marked] = index
 
     def _scalar(self, path: Path, order: int, parent: int, event: ScalarEvent) -> Node:
-        text, style, tag = event.value, event.style, event.tag
-        plain = style is None or style == ""
-        node_tag = tag if tag is not None else PLAIN if plain else NON_PLAIN
+        text, tag, node_tag = event.value, event.tag, _tag(event)
+        plain = node_tag == PLAIN
         span = (_start(event), _end(event))
         if len(text) > self.limits.max_scalar:
             large = Unreadable(Issue.SCALAR_TOO_LARGE, "over max_scalar_length")
@@ -325,6 +349,36 @@ class _Document:
         if self.too_deep:
             return TooDeep(self.index, extent)
         return Document(self.index, self.nodes, extent, version=self.version, skipped=self.skipped)
+
+
+_STR: Final = "tag:yaml.org,2002:str"
+_TYPE_TAGS: Final = {
+    ScalarType.BOOL: "tag:yaml.org,2002:bool",
+    ScalarType.INT: "tag:yaml.org,2002:int",
+    ScalarType.FLOAT: "tag:yaml.org,2002:float",
+    ScalarType.STRING: _STR,
+    ScalarType.BINARY: "tag:yaml.org,2002:binary",
+    ScalarType.OFFSET_DATETIME: "tag:yaml.org,2002:timestamp",
+    ScalarType.LOCAL_DATETIME: "tag:yaml.org,2002:timestamp",
+    ScalarType.LOCAL_DATE: "tag:yaml.org,2002:timestamp",
+    ScalarType.LOCAL_TIME: "tag:yaml.org,2002:timestamp",
+}
+
+
+def _tag(event: ScalarEvent) -> str:
+    """A scalar's tag: the explicit one, or the non-specific ``?`` (plain) or ``!`` (quoted)."""
+    if event.tag is not None:
+        return str(event.tag)
+    return PLAIN if event.style is None or event.style == "" else NON_PLAIN
+
+
+def _reading_type(reading: Reading) -> str:
+    """The tag a plain scalar resolves to under one version's schema."""
+    if isinstance(reading, Null):
+        return "tag:yaml.org,2002:null"
+    if isinstance(reading, Value):
+        return _TYPE_TAGS[reading.readings[0].type]
+    return f"unreadable:{reading.issue}"
 
 
 def _versions(declared: tuple[int, int] | None, option: str) -> tuple[YamlVersion, ...]:

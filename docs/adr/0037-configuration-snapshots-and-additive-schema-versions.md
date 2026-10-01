@@ -84,8 +84,11 @@ Forces:
      A value no record can hold (beyond binary64, over 14,000 bits, an unpaired surrogate, an
      application's tag, a text not of its tag's type) is `Unknown` with a finding.
 4. **Citations.** A value's record-level locator is an RFC 6901 `JsonPointer` into the document
-   as parsed, after a `config:document {index}` step in YAML. Where a key repeats in a mapping,
-   each of its entries is addressed by position instead: the mapping's pointer, then
+   as parsed, after a `config:document {index}` step in YAML. Where a key's text repeats in a
+   mapping, each of its entries is addressed by position instead (in YAML, `1` and `"1"` are two
+   keys of one text, so one path: addressed by position, but no `duplicate_key`, which needs the
+   same text and type: a plain key's type is what the document's YAML versions read it as, a
+   quoted or `!!str` key a string, any other tag its own): the mapping's pointer, then
    `config:entry {order}`, then a pointer into that entry's value, so no two values share a
    citation and none is a counter. A value's state cites the `Span` it is written at, in code
    points of the decoded text (the text adapter's convention); a TOML table cites its `[header]`,
@@ -111,7 +114,8 @@ Forces:
      snapshot. A scanner over the accepted text finds spans and comments, which `tomllib` drops.
    - YAML: PyYAML's pure-Python parser, events only. Nothing is ever constructed, so no tag runs
      code; aliases are references, never expanded, so a billion-laughs document is 91 values;
-     merge keys (`<<`) stay keys. Plain scalars are typed by the version the document declares;
+     an anchor on a key, which is no node and has no path, makes an alias to it read as that
+     key's scalar; merge keys (`<<`) stay keys. Plain scalars are typed by the version the document declares;
      without one, by option `yaml_version`: `declared` (default) reads both 1.1 (the type
      repository) and 1.2 (the core schema) and keeps both readings where they differ, with one
      `config.yaml_version_undeclared` finding per document; `1.1` or `1.2` assume that version.

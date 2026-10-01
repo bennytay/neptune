@@ -783,6 +783,56 @@ def test_aliases_are_references_never_expansions() -> None:
     check_yaml_citations(data, output, {"*nowhere": "nowhere_"})
 
 
+def test_an_alias_to_a_key_reads_as_that_key_again() -> None:
+    data = b"defaults: {&r rate: 10, &f frame: base_link}\nright: {*r : 20}\nparent: *f\n"
+    output = run(data)
+    found = by_path(output)
+    assert reading(found[("right", "rate")]) == ("int", 20)  # an alias as a key: the key's text
+    parent = found[("parent",)]  # an alias as a value: the key's scalar, citing where it is
+    assert (reading(parent), parent.text, parent.tag) == (
+        ("string", "frame"),
+        Known("frame"),
+        Known("?"),
+    )
+    assert text_of(data)[slice(*(span_of(parent) or (0, 0)))] == "&f frame"
+    assert codes(output) == []
+    check_yaml_citations(data, output)
+    # Boundary: an anchor marks the last node or key that carries it, and a key on a collection
+    # is still no path.
+    later = by_path(run(b"a: &x 1\n&x b: 2\nc: *x\n"))
+    assert reading(later[("c",)]) == ("string", "b")
+    assert codes(run(b"? &k [a]\n: 1\n*k : 2\n")) == ["config.unsupported_key"]
+
+
+@pytest.mark.parametrize(
+    ("data", "duplicates"),
+    [
+        (b'1: a\n"1": b\n', 0),  # an int and a string: two keys of one text
+        (b"true: a\n'true': b\n", 0),
+        (b"a: 1\n'a': 2\n", 2),  # a plain string and a quoted one: one key
+        (b'!!str 1: x\n"1": y\n', 2),
+        (b"!!int 1: x\n1: y\n", 2),
+        (b"? !custom k\n: 1\nk: 2\n", 0),  # an application's tag is its own type
+        (b"%YAML 1.1\n---\non: 1\n'on': 2\n", 0),  # 1.1 reads on as a boolean
+        (b"%YAML 1.2\n---\non: 1\n'on': 2\n", 2),
+        (b"1: a\n'1': b\n1: c\n", 2),  # three entries of one text, two of one key
+    ],
+)
+def test_yaml_keys_repeat_by_type_and_text_and_every_entry_of_a_text_is_addressed(
+    data: bytes, duplicates: int
+) -> None:
+    output = run(data)
+    entries = [v for v in values(output) if v.path]
+    assert len({v.path for v in entries}) == 1  # one text: each entry addressed by position
+    for v in entries:
+        assert [s.to_json()["kind"] for s in v.provenance.evidence.locator][-2] == "config:entry"
+    if duplicates:
+        assert finding(output, "config.duplicate_key").details["count"] == duplicates
+    else:
+        assert "config.duplicate_key" not in codes(output)
+    check_yaml_citations(data, output)
+
+
 def test_a_billion_laughs_costs_one_value_per_alias() -> None:
     output = run(fixture("billion_laughs.yaml"))
     assert len(values(output)) == 91  # 9 keys, 9 lists of 9 items, and the root

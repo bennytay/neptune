@@ -6,6 +6,7 @@ and the problem that stopped it, if any. The adapter turns nodes into records; n
 about records, ids or chunks.
 """
 
+from collections import Counter
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final, TypeAlias
@@ -93,7 +94,9 @@ class Node:
 
     ``text`` is a scalar's declared text (``None`` for collections and aliases, or where it
     cannot be held); ``tag`` a YAML tag (``None`` in JSON and TOML); ``span`` where the value is
-    written, when the reader locates it; ``repeated`` that its key repeats in its mapping.
+    written, when the reader locates it; ``repeated`` that its key's text repeats in its mapping;
+    ``key_type`` what type its key is (YAML: ``1`` and ``"1"`` are two keys of one text), ``None``
+    where every key is a string (JSON, TOML).
     """
 
     path: Path
@@ -105,6 +108,7 @@ class Node:
     span: Spot | None = None
     repeated: bool = False
     issues: tuple[Issue, ...] = ()
+    key_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -180,14 +184,17 @@ def pointer_token(segment: str | int) -> str:
     return segment
 
 
-def mark_repeats(nodes: list[Node], children: list[int]) -> list[list[int]]:
-    """Flag the entries of one mapping whose keys repeat; return each repeated key's entries."""
-    by_key: dict[str | int, list[int]] = {}
+def mark_repeats(nodes: list[Node], children: list[int]) -> None:
+    """Flag the entries of one mapping whose keys' text repeats: each is addressed by position.
+    Those whose key is also of one type (the same key, not only the same text) are duplicates."""
+    by_text: dict[str | int, list[int]] = {}
     for child in children:
-        by_key.setdefault(nodes[child].path[-1], []).append(child)
-    groups = [group for group in by_key.values() if len(group) > 1]
-    for group in groups:
+        by_text.setdefault(nodes[child].path[-1], []).append(child)
+    for group in by_text.values():
+        if len(group) < 2:
+            continue
+        types = Counter(nodes[child].key_type for child in group)
         for child in group:
             nodes[child].repeated = True
-            nodes[child].issues = (*nodes[child].issues, Issue.DUPLICATE_KEY)
-    return groups
+            if types[nodes[child].key_type] > 1:
+                nodes[child].issues = (*nodes[child].issues, Issue.DUPLICATE_KEY)

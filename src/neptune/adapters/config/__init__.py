@@ -176,8 +176,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         Documented(
             _code("duplicate_key"),
-            "entries repeat a key of their mapping; every one is kept in source order and"
-            " addressed by its position (inconsistent, warning)",
+            "entries repeat a key of their mapping (YAML: same text and type, so 1 and '1' are"
+            " two keys); every one is kept in source order and addressed by its position, as is"
+            " every entry whose key's text repeats (inconsistent, warning)",
         ),
         Documented(
             _code("invalid_encoding"),
@@ -322,8 +323,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "yaml",
             "PyYAML's events: tags as written (expanded) or the non-specific ? (plain scalars,"
             " collections) and ! (quoted and block scalars); quoted and block scalars are"
-            " strings; aliases are references to their anchor's node, never expanded; merge"
-            " keys (<<) are kept as keys",
+            " strings; aliases are references to their anchor's node, never expanded; an alias"
+            " to an anchored key, which is no node, reads as that key's scalar; merge keys (<<)"
+            " are kept as keys",
         ),
     ),
     resources=Resources(max_memory=1024 * MIB, streaming=False),
