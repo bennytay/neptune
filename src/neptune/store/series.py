@@ -46,7 +46,9 @@ from neptune.model.series import (
 ROW_GROUP_ROWS: Final = 65_536
 # Every setting that shapes a series file's bytes, pyarrow's defaults included so that a default
 # that moves cannot move the bytes. The manifest records them (ADR 0022 §2), and a new pyarrow
-# version is a new writer: its files may differ, so it is part of the settings.
+# version is a new writer: its files may differ, so it is part of the settings. The writer is named
+# by the Arrow C++ version, the one every file's ``created_by`` carries, so that a development
+# build (wheel ``X.Y.Z.devN``, files ``X.Y.Z-SNAPSHOT``) still reads back what it wrote.
 SERIES_SETTINGS: Final[JsonObject] = {
     "byte_stream_split": False,
     "compliant_nested_type": True,
@@ -64,7 +66,7 @@ SERIES_SETTINGS: Final[JsonObject] = {
     "statistics": True,
     "store_schema": True,
     "write_batch_size": 1024,
-    "writer": f"pyarrow {pa.__version__}",
+    "writer": f"pyarrow {pa.cpp_version}",
 }
 STREAM_KEY: Final = b"neptune.stream"  # a series file's Stream line (ADR 0018 §8)
 RUN_KEY: Final = b"neptune.series_run"  # a run's stream id
@@ -425,8 +427,9 @@ def _check_rows(stream: Stream, table: Any) -> None:
 def check_settings(settings: object) -> JsonObject:
     """``store.series`` as a manifest records it: every pinned setting, each of its pinned type.
 
-    Values are not pinned to this writer's: a package written by another pyarrow stays readable,
-    and ``check_series`` holds each file to the settings its manifest records.
+    Values are not pinned to this writer's: a package written by another pyarrow stays readable.
+    ``check_series`` holds each file to what its own metadata can show (writer, format version,
+    row-group sizes); the other settings are the writer's inputs, which the file's hash pins.
     """
     if not isinstance(settings, Mapping) or set(settings) != set(SERIES_SETTINGS):
         raise SeriesError(f"series settings must hold exactly {sorted(SERIES_SETTINGS)}")
@@ -462,7 +465,8 @@ def check_series(stream: Stream, source: Source, settings: JsonObject = SERIES_S
     """Verify a series file against ``stream`` and ``settings``; return its row count.
 
     ``settings`` are what the file was written with, as its package's manifest records them
-    (``check_settings``); by default, this writer's. The file's own metadata must agree with them.
+    (``check_settings``); by default, this writer's. The writer, format version and row-group sizes
+    in the file's own metadata must agree with them.
     Reads one batch at a time; every row is checked for order, the null rules, its ``seq`` and
     its locator, which is parsed as ``Stream.check_row`` would. ``seq`` is unique wherever two
     rows share clock-0 ticks; across ticks, the ingest's checks (``neptune.adapters.check``) see

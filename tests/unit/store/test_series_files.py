@@ -429,7 +429,7 @@ def test_every_row_is_checked_wherever_it_sits(
 
 
 def test_the_settings_name_the_writer() -> None:
-    assert SERIES_SETTINGS["writer"] == f"pyarrow {pa.__version__}"
+    assert SERIES_SETTINGS["writer"] == f"pyarrow {pa.cpp_version}"
     assert SERIES_SETTINGS["row_group_rows"] == series_module.ROW_GROUP_ROWS
     assert check_settings(dict(SERIES_SETTINGS)) == SERIES_SETTINGS
 
@@ -439,7 +439,7 @@ def test_a_file_must_agree_with_the_settings_recorded_for_it(tmp_path: Path) -> 
     path = written(tmp_path, [batch([(0, 1), (1, 2)])])
     assert check_series(STREAM, path, SERIES_SETTINGS) == 2
     for key, value, message in (
-        ("writer", "pyarrow 0.0.0", f"written by 'pyarrow {pa.__version__}'"),
+        ("writer", "pyarrow 0.0.0", f"written by 'pyarrow {pa.cpp_version}'"),
         ("format_version", "2.4", "Parquet format 2.6"),
         ("row_group_rows", 1, "row groups do not hold 1 rows"),
     ):
