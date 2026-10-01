@@ -550,10 +550,9 @@ class Metadata:
         in_files = {p.path.text for p in parts}
         if paths and parts and in_paths != in_files:
             only_paths, only_files = sorted(in_paths - in_files), sorted(in_files - in_paths)
-            anchor = next(
-                (s for s in paths if s.text in in_paths - in_files),
-                next(p.path for p in parts if p.path.text in in_files - in_paths),
-            )
+            candidates = [s for s in paths if s.text not in in_files]
+            candidates += [p.path for p in parts if p.path.text not in in_paths]
+            anchor = candidates[0]
             self.say(
                 "parts_disagree",
                 FindingCategory.INCONSISTENT,

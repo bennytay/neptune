@@ -495,8 +495,8 @@ def _damage(
                 FindingCategory.CORRUPT,
                 Severity.WARNING,
                 (ByteRange(cell.offset, cell.length),),
-                f"{problems.counts[reason]} message row(s) are unusable ({reason}: the record does not"
-                " parse or its topic or timestamp is not an integer); they get no rows",
+                f"{problems.counts[reason]} message row(s) are unusable ({reason}: the record does"
+                " not parse or its topic or timestamp is not an integer); they get no rows",
                 {"first_rowid": cell.rowid, "reason": reason, "rows": problems.counts[reason]},
             )
         )

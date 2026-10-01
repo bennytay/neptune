@@ -172,6 +172,7 @@ class _Parser:
                 text, shift = text[1:], len(BOM.encode())
             self.raw.append((offset + shift, text))
             offset += len(piece) + 1
+        ended = False
         for index, (start, text) in enumerate(self.raw):
             if text.startswith(BOM):
                 raise YamlError("a byte order mark inside the document", index + 1)
@@ -181,9 +182,14 @@ class _Parser:
             indent = len(text) - len(stripped)
             if stripped.startswith("\t"):
                 raise YamlError("a tab is not allowed as indentation", index + 1)
-            if text.startswith(("---", "...")) and index > 0 and self.lines:
-                raise YamlError("a document marker after the first line", index + 1)
-            if text.rstrip() in ("---", "..."):
+            if ended:
+                raise YamlError("content after the document's end marker", index + 1)
+            if text.rstrip() == "...":
+                ended = True
+                continue
+            if text.rstrip() == "---":
+                if self.lines:
+                    raise YamlError("a second document is not supported", index + 1)
                 continue
             if text.startswith("%"):
                 raise YamlError("a directive is not supported", index + 1)
