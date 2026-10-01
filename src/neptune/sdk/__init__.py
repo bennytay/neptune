@@ -26,6 +26,7 @@ from neptune.adapters.builtin import builtin_adapters
 from neptune.discovery.ignore import DEFAULT_PATTERNS, IgnorePolicy
 from neptune.runtime import (
     EventSink,
+    Explanation,
     Isolation,
     JobError,
     JobEvent,
@@ -70,6 +71,7 @@ __all__ = [
     "ConfigurationError",
     "DestinationExistsError",
     "EventSink",
+    "Explanation",
     "IgnorePolicy",
     "IngestResult",
     "Ingestion",

@@ -12,3 +12,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0003](0003-identity-policy-consolidator-contract-and-lineage.md) | Identity policy, the consolidator contract, and consolidator lineage | Accepted |
 | [0004](0004-claim-graph-store.md) | Claim graph store: PostgreSQL 16 + pgvector over Neo4j 5 (Apache AGE optional, measured) | Accepted |
 | [0005](0005-split-closures-bi-temporal-findings-and-the-resolver-config.md) | Split closures, bi-temporal findings and the resolver's config | Accepted |
+| [0006](0006-graph-schema-v1-contract-surface-and-memory-reader.md) | Graph-schema v1: contract surface, version policy and the MemoryReader | Accepted |

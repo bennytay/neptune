@@ -134,11 +134,30 @@ needs, and nothing else decides: no clock, file time or flag.
 
 ## Dry-run
 
-`IngestJob.dry_run()` (ADR 0035) runs `discover`, `fingerprint`, `inspect` and `plan`, then stops:
-state `planned`, a `job_planned` event, no package, never an `ingest` call. It needs no destination;
-the ledger and plans it saves are the ones `run` reuses, and its cache report marks the chunks the
-workspace already holds. The SDK's `dry_run` calls it (`sdk.md`); `explain` (MVL-15) adds adapters'
-`inspect`, grouping and the rendered plan on top. It must never call `ingest`.
+`IngestJob.dry_run()` (ADR 0035, ADR 0044) runs `discover`, `fingerprint`, `inspect` and `plan`, then
+stops: state `planned`, a `job_planned` event, no package, never an `ingest` call. It needs no
+destination and only reads the sources; the ledger and plans it saves are the ones `run` reuses (the
+workspace is the cache; no package id depends on it, ADR 0035 §9), and its cache report marks the
+chunks the workspace already holds. Each selected source is also given to its adapter's `inspect`,
+sandboxed; a failed `inspect` is shown and never quarantines (a short read or a change is the
+source's, as for `plan`). The outcome carries an `Explanation` (`neptune.runtime.explain`):
+
+- inventory (files, links, skipped entries), and per distinct source its status, detected format,
+  every adapter's verdict (`selected`/`tied`/`outranked`/`declined`/`failed`, confidence, reasons,
+  why), `inspect` summary, and plan (rule, chunks, committed, bytes left to read);
+- the session grouping (proposals with reasons, contested readings, unassigned files);
+- work left (chunks, bytes, `ingest` calls) and heavy sources (≥ 256 MiB or ≥ 1024 chunks left,
+  non-streaming memory growth, declared memory above the sandbox limit);
+- everything left out (unsupported, ambiguous, quarantined, unreadable, skipped, links) and the
+  ambiguity findings.
+
+It is bounded (`Bounds`): every list ≤ 10,000 entries, per source ≤ 64 locations, ≤ 16 reasons per
+verdict, ≤ 256 container members, an `inspect` summary ≤ 16 KiB and ≤ 64 `inspect` findings, and
+≤ 64 entries in every list of a session proposal or unassigned file, nested ones included; each cut
+is a `*_omitted` count beside its list and one `neptune.explain.truncated` finding. Totals are over
+everything. `dumps()` is canonical JSON (`neptune.explanation/1`), byte-identical for the same root,
+adapters, config and workspace contents; `render()` is the same for people. The SDK's `dry_run`
+returns it as `IngestResult.explanation` (`sdk.md`); `neptune ingest --explain` prints it (`cli.md`).
 
 ## Determinism contract
 

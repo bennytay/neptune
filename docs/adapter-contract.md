@@ -166,6 +166,21 @@ For formats with timestamped samples (logs, bags, flight logs, telemetry tables,
   a `uint8` stays `uint8`); arrays are `repeated` columns. `seq` and `time/<i>` are `int64`.
 - Tests check every row with `Stream.check_row` and resolve `Stream.row_provenance` back to the bytes.
 
+## Several files, one recording (ADR 0045)
+
+A bag, a split recording or a folder of sidecars is several sources, and an adapter sees one:
+
+- Each file is read by the adapter that claims it, by its bytes. A bag's `.mcap` files are the MCAP
+  adapter's, its `metadata.yaml` and `.db3` files the `rosbag2` adapter's. Never claim another
+  adapter's format to "handle the bag", and never copy its parser.
+- A manifest-like file (`metadata.yaml`) reports what it says of itself: stated rows with cited cells,
+  and findings about its own lists (a part named twice, numbering with a gap, counts that do not
+  add up, a path that leaves the directory). It never opens the files it lists.
+- Which listed parts are present is a check across sources, so it is `validate/`'s, not an adapter's.
+  Grouping the files into one recording is `derived/`'s (ADR 0036).
+- A database you cannot hand to an engine (no path in a `SourceReader`) is read from its bytes
+  by a bounded reader inside the adapter, never copied to scratch per call (`rosbag2/_sqlite.py`).
+
 ## Machine context (ADR 0019)
 
 For sources that describe machines (manifests, robot descriptions, flight logs, calibration files):

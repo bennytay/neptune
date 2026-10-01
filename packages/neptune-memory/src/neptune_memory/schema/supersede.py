@@ -31,14 +31,24 @@ untouched).
 from __future__ import annotations
 
 import itertools
+import re
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Final, TypeAlias
+from functools import cached_property
+from typing import TYPE_CHECKING, Final, NewType, TypeAlias
 
 from neptune.identity.canonical_json import dumps
+from neptune.identity.hashing import content_id
 from neptune.identity.ids import config_hash
-from neptune_memory.schema.claim import Claim, ClaimId, ClaimProvenance, is_inferred
-from neptune_memory.schema.interval import OPEN, LedgerTx, Open
+from neptune.model.ids import ConfigHash, check_text, check_token, parse_config_hash
+from neptune_memory.schema.claim import (
+    Claim,
+    ClaimId,
+    ClaimProvenance,
+    is_inferred,
+    parse_claim_id,
+)
+from neptune_memory.schema.interval import OPEN, LedgerTx, Open, ledger_tx
 from neptune_memory.schema.predicates import (
     VOCABULARY_VERSION,
     Cardinality,
@@ -49,7 +59,7 @@ from neptune_memory.schema.predicates import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-    from neptune.model.ids import ConfigHash, RecordId
+    from neptune.model.ids import RecordId
     from neptune.model.jsonvalue import JsonObject
     from neptune.model.provenance import EvidenceRef
     from neptune_memory.schema.claim import ClaimAssertionKind
@@ -87,6 +97,39 @@ class FindingCode(StrEnum):
     OVERRIDDEN_ON_ARRIVAL = "overridden_on_arrival"
 
 
+# "finding:sha256:<64 lowercase hex>": a resolver finding's id, kept apart from claim ids by prefix.
+FindingId = NewType("FindingId", str)
+_FINDING_ID = re.compile(r"finding:sha256:[0-9a-f]{64}")
+FINDING_ID_SCHEME: Final = "neptune-memory.finding-id/1"
+
+
+def parse_finding_id(text: str) -> FindingId:
+    if not isinstance(text, str) or not _FINDING_ID.fullmatch(text):
+        raise ValueError(f"not a finding id (want 'finding:sha256:<64 lowercase hex>'): {text!r}")
+    return FindingId(text)
+
+
+@dataclass(frozen=True)
+class FindingProvenance:
+    """What produced a finding: the resolver's id, version and configuration hash (ADR 0006 §5)."""
+
+    resolver_id: str
+    resolver_version: str
+    config_hash: ConfigHash
+
+    def __post_init__(self) -> None:
+        check_token("resolver_id", self.resolver_id)
+        check_text("resolver_version", self.resolver_version)
+        parse_config_hash(self.config_hash)
+
+    def to_json(self) -> JsonObject:
+        return {
+            "config_hash": self.config_hash,
+            "resolver_id": self.resolver_id,
+            "resolver_version": self.resolver_version,
+        }
+
+
 @dataclass(frozen=True)
 class ResolutionFinding:
     """Something the resolver could not or did not apply, about ``claim`` and ``others``.
@@ -94,19 +137,59 @@ class ResolutionFinding:
     Bi-temporal like a claim: recorded at the transaction where it arose, and active until
     ``superseded_at``. A ``clock_mismatch`` names one pair of versions and is active exactly while
     both are current; ``overridden_on_arrival`` never stops being true.
+
+    A contract object (ADR 0006 §5): its ``id`` hashes what it says and who said it (code, claims,
+    provenance), never its bookkeeping (``recorded_at``, ``superseded_at``), so a store keys it on
+    arrival and closes it in place, atomically with the claims it names.
     """
 
     code: FindingCode
     claim: ClaimId
     others: tuple[ClaimId, ...]
+    provenance: FindingProvenance
     recorded_at: LedgerTx
     superseded_at: LedgerTx | Open = OPEN
 
-    def to_json(self) -> JsonObject:
+    def __post_init__(self) -> None:
+        if not isinstance(self.code, FindingCode):
+            raise TypeError(f"code must be a FindingCode: {self.code!r}")
+        parse_claim_id(self.claim)
+        if not isinstance(self.others, tuple):
+            raise TypeError("others must be a tuple of claim ids")
+        for other in self.others:
+            parse_claim_id(other)
+        if list(self.others) != sorted(set(self.others)) or self.claim in self.others:
+            raise ValueError("others must be unique, sorted and not the finding's claim")
+        if not isinstance(self.provenance, FindingProvenance):
+            raise TypeError(f"provenance must be a FindingProvenance: {self.provenance!r}")
+        ledger_tx(self.recorded_at)
+        if not isinstance(self.superseded_at, Open):
+            ledger_tx(self.superseded_at)
+            if self.superseded_at < self.recorded_at:
+                raise ValueError("superseded_at precedes recorded_at")
+
+    def content_json(self) -> JsonObject:
+        """What the finding says and who said it: the input its id is derived from."""
         return {
             "claim": self.claim,
             "code": str(self.code),
             "others": list(self.others),
+            "provenance": self.provenance.to_json(),
+        }
+
+    @cached_property
+    def id(self) -> FindingId:
+        payload: JsonObject = {"finding": self.content_json(), "scheme": FINDING_ID_SCHEME}
+        return FindingId("finding:" + content_id(dumps(payload)))
+
+    @property
+    def is_current(self) -> bool:
+        return isinstance(self.superseded_at, Open)
+
+    def to_json(self) -> JsonObject:
+        return {
+            **self.content_json(),
+            "id": self.id,
             "recorded_at": self.recorded_at,
             "superseded_at": self.superseded_at
             if not isinstance(self.superseded_at, Open)
@@ -193,6 +276,7 @@ def resolve(
         check_claim(claim, registry)
     _check_lineages(claims)
     resolver_hash = resolver_config_hash(registry, priorities)
+    by_resolver = FindingProvenance(RESOLVER_ID, RESOLVER_VERSION, resolver_hash)
     versions: dict[ClaimId, Claim] = {}
     origin: dict[ClaimId, Claim] = {}  # version id -> the assertion it is a version of
     current: dict[tuple[NodeRef, str], list[ClaimId]] = {}
@@ -236,7 +320,8 @@ def resolve(
                     ResolutionFinding(
                         FindingCode.OVERRIDDEN_ON_ARRIVAL,
                         arriving.id,
-                        tuple(sorted(w.id for w in winners)),
+                        tuple(sorted({w.id for w in winners})),
+                        by_resolver,
                         tx,
                     )
                 )
@@ -264,18 +349,32 @@ def resolve(
     forged = sorted({c.id for c in claims if is_closure(c)} - versions.keys())
     if forged:
         raise ValueError(f"closure versions this resolution does not produce: {forged}")
-    findings.extend(_clock_mismatches(versions.values(), origin, registry, priorities))
+    findings.extend(_clock_mismatches(versions.values(), origin, registry, priorities, by_resolver))
     history = tuple(sorted(versions.values(), key=lambda c: (c.recorded_at, c.id)))
     ordered = tuple(sorted(findings, key=lambda f: (f.recorded_at, f.claim, f.code, f.others)))
     return Resolution(history, ordered)
 
 
 def as_of(resolution: Resolution, tx: LedgerTx) -> Resolution:
-    """The claim versions and findings active at transaction ``tx``: recorded by then and not yet
-    superseded. Equal to resolving only the claims recorded by ``tx`` (bookkeeping aside)."""
+    """The graph exactly as it was known at transaction ``tx`` (ADR 0006 §6).
+
+    The claim versions and findings active at ``tx``: recorded by then and not yet superseded.
+    Each is presented as it was known at ``tx``, so ``superseded_at`` is masked to ``OPEN``: a
+    supersession recorded after ``tx`` is later knowledge and never leaks into the snapshot. The
+    result equals the current claims and findings of resolving only what was recorded by ``tx``.
+    The unmasked history stays in ``resolution`` itself.
+    """
     return Resolution(
-        tuple(c for c in resolution.claims if _active(c.recorded_at, c.superseded_at, tx)),
-        tuple(f for f in resolution.findings if _active(f.recorded_at, f.superseded_at, tx)),
+        tuple(
+            c if c.is_current else replace(c, superseded_at=OPEN)
+            for c in resolution.claims
+            if _active(c.recorded_at, c.superseded_at, tx)
+        ),
+        tuple(
+            f if f.is_current else replace(f, superseded_at=OPEN)
+            for f in resolution.findings
+            if _active(f.recorded_at, f.superseded_at, tx)
+        ),
     )
 
 
@@ -369,8 +468,9 @@ def _closure(
     """The part of ``version`` over ``valid`` that no winner covers, recorded at ``recorded_at``.
 
     Its evidence is ``root``'s (the assertion ``version`` is of) then the ``cutters``' (the claims
-    that took the rest); its ``config_hash`` covers the resolver's configuration and the version it
-    narrows, so pieces of different versions never share an id even when they share evidence.
+    that took the rest); its model is ``root``'s (ADR 0006 §3); its ``config_hash`` covers the
+    resolver's configuration and the version it narrows, so pieces of different versions never
+    share an id even when they share evidence.
     """
     evidence: list[EvidenceRef] = []
     for ref in (*root.provenance.evidence, *(r for c in cutters for r in c.provenance.evidence)):
@@ -385,6 +485,7 @@ def _closure(
         consolidator_id=RESOLVER_ID,
         consolidator_version=RESOLVER_VERSION,
         config_hash=config_hash({"narrows": version.id, "resolver": resolver_hash}),
+        model=root.provenance.model,
     )
     return replace(
         version,
@@ -402,6 +503,7 @@ def _clock_mismatches(
     origin: Mapping[ClaimId, Claim],
     registry: PredicateRegistry,
     priorities: Mapping[str, int],
+    provenance: FindingProvenance,
 ) -> list[ResolutionFinding]:
     """One ``clock_mismatch`` per pair of versions of a ``one`` fact with different objects on
     different clocks, active exactly while both are current. ``claim`` is the version recorded
@@ -436,7 +538,12 @@ def _clock_mismatches(
                     if isinstance(end, Open) or start < end:
                         found.append(
                             ResolutionFinding(
-                                FindingCode.CLOCK_MISMATCH, later.id, (earlier.id,), start, end
+                                FindingCode.CLOCK_MISMATCH,
+                                later.id,
+                                (earlier.id,),
+                                provenance,
+                                start,
+                                end,
                             )
                         )
     return found
