@@ -29,6 +29,7 @@ inspect on; the walk and its saved ledger always finish. A chunk in progress fin
 nothing in the workspace is left half-written.
 """
 
+import errno
 import platform
 import threading
 import time
@@ -51,6 +52,7 @@ from neptune.adapters.contract import (
     ChunkOutput,
     ConfigError,
     ContractError,
+    Plan,
     ProbeHints,
     ProbeResult,
     chunk_from_json,
@@ -78,12 +80,16 @@ from neptune.model.series import SEQ
 from neptune.model.source import LocalPath, RawLocalPath, SourceArtifact, local_location
 from neptune.runtime import events, lineage
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
+from neptune.runtime.lineage import Failure, Law, Step, type_name
 from neptune.store.assemble import StagedPackage, publish, stage
 from neptune.store.package import PackageError, read_package, write_envelope
-from neptune.store.series import RunCheck, SeriesError, check_run
+from neptune.store.series import RunCheck, SeriesError, SeriesReadError, check_run
 from neptune.store.workspace import Workspace, WorkspaceError
 
 DEFAULT_ATTEMPTS: Final = 2
+# What the runtime's own reads of a source raise: opening it, its size, its head. An adapter's
+# reads are the adapter's: anything but ``SourceChangedError`` from ``plan`` or ``ingest`` is its
+# failure (``plan_failed``, ``chunk_failed``).
 _UNREADABLE: Final = (SourceChangedError, SourceAccessError, OSError)
 
 
@@ -164,59 +170,88 @@ def _hint_name(location: LocalPath | RawLocalPath) -> str:
     return location.raw.rsplit(b"/", 1)[-1].decode("utf-8", "replace")
 
 
-def _check_chunk_series(output: ChunkOutput) -> None:
+def _errno_name(exc: BaseException) -> str | None:
+    """The symbolic errno (``EACCES``) of the ``OSError`` behind ``exc``, if there is one."""
+    cause: BaseException | None = exc
+    while cause is not None:
+        if isinstance(cause, OSError) and cause.errno is not None:
+            return errno.errorcode.get(cause.errno)
+        cause = cause.__cause__
+    return None
+
+
+def _chunk_series_failure(output: ChunkOutput) -> Failure | None:
     """A chunk's batches of one stream agree on their columns, and ``seq`` is unique among them.
 
     Both are laws ``write_run`` relies on; across chunks, ``_run_problems`` checks the rest.
     Memory is one entry per row of this chunk, which the chunk's output already holds.
     """
+
+    def broken(law: Law, stream: RecordId, **facts: JsonValue) -> Failure:
+        details: dict[str, JsonValue] = {"law": str(law), "stream": stream, **facts}
+        return Failure(Step.CHUNK_SERIES, ContractError.__name__, details)
+
     schemas: dict[RecordId, object] = {}
     seen: dict[RecordId, set[int]] = defaultdict(set)
     for batch in output.series:
         if schemas.setdefault(batch.stream, batch.schema()) != batch.schema():
-            raise ContractError(
-                f"stream {batch.stream}: two batches of one chunk disagree on their columns"
-            )
+            return broken(Law.BATCH_COLUMNS_DISAGREE, batch.stream)
         for column in batch.columns:
             if column.name != SEQ:
                 continue
             for value in column.values:
                 if isinstance(value, bool) or not isinstance(value, int):
-                    raise ContractError(f"stream {batch.stream}: seq {value!r} is not an integer")
+                    return broken(Law.SEQ_NOT_INTEGER, batch.stream, type=type_name(value))
                 if value in seen[batch.stream]:
-                    raise ContractError(
-                        f"stream {batch.stream}: seq {value} appears twice in one chunk"
-                    )
+                    return broken(Law.SEQ_REPEATED, batch.stream, seq=value)
                 seen[batch.stream].add(value)
+    return None
 
 
-def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[str]:
+def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[JsonObject]:
     """What breaks the series laws among one stream's runs, each paired with its chunk's id.
 
     Each run keeps the stream's contract, all agree on their columns, and their ``seq`` ranges
-    are disjoint.
+    are disjoint. A run the workspace cannot read is the workspace's fault, not the source's:
+    ``JobError``.
     """
-    problems: list[str] = []
+    problems: list[JsonObject] = []
     checked: list[tuple[str, RunCheck]] = []
     for chunk_id, run in runs:
         try:
             checked.append((chunk_id, check_run(stream, run)))
-        except (SeriesError, ValueError, OSError) as exc:
-            problems.append(f"stream {stream.id}: the run of chunk {chunk_id}: {exc}")
+        except (SeriesReadError, OSError) as exc:
+            raise JobError(f"the run of committed chunk {chunk_id} cannot be read: {exc}") from exc
+        except Exception as exc:
+            problems.append(
+                {
+                    "chunk": chunk_id,
+                    "error": type(exc).__name__,
+                    "law": str(Law.RUN_BREAKS_STREAM),
+                    "stream": stream.id,
+                }
+            )
     if checked:
         first, expected = checked[0]
         for chunk_id, result in checked[1:]:
             if result.columns != expected.columns:
                 problems.append(
-                    f"stream {stream.id}: the runs of chunks {first} and {chunk_id} disagree"
-                    " on their columns"
+                    {
+                        "chunks": [first, chunk_id],
+                        "law": str(Law.RUN_COLUMNS_DISAGREE),
+                        "stream": stream.id,
+                    }
                 )
     ranges = sorted((r.seq[0], r.seq[1], chunk_id) for chunk_id, r in checked if r.seq is not None)
     for (_, high, first), (low, _, second) in pairwise(ranges):
         if low <= high:
             problems.append(
-                f"stream {stream.id}: the seq ranges of chunks {first} and {second} overlap"
-                f" (seq {low} is in both)"
+                {
+                    "chunks": [first, second],
+                    "law": str(Law.SEQ_RANGES_OVERLAP),
+                    "seq": low,
+                    "stream": stream.id,
+                }
             )
     return problems
 
@@ -379,23 +414,26 @@ class IngestJob:
 
     def _skip(self, entry: SkippedEntry) -> None:
         location = local_location(entry.raw_path)
-        self._record(lineage.entry_skipped(self.transform, location, entry.reason, entry.detail))
+        self._record(lineage.entry_skipped(self.transform, location, entry.reason))
         self._emit(
             events.ENTRY_SKIPPED, {"location": location.to_json(), "reason": str(entry.reason)}
         )
 
     def _unreadable(self, source: _Source, exc: Exception) -> None:
-        """A source could not be read when the job came to it: changed, refused, or an I/O error."""
+        """A source could not be read when the job came to it: changed, refused, or an I/O error.
+
+        The finding names the reason and the symbolic errno, never the error's text, which can
+        hold a path.
+        """
         location = source.location.to_json()
         if isinstance(exc, SourceChangedError):
             finding = lineage.source_changed(self.transform, source.location, source.content_id)
             self._emit(events.SOURCE_CHANGED, {"location": location, "source": source.content_id})
         else:
-            if isinstance(exc, SourceAccessError):
-                reason, detail = exc.reason, exc.detail
-            else:
-                reason, detail = SkipReason.UNREADABLE, str(getattr(exc, "strerror", None) or exc)
-            finding = lineage.source_unreadable(self.transform, source.location, reason, detail)
+            reason = exc.reason if isinstance(exc, SourceAccessError) else SkipReason.UNREADABLE
+            finding = lineage.source_unreadable(
+                self.transform, source.location, reason, _errno_name(exc)
+            )
             self._emit(
                 events.SOURCE_UNREADABLE,
                 {"location": location, "reason": str(reason), "source": source.content_id},
@@ -562,41 +600,21 @@ class IngestJob:
                 try:
                     stored = self.workspace.load_plan(item.content_id, config.transform.id)
                     chunks = tuple(chunk_from_json(c) for c in stored.chunks) if stored else ()
-                except (WorkspaceError, ContractError, ValueError) as exc:
+                except (WorkspaceError, ContractError, ValueError, OSError) as exc:
                     raise JobError(
-                        f"the stored plan of {item.content_id} is corrupt: {exc}"
+                        f"the stored plan of {item.content_id} cannot be read: {exc}"
                     ) from exc
                 reused = stored is not None
                 if stored is None:
                     try:
-                        with LocalReader(source, item.location, item.artifact) as reader:
-                            plan = adapter.plan(reader, config)
-                            check_plan(adapter.descriptor, reader, config, plan)
+                        reader = LocalReader(source, item.location, item.artifact)
                     except _UNREADABLE as exc:
                         self._unreadable(item, exc)
                         failed += 1
                         continue
-                    except Exception as exc:
-                        problem = str(exc) if isinstance(exc, ContractError) else None
-                        self._quarantine(
-                            item,
-                            lineage.plan_failed(
-                                self.transform,
-                                item.content_id,
-                                item.artifact.size,
-                                adapter.descriptor.id,
-                                type(exc).__name__,
-                                problem,
-                            ),
-                        )
-                        self._emit(
-                            events.PLAN_FAILED,
-                            {
-                                "adapter": adapter.descriptor.id,
-                                "error": type(exc).__name__,
-                                "source": item.content_id,
-                            },
-                        )
+                    with reader:
+                        plan = self._make_plan(item, reader)
+                    if plan is None:
                         failed += 1
                         continue
                     try:
@@ -632,6 +650,51 @@ class IngestJob:
                     "sources": planned,
                 },
             )
+
+    def _make_plan(self, item: _Source, reader: LocalReader) -> Plan | None:
+        """Call the adapter's ``plan`` and check it; ``None`` once the source is quarantined.
+
+        The adapter's reads are its own: a ``SourceChangedError`` is ``source_changed``, and
+        anything else it raises, an ``OSError`` included, is ``plan_failed`` at ``plan``.
+        """
+        assert item.adapter is not None and item.config is not None
+        adapter, config = item.adapter, item.config
+        try:
+            plan: object = adapter.plan(reader, config)  # the adapter's word, not yet checked
+        except SourceChangedError as exc:
+            self._unreadable(item, exc)
+            return None
+        except Exception as exc:
+            self._fail_plan(item, Failure.raised(Step.PLAN, exc))
+            return None
+        if not isinstance(plan, Plan):
+            self._fail_plan(item, Failure.returned(Step.PLAN_RESULT, plan))
+            return None
+        try:
+            check_plan(adapter.descriptor, reader, config, plan)
+        except Exception as exc:
+            self._fail_plan(item, Failure.raised(Step.CHECK_PLAN, exc))
+            return None
+        return plan
+
+    def _fail_plan(self, item: _Source, failure: Failure) -> None:
+        assert item.adapter is not None
+        adapter_id = item.adapter.descriptor.id
+        self._quarantine(
+            item,
+            lineage.plan_failed(
+                self.transform, item.content_id, item.artifact.size, adapter_id, failure
+            ),
+        )
+        self._emit(
+            events.PLAN_FAILED,
+            {
+                "adapter": adapter_id,
+                "error": failure.error,
+                "source": item.content_id,
+                "step": str(failure.step),
+            },
+        )
 
     # --- parse and normalize, per chunk --------------------------------------------------------
 
@@ -692,8 +755,9 @@ class IngestJob:
     ) -> tuple[ChunkOutput, int] | None:
         """``ingest`` one chunk, up to ``attempts`` times; ``None`` once it has failed for good.
 
-        A ``ContractError`` is a bug, not a fault, so it is not retried; a source that changed is
-        reported and never retried. Any other exception gets the remaining attempts.
+        A ``ContractError`` is a bug, not a fault, so it is not retried, and neither is a result
+        of the wrong type; a source that changed is reported and never retried. Any other
+        exception gets the remaining attempts.
         """
         assert item.adapter is not None and item.config is not None
         adapter, config = item.adapter, item.config
@@ -701,27 +765,27 @@ class IngestJob:
         for attempt in range(1, attempts + 1):
             with self._enter(Phase.PARSE):
                 try:
-                    output = adapter.ingest(reader, chunk, config)
-                    if not isinstance(output, ChunkOutput):
-                        raise ContractError(f"ingest returned a {type(output).__name__}")
+                    output: object = adapter.ingest(reader, chunk, config)
                 except SourceChangedError as exc:
                     self._unreadable(item, exc)
                     return None
                 except Exception as exc:
-                    error = type(exc).__name__
                     if attempt < attempts and not isinstance(exc, ContractError):
                         self._emit(
                             events.CHUNK_RETRIED,
                             {
                                 "attempt": attempt,
                                 "chunk": chunk.id,
-                                "error": error,
+                                "error": type(exc).__name__,
                                 "source": item.content_id,
                             },
                         )
                         continue
-                    problem = str(exc) if isinstance(exc, ContractError) else None
-                    self._fail_chunk(item, chunk, error, attempt, problem)
+                    self._fail_chunk(item, chunk, attempt, Failure.raised(Step.INGEST, exc))
+                    return None
+                if not isinstance(output, ChunkOutput):
+                    failure = Failure.returned(Step.INGEST_RESULT, output)
+                    self._fail_chunk(item, chunk, attempt, failure)
                     return None
             self._emit(
                 events.CHUNK_PARSED,
@@ -737,9 +801,7 @@ class IngestJob:
             return output, attempt
         return None
 
-    def _fail_chunk(
-        self, item: _Source, chunk: Chunk, error: str, attempts: int, problem: str | None
-    ) -> None:
+    def _fail_chunk(self, item: _Source, chunk: Chunk, attempts: int, failure: Failure) -> None:
         assert item.adapter is not None
         adapter_id = item.adapter.descriptor.id
         self._quarantine(
@@ -750,9 +812,8 @@ class IngestJob:
                 item.artifact.size,
                 adapter_id,
                 chunk.id,
-                error,
                 attempts,
-                problem,
+                failure,
             ),
         )
         self._emit(
@@ -761,27 +822,53 @@ class IngestJob:
                 "adapter": adapter_id,
                 "attempts": attempts,
                 "chunk": chunk.id,
-                "error": error,
+                "error": failure.error,
                 "source": item.content_id,
+                "step": str(failure.step),
             },
         )
+
+    def _check_output(
+        self, item: _Source, reader: LocalReader, chunk: Chunk, output: ChunkOutput
+    ) -> Failure | None:
+        """Whatever breaks while checking one chunk's output is that chunk's failure.
+
+        The output is the adapter's, so a check can meet anything: a record-like object without
+        provenance, a ``to_json`` that raises. Each is a ``Failure`` naming the check, never an
+        escape that fails the job.
+        """
+        assert item.adapter is not None and item.config is not None
+        try:
+            check_chunk_output(item.adapter.descriptor, reader, item.config, chunk, output)
+        except Exception as exc:
+            return Failure.raised(Step.CHECK_OUTPUT, exc)
+        try:
+            return _chunk_series_failure(output)
+        except Exception as exc:
+            return Failure.raised(Step.CHUNK_SERIES, exc)
 
     def _normalize(
         self, item: _Source, reader: LocalReader, chunk: Chunk, output: ChunkOutput, attempt: int
     ) -> bool:
-        """Check one chunk's output against the contract and commit it, whole or not at all."""
-        assert item.adapter is not None and item.config is not None
+        """Check one chunk's output against the contract and commit it, whole or not at all.
+
+        Output the checks pass but the workspace still refuses fails the chunk at ``commit``;
+        only an I/O error, the workspace or disk failing to write, fails the job.
+        """
         with self._enter(Phase.NORMALIZE):
-            try:
-                check_chunk_output(item.adapter.descriptor, reader, item.config, chunk, output)
-                _check_chunk_series(output)
-            except ContractError as exc:
-                self._fail_chunk(item, chunk, type(exc).__name__, attempt, str(exc))
+            failure = self._check_output(item, reader, chunk, output)
+            if failure is None:
+                try:
+                    new = self.workspace.commit(
+                        chunk, output.records, output.findings, output.series
+                    )
+                except OSError as exc:
+                    raise JobError(f"chunk {chunk.id} cannot be committed: {exc}") from exc
+                except Exception as exc:
+                    failure = Failure.raised(Step.COMMIT, exc)
+            if failure is not None:
+                self._fail_chunk(item, chunk, attempt, failure)
                 return False
-            try:
-                new = self.workspace.commit(chunk, output.records, output.findings, output.series)
-            except (WorkspaceError, SeriesError, ValueError, OSError) as exc:
-                raise JobError(f"chunk {chunk.id} cannot be committed: {exc}") from exc
             self._emit(
                 events.CHUNK_COMMITTED,
                 {
@@ -797,7 +884,7 @@ class IngestJob:
 
     # --- assemble ------------------------------------------------------------------------------
 
-    def _cross_chunk_problems(self, item: _Source) -> list[str]:
+    def _cross_chunk_problems(self, item: _Source) -> list[JsonObject]:
         """The contract's cross-chunk laws over a source's committed outputs, in bounded memory.
 
         Ids are held in a set (the package holds every record in memory anyway, ADR 0022). Each
@@ -806,14 +893,19 @@ class IngestJob:
         columns. ``seq`` uniqueness across chunks is proven from each run's ``seq`` range:
         ranges that do not overlap, with ``seq`` unique inside each chunk (checked at normalize),
         are unique overall. Memory is one range per chunk, never one entry per row.
+
+        Each problem is an object naming its ``Law`` and the ids it concerns, never text.
         """
         assert item.config is not None
-        problems: list[str] = []
+        problems: list[JsonObject] = []
         record_ids: set[RecordId] = set()
         finding_ids: set[RecordId] = set()
         streams: dict[RecordId, Stream] = {}
         runs: dict[RecordId, list[tuple[str, Path]]] = defaultdict(list)
-        stored = self.workspace.load_plan(item.content_id, item.config.transform.id)
+        try:
+            stored = self.workspace.load_plan(item.content_id, item.config.transform.id)
+        except (WorkspaceError, ValueError, OSError) as exc:
+            raise JobError(f"the plan of {item.content_id} cannot be read: {exc}") from exc
         if stored is None:
             raise JobError(f"the plan of {item.content_id} vanished from the workspace")
         said_something = bool(stored.findings)
@@ -827,22 +919,35 @@ class IngestJob:
             said_something = said_something or bool(output.records or output.findings)
             for record in output.records:
                 if record.id in record_ids:
-                    problems.append(f"{record.kind} {record.id} is emitted by two chunks")
+                    problems.append(
+                        {
+                            "chunk": chunk.id,
+                            "kind": record.kind,
+                            "law": str(Law.RECORD_REPEATED),
+                            "record": record.id,
+                        }
+                    )
                 record_ids.add(record.id)
                 if isinstance(record, Stream):
                     streams[record.id] = record
             for finding in output.findings:
                 if finding.id in finding_ids:
-                    problems.append(f"finding {finding.id} is emitted by two chunks")
+                    problems.append(
+                        {
+                            "chunk": chunk.id,
+                            "finding": finding.id,
+                            "law": str(Law.FINDING_REPEATED),
+                        }
+                    )
                 finding_ids.add(finding.id)
             for stream, run in output.runs.items():
                 runs[stream].append((chunk.id, run))
         if not said_something:
-            problems.append("the output says nothing about its source: no record, no finding")
+            problems.append({"law": str(Law.OUTPUT_SILENT)})
         for stream in sorted(set(runs) - set(streams)):
-            problems.append(f"series rows name {stream}, which no chunk declares as a stream")
+            problems.append({"law": str(Law.STREAM_UNDECLARED), "stream": stream})
         for stream in sorted(set(streams) - set(runs)):
-            problems.append(f"stream {stream} has no series run")
+            problems.append({"law": str(Law.STREAM_WITHOUT_RUN), "stream": stream})
         for stream, found in sorted(runs.items()):
             if stream in streams:
                 problems.extend(_run_problems(streams[stream], found))

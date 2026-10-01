@@ -10,8 +10,8 @@ crashes on demand; ``tally`` and ``text`` supply ordinary corruption.
 import importlib.util
 import os
 import shutil
-from collections.abc import Callable
-from dataclasses import replace
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
@@ -32,7 +32,7 @@ from neptune.model.finding import FindingCategory, Severity, subject_to_json
 from neptune.model.knowledge import Known
 from neptune.model.series import ColumnType, SeriesBatch, SeriesColumn
 from neptune.model.world import DocumentBlock, DocumentRecord
-from neptune.runtime import IngestJob, JobEvent, JobOptions, JobState, Phase
+from neptune.runtime import IngestJob, JobError, JobEvent, JobOptions, JobState, Phase
 from neptune.runtime import lineage as runtime_lineage
 from neptune.store.package import read_package
 from neptune.store.workspace import Workspace
@@ -194,7 +194,7 @@ def test_without_a_retry_the_same_fault_quarantines_the_source(tmp_path: Path) -
     assert codes(package) == ["neptune.runtime.chunk_failed"]
     assert outcome.ingested == ()
     (finding,) = package.receipt.findings
-    assert "after 1 attempt (OSError)" in finding.message
+    assert "after 1 attempt (OSError at ingest)" in finding.message
     assert not [e for e in seen if e.kind == "chunk_retried"]
 
 
@@ -209,13 +209,15 @@ def test_output_that_breaks_the_contract_is_a_finding_not_a_crash(tmp_path: Path
     assert len(outcome.ingested) == 1
     by_code = {f.code: f for f in outcome.findings}
     wrong = by_code["neptune.runtime.chunk_failed"]
-    assert wrong.details["error"] == "ContractError" and "problem" in wrong.details
+    assert wrong.details["error"] == "ContractError"
+    assert wrong.details["step"] == "check_chunk_output"
     assert wrong.details["attempts"] == 1  # a contract violation is a bug: never retried
     twice = by_code["neptune.runtime.output_invalid"]
     problems = twice.details["problems"]
     assert isinstance(problems, list) and len(problems) == 1
-    assert "emitted by two chunks" in str(problems[0])
-    assert "two chunks" in twice.message
+    assert isinstance(problems[0], dict) and problems[0]["law"] == "record_repeated"
+    assert problems[0]["kind"] == "document_block"
+    assert "(record_repeated)" in twice.message
     assert not [e for e in seen if e.kind == "chunk_retried"]
 
 
@@ -241,8 +243,10 @@ def test_seq_repeated_across_chunks_is_caught_without_holding_every_seq(tmp_path
     assert codes(package) == ["neptune.runtime.output_invalid"]
     assert len(outcome.ingested) == 1
     (finding,) = outcome.findings
-    assert "seq ranges of chunks" in finding.message and "overlap" in finding.message
-    assert finding.details["problems"] == [finding.message.split(": ", 1)[1]]
+    assert "(seq_ranges_overlap)" in finding.message
+    (problem,) = finding.details["problems"]
+    assert problem["law"] == "seq_ranges_overlap"
+    assert problem["seq"] == 0 and len(problem["chunks"]) == 2
 
 
 def test_a_source_that_changes_during_the_job_is_reported_and_the_rest_proceed(
@@ -350,11 +354,11 @@ class MisplacedTally(_RowBugTally):
 
 
 @pytest.mark.parametrize(
-    ("adapter", "problem"),
-    [(DriftingTally, "disagree on their columns"), (MisplacedTally, "offset")],
+    ("adapter", "law"),
+    [(DriftingTally, "run_columns_disagree"), (MisplacedTally, "run_breaks_stream")],
 )
 def test_one_sources_broken_series_is_a_finding_and_the_rest_land(
-    tmp_path: Path, adapter: type, problem: str
+    tmp_path: Path, adapter: type, law: str
 ) -> None:
     root = tmp_path / "root"
     root.mkdir()
@@ -366,7 +370,9 @@ def test_one_sources_broken_series_is_a_finding_and_the_rest_land(
     assert len(outcome.ingested) == 1  # the notes
     assert read_by(package) == {"lift.tally": 1, "notes.txt": 1}
     (finding,) = outcome.findings
-    assert problem in finding.message
+    assert f"({law})" in finding.message
+    problems = finding.details["problems"]
+    assert {p["law"] for p in problems} == {law}
     assert not package.series  # the tally's stream is not in the package
     assert [e.details["codes"] for e in seen if e.kind == "source_quarantined"] == [
         ["neptune.runtime.output_invalid"]
@@ -404,7 +410,8 @@ def test_batches_of_one_chunk_that_disagree_fail_that_chunk_not_the_job(tmp_path
     assert codes(package) == ["neptune.runtime.chunk_failed"]
     (finding,) = outcome.findings
     assert finding.details["error"] == "ContractError" and finding.details["attempts"] == 1
-    assert "disagree on their columns" in str(finding.details["problem"])
+    assert finding.details["step"] == "chunk_series"
+    assert finding.details["law"] == "batch_columns_disagree"
     assert len(outcome.ingested) == 1  # the notes
 
 
@@ -425,7 +432,8 @@ def test_ingest_returning_the_wrong_type_fails_that_chunk_not_the_job(tmp_path: 
     outcome, package, seen = run(root, tmp_path, adapters)
     assert codes(package) == ["neptune.runtime.chunk_failed"]
     (finding,) = outcome.findings
-    assert finding.details["problem"] == "ingest returned a NoneType"
+    assert finding.details["step"] == "ingest_result"
+    assert finding.details["returned"] == "builtins.NoneType"
     assert finding.details["attempts"] == 1  # a contract violation: never retried
     assert len(outcome.ingested) == 1 and not [e for e in seen if e.kind == "chunk_retried"]
 
@@ -437,10 +445,157 @@ def test_a_file_removed_after_planning_is_unreadable_in_parse_and_the_rest_land(
         if event.kind == "phase_finished" and event.phase is Phase.PLAN:
             (corpus / "notes.txt").unlink()
 
-    _, package, seen = run(corpus, tmp_path, on_event=remove_notes_after_planning)
+    outcome, package, seen = run(corpus, tmp_path, on_event=remove_notes_after_planning)
     assert "neptune.runtime.source_unreadable" in codes(package)
     (unreadable,) = [e for e in seen if e.kind == "source_unreadable"]
     assert unreadable.phase is Phase.PARSE and path_of(unreadable.details) == "notes.txt"
     (summary,) = [e for e in seen if e.kind == "phase_finished" and e.phase is Phase.PARSE]
     assert summary.details["failed"] == 2  # the chunk notes.txt was opened for; the crash
     assert read_by(package)["corrupted.txt"] == 1 and read_by(package)["lift.tally"] == 1
+    finding = next(f for f in outcome.findings if f.code.endswith("source_unreadable"))
+    assert finding.details == {"errno": "ENOENT", "reason": "missing"}  # codes, never the text
+
+
+# --- Findings are the same every run: no exception text, no repr, no path ----------------------
+
+
+class GeneratorPlanTally(TALLY.TallyAdapter):  # type: ignore[misc, name-defined]
+    """``plan`` returns a generator of chunks, not a ``Plan``: a repr would name its address.
+
+    Every generator it returns is kept, so no two runs can see one at the same address.
+    """
+
+    kept: list[Iterator[Chunk]] = []  # noqa: RUF012 - shared on purpose: outlives every job
+
+    def plan(self, source: SourceReader, config: AdapterConfig) -> Any:
+        chunks = (chunk for chunk in super().plan(source, config).chunks)
+        self.kept.append(chunks)
+        return chunks
+
+
+class AddressTally(TALLY.TallyAdapter):  # type: ignore[misc, name-defined]
+    """``ingest`` builds a ``ChunkOutput`` around a bare ``object()``, whose ``ContractError``
+    quotes its repr, address and all. Each object is kept, so every run's has its own address."""
+
+    kept: list[object] = []  # noqa: RUF012 - shared on purpose: outlives every job
+
+    def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput:
+        output: ChunkOutput = super().ingest(source, chunk, config)
+        if not output.series or not output.series[0].length:
+            return output
+        stray = object()
+        self.kept.append(stray)
+        return ChunkOutput(records=(stray,))  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("adapter", "code", "step", "facts"),
+    [
+        (
+            GeneratorPlanTally,
+            "neptune.runtime.plan_failed",
+            "plan_result",
+            {"error": "ContractError", "returned": "builtins.generator"},
+        ),
+        (AddressTally, "neptune.runtime.chunk_failed", "ingest", {"error": "ContractError"}),
+    ],
+)
+def test_the_same_failing_job_twice_writes_the_same_package(
+    tmp_path: Path, adapter: type, code: str, step: str, facts: dict[str, str]
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    (root / "lift.tally").write_bytes(b"TALLY1\n10 1\n20 2\n")  # one chunk of rows
+    adapters = AdapterRegistry([*builtin_adapters(), adapter(rows_per_chunk=2)])
+    homes = (("a", tmp_path / "w1"), ("b", tmp_path / "elsewhere" / "deep" / "w2"))
+    outcomes = [
+        IngestJob(root, tmp_path / name, Workspace(home), adapters).run() for name, home in homes
+    ]
+    assert outcomes[0].package == outcomes[1].package  # fresh workspaces, different paths
+    assert outcomes[0].findings == outcomes[1].findings
+    (finding,) = outcomes[0].findings
+    assert finding.code == code and finding.details["step"] == step
+    assert {key: finding.details[key] for key in facts} == facts
+    text = finding.message + repr(finding.details)
+    assert "0x" not in text and str(tmp_path) not in text
+    assert len(outcomes[0].ingested) == 1  # the notes
+
+
+@dataclass(frozen=True)
+class _Impostor:
+    """Claims a kind the brittle adapter declares, and has nothing else: no provenance."""
+
+    kind: str = "document_block"
+    id: str = "rec:sha256:" + "0" * 64
+
+
+class ImpostorBrittle(BRITTLE.BrittleAdapter):  # type: ignore[misc, name-defined]
+    """For the line ``impostor``, emits an ``_Impostor`` in place of its block."""
+
+    def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput:
+        output: ChunkOutput = super().ingest(source, chunk, config)
+        if any(getattr(r, "text", None) == Known("impostor") for r in output.records):
+            return ChunkOutput(records=(_Impostor(),))  # type: ignore[arg-type]
+        return output
+
+
+def test_a_check_that_raises_on_odd_output_fails_that_chunk_not_the_job(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    (root / "odd.brittle").write_bytes(BRITTLE.brittle("fine", "impostor"))
+    adapters = AdapterRegistry([*builtin_adapters(), ImpostorBrittle()])
+    outcome, package, seen = run(root, tmp_path, adapters)
+    assert codes(package) == ["neptune.runtime.chunk_failed"]
+    (finding,) = outcome.findings
+    assert finding.details["step"] == "check_chunk_output"
+    assert finding.details["error"] == "AttributeError"  # the check met no provenance
+    assert finding.details["attempts"] == 1
+    assert read_by(package) == {"notes.txt": 1, "odd.brittle": 1}  # read by the runtime only
+    assert len(outcome.ingested) == 1
+    (failed,) = [e for e in seen if e.kind == "chunk_failed"]
+    assert failed.phase is Phase.NORMALIZE and failed.details["step"] == "check_chunk_output"
+
+
+class DiskFaultBrittle(BRITTLE.BrittleAdapter):  # type: ignore[misc, name-defined]
+    """``plan`` raises an ``OSError`` of its own, naming a path, as an adapter's I/O might."""
+
+    def plan(self, source: SourceReader, config: AdapterConfig) -> Plan:
+        raise OSError(5, "Input/output error", "/home/someone/scratch/plan.tmp")
+
+
+def test_an_os_error_from_plan_is_the_adapters_failure_not_an_unreadable_source(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    (root / "a.brittle").write_bytes(BRITTLE.brittle("x"))
+    adapters = AdapterRegistry([*builtin_adapters(), DiskFaultBrittle()])
+    outcome, package, seen = run(root, tmp_path, adapters)
+    assert codes(package) == ["neptune.runtime.plan_failed"]
+    (finding,) = outcome.findings
+    assert finding.details == {"adapter": "brittle", "error": "OSError", "step": "plan"}
+    assert "/home/someone" not in finding.message
+    assert not [e for e in seen if e.kind == "source_unreadable"]
+    assert len(outcome.ingested) == 1
+
+
+def test_a_committed_run_the_workspace_cannot_read_fails_the_job_not_the_source(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "lift.tally").write_bytes(b"TALLY1\n10 1\n20 2\n")
+    home = Workspace(tmp_path / "home")
+
+    def spoil_a_run(event: JobEvent) -> None:
+        if event.kind == "phase_finished" and event.phase is Phase.NORMALIZE:
+            run_file = next((home.home / "chunks").glob("*/*/runs/*.parquet"))
+            run_file.write_bytes(b"not parquet")  # the workspace's own bytes, damaged
+
+    job = IngestJob(root, tmp_path / "p", home, registry(), on_event=spoil_a_run)
+    with pytest.raises(JobError, match="cannot be read"):
+        job.run()
+    assert job.state is JobState.FAILED and not (tmp_path / "p").exists()

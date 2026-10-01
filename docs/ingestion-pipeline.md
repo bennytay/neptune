@@ -57,7 +57,9 @@ state machine over the stages above, in nine phases (ADR 0028):
   changes under the job or cannot be opened, or output breaking a cross-chunk law quarantines that
   source: its output stays out of the package and a `neptune.runtime.*` finding citing it says why.
   Every other source lands. A `ContractError` is a bug and is never retried. Committed chunks of a
-  quarantined source stay in the workspace, so the rerun after a fix redoes only what failed.
+  quarantined source stay in the workspace, so the rerun after a fix redoes only what failed. The
+  finding names the step, law, exception class and ids, never an exception's text or a repr, so
+  the same failing job writes the same package (ADR 0028 §4).
 - **Cancellation.** A `threading.Event`, checked before each source, chunk and phase from `inspect`
   on (the walk and its ledger always finish). The chunk in hand finishes and commits; a staged
   package is discarded; the outcome is `cancelled` with no package.
