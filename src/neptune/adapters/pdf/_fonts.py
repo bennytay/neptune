@@ -48,6 +48,7 @@ from ._objects import (
 # A CMap or a width table larger than this is not read: its codes stay unmapped or unmeasured.
 MAX_CMAP_BYTES: Final = 4 * 1024 * 1024
 MAX_TABLE_ENTRIES: Final = 1 << 17
+GLYPH_SPACE: Final = 1.0 / 1000.0  # glyph space units per unit of font size, but in Type3
 _ENCODINGS: Final[dict[str, list[str]]] = {
     "StandardEncoding": _std_encoding,
     "WinAnsiEncoding": _win_encoding,
@@ -298,12 +299,17 @@ class Font:
         return self.default_width
 
 
+def _scaled(value: float, scale: float) -> float:
+    """Glyph-space units to units of font size; dividing by 1000 is exact more often."""
+    return value / 1000.0 if scale == GLYPH_SPACE else value * scale
+
+
 def _descriptor_metrics(font: Font, descriptor: DictionaryObject | None, scale: float) -> None:
     if descriptor is None:
         return
     ascent, descent = number(entry(descriptor, "/Ascent")), number(entry(descriptor, "/Descent"))
     if ascent is not None and descent is not None:
-        font.ascent, font.descent = ascent * scale, descent * scale
+        font.ascent, font.descent = _scaled(ascent, scale), _scaled(descent, scale)
 
 
 def _simple_encoding(font_dict: DictionaryObject, base_font: str, flags: int) -> list[str | None]:
@@ -353,9 +359,9 @@ def _simple_widths(font: Font, font_dict: DictionaryObject, scale: float) -> Non
         for offset, item in enumerate(widths[:256]):
             width = number(item)
             if width is not None:
-                font.widths[first + offset] = width * scale
+                font.widths[first + offset] = _scaled(width, scale)
         missing = number(entry(descriptor, "/MissingWidth")) if descriptor is not None else None
-        font.default_width = (missing if missing is not None else 0.0) * scale
+        font.default_width = _scaled(missing if missing is not None else 0.0, scale)
         return
     metrics = _core_metrics(font.name)
     if metrics is not None:
@@ -413,12 +419,12 @@ def load_font(font_dict: DictionaryObject) -> Font:
         if descendant is not None:
             _cid_widths(font, descendant)
             descriptor = dictionary(entry(descendant, "/FontDescriptor"))
-            _descriptor_metrics(font, descriptor, 1.0 / 1000.0)
+            _descriptor_metrics(font, descriptor, GLYPH_SPACE)
         return font
     descriptor = dictionary(entry(font_dict, "/FontDescriptor"))
     flags = (integer(entry(descriptor, "/Flags")) or 0) if descriptor is not None else 0
     font.encoding = _simple_encoding(font_dict, base_font, flags)
-    scale = 1.0 / 1000.0
+    scale = GLYPH_SPACE
     if subtype == "Type3":
         matrix = [number(v) for v in array(entry(font_dict, "/FontMatrix")) or []]
         if len(matrix) == 6 and matrix[0] is not None and matrix[3] is not None:
@@ -432,7 +438,7 @@ def load_font(font_dict: DictionaryObject) -> Font:
     if subtype == "Type3" and scale == 0.0:
         font.widths, font.default_width, font.core_widths = {}, None, None
     if font.ascent is None:
-        _descriptor_metrics(font, descriptor, scale if subtype == "Type3" else 1.0 / 1000.0)
+        _descriptor_metrics(font, descriptor, scale if subtype == "Type3" else GLYPH_SPACE)
     if font.ascent is None:
         metrics = _core_metrics(base_font)
         core = getattr(metrics, "font_descriptor", None)
