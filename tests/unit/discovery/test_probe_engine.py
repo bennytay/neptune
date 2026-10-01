@@ -117,9 +117,8 @@ def claims(adapter_id: str, confidence: float, *formats: FormatSpec) -> Stub:
 
 
 def engine(*extra: object, policy: ProbePolicy | None = None) -> ProbeEngine:
-    return ProbeEngine(
-        AdapterRegistry([McapAdapter(), TextAdapter(), TALLY.TallyAdapter(), *extra]), policy
-    )  # type: ignore[list-item]
+    adapters = [McapAdapter(), TextAdapter(), TALLY.TallyAdapter(), *extra]
+    return ProbeEngine(AdapterRegistry(adapters), policy)
 
 
 def probe(
