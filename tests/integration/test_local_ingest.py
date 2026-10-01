@@ -360,27 +360,41 @@ def test_only_copied_files_are_read_back(
 def test_packages_and_exports_are_flushed_before_they_appear(
     corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every file and directory is fsynced, and so is the directory each one is renamed into."""
+    """Every file and directory is fsynced before the rename that publishes it, and the
+    directory it is renamed into is fsynced after."""
     workspace = Workspace(tmp_path / "home")
     ledger, ingested = ingest_into(corpus, workspace, registry())
-    flushed: set[tuple[int, int]] = set()
-    fsync = os.fsync
+    events: list[tuple[str, object]] = []
+    fsync, rename = os.fsync, os.rename
 
-    def recording(descriptor: int) -> None:
+    def recording_fsync(descriptor: int) -> None:
         held = os.fstat(descriptor)
-        flushed.add((held.st_dev, held.st_ino))
         fsync(descriptor)
+        events.append(("fsync", (held.st_dev, held.st_ino)))
 
-    monkeypatch.setattr(os, "fsync", recording)
+    def recording_rename(source: Any, target: Any, *args: Any, **kwargs: Any) -> None:
+        rename(source, target, *args, **kwargs)
+        events.append(("rename", Path(target)))
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    monkeypatch.setattr(os, "rename", recording_rename)
     out = tmp_path / "out"
     out.mkdir()
     assemble(out / "package", workspace, ledger, ingested)
     export(out / "package", out / "portable", LocalSource(corpus))
-    written = [out, *out.rglob("*")]
-    assert len(written) > 20
-    for path in written:
-        named = path.stat()
-        assert (named.st_dev, named.st_ino) in flushed, path
+
+    begun = 0  # each package's own window: from the previous publish to its own
+    for package in (out / "package", out / "portable"):
+        published = events.index(("rename", package))
+        before, after = events[begun:published], events[published + 1 :]
+        written = [package, *package.rglob("*")]
+        assert len(written) > 10
+        for path in written:
+            named = path.stat()
+            assert ("fsync", (named.st_dev, named.st_ino)) in before, path
+        parent = out.stat()
+        assert ("fsync", (parent.st_dev, parent.st_ino)) in after
+        begun = published + 1
 
 
 def test_a_package_is_made_under_the_umask_without_touching_it(
