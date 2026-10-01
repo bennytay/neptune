@@ -495,7 +495,7 @@ def _document(out: _Output, captured: Warnings) -> None:
     )
     if readable:
         try:
-            _active_content(out, opened, pages)
+            _active_content(out, opened, kept)
         except (MemoryError, ShortReadError):
             raise
         except Exception:
@@ -719,6 +719,8 @@ def _active_content(out: _Output, opened: Opened, pages: list[DictionaryObject])
     holders: list[object] = [entry(catalog, "/AA")]
     annotations = 0
     for page in pages:
+        if annotations > MAX_ANNOTATIONS:
+            break
         holders.append(entry(page, "/AA"))
         for raw in array(entry(page, "/Annots")) or []:
             annotations += 1
@@ -899,7 +901,8 @@ def _content_findings(out: _Output, content: PageContent, index: int) -> None:
             FindingCategory.LIMIT,
             Severity.ERROR,
             subject,
-            f"page {index} passed {limit} ({out.config.integer(limit)}); it was read up to there",
+            f"the content of page {index} passed {limit} ({out.config.integer(limit)}); only what"
+            " came before is read",
             {"limit": limit, "page": index, "value": out.config.integer(limit)},
         )
     if content.fonts_limited:

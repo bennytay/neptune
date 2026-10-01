@@ -219,6 +219,19 @@ def test_the_document_record_always_fits_one_reply() -> None:
     assert len(json.dumps(record.to_json())) < 32 * 1024 * 1024
 
 
+def test_active_content_past_the_page_limit_is_not_counted() -> None:
+    # Pages past the 10,000 the record describes are neither read nor scanned.
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    script = pdf.add({"S": MAKE.Name("JavaScript"), "JS": MAKE.Lit(b"app.alert(1);")})
+    base = {"Type": MAKE.Name("Page"), "Parent": tree, "MediaBox": [0, 0, 612, 792]}
+    leaves = [pdf.add(dict(base)) for _ in range(10_000)]
+    leaves.append(pdf.add({**base, "AA": {"O": script}}))
+    MAKE.page_tree(pdf, leaves, tree)
+    output = ingest(bytes(pdf.build(MAKE.catalog(pdf, tree))), pages_per_chunk=10_001)
+    assert [f.code for f in output.findings()] == ["pdf.page_limit"]
+
+
 def test_a_media_box_that_is_not_four_numbers_is_unknown() -> None:
     # pypdf refuses number tokens over 64 characters, so no box overflows a float; a box of the
     # wrong shape is the case left, and the adapter's finiteness check is a second guard.

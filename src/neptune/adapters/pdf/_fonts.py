@@ -263,10 +263,13 @@ def parse_to_unicode(data: bytes) -> ToUnicode:
     operands: list[bytes | list[bytes]] = []
     stack: list[bytes] | None = None
     for count, match in enumerate(_CMAP_TOKEN.finditer(data, 0, MAX_CMAP_BYTES)):
-        if count > MAX_TABLE_ENTRIES * 4 or cmap.entries >= MAX_TABLE_ENTRIES:
+        token = match.group()
+        # At the entry bound the CMap is cut only if more of it follows: a section's closing
+        # keyword is not another entry, so a table of exactly the bound is read whole.
+        more = section and token[:1] in (b"<", b"/", b"[")
+        if count > MAX_TABLE_ENTRIES * 4 or (cmap.entries >= MAX_TABLE_ENTRIES and more):
             cmap.limited = True
             break
-        token = match.group()
         if token == b"[":
             stack = []
         elif token == b"]":

@@ -86,6 +86,7 @@ from ._blocks import Block, Lines, normalize, parse
 
 BOM: Final = b"\xef\xbb\xbf"
 FRONT_MATTER_WINDOW: Final = 64 * 1024
+MAX_FINDING_RECORDS: Final = 1000  # ids a finding lists; its details hold the full count
 MiB: Final = 1024 * 1024
 EXTENSIONS: Final = (".markdown", ".md", ".mdown", ".mkd", ".mkdn")
 # A Markdown name over text the bytes cannot tell from plain text: just above the generic band.
@@ -330,7 +331,7 @@ def _has_strong(line: str) -> bool:
             if inner >= len(line) or line[inner].isspace():
                 start = open_ + 1
                 continue
-            close = line.find(mark, inner + 1)
+            close = line.find(mark, inner + 2)  # two or more characters between the marks
             while close >= 0 and line[close - 1].isspace():
                 close = line.find(mark, close + 1)
             return close >= 0  # no closing mark later serves any later opening either
@@ -472,7 +473,7 @@ class _Output:
                 transform=self.config.transform,
                 message=message,
                 details=details,
-                records=records or (),
+                records=(records or [])[:MAX_FINDING_RECORDS],
             )
         )
 

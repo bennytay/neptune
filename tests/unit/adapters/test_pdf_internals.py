@@ -23,7 +23,13 @@ from pypdf.generic import (
 )
 
 from neptune.adapters.pdf._content import MAX_FORM_DEPTH, Box, Interpreter, Item, Line, PageContent
-from neptune.adapters.pdf._fonts import Ranges, glyph_text, load_font, parse_to_unicode
+from neptune.adapters.pdf._fonts import (
+    MAX_TABLE_ENTRIES,
+    Ranges,
+    glyph_text,
+    load_font,
+    parse_to_unicode,
+)
 from neptune.adapters.pdf._page import PLACEHOLDER, blocks, join
 from neptune.model.world import BlockRole
 
@@ -81,6 +87,19 @@ def test_a_to_unicode_cmap_maps_single_codes_ranges_and_arrays() -> None:
     assert [cmap.lookup(code, 1) for code in (0x10, 0x11, 0x12, 0x13)] == ["a", "b", "c", None]
     assert [cmap.lookup(code, 2) for code in (0x8000, 0x8001)] == ["X", "Y"]
     assert list(cmap.split(b"\x01\x80\x00\x7f")) == [(1, 1), (0x8000, 2), (0x7F, 1)]
+
+
+def test_a_cmap_of_exactly_the_entry_bound_is_read_whole_and_one_more_is_cut() -> None:
+    def cmap_of(count: int) -> bytes:
+        entries = b"".join(b"<%06X> <0041>\n" % code for code in range(count))
+        return b"1 begincodespacerange <000000> <FFFFFF> endcodespacerange\n" + (
+            b"beginbfchar\n" + entries + b"endbfchar endcmap"
+        )
+
+    whole = parse_to_unicode(cmap_of(MAX_TABLE_ENTRIES - 1))  # plus the codespace range
+    assert not whole.limited and whole.lookup(MAX_TABLE_ENTRIES - 2, 3) == "A"
+    cut = parse_to_unicode(cmap_of(MAX_TABLE_ENTRIES))
+    assert cut.limited and cut.lookup(MAX_TABLE_ENTRIES - 1, 3) is None
 
 
 def test_a_malformed_cmap_maps_what_parses_and_nothing_else() -> None:

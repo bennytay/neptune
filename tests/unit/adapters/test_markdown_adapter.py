@@ -320,6 +320,34 @@ def test_a_malformed_definition_is_only_a_paragraph() -> None:
         check_citations(data, output)
 
 
+@pytest.mark.parametrize(
+    ("interrupter", "role"),
+    [
+        ("```\ncode\n```", BlockRole.CODE),
+        ("# Head", BlockRole.HEADING),
+        ("<div>x</div>", "Unknown"),
+        ("> quote", BlockRole.QUOTE),
+        ("- item", BlockRole.LIST_ITEM),
+        ("[ref]: /u", "Unknown"),  # a definition cannot interrupt a paragraph: it is its text
+    ],
+)
+def test_each_block_that_may_interrupt_a_paragraph_does(interrupter: str, role: Any) -> None:
+    output = run(f"intro\n{interrupter}\n".encode())
+    roles = [state(b.role) for b in blocks(output)]
+    if interrupter.startswith("[ref]"):
+        assert roles == [BlockRole.PARAGRAPH]
+    else:
+        assert roles == [BlockRole.PARAGRAPH, role]
+
+
+def test_a_finding_lists_a_bounded_number_of_records_and_counts_the_rest() -> None:
+    data = b"\n".join(b"[l%d]: /u" % n for n in range(2500)) + b"\n"
+    output = run(data)
+    found = finding(output, "markdown.link_definitions")
+    assert found.details == {"blocks": 2500} and len(found.records) == 1000
+    assert len(blocks(output)) == 2500
+
+
 def test_a_fence_or_heading_interrupts_a_paragraph_as_commonmark_says() -> None:
     output = run(b"intro\n```\ncode\n```\ntext\n# Head\n> quote\n")
     assert [(state(b.role), state(b.text)) for b in blocks(output)] == [

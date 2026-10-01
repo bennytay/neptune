@@ -26,11 +26,9 @@ import bisect
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from markdown_it import MarkdownIt
-from markdown_it.parser_block import _rules as _BLOCK_RULES
-from markdown_it.ruler import RuleOptionsType
 from markdown_it.rules_block import (
     StateBlock,
     code,
@@ -46,6 +44,9 @@ from markdown_it.token import Token
 
 from neptune.model.world import BlockRole
 
+if TYPE_CHECKING:
+    from markdown_it.ruler import RuleOptionsType
+
 MAX_NESTING: Final = 64
 _LEAVES: Final = (
     "paragraph",
@@ -57,10 +58,8 @@ _LEAVES: Final = (
     "definition",
 )
 NEWLINES: Final = re.compile(r"\r\n?|\n")
-# Which blocks each rule may interrupt: ``Ruler.at`` resets these, so the wrapper restores them.
-_INTERRUPTS: Final[dict[str, RuleOptionsType]] = {
-    name: {"alt": list(alt)} for name, _, alt in _BLOCK_RULES
-}
+# The chains a block rule may interrupt (markdown-it's ``alt`` of a rule names them).
+_CHAINS: Final = ("paragraph", "reference", "blockquote", "list")
 _ROLES: Final[dict[str, BlockRole]] = {
     "fence": BlockRole.CODE,
     "code_block": BlockRole.CODE,
@@ -160,6 +159,9 @@ def parser(records: dict[int, Recorded]) -> MarkdownIt:
     options = {"maxNesting": MAX_NESTING, "inline_definitions": True}
     md = MarkdownIt("commonmark", options).enable("table")
     md.disable(["inline", "text_join"], ignoreInvalid=True)
+    # ``Ruler.at`` resets a rule's ``alt``, the chains it may interrupt (a fence ends a paragraph),
+    # so read them from the parser's own chains first and hand them back.
+    chains = {chain: md.block.ruler.getRules(chain) for chain in _CHAINS}
     for name, rule in (
         ("table", table),
         ("code", code),
@@ -170,7 +172,8 @@ def parser(records: dict[int, Recorded]) -> MarkdownIt:
         ("lheading", lheading),
         ("paragraph", paragraph),
     ):
-        md.block.ruler.at(name, _recording(name, rule, records), _INTERRUPTS[name])
+        alt: RuleOptionsType = {"alt": [chain for chain in _CHAINS if rule in chains[chain]]}
+        md.block.ruler.at(name, _recording(name, rule, records), alt)
     return md
 
 
