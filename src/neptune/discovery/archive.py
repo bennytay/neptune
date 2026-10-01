@@ -222,6 +222,18 @@ class _State:
         self.total_remaining = max(self.total_remaining - amount, 0)
 
 
+# What reading a member's bytes may raise once its header parsed: a bad CRC, a broken deflate,
+# bzip2 or xz stream, or data that ends early. Each is that member's finding, never the job's.
+_MEMBER_READ_ERRORS: Final = (
+    EOFError,
+    tarfile.TarError,
+    zipfile.BadZipFile,
+    zlib.error,
+    lzma.LZMAError,
+    OSError,
+)
+
+
 @dataclass(frozen=True)
 class _Pumped:
     read: int
@@ -351,14 +363,7 @@ def _pump(
                 read += len(block)
                 if spool is not None and read <= allowed:
                     spool.write(block)
-        except (
-            EOFError,
-            tarfile.TarError,
-            zipfile.BadZipFile,
-            zlib.error,
-            lzma.LZMAError,
-            OSError,
-        ) as exc:
+        except _MEMBER_READ_ERRORS as exc:
             state.charge(read)
             code = MEMBER_TRUNCATED if _is_truncation(exc) else MEMBER_CORRUPT
             _member_defect(state, code, name, locator, read, declared, exc)
@@ -655,12 +660,39 @@ def _zip_member(
         return member(0)
     with fileobj:
         if kind is MemberKind.SYMLINK:
-            target = _read_up_to(fileobj, info.file_size)
-            state.charge(len(target))
-            _link_finding(state, name, locator, "symlink", target)
-            return member(len(target))
+            return member(_zip_link(state, fileobj, name, locator, info.file_size))
         pumped = _pump(state, fileobj, name, locator, info.file_size, depth)
     return member(pumped.read, pumped.nested)
+
+
+def _zip_link(
+    state: _State,
+    fileobj: _Readable,
+    name: str,
+    locator: tuple[Locator, ...],
+    declared: int,
+) -> int:
+    """Record a zip symlink's target (its data, at most ``MAX_HEADER_SIZE``); bytes read."""
+    try:
+        target = _read_up_to(fileobj, declared)
+    except _MEMBER_READ_ERRORS as exc:
+        code = MEMBER_TRUNCATED if _is_truncation(exc) else MEMBER_CORRUPT
+        _member_defect(state, code, name, locator, 0, declared, exc)
+        return 0
+    state.charge(len(target))
+    if len(target) < declared:
+        state.finding(
+            MEMBER_TRUNCATED,
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            locator,
+            f"symlink target declares {declared} bytes but only {len(target)} are present;"
+            " truncated",
+            {**text_field("name", name), "declared_size": declared, "read_bytes": len(target)},
+        )
+        return len(target)
+    _link_finding(state, name, locator, "symlink", target)
+    return len(target)
 
 
 # --- tar and compressed streams ----------------------------------------------------------------
@@ -871,12 +903,13 @@ def _tar_member(
     # must fit the limits whatever its kind.
     if not _declared_within(state, name, locator, info.size, compressed=None):
         return member(0), False
+    # The name first, whatever the kind: a link named ``../x`` is unsafe before it is a link.
+    if _skip_by_policy(state, name, kind, locator, tar_type=info.type):
+        state.charge(info.size)
+        return member(0), True
     if kind in (MemberKind.SYMLINK, MemberKind.HARDLINK):
         target = info.linkname.encode("utf-8", "surrogateescape")
         _link_finding(state, name, locator, str(kind), target)
-        state.charge(info.size)
-        return member(0), True
-    if _skip_by_policy(state, name, kind, locator, tar_type=info.type):
         state.charge(info.size)
         return member(0), True
     fileobj = archive.extractfile(info)

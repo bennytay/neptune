@@ -171,6 +171,49 @@ def test_size_changed_between_walk_and_digest_is_a_warning(tmp_path: Path) -> No
     assert artifact is not None and artifact.size == 7  # the digest is authoritative
 
 
+class SwappedAtOpen(LocalSource):
+    """A regular file replaced, between the walk and the digest's open, by something else."""
+
+    def __init__(self, root: Path, swap: str) -> None:
+        super().__init__(root)
+        self._swap = swap
+
+    def open(self, location: SourceLocation) -> BinaryIO:
+        assert isinstance(location, LocalPath)
+        path = Path(self.root) / location.path
+        if path.is_file() and not path.is_symlink():
+            path.unlink()
+            if self._swap == "symlink":
+                path.symlink_to(Path(self.root).parent / "outside" / "canary.txt")
+            else:
+                os.mkfifo(path)
+        return super().open(location)
+
+
+@pytest.mark.parametrize(
+    ("swap", "code", "severity"),
+    [("symlink", SYMLINK_NOT_FOLLOWED, Severity.INFO), ("fifo", SPECIAL_FILE, Severity.INFO)],
+)
+def test_a_file_swapped_at_open_is_reported_as_what_open_found(
+    tmp_path: Path, swap: str, code: str, severity: Severity
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "canary.txt").write_bytes(b"never read")
+    (root / "log.bin").write_bytes(b"abc")
+    ledger = SourceLedger()
+    scan(LocalSource(root), ledger)
+    result = scan(SwappedAtOpen(root, swap), ledger)
+    [finding] = result.findings
+    assert (finding.code, finding.severity) == (code, severity)
+    assert finding.subject == LocalPath("log.bin")
+    if swap == "fifo":
+        assert str(finding.details["mode"]).startswith("p")  # the FIFO's mode, as open found it
+    assert result.observations == ()
+    assert result.absences == ()  # seen only at open: blind for this scan, the next one decides
+
+
 def test_scan_findings_are_deterministic_and_verifiable(tree: Path) -> None:
     first = scan(LocalSource(tree), SourceLedger())
     second = scan(LocalSource(tree), SourceLedger())

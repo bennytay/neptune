@@ -54,6 +54,7 @@ def scan(
     skipped: list[SkippedEntry] = []
     findings: list[IngestFinding] = []
     seen: set[bytes] = set()
+    blind_at_open: set[bytes] = set()
     forms = root_forms(source.root)
     for entry in source.walk():
         if isinstance(entry, SymlinkEntry):
@@ -66,7 +67,9 @@ def scan(
         else:
             outcome = _digest(source, ledger, entry, chunk_size)
             if isinstance(outcome, SkippedEntry):
+                # Changed between walk and open. Blind for this scan; the next scan decides.
                 skipped.append(outcome)
+                blind_at_open.add(outcome.raw_path)
                 findings.append(skipped_finding(outcome))
                 continue
             observation, digested = outcome
@@ -75,7 +78,7 @@ def scan(
             if digested != entry.size:
                 findings.append(size_changed_finding(_location(entry), entry.size, digested))
 
-    unseen_blind = {s.raw_path for s in skipped if s.reason in _BLIND}
+    unseen_blind = {s.raw_path for s in skipped if s.reason in _BLIND} | blind_at_open
     link_paths = {link.location.raw for link in symlinks}
     absences: list[SourceAbsence] = []
     for location in _present_local_locations(ledger):
@@ -107,9 +110,8 @@ def _digest(
         with source.open(entry.location) as stream:
             artifact = digest_stream(stream, chunk_size=chunk_size)
     except SourceAccessError as exc:
-        # Changed between walk and open. Blind for this scan; the next scan decides.
-        reason = SkipReason.MISSING if exc.reason is SkipReason.MISSING else SkipReason.UNREADABLE
-        return SkippedEntry(_raw(entry), reason, f"at open: {exc.reason}: {exc.detail}")
+        # The reason is what open found (a symlink or FIFO swapped in is that, not unreadable).
+        return SkippedEntry(_raw(entry), exc.reason, exc.detail)
     except OSError as exc:
         return SkippedEntry(_raw(entry), SkipReason.UNREADABLE, exc.strerror or str(exc))
     return ledger.observe(entry.location, artifact), artifact.size

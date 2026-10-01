@@ -8,7 +8,9 @@
   ``flock``.
 - ``clear_scratch`` runs on resume. It removes every directory whose lock nobody holds (its owner
   died) and skips the ones another live process holds, so processes sharing a root cannot delete
-  each other's work.
+  each other's work. The private root itself is ``flock``ed around both: shared while a scratch
+  directory is created and locked, exclusive while ``clear_scratch`` sweeps, so a sweep never sees
+  a directory whose lock is not yet held.
 
 Scratch names are random; nothing in them ever reaches a record, so determinism is unaffected.
 """
@@ -60,14 +62,22 @@ def prepare_private_root(private_root: Path, *, ingest_root: Path | None = None)
 def scratch_space(private_root: Path, *, ingest_root: Path | None = None) -> Iterator[Path]:
     """A fresh private directory for one unit of work, removed when the block ends."""
     root = prepare_private_root(private_root, ingest_root=ingest_root)
-    directory = Path(tempfile.mkdtemp(prefix=_PREFIX, dir=root))
-    lock = os.open(
-        directory / LOCK_NAME,
-        os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
-        0o600,
-    )
+    with _root_lock(root, fcntl.LOCK_SH):  # no sweep runs until the new lock is held
+        directory = Path(tempfile.mkdtemp(prefix=_PREFIX, dir=root))
+        lock = -1
+        try:
+            lock = os.open(
+                directory / LOCK_NAME,
+                os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600,
+            )
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BaseException:
+            _remove(directory)
+            if lock >= 0:
+                os.close(lock)
+            raise
     try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         yield directory
     finally:
         # Remove before releasing the lock, so a concurrent clear_scratch cannot race the removal.
@@ -82,6 +92,11 @@ def clear_scratch(private_root: Path) -> int:
     Symlinks are unlinked, never followed.
     """
     root = prepare_private_root(private_root)
+    with _root_lock(root, fcntl.LOCK_EX):
+        return _sweep(root)
+
+
+def _sweep(root: Path) -> int:
     removed = 0
     for entry in sorted(root.iterdir()):
         if entry.is_symlink() or not entry.is_dir():
@@ -99,6 +114,17 @@ def clear_scratch(private_root: Path) -> int:
 
 
 _LIVE: Final = object()
+
+
+@contextmanager
+def _root_lock(root: Path, operation: int) -> Iterator[None]:
+    """Hold ``flock(operation)`` on the private root directory itself for the block."""
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        fcntl.flock(fd, operation)
+        yield
+    finally:
+        os.close(fd)
 
 
 def _try_lock(path: Path) -> int | object | None:

@@ -70,7 +70,7 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
      inspected recursively against the same total budget. The spool is deleted when the level ends.
    - Member names are recorded exactly as declared (zip: before the NUL `zipfile` cuts at). A name
      that is empty, absolute, holds NUL or a `..` component is `member_path_unsafe` and the member
-     is not read. `.` and empty components are tolerated; backslashes are characters.
+     is not read, whatever its kind (a link named `../x` is unsafe before it is a link). `.` and empty components are tolerated; backslashes are characters.
    - Symlink and hard-link members are `member_link` (target recorded, never followed); FIFOs and
      devices `member_special`; encrypted members `member_encrypted`; unknown compression methods
      `member_unsupported`; defects `truncated`, `corrupt`, `member_truncated`, `member_corrupt`;
@@ -97,8 +97,10 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
    ingest root in either direction. `scratch_space(private_root)` yields a fresh `0700` directory
    holding an `flock`ed lock file and removes it on exit, success or crash: that is "cleaned on
    commit". `clear_scratch(private_root)` runs on resume and removes every entry whose lock nobody
-   holds, skipping a live process's; symlinks are unlinked, never followed. Scratch names are
-   random and never reach a record.
+   holds, skipping a live process's; symlinks are unlinked, never followed. The private root is
+   itself `flock`ed: shared while a scratch directory is created and its lock taken, exclusive
+   while `clear_scratch` sweeps, so a sweep never removes a directory still being set up. Scratch
+   names are random and never reach a record.
 
 ## Alternatives considered
 

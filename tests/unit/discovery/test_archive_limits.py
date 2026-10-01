@@ -298,6 +298,42 @@ def test_a_zip_symlink_target_is_capped_like_a_header(tmp_path: Path, hostile: M
     assert peak_memory(lambda: inspect(data, tmp_path, limits)) < MiB
 
 
+def test_a_tar_link_with_an_unsafe_name_is_unsafe_before_it_is_a_link(
+    tmp_path: Path, hostile: ModuleType
+) -> None:
+    data = hostile.make_tar(
+        [
+            (hostile.tar_info("../../evil", kind=tarfile.SYMTYPE, linkname="/etc/passwd"), b""),
+            (hostile.tar_info("/abs-hard", kind=tarfile.LNKTYPE, linkname="ok.txt"), b""),
+            (hostile.tar_info("fine", kind=tarfile.SYMTYPE, linkname="ok.txt"), b""),
+        ]
+    )
+    report = inspect(data, tmp_path)
+    assert codes(report) == [MEMBER_PATH_UNSAFE, MEMBER_PATH_UNSAFE, MEMBER_LINK]
+    assert [f.details["problem"] for f in report.findings[:2]] == ["parent_reference", "absolute"]
+    assert report.complete
+
+
+@pytest.mark.parametrize("compression", [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED])
+def test_a_corrupt_zip_symlink_is_a_member_finding(
+    tmp_path: Path, hostile: ModuleType, compression: int
+) -> None:
+    """A bad CRC or a broken stream in a link's target is that member's finding, not a crash."""
+    target = b"../" * 40 + b"etc/passwd"
+    link = hostile.zip_info("latest", 0o120777)
+    data = bytearray(
+        hostile.make_zip([(link, target), ("ok.txt", b"ok\n")], compression=compression)
+    )
+    with zipfile.ZipFile(io.BytesIO(bytes(data))) as archive:
+        info = archive.getinfo("latest")
+    data[info.header_offset + 30 + len("latest") + len(info.extra) + 2] ^= 0xFF
+    report = inspect(bytes(data), tmp_path)
+    assert codes(report) == [MEMBER_CORRUPT]
+    assert report.findings[0].details["name"] == "latest"
+    assert [(m.name, m.read_bytes) for m in report.members] == [("latest", 0), ("ok.txt", 3)]
+    assert report.complete
+
+
 # --- headers, truncation and corruption --------------------------------------------------------
 
 

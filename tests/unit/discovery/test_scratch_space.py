@@ -1,7 +1,9 @@
 """Scratch space: private, never in the source tree, gone on exit, cleared on resume."""
 
+import fcntl
 import os
 import stat
+import threading
 from pathlib import Path
 
 import pytest
@@ -94,3 +96,22 @@ def test_clear_scratch_removes_stale_and_debris_and_keeps_live(tmp_path: Path) -
         assert sorted(p.name for p in root.iterdir()) == [live.name]
     assert tmp_path.exists() and list(root.iterdir()) == []
     assert clear_scratch(root) == 0
+
+
+def test_a_sweep_waits_while_a_scratch_directory_is_being_set_up(tmp_path: Path) -> None:
+    """``scratch_space`` holds the root shared until its lock is held; a sweep needs it whole."""
+    root = prepare_private_root(tmp_path / "private")
+    half_made = root / "scratch-half-made"
+    half_made.mkdir()  # created, its lock not yet taken: another process is mid-way through
+    setting_up = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    fcntl.flock(setting_up, fcntl.LOCK_SH)
+    removed: list[int] = []
+    sweep = threading.Thread(target=lambda: removed.append(clear_scratch(root)))
+    try:
+        sweep.start()
+        sweep.join(timeout=0.2)
+        assert sweep.is_alive() and half_made.exists()  # the sweep waits for the set-up
+    finally:
+        os.close(setting_up)
+    sweep.join(timeout=10)
+    assert removed == [1] and not half_made.exists()
