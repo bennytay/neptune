@@ -42,23 +42,65 @@ PGDATA = w.ROOT / "pgdata"
 
 # --- recall --------------------------------------------------------------------------------------
 
-#: (ef_search, iterative scan mode, max_scan_tuples): the shipped default first.
-GRID: list[tuple[int, str, int]] = [
-    (100, "relaxed_order", 20_000),
-    (40, "relaxed_order", 20_000),
-    (200, "relaxed_order", 20_000),
-    (400, "relaxed_order", 20_000),
-    (100, "strict_order", 20_000),
-    (100, "relaxed_order", 100_000),
-    (200, "relaxed_order", 100_000),
-]
+#: The pre-gate graph-filtered query: the HNSW index with an iterative scan, filtered by scope.
+HNSW_FILTERED = (
+    pg.neighbours_sql(S).split("\nSELECT u.entity, b.depth, u.path")[0]
+    + f""", scope AS (
+  SELECT u.entity FROM bfs b CROSS JOIN LATERAL unnest(b.ents) AS u(entity)
+)
+SELECT claim_id, distance FROM (
+  SELECT e.claim_id, e.embedding <-> %(query)s::vector AS distance
+  FROM {S}.claim_embedding e
+  WHERE e.subject IN (SELECT entity FROM scope)
+  ORDER BY e.embedding <-> %(query)s::vector LIMIT %(k)s
+) hits ORDER BY distance, claim_id"""
+)
+EF_GRID = (40, 100, 200, 400)
 
 
 def _ids(rows: list[tuple[Any, ...]]) -> set[int]:
     return {int(r[0]) for r in rows}
 
 
+def _truth(c: psycopg.Connection[Any], p: dict[str, Any], k: int) -> tuple[set[int], int]:
+    """Exact top-k computed outside the database query under test: the walk's scope (anchor
+    included), every embedding of it, distances in numpy. Returns (ids, scope embeddings)."""
+    walk = c.execute(pg.neighbours_sql(S), p, prepare=False).fetchall()
+    scope = [p["start"], *(row[0] for row in walk)]
+    rows = c.execute(
+        f"SELECT claim_id, embedding::text FROM {S}.claim_embedding WHERE subject = ANY(%(s)s)",
+        {"s": scope},
+        prepare=False,
+    ).fetchall()
+    if not rows:
+        return set(), 0
+    ids = np.array([r[0] for r in rows])
+    vecs = np.array([[float(x) for x in r[1].strip("[]").split(",")] for r in rows])
+    query = np.array([float(x) for x in p["query"].strip("[]").split(",")])
+    dist = np.sqrt(((vecs - query) ** 2).sum(axis=1))
+    order = np.lexsort((ids, dist))[:k]
+    return {int(ids[i]) for i in order}, len(rows)
+
+
+def _score(
+    c: psycopg.Connection[Any], sql: str, params: list[dict[str, Any]], truth: list[set[int]]
+) -> dict[str, Any]:
+    ms_all, hits = [], []
+    for p, want in zip(params, truth, strict=True):
+        ms, got = w.timed(lambda p=p: c.execute(sql, p, prepare=False).fetchall())
+        ms_all.append(ms)
+        hits.append(len(_ids(got) & want) / max(1, len(want)))
+    return {
+        **w.summary(ms_all),
+        "recall_at_10": round(sum(hits) / len(hits), 4),
+        "recall_min": round(min(hits), 2),
+        "queries_below_0_9": sum(h < 0.9 for h in hits),
+    }
+
+
 def recall(n: int, k: int = 10) -> None:
+    """Every query runs unprepared (``prepare=False``): a cached plan survives a planner setting
+    change, so a plan cached with the index off would silently be reused with it on."""
     queries = np.load(w.paths(n)["queries"])
     sites = w.entities(n, "site")
     rng = random.Random(5)
@@ -74,38 +116,24 @@ def recall(n: int, k: int = 10) -> None:
         for i, q in enumerate(queries)
     ]
     plain = pg.vector_top_k_sql(S, filtered=False)
-    filt = pg.vector_top_k_sql(S, filtered=True)
     out: dict[str, Any] = {"queries": len(params), "k": k}
     with pb.conn() as c:
         c.autocommit = True
+        truth, sizes = zip(*(_truth(c, p, k) for p in params), strict=True)
+        out["scope_embeddings"] = {"mean": sum(sizes) / len(sizes), "max": max(sizes)}
         c.execute("SET enable_indexscan = off")
         c.execute("SET enable_indexonlyscan = off")
-        exact_plain = [_ids(c.execute(plain, p).fetchall()) for p in params]
-        exact_filt = [_ids(c.execute(filt, p).fetchall()) for p in params]
+        plain_truth = [_ids(c.execute(plain, p, prepare=False).fetchall()) for p in params]
         c.execute("RESET enable_indexscan")
         c.execute("RESET enable_indexonlyscan")
-        out["exact_filtered_rows_mean"] = sum(len(e) for e in exact_filt) / len(exact_filt)
-        for ef, mode, max_tuples in GRID:
+        c.execute("SET hnsw.iterative_scan = relaxed_order")
+        out["graph_filtered_shipped"] = _score(
+            c, pg.vector_top_k_sql(S, filtered=True), params, list(truth)
+        )
+        for ef in EF_GRID:
             c.execute(f"SET hnsw.ef_search = {ef}")
-            c.execute(f"SET hnsw.iterative_scan = {mode}")
-            c.execute(f"SET hnsw.max_scan_tuples = {max_tuples}")
-            row: dict[str, Any] = {}
-            for name, sql, exact in (
-                ("unfiltered", plain, exact_plain),
-                ("graph_filtered", filt, exact_filt),
-            ):
-                ms_all, hits = [], []
-                for p, want in zip(params, exact, strict=True):
-                    ms, got = w.timed(lambda p=p, sql=sql: c.execute(sql, p).fetchall())
-                    ms_all.append(ms)
-                    hits.append(len(_ids(got) & want) / max(1, len(want)))
-                row[name] = {
-                    **w.summary(ms_all),
-                    "recall_at_10": round(sum(hits) / len(hits), 4),
-                    "recall_min": round(min(hits), 2),
-                    "queries_below_0_9": sum(h < 0.9 for h in hits),
-                }
-            out[f"ef{ef}_{mode}_max{max_tuples}"] = row
+            out[f"unfiltered_ef{ef}"] = _score(c, plain, params, plain_truth)
+            out[f"graph_filtered_hnsw_ef{ef}"] = _score(c, HNSW_FILTERED, params, list(truth))
     w.save("g1", n, "recall", out)
 
 
@@ -131,26 +159,29 @@ def evict() -> tuple[int, float]:
 
 
 def cold(n: int, reps: int = 200) -> None:
+    """Each sample evicts the cluster from the OS page cache, then runs the thread query once
+    under ``EXPLAIN (ANALYZE, BUFFERS)``: the client time is the measurement, and the plan's
+    block and I/O counters show the reads reached the device. Only what the small
+    ``shared_buffers`` kept from earlier samples (upper index pages, in practice) is warm."""
     robots = w.entities(n, "robot")
     rng = random.Random(21)
     samples = w.as_of_samples(reps, seed=22)
-    sql = pg.as_of_thread_sql(S)
-    ms_all, rows, io_ms, reads = [], [], [], []
+    sql = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + pg.as_of_thread_sql(S)
+    ms_all, rows, io_ms, reads, hits, evict_ms = [], [], [], [], [], []
     with pb.conn() as c:
         c.autocommit = True
         buffers = c.execute("SHOW shared_buffers").fetchone()[0]
         c.execute("SET track_io_timing = on")
         for at in samples:
             params = {"subject": rng.choice(robots), **at}
-            evict()
-            ms, out = w.timed(lambda params=params: c.execute(sql, params).fetchall())
-            ms_all.append(ms)
-            rows.append(len(out))
-            evict()  # the same query again, cold, to count its reads and their device time
-            plan = c.execute("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql, params).fetchone()
+            evict_ms.append(evict()[1])
+            ms, plan = w.timed(lambda p=params: c.execute(sql, p, prepare=False).fetchone())
             top = plan[0][0]["Plan"]
+            ms_all.append(ms)
+            rows.append(int(top.get("Actual Rows", 0)))
             reads.append(int(top.get("Shared Read Blocks", 0)))
-            io_ms.append(float(top.get("I/O Read Time", 0.0)))
+            hits.append(int(top.get("Shared Hit Blocks", 0)))
+            io_ms.append(float(top.get("I/O Read Time", top.get("Shared I/O Read Time", 0.0))))
     w.save(
         "g1",
         n,
@@ -160,8 +191,10 @@ def cold(n: int, reps: int = 200) -> None:
             "rows_mean": sum(rows) / len(rows),
             "shared_buffers": buffers,
             "eviction": "posix_fadvise(DONTNEED) on every cluster file before every query",
+            "eviction_ms_mean": round(sum(evict_ms) / len(evict_ms), 1),
             "blocks_read_mean": sum(reads) / len(reads),
-            "io_read_ms_mean": round(sum(io_ms) / len(io_ms), 3),
+            "blocks_hit_mean": sum(hits) / len(hits),
+            "io_read_ms": w.summary(io_ms),
         },
     )
 

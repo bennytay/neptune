@@ -152,3 +152,11 @@ finding. The configuration's hash is the **generation** (`MemoryReader.generatio
 - Cross-clock comparison, which waits for `ClockAlignment` (compiler MVL-36).
 - A Postgres-backed `MemoryReader`. `MemoryStore` stays provisional (ADR 0004 §5); G2 maps its rows to `Claim`,
   masks `superseded_at`, joins findings and runs this suite.
+- Withdrawal ([ADR 0007](adr/0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) §5, MVL-132).
+  Until it lands, a claim a consolidator stops emitting stays current: an operator cannot retract a `many`
+  fact such as `same_as`, and an upgrade that emits nothing retires nothing. A `one` fact is corrected by a new
+  stated claim, which supersedes it.
+- Names (`has_name`, ADR 0007 §2, MVL-126) and evidence status beside claims (ADR 0007 §6, MVL-132). A reader
+  returns `EvidenceRef`s with no availability; that is the absence of a signal, not "available".
+
+Each lands as a minor version: the shapes above do not change.

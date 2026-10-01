@@ -9,7 +9,8 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 |---|---|---|
 | [0001](0001-place-in-the-programme-and-contract-pins.md) | Memory's place in the programme, declared contract versions, and the stub Ledger | Accepted |
 | [0002](0002-graph-tiers-and-the-bi-temporal-claim-model.md) | Graph tiers, node and edge schema, and the bi-temporal claim model | Accepted; §4 and the worked examples superseded by 0005 |
-| [0003](0003-identity-policy-consolidator-contract-and-lineage.md) | Identity policy, the consolidator contract, and consolidator lineage | Accepted |
-| [0004](0004-claim-graph-store.md) | Claim graph store: PostgreSQL 16 + pgvector over Neo4j 5 (Apache AGE optional, measured) | Accepted |
+| [0003](0003-identity-policy-consolidator-contract-and-lineage.md) | Identity policy, the consolidator contract, and consolidator lineage | Accepted; the §1.4 undo sentence and the §3 known gap superseded by 0007 |
+| [0004](0004-claim-graph-store.md) | Claim graph store: PostgreSQL 16 + pgvector over Neo4j 5 (Apache AGE optional, measured) | Accepted; final per 0007, which supersedes Decision 4 (budgets) and the recall consequence |
 | [0005](0005-split-closures-bi-temporal-findings-and-the-resolver-config.md) | Split closures, bi-temporal findings and the resolver's config | Accepted |
 | [0006](0006-graph-schema-v1-contract-surface-and-memory-reader.md) | Graph-schema v1: contract surface, version policy and the MemoryReader | Accepted |
+| [0007](0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) | G1 gate: withdrawal, names, evidence status, and the final store decision | Accepted |

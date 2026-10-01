@@ -341,6 +341,16 @@ def test_failed_read_rolls_back() -> None:
     assert (conn.commits, conn.rollbacks) == (0, 1)
 
 
+def test_graph_filtered_search_is_exact_over_the_scope_never_the_hnsw_index() -> None:
+    """A filtered HNSW scan misses most of a tiny scope (ADR 0007 §7): distances are computed in
+    a materialized CTE joined on subject, so no ORDER BY can be served by the vector index."""
+    sql = pg.vector_top_k_sql("memory", filtered=True)
+    assert "candidates AS MATERIALIZED" in sql
+    assert "JOIN memory.claim_embedding e ON e.subject = scope.entity" in sql
+    assert sql.rstrip().endswith("FROM candidates ORDER BY distance, claim_id LIMIT %(k)s")
+    assert "ORDER BY e.embedding" not in sql
+
+
 def test_vector_search_sets_ef_search_locally_from_the_constructor() -> None:
     conn = RecordingConnection()
     PostgresStore(conn, dimensions=2, ef_search=250).vector_top_k([0.0, 1.0], 3)

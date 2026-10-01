@@ -33,8 +33,9 @@ if TYPE_CHECKING:
 
 _IDENT = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 MAX_HOPS: Final = 6
-#: Measured setting (ADR 0007 §7, 200 queries at 10^6 embeddings); pgvector's own default is 40.
-DEFAULT_EF_SEARCH: Final = 200
+#: Unfiltered HNSW search only (ADR 0007 §7: recall@10 0.93 on 200 queries at 10^6 embeddings);
+#: pgvector's own default is 40. Graph-filtered search is exact and never uses the index.
+DEFAULT_EF_SEARCH: Final = 400
 VALID_RANGE: Final = "int8range(valid_from, valid_to, '[)')"
 TX_RANGE: Final = "int8range(recorded_at, superseded_at, '[)')"
 
@@ -254,9 +255,15 @@ ORDER BY u.entity"""
 
 
 def vector_top_k_sql(schema: str, *, filtered: bool) -> str:
-    """Nearest neighbours by L2 distance; with ``filtered``, only subjects reached by the walk
-    (the anchor included). Hits are re-sorted, since ``relaxed_order`` scans may return them
-    slightly out of order."""
+    """Nearest neighbours by L2 distance, ties broken by claim id.
+
+    Unfiltered: the HNSW index, re-sorted, since an iterative ``relaxed_order`` scan may return
+    hits slightly out of order. Filtered (only subjects the walk reaches, the anchor included):
+    an **exact** scan of the scope's embeddings through the subject index. A graph scope is a
+    tiny fraction of all embeddings, so a filtered HNSW scan exhausts its tuple budget before it
+    finds them (recall@10 0.87, some queries 0) while the exact scan is as fast (ADR 0007 §7).
+    The distances are computed in a materialized CTE, so the planner cannot order by the index.
+    """
     s = _ident(schema)
     if not filtered:
         return f"""SELECT claim_id, distance FROM (
@@ -266,14 +273,12 @@ def vector_top_k_sql(schema: str, *, filtered: bool) -> str:
     return (
         _walk_cte(schema)
         + f""", scope AS (
-  SELECT u.entity FROM bfs b CROSS JOIN LATERAL unnest(b.ents) AS u(entity)
-)
-SELECT claim_id, distance FROM (
+  SELECT DISTINCT u.entity FROM bfs b CROSS JOIN LATERAL unnest(b.ents) AS u(entity)
+), candidates AS MATERIALIZED (
   SELECT e.claim_id, e.embedding <-> %(query)s::vector AS distance
-  FROM {s}.claim_embedding e
-  WHERE e.subject IN (SELECT entity FROM scope)
-  ORDER BY e.embedding <-> %(query)s::vector LIMIT %(k)s
-) hits ORDER BY distance, claim_id"""
+  FROM scope JOIN {s}.claim_embedding e ON e.subject = scope.entity
+)
+SELECT claim_id, distance FROM candidates ORDER BY distance, claim_id LIMIT %(k)s"""
     )
 
 
@@ -339,7 +344,8 @@ class PostgresStore:
     """:class:`MemoryStore` over one PostgreSQL schema. Call :meth:`create` once per schema.
 
     ``graph`` names an optional AGE snapshot that only :meth:`rebuild` refreshes (default: none).
-    ``ef_search`` is set per query with ``SET LOCAL``; the default is the value ADR 0004 measured.
+    ``ef_search`` is set per query with ``SET LOCAL`` for unfiltered search; the default is ADR 0007
+    §7's measurement.
     """
 
     def __init__(
