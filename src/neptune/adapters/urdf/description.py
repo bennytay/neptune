@@ -359,7 +359,7 @@ class _Reader:
                 name = f"{path}/{key}" if path else key
                 found.append(self.parameter(name, element, key, value, units, joint_type, subject))
             text = element.text()
-            if element is not subject and (text.strip() or "#text" in element.unresolved):
+            if path and (text.strip() or "#text" in element.unresolved):
                 found.append(
                     self.parameter(path, element, "#text", text.strip(), units, None, subject)
                 )

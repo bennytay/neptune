@@ -285,12 +285,13 @@ def _root_name(head: bytes) -> str | None:
         while position < len(data) and data[position] in b" \t\r\n":
             position += 1
         if data.startswith(b"<?", position):
-            end = data.find(b"?>", position)
+            end, closing = data.find(b"?>", position), 2
         elif data.startswith(b"<!--", position):
-            end = data.find(b"-->", position)
+            end, closing = data.find(b"-->", position), 3
         elif data.startswith(b"<!", position):
             bracket, close = data.find(b"[", position), data.find(b">", position)
-            end = data.find(b"]>", position) if 0 <= bracket < close else close
+            internal = 0 <= bracket < close
+            end, closing = (data.find(b"]>", position), 2) if internal else (close, 1)
         elif data.startswith(b"<", position):
             name = bytearray()
             for byte in data[position + 1 : position + 257]:
@@ -302,7 +303,7 @@ def _root_name(head: bytes) -> str | None:
             return None
         if end < 0:
             return None
-        position = end + 2
+        position = end + closing
 
 
 def _finding(

@@ -9,13 +9,15 @@ urdf-parser-py==0.0.4``, and writes ``oracle/``:
   ``quadrotor.xacro.json``: ``urdf_parser_py``'s reading of that expansion.
 """
 
+import importlib
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
-import xacro  # type: ignore[import-not-found]
-from urdf_parser_py.urdf import URDF  # type: ignore[import-not-found]
+# Imported by name: these exist only in the oracle's throwaway environment, never the project's.
+xacro: Any = importlib.import_module("xacro")
+URDF: Any = importlib.import_module("urdf_parser_py.urdf").URDF
 
 
 def summary(text: str) -> dict[str, Any]:
