@@ -24,10 +24,12 @@ costs a full pass. The model is frozen (ADR 0023): no new fields, no new record 
 1. **We read the container ourselves** (`neptune.adapters.mcap`), with the standard library plus
    **`zstandard` and `lz4`**, the two compressions the specification defines and the libraries the
    official reader itself uses. They are new runtime dependencies (ADR 0001 §4), imported only by
-   this subpackage, decompressing into a buffer bounded by the chunk's declared size. They are not
-   output-affecting `libraries`: a decompressor's output is defined by its format, so their
-   version shapes no record; only the fixtures' compressed bytes may move with an upgrade. The
-   official `mcap` reader is a test oracle (`tests/fixtures/mcap/oracle.json`), never a dependency.
+   this subpackage, decompressing into one buffer bounded by the chunk's declared size (lz4 is fed
+   in pieces; a stored chunk is freed once decoded). They **are** output-affecting `libraries`,
+   so their versions are in the transform id and every cache key: a whole chunk decodes to the
+   bytes its format defines, but a chunk cut short keeps the prefix its stored bytes decode to
+   (§7), and how far a library gets into an incomplete block is its own. The official `mcap`
+   reader is a test oracle (`tests/fixtures/mcap/oracle.json`), never a dependency.
    The package imports its own modules and nothing of another adapter.
 2. **Probe.** The magic (`\x89MCAP0\r\n`, format version 0) is `SIGNATURE`; a well-formed Header
    record after it is `VERIFIED`. Anything else is 0, whatever its name.
@@ -76,6 +78,14 @@ costs a full pass. The model is frozen (ADR 0023): no new fields, no new record 
      channel comes from its Message Index records' offsets alone (each record's length is the gap
      to the next); a chunk whose offsets do not give counts is decompressed once. Nothing else of
      the data section is read to plan. An index that fails a check is an `index_invalid` finding.
+     A chunk read at ingest is compared with the index entry that names it (start and end time,
+     both sizes, compression): any difference is an `index_mismatch` finding with reason
+     `chunk_fields`, citing the chunk; the chunk's own fields are the ones read.
+   - *Walked lazily*: a chunk's records are walked over its decompressed bytes without an object
+     per record (a message costs 16 bytes of kept index, its offset and log time, not a Python
+     object), and at most `max_chunk_bytes / 31` of them, 31 bytes being the smallest message;
+     records past that bound are not read and are one `too_many_records` finding. The Message
+     Index check reads its entries lazily against that kept index.
    - *Scanned* otherwise: every top-level record is visited once and every chunk decompressed
      once, to find the declarations and count the messages. That is the price of a file cut short,
      with a damaged summary, or written without an index.
@@ -99,14 +109,19 @@ costs a full pass. The model is frozen (ADR 0023): no new fields, no new record 
    chunk failing its CRC, its decompression or its size gives no rows and one finding. The
    data-section CRC is not checked: it needs one pass over the whole file in one call, against
    chunk purity and the call limits, and the fingerprint already hashes every byte. A file cut
-   inside a chunk keeps the whole messages that chunk's stored prefix decodes to; cut after its
-   data, it loses only the summary (a warning). Every length is checked against its record before
+   inside a chunk keeps the whole messages that chunk's stored prefix decodes to, a strict prefix
+   of its message order (no gaps in `seq`), and the chunk gets a `chunk_truncated` finding (bytes
+   decoded, bytes whose records are whole, bytes declared; the CRC cannot be checked); cut after
+   its data, it loses only the summary (a warning). Every length is checked against its record before
    anything is read or allocated; `max_chunk_bytes` (256 MiB, config) bounds a chunk or record.
 8. **Selection by topic and time** is config, so it is lineage: `topic_pattern` (a regular
    expression a whole topic must match; empty selects all) and an inclusive `log_time` window.
    Unselected messages keep their `seq` and get no row; every stream is still declared, with a
    `not_selected` finding. An indexed chunk outside the window or without a selected channel is not
-   decompressed. Consumers slice the package by topic (a series file per stream) and by time (rows
+   decompressed: the decision rests on the summary's index alone, so messages a lying index hides
+   there have no rows, and the chunks so skipped are one `skipped_by_index` finding (their count
+   by reason, `time` or `topics`; the first is cited). Only a chunk whose counts the index gives
+   may be skipped, since the chunks after it are numbered from them. Consumers slice the package by topic (a series file per stream) and by time (rows
    sorted by `log_time`, Parquet row groups) and reach any message's bytes through its locator.
 9. **Inspect** reads the head, the footer and the summary only, and reports the header, summary
    state, statistics, schemas, channels with their declared counts, chunk totals and each
@@ -131,8 +146,12 @@ costs a full pass. The model is frozen (ADR 0023): no new fields, no new record 
 - **One `publish_time` domain per file.** It would assert that every publisher shares a clock.
 - **Attachments ingested by other adapters.** Adapters never call each other; a nested source
   needs the archive pattern (ADR 0032, O3), not an MCAP special case.
-- **Listing `zstandard` and `lz4` as output-affecting.** Every upgrade would re-lineage every MCAP
-  record without changing one.
+- **Leaving `zstandard` and `lz4` out of the transform.** A whole chunk's output is fixed by its
+  format, but a cut chunk's recovered prefix is the library's; leaving them out would let two
+  versions write different records under one lineage and one cache key.
+- **An object per record in a chunk.** Simple, but a chunk of small messages costs about eight
+  times its bytes (measured: 32 MB for a 4 MB chunk of 120,000 messages, against 8.7 MB walked
+  lazily), against the call's memory limit.
 
 ## Consequences
 
@@ -149,6 +168,8 @@ costs a full pass. The model is frozen (ADR 0023): no new fields, no new record 
   `publish_time`. MVL-19 reads MCAP-backed rosbag2 storage: since adapters never import each
   other, it needs this reader lifted into a shared non-adapter package, by ADR, first.
 - Fixtures' compressed bytes follow the pinned `zstandard` and `lz4`; an upgrade regenerates them.
+  An upgrade of either is also a new transform: every MCAP record is re-ingested under new lineage,
+  whether or not its bytes moved.
 - They are the first native decoders inside adapter calls, the point at which ADR 0030 said to
   revisit a read allowlist. It stays deferred: they run under the same confinement as any adapter
   code, so a memory-safety bug in one reaches what a compromised parser already could, the files
