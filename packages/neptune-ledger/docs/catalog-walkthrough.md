@@ -2,8 +2,11 @@
 
 What registering the compiler's four example packages (`drone`, `quadruped`, `manipulator`,
 `mobile_robot`; root `tests/fixtures/model/README.md`) writes into one tenant's catalog under
-[ADR 0002](adr/0002-catalog-data-model.md). The schema is
-[`catalog/migrations/0001_catalog.sql`](../src/neptune_ledger/catalog/migrations/0001_catalog.sql).
+[ADR 0002](adr/0002-catalog-data-model.md), as amended at the L1 gate by
+[ADR 0005](adr/0005-l1-gate-catalog-data-model-amendments.md). The schema is
+[`0001_catalog.sql`](../src/neptune_ledger/catalog/migrations/0001_catalog.sql) plus
+[`0002_gate_amendments.sql`](../src/neptune_ledger/catalog/migrations/0002_gate_amendments.sql),
+in a database with the byte-order `C` collation.
 
 `tests/test_catalog_walkthrough.py` registers the packages, in the order below, into a real
 PostgreSQL 16 and checks every table in this document against the database, so the numbers cannot
@@ -11,7 +14,9 @@ drift from the DDL. Tenant: `acme`, schema `tenant_acme`.
 
 ## Registration, step by step
 
-One registration is one transaction in the tenant's schema:
+Registration first verifies the whole package at its root, outside any transaction, and never
+follows a symlink ([ADR 0006](adr/0006-l1-gate-catalog-api-amendments.md) §1). Then one
+transaction in the tenant's schema does the rest:
 
 1. Lock the transaction clock (`SELECT … FROM tx_clock FOR UPDATE`). Registrations in a tenant
    are serialised from here on.
@@ -27,7 +32,8 @@ One registration is one transaction in the tenant's schema:
    `package_source` (per package) from `manifest.sources`; every example references its sources in
    place (`referenced`).
 6. `source_location` from each `source_revision` record: the location object as stated
-   (`{"kind": "local", "path": "flight.ulg"}`) and the revisions it supersedes.
+   (`{"kind": "local", "path": "flight.ulg"}`) and the revisions it supersedes; `location_absence`
+   likewise from each `source_absence` record (the examples have none).
 7. `transform` (once per transform id; an existing one with other fields is refused) and
    `transform_upstream` from each `transform_record`.
    The examples have nine transforms, one per adapter (`ulog`, `rosbag2`, `mcap`, `urdf`, `stl`,
@@ -35,8 +41,9 @@ One registration is one transaction in the tenant's schema:
 8. `clock` from each `timestamp_domain` record: its field and scope.
 9. `record`: one row per line of every `records/<kind>.jsonl`, into the kind's partition, with
    the package's `tx_seq` as `registration_key`, the provenance summary (source, locator,
-   transform, assertion kind), the world time where ADR 0003 §3 gives the kind one, and the
-   pointers of its `Ambiguous` fields; then `record_logical_id` for every Known logical id the
+   transform, assertion kind), the world time where ADR 0003 §3 gives the kind one, the
+   pointers of its `Ambiguous` fields and `body_digest`, the sha256 of the record's line. A record
+   id already catalogued with another digest is refused (ADR 0005 §2); then `record_logical_id` for every Known logical id the
    record states.
 
 ## Packages

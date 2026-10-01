@@ -156,7 +156,7 @@ def test_registry_holds_this_version_and_schema() -> None:
     version = CONTRACT / f"v{CATALOG_API_VERSION}"
     meta = json.loads((version / "version.json").read_text("utf-8"))
     assert meta["owner_version"] == CATALOG_API_VERSION
-    assert meta["status"] == "draft", "draft until the L1 gate (MVL-89) passes"
+    assert meta["status"] == "stable", "stable from 1.1.0, after the L1 gate (Ledger ADR 0006 §7)"
     schema_text = (version / "schema.json").read_text("utf-8")
     assert json.loads(schema_text) == catalog_schema()
 

@@ -10,6 +10,7 @@ from neptune_ledger.catalog.migrate import apply_migrations
 
 Conn = psycopg.Connection[tuple[object, ...]]
 SCHEMA = "tenant_acme"
+DIGEST = "sha256:" + "f" * 64  # a record body digest (ADR 0005 §2)
 
 # Column-name fragments that would mean a table stores interpretation: inferred or model-made
 # meaning, scores, or semantic grouping. The Ledger stores evidence, declared links and its own
@@ -49,6 +50,7 @@ def test_the_schema_has_the_tables_the_adr_names(catalog: Conn) -> None:
     top_level = {table for table in _tables(catalog) if not table.startswith("record_")}
     assert top_level == {
         "clock",
+        "location_absence",
         "package",
         "package_source",
         "record",
@@ -103,8 +105,8 @@ def test_assertion_kind_admits_only_the_canonical_kinds(catalog: Conn) -> None:
     package = add_package(catalog, SCHEMA, "sha256:" + "b" * 64, 1)
     insert = (
         f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id,"
-        " registration_key, line, schema_version, assertion_kind)"
-        " VALUES ('acme', 'run', %s, %s, 1, %s, 1, %s)"
+        " registration_key, line, schema_version, body_digest, assertion_kind)"
+        f" VALUES ('acme', 'run', %s, %s, 1, %s, 1, '{DIGEST}', %s)"
     )
     for line, kind in enumerate(("observed", "stated", None), start=1):
         catalog.execute(insert, ("rec:sha256:" + f"{line:064x}", package, line, kind))
@@ -140,8 +142,8 @@ def test_world_ticks_need_a_named_clock(catalog: Conn) -> None:
     with pytest.raises(psycopg.errors.CheckViolation):
         catalog.execute(
             f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id,"
-            " registration_key, line, schema_version, world_first)"
-            " VALUES ('acme', 'run', %s, %s, 1, 1, 1, 5)",
+            " registration_key, line, schema_version, body_digest, world_first)"
+            f" VALUES ('acme', 'run', %s, %s, 1, 1, 1, '{DIGEST}', 5)",
             ("rec:sha256:" + "d" * 64, package),
         )
 
@@ -194,7 +196,8 @@ def test_registered_rows_are_append_only(catalog: Conn, statement: str) -> None:
     package = _package(catalog, 1)
     catalog.execute(
         f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id,"
-        " registration_key, line, schema_version) VALUES ('acme', 'run', %s, %s, 1, 1, 1)",
+        " registration_key, line, schema_version, body_digest)"
+        f" VALUES ('acme', 'run', %s, %s, 1, 1, 1, '{DIGEST}')",
         ("rec:sha256:" + "d" * 64, package),
     )
     with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
@@ -209,7 +212,8 @@ def test_a_records_registration_key_is_its_packages_sequence(catalog: Conn) -> N
     with pytest.raises(psycopg.errors.ForeignKeyViolation):
         catalog.execute(
             f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id,"
-            " registration_key, line, schema_version) VALUES ('acme', 'run', %s, %s, 2, 1, 1)",
+            " registration_key, line, schema_version, body_digest)"
+            f" VALUES ('acme', 'run', %s, %s, 2, 1, 1, '{DIGEST}')",
             ("rec:sha256:" + "d" * 64, package),
         )
 
@@ -226,8 +230,8 @@ def test_hostile_locators_are_stored_as_stated(catalog: Conn, locator: str) -> N
     source = "sha256:" + "e" * 64
     catalog.execute(
         f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id, registration_key,"
-        " line, schema_version, source_content_id, source_locator)"
-        " VALUES ('acme', 'run', %s, %s, 1, 1, 1, %s, %s)",
+        " line, schema_version, body_digest, source_content_id, source_locator)"
+        f" VALUES ('acme', 'run', %s, %s, 1, 1, 1, '{DIGEST}', %s, %s)",
         ("rec:sha256:" + "d" * 64, package, source, locator),
     )
     row = catalog.execute(

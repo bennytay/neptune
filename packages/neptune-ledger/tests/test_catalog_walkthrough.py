@@ -43,7 +43,7 @@ WORLD_TIME: Final[dict[str, tuple[str, str, str | None]]] = {
 RECORD_COLUMNS: Final = (
     "tenant_id, kind, record_id, package_id, registration_key, line, schema_version,"
     " source_content_id, source_locator, transform_id, assertion_kind,"
-    " world_clock, world_first, world_last, ambiguous_pointers"
+    " world_clock, world_first, world_last, ambiguous_pointers, body_digest"
 )
 
 
@@ -77,6 +77,11 @@ def load_package(name: str) -> Package:
 def canonical(value: Any) -> str:
     """Canonical JSON text (root ADR 0002): sorted keys, no whitespace, UTF-8."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def body_digest(record: dict[str, Any]) -> str:
+    """sha256 of the record's canonical line, without the newline (ADR 0005 §2)."""
+    return "sha256:" + hashlib.sha256(canonical(record).encode("utf-8")).hexdigest()
 
 
 def _escape(token: str) -> str:
@@ -236,6 +241,11 @@ def register(
                     revision["supersedes"],
                 ),
             )
+        for absence in package.tables["source_absence"]:
+            conn.execute(
+                "INSERT INTO location_absence VALUES (%s, %s, %s, %s, %s)",
+                (tenant, absence["id"], pid, canonical(absence["location"]), absence["supersedes"]),
+            )
         for transform in package.tables["transform_record"]:
             fields = {
                 "adapter_id": transform["adapter_id"],
@@ -266,7 +276,7 @@ def register(
             for line, record in enumerate(records, start=1):
                 key = record["content_id"] if kind == "source_artifact" else record["id"]
                 conn.execute(
-                    f"INSERT INTO record ({RECORD_COLUMNS}) VALUES ({', '.join(['%s'] * 15)})",
+                    f"INSERT INTO record ({RECORD_COLUMNS}) VALUES ({', '.join(['%s'] * 16)})",
                     (
                         tenant,
                         kind,
@@ -278,6 +288,7 @@ def register(
                         *provenance_summary(kind, record),
                         *world_time(kind, record),
                         ambiguous_pointers(record),
+                        body_digest(record),
                     ),
                 )
                 for pointer, namespace, value in logical_ids(record):
@@ -517,3 +528,47 @@ def _snapshot(conn: Conn, schema: str, *, tx: bool = True) -> dict[str, list[str
         ).fetchall()
         out[table] = [str(row[0]) for row in rows]
     return out
+
+
+def test_a_body_digest_is_the_sha256_of_the_records_line() -> None:
+    for name in EXAMPLES:
+        for kind in RECORD_KINDS:
+            path = RECORDS / name / "records" / f"{kind}.jsonl"
+            lines = path.read_bytes().splitlines() if path.exists() else []
+            records = load_package(name).tables[kind]
+            assert [canonical(r).encode("utf-8") for r in records] == lines
+            assert [body_digest(r) for r in records] == [
+                "sha256:" + hashlib.sha256(line).hexdigest() for line in lines
+            ]
+
+
+def test_the_same_records_in_another_package_are_accepted(catalog: Conn) -> None:
+    """A re-ingest after a referenced source moved: another package, the same record bodies."""
+    original = load_package("mobile_robot")
+    register(catalog, "tenant_acme", original)
+    manifest = json.loads(original.manifest_bytes)
+    manifest["store"] = {**manifest["store"], "moved": True}  # any change gives a new package id
+    again = _altered(original, manifest)
+    _, seq, created = register(catalog, "tenant_acme", again)
+    assert created and seq == 2
+    shared = _count(
+        catalog,
+        "SELECT count(*) FROM (SELECT kind, record_id FROM tenant_acme.record"
+        " GROUP BY kind, record_id HAVING count(DISTINCT package_id) = 2) AS twice",
+    )
+    assert shared == sum(len(records) for records in original.tables.values())
+
+
+def test_an_existing_record_id_with_another_body_is_refused(catalog: Conn) -> None:
+    """ADR 0005 §2: a tier-2 id does not cover the body, so the catalog compares digests."""
+    original = load_package("mobile_robot")
+    register(catalog, "tenant_acme", original)
+    tables = {kind: [dict(r) for r in records] for kind, records in original.tables.items()}
+    run = tables["run"][0]
+    run["last"] = {**run["last"], "value": {**run["last"]["value"], "ticks": 1}}
+    manifest = json.loads(original.manifest_bytes)
+    manifest["store"] = {**manifest["store"], "tampered": True}
+    hostile = _altered(original, manifest, tables)
+    with pytest.raises(psycopg.errors.RaiseException, match="catalogued with body"):
+        register(catalog, "tenant_acme", hostile)
+    assert _count(catalog, "SELECT count(*) FROM tenant_acme.package") == 1
