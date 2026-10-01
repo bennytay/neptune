@@ -91,11 +91,15 @@ partial chunk in the workspace.
    `memory_bytes` 2 GiB of address space above what the process held at fork, and `reply_bytes`
    64 MiB — a separate cap far below `memory_bytes`, so one hostile call that emits a giant reply
    cannot exhaust the job as the parent reads and decodes it. The parent reads the reply into one
-   buffer (no list joined into a second copy), decodes it once, and bounds the decode in count as
-   well as bytes: a reply under the byte cap that packs it with empty containers or bare numbers
-   would still build millions of objects, so a count past a fixed ceiling is refused as
-   `reply_bytes` too. The parent enforces wall time (it kills the child at the deadline) and both
-   reply caps; the kernel enforces the rest (SIGXCPU, then SIGKILL a second later; `MemoryError`
+   buffer (no list joined into a second copy), decodes it once, and bounds the decode in count and
+   depth as well as bytes: a reply under the byte cap that packs it with empty containers or short
+   strings would still build millions of objects, so a count past 4 Mi values (the byte cap at 16
+   bytes a value; the densest legitimate reply the test suite produces averages 16.4) is refused
+   as `reply_bytes` too, as is a reply nested past the JSON parser's recursion guard (a
+   `RecursionError` anywhere in the decode), so neither is a crash the job retries. An exact
+   depth scan before parsing would cost 30 to 90% of the parse on a large legitimate reply; the
+   parser's guard costs nothing. The parent enforces wall time (it kills the child at the
+   deadline) and the reply caps; the kernel enforces the rest (SIGXCPU, then SIGKILL a second later; `MemoryError`
    or a failed allocation). They are the runtime transform's config with `attempts`, `isolation`
    and, on a degraded host, the guarantees lost (`neptune.runtime` 0.1.0), so the receipt names
    the policy whenever a runtime finding is in it; in-process runs record no limits, since none
@@ -160,8 +164,10 @@ partial chunk in the workspace.
 - Each call costs a fork and a JSON round trip; a job forks once per (source, adapter) to probe.
   MVL-8's engine and M9's scheduler can batch probes per source if that shows in profiles.
 - Residual risks, recorded in `security.md`: a compromised parser can read files the user can
-  read and put them in its own output (the contract checks citations, not every text); the
-  parent holds a reply of up to `reply_bytes` (64 MiB) and its bounded decode.
+  read and put them in its own output (the contract checks citations, not every text); while
+  it decodes one reply the parent holds it three times (buffer, payload, the parser's text) plus
+  the objects it decodes to, which the value cap bounds, not the byte cap: about 550 MiB at the
+  defaults for the worst shape measured (one object of 4 Mi distinct keys).
 - A committed chunk's id (ADR 0024 §4, ADR 0031) covers the adapter, its version, config and the
   source, not the isolation or the Landlock ABI it ran under, so a workspace shared between a
   degraded and a sound run reuses chunk outputs across them — as it already does between

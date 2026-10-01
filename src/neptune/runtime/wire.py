@@ -59,10 +59,14 @@ _DOUBLE: Final = re.compile(r"[0-9a-f]{16}")
 
 # The reply's byte size is already capped (``Limits.reply_bytes``); this caps how many containers
 # and elements a decode may build from it, so a reply that stays under the byte cap but packs it
-# with empty lists or bare zeros — millions of tiny Python objects — cannot exhaust the parent.
+# with empty lists or short strings — millions of small Python objects — cannot exhaust the
+# parent. It is the default byte cap at 16 bytes a value: the densest legitimate reply the test
+# suite produces averages 16.4, so the byte cap binds first for those, while a hostile reply
+# decodes to at most about 250 MiB of objects (4 Mi short strings), or 470 MiB at the peak for one
+# object of 4 Mi distinct keys, which the parser memoises as it goes (``docs/security.md``).
 # A value needs at least one byte, so a reply no larger than the cap can never exceed it: the
 # scan runs only for the rare reply above it, and stops the moment the count is passed.
-_MAX_REPLY_NODES: Final = 8 * 1024 * 1024
+_MAX_REPLY_NODES: Final = 4 * 1024 * 1024
 _OPENERS: Final = frozenset(b",[{")
 _QUOTE: Final = 0x22
 _BACKSLASH: Final = 0x5C

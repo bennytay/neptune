@@ -94,7 +94,7 @@ class Limits:
     space the call may add to what the process held when it forked. ``reply_bytes`` bounds the
     reply the parent reads and decodes — kept far below ``memory_bytes`` (64 MiB by default), so
     one hostile call that emits a giant reply cannot exhaust the job while it copies and decodes
-    it; the decode is bounded in count as well (``neptune.runtime.wire``).
+    it; the decode is bounded in count and depth as well (``neptune.runtime.wire``).
     """
 
     cpu_seconds: int = 60
