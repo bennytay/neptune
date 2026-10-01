@@ -7,6 +7,11 @@ retrieval, simulation and training systems can consume without ever re-parsing t
 
 Think of it as a **data compiler for physical AI**: raw sources in, deterministic ingest package + receipt out.
 
+**Every type of robot.** Manipulators, mobile bases, quadrupeds and other legged platforms, humanoids, drones,
+marine vehicles, autonomous vehicles, industrial automation and multi-robot fleets are all first-class. Flight
+logs are two formats in the catalogue, not the focus; nothing assumes a flight controller, a single vehicle or
+one morphology.
+
 ## Status
 
 Pre-alpha. The canonical contract (M1) is being built; nothing is usable yet. Execution plan lives in Linear
