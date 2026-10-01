@@ -7,16 +7,19 @@ in two steps, each in memory that does not grow with the stream's length:
 2. ``merge_runs``: every run of a stream, merged into the stream's series file.
 
 Rows are sorted by their clock-0 ticks (unknown last), then ``seq`` (ADR 0018 §7). Row groups hold
-``ROW_GROUP_ROWS`` rows each, counted along the merged order, and the writer's settings are pinned
-(``SERIES_SETTINGS``, recorded in the manifest's ``store``). So a file's bytes depend only on its
-rows: the same rows, cut into any chunks and merged in any order, give the same file.
+``ROW_GROUP_ROWS`` rows each, counted along the merged order, each written from one contiguous
+array per column, and the writer's settings are pinned (``SERIES_SETTINGS``, recorded in the
+manifest's ``store``). So a file's bytes depend only on its rows: the same rows, cut into any
+chunks and merged in any order, give the same file.
 
-``check_series`` verifies a series file against its stream without loading it whole: the stream
-line in its metadata, its columns and types, the order and the null rules.
+``check_series`` verifies a series file against its stream and the settings it was written with,
+without loading it whole: the stream line in its metadata, its columns and types, the order, the
+null rules, and every row's ``seq`` and locator.
 """
 
+import re
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -41,21 +44,31 @@ from neptune.model.series import (
 )
 
 ROW_GROUP_ROWS: Final = 65_536
-# Every setting that shapes a series file's bytes. The manifest records them (ADR 0022 §2), and a
-# new pyarrow version is a new writer: its files may differ, so it is part of the settings.
+# Every setting that shapes a series file's bytes, pyarrow's defaults included so that a default
+# that moves cannot move the bytes. The manifest records them (ADR 0022 §2), and a new pyarrow
+# version is a new writer: its files may differ, so it is part of the settings.
 SERIES_SETTINGS: Final[JsonObject] = {
+    "byte_stream_split": False,
+    "compliant_nested_type": True,
     "compression": "zstd",
     "compression_level": 3,
     "data_page_size": 1024 * 1024,
+    "data_page_version": "1.0",
     "dictionary": True,
+    "dictionary_page_size_limit": 1024 * 1024,
     "format_version": "2.6",
+    "max_rows_per_page": 20_000,
+    "page_checksum": False,
     "page_index": True,
     "row_group_rows": ROW_GROUP_ROWS,
     "statistics": True,
+    "store_schema": True,
+    "write_batch_size": 1024,
     "writer": f"pyarrow {pa.__version__}",
 }
 STREAM_KEY: Final = b"neptune.stream"  # a series file's Stream line (ADR 0018 §8)
 RUN_KEY: Final = b"neptune.series_run"  # a run's stream id
+_CREATED_BY: Final = re.compile(r"parquet-cpp-arrow version (\S+)")  # pyarrow's created_by
 
 # How many runs one merge reads at once, and how many rows of each it holds. Neither shapes the
 # output's bytes; together they bound the merge's memory.
@@ -79,6 +92,12 @@ _ARROW_TYPES: Final = {
     ColumnType.STRING: pa.string(),
     ColumnType.BINARY: pa.binary(),
 }
+# A repeated cell is a tuple of scalars, so a repeated column's items are never null; the schema
+# says so, pyarrow enforces it when writing, and the reader checks it by type.
+_VALUE_TYPES: Final = (
+    *_ARROW_TYPES.values(),
+    *(pa.list_(pa.field("item", kind, nullable=False)) for kind in _ARROW_TYPES.values()),
+)
 
 Source = Path | bytes
 
@@ -98,7 +117,9 @@ def arrow_schema(columns: Sequence[tuple[str, ColumnType, bool]]) -> Any:
     """The Arrow schema of a series with these columns, in name order."""
     fields = []
     for name, kind, repeated in sorted(columns):
-        arrow = pa.list_(_ARROW_TYPES[kind]) if repeated else _ARROW_TYPES[kind]
+        arrow = _ARROW_TYPES[kind]
+        if repeated:
+            arrow = pa.list_(pa.field("item", arrow, nullable=False))
         fields.append(pa.field(name, arrow, nullable=not _never_null(name)))
     return pa.schema(fields)
 
@@ -123,11 +144,30 @@ def _writer(destination: Path, schema: Any) -> Any:
         compression=SERIES_SETTINGS["compression"],
         compression_level=SERIES_SETTINGS["compression_level"],
         data_page_size=SERIES_SETTINGS["data_page_size"],
+        data_page_version=SERIES_SETTINGS["data_page_version"],
+        dictionary_pagesize_limit=SERIES_SETTINGS["dictionary_page_size_limit"],
+        max_rows_per_page=SERIES_SETTINGS["max_rows_per_page"],
+        store_schema=SERIES_SETTINGS["store_schema"],
+        use_byte_stream_split=SERIES_SETTINGS["byte_stream_split"],
+        use_compliant_nested_type=SERIES_SETTINGS["compliant_nested_type"],
         use_dictionary=SERIES_SETTINGS["dictionary"],
         version=SERIES_SETTINGS["format_version"],
+        write_batch_size=SERIES_SETTINGS["write_batch_size"],
+        write_page_checksum=SERIES_SETTINGS["page_checksum"],
         write_page_index=SERIES_SETTINGS["page_index"],
         write_statistics=SERIES_SETTINGS["statistics"],
     )
+
+
+def _write_group(writer: Any, group: Any) -> None:
+    """One row group from one contiguous array per column.
+
+    pyarrow cuts pages and falls back from dictionary encoding per array it is handed, checking
+    the limits every ``write_batch_size`` values from each array's start. A group assembled from
+    the pieces the merge produced would carry those seams into its bytes; combined, the bytes
+    depend on the rows alone. The copy is one row group, so memory stays bounded.
+    """
+    writer.write_table(group.combine_chunks(), row_group_size=ROW_GROUP_ROWS)
 
 
 def _write(destination: Path, schema: Any, tables: Iterator[Any]) -> None:
@@ -140,10 +180,10 @@ def _write(destination: Path, schema: Any, tables: Iterator[Any]) -> None:
             rows += table.num_rows
             while rows >= ROW_GROUP_ROWS:
                 whole = pa.concat_tables(pending)
-                writer.write_table(whole.slice(0, ROW_GROUP_ROWS), row_group_size=ROW_GROUP_ROWS)
+                _write_group(writer, whole.slice(0, ROW_GROUP_ROWS))
                 pending, rows = [whole.slice(ROW_GROUP_ROWS)], whole.num_rows - ROW_GROUP_ROWS
         if rows:
-            writer.write_table(pa.concat_tables(pending), row_group_size=ROW_GROUP_ROWS)
+            _write_group(writer, pa.concat_tables(pending))
     finally:
         writer.close()
 
@@ -307,7 +347,10 @@ def _check_columns(stream: Stream, schema: Any) -> None:
             qualifies = target.startswith(f"{TIME}/") or target.startswith(f"{VALUE}/")
             ok = kind == pa.string() and target in names and qualifies
         else:
+            # A value column holds one ColumnType, or a list of it with no null items (ADR 0025
+            # §5); a timestamp, decimal, struct or dictionary type asserts what no adapter did.
             ok = name.startswith(f"{VALUE}/") and len(name) > len(VALUE) + 1
+            ok = ok and any(kind.equals(allowed) for allowed in _VALUE_TYPES)
         if not ok:
             raise SeriesError(f"stream {stream.id}: column {name} ({kind}) breaks the contract")
         if _never_null(name) and field.nullable:
@@ -358,29 +401,86 @@ def _check_nulls(table: Any) -> None:
             raise SeriesError(f"{name} holds nulls but has no state column")
 
 
-def check_series(stream: Stream, source: Source) -> int:
-    """Verify a series file against ``stream``; return its row count.
+def _check_rows(stream: Stream, table: Any) -> None:
+    """What ``Stream.check_row`` checks that the whole-batch checks do not: ``seq`` and the locator.
 
-    Reads one batch at a time. Every row is checked for order and the null rules; the first row
-    of each batch is checked in full by ``Stream.check_row``, which rebuilds its provenance.
-    ``seq`` is unique wherever two rows share clock-0 ticks; across ticks, the ingest's checks
-    (``neptune.adapters.check``) see it.
+    Names and types (``_check_columns``), the null rules (``_check_nulls``) and the clock-0 ticks
+    (``_check_order``) are checked for every row at once. ``seq`` is a position, so never
+    negative, which one minimum settles. Each row's locator must parse (``Stream.row_evidence``):
+    it is read from the locator columns alone, so a batch of wide value columns is never
+    materialised row by row, and only one batch is in memory at a time.
+    """
+    if not table.num_rows:
+        return
+    least = pc.min(table.column(SEQ)).as_py()
+    if least < 0:
+        raise SeriesError(f"stream {stream.id}: seq is a position, never negative; got {least}")
+    for row in table.select([SEQ, *stream.series.columns]).to_pylist():
+        try:
+            stream.row_evidence(row)
+        except ValueError as exc:
+            raise SeriesError(f"stream {stream.id}, seq {row[SEQ]}: {exc}") from exc
+
+
+def check_settings(settings: object) -> JsonObject:
+    """``store.series`` as a manifest records it: every pinned setting, each of its pinned type.
+
+    Values are not pinned to this writer's: a package written by another pyarrow stays readable,
+    and ``check_series`` holds each file to the settings its manifest records.
+    """
+    if not isinstance(settings, Mapping) or set(settings) != set(SERIES_SETTINGS):
+        raise SeriesError(f"series settings must hold exactly {sorted(SERIES_SETTINGS)}")
+    for key, pinned in SERIES_SETTINGS.items():
+        if type(settings[key]) is not type(pinned):
+            raise SeriesError(f"series setting {key} must be a {type(pinned).__name__}")
+    return dict(settings)
+
+
+def _check_written_with(stream: Stream, metadata: Any, settings: JsonObject) -> None:
+    """What a file's own metadata tells of its writer agrees with the settings recorded for it."""
+    match = _CREATED_BY.fullmatch(metadata.created_by or "")
+    writer = f"pyarrow {match[1]}" if match else metadata.created_by
+    if writer != settings["writer"]:
+        raise SeriesError(
+            f"stream {stream.id}: written by {writer!r}, the settings say {settings['writer']!r}"
+        )
+    if metadata.format_version != settings["format_version"]:
+        raise SeriesError(
+            f"stream {stream.id}: Parquet format {metadata.format_version}, the settings say"
+            f" {settings['format_version']}"
+        )
+    group_rows = settings["row_group_rows"]
+    sizes = [metadata.row_group(i).num_rows for i in range(metadata.num_row_groups)]
+    full, last = sizes[:-1], sizes[-1:]
+    if any(size != group_rows for size in full) or any(
+        not (isinstance(group_rows, int) and 0 < size <= group_rows) for size in last
+    ):
+        raise SeriesError(f"stream {stream.id}: row groups do not hold {group_rows} rows each")
+
+
+def check_series(stream: Stream, source: Source, settings: JsonObject = SERIES_SETTINGS) -> int:
+    """Verify a series file against ``stream`` and ``settings``; return its row count.
+
+    ``settings`` are what the file was written with, as its package's manifest records them
+    (``check_settings``); by default, this writer's. The file's own metadata must agree with them.
+    Reads one batch at a time; every row is checked for order, the null rules, its ``seq`` and
+    its locator, which is parsed as ``Stream.check_row`` would. ``seq`` is unique wherever two
+    rows share clock-0 ticks; across ticks, the ingest's checks (``neptune.adapters.check``) see
+    it.
     """
     series = _open(source)
     metadata = series.schema_arrow.metadata or {}
     if metadata.get(STREAM_KEY) != canonical_json.dumps(stream.to_json()):
         raise SeriesError(f"the series file does not hold stream {stream.id}'s line")
+    _check_written_with(stream, series.metadata, settings)
     _check_columns(stream, series.schema_arrow)
     rows, previous = 0, None
     for batch in series.iter_batches(batch_size=READ_ROWS):
         table = pa.Table.from_batches([batch])
         _check_nulls(table)
         _check_order(table, previous)
+        _check_rows(stream, table)
         if table.num_rows:
-            try:
-                stream.check_row(table.slice(0, 1).to_pylist()[0])
-            except ValueError as exc:
-                raise SeriesError(f"stream {stream.id}: {exc}") from exc
             previous = _key(table, table.num_rows - 1)
         rows += table.num_rows
     return rows
