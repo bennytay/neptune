@@ -223,21 +223,21 @@ def decode(data: bytes) -> tuple[str, list[int], list[int]]:
     return text, positions, [start + low for low, _ in marks]
 
 
-def front_matter(text: str) -> tuple[int, list[tuple[int, str]]] | None:
+def front_matter(head: bytes, whole: bool) -> tuple[int, list[tuple[int, str]]] | None:
     """The line index closing a leading front matter block, and its inner lines with offsets.
 
-    Lines end as CommonMark's do (LF, CRLF or CR). The closing line must end within the first
-    ``FRONT_MATTER_WINDOW`` code points.
+    ``head`` is the file's first ``FRONT_MATTER_WINDOW`` bytes, ``whole`` whether that is all of
+    it; both chunks call this with the same bytes, so they agree. Lines end as CommonMark's do
+    (LF, CRLF or CR); a line the window cuts is never a closing line. Offsets are code points of
+    the text after a BOM, the same in the head as in the whole file before the cut.
     """
-    window = text[:FRONT_MATTER_WINDOW]
-    starts = [0, *(match.end() for match in _NEWLINES.finditer(window))]
+    text = head.removeprefix(BOM).decode("utf-8", errors="replace")
+    starts = [0, *(match.end() for match in _NEWLINES.finditer(text))]
     lines = [
-        (start, window[start:end].rstrip("\r\n"))
-        for start, end in zip(starts, [*starts[1:], len(window)], strict=True)
+        (start, text[start:end].rstrip("\r\n"))
+        for start, end in zip(starts, [*starts[1:], len(text)], strict=True)
     ]
-    complete = len(starts) - 1  # the last line has no ending inside the window, unless at its end
-    if len(text) <= FRONT_MATTER_WINDOW:
-        complete = len(lines)
+    complete = len(lines) if whole else len(starts) - 1
     if not lines or lines[0][1].rstrip(" \t") != "---":
         return None
     inner: list[tuple[int, str]] = []
@@ -246,6 +246,17 @@ def front_matter(text: str) -> tuple[int, list[tuple[int, str]]] | None:
             return index, inner
         inner.append((offset, content))
     return None
+
+
+def _front_matter(
+    source: SourceReader, data: bytes | None = None
+) -> tuple[int, list[tuple[int, str]]] | None:
+    head = (
+        data[:FRONT_MATTER_WINDOW]
+        if data is not None
+        else source.read(0, min(source.size, FRONT_MATTER_WINDOW))
+    )
+    return front_matter(head, source.size <= FRONT_MATTER_WINDOW)
 
 
 # --- The adapter ------------------------------------------------------------------------------
@@ -289,11 +300,10 @@ class MarkdownAdapter:
 
     def inspect(self, source: SourceReader, config: AdapterConfig) -> InspectResult:
         head = source.read(0, min(source.size, PROBE_HEAD_SIZE))
-        text = head.removeprefix(BOM).decode("utf-8", errors="replace")
         return InspectResult(
             {
                 "bom": head.startswith(BOM),
-                "front_matter": front_matter(text) is not None,
+                "front_matter": _front_matter(source) is not None,
                 "head_lines": head.count(b"\n"),
                 "size": source.size,
             }
@@ -355,10 +365,8 @@ class _Output:
 
 
 def _document(out: _Output) -> None:
-    head = out.source.read(0, min(out.source.size, FRONT_MATTER_WINDOW))
-    text = head.removeprefix(BOM).decode("utf-8", errors="replace")
     title: Knowledge[str] = Unknown()
-    found = front_matter(text) if out.config.flag("front_matter") else None
+    found = _front_matter(out.source) if out.config.flag("front_matter") else None
     if found is not None:
         title = _title(out, found[1])
     out.records.append(
@@ -434,9 +442,10 @@ def _blocks(out: _Output) -> None:
             {"bytes": source.size, "max_document_bytes": limit},
         )
         return
-    text, invalid, invalid_bytes = decode(b"".join(read_pieces(source, 0, source.size)))
+    data = b"".join(read_pieces(source, 0, source.size))
+    text, invalid, invalid_bytes = decode(data)
     normalized = normalize(text)
-    found = front_matter(text) if config.flag("front_matter") else None
+    found = _front_matter(source, data) if config.flag("front_matter") else None
     if found is not None:
         closing = found[0]
         lines = normalized.split("\n")

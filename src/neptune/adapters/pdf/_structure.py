@@ -174,7 +174,11 @@ class PageStructure:
 
 
 class Structure:
-    """The structure tree of one document, read lazily and bounded. One per chunk."""
+    """The structure tree of one document as one page needs it, read lazily and bounded.
+
+    Build one per page: its visit budget and caches are then the page's alone, so whether a
+    page's tags are read never depends on which other pages share its chunk.
+    """
 
     def __init__(self, catalog: DictionaryObject, page_numbers: dict[tuple[int, int], int]) -> None:
         self._root = dictionary(entry(catalog, "/StructTreeRoot"))
@@ -183,6 +187,8 @@ class Structure:
         self._pages = page_numbers
         self._nodes: dict[Key, _Node] = {}
         self._tables: dict[Key, Table] = {}
+        self._positions: dict[object, dict[object, int]] = {}
+        self._table_rows: dict[Key, list[DictionaryObject]] = {}
         self._visits = 0
 
     @property
@@ -270,17 +276,31 @@ class Structure:
             above, holder = node, obj_i
         return self._nodes[key]
 
+    @staticmethod
+    def _identity(raw: object, resolved: object) -> object:
+        """What names a kid: the reference it is listed by, or the object itself if direct."""
+        if isinstance(raw, IndirectObject):
+            return (int(raw.idnum), int(raw.generation))
+        return id(resolved)
+
+    def _position_of(
+        self, holder_key: object, kids: list[object], raw: object, child: object
+    ) -> int:
+        """``child``'s position among ``kids``, indexed once per holder (the end if unlisted)."""
+        positions = self._positions.get(holder_key)
+        if positions is None:
+            positions = {}
+            for index, kid in enumerate(kids):
+                self._visit()
+                positions.setdefault(self._identity(kid, kid), index)
+            self._positions[holder_key] = positions
+        found = positions.get(self._identity(raw, child))
+        return found if found is not None else len(kids)
+
     def _index_in(self, holder: DictionaryObject, child: DictionaryObject, raw: object) -> int:
         """The child's position among ``holder``'s kids (the end if it is not listed)."""
-        wanted = reference(raw) or reference(child)
-        kids = self.kids(holder)
-        for index, kid in enumerate(kids):
-            self._visit()
-            if wanted is not None and reference(kid) == wanted:
-                return index
-            if resolve(kid) is child:
-                return index
-        return len(kids)
+        holder_key = "root" if self._is_root(holder) else ("kids", self._key(holder, holder))
+        return self._position_of(holder_key, self.kids(holder), raw, child)
 
     @staticmethod
     def _path(node: _Node) -> tuple[int, ...]:
@@ -334,6 +354,9 @@ class Structure:
     # --- Tables -----------------------------------------------------------------------------
 
     def _rows(self, table: _Node) -> list[DictionaryObject]:
+        cached = self._table_rows.get(table.key)
+        if cached is not None:
+            return cached
         rows: list[DictionaryObject] = []
         for raw in self.kids(table.obj):
             self._visit()
@@ -349,22 +372,25 @@ class Structure:
                     row = dictionary(inner)
                     if row is not None and self.standard_type(name(entry(row, "/S")) or "") == "TR":
                         rows.append(row)
+        self._table_rows[table.key] = rows
         return rows
 
     def _row_index(self, table: _Node, row: _Node) -> int:
-        for index, candidate in enumerate(self._rows(table)):
-            if candidate is row.obj or (reference(candidate) and reference(candidate) == row.key):
-                return index
-        raise StructureError("a table row is not among its table's rows")
+        rows: list[object] = list(self._rows(table))
+        index = self._position_of(("rows", table.key), rows, row.obj, row.obj)
+        if index == len(rows):
+            raise StructureError("a table row is not among its table's rows")
+        return index
 
     def _cells(self, row: DictionaryObject) -> list[DictionaryObject]:
         return [kid for kid in (dictionary(raw) for raw in self.kids(row)) if kid is not None]
 
     def _cell_index(self, row: _Node, cell: _Node) -> int:
-        for index, candidate in enumerate(self._cells(row.obj)):
-            if candidate is cell.obj or (reference(candidate) and reference(candidate) == cell.key):
-                return index
-        raise StructureError("a table cell is not among its row's cells")
+        cells: list[object] = list(self._cells(row.obj))
+        index = self._position_of(("cells", row.key), cells, cell.obj, cell.obj)
+        if index == len(cells):
+            raise StructureError("a table cell is not among its row's cells")
+        return index
 
     def _table(self, table: _Node) -> Table:
         found = self._tables.get(table.key)

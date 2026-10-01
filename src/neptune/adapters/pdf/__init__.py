@@ -85,6 +85,7 @@ from neptune.model.world import (
 )
 
 from ._content import Interpreter, PageContent
+from ._labels import page_labels
 from ._objects import (
     array,
     dictionary,
@@ -559,7 +560,7 @@ def _labels(out: _Output, opened: Opened, count: int) -> list[Knowledge[str]]:
     ref = reference(raw) or reference(opened.catalog)
     cited = out.provenance(_object(ref)) if ref is not None else None
     try:
-        labels = list(opened.reader.page_labels)
+        labels = page_labels(raw, count)
     except (MemoryError, ShortReadError):
         raise
     except Exception:
@@ -573,8 +574,7 @@ def _labels(out: _Output, opened: Opened, count: int) -> list[Knowledge[str]]:
         )
         return [Unknown()] * count
     found: list[Knowledge[str]] = []
-    for index in range(count):
-        label = labels[index] if index < len(labels) else ""
+    for label in labels:
         if label:
             found.append(Known(label) if cited is None else Known(label, cited))
         else:
@@ -595,9 +595,14 @@ def _page_record(
         box, rotate = [], b""
     width: Knowledge[float]
     height: Knowledge[float]
-    if len(box) == 4 and None not in box:
-        x0, y0, x1, y1 = (value for value in box if value is not None)
-        width, height = Known(abs(x1 - x0), at), Known(abs(y1 - y0), at)
+    corners = [value for value in box if value is not None]
+    sides = (
+        [abs(corners[2] - corners[0]), abs(corners[3] - corners[1])]
+        if len(box) == 4 and len(corners) == 4
+        else []
+    )
+    if sides and all(math.isfinite(side) for side in sides):
+        width, height = Known(sides[0], at), Known(sides[1], at)
     else:
         width, height = Unknown(at), Unknown(at)
         out.finding(
@@ -705,13 +710,13 @@ def _pages(out: _Output, captured: Warnings, first: int, count: int) -> None:
     if opened.encryption == "unreadable":
         return
     numbers = {ref: index for index, page in enumerate(pages) if (ref := reference(page))}
-    try:
-        structure: Structure | None = Structure(opened.catalog, numbers)
-    except (MemoryError, ShortReadError):
-        raise
-    except Exception:
-        structure = None
     for index in range(first, min(first + count, len(pages))):
+        try:  # one per page: a page's tags never depend on which pages share its chunk
+            structure: Structure | None = Structure(opened.catalog, numbers)
+        except (MemoryError, ShortReadError):
+            raise
+        except Exception:
+            structure = None
         _page(out, opened, captured, structure, pages[index], index)
         opened.stream.check()
 

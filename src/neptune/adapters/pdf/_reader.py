@@ -15,7 +15,8 @@
 - Encryption: pypdf tries the empty user password itself. The adapter reads an encrypted file
   only when that succeeded and the file uses RC4 (``/V`` 1 or 2, or 4 with ``V2`` crypt
   filters), which pypdf decrypts in pure Python. AES needs a native library whose presence
-  would make output depend on the host, so it is never decrypted.
+  would make output depend on the host, so it is never decrypted. A repaired file whose bytes
+  mention encryption is never read as plain text: the repair's trailer has no ``/Encrypt``.
 """
 
 import io
@@ -40,6 +41,7 @@ _OBJECT: Final = re.compile(
 )
 _CATALOG: Final = re.compile(rb"/Type[ \t\r\n\f\x00]*/Catalog\b")
 _CATALOG_WINDOW: Final = 4096
+_ENCRYPTED: Final = re.compile(rb"/Encrypt\b|/Filter[ \t\r\n\f\x00]*/Standard\b")
 RC4_VERSIONS: Final = (1, 2)
 
 
@@ -160,8 +162,10 @@ class Unreadable(Exception):
         self.cause = cause
 
 
-def find_catalog(source: SourceReader) -> tuple[int, int] | None:
-    """The last object the bytes declare as ``/Type /Catalog``: the latest revision's root."""
+def find_catalog(source: SourceReader) -> tuple[tuple[int, int] | None, bool]:
+    """The last object the bytes declare as ``/Type /Catalog`` (the latest revision's root), and
+    whether the bytes mention encryption anywhere: a trailer's ``/Encrypt`` or a standard
+    security handler's dictionary, either of which the repair's own trailer would hide."""
     data = b"".join(read_pieces(source, 0, source.size))
     found = None
     for match in _OBJECT.finditer(data):
@@ -169,7 +173,7 @@ def find_catalog(source: SourceReader) -> tuple[int, int] | None:
         end = window.find(b"endobj")
         if _CATALOG.search(window if end < 0 else window[:end]):
             found = (int(match.group(1)), int(match.group(2)))
-    return found
+    return found, _ENCRYPTED.search(data) is not None
 
 
 def _encryption(reader: PdfReader) -> str:
@@ -201,13 +205,13 @@ def _attempt(source: SourceReader, suffix: bytes) -> tuple[PdfReader, SourceStre
 def open_document(source: SourceReader, captured: Warnings) -> Opened:
     """Open ``source``; ``Unreadable`` if pypdf cannot, even repaired. Never another exception
     for bad bytes, except ``MemoryError`` and ``ShortReadError``, which the runtime owns."""
-    repaired = False
+    repaired, hidden_encryption = False, False
     try:
         reader, stream = _attempt(source, b"")
     except (MemoryError, ShortReadError):
         raise
     except Exception as first:
-        catalog = find_catalog(source)
+        catalog, hidden_encryption = find_catalog(source)
         if catalog is None:
             raise Unreadable(type(first).__name__) from first
         tail = b"\ntrailer\n<</Root %d %d R>>\nstartxref\n0\n%%%%EOF\n" % catalog
@@ -221,7 +225,9 @@ def open_document(source: SourceReader, captured: Warnings) -> Opened:
     root = dictionary(reader.root_object)
     if root is None:
         raise Unreadable("PdfReadError")
-    return Opened(reader, stream, repaired, _encryption(reader), root, captured.take())
+    # A repaired file that was encrypted has lost its key with its trailer: never read as plain.
+    encryption = "unreadable" if hidden_encryption else _encryption(reader)
+    return Opened(reader, stream, repaired, encryption, root, captured.take())
 
 
 def page_list(opened: Opened) -> list[DictionaryObject]:

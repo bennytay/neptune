@@ -161,6 +161,8 @@ def _table_block(
     text = "\n".join(lines)
     every = [item for _, item in items]
     runs = [item for item in every if item.text is not None]
+    if not runs:  # images only: the placeholder stands for the table, and no cell has a span
+        cells, spans = [], {}
     return Block(
         role=BlockRole.TABLE,
         level=None,

@@ -79,18 +79,26 @@ give byte-identical output on every host.
    its `[Page, Span]`; an empty cell is `Unknown`. Untagged tables are layout and are not guessed.
 6. **PDF: values cite where they are declared.** The title cites the `/Info` object, labels the
    object holding `/PageLabels`, sizes and rotation the page (`[Page(p)]`); an absent `/Rotate`
-   is `Known(0)` citing the header, the specification's default. Two adapter steps:
+   is `Known(0)` citing the header, the specification's default. Labels are read by the adapter
+   per ISO 32000-1 §12.4.2: pypdf falls back to `1, 2, 3` on a malformed tree, which would be a
+   fabricated declaration, so a tree that does not parse makes every label `Unknown` with
+   `pdf.value_unreadable`. Two adapter steps:
    `pdf:object` (number, generation, as the last cross-reference section resolves it) and
    `pdf:structure` (path). Absent labels and titles are `Unknown`; labels are never the index.
 7. **PDF: hostile input is bounded, reported and never run.**
    - Config bounds, each a `pdf.content_limit` finding when hit: `max_stream_bytes` (64 MiB, every
      stream pypdf inflates), `max_page_content_bytes` (16 MiB per page) and `max_page_operations`
-     (1,000,000). Forms nest 8 deep, `q` 1,024 deep, structure walks 200,000 visits. Recursion
+     (1,000,000). Forms nest 8 deep, `q` 1,024 deep, and the structure tree is read for each page
+     afresh within 200,000 visits (siblings and rows indexed once), so whether a page's tags are
+     read never depends on which pages share its chunk. Recursion
      bombs end in `RecursionError`, a finding. `jbig2dec` is never started; images are never
      decoded.
    - A file pypdf cannot open as written (truncated, broken cross-reference) is opened once more
      with an in-memory tail naming the last `/Type /Catalog` object, so pypdf rebuilds the table
      by scanning objects (`pdf.repaired`). The source is never changed. Otherwise `pdf.unreadable`.
+     A repaired file whose bytes mention encryption (`/Encrypt`, a standard security handler) is
+     treated as encrypted: its key went with its trailer, and its strings must never be read as
+     plain text.
    - Encryption: read only RC4 with the empty user password (pure Python in pypdf). AES is never
      decrypted, because whether it can be depends on a native library being installed, which
      would make output depend on the host. An unreadable file still lists its pages

@@ -361,6 +361,18 @@ def test_front_matter_is_never_a_block_and_unclosed_is_not_front_matter() -> Non
     assert state(document(off).title) == "Unknown" and summary(off) != []
 
 
+def test_both_chunks_see_front_matter_in_the_same_first_64_kib_of_bytes() -> None:
+    # The closing line is within 64 K code points but past 64 KiB of bytes: not front matter.
+    late = ("---\ntitle: Pump\nnote: " + "\u00e9" * 40_000 + "\n---\n\nBody\n").encode()
+    output = run(late)
+    assert state(document(output).title) == "Unknown"
+    assert any("title: Pump" in str(text) for *_, text in summary(output))
+    early = ("---\ntitle: Pump\n---\n\n" + "\u00e9" * 40_000 + "\n").encode()
+    output = run(early)
+    assert state(document(output).title) == "Pump"
+    assert not any("title: Pump" in str(text) for *_, text in summary(output))
+
+
 # --- Determinism, lineage and generated Markdown -----------------------------------------------
 
 EVERY: Final = sorted(p.name for p in FIXTURES.iterdir() if p.is_file() and p.name != "README.md")
