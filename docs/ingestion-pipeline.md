@@ -153,7 +153,7 @@ source's, as for `plan`). The outcome carries an `Explanation` (`neptune.runtime
 
 It is bounded (`Bounds`): every list ≤ 10,000 entries, per source ≤ 64 locations, ≤ 16 reasons per
 verdict, ≤ 256 container members, an `inspect` summary ≤ 16 KiB and ≤ 64 `inspect` findings, and
-≤ 64 entries in each list of a session proposal; each cut
+≤ 64 entries in every list of a session proposal or unassigned file, nested ones included; each cut
 is a `*_omitted` count beside its list and one `neptune.explain.truncated` finding. Totals are over
 everything. `dumps()` is canonical JSON (`neptune.explanation/1`), byte-identical for the same root,
 adapters, config and workspace contents; `render()` is the same for people. The SDK's `dry_run`

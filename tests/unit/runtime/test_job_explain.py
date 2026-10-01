@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -482,6 +483,70 @@ def test_hostile_names_render_on_one_line_escaped(tmp_path: Path, name: bytes) -
     assert not any(line.startswith("  fake.mcap") for line in lines)  # no injected line
     (source,) = [line for line in lines if line.startswith("  ") and line.endswith("utf8")]
     assert "\\x" in source
+
+
+def stepped_recordings(base: Path, count: int) -> Path:
+    """``count`` loose recordings whose names state times 10 s apart: one contested reading per
+    rule, each listing every recording's time in its reasons (ADR 0036 §4)."""
+    root = base / f"steps-{count}"
+    root.mkdir()
+    for index in range(count):
+        minute, second = divmod(index * 10, 60)
+        (root / f"cam_2024-05-01_12-{minute:02d}-{second:02d}.mcap").write_bytes(b"x%d" % index)
+    return root
+
+
+def test_the_explanation_stays_bounded_as_the_tree_grows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(explain_module, "DEFAULT_BOUNDS", Bounds(entries=4, locations=2))
+    sizes = {}
+    for count in (10, 50, 200):
+        _, explanation = explain(stepped_recordings(tmp_path, count), tmp_path / f"h{count}")
+        data = json.loads(explanation.dumps())
+        for proposal in data["grouping"]["proposals"]:
+            for reason in proposal["reasons"]:
+                for key, value in reason["details"].items():
+                    if isinstance(value, list):
+                        assert len(value) <= 2 and key + "_omitted" in reason["details"]
+        sizes[count] = len(explanation.dumps())
+    # Only counts grow (more digits), never lists: 20x the files, a few bytes more.
+    assert sizes[200] - sizes[10] < 400, sizes
+
+
+def test_lists_inside_a_proposal_s_reasons_are_cut_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(explain_module, "DEFAULT_BOUNDS", Bounds(locations=2))
+    _, explanation = explain(stepped_recordings(tmp_path, 10), tmp_path / "home")
+    data = json.loads(explanation.dumps())
+    (steps,) = [p for p in data["grouping"]["proposals"] if p["rule"] == "name_time_proximity"]
+    (reason,) = steps["reasons"]
+    assert len(reason["details"]["times"]) == 2 and reason["details"]["times_omitted"] == 8
+    assert len(steps["members"]) == 2 and steps["members_omitted"] == 8
+    (cut,) = [
+        f for f in explanation.findings
+        if f.code == TRUNCATED and f.details["list"] == "grouping.proposal_lists"
+    ]  # fmt: skip
+    assert steps["contested_omitted"] == 8  # its ten single-recording peers, cut to two
+    assert cut.details["omitted"] == 8 * 3 and cut.details["sources"] == 1
+
+
+def test_hostile_strings_in_an_inspect_summary_cannot_drive_the_terminal(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    library = "lib\x1b]0;owned\x07\x9b31m\x7f\u0085end".encode()
+    header = b"".join(struct.pack("<I", len(part)) + part for part in (b"ros2", library))
+    magic = b"\x89MCAP0\r\n"
+    (root / "hostile.mcap").write_bytes(magic + b"\x01" + struct.pack("<Q", len(header)) + header)
+    _, explanation = explain(root, tmp_path / "home")
+    (item,) = explanation.sources
+    assert item.inspection is not None and item.inspection.summary is not None
+    assert "\x9b" in json.dumps(item.inspection.summary, ensure_ascii=False)  # kept exact in JSON
+    text = explanation.render()
+    assert not any(ch in text for ch in "\x1b\x07\x9b\x7f\x85")
+    (line,) = [line for line in text.splitlines() if line.startswith("    inspect")]
+    assert "\\x9b31m" in line and "\\x7f" in line
 
 
 def test_bounds_refuse_what_is_not_a_positive_count() -> None:

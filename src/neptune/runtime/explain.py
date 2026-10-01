@@ -101,6 +101,14 @@ def explain_transform(bounds: Bounds) -> TransformRecord:
 Location = LocalPath | RawLocalPath
 
 
+def _printable(text: str) -> str:
+    """``text`` on one line with nothing a terminal acts on: C0 controls (a newline, ESC), DEL and
+    C1 controls (U+009B CSI) as ``\\xNN`` escapes. Names and summaries are hostile."""
+    return "".join(
+        f"\\x{ord(ch):02x}" if ord(ch) < 0x20 or 0x7F <= ord(ch) < 0xA0 else ch for ch in text
+    )
+
+
 def show(location: Location) -> str:
     """A location for people, on one line: bytes that are not UTF-8, and control characters (a
     newline, an escape sequence: names are hostile), as ``\\xNN`` escapes."""
@@ -109,9 +117,7 @@ def show(location: Location) -> str:
         if isinstance(location, LocalPath)
         else location.path.decode("utf-8", errors="backslashreplace")
     )
-    return "".join(
-        f"\\x{ord(ch):02x}" if ord(ch) < 0x20 or 0x7F <= ord(ch) < 0xA0 else ch for ch in text
-    )
+    return _printable(text)
 
 
 def _size(count: int) -> str:
@@ -587,15 +593,14 @@ class GroupingExplanation:
     per_proposal: int | None = None  # the bound on each proposal's lists, once bounded
 
     def proposal_json(self, proposal: SessionProposal) -> JsonObject:
-        """A proposal's record, each of its lists cut to ``per_proposal`` with a count beside it."""
-        out = dict(proposal.to_json())
-        if self.per_proposal is not None:
-            for key in _PROPOSAL_LISTS:
-                listed = out[key]
-                assert isinstance(listed, Sequence)
-                out[key] = list(listed[: self.per_proposal])
-                out[f"{key}_omitted"] = max(0, len(listed) - self.per_proposal)
-        return out
+        """A proposal's record, every list in it (its own, and those inside its reasons' details)
+        cut to ``per_proposal`` with a count beside it (``capped``)."""
+        out = proposal.to_json()
+        return out if self.per_proposal is None else capped(out, self.per_proposal)[0]
+
+    def unassigned_json(self, entry: UnassignedFile) -> JsonObject:
+        out = entry.to_json()
+        return out if self.per_proposal is None else capped(out, self.per_proposal)[0]
 
     @classmethod
     def of(cls, grouping: Grouping) -> "GroupingExplanation":
@@ -609,7 +614,7 @@ class GroupingExplanation:
             "proposals_omitted": self.proposals_omitted,
             "summary": self.summary,
             "transform": self.transform,
-            "unassigned": [entry.to_json() for entry in self.unassigned],
+            "unassigned": [self.unassigned_json(entry) for entry in self.unassigned],
             "unassigned_omitted": self.unassigned_omitted,
         }
 
@@ -802,7 +807,7 @@ class Explanation:
         if truncated:
             lines += ["", "Truncated:"]
             lines += [f"  {finding.message}" for finding in truncated]
-        return "\n".join(lines) + "\n"
+        return "\n".join(_printable(line) for line in lines) + "\n"
 
 
 # --- Bounds --------------------------------------------------------------------------------------
@@ -964,11 +969,11 @@ def bounded(explanation: Explanation, bounds: Bounds | None = None) -> Explanati
         cuts.cut("grouping.unassigned", grouping.unassigned[n].location, n,
                  len(grouping.unassigned) - n, n, "files")  # fmt: skip
     per = bounds.locations
-    longest = [
-        (proposal, max(len(getattr(proposal, key)) for key in _PROPOSAL_LISTS))
+    over = [
+        (proposal, cut)
         for proposal in grouping.proposals[:n]
+        if (cut := capped(proposal.to_json(), per)[1])
     ]
-    over = [(proposal, size) for proposal, size in longest if size > per]
     first_cut = over[0][0] if over else None
     named: FindingSubject | None = None
     if first_cut is not None:
@@ -976,13 +981,18 @@ def bounded(explanation: Explanation, bounds: Bounds | None = None) -> Explanati
         if named is None and inv.files:
             named = inv.files[0].location
     if named is not None:
-        omitted = sum(
-            max(0, len(getattr(proposal, key)) - per)
-            for proposal, _ in over
-            for key in _PROPOSAL_LISTS
-        )
+        omitted = sum(cut for _, cut in over)
         cuts.cut("grouping.proposal_lists", named, per, omitted, per, "items",
                  sources=len(over), among="proposals")  # fmt: skip
+    loose = [
+        (entry, cut)
+        for entry in grouping.unassigned[:n]
+        if (cut := capped(entry.to_json(), per)[1])
+    ]
+    if loose:
+        cuts.cut("grouping.unassigned_lists", loose[0][0].location, per,
+                 sum(cut for _, cut in loose), per, "items", sources=len(loose),
+                 among="files")  # fmt: skip
     grouping = replace(
         grouping,
         per_proposal=per,
@@ -1010,7 +1020,36 @@ def bounded(explanation: Explanation, bounds: Bounds | None = None) -> Explanati
     )
 
 
-_PROPOSAL_LISTS: Final = ("contested", "includes", "links", "members", "reasons")
+def capped(value: JsonObject, bound: int) -> tuple[JsonObject, int]:
+    """``value`` with every list in it, at any depth, cut to ``bound`` entries, and how many
+    entries were cut. A list under a key gets ``<key>_omitted`` beside it, always; what is cut
+    from a list inside a list counts toward the nearest such key."""
+
+    def walk(node: JsonValue) -> tuple[JsonValue, int]:
+        if isinstance(node, Mapping):
+            out: dict[str, JsonValue] = {}
+            total = 0
+            for key, item in node.items():
+                kept, cut = walk(item)
+                out[key] = kept
+                if isinstance(item, Sequence) and not isinstance(item, str):
+                    out[f"{key}_omitted"] = cut
+                total += cut
+            return out, total
+        if isinstance(node, Sequence) and not isinstance(node, str):
+            kept_items, total = [], max(0, len(node) - bound)
+            for item in node[:bound]:
+                kept, cut = walk(item)
+                kept_items.append(kept)
+                total += cut
+            return kept_items, total
+        return node, 0
+
+    out, total = walk(value)
+    assert isinstance(out, Mapping)
+    return out, total
+
+
 _PER_SOURCE: Final = {
     "container.members": "members",
     "inspection.findings": "inspect_findings",

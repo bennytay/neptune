@@ -92,8 +92,9 @@ warms it (ledger and plans), and ADR 0043 §5's `--resume` treats that as resuma
    no `null`: an absent value is an absent key. `dumps()` is its canonical bytes, under schema
    `neptune.explanation/1`. It carries no job id, clock, duration, host or absolute path, so the
    same root bytes and names, adapters, config and workspace contents give the same bytes from any
-   path. `render()` prints the same content for people, one line per entry: control characters and
-   bytes that are not UTF-8 in names print as `\xNN` escapes, since names are hostile. It
+   path. `render()` prints the same content for people, one line per entry. Every rendered line is escaped: C0 controls, DEL and C1 controls
+   (U+009B CSI) print as `\xNN`, and so do bytes that are not UTF-8 in names. Names and `inspect`
+   summaries carry the files' own strings, which are hostile. It
    abridges long `inspect` summaries.
    Nothing in an explanation enters a package.
 8. **Bounded.** `Bounds` (`DEFAULT_BOUNDS`) caps what one explanation holds. Every list keeps at
@@ -107,8 +108,10 @@ warms it (ledger and plans), and ADR 0043 §5's `--resume` treats that as resuma
      as `summary_omitted_bytes`);
    - 64 `inspect` findings.
 
-   Each session proposal is cut to 64 members, links, contested peers, included proposals and
-   reasons; its record keeps its id, and the cuts are counted beside each list.
+   In each session proposal and each unassigned file, every list at any depth is cut to 64
+   entries: members, links, contested peers, included proposals, reasons, declarations, candidates,
+   and the lists inside reasons' details (one `times` entry per recording). Each such list gets a
+   `<key>_omitted` count beside it, and the record keeps its id.
 
    Each cut is an explicit `*_omitted` count beside its list. Each bound that cut anything adds one
    `neptune.explain.truncated` finding (limit, info), whose producer is `neptune.explain` 0.1.0
