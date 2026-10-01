@@ -91,7 +91,8 @@ def test_a_sync_ingest_of_the_text_fixtures_runs_every_call_in_the_sandbox(
     assert result.cache.calls.ingest == sum(len(s.chunks) for s in result.cache.sources)
     receipt = result.read_receipt()
     assert receipt.id == result.receipt
-    assert {t.adapter_id for t in receipt.transforms} == {"text"}
+    # The adapter, and session grouping, whose tables every package holds (ADR 0036).
+    assert {t.adapter_id for t in receipt.transforms} == {"neptune.grouping", "text"}
     # The truncated and the corrupted file each lose one block, and say so.
     assert [(f.code, f.severity) for f in receipt.findings] == [
         ("text.invalid_utf8", Severity.WARNING)

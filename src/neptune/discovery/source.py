@@ -197,7 +197,7 @@ class LocalSource:
     def _file_entry(self, name: bytes) -> WalkEntry:
         """The root file as a walk entry; a root that is no longer a regular file is skipped."""
         try:
-            info = os.stat(self._root)
+            info = Path(self._root).stat()
         except FileNotFoundError:
             return SkippedEntry(_join(()), SkipReason.MISSING, "vanished during walk")
         except OSError as exc:

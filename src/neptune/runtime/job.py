@@ -74,7 +74,9 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.registry import AdapterRegistry, SelectionStatus
+from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
+from neptune.discovery.layout import Layout, layout_from_scan
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
 from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe
 from neptune.discovery.reader import LocalReader, SourceChangedError
@@ -191,9 +193,11 @@ class JobOptions:
     receipt and ``sandbox_ready`` event record exactly which guarantees were lost. These are the
     runtime transform's config, so a package's runtime findings name the policy they were made
     under. ``config`` gives each adapter, by id, the option values to configure it with. ``job``
-    names the job in its envelope; by default a fresh random token. ``ignore`` says which ignore
-    rules the walk applies (ADR 0043): by default version-control internals, OS metadata and the
-    root's ``.neptune-ignore``; whatever they leave unread is a finding naming the rule.
+    names the job in its envelope; by default a fresh random token. ``grouping`` configures
+    session grouping (ADR 0036): its gap, and the sessions the user declares, stated and set
+    against the rules' readings; it is the grouping transform's config. ``ignore`` says which
+    ignore rules the walk applies (ADR 0043): by default version-control internals, OS metadata
+    and the root's ``.neptune-ignore``; whatever they leave unread is a finding naming the rule.
     """
 
     attempts: int = DEFAULT_ATTEMPTS
@@ -202,6 +206,7 @@ class JobOptions:
     isolation: Isolation = Isolation.SUBPROCESS
     limits: Limits = DEFAULT_LIMITS
     allow_degraded_sandbox: bool = False
+    grouping: GroupingConfig = field(default_factory=GroupingConfig)
     ignore: IgnorePolicy = field(default_factory=IgnorePolicy)
 
     def __post_init__(self) -> None:
@@ -225,6 +230,8 @@ class JobOptions:
             raise JobError("limits bound sandboxed calls; in-process calls have none to set")
         if self.isolation is Isolation.IN_PROCESS and self.allow_degraded_sandbox:
             raise JobError("allow_degraded_sandbox is a sandbox policy; in-process calls have none")
+        if not isinstance(self.grouping, GroupingConfig):
+            raise JobError(f"grouping must be a GroupingConfig, got {self.grouping!r}")
 
 
 @dataclass(frozen=True)
@@ -526,6 +533,9 @@ class IngestJob:
         self._engine = ProbeEngine(registry)
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
+        self._grouper = LayoutGrouper(self.options.grouping)
+        self._layout = Layout(())
+        self._grouping: Grouping | None = None
         self._dry = False  # a dry run: stops after plan (ADR 0035)
         self._published: ContentId | None = None  # the package, once renamed into place
 
@@ -951,6 +961,7 @@ class IngestJob:
                     self._skip(entry)
             by_content: dict[ContentId, _Source] = {}
             scanned = SourceLedger()
+            listed: list[Observation] = []
             new_artifacts = new_revisions = 0
             replaced = _replaced(ledger, result.observations)
             for observation in result.observations:
@@ -963,7 +974,7 @@ class IngestJob:
                 artifact = ledger.artifact(revision.content_id)
                 if artifact is None:
                     raise JobError(f"the ledger lost artifact {revision.content_id}")
-                scanned.observe(location, artifact)
+                listed.append(scanned.observe(location, artifact))
                 self._emit(
                     events.SOURCE_HASHED,
                     {
@@ -981,6 +992,8 @@ class IngestJob:
             for absence in result.absences:
                 self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
             self._sources = list(by_content.values())
+            # Grouping reads the revisions the package lists, so it recomputes from the package.
+            self._layout = layout_from_scan(listed, result.symlinks)
             self._finish(
                 Phase.FINGERPRINT,
                 {
@@ -1081,7 +1094,20 @@ class IngestJob:
                 else:
                     counts["unsupported"] += 1
                     self._emit(events.SOURCE_UNSUPPORTED, details)
+            self._group()
             self._finish(Phase.INSPECT, dict(counts))
+
+    def _group(self) -> None:
+        """Stage 5, at the end of inspect so a dry run sees it too: propose sessions from this
+        scan's layout (ADR 0036). Names and directories only, no adapter call; the proposals
+        reach the package as derived tables and the findings under the grouping's transform."""
+        self._check_cancel()
+        grouping = self._grouper.propose(self._layout)
+        self._producers[grouping.transform.id] = grouping.transform
+        for finding in grouping.findings:
+            self._record(finding, grouping.transform)
+        self._grouping = grouping
+        self._emit(events.SESSIONS_PROPOSED, grouping.summary())
 
     # --- plan ----------------------------------------------------------------------------------
 
@@ -1716,6 +1742,10 @@ class IngestJob:
             cited = {finding.transform for finding in self._findings.values()}
             if self._lost_guarantees:
                 cited.add(self.transform.id)
+            derived = None
+            if self._grouping is not None:  # its derived tables name its transform
+                cited.add(self._grouping.transform.id)
+                derived = self._grouping.tables()
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
@@ -1723,7 +1753,12 @@ class IngestJob:
             assert self.destination is not None  # ``run`` refuses to start without one
             try:
                 self._staged = stage(
-                    self.destination, self.workspace, scanned, self._ingested, extra=extra
+                    self.destination,
+                    self.workspace,
+                    scanned,
+                    self._ingested,
+                    extra=extra,
+                    derived=derived,
                 )
             except (PackageError, WorkspaceError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the package cannot be assembled: {exc}") from exc

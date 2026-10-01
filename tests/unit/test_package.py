@@ -38,12 +38,13 @@ def test_store_imports_only_model_and_identity() -> None:
 
 
 def test_format_adapters_are_leaves() -> None:
-    """A format subpackage sees only the model, identity and the contract (ADR 0008 §4)."""
+    """A format subpackage sees only the model, identity, the contract and itself (ADR 0008 §4)."""
     adapters = Path(neptune.__file__).parent / "adapters"
-    allowed = ("neptune.model", "neptune.identity", "neptune.adapters.contract")
     formats = [path for path in adapters.iterdir() if path.is_dir() and path.name != "__pycache__"]
     assert formats, "the reference adapter is a subpackage"
     for package in formats:
+        own = f"neptune.adapters.{package.name}."  # its own modules, never another adapter
+        allowed = ("neptune.model", "neptune.identity", "neptune.adapters.contract", own)
         for path in package.rglob("*.py"):
             for node in ast.walk(ast.parse(path.read_text())):
                 if isinstance(node, ast.Import):
@@ -66,3 +67,25 @@ def test_the_adapter_contract_does_not_reach_into_the_runtime_or_store() -> None
             if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("neptune"):
                 forbidden = ("neptune.runtime", "neptune.store", "neptune.derived")
                 assert not (node.module or "").startswith(forbidden), f"{path.name}: {node.module}"
+
+
+def test_evidence_never_imports_interpretation() -> None:
+    """``derived/`` reads the evidence layers; nothing below the runtime reads ``derived/``.
+
+    Interpretation depends on evidence, never the reverse (ADR 0036 §8): ``derived/`` may import
+    the model, identity and discovery's observed layout, and model, identity, discovery, store and
+    adapters never import it.
+    """
+    root = Path(neptune.__file__).parent
+    for package in ("model", "identity", "discovery", "store", "adapters"):
+        for path in (root / package).rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("neptune"):
+                    assert not (node.module or "").startswith("neptune.derived"), (
+                        f"{package}/{path.name} imports {node.module}"
+                    )
+    allowed = ("neptune.model", "neptune.identity", "neptune.discovery", "neptune.derived")
+    for path in (root / "derived").rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("neptune"):
+                assert (node.module or "").startswith(allowed), f"{path.name} imports {node.module}"

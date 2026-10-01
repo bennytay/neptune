@@ -1,0 +1,8 @@
+title = "Dataset manifest for external training pipelines"
+status = "planned"
+# Consumed outside this repository; no in-repo consumer declares it.
+consumers = []
+
+[owner]
+package = "neptune-learn"
+module = "neptune_learn.manifest"
