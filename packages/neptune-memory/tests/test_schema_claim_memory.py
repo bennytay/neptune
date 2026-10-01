@@ -287,3 +287,22 @@ def test_a_literal_unit_inherits_the_claim_provenance() -> None:
         )
     with pytest.raises(ValueError, match="INHERITED"):
         TypedLiteral(ValueType.QUANTITY, 5.0, Unknown(grounded))
+
+
+def test_a_claim_names_its_model_exactly_when_inferred() -> None:
+    from memory_schema_builders import INFERRED as GUESS
+    from memory_schema_builders import MODEL
+
+    guess = claim(ARM, "located_at", CELL, 0, tx=0, kind=GUESS)
+    assert guess.provenance.model == MODEL
+    with pytest.raises(ValueError, match="model"):
+        replace(guess, provenance=replace(guess.provenance, model=None))
+    fact = claim(ARM, "located_at", CELL, 0, tx=0)
+    with pytest.raises(ValueError, match="model"):
+        replace(fact, provenance=replace(fact.provenance, model=MODEL))
+    with pytest.raises(TypeError):
+        replace(guess.provenance, model="vlm-x")  # type: ignore[arg-type]
+    newer = replace(
+        guess, provenance=replace(guess.provenance, model=replace(MODEL, model_version="2"))
+    )
+    assert newer.id != guess.id  # the model is part of what the claim asserts

@@ -214,6 +214,12 @@ def test_model_based_consolidator_emits_only_inferred_and_hashes_its_model() -> 
     inferred = _run(EvidencedBy(model=MODEL, kind="inferred"), config)
     assert len(inferred.claims) == 2
     assert inferred.transform.model == MODEL
+    # ADR 0006 §3: the runner stamps the model into each claim's provenance.
+    assert all(c.provenance.model == MODEL for c in inferred.claims)
+    assert '"model"' in canonical_json.dumps(inferred.claims[0].to_json()).decode()
+    deterministic = _run(EvidencedBy())
+    assert all(c.provenance.model is None for c in deterministic.claims)
+    assert '"model"' not in canonical_json.dumps(deterministic.claims[0].to_json()).decode()
     newer_model = ModelRef("vlm-x", "2026-10")
     newer = _run(EvidencedBy(model=newer_model, kind="inferred"), {"model": newer_model.to_json()})
     assert {c.id for c in inferred.claims}.isdisjoint(c.id for c in newer.claims)

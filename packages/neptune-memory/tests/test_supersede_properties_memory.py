@@ -183,6 +183,9 @@ def test_p4_as_of_sees_history(items: list[Claim]) -> None:
         # Findings replay too: as_of shows exactly the findings a replay to tx leaves active.
         live = [f for f in prefix.findings if isinstance(f.superseded_at, Open)]
         assert clear_findings(seen.findings) == clear_findings(tuple(live))
+        # ADR 0006 §6: exactly, bookkeeping included: no later supersession leaks into tx.
+        assert seen.claims == tuple(c for c in prefix.claims if c.is_current)
+        assert seen.findings == tuple(live)
 
 
 @settings(derandomize=True, max_examples=300)
