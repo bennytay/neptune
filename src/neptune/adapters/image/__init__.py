@@ -179,19 +179,19 @@ DESCRIPTOR: Final = AdapterDescriptor(
     ),
     conventions=(
         Documented(
+            "assertion_kinds",
+            "stated: what the file's writer or camera declares (every IFD, XMP, ICC and text table"
+            " and row, JFIF, Adobe, capture time, position, device, orientation); observed: the"
+            " measured raster structure (IHDR, SOFn, VP8*, BMP and PNM headers) and the Image's"
+            " size",
+        ),
+        Documented(
             "capture",
             "Make, Model, BodySerialNumber (exif.body_serial) and DNG CameraSerialNumber"
             " (dng.camera_serial); DateTimeOriginal as civil seconds (posix with"
             " OffsetTimeOriginal, finer with SubSecTimeOriginal); GPS degrees, minutes and seconds"
             " read exactly, altitude in metres above mean sea level; crs Unknown (GPSMapDatum is"
             " text); NotCovered for BMP and Netpbm",
-        ),
-        Documented(
-            "assertion_kinds",
-            "stated: what the file's writer or camera declares (every IFD, XMP, ICC and text table"
-            " and row, JFIF, Adobe, capture time, position, device, orientation); observed: the"
-            " measured raster structure (IHDR, SOFn, VP8*, BMP and PNM headers) and the Image's"
-            " size",
         ),
         Documented(
             "chunks",

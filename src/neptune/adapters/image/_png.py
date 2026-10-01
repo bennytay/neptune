@@ -216,13 +216,12 @@ class _Png:
         prefix = (*self.space.cite(compressed_at, len(compressed)), payload_step("inflate"))
         try:
             inflated = self.ctx.inflate(compressed)
-        except LimitHit:
+        except LimitHit as hit:
             self.ctx.out.finding(
                 MALFORMED,
                 self.space.cite(compressed_at, len(compressed)),
-                f"chunk {name} inflates past max_metadata_bytes ({self.ctx.max_metadata_bytes});"
-                " it is not read",
-                {"max_metadata_bytes": self.ctx.max_metadata_bytes},
+                f"chunk {name} inflates past {hit.option} ({hit.limit}); it is not read",
+                {"limit": hit.limit, "option": hit.option},
             )
             return None
         except zlib.error:

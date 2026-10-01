@@ -1,6 +1,6 @@
 """An image's ``capture`` and ``orientation``, read from the EXIF or TIFF tags that declare them.
 
-The rules (ADR 0041 §4), each value citing the row or IFD it is read from:
+The rules (ADR 0041 §5), each value citing the row or IFD it is read from:
 
 - ``device_manufacturer`` and ``device_model`` are Make (271) and Model (272), verbatim;
   ``device_identifiers`` are BodySerialNumber (42033, ``exif.body_serial``) and DNG's

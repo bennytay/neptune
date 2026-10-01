@@ -82,6 +82,13 @@ class Context:
         inflater = zlib.decompressobj()
         out = inflater.decompress(data, room + 1)
         if len(out) > room:
+            self.budget.inflated(
+                len(out)
+            )  # a bomb spends what it cost, so many cannot all be tried
+            if room < self.max_metadata_bytes:
+                raise LimitHit(
+                    "the inflate total (4 x max_metadata_bytes)", self.budget.inflate_total
+                )
             raise LimitHit("max_metadata_bytes", self.max_metadata_bytes)
         if not inflater.eof:
             raise zlib.error("the zlib stream ends before its end marker")

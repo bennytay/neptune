@@ -156,15 +156,15 @@ class _Rows:
     def emit(self, namespace: str, path: str, value: str) -> None:
         self.ctx.budget.entry()
         keep = self.ctx.max_value_bytes
-        if max(len(namespace), len(path), len(value)) > keep:
+        cells = [_cut(text, keep) for text in (namespace, path, value)]
+        if cells != [namespace, path, value]:
             self.ctx.out.finding(
                 VALUE_NOT_COPIED,
                 self.locator,
-                f"XMP namespaces, paths or values over {keep} characters (max_value_bytes) are"
-                " cut to it; the packet's bytes hold them whole",
+                f"XMP namespaces, paths or values over {keep} bytes (max_value_bytes) are cut to"
+                " it; the packet's bytes hold them whole",
                 {"max_value_bytes": keep},
             )
-        cells = [namespace[:keep], path[:keep], value[:keep]]
         self.ctx.out.row(self.table, self.locator, self.count, cells)
         self.count += 1
 
@@ -205,6 +205,14 @@ class _Rows:
                 self.fields(child, path)
             else:
                 self.value(child, _join(path, child.name.qualified), child.name.uri)
+
+
+def _cut(text: str, keep: int) -> str:
+    """``text`` cut to at most ``keep`` bytes of UTF-8, never inside a character."""
+    if len(text) * 4 <= keep:
+        return text
+    raw = text.encode()
+    return text if len(raw) <= keep else raw[:keep].decode("utf-8", errors="ignore")
 
 
 def _join(path: str, name: str) -> str:

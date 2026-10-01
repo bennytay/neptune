@@ -633,3 +633,38 @@ def test_a_netpbm_header_is_accepted_up_to_what_the_probe_sees_and_no_further() 
     assert len(fits) <= 65536 and images(run(fits + b"\0\0"))
     too_long = b"P5\n#" + b"x" * 65536 + b"\n2 1\n255\n\0\0"
     assert codes(run(too_long)) == {"image.unreadable"}
+
+
+def test_many_inflate_bombs_spend_the_sources_inflate_total() -> None:
+    bomb = b"XML:com.adobe.xmp\x00\x01\x00\x00\x00" + zlib.compress(b"\x00" * (8 << 20), 9)
+    png = data_of("amr_dock.png")
+    data = png[:33] + b"".join(chunk(b"iTXt", bomb) for _ in range(40)) + png[33:]
+    tracemalloc.start()
+    try:
+        output = run(data, max_metadata_bytes=1 << 20)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    refused = [f for f in output.findings() if f.code == "image.malformed"]
+    assert len(refused) >= 40 and len(images(output)) == 1
+    assert any("inflate total" in f.message for f in refused)  # the total, not the single limit
+    assert peak < 16 * 1024 * 1024
+
+
+def test_xmp_text_is_cut_to_max_value_bytes_of_utf8_never_inside_a_character() -> None:
+    packet = (
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF'
+        ' xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        '<rdf:Description xmlns:t="http://example.com/t/" t:Note="' + "漢" * 4096 + '"/>'
+        "</rdf:RDF></x:xmpmeta>"
+    ).encode()
+    output = run(png_with_chunk(b"iTXt", b"XML:com.adobe.xmp\x00\x00\x00\x00\x00" + packet))
+    values = [
+        c.value
+        for r in output.records()
+        if isinstance(r, StructuredRecord) and len(r.cells) == 3
+        for c in r.cells
+        if isinstance(c, Known) and isinstance(c.value, str) and "漢" in c.value
+    ]
+    assert values and all(len(v.encode()) <= 4096 for v in values)
+    assert "image.value_not_copied" in codes(output)

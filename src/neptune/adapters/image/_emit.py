@@ -247,8 +247,9 @@ class Emitter:
         """
         locator = (*table_locator, Row(row))
         record_id = self.record_id(StructuredRecord.kind, locator)
-        built = tuple(cell(c) for c in cells)
-        used = sum(len(c) for c in cells if isinstance(c, str))
+        given = tuple(cells)
+        built = tuple(cell(c) for c in given)
+        used = sum(len(c.encode()) for c in given if isinstance(c, str))
         if used > self._cell_room:
             raise LimitHit("max_metadata_bytes", self._cell_limit)
         self._cell_room -= used
