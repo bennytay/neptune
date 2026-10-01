@@ -31,7 +31,7 @@ from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.package import Storage
 from neptune.model.source import LocalPath, SourceRevision
-from neptune.store.assemble import assemble, export
+from neptune.store.assemble import _sibling, assemble, export
 from neptune.store.package import PackageError, read_package
 from neptune.store.series import SERIES_SETTINGS, read_rows
 from neptune.store.workspace import Workspace
@@ -209,8 +209,27 @@ def test_an_exported_package_holds_every_source_and_the_same_receipt(
 
 
 def _nothing_at(destination: Path) -> bool:
-    """Neither the destination nor the hidden staging directory beside it was left behind."""
-    return not any(p.name.startswith(destination.name) for p in destination.parent.iterdir())
+    """Neither the destination nor a hidden staging directory beside it was left behind.
+
+    Staging is named ``.<name>.<hex>`` (``assemble._sibling``), so it starts with a dot.
+    """
+    return not any(
+        entry.name == destination.name or entry.name.startswith(f".{destination.name}.")
+        for entry in destination.parent.iterdir()
+    )
+
+
+def test_nothing_at_sees_leftover_staging(tmp_path: Path) -> None:
+    """The helper the failure tests rely on: a planted leftover of either kind is seen."""
+    destination = tmp_path / "portable"
+    (tmp_path / "portable-other").mkdir()  # a neighbour that only shares the prefix
+    assert _nothing_at(destination)
+    planted = _sibling(destination)  # exactly what a failed export would leave
+    assert planted.name.startswith(".portable.")
+    assert not _nothing_at(destination)
+    planted.rmdir()
+    destination.mkdir()
+    assert not _nothing_at(destination)
 
 
 def test_exporting_without_the_sources_fails_loudly(corpus: Path, tmp_path: Path) -> None:
