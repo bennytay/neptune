@@ -150,10 +150,9 @@ def test_unreadable_directory_is_reported_and_walk_continues(tmp_path: Path) -> 
         (tmp_path / "locked").chmod(0o755)
 
 
-def test_root_must_be_a_directory(tmp_path: Path) -> None:
+def test_root_must_be_a_directory_or_a_regular_file(tmp_path: Path) -> None:
     write(tmp_path / "f")
-    with pytest.raises(NotADirectoryError):
-        LocalSource(tmp_path / "f")
+    assert LocalSource(tmp_path / "f").is_file  # one file is a source of one entry (ADR 0043)
     with pytest.raises(NotADirectoryError):
         LocalSource(tmp_path / "missing")
 

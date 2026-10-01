@@ -19,6 +19,7 @@ import pytest
 
 from neptune.adapters.builtin import builtin_adapters
 from neptune.adapters.registry import AdapterRegistry
+from neptune.discovery.ignore import IGNORED, IgnorePolicy
 from neptune.identity import canonical_json
 from neptune.model.finding import IngestFinding
 from neptune.model.machine import SoftwareConfiguration
@@ -93,7 +94,8 @@ def run_job(root: Path, home: Path, destination: Path) -> tuple[JobOutcome, Any]
         destination,
         Workspace(home),
         AdapterRegistry(builtin_adapters()),
-        JobOptions(attempts=2),
+        # ADR 0043 leaves `.git/` unread by default; this job keeps it, to read the refs inside.
+        JobOptions(attempts=2, ignore=IgnorePolicy(defaults=False, file=False)),
     )
     outcome = job.run()
     assert outcome.state is JobState.COMMITTED
@@ -203,3 +205,22 @@ def test_the_golden_package_is_what_reading_the_fixture_gives() -> None:
         if path.is_file() and path.suffix != ".py" and "__pycache__" not in path.parts
     }
     assert committed == built
+
+
+def test_by_default_the_job_leaves_a_dot_git_folder_unread(tmp_path: Path) -> None:
+    """ADR 0043's default rules skip version-control internals, refs included: the git files are
+    read when a job keeps them (above), or when they sit outside ``.git/``."""
+    root = tmp_path / "robot"
+    build_tree(root)
+    job = IngestJob(
+        root,
+        tmp_path / "package",
+        Workspace(tmp_path / "home"),
+        AdapterRegistry(builtin_adapters()),
+        JobOptions(attempts=2),
+    )
+    job.run()
+    package = read_package(tmp_path / "package")
+    ignored = [r for r in package.records if isinstance(r, IngestFinding) and r.code == IGNORED]
+    assert [r.subject for r in ignored] == [LocalPath(".git")]
+    assert not any(location.startswith(".git/") for location in software(package))

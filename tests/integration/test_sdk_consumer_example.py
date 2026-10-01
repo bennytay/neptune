@@ -59,7 +59,10 @@ def test_the_consumer_ingests_without_the_cli(corpus: Path, tmp_path: Path) -> N
     summary = json.loads(ran.stdout)
     expected = Neptune(tmp_path / "other").ingest(corpus, tmp_path / "expected")
     assert summary["receipt"] == expected.receipt
-    assert summary["chunks"] == {"text": sum(len(s.chunks) for s in expected.cache.sources)}
+    chunks: dict[str, int] = {}
+    for source in expected.cache.sources:  # each source by the adapter the registry picks
+        chunks[source.adapter] = chunks.get(source.adapter, 0) + len(source.chunks)
+    assert summary["chunks"] == chunks and "text" in chunks
     assert summary["by_line"] != expected.receipt  # another config: another lineage
     assert summary["committed"] > 0
     assert summary["findings"] == ["text.invalid_utf8", "text.invalid_utf8"]

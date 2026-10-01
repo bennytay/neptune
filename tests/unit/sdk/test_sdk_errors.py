@@ -6,6 +6,7 @@ import pytest
 
 import neptune.sdk
 from neptune.adapters.contract import ConfigError
+from neptune.discovery.ignore import IgnoreError
 from neptune.discovery.scratch import ScratchError
 from neptune.runtime import JobError
 from neptune.runtime.sandbox import SandboxError
@@ -19,6 +20,7 @@ from neptune.sdk import (
     JobFailedError,
     NeptuneError,
     NetworkRefusedError,
+    NothingToResumeError,
     PackageInvalidError,
     PublishIncompleteError,
     SandboxUnavailableError,
@@ -37,6 +39,7 @@ CODES = {
     InvalidDestinationError: "invalid_destination",
     DestinationExistsError: "destination_exists",
     ConfigurationError: "invalid_configuration",
+    NothingToResumeError: "nothing_to_resume",
     UnsupportedError: "unsupported",
     NetworkRefusedError: "network_refused",
     SandboxUnavailableError: "sandbox_unavailable",
@@ -52,6 +55,7 @@ PARENTS = {
     InvalidDestinationError: InvalidRequestError,
     DestinationExistsError: InvalidDestinationError,
     ConfigurationError: InvalidRequestError,
+    NothingToResumeError: InvalidRequestError,
     UnsupportedError: NeptuneError,
     NetworkRefusedError: NeptuneError,
     SandboxUnavailableError: NeptuneError,
@@ -91,6 +95,7 @@ def _caused(cause: BaseException | None) -> JobError:
     [
         (SandboxError("no Landlock"), SandboxUnavailableError),
         (ConfigError("text has no option nope"), ConfigurationError),
+        (IgnoreError(".neptune-ignore: line 1: negation"), ConfigurationError),
         (WorkspaceError("format 9"), WorkspaceUnusableError),
         (WorkspaceBusyError("collecting"), WorkspaceUnusableError),
         (ScratchError("overlaps the root"), WorkspaceUnusableError),
@@ -133,6 +138,12 @@ def test_a_package_the_job_renamed_into_place_is_never_another_writers(tmp_path:
     error = from_job_error(_caused(NotDurableError("renamed, not flushed")), destination)
     assert type(error) is PublishIncompleteError and error.code == "publish_incomplete"
     assert isinstance(error, JobFailedError)  # the job did fail: it could not promise durability
+    assert error.destination == destination  # committed_result has nothing: this names it
+
+
+def test_publish_incomplete_carries_no_destination_when_none_was_known() -> None:
+    error = from_job_error(_caused(NotDurableError("renamed, not flushed")))
+    assert isinstance(error, PublishIncompleteError) and error.destination is None
 
 
 def test_the_mapping_never_reads_the_message() -> None:

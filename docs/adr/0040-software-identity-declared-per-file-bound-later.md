@@ -90,7 +90,11 @@ gigabyte checkpoint hashed twice, a URDF-style guess turned into a binding.
    history, not identity: no adapter claims them, so the probe engine reports them and reads no
    more than their head, whatever their size. Dirty state needs the working tree as well as the
    index and is not claimed. Only the name can tell a one-line hex checksum file from a ref, so
-   a name ending `.sha256`, `.sha1`, `.md5` (and the like) vetoes the ref claim.
+   a name ending `.sha256`, `.sha1`, `.md5` (and the like) vetoes the ref claim. ADR 0043's
+   default ignore rules leave `.git/` unread, refs included, so a job reads these files only when
+   it keeps the folder (`IgnorePolicy(defaults=False)`) or they sit outside `.git/` (a copied
+   `HEAD`, `release.sha256`'s sibling refs); a carve-out for refs in the default list is for a
+   dedicated change to ADR 0043, not made here.
 8. **A checkpoint's identity is its content id.** Its sha256 is computed when it is fingerprinted
    and is the record's source; the adapter never rehashes gigabytes in its sandbox, and never
    puts its own hash in `digest`, which holds what a source states. safetensors headers, ONNX

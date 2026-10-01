@@ -1,0 +1,47 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<</Type /Pages /Kids [6 0 R] /Count 1>>
+endobj
+2 0 obj
+<</S /JavaScript /JS (app.alert\('opened'\);)>>
+endobj
+3 0 obj
+<</Type /EmbeddedFile /Length 23>>
+stream
+#!/bin/sh
+echo payload
+
+endstream
+endobj
+4 0 obj
+<</Type /Filespec /F (payload.sh) /UF (payload.sh) /EF <</F 3 0 R>>>>
+endobj
+5 0 obj
+<</Length 56>>
+stream
+BT /F1 11 Tf 72 720 Td (Lockout tagout procedure) Tj ET
+
+endstream
+endobj
+6 0 obj
+<</Type /Page /Parent 1 0 R /MediaBox [0 0 612 792] /Resources <</Font <</F1 <</Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding>>>>>> /AA <</O 2 0 R>> /Contents 5 0 R>>
+endobj
+7 0 obj
+<</Type /Catalog /Pages 1 0 R /OpenAction 2 0 R /Names <</EmbeddedFiles <</Names [(payload.sh) 4 0 R]>> /JavaScript <</Names [(init) 2 0 R]>>>>>>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000070 00000 n 
+0000000133 00000 n 
+0000000224 00000 n 
+0000000309 00000 n 
+0000000413 00000 n 
+0000000624 00000 n 
+trailer
+<</Size 8 /Root 7 0 R /ID [<A1C27F4DEED1C83E51091EBA0EA5F8F4> <A1C27F4DEED1C83E51091EBA0EA5F8F4>]>>
+startxref
+785
+%%EOF
