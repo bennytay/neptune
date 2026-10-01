@@ -1,0 +1,7 @@
+# Gripper runbook
+
+Restart the gripper driver if the jaws stop responding.
+
+```
+systemctl restart gripper-driver
+```

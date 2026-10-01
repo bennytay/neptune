@@ -7,7 +7,9 @@ requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 dependencies = [
     "lz4>=4.4.5",
+    "markdown-it-py>=4.2.0",
     "pyarrow>=25.0.1",
+    "pypdf>=6.19.0",
     "zstandard>=0.25.0",
 ]
 
