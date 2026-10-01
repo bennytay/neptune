@@ -204,6 +204,22 @@ def test_crashing_consolidator_is_a_finding() -> None:
     assert result.findings[0].message == "KeyError: 'boom'"
 
 
+@pytest.mark.parametrize("text", ["line\nbreak", "lone \ud800 surrogate"])
+def test_crash_with_hostile_message_keeps_only_the_type(text: str) -> None:
+    @dataclass(frozen=True)
+    class Hostile(Crashes):
+        def consolidate(
+            self,
+            ledger: LedgerReader,
+            previous: Sequence[PriorClaim],
+            config: Mapping[str, JsonValue],
+        ) -> ConsolidatorOutput:
+            raise RuntimeError(text)
+
+    (finding,) = run_consolidator(Hostile(), _ledger(), (), {}).findings
+    assert finding.message == "RuntimeError"
+
+
 def test_rebuild_reproduces_the_graph_byte_for_byte() -> None:
     plan: list[tuple[Consolidator, Mapping[str, JsonValue]]] = [
         (CountObservations(), {}),

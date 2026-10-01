@@ -250,6 +250,17 @@ class Consolidation:
         }
 
 
+MAX_MESSAGE: Final = 1000
+
+
+def _valid_unicode(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _runner_finding(
     code: str, transform: ConsolidatorTransform, message: str, records: Sequence[RecordId] = ()
 ) -> ConsolidationFinding:
@@ -297,7 +308,11 @@ def run_consolidator(
     try:
         output = consolidator.consolidate(ledger, tuple(previous), config)
     except Exception as exc:  # partial success: a crashing consolidator is a finding
-        finding = _runner_finding("failed", transform, f"{type(exc).__name__}: {exc}")
+        # The exception text is untrusted: keep it only if it is valid Unicode and one line.
+        text = f"{type(exc).__name__}: {exc}"
+        if "\n" in text or not text.isprintable() or not _valid_unicode(text):
+            text = type(exc).__name__
+        finding = _runner_finding("failed", transform, text[:MAX_MESSAGE])
         return Consolidation(transform, (), (finding,))
     claims: dict[RecordId, ProposedClaim] = {}
     findings: dict[RecordId, ConsolidationFinding] = {f.id: f for f in output.findings}
