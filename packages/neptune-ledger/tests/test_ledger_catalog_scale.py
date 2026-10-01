@@ -47,6 +47,9 @@ def test_the_generated_catalog_is_the_documented_one(report: dict[str, Any]) -> 
     assert report["schema_matches_migrations"] is True
 
 
+WORLD_INDEX = "record_stream_world_clock_world_first_world_last_registrati_idx"
+
+
 @pytest.mark.parametrize(
     ("measure", "index"),
     [
@@ -55,8 +58,8 @@ def test_the_generated_catalog_is_the_documented_one(report: dict[str, Any]) -> 
         ("thread_declared_sensor", "record_logical_id_by_value"),
         ("thread_anchored", "record_stream_source_content_id_kind_md5_idx"),
         ("lineage_set", "record_stream_source_content_id_kind_md5_idx"),
-        ("window_typical", "record_stream_world_clock_world_first_world_last_registrati_idx"),
-        ("window_long_recording", "record_stream_world_clock_world_first_world_last_registrati_idx"),
+        ("window_typical", WORLD_INDEX),
+        ("window_long_recording", WORLD_INDEX),
         ("query_page", "record_stream_pkey"),
         ("package_lookup", "package_tenant_id_package_id_tx_seq_key"),
     ],
