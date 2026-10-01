@@ -27,6 +27,7 @@ from neptune.adapters.software._common import (
     Draft,
     Format,
     Reading,
+    json_head,
     reason,
     toml_head,
 )
@@ -250,12 +251,20 @@ def _detect_toml_lock(
     return detect
 
 
+_UV_KEYS: Final = (
+    re.compile(rb"^version = [0-9]+$", re.M),
+    re.compile(rb"^requires-python = \"", re.M),
+    re.compile(rb"^\[\[package\]\]$", re.M),
+)
+
+
 def _detect_uv(head: bytes, size: int) -> Detected | None:
-    if b"requires-python" not in head:
+    if not all(key.search(head) for key in _UV_KEYS):
         return None
     document = toml_head(head, size)
     if document is None:
-        return None
+        why = "uv.lock's top-level version and requires-python, and [[package]] tables"
+        return Detected(SIGNATURE, reason("uv_lock", why))
     version, python = document.get("version"), document.get("requires-python")
     if isinstance(version, int) and isinstance(python, str):
         return Detected(
@@ -273,6 +282,10 @@ def _detect_npm(head: bytes, size: int) -> Detected | None:
     if match is None:
         return None
     version = match[1].decode("ascii")
+    document = json_head(head, size)
+    if isinstance(document, dict) and isinstance(document.get("lockfileVersion"), int):
+        why = reason("npm_lock", "a package-lock.json that parses, with its lockfileVersion")
+        return Detected(VERIFIED, why, version)
     return Detected(
         SIGNATURE, reason("npm_lock", "a JSON object with npm's lockfileVersion"), version
     )

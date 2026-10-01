@@ -26,8 +26,16 @@ import urllib.parse
 from collections.abc import Iterator
 from typing import Any, Final
 
-from neptune.adapters.contract import SIGNATURE, STRUCTURE, FormatSpec
-from neptune.adapters.software._common import Detected, Doc, Draft, Format, Reading, reason
+from neptune.adapters.contract import SIGNATURE, STRUCTURE, VERIFIED, FormatSpec
+from neptune.adapters.software._common import (
+    Detected,
+    Doc,
+    Draft,
+    Format,
+    Reading,
+    json_head,
+    reason,
+)
 from neptune.model.knowledge import AssertionKind, Knowledge, Unknown
 from neptune.model.machine import ArtifactDigest, Release
 from neptune.model.provenance import ByteRange, EvidenceRef, Span
@@ -131,6 +139,9 @@ def _detect_spdx(head: bytes, size: int) -> Detected | None:
     if match is None:
         return None
     version = match[1].decode("ascii")
+    document = json_head(head, size)
+    if isinstance(document, dict) and isinstance(document.get("packages", []), list):
+        return Detected(VERIFIED, reason("spdx", "an SPDX JSON document that parses"), version)
     return Detected(
         SIGNATURE, reason("spdx", "a JSON object with spdxVersion: an SPDX document"), version
     )
@@ -191,11 +202,13 @@ def _read_spdx(reading: Reading) -> list[Draft]:
 def _detect_cyclonedx(head: bytes, size: int) -> Detected | None:
     if not _json_object(head) or _CYCLONEDX.search(head) is None:
         return None
-    version = _CYCLONEDX_VERSION.search(head)
+    found = _CYCLONEDX_VERSION.search(head)
+    version = found[1].decode("ascii") if found else None
+    document = json_head(head, size)
+    if isinstance(document, dict) and document.get("bomFormat") == "CycloneDX":
+        return Detected(VERIFIED, reason("cyclonedx", "a CycloneDX JSON BOM that parses"), version)
     return Detected(
-        SIGNATURE,
-        reason("cyclonedx", "a JSON object with bomFormat CycloneDX"),
-        version[1].decode("ascii") if version else None,
+        SIGNATURE, reason("cyclonedx", "a JSON object with bomFormat CycloneDX"), version
     )
 
 
@@ -289,6 +302,14 @@ def _read_cyclonedx(reading: Reading) -> list[Draft]:
 def _detect_oci_index(head: bytes, size: int) -> Detected | None:
     if not _json_object(head) or _SCHEMA_2.search(head) is None:
         return None
+    document = json_head(head, size)
+    if (
+        isinstance(document, dict)
+        and document.get("schemaVersion") == 2
+        and isinstance(document.get("manifests"), list)
+        and all(isinstance(m, dict) and "digest" in m for m in document["manifests"])
+    ):
+        return Detected(VERIFIED, reason("oci_index", "an image index that parses"))
     if _INDEX_TYPE.search(head):
         return Detected(SIGNATURE, reason("oci_index", "an image index's mediaType"))
     if _MANIFESTS.search(head):

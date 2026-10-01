@@ -1,0 +1,42 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "amr-image",
+  "documentNamespace": "https://example.com/spdx/amr-image",
+  "creationInfo": {
+    "created": "2026-09-30T10:00:00Z",
+    "creators": [
+      "Tool: example-1.0"
+    ]
+  },
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-image",
+      "name": "amr-image",
+      "versionInfo": "1.2.0",
+      "primaryPackagePurpose": "CONTAINER",
+      "downloadLocation": "NOASSERTION",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:docker/example/amr-image@sha256%3A4b29940e806f2daaa4457597e69375ff0fde556dfba48851b1882db5145842dc"
+        }
+      ]
+    },
+    {
+      "SPDXID": "SPDXRef-lidar",
+      "name": "lidar-firmware",
+      "versionInfo": "3.0.7",
+      "primaryPackagePurpose": "FIRMWARE",
+      "downloadLocation": "NOASSERTION"
+    },
+    {
+      "SPDXID": "SPDXRef-libyaml",
+      "name": "libyaml",
+      "versionInfo": "NOASSERTION",
+      "downloadLocation": "NOASSERTION"
+    }
+  ]
+}

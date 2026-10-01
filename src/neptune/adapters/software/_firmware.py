@@ -25,7 +25,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Final
 
-from neptune.adapters.contract import SIGNATURE, FormatSpec, Magic
+from neptune.adapters.contract import SIGNATURE, VERIFIED, FormatSpec, Magic
 from neptune.adapters.software._common import (
     Detected,
     Doc,
@@ -33,6 +33,7 @@ from neptune.adapters.software._common import (
     Format,
     Reading,
     describe,
+    json_head,
     loads_json,
     reason,
 )
@@ -344,6 +345,10 @@ def _detect_px4(head: bytes, size: int) -> Detected | None:
     if match is None:
         return None
     what = "PX4" if match[1] == b"PX4FWv1" else "ArduPilot"
+    document = json_head(head, size)
+    if isinstance(document, dict) and document.get("magic") in ("PX4FWv1", "APJFWv1"):
+        why = reason("px4_firmware", f"a {what} firmware file that parses")
+        return Detected(VERIFIED, why)
     return Detected(
         SIGNATURE, reason("px4_firmware", f"a JSON object with {what}'s firmware magic")
     )

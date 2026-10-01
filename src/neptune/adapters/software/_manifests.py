@@ -58,7 +58,31 @@ _PACKAGE_ROOT: Final = re.compile(
 def _detect_package_xml(head: bytes, size: int) -> Detected | None:
     if not _PACKAGE_ROOT.match(head):
         return None
+    if len(head) == size and _xml_root(head) == "package":
+        return Detected(VERIFIED, reason("ros_package_xml", "XML that parses, rooted at <package>"))
     return Detected(STRUCTURE, reason("ros_package_xml", "an XML document whose root is <package>"))
+
+
+def _xml_root(data: bytes) -> str | None:
+    """The root element of a whole XML document, or ``None`` if it does not parse."""
+    parser = expat.ParserCreate()
+    parser.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
+    roots: list[str] = []
+
+    def start(name: str, attributes: dict[str, str]) -> None:
+        if not roots:
+            roots.append(name)
+
+    def refuse(*_: object) -> None:
+        raise _EntityRefused
+
+    parser.StartElementHandler = start
+    parser.EntityDeclHandler = refuse
+    try:
+        parser.Parse(data, True)
+    except (expat.ExpatError, _EntityRefused):
+        return None
+    return roots[0] if roots else None
 
 
 class _EntityRefused(Exception):

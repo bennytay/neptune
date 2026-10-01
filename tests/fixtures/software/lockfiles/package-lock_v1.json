@@ -1,0 +1,22 @@
+{
+  "name": "legacy-console",
+  "version": "0.4.0",
+  "lockfileVersion": 1,
+  "requires": true,
+  "dependencies": {
+    "roslib": {
+      "version": "1.1.0",
+      "requires": {
+        "eventemitter2": "^6"
+      },
+      "dependencies": {
+        "eventemitter2": {
+          "version": "6.4.9"
+        }
+      }
+    },
+    "teleop": {
+      "version": "git+ssh://git@github.com/example/teleop.git#17d0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6"
+    }
+  }
+}

@@ -122,6 +122,17 @@ def loads_json(text: str) -> Any:
     return json.loads(text, object_pairs_hook=_object_pairs, parse_constant=_no_constant)
 
 
+def json_head(head: bytes, size: int) -> Any:
+    """The head as strict JSON when it is the whole source, else ``None``: a probe that parses
+    and checks its document claims ``VERIFIED``, above a generic JSON reader's ``STRUCTURE``."""
+    if len(head) != size:
+        return None
+    try:
+        return loads_json(head.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return None
+
+
 _TABLE_HEADER: Final = re.compile(rb"^[ \t]*\[", re.MULTILINE)
 
 
