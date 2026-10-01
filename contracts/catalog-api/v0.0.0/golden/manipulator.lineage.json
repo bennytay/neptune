@@ -1,0 +1,17 @@
+{
+  "api_version": "0.0.0",
+  "evidence": [
+    "sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa"
+  ],
+  "kind": "lineage",
+  "record": {
+    "package_id": "sha256:74f0761606322f58fe41abd43b24f12ffda223ecad2996404d7dd20bfd6e0b0f",
+    "record_id": "rec:sha256:402177b2decbea5aea931fcbca1600ed267ed611b70513ef43c4efd433c372ea",
+    "record_kind": "ingest_finding",
+    "registered": 1
+  },
+  "related_records": [
+    "rec:sha256:e2c144c52c3f1c398b3a8f14738901a89d68bd7853dce97e558c112e596044f6"
+  ],
+  "transform": "rec:sha256:b067af6b936bfee6cc0672de2e1ea86982eff4ea2e821b27f71b4d8701de85c0"
+}

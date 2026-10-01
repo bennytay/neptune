@@ -1,0 +1,36 @@
+{
+  "category": "joint",
+  "configuration": "rec:sha256:8f6ee2cc76048b1d40463b67b8b409f732645d1708c33db799b79928dc056fe1",
+  "frame": {
+    "knowledge": "known",
+    "value": {
+      "frame_graph_id": "rec:sha256:5666e516b12def5a3598f67523fc957de4f4d24bbcc42f77f1905b2cf3e6971f",
+      "frame_id": "fl_thigh"
+    }
+  },
+  "id": "rec:sha256:0d224c6089545d960b8996a2bcf9ee36eba86b53872f985a628912ceabb43e42",
+  "identifiers": [],
+  "kind": "hardware_component",
+  "model": {
+    "knowledge": "not_covered"
+  },
+  "name": {
+    "knowledge": "known",
+    "value": "fl_hip"
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 239,
+          "offset": 231
+        }
+      ],
+      "source": "sha256:9f8f2aaf7b5965b8524e66d8e865b4d8fc9f1f608fa4454fc7b940f32d381291"
+    },
+    "transform": "rec:sha256:163827bfaac771e9ba9f51d5b630984a2aa8eb3d64ff852bfe24bf0303285e07"
+  },
+  "schema_version": 1
+}

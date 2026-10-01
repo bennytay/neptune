@@ -1,0 +1,14 @@
+{
+  "api_version": "0.0.0",
+  "entries": [
+    {
+      "package_id": "sha256:44b4309877e2ce74d1a82d2c872eaafec8f07325b299637dae59d8f07dfa76b1",
+      "record_id": "rec:sha256:5bf3bccba577623acf6104e6d71ed1cf1dc7c0a383a97791f700564511548557",
+      "record_kind": "run",
+      "registered": 0
+    }
+  ],
+  "kind": "entity_thread",
+  "record_kind": "run",
+  "thread_id": "quadruped-run"
+}
