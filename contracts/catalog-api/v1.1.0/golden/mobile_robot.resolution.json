@@ -1,0 +1,57 @@
+{
+  "api_version": "1.1.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "cited_by": [
+    {
+      "kind": "image",
+      "line": 1,
+      "package_id": "sha256:97f31808983a6bb6d1815090e526645704d57a4e1562cd4f585799cf30955155",
+      "record_id": "rec:sha256:deec240cd3f458123c480eb7794a21c41facef5588f32c45e3dcd8888fe26006"
+    }
+  ],
+  "evidence_ref": {
+    "locator": [
+      {
+        "kind": "byte_range",
+        "length": 352,
+        "offset": 0
+      }
+    ],
+    "source": "sha256:a129a6a387b18d19bbbb00672f13b41987ea69ea42261895d257fb3b084fe0eb"
+  },
+  "fetch": [
+    {
+      "blob_path": {
+        "knowledge": "not_applicable"
+      },
+      "locations": [
+        {
+          "kind": "local",
+          "path": "photos/dock.png"
+        }
+      ],
+      "package_id": "sha256:97f31808983a6bb6d1815090e526645704d57a4e1562cd4f585799cf30955155",
+      "storage": "referenced"
+    }
+  ],
+  "findings": [],
+  "region": {
+    "addressing": "byte_range",
+    "step": {
+      "kind": "byte_range",
+      "length": 352,
+      "offset": 0
+    }
+  },
+  "size": {
+    "knowledge": "known",
+    "value": 352
+  },
+  "status": "resolved"
+}

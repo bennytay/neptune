@@ -48,21 +48,29 @@ class CatalogApi(Protocol):
     """
 
     def register(self, package_root: str | os.PathLike[str]) -> Registration:
-        """Catalogue the package at ``package_root`` (ADR 0002 §4, §6).
+        """Catalogue the package at ``package_root`` (ADR 0002 §4, §6; ADR 0006 §1, §3).
 
+        The whole package is verified first, outside the transaction and without following any
+        symlink: a symlink or special file anywhere under the root is ``refused`` with
+        ``unsafe_entry``, and a root outside the tenant's package roots is ``package_unreadable``.
         One database transaction writes the registration-log row, the package row and every
         index row together, or nothing. It locks the ``tx_clock`` row before looking the package
         up and holds it to commit, so READ COMMITTED suffices; at REPEATABLE READ or SERIALIZABLE
         the implementation retries the whole transaction on SQLSTATE 40001 / 40P01, which is safe
         because a retry either registers or finds the package registered. A known package id is a
-        no-op returning the stored ids (``already_registered``); a package bringing an existing
-        source, transform or clock id with different fields is ``refused`` with a
-        ``conflicting_id`` finding, and a corrupt or tampered package is ``refused`` too.
+        no-op returning the stored ids (``already_registered``), which also certifies that
+        ``package_root`` holds that package's bytes; a package bringing an existing source or
+        transform id with different fields, or an existing record id with another body, is
+        ``refused`` with a ``conflicting_id`` finding, and a corrupt or tampered package is
+        ``refused`` too.
         """
         ...
 
     def verify(self, package_id: str, *, as_of: int | None = None) -> VerifyReport:
-        """Re-hash a registered package at its stored root locator; report, never repair."""
+        """Re-hash a registered package at its stored root locator; report, never repair.
+
+        ``unreachable`` when that root cannot be read (the package moved or was removed).
+        """
         ...
 
     def resolve(self, evidence_ref: EvidenceAnchor, *, as_of: int | None = None) -> Resolution:

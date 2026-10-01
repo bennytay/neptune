@@ -2,11 +2,17 @@
 
 The contract that Memory, Context, Deploy and Learn build against. This page is the reference for
 each call. The decisions behind it are in [ADR 0002](adr/0002-catalog-data-model.md) (tables,
-registration), [ADR 0003](adr/0003-entity-threads-and-the-lineage-current-view.md) (threads) and
-[ADR 0004](adr/0004-catalog-api-error-model-and-versioning.md) (names, errors, versioning).
+registration), [ADR 0003](adr/0003-entity-threads-and-the-lineage-current-view.md) (threads),
+[ADR 0004](adr/0004-catalog-api-error-model-and-versioning.md) (names, errors, versioning) and
+the L1 gate's amendments, [ADR 0005](adr/0005-l1-gate-catalog-data-model-amendments.md) (record
+bodies, clock checks, collation, scale) and
+[ADR 0006](adr/0006-l1-gate-catalog-api-amendments.md) (hostile packages, moved packages and
+sources, tenant roots, paging, merge order). The gate's review is
+[reviews/l1-stress-test.md](reviews/l1-stress-test.md).
 
-- **Version:** `1.0.0`, `neptune_ledger.api.CATALOG_API_VERSION`, published as a draft in
-  `contracts/catalog-api/v1.0.0/` until the L1 gate (MVL-89) passes.
+- **Version:** `1.1.0`, `neptune_ledger.api.CATALOG_API_VERSION`, **stable**, in
+  `contracts/catalog-api/v1.1.0/`. 1.0.0 was the pre-gate draft; 1.1.0 adds the `unsafe_entry`
+  finding, the `unreachable` verdict and `QuerySpec.after`, and accepts every 1.0.0 document.
 - **Code:** `neptune_ledger.api`. It holds the `CatalogApi` protocol, the request and response
   records, `catalog_schema()` (JSON Schema 2020-12, one `$defs` entry per record),
   `QUERY_RESULT_SCHEMA` (Arrow), `to_json` / `from_json` / `dumps` / `loads`, and `StubCatalog`.
@@ -35,13 +41,13 @@ registration), [ADR 0003](adr/0003-entity-threads-and-the-lineage-current-view.m
 
 | Call | Returns | Guarantees | Never |
 |---|---|---|---|
-| `register(package_root)` | `Registration` | One transaction writes the log row, the package row and every index row, or nothing. It locks `tx_clock` before the lookup, so READ COMMITTED suffices; at stricter isolation it retries on 40001/40P01. An identical re-registration returns `already_registered` with the stored ids and locator and allocates no tick. `refused` writes nothing. | Edits, normalises or copies package bytes. Keeps the first value of a conflicting id (that is `refused` + `conflicting_id`). Records a second root locator. |
-| `verify(package_id)` | `VerifyReport` | Re-hashes `manifest.json` against the id and every listed file against the manifest, at the stored root locator. Verdict `intact`, `damaged` (every mismatch listed) or `unknown_package` (also for a package registered after `as_of`). Returns the `as_of` it used. | Repairs, re-registers or changes the catalog. |
-| `resolve(evidence_ref)` | `Resolution` | For an `EvidenceAnchor(source, locator)`: the source's size, the innermost locator step (`region`), every registered package's route to the bytes (`fetch`: package-relative blob path when materialised, stated locations when referenced, in registration order), and every record whose record-level anchor equals it exactly (`cited_by`). | Fetches bytes, follows a location, or matches locators other than by exact canonical JSON. |
+| `register(package_root)` | `Registration` | First verifies the whole package at `package_root`, outside any transaction: no symlink or special file anywhere under it, every listed file present with its size and sha256, a table for every record kind, every record readable. Only an intact package goes on. One transaction then writes the log row, the package row and every index row, or nothing. It locks `tx_clock` before the lookup, so READ COMMITTED suffices; at stricter isolation it retries on 40001/40P01. An identical re-registration returns `already_registered` with the stored ids and locator and allocates no tick; because the bytes were verified first, it also certifies that `package_root` holds the registered package. `refused` writes nothing. `package_root` must lie under the tenant's own package roots (ADR 0006 §3); any other root is `package_unreadable`, exactly as if it did not exist. | Edits, normalises or copies package bytes. Follows a symlink. Keeps the first value of a conflicting id, including a record id that arrives with another body (that is `refused` + `conflicting_id`). Records a second root locator. |
+| `verify(package_id)` | `VerifyReport` | Re-hashes `manifest.json` against the id and every listed file against the manifest, at the stored root locator, with the same entry checks as `register`. Verdict `intact`, `damaged` (every mismatch listed), `unreachable` (the stored root cannot be read: nothing compared, one `package_unreadable` finding naming it) or `unknown_package` (also for a package registered after `as_of`). Returns the `as_of` it used. A package that moved is checked at its new root with `register(new_root)`. | Repairs, re-registers or changes the catalog. Reports a moved package as `damaged`. |
+| `resolve(evidence_ref)` | `Resolution` | For an `EvidenceAnchor(source, locator)`: the source's size, the innermost locator step (`region`), every registered package's route to the bytes (`fetch`, in registration order: the package-relative blob path when materialised; when referenced, the locations that package says hold the bytes, leaving out a revision that another revision or an absence in the same package supersedes), and every record whose record-level anchor equals it exactly (`cited_by`). | Fetches bytes, follows a location, or matches locators other than by exact canonical JSON. |
 | `thread(key, order, preference)` | `Thread` | ADR 0003. `History()` returns every entry and leaves lineage sets `NotApplicable`. `LatestTransform()`, `Pinned(t)` or `AsRegisteredBy(p)` returns the current view: one transform per lineage set, resolved to `Known`, `Ambiguous` or `NotCovered`; only `Known` sets contribute entries. An entry's `world` has a `TimePoint` start and its end exactly as the package states it (open unless `Known` on the start's clock). `world` order gives per-clock partitions with the untimed partition last. `transaction` order gives one partition. Optional `merge` takes a reference clock and `ClockMapping` ids. | Defaults the preference (a missing one gives `preference_required`). Unions threads. Relates clocks without named mappings. Converts ticks. Orders by wall clock. |
 | `threads_of(record_id)` | `ThreadsOf` | Every thread the record is a member of, per registering package, with its roles, plus the threads an `Ambiguous` field names (`unresolved`). | Merges co-declared keys into one thread. |
 | `lineage(record_id)` | `LineageGraph` | The record's kind and transform, every package holding it, the transform DAG upstream of it (an unregistered upstream is a node with `NotCovered` info), and lineage siblings (same kind and anchor, other transforms). | Picks a "current" transform; that is `thread` with a preference. |
-| `query(spec)` | `pyarrow.Table` | Columns are exactly `QUERY_RESULT_SCHEMA` (`QueryRow`): the catalog's nullable index columns (ADR 0002 §5), where NULL means "not Known in the record" (`world_last`: the end is open), never "absent". Metadata `neptune.catalog_api` holds `QueryMeta` (`as_of`, findings). Filters on kinds (required), a `TimeWindow` on one clock (inclusive; records without world time never match), a `thread_id` (history entries) and packages, combined with AND. Rows are sorted by `(kind, record_id, package_id)` as UTF-8 bytes. | Accepts SQL. Applies a window across clocks. Returns record bodies (read the package). |
+| `query(spec)` | `pyarrow.Table` | Columns are exactly `QUERY_RESULT_SCHEMA` (`QueryRow`): the catalog's nullable index columns (ADR 0002 §5), where NULL means "not Known in the record" (`world_last`: the end is open), never "absent". Metadata `neptune.catalog_api` holds `QueryMeta` (`as_of`, findings). Filters on kinds (required), a `TimeWindow` on one clock (inclusive; records without world time never match), a `thread_id` (history entries) and packages, combined with AND. Rows are sorted by `(kind, record_id, package_id)` as UTF-8 bytes; `after` (a `QueryCursor`, 1.1.0) keeps the rows strictly after it and `limit` the first rows, so the last row of a page is the next page's cursor. | Accepts SQL. Applies a window across clocks. Returns record bodies (read the package). |
 
 ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 `current(thread, preference, order)` is `thread(key, order, preference)`.
@@ -60,13 +66,14 @@ ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 
 | Code | Raised by | Meaning |
 |---|---|---|
-| `package_unreadable` | register | The root is missing, not a directory, or a symlink, or its manifest cannot be read |
-| `manifest_invalid` | register | `manifest.json` is not a package manifest |
-| `file_missing`, `unexpected_file` | register, verify | A listed file is absent, or a file the manifest does not list is present |
+| `package_unreadable` | register, verify | The root is missing, not a directory, a symlink, outside the tenant's package roots, or its manifest cannot be read. From verify: the stored root, with verdict `unreachable` |
+| `manifest_invalid` | register | `manifest.json` is not a package manifest, including one that does not count a table for every record kind |
+| `unsafe_entry` | register, verify | An entry under the root is a symlink, FIFO, socket or device (subject: package-relative path). It is never followed or opened (1.1.0) |
+| `file_missing`, `unexpected_file` | register, verify | A listed file is absent (a deleted record table is `file_missing`), or a file the manifest does not list is present |
 | `file_digest_mismatch` | register, verify | A file's size or sha256 differs from the manifest (subject: package-relative path) |
 | `manifest_digest_mismatch` | verify | `manifest.json` at the stored root no longer hashes to the package id |
 | `unsupported_schema_version`, `record_invalid` | register | The package uses a schema version the Ledger does not read, or a record fails the package-schema readers |
-| `conflicting_id` | register | An existing source, transform or clock id arrives with different fields (ADR 0002 §6) |
+| `conflicting_id` | register | An existing source or transform id arrives with different fields (ADR 0002 §6), or an existing record id (clocks included) with another body (ADR 0005 §2) |
 | `unknown_package` | verify | The tenant never registered the id |
 | `unknown_record` | lineage, threads_of | No registered package holds the record id |
 | `unresolvable_evidence` | resolve | No registered package holds the source |
@@ -98,6 +105,11 @@ The suite contains:
 - the error cases: unknown package, tampered manifest and record table, refused tampered package,
   `conflicting_id` refusal, unresolvable evidence, missing preference, `as_of_out_of_range` and
   an inverted window;
+- the L1 gate's hostile cases (ADR 0006): a symlinked file or directory in a package (refused,
+  never followed), a deleted table, a manifest that omits a table, a damaged copy of a
+  registered package, a record id with another body, a source that moved (another package, and
+  `resolve` routes each package to its own locations), a package that moved (`unreachable`, then
+  `already_registered` at the new root), and paging `query` by cursor;
 - determinism checks: the same call twice gives identical bytes, and `as_of` replays an earlier
   point.
 
@@ -107,5 +119,5 @@ Clock-merge and `mapping_out_of_range` tests are deferred to MVL-92. They need M
 
 This package runs the suite against `StubCatalog` as strict expected failures
 (`tests/contract/`): each test must fail with `NotImplementedError`. The registry goldens in
-`contracts/catalog-api/v1.0.0/golden/` come from `contract_tests/goldens.py`. They are example
+`contracts/catalog-api/v1.1.0/golden/` come from `contract_tests/goldens.py`. They are example
 documents valued from the worked examples, with fixed illustrative transaction keys.
