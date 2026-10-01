@@ -41,6 +41,7 @@ Not in place yet (MVL-10): subprocess isolation, CPU/memory/time limits, crash c
 | Milestone | Control |
 |---|---|
 | M1 (MVL-2) | done: `LocalSource` walks with `O_NOFOLLOW` per component; symlinks recorded, never followed; special files never opened (ADRs 0009, 0010) |
+| M2 (MVL-8) | done: containers are inspected, never extracted: member names listed verbatim and never resolved; decoding bounded by `ProbePolicy` (members, decoded bytes, depth, declared ratio); a crashing probe is a finding (ADR 0027) |
 | M2 (MVL-75) | done: walk findings, archive-bomb limits, truncation detection, scratch-space policy, hostile fixture suite (ADR 0029) |
 | M2 (MVL-10) | subprocess isolation, CPU/memory/time limits, crash capture (file handling and the adversarial seed landed with MVL-75) |
 | M2 (MVL-16) | local-only mode |
