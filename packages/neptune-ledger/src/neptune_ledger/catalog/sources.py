@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any, BinaryIO, Final, Literal, Protocol
 
 from neptune.identity import canonical_json
-from neptune.model.knowledge import Knowledge
+from neptune.model.knowledge import Knowledge, Known
 from neptune_ledger.api.types import CatalogFinding, TransactionKey
 
 _READ_SIZE: Final = 1024 * 1024
@@ -112,8 +112,12 @@ class SourceReport:
     def to_json(self) -> dict[str, Any]:
         from neptune_ledger.api.codec import to_json
 
+        point = self.as_of
+        as_of: dict[str, Any] = {"knowledge": point.state.value}
+        if isinstance(point, Known):
+            as_of["value"] = to_json(point.value)
         return {
-            "as_of": to_json(self.as_of),
+            "as_of": as_of,
             "checks": [check.to_json() for check in self.checks],
             "findings": [to_json(finding) for finding in self.findings],
             "package_id": self.package_id,

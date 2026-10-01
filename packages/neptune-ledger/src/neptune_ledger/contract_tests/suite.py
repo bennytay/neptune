@@ -98,6 +98,12 @@ class CatalogContract:
     expected_failure: ClassVar[type[BaseException] | None] = None
 
     def make_catalog(self, workdir: Path) -> CatalogApi:
+        """A fresh, empty catalog for one tenant, with no package-root limit (ADR 0006 §3).
+
+        The tests register packages from pytest's ``tmp_path``, so the catalog must accept any
+        root, or at least every root under ``tmp_path``. ``make_tenant_catalog`` is the one that
+        configures roots.
+        """
         raise NotImplementedError("subclass CatalogContract and return a fresh catalog")
 
     def make_tenant_catalog(self, workdir: Path, package_roots: tuple[Path, ...]) -> CatalogApi:
