@@ -57,6 +57,10 @@ async def ingest_with_progress() -> IngestResult:
   do the same.
 - Cancelling the task awaiting `AsyncNeptune.ingest` cancels the job, **waits** for it to stop, then
   raises `CancelledError`. An exception from `on_event` stops the job and propagates.
+- The last checkpoint is the start of `commit`. An interruption after it (task cancelled, `on_event`
+  raising, a `with` block left by an exception) waits for the publish, then propagates carrying the
+  result: `committed_result(error)` returns the committed `IngestResult`, or `None` if no package was
+  written. Check it before retrying into the same destination.
 - Resume = call `ingest` again with the same source and workspace. Killed processes too: the
   workspace is the checkpoint (ADR 0028 §2).
 

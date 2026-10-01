@@ -34,6 +34,7 @@ from neptune.sdk import (
     UnsupportedError,
     Workspace,
     WorkspaceUnusableError,
+    committed_result,
     dry_run,
     ingest,
     read_package,
@@ -120,8 +121,9 @@ def test_an_exception_from_on_event_stops_the_job_and_the_next_ingest_resumes(
         if event.kind == "chunk_committed":
             raise KeyError("the consumer gave up")
 
-    with pytest.raises(KeyError, match="gave up"):
+    with pytest.raises(KeyError, match="gave up") as caught:
         Neptune(home).ingest(root, tmp_path / "package", on_event=stop)
+    assert committed_result(caught.value) is None
     assert not (tmp_path / "package").exists()
     seen: list[JobEvent] = []
     result = Neptune(home).ingest(root, tmp_path / "package", on_event=seen.append)
@@ -554,3 +556,35 @@ def test_a_workspace_that_will_not_read_or_write_is_workspace_unusable(
     assert isinstance(job_error.__cause__.__cause__, PermissionError)
     assert not (tmp_path / "package").exists()
     assert client.ingest(root, tmp_path / "package").committed  # usable again: the job resumes
+
+
+def test_an_on_event_exception_after_the_publish_leaves_the_job_committed(
+    root: Path, home: Path, tmp_path: Path
+) -> None:
+    """Only ``on_event`` runs after the rename: what it raises propagates, the job is committed,
+    not failed, and the exception carries the committed result (ADR 0035 §3)."""
+    seen: list[JobEvent] = []
+
+    def stop(event: JobEvent) -> None:
+        seen.append(event)
+        if event.kind == "job_committed":
+            raise KeyError("the consumer gave up")
+
+    with pytest.raises(KeyError, match="gave up") as caught:
+        Neptune(home).ingest(root, tmp_path / "package", on_event=stop)
+    result = committed_result(caught.value)
+    assert result is not None and result.state is JobState.COMMITTED
+    assert result.package == read_package(tmp_path / "package").id
+    assert result.receipt == result.read_receipt().id
+    assert kinds(seen)[-1] == "job_committed" and "job_failed" not in kinds(seen)
+
+
+def test_leaving_a_with_block_after_the_job_committed_carries_the_result(
+    root: Path, home: Path, tmp_path: Path
+) -> None:
+    run = Neptune(home).start(root, tmp_path / "package")
+    with pytest.raises(RuntimeError, match="the caller failed") as caught, run:
+        assert run.result(timeout=60).committed
+        raise RuntimeError("the caller failed")
+    result = committed_result(caught.value)
+    assert result is not None and result.package == read_package(tmp_path / "package").id

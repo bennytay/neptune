@@ -521,6 +521,7 @@ class IngestJob:
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
         self._dry = False  # a dry run: stops after plan (ADR 0035)
+        self._published: ContentId | None = None  # the package, once renamed into place
 
     @staticmethod
     def _configure(
@@ -557,6 +558,16 @@ class IngestJob:
         """
         return self._execute(dry=True)
 
+    @property
+    def committed(self) -> JobOutcome | None:
+        """The committed outcome once the package is in place, else ``None``.
+
+        ``run`` returns it. It is here too for when ``on_event`` raised after the package was
+        published and ``run`` propagated that exception instead: the job is ``committed`` all
+        the same, since its package is in place (ADR 0035 §3).
+        """
+        return self._outcome(self._published) if self._published is not None else None
+
     def _execute(self, *, dry: bool) -> JobOutcome:
         if self.state is not JobState.PENDING:
             raise JobError("a job runs once")
@@ -573,6 +584,9 @@ class IngestJob:
             self._emit(events.JOB_CANCELLED, {})
             return self._outcome(None)
         except Exception as exc:
+            if self._published is not None:  # ``on_event`` raised once the package was in place
+                self.state = JobState.COMMITTED
+                raise
             self._discard()
             self.state = JobState.FAILED
             self._emit(events.JOB_FAILED, {"error": type(exc).__name__})
@@ -580,6 +594,9 @@ class IngestJob:
                 raise JobError(f"the workspace cannot be used: {exc}") from exc
             raise
         except BaseException:
+            if self._published is not None:
+                self.state = JobState.COMMITTED
+                raise
             self._discard()  # the process is going down: leave nothing half-staged
             self.state = JobState.FAILED
             raise
@@ -1745,6 +1762,8 @@ class IngestJob:
             except (PackageError, OSError) as exc:
                 raise JobError(f"the package cannot be committed: {exc}") from exc
             self._staged = None
+            # Past here only ``on_event`` runs: whatever it raises, the job is committed.
+            self._published = package
             self._emit(events.JOB_COMMITTED, {"package": package, "sources": len(self._ingested)})
             self._finish(Phase.COMMIT, {"package": package})
         return package

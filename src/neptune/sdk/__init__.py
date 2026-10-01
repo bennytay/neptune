@@ -16,7 +16,7 @@ workspace allows it.
 
 - ``client``: ``Neptune`` and ``AsyncNeptune`` (one surface), ``Ingestion`` and
   ``AsyncIngestion`` (a job on its own thread), and the shorthands ``ingest`` and ``dry_run``.
-- ``result``: ``IngestResult`` and ``read_package``.
+- ``result``: ``IngestResult``, ``read_package``, and ``committed_result`` (ADR 0035 §3).
 - ``errors``: ``NeptuneError`` and its subclasses, each with a stable ``code``.
 
 Imports the runtime, the store and the adapters; the CLI (MVL-11) wraps this.
@@ -48,7 +48,7 @@ from neptune.sdk.errors import (
     UnsupportedError,
     WorkspaceUnusableError,
 )
-from neptune.sdk.result import IngestResult, read_package
+from neptune.sdk.result import IngestResult, committed_result, read_package
 from neptune.store.workspace import Workspace
 
 __all__ = [
@@ -80,6 +80,7 @@ __all__ = [
     "Workspace",
     "WorkspaceUnusableError",
     "builtin_adapters",
+    "committed_result",
     "dry_run",
     "ingest",
     "read_package",

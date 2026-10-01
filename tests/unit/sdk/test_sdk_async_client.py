@@ -24,7 +24,10 @@ from neptune.sdk import (
     InvalidSourceError,
     Neptune,
     NetworkRefusedError,
+    committed_result,
+    read_package,
 )
+from neptune.store.assemble import StagedPackage, publish
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures"
 IN_PROCESS: Final = JobOptions(isolation=Isolation.IN_PROCESS)
@@ -174,8 +177,9 @@ def test_cancelling_the_task_cancels_the_job_and_waits_for_it(
         await asyncio.sleep(0.05)
         assert not task.done()  # the task waits for the job to stop, not just for the cancel
         gate.set()
-        with pytest.raises(asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError) as caught:
             await task
+        assert committed_result(caught.value) is None  # stopped at a checkpoint: no package
 
     asyncio.run(main())
     assert no_job_threads()  # nothing is left running behind the caller's back
@@ -229,3 +233,61 @@ def test_a_shared_cancel_event_reaches_the_async_job(
         return await AsyncNeptune(home).ingest(root, tmp_path / "package", cancel=cancel)
 
     assert asyncio.run(main()).cancelled
+
+
+def test_a_task_cancelled_after_the_last_checkpoint_carries_the_committed_package(
+    root: Path, home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The job holds still just after its rename (the seam: nothing else stops a job between its
+    last checkpoint and its last event). The cancel is acknowledged once the package is in
+    place: ``CancelledError`` still ends the task, and carries the committed result (ADR 0035
+    §3), so the caller knows the destination now holds the package."""
+    published, gate = threading.Event(), threading.Event()
+
+    def held(staged: StagedPackage) -> str:
+        package = publish(staged)
+        published.set()
+        gate.wait(30)
+        return package
+
+    monkeypatch.setattr("neptune.runtime.job.publish", held)
+
+    async def main() -> BaseException:
+        client = AsyncNeptune(home)
+        task = asyncio.create_task(client.ingest(root, tmp_path / "package"))
+        while not published.is_set():
+            await asyncio.sleep(0.01)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        assert not task.done()  # acknowledged after the publish, not before
+        gate.set()
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await task
+        return caught.value
+
+    error = asyncio.run(main())
+    assert no_job_threads()
+    result = committed_result(error)
+    assert result is not None and result.committed
+    assert result.destination == tmp_path / "package"
+    assert result.package == read_package(tmp_path / "package").id
+    assert any("committed package" in note for note in getattr(error, "__notes__", []))
+
+
+def test_an_on_event_exception_after_the_last_checkpoint_carries_the_committed_package(
+    root: Path, home: Path, tmp_path: Path
+) -> None:
+    def stop(event: JobEvent) -> None:
+        if event.kind == "job_committed":  # the package is in place by now
+            raise LookupError("the consumer gave up")
+
+    async def main() -> BaseException:
+        with pytest.raises(LookupError, match="gave up") as caught:
+            await AsyncNeptune(home).ingest(root, tmp_path / "package", on_event=stop)
+        return caught.value
+
+    error = asyncio.run(main())
+    assert no_job_threads()
+    result = committed_result(error)
+    assert result is not None and result.committed
+    assert result.package == read_package(tmp_path / "package").id

@@ -79,7 +79,9 @@ state machine over the stages above, in nine phases (ADR 0028):
   unopened (`neptune.probe.inspection_failed`).
 - **Cancellation.** A `threading.Event`, checked before each source, chunk and phase from `inspect`
   on (the walk and its ledger always finish). The chunk in hand finishes and commits; a staged
-  package is discarded; the outcome is `cancelled` with no package.
+  package is discarded; the outcome is `cancelled` with no package. The last checkpoint is the
+  start of `commit`: after it the package is published, and an exception `on_event` raises then
+  propagates with the job `committed` (`IngestJob.committed`), never `failed` (ADR 0035 §3).
 - **Events.** `on_event(JobEvent(kind, phase, details))` for every phase start and finish, the
   start's sweep (`workspace_swept`: scratch and staging entries removed), every source (hashed,
   selected, unsupported, ambiguous, short read, planned, admitted, quarantined, …) and chunk

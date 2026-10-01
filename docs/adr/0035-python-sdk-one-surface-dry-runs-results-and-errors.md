@@ -28,7 +28,7 @@ sandbox without parsing text.
 
 1. **`neptune.sdk` is the SDK**: `client` (`Neptune`, `AsyncNeptune`, `Ingestion`,
    `AsyncIngestion`, and the shorthands `ingest` and `dry_run`), `result` (`IngestResult`,
-   `read_package`) and `errors`. It imports the runtime, the store and the adapters; the runtime
+   `read_package`, `committed_result`) and `errors`. It imports the runtime, the store and the adapters; the runtime
    is imported by nothing else but the SDK, and the CLI (MVL-11) wraps the SDK. It re-exports
    the runtime types a caller needs (`JobOptions`, `Isolation`, `Limits`, `JobEvent`,
    `JobState`, `Phase`, `Workspace`, `builtin_adapters`). Nothing is re-exported from the
@@ -63,6 +63,20 @@ sandbox without parsing text.
    raises stops the job as the runtime defines (the exception propagates, the job is `failed`,
    staging is discarded). In every case the workspace keeps what was committed, and resuming is
    calling `ingest` again.
+   - **Past the last checkpoint, the job publishes, and the interruption says so.** The job's
+     last checkpoint is the start of `commit`; after it the package is written and renamed into
+     place whatever happens. A cancel that arrives then (the event set, the awaiting task
+     cancelled, an `on_event` exception, a `with` block left by an exception) is acknowledged
+     once the package is in place: the interruption still propagates (a cancelled task must end
+     in `CancelledError` for `asyncio.timeout` and task groups to work, and a consumer's
+     exception is the consumer's), carrying the job's committed `IngestResult`.
+     `committed_result(error)` returns it (following `__cause__` and `__context__`, so it is
+     found behind a `TimeoutError` or a task's re-raised `CancelledError`), and a note on the
+     exception names the package for people; `None` means the job stopped without a package
+     and nothing is at the destination. A sync `on_event` that raises after the rename (only
+     events follow it) leaves the job `committed`, not `failed`, with no `job_failed` event;
+     `IngestJob.committed` holds its outcome. So a caller never takes a published package for a
+     stopped job, and never retries into `destination_exists` unawares.
 4. **The dry run is the job's.** `IngestJob.dry_run()` runs `discover`, `fingerprint`,
    `inspect` and `plan` and stops: state `planned` (a new `JobState`), a `job_planned` event
    (`{"sources": n}`, the sources planned), no package, no `ingest` call. A job may be built
@@ -172,6 +186,11 @@ sandbox without parsing text.
 - **Ledger records of this scan copied from the workspace's ledger as they are.** A revision's id
   hashes what it supersedes, so a changed file's revision would still carry the workspace's
   history into the package.
+- **Returning the committed result instead of raising** when an interruption loses the race
+  to the publish. Swallows a task's cancellation, which breaks `asyncio.timeout`, task groups
+  and the caller's own cancellation, and swallows a consumer's exception.
+- **A checkpoint after the publish** (or un-publishing on cancel). A package that has appeared
+  stays (ADR 0026 §4); removing it would make a package's existence depend on a race.
 - **Re-exporting the SDK from `neptune`.** `import neptune.model` would then import the
   runtime, the sandbox and pyarrow, against the package layering.
 - **Leaving out `remote` until MVL-46.** The constructor's signature would change when it lands.

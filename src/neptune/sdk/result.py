@@ -3,10 +3,15 @@
 ``IngestResult`` wraps the runtime's ``JobOutcome`` without copying or reinterpreting it: every
 property reads the runtime's record, and the receipt is the one the job wrote into the package.
 Findings are the runtime's ``IngestFinding`` objects and the cache report its ``CacheReport``.
+
+``committed_result`` finds the result an interrupted call carries when its job had already
+passed its last checkpoint and published its package (ADR 0035 §3).
 """
 
+import contextlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 from neptune.identity import canonical_json
 from neptune.model.finding import IngestFinding
@@ -110,6 +115,49 @@ class IngestResult:
     def read_package(self) -> IngestPackage:
         """The committed package, read back and verified."""
         return read_package(self._committed())
+
+
+# The attribute an interruption carries its job's committed result under (``committed_result``).
+_COMMITTED: Final = "_neptune_committed"
+
+
+def attach_committed(error: BaseException, result: IngestResult) -> None:
+    """Make ``error``, which interrupted a call whose job committed anyway, carry ``result``.
+
+    A note names the package for people reading the traceback; ``committed_result`` returns the
+    result for code. Attaching twice changes nothing.
+    """
+    if not result.committed or getattr(error, _COMMITTED, None) is not None:
+        return
+    with contextlib.suppress(AttributeError, TypeError):  # an exception that takes no attributes
+        setattr(error, _COMMITTED, result)
+        error.add_note(
+            f"Neptune: the job had passed its last checkpoint and committed package "
+            f"{result.package} at {result.destination}; committed_result(error) returns it"
+        )
+
+
+def committed_result(error: BaseException) -> IngestResult | None:
+    """The committed result an interrupted SDK call carries, else ``None`` (ADR 0035 §3).
+
+    A job past its last checkpoint (the start of ``commit``) publishes its package whatever
+    interrupts the call running it: the awaiting task cancelled, ``on_event`` raising, a
+    ``with`` block left by an exception. The interruption still propagates, carrying the job's
+    committed ``IngestResult``: the package exists, and retrying into the same destination would
+    be ``destination_exists``. ``None`` means the job stopped without one, so nothing was written
+    to the destination. The chain is followed (``__cause__``, then ``__context__``), so the result
+    is found behind the ``TimeoutError`` of ``asyncio.timeout`` or a ``CancelledError`` a task
+    re-raises for its awaiter.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        found = getattr(current, _COMMITTED, None)
+        if isinstance(found, IngestResult):
+            return found
+        current = current.__cause__ if current.__cause__ is not None else current.__context__
+    return None
 
 
 def read_package(path: Path) -> IngestPackage:

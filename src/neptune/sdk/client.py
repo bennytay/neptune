@@ -15,6 +15,10 @@ caller through a queue (to the event loop with ``call_soon_threadsafe``). Cancel
 task sets the job's cancel event, waits for the job to stop at its next checkpoint (ADR 0028 §6),
 then lets ``CancelledError`` through, so the workspace never holds half a chunk.
 
+A job past its last checkpoint (the start of ``commit``) publishes its package whatever
+interrupts the call; the interruption then propagates carrying the committed result
+(``committed_result``, ADR 0035 §3), so a caller never takes a published package for a stopped job.
+
 The SDK reads no clock and draws no random number: what reaches a package is the runtime's.
 """
 
@@ -44,7 +48,7 @@ from neptune.sdk.errors import (
     WorkspaceUnusableError,
     from_job_error,
 )
-from neptune.sdk.result import IngestResult
+from neptune.sdk.result import IngestResult, attach_committed
 from neptune.store.workspace import LocalOnlyError, Workspace, WorkspaceError
 
 StrPath: TypeAlias = str | os.PathLike[str]
@@ -158,6 +162,10 @@ def _execute(job: IngestJob, *, dry: bool) -> IngestResult:
         outcome = job.dry_run() if dry else job.run()
     except JobError as exc:
         raise from_job_error(exc, job.destination) from exc
+    except BaseException as exc:  # ``on_event`` raised: after the publish, the job committed
+        if (committed := job.committed) is not None:
+            attach_committed(exc, IngestResult(committed))
+        raise
     return IngestResult(outcome)
 
 
@@ -229,6 +237,8 @@ class Ingestion:
         if error is not None:
             self.cancel()
         self._thread.join()
+        if error is not None and self._result is not None:
+            attach_committed(error, self._result)  # past its last checkpoint: it published
 
 
 class AsyncIngestion:
@@ -300,6 +310,11 @@ class AsyncIngestion:
             raise self._error
         assert self._result is not None
         return self._result
+
+    def _attach_committed(self, error: BaseException) -> None:
+        """If the job, now ended, committed its package, make ``error`` carry the result."""
+        if self._result is not None:
+            attach_committed(error, self._result)
 
 
 # --- The clients ---------------------------------------------------------------------------------
@@ -419,7 +434,8 @@ class AsyncNeptune:
     Each job runs on a worker thread of its own; ``on_event`` is called on the event loop's
     thread. Cancelling the awaiting task cancels the job, waits for it to reach its next
     checkpoint, and re-raises ``CancelledError``; an exception from ``on_event`` does the same and
-    propagates.
+    propagates. A job already past its last checkpoint publishes first, and the exception carries
+    its committed result (``committed_result``).
     """
 
     def __init__(
@@ -482,14 +498,17 @@ class AsyncNeptune:
 async def _drive(run: AsyncIngestion, on_event: EventSink | None) -> IngestResult:
     """Deliver ``run``'s events to ``on_event`` on this loop; its result. Whatever interrupts
     the delivery (the task cancelled, ``on_event`` raising) cancels the job and waits for it to
-    stop before propagating, so nothing is left running behind the caller's back."""
+    stop before propagating, so nothing is left running behind the caller's back. A job already
+    past its last checkpoint publishes instead of stopping; the interruption then propagates
+    carrying its committed result (``committed_result``, ADR 0035 §3)."""
     try:
         async for event in run:
             if on_event is not None:
                 on_event(event)
-    except (Exception, asyncio.CancelledError):
+    except (Exception, asyncio.CancelledError) as exc:
         run.cancel()
         await run.wait()
+        run._attach_committed(exc)
         raise
     except BaseException:
         run.cancel()
