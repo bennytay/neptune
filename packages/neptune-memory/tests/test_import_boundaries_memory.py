@@ -22,19 +22,31 @@ MODEL_CLIENTS = (
 SUBPACKAGES = ("schema", "store", "consolidate", "derived", "spatial", "episodes", "cli")
 
 
-def _imports(path: Path) -> list[str]:
+def _imports_of_source(source: str, package: tuple[str, ...]) -> list[str]:
+    """Every dotted name a module may import, relative imports resolved against ``package``.
+
+    ``package`` is the importing module's package, e.g. ``("neptune_memory", "consolidate")``.
+    ``from X import n`` yields both ``X`` and ``X.n`` (``n`` may be a submodule). Out of scope for
+    v0: ``importlib.import_module`` and ``__import__`` (dynamic, invisible to the AST).
+    """
     names: list[str] = []
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Import):
             names.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if node.level:  # resolve relative imports against neptune_memory
-                base = path.relative_to(SRC).parent.parts
-                module = ".".join(["neptune_memory", *base[: len(base) - node.level + 1], module])
+            if node.level:
+                base = package[: len(package) - (node.level - 1)]
+                module = ".".join([*base, *([node.module] if node.module else [])])
+            else:
+                module = node.module or ""
             names.append(module)
             names.extend(f"{module}.{alias.name}" for alias in node.names)
     return names
+
+
+def _imports(path: Path) -> list[str]:
+    package = ("neptune_memory", *path.relative_to(SRC).parent.parts)
+    return _imports_of_source(path.read_text(encoding="utf-8"), package)
 
 
 def _under(name: str, prefix: str) -> bool:
@@ -67,3 +79,23 @@ def test_only_derived_may_import_model_clients() -> None:
             continue
         for name in _imports(path):
             assert not any(_under(name, c) for c in MODEL_CLIENTS), f"{path.name} imports {name}"
+
+
+CONSOLIDATE = ("neptune_memory", "consolidate")
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("from .. import derived", "neptune_memory.derived"),
+        ("from ..derived import x", "neptune_memory.derived.x"),
+        ("from . import x", "neptune_memory.consolidate.x"),
+        ("import neptune_memory.derived.thing", "neptune_memory.derived.thing"),
+        ("from neptune_memory import derived", "neptune_memory.derived"),
+    ],
+)
+def test_checker_resolves_planted_imports(source: str, expected: str) -> None:
+    names = _imports_of_source(source, CONSOLIDATE)
+    assert expected in names
+    if "derived" in expected:
+        assert any(_under(n, "neptune_memory.derived") for n in names)
