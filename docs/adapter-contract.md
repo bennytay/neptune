@@ -183,7 +183,7 @@ For registers, geometry, photos, video files and documents:
 | Concern | Runtime mechanism |
 |---|---|
 | resume | skip chunks whose id is already committed in the store |
-| cache | (source id, adapter id, adapter version, config hash, chunk id) |
+| cache | the chunk id, which covers source id, adapter id and version, config hash, libraries and context; a version or config change recomputes only that adapter's chunks (ADR 0031) |
 | validation across sources | `validate/` engine over the store |
 | sandboxing | subprocess with limits; the contract is picklable/serialisable so this needs no adapter change |
 | explanation | assembles `ProbeResult`, `plan` output and `descriptor` into the receipt |

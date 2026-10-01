@@ -9,6 +9,7 @@ A package is a directory::
     series/<64 hex>.parquet          one per stream, named by the stream's id (MVL-16 writes them)
     blobs/sha256/<2 hex>/<64 hex>    a materialised source's bytes
     volatile/receipt-envelope.json   ReceiptEnvelope: job, wall clock, host, root; not listed
+    volatile/cache-report.json       what the job reused and recomputed, and why (ADR 0031)
 
 ``package_contents`` computes every deterministic file from the records: the same records,
 series and blobs always give the same bytes and so the same package id. ``package_files`` is the
@@ -60,6 +61,7 @@ RECEIPT: Final = "receipt.json"
 RECEIPT_TEXT: Final = "receipt.md"
 VOLATILE: Final = "volatile"
 ENVELOPE: Final = f"{VOLATILE}/receipt-envelope.json"
+CACHE_REPORT: Final = f"{VOLATILE}/cache-report.json"
 _SERIES: Final = re.compile(r"series/([0-9a-f]{64})\.parquet")
 _BLOB: Final = re.compile(r"blobs/sha256/([0-9a-f]{2})/([0-9a-f]{64})")
 _TABLE: Final = re.compile(r"records/([a-z][a-z0-9_]*)\.jsonl")
@@ -258,6 +260,31 @@ def write_envelope(root: Path, envelope: ReceiptEnvelope) -> None:
     path = root / ENVELOPE
     path.parent.mkdir(exist_ok=True)
     path.write_bytes(_document(envelope))
+
+
+def write_cache_report(root: Path, report: JsonObject) -> None:
+    """Add the runtime's cache report (ADR 0031 §5); like the envelope, it names its receipt.
+
+    The report is the runtime's document (``neptune.runtime.cache``); the store only checks
+    that it accompanies this package's receipt and writes it, canonical, beside the envelope.
+    """
+    manifest = package_manifest_from_json(canonical_json.loads((root / MANIFEST).read_bytes()))
+    if report.get("receipt") != manifest.receipt:
+        raise PackageError(f"cache report is for receipt {report.get('receipt')!r}, not this one")
+    path = root / CACHE_REPORT
+    path.parent.mkdir(exist_ok=True)
+    path.write_bytes(canonical_json.dumps(report))
+
+
+def read_cache_report(root: Path) -> JsonObject:
+    """The cache report a job left in a package, as canonical JSON; ``PackageError`` if none."""
+    try:
+        data = canonical_json.loads((root / CACHE_REPORT).read_bytes())
+    except (OSError, ValueError) as exc:
+        raise PackageError(f"{CACHE_REPORT} cannot be read: {exc}") from exc
+    if not isinstance(data, dict):
+        raise PackageError(f"{CACHE_REPORT} is not a JSON object")
+    return data
 
 
 # --- Reading -----------------------------------------------------------------------------------

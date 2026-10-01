@@ -7,7 +7,7 @@ flowchart LR
   subgraph N["Neptune"]
     DISC["Discovery &amp; identity"]
     RT["Ingestion runtime"]
-    WS[("Local workspace<br/>ledgers · chunks")]
+    WS[("Local workspace + cache<br/>ledgers · plans · chunks<br/>derivatives")]
     AD["Format adapters"]
     CAN["Canonical model<br/>records + provenance"]
     PKG[("Ingest package")]
@@ -24,7 +24,8 @@ flowchart LR
   RAW --> DISC --> RT
   RT <-->|chunks / records| AD
   AD -.->|conforms to| CAN
-  RT --> WS --> PKG
+  RT <-->|commit / reuse by key| WS
+  WS --> PKG
   PKG <--> VAL
   PKG --> DER
   PKG ==> MEM --> RET --> USE
@@ -41,8 +42,8 @@ flowchart LR
   classDef partial fill:#c09a5b26,stroke:#c09a5b,stroke-width:2px
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
-  class CAN,K1 built
-  class DISC,RT,AD,WS,PKG,K2 partial
+  class CAN,WS,K1 built
+  class DISC,RT,AD,PKG,K2 partial
   class VAL,DER,K3 todo
   class RAW,MEM,RET,USE ext
   style N fill:#8b949e0f,stroke:#8b949e

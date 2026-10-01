@@ -27,6 +27,11 @@ exists, a config naming an option no adapter has, a workspace or disk that will 
 Cancellation is checked between units of work (sources and chunks) and between phases from
 inspect on; the walk and its saved ledger always finish. A chunk in progress finishes and commits;
 nothing in the workspace is left half-written.
+
+The workspace is also the cache (ADR 0031): a plan, a chunk's output and a derivative (a source's
+verdict on the cross-chunk laws, a stream's series file) are each reused whenever the workspace
+keeps them under the key the job needs, so an unchanged source costs a hash and no adapter call.
+Each miss names the rule that caused it, and the job leaves a ``CacheReport`` beside the envelope.
 """
 
 import errno
@@ -35,13 +40,13 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from itertools import pairwise
 from pathlib import Path
-from typing import Final
+from typing import Final, TypeVar
 
 from neptune.adapters.check import check_chunk_output, check_plan
 from neptune.adapters.contract import (
@@ -70,27 +75,59 @@ from neptune.discovery.source import (
     SymlinkEntry,
     WalkEntry,
 )
-from neptune.identity.revisions import SourceLedger
+from neptune.identity import canonical_json
+from neptune.identity.revisions import Observation, SourceLedger
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.package import ReceiptEnvelope
 from neptune.model.run import Stream
 from neptune.model.series import SEQ
-from neptune.model.source import LocalPath, RawLocalPath, SourceArtifact, local_location
+from neptune.model.source import (
+    LocalPath,
+    RawLocalPath,
+    SourceArtifact,
+    local_location,
+)
 from neptune.runtime import events, lineage
+from neptune.runtime.cache import (
+    VERDICT_FILE,
+    CacheReport,
+    Calls,
+    ChunkCache,
+    DerivativeCache,
+    PlanCache,
+    Rule,
+    SourceCache,
+    admission_key,
+    chunk_laws_key,
+    explain_plan,
+)
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
-from neptune.runtime.lineage import Failure, Law, Step, type_name
+from neptune.runtime.lineage import Failure, Law, Step, failure_from_json, type_name
 from neptune.store.assemble import StagedPackage, publish, stage
-from neptune.store.package import PackageError, read_package, write_envelope
-from neptune.store.series import RunCheck, SeriesError, SeriesReadError, check_run
-from neptune.store.workspace import Workspace, WorkspaceError
+from neptune.store.package import (
+    PackageError,
+    read_package,
+    write_cache_report,
+    write_envelope,
+)
+from neptune.store.series import RunCheck, SeriesError, SeriesReadError, check_run, read_run
+from neptune.store.workspace import (
+    Collected,
+    Derivative,
+    DerivativeKey,
+    Held,
+    Workspace,
+    WorkspaceError,
+)
 
 DEFAULT_ATTEMPTS: Final = 2
 # What the runtime's own reads of a source raise: opening it, its size, its head. An adapter's
 # reads are the adapter's: anything but ``SourceChangedError`` from ``plan`` or ``ingest`` is its
 # failure (``plan_failed``, ``chunk_failed``).
 _UNREADABLE: Final = (SourceChangedError, SourceAccessError, OSError)
+_T = TypeVar("_T")
 
 
 class JobError(Exception):
@@ -99,6 +136,18 @@ class JobError(Exception):
 
 class _Cancelled(Exception):
     """Raised at a checkpoint when cancellation was requested; caught by ``run``."""
+
+
+class _Unopened(Exception):
+    """A source could not be opened to judge a kept chunk; ``cause`` says why.
+
+    Neither an ``OSError`` nor a ``ValueError``, so it passes through the workspace's handling of
+    a derivative being built to the job, which quarantines the source.
+    """
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(type(cause).__name__)
+        self.cause = cause
 
 
 @dataclass(frozen=True)
@@ -126,7 +175,10 @@ class JobOptions:
 
 @dataclass(frozen=True)
 class JobOutcome:
-    """How a job ended: committed with a package, or cancelled at a checkpoint without one."""
+    """How a job ended: committed with a package, or cancelled at a checkpoint without one.
+
+    ``cache`` says what the job reused and recomputed, and why (ADR 0031 §5).
+    """
 
     state: JobState
     job: str
@@ -135,6 +187,7 @@ class JobOutcome:
     ingested: tuple[tuple[ContentId, RecordId], ...]
     findings: tuple[IngestFinding, ...]
     durations: tuple[tuple[str, float], ...]
+    cache: CacheReport = field(default_factory=CacheReport)
 
 
 @dataclass
@@ -148,6 +201,9 @@ class _Source:
     chunks: tuple[Chunk, ...] = ()
     planned: bool = False
     quarantined: list[str] = field(default_factory=list)  # the codes of its runtime findings
+    replaced: ContentId | None = None  # bytes a location of it held before, if any
+    plan_cache: PlanCache | None = None  # set once the job decides to plan or reuse
+    hits: set[str] = field(default_factory=set)  # chunks the workspace had committed
 
     @property
     def content_id(self) -> ContentId:
@@ -157,6 +213,25 @@ class _Source:
     def key(self) -> tuple[ContentId, RecordId]:
         assert self.config is not None  # only selected sources have a key
         return (self.content_id, self.config.transform.id)
+
+
+class _Opener:
+    """One source's reader, opened the first time a chunk needs the source; then ``close``."""
+
+    def __init__(self, source: LocalSource, item: _Source) -> None:
+        self._source, self._item = source, item
+        self._reader: LocalReader | None = None
+
+    def open(self) -> LocalReader:
+        """The reader. The first call opens it and raises whatever opening raises."""
+        if self._reader is None:
+            self._reader = LocalReader(self._source, self._item.location, self._item.artifact)
+        return self._reader
+
+    def close(self) -> None:
+        if self._reader is not None:
+            self._reader.close()
+            self._reader = None
 
 
 def _now() -> str:
@@ -206,6 +281,29 @@ def _chunk_series_failure(output: ChunkOutput) -> Failure | None:
                     return broken(Law.SEQ_REPEATED, batch.stream, seq=value)
                 seen[batch.stream].add(value)
     return None
+
+
+def _replaced(
+    ledger: SourceLedger, observations: Iterable[Observation]
+) -> dict[ContentId, ContentId]:
+    """For each source a location now holds in place of other bytes, those bytes (the least).
+
+    What a ``source_changed`` miss names (ADR 0031 §3). Bytes returning to a location that was
+    seen empty replace nothing.
+    """
+    held: dict[RecordId, ContentId] = {r.id: r.content_id for r in ledger.revisions()}
+    replaced: dict[ContentId, ContentId] = {}
+    for observation in observations:
+        revision = observation.revision
+        if not observation.new_revision:
+            continue
+        for previous in revision.supersedes:
+            before = held.get(previous)  # None for an absence
+            if before is not None and before != revision.content_id:
+                replaced[revision.content_id] = min(
+                    before, replaced.get(revision.content_id, before)
+                )
+    return replaced
 
 
 def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[JsonObject]:
@@ -298,6 +396,9 @@ class IngestJob:
         self._sources: list[_Source] = []
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
+        self._calls: dict[str, int] = {"ingest": 0, "plan": 0, "probe": 0}
+        self._derivatives: dict[str, DerivativeCache] = {}
+        self._receipt: RecordId | None = None
 
     @staticmethod
     def _configure(
@@ -324,15 +425,8 @@ class IngestJob:
         self.state = JobState.RUNNING
         started = _now()
         try:
-            source = LocalSource(self.root)
-            entries = self._discover(source)
-            ledger = self._fingerprint(source, entries)
-            self._inspect(source)
-            self._plan(source)
-            self._ingest(source)
-            self._assemble(ledger)
-            receipt = self._validate()
-            package = self._commit(receipt, started)
+            with self.workspace.in_use():  # collection waits until the job is done
+                package = self._phases(started)
         except _Cancelled:
             self._discard()
             self.state = JobState.CANCELLED
@@ -342,6 +436,8 @@ class IngestJob:
             self._discard()
             self.state = JobState.FAILED
             self._emit(events.JOB_FAILED, {"error": type(exc).__name__})
+            if isinstance(exc, WorkspaceError):
+                raise JobError(f"the workspace cannot be used: {exc}") from exc
             raise
         except BaseException:
             self._discard()  # the process is going down: leave nothing half-staged
@@ -349,6 +445,17 @@ class IngestJob:
             raise
         self.state = JobState.COMMITTED
         return self._outcome(package)
+
+    def _phases(self, started: str) -> ContentId:
+        source = LocalSource(self.root)
+        entries = self._discover(source)
+        ledger = self._fingerprint(source, entries)
+        self._inspect(source)
+        self._plan(source)
+        self._ingest(source)
+        self._assemble(ledger)
+        receipt = self._validate()
+        return self._commit(receipt, started)
 
     def _outcome(self, package: ContentId | None) -> JobOutcome:
         return JobOutcome(
@@ -359,6 +466,36 @@ class IngestJob:
             ingested=tuple(sorted(self._ingested)),
             findings=tuple(sorted(self._findings.values(), key=lambda f: f.id)),
             durations=self._durations_pairs(),
+            cache=self._cache_report(),
+        )
+
+    def _cache_report(self) -> CacheReport:
+        """What this job reused and recomputed so far, and why (ADR 0031 §5)."""
+        sources = []
+        for item in self._sources:
+            if item.config is None or item.plan_cache is None:
+                continue  # never selected, or never reached the plan phase
+            plan, transform = item.plan_cache, item.config.transform
+            chunks = tuple(
+                ChunkCache(chunk.id, Rule.COMMITTED if chunk.id in item.hits else plan.chunk_miss)
+                for chunk in item.chunks
+            )
+            sources.append(
+                SourceCache(
+                    source=item.content_id,
+                    transform=transform.id,
+                    adapter=transform.adapter_id,
+                    adapter_version=transform.adapter_version,
+                    config_hash=transform.config_hash,
+                    plan=plan,
+                    chunks=chunks,
+                )
+            )
+        return CacheReport(
+            sources=tuple(sorted(sources, key=lambda s: (s.source, s.transform))),
+            derivatives=tuple(self._derivatives[key] for key in sorted(self._derivatives)),
+            calls=Calls(**self._calls),
+            receipt=self._receipt,
         )
 
     # --- Phases, events, checkpoints -----------------------------------------------------------
@@ -484,6 +621,7 @@ class IngestJob:
                     self._skip(entry)
             by_content: dict[ContentId, _Source] = {}
             new_artifacts = new_revisions = 0
+            replaced = _replaced(ledger, result.observations)
             for observation in result.observations:
                 revision = observation.revision
                 location = revision.location
@@ -505,7 +643,9 @@ class IngestJob:
                     },
                 )
                 if revision.content_id not in by_content:
-                    by_content[revision.content_id] = _Source(artifact, location)
+                    by_content[revision.content_id] = _Source(
+                        artifact, location, replaced=replaced.get(revision.content_id)
+                    )
             for absence in result.absences:
                 self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
             self._sources = list(by_content.values())
@@ -534,6 +674,7 @@ class IngestJob:
         for adapter in self.registry.adapters():
             descriptor = adapter.descriptor
             try:
+                self._calls["probe"] += 1
                 result = adapter.probe(head, hints)
                 if not isinstance(result, ProbeResult):
                     raise ContractError(f"probe returned {result!r}")
@@ -589,6 +730,19 @@ class IngestJob:
 
     # --- plan ----------------------------------------------------------------------------------
 
+    def _explain(self, item: _Source) -> PlanCache:
+        """Why ``item`` must be planned: the first invalidation rule that holds (ADR 0031 §3).
+
+        Only the explanation depends on the source's other plans, so if they cannot be listed it
+        is made from what is known without them; the job plans the source either way.
+        """
+        assert item.config is not None
+        try:
+            kept = self.workspace.transforms_of(item.content_id)
+        except (WorkspaceError, ValueError, OSError):
+            kept = ()
+        return explain_plan(item.config.transform, kept, item.replaced)
+
     def _plan(self, source: LocalSource) -> None:
         with self._enter(Phase.PLAN):
             planned = chunks_total = committed_total = failed = 0
@@ -605,6 +759,7 @@ class IngestJob:
                         f"the stored plan of {item.content_id} cannot be read: {exc}"
                     ) from exc
                 reused = stored is not None
+                item.plan_cache = PlanCache(Rule.PLANNED) if reused else self._explain(item)
                 if stored is None:
                     try:
                         reader = LocalReader(source, item.location, item.artifact)
@@ -637,6 +792,7 @@ class IngestJob:
                         "committed": done,
                         "cost": sum(chunk.cost for chunk in chunks),
                         "reused": reused,
+                        "rule": str(item.plan_cache.rule),
                         "source": item.content_id,
                         "transform": config.transform.id,
                     },
@@ -660,6 +816,7 @@ class IngestJob:
         assert item.adapter is not None and item.config is not None
         adapter, config = item.adapter, item.config
         try:
+            self._calls["plan"] += 1
             plan: object = adapter.plan(reader, config)  # the adapter's word, not yet checked
         except SourceChangedError as exc:
             self._unreadable(item, exc)
@@ -706,12 +863,20 @@ class IngestJob:
         for item in self._sources:
             if not item.planned or item.quarantined:
                 continue
-            reader: LocalReader | None = None
+            opener = _Opener(source, item)
             try:
                 for chunk in item.chunks:
                     self._phase = Phase.PARSE  # between chunks, the job is about to parse
                     self._check_cancel()
                     if self.workspace.committed(chunk.id):
+                        item.hits.add(chunk.id)  # its output is reused: no adapter call
+                        admitted = self._judge(item, chunk, opener)
+                        if admitted is None:  # the source could not be opened to judge it
+                            failed += 1
+                            break
+                        if not admitted:
+                            failed += 1
+                            continue
                         skipped += 1
                         self._emit(
                             events.CHUNK_SKIPPED,
@@ -719,15 +884,15 @@ class IngestJob:
                             Phase.PARSE,
                         )
                         continue
+                    reader: LocalReader | None = None
+                    with self._enter(Phase.PARSE):
+                        try:
+                            reader = opener.open()
+                        except _UNREADABLE as exc:
+                            self._unreadable(item, exc)
                     if reader is None:
-                        with self._enter(Phase.PARSE):
-                            try:
-                                reader = LocalReader(source, item.location, item.artifact)
-                            except _UNREADABLE as exc:
-                                self._unreadable(item, exc)
-                        if reader is None:
-                            failed += 1
-                            break
+                        failed += 1
+                        break
                     parsed = self._parse(item, reader, chunk)
                     if parsed is None:
                         failed += 1
@@ -743,8 +908,7 @@ class IngestJob:
                     else:
                         failed += 1
             finally:
-                if reader is not None:
-                    reader.close()
+                opener.close()
         self._finish(
             Phase.PARSE, {"chunks": committed + failed, "failed": failed, "skipped": skipped}
         )
@@ -765,6 +929,7 @@ class IngestJob:
         for attempt in range(1, attempts + 1):
             with self._enter(Phase.PARSE):
                 try:
+                    self._calls["ingest"] += 1
                     output: object = adapter.ingest(reader, chunk, config)
                 except SourceChangedError as exc:
                     self._unreadable(item, exc)
@@ -835,7 +1000,10 @@ class IngestJob:
 
         The output is the adapter's, so a check can meet anything: a record-like object without
         provenance, a ``to_json`` that raises. Each is a ``Failure`` naming the check, never an
-        escape that fails the job.
+        escape that fails the job. The same checks judge a committed output that another runtime
+        version admitted (``_judge``), as the workspace keeps it: records and findings sorted by
+        id, one sorted batch per stream. So a law, and the facts its failure names, depends on a
+        chunk's content and never on the order or batching the adapter emitted it in.
         """
         assert item.adapter is not None and item.config is not None
         try:
@@ -860,7 +1028,11 @@ class IngestJob:
             if failure is None:
                 try:
                     new = self.workspace.commit(
-                        chunk, output.records, output.findings, output.series
+                        chunk,
+                        output.records,
+                        output.findings,
+                        output.series,
+                        laws=lineage.RUNTIME_VERSION,
                     )
                 except OSError as exc:
                     raise JobError(f"chunk {chunk.id} cannot be committed: {exc}") from exc
@@ -881,6 +1053,103 @@ class IngestJob:
                 },
             )
         return True
+
+    def _judge(self, item: _Source, chunk: Chunk, opener: _Opener) -> bool | None:
+        """Whether a committed chunk's output is admitted by this runtime's per-chunk laws.
+
+        One this runtime version admitted is, as it stands. One another version admitted (or
+        whose version is not recorded) is judged by these laws without the adapter (ADR 0031
+        §2); one they refuse fails as it would in a fresh workspace: ``chunk_failed`` at the
+        check it broke, after one attempt. ``None`` if the source, needed to judge it, could not
+        be opened (it is quarantined as unreadable, as a fresh ingest would find it).
+        """
+        if self.workspace.admitted(chunk.id) == lineage.RUNTIME_VERSION:
+            return True
+        with self._enter(Phase.NORMALIZE):
+            try:
+                failure = self._chunk_laws(item, chunk, opener)
+            except _Unopened as exc:
+                self._unreadable(item, exc.cause)
+                return None
+            if failure is not None:
+                self._fail_chunk(item, chunk, 1, failure)
+                return False
+        return True
+
+    def _chunk_laws(self, item: _Source, chunk: Chunk, opener: _Opener) -> Failure | None:
+        """This runtime's per-chunk laws over a chunk's committed output, kept as a derivative.
+
+        A function of the chunk's id (its output never changes) and of the runtime's version, so
+        it is judged once per version: the next job of this version reads the verdict back, and
+        the source is opened only to judge.
+        """
+        assert item.config is not None
+        key = chunk_laws_key(
+            item.content_id, item.config.transform.id, chunk.id, lineage.RUNTIME_VERSION
+        )
+
+        def build(directory: Path) -> None:
+            try:
+                reader = opener.open()
+            except _UNREADABLE as exc:
+                raise _Unopened(exc) from exc
+            failure = self._check_output(item, reader, chunk, self._committed_output(chunk))
+            verdict: JsonObject = (
+                {"admitted": True}
+                if failure is None
+                else {"admitted": False, "failure": failure.to_json()}
+            )
+            (directory / VERDICT_FILE).write_bytes(canonical_json.dumps(verdict))
+
+        def read(derivative: Derivative) -> tuple[Failure | None]:
+            data = canonical_json.loads(derivative.read(VERDICT_FILE))
+            if data == {"admitted": True}:
+                return (None,)
+            if not isinstance(data, dict) or data.keys() != {"admitted", "failure"}:
+                raise ValueError("not a chunk's verdict")
+            if data["admitted"] is not False:
+                raise ValueError("a chunk's verdict with a failure does not admit it")
+            return (failure_from_json(data["failure"]),)
+
+        return self._kept(key, build, read, f"the verdict on chunk {chunk.id}")[0]
+
+    def _committed_output(self, chunk: Chunk) -> ChunkOutput:
+        """A committed chunk's output as the laws see it: its records, findings and runs.
+
+        Each stream's run comes back as one batch in run order. A chunk the workspace cannot
+        read back is the workspace's fault, not the source's: ``JobError``.
+        """
+        try:
+            committed = self.workspace.load(chunk.id)
+            series = tuple(read_run(run) for _, run in sorted(committed.runs.items()))
+            return ChunkOutput(committed.records, series, committed.findings)
+        except (ValueError, OSError) as exc:  # a WorkspaceError, SeriesError or ContractError too
+            raise JobError(f"committed chunk {chunk.id} cannot be read: {exc}") from exc
+
+    def _kept(
+        self,
+        key: DerivativeKey,
+        build: Callable[[Path], None],
+        read: Callable[[Derivative], _T],
+        what: str,
+    ) -> _T:
+        """A small derivative read back from the workspace: the one kept, or built now.
+
+        One kept that does not read back (``read`` raises ``ValueError``) is damaged: discarded
+        and built again. The workspace failing to keep it fails the job.
+        """
+        try:
+            derivative, held = self.workspace.materialise(key, build)
+            try:
+                value = read(derivative)
+            except ValueError:  # a WorkspaceError too: not what was kept
+                self.workspace.discard(key)
+                derivative, _ = self.workspace.materialise(key, build)
+                held, value = Held.REBUILT, read(derivative)
+        except (ValueError, OSError) as exc:
+            raise JobError(f"{what} cannot be kept: {exc}") from exc
+        self._derived(key, held)
+        return value
 
     # --- assemble ------------------------------------------------------------------------------
 
@@ -953,6 +1222,44 @@ class IngestJob:
                 problems.extend(_run_problems(streams[stream], found))
         return problems
 
+    def _verdict(self, item: _Source) -> list[JsonObject]:
+        """The cross-chunk laws' verdict on ``item``: kept by the workspace, or computed now.
+
+        A function of the source's chunk ids (their outputs never change) and of the runtime's
+        version (which changes with the laws), so it is a derivative (ADR 0031 §4): an unchanged
+        source is not read again to be admitted.
+        """
+        assert item.config is not None
+        key = admission_key(
+            item.content_id,
+            item.config.transform.id,
+            [chunk.id for chunk in item.chunks],
+            lineage.RUNTIME_VERSION,
+        )
+
+        def build(directory: Path) -> None:
+            problems: list[JsonValue] = list(self._cross_chunk_problems(item))
+            (directory / VERDICT_FILE).write_bytes(canonical_json.dumps({"problems": problems}))
+
+        def read(derivative: Derivative) -> list[JsonObject]:
+            data = canonical_json.loads(derivative.read(VERDICT_FILE))
+            found = data.get("problems") if isinstance(data, dict) else None
+            if not isinstance(found, list):
+                raise ValueError("not a source's verdict")
+            problems: list[JsonObject] = [p for p in found if isinstance(p, dict)]
+            if len(problems) != len(found):
+                raise ValueError("a verdict's problems are objects")
+            return problems
+
+        return self._kept(key, build, read, f"the verdict on {item.content_id}")
+
+    def _derived(self, key: DerivativeKey, held: Held) -> None:
+        """Note a derivative the job read, and how the workspace came by it."""
+        entry = DerivativeCache.of(key, held)
+        self._derivatives[key.id] = entry
+        kind = events.DERIVATIVE_REUSED if held is Held.HELD else events.DERIVATIVE_BUILT
+        self._emit(kind, {"derivative": key.id, "recipe": key.recipe, "rule": str(entry.rule)})
+
     def _assemble(self, ledger: SourceLedger) -> None:
         with self._enter(Phase.ASSEMBLE):
             self._check_cancel()
@@ -961,11 +1268,7 @@ class IngestJob:
                 if item.adapter is None or item.config is None:
                     continue  # never selected: nothing to admit, nothing to quarantine
                 self._check_cancel()  # each source's runs are read whole: a checkpoint between
-                if (
-                    item.planned
-                    and not item.quarantined
-                    and (problems := self._cross_chunk_problems(item))
-                ):
+                if item.planned and not item.quarantined and (problems := self._verdict(item)):
                     self._quarantine(
                         item,
                         lineage.output_invalid(
@@ -994,6 +1297,8 @@ class IngestJob:
                 )
             except (PackageError, WorkspaceError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the package cannot be assembled: {exc}") from exc
+            for use in self._staged.derivatives:
+                self._derived(use.key, use.held)
             self._emit(
                 events.PACKAGE_STAGED,
                 {"package": self._staged.id, "sources": len(self._ingested)},
@@ -1026,11 +1331,12 @@ class IngestJob:
     # --- commit --------------------------------------------------------------------------------
 
     def _commit(self, receipt: RecordId, started: str) -> ContentId:
-        """Write the envelope into the staged package and rename it into place."""
+        """Write the envelope and the cache report into the staged package; rename it into place."""
         with self._enter(Phase.COMMIT):
             self._check_cancel()
             staged = self._staged
             assert staged is not None
+            self._receipt = receipt
             envelope = ReceiptEnvelope(
                 receipt=receipt,
                 job=self.job,
@@ -1042,6 +1348,7 @@ class IngestJob:
             )
             try:
                 write_envelope(staged.path, envelope)
+                write_cache_report(staged.path, self._cache_report().to_json())
                 package = publish(staged)
             except (PackageError, OSError) as exc:
                 raise JobError(f"the package cannot be committed: {exc}") from exc
@@ -1049,3 +1356,20 @@ class IngestJob:
             self._emit(events.JOB_COMMITTED, {"package": package, "sources": len(self._ingested)})
             self._finish(Phase.COMMIT, {"package": package})
         return package
+
+
+def collect(
+    workspace: Workspace, registry: AdapterRegistry, options: JobOptions | None = None
+) -> Collected:
+    """Collect ``workspace`` for jobs run with ``registry`` and ``options`` (ADR 0031 §6).
+
+    Keeps what such a job could reuse: plans under the transforms these adapters and this config
+    define, for sources some saved ledger still holds, with their chunks and derivatives.
+    Removes the rest. Refused (``JobError``) while a job holds the workspace, or when the
+    workspace cannot be read well enough to tell what is reachable.
+    """
+    configs = IngestJob._configure(registry, (options or JobOptions()).config)
+    try:
+        return workspace.collect({config.transform.id for config in configs.values()})
+    except (WorkspaceError, ValueError, TypeError, OSError) as exc:
+        raise JobError(f"the workspace cannot be collected: {exc}") from exc

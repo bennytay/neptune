@@ -43,6 +43,7 @@ from neptune.model.series import (
     VALUE,
     ColumnType,
     SeriesBatch,
+    SeriesColumn,
     time_column,
 )
 
@@ -336,6 +337,39 @@ def read_rows(source: Source) -> Iterator[dict[str, object]]:
     """Every row of a series file, in file order, as column name to cell."""
     for batch in _open(source).iter_batches(batch_size=READ_ROWS):
         yield from batch.to_pylist()
+
+
+def read_run(run: Path) -> SeriesBatch:
+    """One chunk's run of a stream back as one batch: its columns and rows, in run order.
+
+    What the runtime judges a committed chunk's series by when the laws changed after it was
+    committed (ADR 0031 §2). The whole run is held in memory, as the chunk's output was when it
+    was committed. A file that is not a run is a ``SeriesError``.
+    """
+    opened = _open(run)
+    stream = _run_stream(opened)
+    try:
+        table = opened.read()
+    except (pa.ArrowException, OSError) as exc:
+        raise SeriesReadError(f"a run of {stream} cannot be read: {exc}") from exc
+    columns = []
+    for field in table.schema:
+        repeated = pa.types.is_list(field.type)
+        arrow = field.type.value_type if repeated else field.type
+        kind = next((k for k, t in _ARROW_TYPES.items() if t == arrow), None)
+        if kind is None:
+            raise SeriesError(f"a run's column {field.name} is of no series type: {field.type}")
+        cells = table.column(field.name).to_pylist()
+        if repeated:
+            cells = [None if cell is None else tuple(cell) for cell in cells]
+        try:
+            columns.append(SeriesColumn(field.name, kind, tuple(cells), repeated))
+        except (TypeError, ValueError) as exc:
+            raise SeriesError(f"a run's column {field.name} breaks its type: {exc}") from exc
+    try:
+        return SeriesBatch(stream, tuple(columns))
+    except ValueError as exc:
+        raise SeriesError(f"a run of {stream} is not a batch: {exc}") from exc
 
 
 def _check_columns(stream: Stream, schema: Any) -> None:

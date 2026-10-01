@@ -302,6 +302,7 @@ def test_cancelling_during_assembly_stops_before_the_next_source(
     assert job.run().state is JobState.CANCELLED
     assert [e.kind for e in seen if e.phase is Phase.ASSEMBLE] == [
         "phase_started",
+        "derivative_built",  # the first source's verdict on the cross-chunk laws (ADR 0031)
         "source_admitted",
         "job_cancelled",
     ]

@@ -26,11 +26,12 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0019](0019-machine-context-records.md) | Machine context: machines, hardware, software and calibration | Accepted |
 | [0020](0020-world-and-record-context-records.md) | World and record context: sites, assets, geometry, media, documents and tables | Accepted |
 | [0021](0021-schema-export-and-worked-examples.md) | The canonical JSON Schema and the worked examples | Accepted |
-| [0022](0022-ingest-package-and-receipt.md) | The ingest package and its receipt | Accepted; §1 amended by 0023 |
+| [0022](0022-ingest-package-and-receipt.md) | The ingest package and its receipt | Accepted; §1 amended by 0023 and 0031 |
 | [0023](0023-m1-gate-freeze-and-growth.md) | The M1 gate: the model freezes, grows only by addition, and fixes four gaps | Accepted |
 | [0024](0024-adapter-abi-types-selection-and-reference-adapter.md) | The adapter ABI's exact types, adapter selection, and the reference adapter | Accepted |
 | [0025](0025-series-files-sorted-merged-and-pinned.md) | Series files: one sorted Parquet file per stream, merged from runs, pinned settings | Accepted |
-| [0026](0026-local-workspace-in-place-reads-and-assembly.md) | The local workspace, reading sources in place, and assembling packages | Accepted |
+| [0026](0026-local-workspace-in-place-reads-and-assembly.md) | The local workspace, reading sources in place, and assembling packages | Accepted; §1 amended by 0031 (format 2) |
 | [0027](0027-probe-engine-sniffing-containers-and-selection-findings.md) | The probe engine: sniffing, bounded container inspection, and selection as findings | Accepted |
 | [0028](0028-ingest-job-phases-resume-quarantine-and-events.md) | The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events | Accepted |
 | [0029](0029-hostile-file-handling.md) | Hostile file handling: walk findings, archive limits, source verification, scratch space | Accepted |
+| [0031](0031-cache-keys-invalidation-lazy-derivatives-and-collection.md) | The cache: chunk ids as keys, named invalidation rules, lazy derivatives, a report and collection | Accepted |
