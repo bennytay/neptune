@@ -8,8 +8,8 @@ way round. Gaps until that mapping lands (ADR 0004): integer claim ids, a single
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, fields
+from typing import Final, Literal
 
 AssertionKind = Literal["observed", "stated", "inferred"]
 ASSERTION_KINDS: tuple[AssertionKind, ...] = ("observed", "stated", "inferred")
@@ -61,6 +61,10 @@ class ClaimRecord:
             and self.recorded_at <= known_at
             and (self.superseded_at is None or known_at < self.superseded_at)
         )
+
+
+#: Column order shared by the claim table, the benchmark CSV and ``ClaimRecord(*row)``.
+CLAIM_COLUMNS: Final = tuple(f.name for f in fields(ClaimRecord))
 
 
 @dataclass(frozen=True, slots=True)

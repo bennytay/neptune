@@ -313,3 +313,20 @@ def test_postgres_store_end_to_end() -> None:
         conn.execute("DROP SCHEMA memory_test CASCADE")
         conn.execute("SELECT ag_catalog.drop_graph('memory_test_graph', true)")
         conn.commit()
+
+
+def test_failed_bulk_write_rolls_back_so_the_connection_stays_usable() -> None:
+    class Failing(RecordingConnection):
+        def cursor(self) -> RecordingCursor:
+            cur = RecordingCursor(self)
+
+            def boom(query: str, params_seq: Iterable[Mapping[str, Any]]) -> None:
+                raise RuntimeError("duplicate key")
+
+            cur.executemany = boom  # type: ignore[method-assign]
+            return cur
+
+    conn = Failing()
+    with pytest.raises(RuntimeError, match="duplicate"):
+        PostgresStore(conn).write_claims([claim()])
+    assert (conn.commits, conn.rollbacks) == (0, 1)

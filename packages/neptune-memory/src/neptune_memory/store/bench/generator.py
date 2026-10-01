@@ -27,7 +27,7 @@ import random
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Literal
 
-from neptune_memory.store.records import ClaimRecord
+from neptune_memory.store.records import CLAIM_COLUMNS, ClaimRecord
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -133,23 +133,6 @@ MOUNT_PER_DAY: Final = 1 / 365
 COMPONENT_PREDICATES: Final = (
     _Pred("calibrated_by", 1 / 7, "entity", "observed", "calibration"),
     _Pred("wear_index", 1.0, "state", "observed", "log"),
-)
-
-CLAIM_COLUMNS: Final = (
-    "claim_id",
-    "subject",
-    "predicate",
-    "object_entity",
-    "object_value",
-    "valid_clock",
-    "valid_from",
-    "valid_to",
-    "recorded_at",
-    "superseded_at",
-    "assertion_kind",
-    "source_id",
-    "transform_id",
-    "supersedes",
 )
 
 

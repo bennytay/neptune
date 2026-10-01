@@ -16,6 +16,7 @@ import re
 from typing import TYPE_CHECKING, Any, Final, Protocol
 
 from neptune_memory.store.records import (
+    CLAIM_COLUMNS,
     AsOf,
     ClaimEmbedding,
     ClaimRecord,
@@ -26,22 +27,6 @@ from neptune_memory.store.records import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-CLAIM_COLUMNS: Final = (
-    "claim_id",
-    "subject",
-    "predicate",
-    "object_entity",
-    "object_value",
-    "valid_clock",
-    "valid_from",
-    "valid_to",
-    "recorded_at",
-    "superseded_at",
-    "assertion_kind",
-    "source_id",
-    "transform_id",
-    "supersedes",
-)
 _IDENT = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 MAX_HOPS: Final = 6
 
@@ -332,9 +317,22 @@ class PostgresStore:
         self.graph = None if graph is None else _ident(graph)
 
     def _run(self, statements: Iterable[str]) -> None:
-        cur = self.conn.cursor()
-        for statement in statements:
-            cur.execute(statement)
+        try:
+            cur = self.conn.cursor()
+            for statement in statements:
+                cur.execute(statement)
+        except BaseException:
+            self.conn.rollback()
+            raise
+        self.conn.commit()
+
+    def _many(self, sql: str, rows: list[dict[str, Any]]) -> None:
+        try:
+            if rows:
+                self.conn.cursor().executemany(sql, rows)
+        except BaseException:
+            self.conn.rollback()
+            raise
         self.conn.commit()
 
     def create(self) -> None:
@@ -344,9 +342,7 @@ class PostgresStore:
 
     def write_claims(self, claims: Iterable[ClaimRecord]) -> int:
         rows = [_row_params(c) for c in claims]
-        if rows:
-            self.conn.cursor().executemany(insert_claim_sql(self.schema), rows)
-        self.conn.commit()
+        self._many(insert_claim_sql(self.schema), rows)
         return len(rows)
 
     def supersede(self, old_claim_id: int, new: ClaimRecord) -> None:
@@ -382,9 +378,7 @@ class PostgresStore:
             rows.append(
                 {"claim_id": e.claim_id, "subject": e.subject, "vector": vector_literal(e.vector)}
             )
-        if rows:
-            self.conn.cursor().executemany(insert_embedding_sql(self.schema), rows)
-        self.conn.commit()
+        self._many(insert_embedding_sql(self.schema), rows)
         return len(rows)
 
     def vector_top_k(
