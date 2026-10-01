@@ -161,12 +161,13 @@ class Raised:
     ``contract`` marks a ``ContractError`` (a bug: never retried); ``changed`` a
     ``SourceChangedError`` (the source's bytes are not the ones fingerprinted: never retried,
     reported as the source's problem, not the adapter's). ``short_read`` is a ``ShortReadError``'s
-    ``(source, offset, length)``: a reader served no bytes inside the size it declares, which is
-    the source's fault too and never retried (ADR 0033 §3); the runtime checks the source is the
-    one it gave. ``returned`` is the ``module.qualname`` of a value of the wrong type the call
-    returned; ``unencodable`` marks a value of the right type that could not be encoded to cross
-    back (a record with no JSON form), ``error`` being what encoding raised. Both are contract
-    errors: the value breaks the contract.
+    ``(source, offset, length)``: a reader served no bytes inside the size it declares, which the
+    runtime blames on the source, never retried, only if it names the source it gave and the
+    source no longer matches its artifact; otherwise it is the adapter's raise (ADR 0033 §3).
+    ``returned`` is the ``module.qualname`` of a value of the wrong type the call returned;
+    ``unencodable`` marks a value of the right type that could not be encoded to cross back (a
+    record with no JSON form), ``error`` being what encoding raised. Both are contract errors:
+    the value breaks the contract.
     """
 
     error: str

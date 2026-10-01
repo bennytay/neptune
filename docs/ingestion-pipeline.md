@@ -57,8 +57,10 @@ state machine over the stages above, in nine phases (ADR 0028):
 - **Partial success.** A chunk that raises after every attempt, a plan that raises, a source that
   changes under the job or cannot be opened, a read that comes up short, or output breaking a
   cross-chunk law quarantines that source: its output stays out of the package and a finding
-  citing it says why (`neptune.runtime.*`; a short read is `neptune.discovery.short_read`, never
-  retried, and a changed or short source also gets `verify_artifact`'s account, ADR 0033 §3).
+  citing it says why (`neptune.runtime.*`; a short read from a source that no longer matches its
+  artifact is `neptune.discovery.short_read`, never retried, and a changed or short source also
+  gets `verify_artifact`'s account; over an intact source a short read is the adapter's own
+  raise, ADR 0033 §3).
   Every other source lands. A `ContractError` is a bug and is never retried. Committed chunks of a
   quarantined source stay in the workspace, so the rerun after a fix redoes only what failed. The
   finding names the step, law, exception class and ids, never an exception's text or a repr, so

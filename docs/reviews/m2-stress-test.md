@@ -87,9 +87,11 @@ frames, 16 per chunk, through the sandboxed job, then again) and `... WORKDIR ma
   special file and unreadable entry in receipts; the job kept them as events or a runtime
   `entry_skipped`, and dropped `size_changed`. Now discovery's findings are recorded under its
   transform and `entry_skipped` is retired (runtime 0.2.0).
-- **D2. A short read was blamed on the adapter.** `ShortReadError` crossed the sandbox as a plain
-  raise: retried, then `chunk_failed`. Now it carries its range, is never retried, and is
-  `neptune.discovery.short_read` with `verify_artifact`'s account.
+- **D2. A short read was blamed on the adapter, whatever the source held.** `ShortReadError`
+  crossed the sandbox as a plain raise: retried, then `chunk_failed`. Now it carries its range,
+  and the job verifies the source: one that no longer matches its artifact is
+  `neptune.discovery.short_read` with `verify_artifact`'s account, never retried; over an intact
+  source the short read is the adapter's own window's, and stays its failure.
 - **D3. A changed source had no account of what changed.** `source_changed` now comes with
   `verify_artifact`'s `truncated`, `grown` or `chunk_changed`, as ADR 0029 §3 promised.
 - **D4. What killed jobs left stayed.** No scratch root existed, and staging debris waited for a
@@ -117,7 +119,8 @@ concurrent job's sweep delete it mid-call).
   call (ADR 0032).
 - One probe call per source with a per-adapter fallback, its reply re-derived (ADR 0033 §1).
 - Scratch for `plan` and `ingest` only, per file `scratch_bytes`, none without Landlock (§2).
-- A short read is the source's, never retried; walk entries are discovery's findings (§3).
+- A short read is the source's, never retried, when the source no longer matches its artifact,
+  and the adapter's otherwise; walk entries are discovery's findings (§3).
 - A degraded run's chunks may be reused by a sound run: output never depended on isolation; the
   degraded risk is to files, workspace included, not to chunk identity (§6).
 

@@ -73,11 +73,18 @@ them did not all hold, and the coordinator recorded follow-ups the gate had to l
    The ABI gains `neptune.adapters.contract.scratch_directory()`: the call's directory or `None`.
    It adds a function, not a parameter, so `ABI_VERSION` stays 1; output must not depend on it.
 3. **Short reads, changed sources and walk entries are the source's findings.** `Raised` carries
-   a well-formed `ShortReadError`'s `(source, offset, length)` across the sandbox. A short read is
-   never retried. One that names this source and a range inside it is
-   `neptune.discovery.short_read` for the unserved range plus `verify_artifact`'s findings, and
-   the source is quarantined (`source_short_read` event); one naming any other reader or range is
-   the adapter's failure at its step. A source that changed under the job also gets
+   a well-formed `ShortReadError`'s `(source, offset, length)` across the sandbox. The job's
+   `LocalReader` cannot serve a short read (a piece that is not all there fails its hash and
+   raises `SourceChangedError`), so a `ShortReadError` naming an intact source came from the
+   adapter's own code: a window over the reader that declares the wrong size, or a raise of its
+   own. The job therefore re-reads the source with `verify_artifact` before it blames it. A short
+   read that names this source and a range inside it, where verification finds the file no longer
+   matches its artifact (or cannot open it), is `neptune.discovery.short_read` for the unserved
+   range plus `verify_artifact`'s findings; the source is quarantined (`source_short_read`
+   event) and nothing is retried, since the bytes behind it stay gone. Any other short read (an
+   intact source, another reader, a range outside the source) is the adapter's failure at its
+   step, `plan_failed` or `chunk_failed` naming `ShortReadError` as the error, under the usual
+   retry policy. A source that changed under the job also gets
    `verify_artifact`'s account (`truncated`, `grown`, `chunk_changed`) beside `source_changed`.
    Discovery's walk findings (`symlink_not_followed`, `special_file`, `vanished`, `unreadable`,
    `size_changed`) enter the package under the discovery transform; the runtime's
@@ -122,6 +129,9 @@ them did not all hold, and the coordinator recorded follow-ups the gate had to l
 - **Keeping `entry_skipped` beside discovery's findings.** Two findings for one entry, from two
   producers, one of which did not see it.
 - **Retrying a short read.** The bytes behind it are the same on the next attempt.
+- **Blaming the source for every short read naming it.** It blamed the source for an adapter's
+  bug: with an intact source, the only reader that could read short is the adapter's own.
+  Verifying costs one more pass over the source, and only when a call raises one.
 - **Folding isolation into chunk identity.** New record ids for the same evidence (ADR 0003)
   and a recomputation for nothing the output depends on; see §6.
 

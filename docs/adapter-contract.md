@@ -29,11 +29,13 @@ class Adapter(Protocol):
 
 `SourceReader` is one artifact's bytes: `content_id`, `size`, `read(offset, length)`
 (`read_pieces` streams a range). `discovery.reader.BytesReader` serves bytes from memory. A reader
-that serves no bytes inside the size it declares makes `read_pieces` raise `ShortReadError`: the
-source's fault, not the adapter's, so it propagates, and the runtime records
-`neptune.discovery.short_read` for the unserved range with `verify_artifact`'s account, never
-retries it, quarantines the source and goes on with the job (ADR 0029 §3, ADR 0033 §3). Raise it
-only for the reader you were given; one naming another reader is your own failure.
+that serves no bytes inside the size it declares makes `read_pieces` raise `ShortReadError`; let it
+propagate. The runtime re-reads the source (ADR 0029 §3, ADR 0033 §3): if it no longer matches its
+artifact, the short read is the source's, `neptune.discovery.short_read` for the unserved range
+with `verify_artifact`'s account, never retried, the source quarantined and the job going on. If
+the source is intact, the short read came from your code (a window over the reader that declares
+the wrong size, a raise naming another reader) and the call failed like any other raise
+(`plan_failed`, `chunk_failed` naming `ShortReadError`).
 
 ## Laws
 

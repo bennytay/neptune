@@ -149,13 +149,15 @@ def scratch_granted(directory: Path | None) -> Iterator[None]:
 
 
 class ShortReadError(Exception):
-    """A reader served no bytes inside the size it declares (ADR 0029 §3).
+    """A reader served no bytes inside the size it declares (ADR 0029 §3, ADR 0033 §3).
 
-    The source is shorter than the artifact it was hashed as, or changed under the reader. It is
-    not an adapter bug, and it is not the adapter's to report: adapters let it propagate, and the
-    runtime records ``neptune.discovery.verify.short_read_finding(source, offset, length)`` for
-    it and goes on with the job. ``[offset, offset + length)`` is the declared range that was not
-    served.
+    Either the source is shorter than the artifact it was hashed as, or changed under the
+    reader, or a reader in the adapter's own code (a window over the source) declares more than
+    it serves. Adapters let it propagate and never report it themselves. The runtime re-reads
+    the source: if it no longer matches its artifact, the short read is the source's,
+    ``neptune.discovery.verify.short_read_finding(source, offset, length)`` with
+    ``verify_artifact``'s account, never retried; if it is intact, the call failed like any other
+    raise. ``[offset, offset + length)`` is the declared range that was not served.
     """
 
     def __init__(self, source: ContentId, offset: int, length: int) -> None:

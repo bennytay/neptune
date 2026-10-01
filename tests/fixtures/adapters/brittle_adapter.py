@@ -22,12 +22,14 @@ with these texts misbehave instead:
   per-chunk check catches);
 - ``dup``: the block cites the first line's span, so its id collides with that line's block (a
   cross-chunk violation only the whole source's output shows);
-- ``short``: ``ingest`` reads its line through a reader that serves nothing from the line on, as a
-  source cut after it was hashed would (``read_pieces`` raises ``ShortReadError``);
+- ``short``: ``ingest`` reads its line through a window of its own over the source that declares
+  the source's size but serves nothing from the line on, an adapter's bug (``read_pieces`` raises
+  ``ShortReadError`` naming the source while the source is intact; a source really cut after it
+  was hashed fails the job's reader with ``SourceChangedError`` instead);
 - ``short-elsewhere``: ``ingest`` raises a ``ShortReadError`` naming another source (an adapter's
   own reader, not the one it was given);
 - a first line ``plan-crash``: ``plan`` raises ``RuntimeError``; ``plan-short``: ``plan`` reads
-  the source short, as ``short`` does.
+  through such a window, as ``short`` does.
 """
 
 from typing import Final
@@ -108,7 +110,8 @@ def _lines(source: SourceReader) -> list[tuple[int, bytes]]:
 
 
 class _CutFrom:
-    """``source`` as a reader would serve it if its bytes ended at ``cut``: same id and size."""
+    """A window over ``source`` that serves nothing from ``cut`` on, yet declares the same id and
+    size: the adapter's own reader, wrong about its size."""
 
     def __init__(self, source: SourceReader, cut: int) -> None:
         self._source, self._cut = source, cut
@@ -126,7 +129,8 @@ class _CutFrom:
 
 
 def _read_short(source: SourceReader, start: int, end: int) -> bytes:
-    """Read ``[start, end)`` through a reader cut at ``start``: ``ShortReadError``."""
+    """Read ``[start, end)`` through a window cut at ``start``: ``ShortReadError``, without a
+    byte of ``source`` read."""
     return b"".join(read_pieces(_CutFrom(source, start), start, end))
 
 

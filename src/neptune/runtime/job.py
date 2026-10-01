@@ -731,42 +731,50 @@ class IngestJob:
             )
         self._quarantine(source, finding)
 
-    def _verify(self, item: _Source) -> None:
-        """Re-read a source that changed or read short against its artifact, and record exactly
-        what differs (``verify_artifact``: truncated, grown, changed chunks; ADR 0029 §3).
-
-        One pass over the file as it is now; nothing is said if it cannot be opened, since the
-        finding that brought the job here already says the source was not read.
+    def _differences(self, item: _Source) -> tuple[IngestFinding, ...] | None:
+        """How the source differs now from the artifact it was hashed as: ``verify_artifact``'s
+        findings (truncated, grown, changed chunks; ADR 0029 §3), empty when it is intact, and
+        ``None`` when it cannot be opened. One pass over the file as it is now.
         """
         assert self._local is not None
         try:
             with self._local.open(item.location) as stream:
-                found = verify_artifact(stream, item.artifact)
+                return verify_artifact(stream, item.artifact)
         except _UNREADABLE:
-            return
-        for finding in found:
+            return None
+
+    def _verify(self, item: _Source) -> None:
+        """Record exactly what differs in a source that changed under the job.
+
+        Nothing is said if it cannot be opened, since the finding that brought the job here
+        already says the source was not read.
+        """
+        for finding in self._differences(item) or ():
             self._record(finding, DISCOVERY_TRANSFORM)
 
-    def _short(
-        self, item: _Source, raised: Raised, step: Step, chunk: Chunk | None, attempt: int
-    ) -> None:
-        """A call raised ``ShortReadError``: never retried (ADR 0033 §3).
+    def _read_short(self, item: _Source, raised: Raised, step: Step, chunk: Chunk | None) -> bool:
+        """Whether a call that raised is the source's short read; if so, it is recorded.
 
-        One that names this source and a range inside it is the source's fault: discovery's
-        ``short_read`` finding for the unserved range, then ``verify_artifact``'s account, and
-        the source is quarantined. One that names any other reader or range is the adapter's
-        failure at ``step`` (``plan_failed``, ``chunk_failed``), not retried either: the same
-        bytes raise it again.
+        ``LocalReader`` cannot serve a short read: a piece that is not all there fails its hash
+        and raises ``SourceChangedError``. So a ``ShortReadError`` naming an intact source came
+        from the adapter's own code (a window over the reader with the wrong size, a raise of its
+        own), and the job checks before blaming the source (ADR 0033 §3). One that names this
+        source and a range inside it, where ``verify_artifact`` finds the file no longer matches
+        its artifact (or the file cannot be opened at all), is the source's: discovery's
+        ``short_read`` for the unserved range, then the account, the source quarantined and never
+        retried, and ``True``. Anything else is ``False``: the adapter's failure at ``step``,
+        which the caller handles as any other raise (``plan_failed``; ``chunk_failed`` after the
+        usual retries), naming ``ShortReadError`` as its class.
         """
-        assert raised.short_read is not None and item.adapter is not None
+        if raised.short_read is None:
+            return False
+        assert item.adapter is not None
         source, offset, length = raised.short_read
         if source != item.content_id or length == 0 or offset + length > item.artifact.size:
-            failure = Failure(step, raised.error)
-            if chunk is None:
-                self._fail_plan(item, failure)
-            else:
-                self._fail_chunk(item, chunk, attempt, failure)
-            return
+            return False
+        found = self._differences(item)
+        if found == ():
+            return False  # intact: the adapter's reader read short, not the source
         finding = short_read_finding(item.content_id, offset, length)
         self._record(finding, DISCOVERY_TRANSFORM)
         item.quarantined.append(finding.code)
@@ -780,7 +788,9 @@ class IngestJob:
         if chunk is not None:
             details["chunk"] = chunk.id
         self._emit(events.SOURCE_SHORT_READ, details)
-        self._verify(item)
+        for difference in found or ():
+            self._record(difference, DISCOVERY_TRANSFORM)
+        return True
 
     # --- discover ------------------------------------------------------------------------------
 
@@ -1041,10 +1051,11 @@ class IngestJob:
         """Call the adapter's ``plan`` through the runner and check it; ``None`` once the source
         is quarantined.
 
-        The adapter's reads are its own: a ``SourceChangedError`` is ``source_changed``, and
-        anything else it raises, an ``OSError`` included, is ``plan_failed`` at ``plan``. A plan
-        that crashes or hits a limit is not retried: a failed plan is never saved, so the next
-        job plans again anyway.
+        The adapter's reads are its own: a ``SourceChangedError`` is ``source_changed``, a
+        ``ShortReadError`` the source's ``short_read`` only if the source no longer matches its
+        artifact, and anything else it raises, an ``OSError`` included, is ``plan_failed`` at
+        ``plan``. A plan that crashes or hits a limit is not retried: a failed plan is never
+        saved, so the next job plans again anyway.
         """
         assert item.adapter is not None and item.config is not None
         adapter, config = item.adapter, item.config
@@ -1053,9 +1064,7 @@ class IngestJob:
         if isinstance(outcome, Raised):
             if outcome.changed:
                 self._unreadable(item, SourceChangedError(item.content_id))
-            elif outcome.short_read is not None:
-                self._short(item, outcome, Step.PLAN, None, 1)
-            else:
+            elif not self._read_short(item, outcome, Step.PLAN, None):
                 self._fail_plan(
                     item, _failure(outcome, Step.PLAN, Step.PLAN_RESULT, Step.CHECK_PLAN)
                 )
@@ -1200,9 +1209,10 @@ class IngestJob:
         failed for good.
 
         A ``ContractError`` is a bug, not a fault, so it is not retried, and neither is a result
-        of the wrong type; a source that changed is reported and never retried; nor is a limit,
-        which the same bytes would hit again. Any other exception, and a crash, which may be the
-        host's (an OOM killer), get the remaining attempts.
+        of the wrong type; a source that changed or read short under it is reported and never
+        retried; nor is a limit, which the same bytes would hit again. Any other exception (a
+        ``ShortReadError`` from the adapter's own reader over an intact source included), and a
+        crash, which may be the host's (an OOM killer), get the remaining attempts.
         """
         assert item.adapter is not None and item.config is not None
         adapter, config = item.adapter, item.config
@@ -1215,8 +1225,7 @@ class IngestJob:
             if isinstance(outcome, Raised) and outcome.changed:
                 self._unreadable(item, SourceChangedError(item.content_id))
                 return None
-            if isinstance(outcome, Raised) and outcome.short_read is not None:
-                self._short(item, outcome, Step.INGEST, chunk, attempt)
+            if isinstance(outcome, Raised) and self._read_short(item, outcome, Step.INGEST, chunk):
                 return None
             if not isinstance(outcome, Returned):
                 retry = isinstance(outcome, Crashed) or (
