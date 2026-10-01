@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from neptune_memory.store.bench.generator import (
-    CLAIM_COLUMNS,
     EMBODIMENTS,
     DeploymentSpec,
     generate,
     robot_ids,
     write_dataset,
 )
+from neptune_memory.store.records import CLAIM_COLUMNS
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -23,6 +23,7 @@ from neptune_memory.store import (
 )
 from neptune_memory.store import postgres as pg
 from neptune_memory.store.bench.generator import DeploymentSpec, generate
+from neptune_memory.store.records import CLAIM_COLUMNS
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -178,15 +179,15 @@ def test_query_parameters_are_exactly_what_the_adapter_binds() -> None:
         _placeholders(pg.vector_top_k_sql("memory", filtered=True))
         == {"query", "k", "start", "hops"} | at
     )
-    assert _placeholders(pg.insert_claim_sql("memory")) == set(pg.CLAIM_COLUMNS)
+    assert _placeholders(pg.insert_claim_sql("memory")) == set(CLAIM_COLUMNS)
     assert _placeholders(pg.close_claim_sql("memory")) == {"old", "at"}
 
 
 def test_thread_sql_selects_columns_in_record_order() -> None:
     sql = pg.as_of_thread_sql("memory")
     select = sql.split("SELECT x.", 1)[1].split("\nFROM", 1)[0]
-    assert [c.strip().removeprefix("x.") for c in select.split(",")] == list(pg.CLAIM_COLUMNS)
-    assert tuple(f.name for f in ClaimRecord.__dataclass_fields__.values()) == pg.CLAIM_COLUMNS
+    assert [c.strip().removeprefix("x.") for c in select.split(",")] == list(CLAIM_COLUMNS)
+    assert tuple(f.name for f in ClaimRecord.__dataclass_fields__.values()) == CLAIM_COLUMNS
 
 
 def test_ddl_is_schema_qualified_and_rejects_bad_dimensions() -> None:
