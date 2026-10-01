@@ -18,13 +18,19 @@ overlapping valid intervals on the same clock:
 
 Nothing is deleted. Claims on different clocks are never compared: the pair is reported as a
 ``clock_mismatch`` finding and both stay current.
+
+Consolidator upgrades (ADR 0003 §3): a lineage is (consolidator id, version, config hash). One
+lineage per consolidator per transaction, and a replaced lineage never returns, else
+``LineageError``. A consolidator's first claim in a new lineage retires, at that transaction, every
+current claim of its other lineages (``superseded_at`` set, valid time untouched).
 """
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, TypeAlias
 
 from neptune.identity.canonical_json import dumps
 from neptune.identity.ids import config_hash
@@ -43,6 +49,24 @@ if TYPE_CHECKING:
 # Reserved consolidator id for closure versions; no consolidator may use it.
 RESOLVER_ID: Final = "memory.supersede"
 RESOLVER_VERSION: Final = "1"
+
+
+# (consolidator id, version, config hash): what one build of one consolidator produced.
+Lineage: TypeAlias = tuple[str, str, str]
+
+
+def lineage_of(claim: Claim) -> Lineage:
+    p = claim.provenance
+    return (p.consolidator_id, p.consolidator_version, p.config_hash)
+
+
+class LineageError(ValueError):
+    """Claims whose lineages cannot be ordered (ADR 0003 §3). ``code``: clash or reuse."""
+
+    def __init__(self, code: str, consolidator_id: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.consolidator_id = consolidator_id
 
 
 class FindingCode(StrEnum):
@@ -119,12 +143,20 @@ def resolve(
         raise ValueError(f"{RESOLVER_ID} is reserved for the resolver")
     for claim in inputs:
         check_claim(claim, registry)
+    _check_lineages(claims)
     versions: dict[ClaimId, Claim] = {}
     origin: dict[ClaimId, Claim] = {}  # version id -> the assertion it narrows
     current: dict[tuple[NodeRef, str], list[ClaimId]] = {}
     findings: list[ResolutionFinding] = []
 
+    latest: dict[str, Lineage] = {}  # consolidator id -> lineage of its latest build so far
+
     for arriving in sorted(inputs, key=lambda c: arrival_key(c, priorities)):
+        arriving_lineage = lineage_of(arriving)
+        cid = arriving.provenance.consolidator_id
+        if latest.get(cid, arriving_lineage) != arriving_lineage:
+            _retire(versions, origin, current, arriving_lineage, arriving.recorded_at)
+        latest[cid] = arriving_lineage
         origin[arriving.id] = arriving
         if registry.spec(arriving.predicate).cardinality is Cardinality.MANY:
             versions[arriving.id] = arriving
@@ -201,6 +233,59 @@ def as_of(history: Iterable[Claim], tx: LedgerTx) -> tuple[Claim, ...]:
 
 
 # --- Internals --------------------------------------------------------------------------------
+
+
+def _retire(
+    versions: dict[ClaimId, Claim],
+    origin: Mapping[ClaimId, Claim],
+    current: Mapping[tuple[NodeRef, str], list[ClaimId]],
+    upgrade: Lineage,
+    tx: LedgerTx,
+) -> None:
+    """ADR 0003 §3: a consolidator's new lineage retires every current claim of its other lineages.
+
+    Each such version gets ``superseded_at = tx``, closure versions included, even one narrowed at
+    ``tx`` itself. Nothing is deleted and valid time is not cut, so ``as_of`` before ``tx`` still
+    answers from the old lineage.
+    """
+    for vid, version in list(versions.items()):
+        root = lineage_of(origin[vid])
+        if root[0] == upgrade[0] and root != upgrade and isinstance(version.superseded_at, Open):
+            versions[vid] = replace(version, superseded_at=tx)
+            for live in current.values():
+                if vid in live:
+                    live.remove(vid)
+
+
+def _check_lineages(claims: Iterable[Claim]) -> None:
+    """One lineage per consolidator per transaction, and no lineage back after another replaced it.
+
+    Checked over every recording (before ``assertions`` keeps only the earliest), so a re-run of
+    a retired lineage is caught even when it reproduces the old claim ids.
+    """
+    builds: dict[str, dict[int, set[Lineage]]] = {}
+    for claim in claims:
+        if not is_closure(claim):
+            by_tx = builds.setdefault(claim.provenance.consolidator_id, {})
+            by_tx.setdefault(claim.recorded_at, set()).add(lineage_of(claim))
+    for cid, by_tx in sorted(builds.items()):
+        clashes = sorted(tx for tx, lineages in by_tx.items() if len(lineages) > 1)
+        if clashes:
+            raise LineageError(
+                "lineage_clash", cid, f"two lineages of {cid} at transactions {clashes}"
+            )
+        sequence = [next(iter(by_tx[tx])) for tx in sorted(by_tx)]
+        retired: set[Lineage] = set()
+        for before, after in itertools.pairwise(sequence):
+            if after != before:
+                retired.add(before)
+                if after in retired:
+                    raise LineageError(
+                        "lineage_reuse",
+                        cid,
+                        f"{cid} lineage {after[1]!r} reappears after it was replaced; "
+                        "a rollback is a new version",
+                    )
 
 
 def _beats(arriving: Claim, held: Claim) -> bool:
