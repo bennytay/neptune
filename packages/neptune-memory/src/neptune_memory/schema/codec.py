@@ -249,21 +249,25 @@ class GraphDocument:
 
     ``generation`` is ``config_hash(resolver_config)``: the store generation (ADR 0006 §7). Two
     documents with different generations are different graphs, never merged or diffed by id.
+
+    ``head`` is the latest Ledger transaction the history covers. It is explicit, because a
+    transaction can produce no claim: the highest ``recorded_at`` may be earlier than the head,
+    and every ``as_of`` up to the head is answerable. No transaction in the history is later.
     """
 
     resolution: Resolution
     resolver_config: JsonObject
+    head: LedgerTx
+
+    def __post_init__(self) -> None:
+        head = ledger_tx(self.head)
+        for stamp in latest_stamps(self.resolution):
+            if stamp > head:
+                raise ValueError(f"the history records transaction {stamp} after its head {head}")
 
     @property
     def generation(self) -> ConfigHash:
         return config_hash(self.resolver_config)
-
-    @property
-    def head(self) -> LedgerTx:
-        """The latest transaction the document knows: the highest ``recorded_at``, or 0."""
-        stamps = [c.recorded_at for c in self.resolution.claims]
-        stamps += [f.recorded_at for f in self.resolution.findings]
-        return ledger_tx(max(stamps, default=0))
 
     def to_json(self) -> JsonObject:
         return {
@@ -271,9 +275,22 @@ class GraphDocument:
             "findings": [finding.to_json() for finding in self.resolution.findings],
             "generation": self.generation,
             "graph_schema_version": GRAPH_SCHEMA_VERSION,
+            "head": self.head,
             "kind": GRAPH_DOCUMENT_KIND,
             "resolver_config": self.resolver_config,
         }
+
+
+def latest_stamps(resolution: Resolution) -> list[LedgerTx]:
+    """Every transaction a history mentions: recordings and supersessions."""
+    stamps: list[LedgerTx] = []
+    pairs = [(c.recorded_at, c.superseded_at) for c in resolution.claims]
+    pairs += [(f.recorded_at, f.superseded_at) for f in resolution.findings]
+    for recorded_at, superseded_at in pairs:
+        stamps.append(recorded_at)
+        if not isinstance(superseded_at, Open):
+            stamps.append(superseded_at)
+    return stamps
 
 
 def graph_from_json(data: JsonValue) -> GraphDocument:
@@ -281,7 +298,15 @@ def graph_from_json(data: JsonValue) -> GraphDocument:
     obj = _exact(
         data,
         "graph document",
-        {"claims", "findings", "generation", "graph_schema_version", "kind", "resolver_config"},
+        {
+            "claims",
+            "findings",
+            "generation",
+            "graph_schema_version",
+            "head",
+            "kind",
+            "resolver_config",
+        },
     )
     if obj["kind"] != GRAPH_DOCUMENT_KIND:
         raise ValueError(f"graph document kind must be {GRAPH_DOCUMENT_KIND!r}")
@@ -294,7 +319,9 @@ def graph_from_json(data: JsonValue) -> GraphDocument:
     if list(findings) != sorted(findings, key=lambda f: (f.recorded_at, f.claim, f.code, f.others)):
         raise ValueError("findings must be ordered by (recorded_at, claim, code, others)")
     document = GraphDocument(
-        Resolution(claims, findings), dict(_object(obj["resolver_config"], "resolver_config"))
+        Resolution(claims, findings),
+        dict(_object(obj["resolver_config"], "resolver_config")),
+        _tx(obj["head"], "head"),
     )
     if parse_config_hash(_str(obj["generation"], "generation")) != document.generation:
         raise ValueError("generation does not match the resolver configuration")

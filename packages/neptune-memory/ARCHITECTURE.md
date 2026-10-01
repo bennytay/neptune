@@ -21,7 +21,7 @@ flowchart LR
   DER --> SCH
   SCH --> SPA & EPI
   SCH --> RD --> OUT
-  CON & DER --> CT --> RD
+  CON --> CT --> RD
   CT --> REG[("contracts/graph-schema v1.0.0")]
   STO --> OUT
   CLI --> STO

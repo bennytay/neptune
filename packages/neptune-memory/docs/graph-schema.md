@@ -78,20 +78,24 @@ Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit 
   - `clock_mismatch`: two versions of a `one` fact with different objects on different clocks. They are never
     compared, and the finding is active while both are current.
   - `overridden_on_arrival`: winners covered the arriving claim entirely, so no part of it was ever current.
-- A **graph document** (`#/$defs/Graph`) is one resolved history: every claim version and every finding, plus the
-  `resolver_config` whose hash is its `generation`.
+- A **graph document** (`#/$defs/Graph`) is one resolved history: every claim version and every finding, the
+  `resolver_config` whose hash is its `generation`, and its `head`: the latest Ledger transaction it covers. The
+  head may be later than every `recorded_at`, because a transaction can produce no claim.
 
 ## Reading: `MemoryReader`
 
 | Method | Returns |
 |---|---|
 | `graph_schema_version`, `generation`, `head` | the major, the resolver configuration hash, the latest transaction |
-| `node(node, as_of)` | `Known(NodeView)`: claims about the node and claims pointing at it, plus their findings; otherwise `NotCovered` |
+| `node(node, as_of, *, include_inferred=True)` | `Known(NodeView)`: claims about the node and claims pointing at it, plus their findings; otherwise `NotCovered` |
 | `claims(subject, predicate, as_of, during=None, *, include_inferred=True)` | `ClaimsResult`: `claims`, `other_clocks` and `findings` |
-| `neighbours(node, hops, as_of, *, include_inferred=True)` | `NeighboursResult`: each node within `hops` edges in either direction, at its shortest depth, with a `via` path of claims |
+| `neighbours(node, hops, as_of, *, include_inferred=True)` | `NeighboursResult`: each node within `hops` edges in either direction, at its shortest depth, with a `via` path of claims; findings naming any edge between two result nodes |
 | `episodes(filter)` | **provisional (G3)**: `NotCovered` in v1 |
 | `spatial(site, frame, as_of)` | **provisional (G3)**: `NotCovered` in v1 |
 
+Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, `ClaimsResult`,
+`NeighboursResult`, `EpisodesResult`, `SpatialResult`). A `Knowledge`-wrapped result is
+`{"knowledge": "known", "value": …}` or `{"knowledge": "not_covered"}`. Goldens `result.*.json` pin the shapes.
 `schema.reference.ReferenceReader` defines the expected answers. A consumer can test any reader with the suite:
 
 ```python

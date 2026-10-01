@@ -17,18 +17,36 @@ and until G3 a reader answers ``NotCovered``, never an empty result that reads a
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from neptune.model.knowledge import to_json as knowledge_to_json
 from neptune_memory.schema.interval import LedgerTx, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from neptune.model.frames import FrameRef
     from neptune.model.ids import ConfigHash
+    from neptune.model.jsonvalue import JsonObject, JsonValue
     from neptune.model.knowledge import Knowledge
     from neptune_memory.schema.claim import Claim
     from neptune_memory.schema.interval import Interval
     from neptune_memory.schema.supersede import ResolutionFinding
+
+
+def _claims(claims: tuple[Claim, ...]) -> JsonValue:
+    return [c.to_json() for c in claims]
+
+
+def _findings(findings: tuple[ResolutionFinding, ...]) -> JsonValue:
+    return [f.to_json() for f in findings]
+
+
+def result_to_json(result: Knowledge[Any], encode: Callable[[Any], JsonValue]) -> JsonObject:
+    """A ``Knowledge``-wrapped result (``node``, ``episodes``, ``spatial``) as published:
+    ``{"knowledge": "known", "value": ...}`` or ``{"knowledge": "not_covered"}``."""
+    return knowledge_to_json(result, encode)
 
 
 class AsOfBeyondHeadError(ValueError):
@@ -59,6 +77,15 @@ class NodeView:
     incoming: tuple[Claim, ...]  # node is the object (edges into it); sorted by id
     findings: tuple[ResolutionFinding, ...]  # active at as_of, naming any claim above
 
+    def to_json(self) -> JsonObject:
+        return {
+            "as_of": self.as_of,
+            "claims": _claims(self.claims),
+            "findings": _findings(self.findings),
+            "incoming": _claims(self.incoming),
+            "node": self.node.to_json(),
+        }
+
 
 @dataclass(frozen=True)
 class ClaimsResult:
@@ -77,6 +104,14 @@ class ClaimsResult:
     other_clocks: tuple[Claim, ...]
     findings: tuple[ResolutionFinding, ...]
 
+    def to_json(self) -> JsonObject:
+        return {
+            "as_of": self.as_of,
+            "claims": _claims(self.claims),
+            "findings": _findings(self.findings),
+            "other_clocks": _claims(self.other_clocks),
+        }
+
 
 @dataclass(frozen=True)
 class Neighbour:
@@ -86,14 +121,18 @@ class Neighbour:
     depth: int
     via: tuple[Claim, ...]  # len(via) == depth; via[0] touches the start node
 
+    def to_json(self) -> JsonObject:
+        return {"depth": self.depth, "node": self.node.to_json(), "via": _claims(self.via)}
+
 
 @dataclass(frozen=True)
 class NeighboursResult:
     """Nodes within ``hops`` edges of ``start`` (either direction) as of a transaction.
 
     Edges are claims whose object is a node. ``neighbours`` exclude ``start`` and are sorted by
-    ``(depth, node_type, node_id)``; ``findings`` are those active at ``as_of`` naming a ``via``
-    claim.
+    ``(depth, node_type, node_id)``. ``findings`` are those active at ``as_of`` that name any edge
+    between two nodes of the result (``start`` included), so they do not depend on which shortest
+    path ``via`` shows.
     """
 
     start: NodeRef
@@ -101,6 +140,15 @@ class NeighboursResult:
     as_of: LedgerTx
     neighbours: tuple[Neighbour, ...]
     findings: tuple[ResolutionFinding, ...]
+
+    def to_json(self) -> JsonObject:
+        return {
+            "as_of": self.as_of,
+            "findings": _findings(self.findings),
+            "hops": self.hops,
+            "neighbours": [n.to_json() for n in self.neighbours],
+            "start": self.start.to_json(),
+        }
 
 
 @dataclass(frozen=True)
@@ -127,6 +175,9 @@ class EpisodeView:
     episode: NodeRef
     claims: tuple[Claim, ...]
 
+    def to_json(self) -> JsonObject:
+        return {"claims": _claims(self.claims), "episode": self.episode.to_json()}
+
 
 @dataclass(frozen=True)
 class SpatialView:
@@ -136,6 +187,14 @@ class SpatialView:
     frame: FrameRef
     as_of: LedgerTx
     claims: tuple[Claim, ...]
+
+    def to_json(self) -> JsonObject:
+        return {
+            "as_of": self.as_of,
+            "claims": _claims(self.claims),
+            "frame": self.frame.to_json(),
+            "site": self.site.to_json(),
+        }
 
 
 @runtime_checkable
@@ -163,9 +222,13 @@ class MemoryReader(Protocol):
         """The latest Ledger transaction the reader knows."""
         ...
 
-    def node(self, node: NodeRef, as_of: LedgerTx) -> Knowledge[NodeView]:
+    def node(
+        self, node: NodeRef, as_of: LedgerTx, *, include_inferred: bool = True
+    ) -> Knowledge[NodeView]:
         """``Known(NodeView)`` when some claim active at ``as_of`` names ``node``; else
-        ``NotCovered``: the graph says nothing about it, which is not the node's absence."""
+        ``NotCovered``: the graph says nothing about it, which is not the node's absence.
+        ``include_inferred=False`` judges and fills the view from observed and stated claims
+        only, so a node only an inference names is ``NotCovered``."""
         ...
 
     def claims(

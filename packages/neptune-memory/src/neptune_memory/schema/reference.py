@@ -97,14 +97,19 @@ class ReferenceReader:
 
         return tuple(f for f in snapshot.findings if wanted(f))
 
-    def node(self, node: NodeRef, as_of: LedgerTx) -> Knowledge[NodeView]:
-        snapshot = self._snapshot(as_of)
+    def node(
+        self, node: NodeRef, as_of: LedgerTx, *, include_inferred: bool = True
+    ) -> Knowledge[NodeView]:
+        snapshot = self._snapshot(as_of, include_inferred)
         out = _by_id(c for c in snapshot.claims if c.subject == node)
         incoming = _by_id(c for c in snapshot.claims if c.object == node)
         if not out and not incoming:
             return NotCovered()
         findings = self._findings(
-            snapshot, (*out, *incoming), lambda c: node in (c.subject, c.object)
+            snapshot,
+            (*out, *incoming),
+            lambda c: node in (c.subject, c.object),
+            include_inferred,
         )
         return Known(NodeView(node, check_as_of(as_of, self._head), out, incoming, findings))
 
@@ -178,13 +183,21 @@ class ReferenceReader:
             for n, via in sorted(paths.items(), key=lambda i: (len(i[1]), _node_key(i[0])))
             if n != node
         )
-        via_claims = [c for n in found for c in n.via]
+        # Findings do not depend on which shortest path ``via`` shows: those naming any edge
+        # between two nodes of the result (the start included).
+        within = set(paths)
+        inside = [
+            c
+            for edges_of in edges.values()
+            for _, c in edges_of
+            if c.subject in within and c.object in within
+        ]
         return NeighboursResult(
             node,
             hops,
             check_as_of(as_of, self._head),
             found,
-            self._findings(snapshot, via_claims, lambda _: False),
+            self._findings(snapshot, inside, lambda _: False),
         )
 
     def episodes(self, filter: EpisodeFilter) -> Knowledge[tuple[EpisodeView, ...]]:

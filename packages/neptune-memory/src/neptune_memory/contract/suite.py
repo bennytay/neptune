@@ -24,7 +24,7 @@ findings travel with the claims they name, and ``episodes``/``spatial`` answer `
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Final, TypeAlias
 
 from neptune.identity.ids import record_id
@@ -32,7 +32,7 @@ from neptune.model.frames import FrameRef
 from neptune.model.knowledge import Known, NotCovered
 from neptune.model.time import Timestamp
 from neptune_memory.schema import GRAPH_SCHEMA_VERSION
-from neptune_memory.schema.claim import Claim, is_inferred
+from neptune_memory.schema.claim import Claim, ClaimId, is_inferred
 from neptune_memory.schema.codec import GraphDocument, graph_from_json
 from neptune_memory.schema.interval import OPEN, Interval, LedgerTx, Open, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -44,6 +44,7 @@ from neptune_memory.schema.reader import (
     NeighboursResult,
 )
 from neptune_memory.schema.reference import ReferenceReader
+from neptune_memory.schema.supersede import as_of as snapshot_at
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -265,8 +266,14 @@ def check_nodes(factory: ReaderFactory, golden: GraphDocument) -> None:
     reader, reference = factory(golden), ReferenceReader(golden)
     for tx in _transactions(golden):
         for node in [*_nodes(golden), ABSENT]:
-            got, want = reader.node(node, ledger_tx(tx)), reference.node(node, ledger_tx(tx))
-            _expect(got == want, f"node({node.node_id}, as_of={tx}) differs from the reference")
+            for inferred in (True, False):
+                got = reader.node(node, ledger_tx(tx), include_inferred=inferred)
+                want = reference.node(node, ledger_tx(tx), include_inferred=inferred)
+                _expect(
+                    got == want,
+                    f"node({node.node_id}, as_of={tx}, inferred={inferred}) differs from the"
+                    " reference",
+                )
     _expect(
         isinstance(reader.node(ABSENT, golden.head), NotCovered),
         "a node the graph never names must be NotCovered, not an empty fact",
@@ -274,9 +281,12 @@ def check_nodes(factory: ReaderFactory, golden: GraphDocument) -> None:
 
 
 def check_neighbours(factory: ReaderFactory, golden: GraphDocument) -> None:
-    """Same nodes at the same shortest depths as the reference; each ``via`` is a real path."""
+    """Same nodes at the same shortest depths and the same findings as the reference; each
+    ``via`` is a path of claims active at ``as_of``, exactly as the snapshot shows them."""
     reader, reference = factory(golden), ReferenceReader(golden)
+    saw_findings = False
     for tx in _transactions(golden):
+        active = {c.id: c for c in snapshot_at(golden.resolution, ledger_tx(tx)).claims}
         for node in _nodes(golden):
             for hops in range(MAX_HOPS + 1):
                 for inferred in (True, False):
@@ -284,22 +294,33 @@ def check_neighbours(factory: ReaderFactory, golden: GraphDocument) -> None:
                     want = reference.neighbours(
                         node, hops, ledger_tx(tx), include_inferred=inferred
                     )
-                    _neighbours_agree(got, want, ledger_tx(tx), inferred)
+                    _neighbours_agree(got, want, ledger_tx(tx), inferred, active)
+                    saw_findings |= bool(want.findings)
+    _expect(saw_findings, "no neighbours result had findings: the findings check is untested")
 
 
 def _neighbours_agree(
-    got: NeighboursResult, want: NeighboursResult, tx: LedgerTx, inferred: bool
+    got: NeighboursResult,
+    want: NeighboursResult,
+    tx: LedgerTx,
+    inferred: bool,
+    active: Mapping[ClaimId, Claim],
 ) -> None:
     where = f"neighbours({got.start.node_id}, {got.hops}, as_of={tx})"
+    _expect(
+        (got.start, got.hops, got.as_of) == (want.start, want.hops, want.as_of),
+        f"{where}: the result does not echo its query",
+    )
     _expect(
         [(n.node, n.depth) for n in got.neighbours] == [(n.node, n.depth) for n in want.neighbours],
         f"{where}: nodes or depths differ from the reference",
     )
+    _expect(got.findings == want.findings, f"{where}: findings differ from the reference")
     for neighbour in got.neighbours:
         _expect(len(neighbour.via) == neighbour.depth, f"{where}: via length != depth")
         here = got.start
         for claim in neighbour.via:
-            _expect(claim.recorded_at <= tx and claim.superseded_at == OPEN, f"{where}: stale via")
+            _expect(active.get(claim.id) == claim, f"{where}: via {claim.id} is not active")
             _expect(inferred or not is_inferred(claim.assertion_kind), f"{where}: inferred via")
             if claim.subject == here and isinstance(claim.object, NodeRef):
                 here = claim.object
@@ -348,7 +369,9 @@ def check_golden_story(factory: ReaderFactory, golden: GraphDocument) -> None:
     guesses = [
         c
         for c in golden.resolution.claims
-        if is_inferred(c.assertion_kind) and not isinstance(c.superseded_at, Open)
+        if is_inferred(c.assertion_kind)
+        and not isinstance(c.superseded_at, Open)
+        and c.recorded_at < c.superseded_at  # it was current once
     ]
     _expect(bool(guesses), "the golden graph must contain a superseded inferred claim")
     for guess in guesses:
@@ -400,7 +423,9 @@ class StubReader:
     def head(self) -> LedgerTx:
         return self._document.head
 
-    def node(self, node: NodeRef, as_of: LedgerTx) -> Knowledge[NodeView]:
+    def node(
+        self, node: NodeRef, as_of: LedgerTx, *, include_inferred: bool = True
+    ) -> Knowledge[NodeView]:
         return NotCovered()
 
     def claims(

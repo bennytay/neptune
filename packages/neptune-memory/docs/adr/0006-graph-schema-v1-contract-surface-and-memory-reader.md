@@ -24,7 +24,7 @@ knowledge makes "what did we believe at tx" unanswerable.
 ## Decision
 
 Code: `neptune_memory/schema/` (`__init__`, `claim`, `predicates`, `supersede`, `codec`, `reader`, `reference`,
-`export`), `neptune_memory/contract/` (`golden`, `suite`, `worked_examples`) and `neptune_memory/derived/golden.py`.
+`export`) and `neptune_memory/contract/` (`golden`, `suite`, `worked_examples`, `_fixture_model`).
 The guarantees are listed in [`docs/graph-schema.md`](../graph-schema.md).
 
 ### 1. The contract surface
@@ -110,8 +110,19 @@ Readers expose `generation`, and graph documents carry it. Ids and answers from 
 
 `MemoryReader` provides `graph_schema_version`, `generation`, `head`, `node`, `claims`, `neighbours`, `episodes`
 and `spatial`. Every query takes an `as_of` no later than `head`; a later one raises `AsOfBeyondHeadError`, so one
-`as_of` always gets one answer. `schema.reference.ReferenceReader` is the in-memory reference built on `resolve`
-and `as_of`. The contract suite compares any reader with it on the golden graph, and checks the guarantees directly
+`as_of` always gets one answer. `head` is the latest Ledger transaction, which can be later than every
+`recorded_at`, because a transaction may produce no claim. The graph document therefore carries `head`
+explicitly. `node`, `claims` and `neighbours` all take `include_inferred`. Neighbour findings are those naming any
+edge between two nodes of the result, so they do not depend on which shortest path `via` shows.
+
+Every result type has a `to_json` and a JSON Schema definition: `NodeResult`, `NodeView`, `ClaimsResult`,
+`NeighboursResult`, `Neighbour`, `EpisodesResult`, `EpisodeView`, `SpatialResult` and `SpatialView`. A
+`Knowledge`-wrapped result is `known` with a value, or `not_covered`. The definitions are published with goldens
+(`result.*.json`), so `check-owner` catches a renamed or retyped result field. The schema also states the claim
+rules the codec enforces: inferred exactly when `provenance.model` is present, and deterministic only with
+confidence `not_applicable`.
+
+`schema.reference.ReferenceReader` is the in-memory reference built on `resolve` and `as_of`. The contract suite compares any reader with it on the golden graph, and checks the guarantees directly
 as well. `contract.suite.StubReader` is the stub that the suite rejects.
 
 `MemoryStore` (ADR 0004 §5) is unchanged and remains provisional. Its write side is refactored in G2, with
@@ -133,24 +144,35 @@ name a person by it.
 ### 10. The golden graph
 
 The golden graph is built from the compiler's four worked examples: drone, manipulator, mobile robot and
-quadruped. They are loaded into a `StubLedger` over three transactions, with a small Ledger overlay: an operator
-log whose bytes live in the code, and the two Ledger threads its identity assertion needs. Four consolidators run:
+quadruped. They are loaded into a `StubLedger` over five transactions, with a Ledger overlay: two operator logs
+whose bytes live in the code, the two Ledger threads the identity assertion needs, and a final package that no
+consolidator reads. Four consolidators run, in priority order:
 
 - `golden.runs` is deterministic: `evidenced_by` per run, plus `recorded_by` where the run declares a machine.
-- `golden.recorder_guess` is inferred. It is a fixture under `derived/`.
+- `golden.operator` makes stated statements and corrections.
 - `memory.identity` is the real identity policy.
-- `golden.operator` makes stated corrections.
+- `golden.fixture_model` stands in for a model and emits inferred claims. It lives in
+  `contract/_fixture_model.py`: golden only, private, and never registered. Real model-based consolidators live
+  in `derived/`.
 
-The resolver then runs over the result. The graph contains:
+The resolver then runs over the result. The review of PR #60 showed that the suite can only catch what the graph
+contains, so the graph contains all of the following:
 
 - deterministic and inferred claims;
 - an inferred guess superseded at tx 3;
+- an `overridden_on_arrival` finding whose winner is superseded at tx 4;
+- a `clock_mismatch` that closes at tx 4, plus newer ones that stay open;
+- split closure versions;
+- an inferred `same_as_candidate` pair;
 - a stated `same_as`;
-- a `clock_mismatch` finding.
+- two corroborating `recorded_by` claims, observed by the log and stated by the operator;
+- neighbour results that carry findings;
+- a head (tx 5) after the last claim (tx 4).
 
-The suite's checks therefore have something to bite on. Rebuilding is byte-identical, and a test compares the
-rebuild with the published file. The golden consolidators are fixtures, not production policy: in particular,
-keying a run node by its record id (`record:<id>`) is a golden-graph convention, not an identity rule.
+The package tests keep six subtly wrong readers that each must fail the suite on this graph. Rebuilding is
+byte-identical, and a test compares the rebuild with the published file. The golden consolidators are fixtures,
+not production policy: in particular, keying a run node by its record id (`record:<id>`) is a golden-graph
+convention, not an identity rule.
 
 ### 11. Provisional queries answer `NotCovered`
 

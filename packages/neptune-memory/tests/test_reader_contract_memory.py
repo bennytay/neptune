@@ -30,18 +30,22 @@ from neptune_memory.contract.suite import (
     check_provisional_queries_are_not_covered,
     check_superseded_versions_vanish_exactly,
 )
+from neptune_memory.schema.claim import is_inferred
 from neptune_memory.schema.codec import GraphDocument
-from neptune_memory.schema.interval import ledger_tx
+from neptune_memory.schema.interval import OPEN, ledger_tx
 from neptune_memory.schema.nodes import NodeType
-from neptune_memory.schema.predicates import CORE_PREDICATES
-from neptune_memory.schema.reader import ClaimsResult, MemoryReader
+from neptune_memory.schema.predicates import CORE_PREDICATES, SAME_AS_CANDIDATE
+from neptune_memory.schema.reader import ClaimsResult, MemoryReader, NeighboursResult
 from neptune_memory.schema.reference import ReferenceReader
-from neptune_memory.schema.supersede import resolve, resolver_config
+from neptune_memory.schema.supersede import Resolution, resolve, resolver_config
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
     from neptune_memory.schema.claim import Claim
     from neptune_memory.schema.interval import Interval, LedgerTx
     from neptune_memory.schema.nodes import NodeRef
+    from neptune_memory.schema.supersede import ResolutionFinding
 
 # Checks that pass vacuously on a reader that answers nothing (it does answer NotCovered).
 VACUOUS_ON_STUB = {
@@ -167,8 +171,11 @@ GENERAL = (
 
 def _document(*claims: Claim) -> GraphDocument:
     priorities = {"memory.test": 0}
+    head = ledger_tx(max(c.recorded_at for c in claims))
     return GraphDocument(
-        resolve(claims, CORE_PREDICATES, priorities), resolver_config(CORE_PREDICATES, priorities)
+        resolve(claims, CORE_PREDICATES, priorities),
+        resolver_config(CORE_PREDICATES, priorities),
+        head,
     )
 
 
@@ -194,3 +201,105 @@ def test_an_override_finding_stays_visible_after_its_winner_is_superseded() -> N
     assert overridden.id not in {f.id for f in filtered.findings}  # names only inferred + gone
     for check in GENERAL:
         check(ReferenceReader, document)
+
+
+# --- Subtly wrong readers from the review of PR #60: each must fail the suite on the golden ---
+
+
+class _LeakFindingSupersession(ReferenceReader):
+    """Findings keep their real ``superseded_at``: later knowledge leaks into the snapshot."""
+
+    def _snapshot(self, as_of: LedgerTx, include_inferred: bool = True) -> Resolution:
+        snapshot = super()._snapshot(as_of, include_inferred)
+        real = {f.id: f for f in self._history.findings}
+        return Resolution(snapshot.claims, tuple(real[f.id] for f in snapshot.findings))
+
+
+class _DropsCorroboration(ReferenceReader):
+    """Keeps one claim per (subject, predicate, object): corroborating claims vanish."""
+
+    def _snapshot(self, as_of: LedgerTx, include_inferred: bool = True) -> Resolution:
+        snapshot = super()._snapshot(as_of, include_inferred)
+        seen: set[object] = set()
+        kept = []
+        for c in sorted(snapshot.claims, key=lambda c: (is_inferred(c.assertion_kind), c.id)):
+            key = (c.subject, c.predicate, c.object)
+            if key not in seen:
+                seen.add(key)
+                kept.append(c)
+        return Resolution(tuple(kept), snapshot.findings)
+
+
+class _OnlyFindingsNamingReturnedClaims(ReferenceReader):
+    """Regresses guarantee 7: an override finding vanishes once its winners are superseded."""
+
+    def _findings(
+        self,
+        snapshot: Resolution,
+        returned: Iterable[Claim],
+        about: Callable[[Claim], bool],
+        include_inferred: bool = True,
+    ) -> tuple[ResolutionFinding, ...]:
+        ids = {c.id for c in returned}
+        return tuple(f for f in snapshot.findings if f.claim in ids or ids & set(f.others))
+
+
+class _NeighboursWithoutFindings(ReferenceReader):
+    def neighbours(
+        self, node: NodeRef, hops: int, as_of: LedgerTx, *, include_inferred: bool = True
+    ) -> NeighboursResult:
+        result = super().neighbours(node, hops, as_of, include_inferred=include_inferred)
+        return replace(result, findings=())
+
+
+class _CandidatesIgnoreInferenceFilter(ReferenceReader):
+    """Treats identity edges as always visible: inferred ``same_as_candidate`` survives."""
+
+    def _snapshot(self, as_of: LedgerTx, include_inferred: bool = True) -> Resolution:
+        full = super()._snapshot(as_of, True)
+        if include_inferred:
+            return full
+        kept = tuple(
+            c
+            for c in full.claims
+            if not is_inferred(c.assertion_kind) or c.predicate == SAME_AS_CANDIDATE
+        )
+        return Resolution(kept, full.findings)
+
+
+class _NeighboursStaleEdges(ReferenceReader):
+    """Traverses every claim recorded by ``as_of``, superseded ones included (masked open)."""
+
+    def neighbours(
+        self, node: NodeRef, hops: int, as_of: LedgerTx, *, include_inferred: bool = True
+    ) -> NeighboursResult:
+        stale = tuple(
+            replace(c, superseded_at=OPEN) for c in self._history.claims if c.recorded_at <= as_of
+        )
+        everything = GraphDocument(
+            Resolution(stale, self._history.findings), published().resolver_config, self.head
+        )
+        return ReferenceReader(everything).neighbours(
+            node, hops, as_of, include_inferred=include_inferred
+        )
+
+
+PROBES = (
+    _LeakFindingSupersession,
+    _DropsCorroboration,
+    _OnlyFindingsNamingReturnedClaims,
+    _NeighboursWithoutFindings,
+    _CandidatesIgnoreInferenceFilter,
+    _NeighboursStaleEdges,
+)
+
+
+@pytest.mark.parametrize("reader", PROBES, ids=lambda r: r.__name__)
+def test_subtly_wrong_readers_fail_the_suite_on_the_golden(reader: type[ReferenceReader]) -> None:
+    failed = []
+    for check in CHECKS:
+        try:
+            check(reader, published())
+        except ContractViolation:
+            failed.append(check.__name__)
+    assert failed, f"{reader.__name__} passes the whole suite"

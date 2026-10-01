@@ -47,6 +47,45 @@
     },
     "Claim": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "confidence": {
+                "$ref": "#/$defs/NotApplicable"
+              },
+              "provenance": {
+                "not": {
+                  "required": [
+                    "model"
+                  ]
+                }
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "assertion_kind": {
+                "const": "inferred"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "confidence": {
+                "not": {
+                  "$ref": "#/$defs/NotApplicable"
+                }
+              },
+              "provenance": {
+                "required": [
+                  "model"
+                ]
+              }
+            }
+          }
+        }
+      ],
       "description": "subject predicate object over a valid interval, recorded at a Ledger transaction (ADR 0002 §2). id hashes everything but recorded_at, superseded_at, supersedes. An inferred claim names its model in provenance; an observed or stated one has confidence not_applicable and no model (ADR 0006 §3).",
       "properties": {
         "assertion_kind": {
@@ -164,6 +203,39 @@
       ],
       "type": "object"
     },
+    "ClaimsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/ResolutionFinding"
+          },
+          "type": "array"
+        },
+        "other_clocks": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "as_of",
+        "claims",
+        "findings",
+        "other_clocks"
+      ],
+      "type": "object"
+    },
     "Confidence": {
       "anyOf": [
         {
@@ -217,6 +289,60 @@
     "ContentId": {
       "pattern": "^sha256:[0-9a-f]{64}$",
       "type": "string"
+    },
+    "EpisodeView": {
+      "additionalProperties": false,
+      "properties": {
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "episode": {
+          "$ref": "#/$defs/NodeRef"
+        }
+      },
+      "required": [
+        "claims",
+        "episode"
+      ],
+      "type": "object"
+    },
+    "EpisodesResult": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/EpisodeView"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "EvidenceRef": {
       "additionalProperties": false,
@@ -393,6 +519,9 @@
         "graph_schema_version": {
           "const": 1
         },
+        "head": {
+          "$ref": "#/$defs/LedgerTx"
+        },
         "kind": {
           "const": "memory.graph"
         },
@@ -405,6 +534,7 @@
         "findings",
         "generation",
         "graph_schema_version",
+        "head",
         "kind",
         "resolver_config"
       ],
@@ -516,6 +646,65 @@
       ],
       "type": "object"
     },
+    "Neighbour": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeRef"
+        },
+        "via": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "depth",
+        "node",
+        "via"
+      ],
+      "type": "object"
+    },
+    "NeighboursResult": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/ResolutionFinding"
+          },
+          "type": "array"
+        },
+        "hops": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "neighbours": {
+          "items": {
+            "$ref": "#/$defs/Neighbour"
+          },
+          "type": "array"
+        },
+        "start": {
+          "$ref": "#/$defs/NodeRef"
+        }
+      },
+      "required": [
+        "as_of",
+        "findings",
+        "hops",
+        "neighbours",
+        "start"
+      ],
+      "type": "object"
+    },
     "NodeRef": {
       "additionalProperties": false,
       "properties": {
@@ -537,6 +726,38 @@
       ],
       "type": "object"
     },
+    "NodeResult": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/NodeView"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "NodeType": {
       "enum": [
         "asset",
@@ -556,6 +777,43 @@
         "task",
         "zone"
       ]
+    },
+    "NodeView": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/ResolutionFinding"
+          },
+          "type": "array"
+        },
+        "incoming": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeRef"
+        }
+      },
+      "required": [
+        "as_of",
+        "claims",
+        "findings",
+        "incoming",
+        "node"
+      ],
+      "type": "object"
     },
     "NonFinite": {
       "additionalProperties": false,
@@ -871,6 +1129,65 @@
       ],
       "type": "object"
     },
+    "SpatialResult": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/SpatialView"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SpatialView": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/LedgerTx"
+        },
+        "claims": {
+          "items": {
+            "$ref": "#/$defs/Claim"
+          },
+          "type": "array"
+        },
+        "frame": {
+          "$ref": "#/$defs/FrameRef"
+        },
+        "site": {
+          "$ref": "#/$defs/NodeRef"
+        }
+      },
+      "required": [
+        "as_of",
+        "claims",
+        "frame",
+        "site"
+      ],
+      "type": "object"
+    },
     "Timestamp": {
       "additionalProperties": false,
       "properties": {
@@ -1173,6 +1490,6 @@
       "$ref": "#/$defs/Graph"
     }
   ],
-  "description": "Neptune Memory's graph schema (neptune-memory ADR 0002, 0005, 0006): a graph document; claims, findings and the vocabulary are #/$defs/Claim, #/$defs/ResolutionFinding and #/$defs/PredicateRegistry. Generated from neptune_memory.schema; the Python readers in neptune_memory.schema.codec are stricter.",
+  "description": "Neptune Memory's graph schema (neptune-memory ADR 0002, 0005, 0006): a graph document; claims, findings and the vocabulary are #/$defs/Claim, #/$defs/ResolutionFinding and #/$defs/PredicateRegistry; MemoryReader results are #/$defs/NodeResult, ClaimsResult, NeighboursResult, EpisodesResult and SpatialResult. Generated from neptune_memory.schema; the Python readers in neptune_memory.schema.codec are stricter.",
   "title": "Neptune Memory graph schema, version 1"
 }

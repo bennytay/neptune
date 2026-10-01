@@ -27,7 +27,15 @@ if TYPE_CHECKING:
 DIALECT: Final = "https://json-schema.org/draft/2020-12/schema"
 SCHEMA_ID: Final = f"urn:neptune:schema:graph:{GRAPH_SCHEMA_VERSION}"
 # Compiler definitions a claim embeds; their transitive references come along.
-COMPILER_DEFS: Final = ("ConfigHash", "EvidenceRef", "NonFinite", "RecordId", "Timestamp", "Unit")
+COMPILER_DEFS: Final = (
+    "ConfigHash",
+    "EvidenceRef",
+    "FrameRef",
+    "NonFinite",
+    "RecordId",
+    "Timestamp",
+    "Unit",
+)
 _INT64_MAX: Final = 2**63 - 1
 
 
@@ -109,6 +117,25 @@ def _memory_defs() -> dict[str, JsonValue]:
         "ClaimAssertionKind": {"enum": ["inferred", "observed", "stated"]},
         "Cardinality": {"enum": sorted(str(c) for c in Cardinality)},
         "Claim": {
+            # ADR 0006 §3: inferred <=> provenance.model; deterministic => confidence
+            # not_applicable (and an inferred claim's confidence is known or unknown).
+            "allOf": [
+                {
+                    "else": {
+                        "properties": {
+                            "confidence": _ref("NotApplicable"),
+                            "provenance": {"not": {"required": ["model"]}},
+                        }
+                    },
+                    "if": {"properties": {"assertion_kind": _const("inferred")}},
+                    "then": {
+                        "properties": {
+                            "confidence": {"not": _ref("NotApplicable")},
+                            "provenance": {"required": ["model"]},
+                        }
+                    },
+                }
+            ],
             **_obj(
                 {
                     "assertion_kind": _ref("ClaimAssertionKind"),
@@ -172,6 +199,7 @@ def _memory_defs() -> dict[str, JsonValue]:
                     "findings": _array(_ref("ResolutionFinding")),
                     "generation": _ref("ConfigHash"),
                     "graph_schema_version": {"const": GRAPH_SCHEMA_VERSION},
+                    "head": _ref("LedgerTx"),
                     "kind": _const("memory.graph"),
                     "resolver_config": _ref("ResolverConfig"),
                 }
@@ -256,6 +284,66 @@ def _memory_defs() -> dict[str, JsonValue]:
             ]
         },
         "ValueType": {"enum": sorted(str(t) for t in ValueType)},
+        **_result_defs(),
+    }
+
+
+def _not_covered_or(value: JsonObject) -> JsonObject:
+    return {
+        "anyOf": [
+            _obj({"knowledge": _const("known"), "value": value}),
+            _obj({"knowledge": _const("not_covered")}),
+        ]
+    }
+
+
+def _result_defs() -> dict[str, JsonValue]:
+    """``MemoryReader`` results as ``to_json`` writes them (ADR 0006 §8), so ``check-owner``
+    covers a renamed or retyped result field like any other part of the contract."""
+    claims = _array(_ref("Claim"))
+    findings = _array(_ref("ResolutionFinding"))
+    return {
+        "ClaimsResult": _obj(
+            {
+                "as_of": _ref("LedgerTx"),
+                "claims": claims,
+                "findings": findings,
+                "other_clocks": claims,
+            }
+        ),
+        "EpisodeView": _obj({"claims": claims, "episode": _ref("NodeRef")}),
+        "EpisodesResult": _not_covered_or(_array(_ref("EpisodeView"))),
+        "Neighbour": _obj(
+            {"depth": {"minimum": 1, "type": "integer"}, "node": _ref("NodeRef"), "via": claims}
+        ),
+        "NeighboursResult": _obj(
+            {
+                "as_of": _ref("LedgerTx"),
+                "findings": findings,
+                "hops": {"minimum": 0, "type": "integer"},
+                "neighbours": _array(_ref("Neighbour")),
+                "start": _ref("NodeRef"),
+            }
+        ),
+        "NodeResult": _not_covered_or(_ref("NodeView")),
+        "NodeView": _obj(
+            {
+                "as_of": _ref("LedgerTx"),
+                "claims": claims,
+                "findings": findings,
+                "incoming": claims,
+                "node": _ref("NodeRef"),
+            }
+        ),
+        "SpatialResult": _not_covered_or(_ref("SpatialView")),
+        "SpatialView": _obj(
+            {
+                "as_of": _ref("LedgerTx"),
+                "claims": claims,
+                "frame": _ref("FrameRef"),
+                "site": _ref("NodeRef"),
+            }
+        ),
     }
 
 
@@ -270,9 +358,10 @@ def graph_schema() -> JsonObject:
         "description": (
             "Neptune Memory's graph schema (neptune-memory ADR 0002, 0005, 0006): a graph"
             " document; claims, findings and the vocabulary are #/$defs/Claim,"
-            " #/$defs/ResolutionFinding and #/$defs/PredicateRegistry. Generated from"
-            " neptune_memory.schema; the Python readers in neptune_memory.schema.codec are"
-            " stricter."
+            " #/$defs/ResolutionFinding and #/$defs/PredicateRegistry; MemoryReader results are"
+            " #/$defs/NodeResult, ClaimsResult, NeighboursResult, EpisodesResult and"
+            " SpatialResult. Generated from neptune_memory.schema; the Python readers in"
+            " neptune_memory.schema.codec are stricter."
         ),
         "title": f"Neptune Memory graph schema, version {GRAPH_SCHEMA_VERSION}",
     }
