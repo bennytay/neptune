@@ -29,6 +29,7 @@ from neptune.adapters.config._tree import (
     TooDeep,
     Unreadable,
     Value,
+    issues_for,
     mark_repeats,
 )
 from neptune.model.configuration import CollectionType, ConfigFormat, ConfigScalar, Path, ScalarType
@@ -203,6 +204,7 @@ def read_json(text: str, limits: Limits) -> Parse:
             children = [(value, (*path, i), i, index, "") for i, value in enumerate(item)]
         else:
             text_value, reading, issues = _scalar(item, limits)
+            issues = issues_for(reading, issues)
             nodes.append(Node(path, order, parent, reading, text_value, None, span, False, issues))
             continue
         nodes.append(Node(path, order, parent, Collection(kind, length), span=span))

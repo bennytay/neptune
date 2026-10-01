@@ -29,6 +29,7 @@ from neptune.adapters.config._tree import (
     TooDeep,
     Unreadable,
     Value,
+    issues_for,
 )
 from neptune.model.configuration import CollectionType, ConfigFormat, ConfigScalar, Path, ScalarType
 
@@ -334,7 +335,8 @@ def read_toml(text: str, limits: Limits) -> Parse:
         else:
             raw = text[span[0] : span[1]] if span is not None else None
             declared, reading = _scalar(item, raw, limits)
-            nodes.append(Node(path, order, parent, reading, declared, None, span))
+            issues = issues_for(reading)
+            nodes.append(Node(path, order, parent, reading, declared, None, span, False, issues))
             continue
         nodes[index].span = span
         pending.extend(reversed(children))

@@ -71,6 +71,13 @@ class Alias:
 NodeValue: TypeAlias = Collection | Alias | Reading
 
 
+def issues_for(value: NodeValue, issues: tuple[Issue, ...] = ()) -> tuple[Issue, ...]:
+    """A node's issues: those given, and why its reading cannot be held, if it cannot."""
+    if isinstance(value, Unreadable) and value.issue not in issues:
+        return (*issues, value.issue)
+    return issues
+
+
 @dataclass
 class Node:
     """One value of a document, as a reader found it.
