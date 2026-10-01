@@ -214,6 +214,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
             "cpu_seconds": 10,
             "memory_bytes": 256 * MIB,
             "reply_bytes": 64 * MIB,
+            "scratch_bytes": 1024 * MIB,
             "wall_seconds": 2,
         },
     }
@@ -229,6 +230,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
         "isolation": "subprocess",
         "memory_bytes": 256 * MIB,
         "reply_bytes": 64 * MIB,
+        "scratch_bytes": 1024 * MIB,
         "wall_seconds": 2,
     }
     assert {f.transform for f in run.outcome.findings} == {runtime.id}
@@ -308,6 +310,26 @@ def test_a_parser_cannot_reach_the_network_processes_or_files(tmp_path: Path, at
     assert (finding.details["error"], finding.details["step"]) == (denied, "ingest")
     assert not escaped.exists() or escaped.read_bytes() == b""  # not one byte escaped
     assert sorted(p.name for p in root.iterdir()) == ["attack.hostile"]  # the source untouched
+
+
+@pytest.mark.skipif(not confine.landlock_abi(), reason="no Landlock: calls get no scratch")
+def test_a_call_spools_through_its_scratch_and_a_flood_is_the_scratch_limit(
+    tmp_path: Path,
+) -> None:
+    """Plan and ingest each get a fresh scratch directory under the workspace: a spool works,
+    one file past ``scratch_bytes`` stops the call, and nothing is left there (ADR 0033 §2)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "spool.hostile").write_bytes(HOSTILE.hostile("before", "spool", "after"))
+    (root / "flood.hostile").write_bytes(HOSTILE.hostile("flood"))
+    run = Run(root, tmp_path, sandboxed(scratch_bytes=4 * MIB))
+    assert run.codes() == ["neptune.runtime.limit_exceeded"]
+    finding = run.finding("neptune.runtime.limit_exceeded")
+    assert (finding.details["limit"], finding.details["value"]) == ("scratch_bytes", 4 * MIB)
+    assert [source for source, _ in run.outcome.ingested] == [run.source("spool.hostile")]
+    assert {"before", "spool", "after"} <= set(run.texts())
+    assert list((run.home / "scratch").iterdir()) == [] and run.staging_is_empty()
+    assert sorted(p.name for p in root.iterdir()) == ["flood.hostile", "spool.hostile"]
 
 
 def test_a_probe_that_crashes_takes_only_its_adapter_out(tmp_path: Path) -> None:

@@ -14,6 +14,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import termios
 import threading
 import time
@@ -24,7 +25,7 @@ from typing import Final
 
 import pytest
 
-from neptune.adapters.contract import ContractError, ShortReadError
+from neptune.adapters.contract import ContractError, ShortReadError, scratch_directory
 from neptune.discovery.reader import SourceChangedError
 from neptune.model.ids import ContentId
 from neptune.runtime import confine, wire
@@ -88,11 +89,13 @@ def test_default_limits() -> None:
         "cpu_seconds": 60,
         "memory_bytes": 2 * 1024 * MIB,
         "reply_bytes": 64 * MIB,
+        "scratch_bytes": 1024 * MIB,
         "wall_seconds": 120,
     }
     assert DEFAULT_LIMITS.value(Limit.CPU) == 60 and DEFAULT_LIMITS.value(Limit.WALL) == 120
     assert DEFAULT_LIMITS.value(Limit.MEMORY) == 2 * 1024 * MIB  # the address space
     assert DEFAULT_LIMITS.value(Limit.REPLY) == 64 * MIB  # far below it: a separate cap
+    assert DEFAULT_LIMITS.value(Limit.SCRATCH) == 1024 * MIB  # one file in a call's scratch
 
 
 @pytest.mark.parametrize(
@@ -444,6 +447,73 @@ def test_with_landlock_nothing_is_created_changed_or_removed(
     assert kept.read_bytes() == b"source bytes"
 
 
+# --- Scratch space (ADR 0033 §2) ------------------------------------------------------------------
+
+
+def spool(size: int) -> Callable[[], str]:
+    """Work that spools ``size`` bytes through its scratch directory, as an archive adapter would
+    spool a nested member, and says what it found there."""
+
+    def work() -> str:
+        directory = scratch_directory()
+        if directory is None:
+            return "none"
+        with tempfile.SpooledTemporaryFile(max_size=1024, dir=str(directory)) as spooled:
+            spooled.write(b"x" * size)  # past max_size: rolls over to a real file in scratch
+            spooled.seek(0)
+            read = len(spooled.read())
+        (directory / "sub").mkdir()
+        (directory / "sub" / "kept").write_bytes(b"k")
+        (directory / "sub" / "kept").rename(directory / "moved")
+        os.truncate(directory / "moved", 0)
+        return f"{read} {sorted(p.name for p in directory.iterdir())}"
+
+    return work
+
+
+@pytest.mark.skipif(not confine.landlock_abi(), reason="this kernel has no Landlock")
+def test_a_call_writes_in_its_scratch_directory_and_nowhere_else(
+    box: Subprocess, tmp_path: Path
+) -> None:
+    scratch = tmp_path / "scratch"
+    scratch.mkdir(mode=0o700)
+    assert box.call(spool(64 * 1024), TEXT, scratch=scratch) == Returned("65536 ['moved', 'sub']")
+    denied = Raised("PermissionError")
+    beside = tmp_path / "beside"
+    assert box.call(doing(lambda: beside.write_bytes(b"")), TEXT, scratch=scratch) == denied
+    assert not beside.exists()
+    link = doing(lambda: (scratch / "link").symlink_to(tmp_path))
+    assert box.call(link, TEXT, scratch=scratch) == denied  # no symlink, even in scratch
+    escape = doing(lambda: (scratch / "moved").rename(tmp_path / "out"))
+    assert box.call(escape, TEXT, scratch=scratch) == Raised("PermissionError")
+    # Without one, the call has no scratch and writes nowhere.
+    assert box.call(spool(1), TEXT) == Returned("none")
+
+
+@pytest.mark.skipif(not confine.landlock_abi(), reason="this kernel has no Landlock")
+def test_a_scratch_file_past_its_budget_is_the_scratch_limit(tmp_path: Path) -> None:
+    small = Subprocess(Limits(cpu_seconds=5, wall_seconds=10, scratch_bytes=64 * 1024))
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    outcome = small.call(spool(64 * 1024 + 1), TEXT, scratch=scratch)
+    assert outcome == Exceeded(Limit.SCRATCH, 64 * 1024)
+    assert small.call(spool(64 * 1024), TEXT, scratch=scratch) == Returned("65536 ['moved', 'sub']")
+
+
+def test_a_zero_scratch_budget_grants_no_scratch(tmp_path: Path) -> None:
+    none = Subprocess(Limits(cpu_seconds=5, wall_seconds=10, scratch_bytes=0))
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    assert none.call(spool(1), TEXT, scratch=scratch) == Returned("none")
+
+
+def test_in_process_calls_get_their_scratch_directory_too(tmp_path: Path) -> None:
+    trusted = runner(Isolation.IN_PROCESS)
+    assert trusted.call(spool(10), TEXT, scratch=tmp_path) == Returned("10 ['moved', 'sub']")
+    assert trusted.call(spool(10), TEXT) == Returned("none")
+    assert scratch_directory() is None  # granted only for the call
+
+
 def test_only_kept_descriptors_stay_open(box: Subprocess, tmp_path: Path) -> None:
     (tmp_path / "kept").write_bytes(b"kept")
     (tmp_path / "other").write_bytes(b"other")
@@ -517,6 +587,7 @@ def test_the_sandbox_describes_its_limits_and_landlock(box: Subprocess) -> None:
             "cpu_seconds": 1,
             "memory_bytes": 128 * MIB,
             "reply_bytes": 64 * MIB,
+            "scratch_bytes": 1024 * MIB,
             "wall_seconds": 2,
         },
     }
@@ -577,7 +648,7 @@ def test_allow_degraded_must_be_a_bool() -> None:
 def test_a_control_that_fails_in_the_child_is_the_hosts_fault(
     box: Subprocess, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def refused(*args: object) -> None:
+    def refused(*args: object, **kwargs: object) -> None:
         raise confine.ConfineError("seccomp", "EINVAL")
 
     monkeypatch.setattr(confine, "confine", refused)  # the child inherits it at fork

@@ -20,6 +20,7 @@ what the parent decoded and checked, so a killed child leaves no partial chunk a
 """
 
 import contextlib
+import errno
 import json
 import math
 import os
@@ -30,9 +31,10 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Final, Generic, NoReturn, Protocol, TypeAlias, TypeVar
 
-from neptune.adapters.contract import ContractError, ShortReadError
+from neptune.adapters.contract import ContractError, ShortReadError, scratch_granted
 from neptune.discovery.reader import SourceChangedError
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.runtime import confine
@@ -86,6 +88,7 @@ class Limit(StrEnum):
     WALL = "wall_seconds"
     MEMORY = "memory_bytes"
     REPLY = "reply_bytes"  # the reply's size, and the count of values it decodes to, are capped
+    SCRATCH = "scratch_bytes"  # one file in the call's scratch directory (ADR 0033 §2)
 
 
 @dataclass(frozen=True)
@@ -96,13 +99,16 @@ class Limits:
     space the call may add to what the process held when it forked. ``reply_bytes`` bounds the
     reply the parent reads and decodes — kept far below ``memory_bytes`` (64 MiB by default), so
     one hostile call that emits a giant reply cannot exhaust the job while it copies and decodes
-    it; the decode is bounded in count as well (``neptune.runtime.wire``).
+    it; the decode is bounded in count as well (``neptune.runtime.wire``). ``scratch_bytes``
+    bounds each file a ``plan`` or ``ingest`` call writes in its scratch directory (the only place
+    it can write; ADR 0033 §2); 0 gives calls no scratch at all.
     """
 
     cpu_seconds: int = 60
     wall_seconds: int = 120
     memory_bytes: int = 2 * 1024 * _MIB
     reply_bytes: int = 64 * _MIB
+    scratch_bytes: int = 1024 * _MIB
 
     def __post_init__(self) -> None:
         for name, value, low, high in (
@@ -110,6 +116,7 @@ class Limits:
             ("wall_seconds", self.wall_seconds, 1, _MAX_SECONDS),
             ("memory_bytes", self.memory_bytes, _MIN_MEMORY, _MAX_MEMORY),
             ("reply_bytes", self.reply_bytes, _MIN_REPLY, _MAX_MEMORY),
+            ("scratch_bytes", self.scratch_bytes, 0, _MAX_MEMORY),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
                 raise ValueError(f"{name} is an integer in [{low}, {high}], got {value!r}")
@@ -121,6 +128,8 @@ class Limits:
             return self.wall_seconds
         if limit is Limit.REPLY:
             return self.reply_bytes
+        if limit is Limit.SCRATCH:
+            return self.scratch_bytes
         return self.memory_bytes
 
     def to_json(self) -> JsonObject:
@@ -128,6 +137,7 @@ class Limits:
             "cpu_seconds": self.cpu_seconds,
             "memory_bytes": self.memory_bytes,
             "reply_bytes": self.reply_bytes,
+            "scratch_bytes": self.scratch_bytes,
             "wall_seconds": self.wall_seconds,
         }
 
@@ -285,9 +295,14 @@ class Runner(Protocol):
     isolation: Isolation
 
     def call(
-        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
+        self,
+        work: Callable[[], object],
+        codec: Codec[T],
+        keep: tuple[int, ...] = (),
+        scratch: Path | None = None,
     ) -> Returned[T] | Raised | Crashed | Exceeded:
-        """Run ``work``; ``keep`` lists the descriptors it reads (a source's)."""
+        """Run ``work``; ``keep`` lists the descriptors it reads (a source's). ``scratch`` is an
+        empty private directory the call may write in (``scratch_directory``), if it has one."""
         ...
 
     def describe(self) -> JsonObject:
@@ -306,10 +321,15 @@ class InProcess:
     isolation = Isolation.IN_PROCESS
 
     def call(
-        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
+        self,
+        work: Callable[[], object],
+        codec: Codec[T],
+        keep: tuple[int, ...] = (),
+        scratch: Path | None = None,
     ) -> Returned[T] | Raised | Crashed | Exceeded:
         try:
-            value = work()
+            with scratch_granted(scratch):
+                value = work()
         except Exception as exc:
             return Raised.of(exc)
         if not isinstance(value, codec.kind):
@@ -332,6 +352,7 @@ _UNCONFINED: Final = b"U"
 _RETURNED: Final = b"R"
 _RAISED: Final = b"E"
 _OUT_OF_MEMORY: Final = b"M"
+_SCRATCH_FULL: Final = b"F"  # a write past ``scratch_bytes`` failed with EFBIG
 _UNREPORTED: Final = 70  # the child's exit status when it could not even write its reply
 
 
@@ -468,7 +489,11 @@ class Subprocess:
         return described
 
     def call(
-        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
+        self,
+        work: Callable[[], object],
+        codec: Codec[T],
+        keep: tuple[int, ...] = (),
+        scratch: Path | None = None,
     ) -> Returned[T] | Raised | Crashed | Exceeded:
         for fd in keep:
             if isinstance(fd, bool) or not isinstance(fd, int) or fd < 0:
@@ -485,7 +510,7 @@ class Subprocess:
             os.close(write_end)
             raise SandboxError(f"cannot start a sandboxed call: {exc}") from exc
         if pid == 0:  # pragma: no cover - the child's coverage is not collected
-            self._child(work, codec, frozenset(keep) | {write_end}, write_end, parent)
+            self._child(work, codec, frozenset(keep) | {write_end}, write_end, parent, scratch)
         os.close(write_end)
         try:
             try:
@@ -508,11 +533,18 @@ class Subprocess:
         keep: frozenset[int],
         reply: int,
         parent: int,
+        scratch: Path | None,
     ) -> NoReturn:  # pragma: no cover - runs in the child, whose coverage is not collected
         try:
             try:
-                confine.confine(
-                    self._host, keep, parent, self.limits.cpu_seconds, self.limits.memory_bytes
+                granted = confine.confine(
+                    self._host,
+                    keep,
+                    parent,
+                    self.limits.cpu_seconds,
+                    self.limits.memory_bytes,
+                    scratch=scratch,
+                    scratch_bytes=self.limits.scratch_bytes,
                 )
             except confine.ConfineError as exc:
                 _send(reply, _UNCONFINED + exc.control.encode("ascii", "replace"))
@@ -522,7 +554,8 @@ class Subprocess:
             tag, payload = _OUT_OF_MEMORY, b""  # held before the call: needs no allocation
             try:
                 try:
-                    value = work()
+                    with scratch_granted(scratch if granted else None):
+                        value = work()
                     if not isinstance(value, codec.kind):
                         payload, tag = encode_raised(Raised.mistyped(value)), _RAISED
                     else:
@@ -534,6 +567,11 @@ class Subprocess:
                             payload, tag = encode_raised(Raised.unencoded(exc)), _RAISED
                 except MemoryError:
                     pass
+                except OSError as exc:
+                    if exc.errno == errno.EFBIG:  # past RLIMIT_FSIZE: SIGXFSZ is ignored
+                        tag, payload = _SCRATCH_FULL, b""
+                    else:
+                        payload, tag = encode_raised(Raised.of(exc)), _RAISED
                 except BaseException as exc:
                     payload = encode_raised(Raised.of(exc))
                     tag = _RAISED
@@ -620,6 +658,8 @@ class Subprocess:
                 return decode_raised(payload)
             if tag == _OUT_OF_MEMORY and not payload:
                 return Exceeded(Limit.MEMORY, limits.memory_bytes)
+            if tag == _SCRATCH_FULL and not payload:
+                return Exceeded(Limit.SCRATCH, limits.scratch_bytes)
         except ReplyTooLarge:  # too many containers or elements to build: the reply's own cap
             return Exceeded(Limit.REPLY, limits.reply_bytes)
         except Exception:  # any failure to decode: the reply is not one a sound child writes

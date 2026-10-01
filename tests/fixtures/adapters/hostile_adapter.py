@@ -21,7 +21,10 @@ Chunk 0 emits the ``DocumentRecord``; every other chunk holds one line and emits
 - ``socket``: opens a socket; ``fork``: forks; ``exec``: runs ``/bin/true``;
   ``kill-parent``: signals the job's process; ``write <path>``: writes ``<path>``;
 - ``setown``: aims a pipe's SIGIO at the job (``fcntl`` F_SETOWN); ``fioasync``: turns a pipe's
-  async signal on (``ioctl`` FIOASYNC) — the signal path only Landlock ABI 6 scopes.
+  async signal on (``ioctl`` FIOASYNC) — the signal path only Landlock ABI 6 scopes;
+- ``spool``: not an attack: spools 2 MiB through the call's scratch directory, as an archive
+  adapter spools a nested member, and reads it back (a block ``spool``); ``flood``: writes one
+  file past the scratch budget.
 
 A first line ``plan-hang`` or ``plan-segfault`` attacks ``plan`` instead, and a line
 ``probe-segfault`` anywhere in the head makes ``probe`` segfault.
@@ -33,6 +36,7 @@ import os
 import signal
 import socket
 import struct
+import tempfile
 import termios
 import time
 from typing import Final
@@ -55,6 +59,7 @@ from neptune.adapters.contract import (
     Resources,
     SourceReader,
     make_chunk,
+    scratch_directory,
 )
 from neptune.identity.provenance import evidence_record_id
 from neptune.model.jsonvalue import JsonObject
@@ -160,6 +165,18 @@ def attack(text: str) -> str:
         finally:
             os.close(read_fd)
             os.close(write_fd)
+    elif text in ("spool", "flood"):
+        directory = scratch_directory()
+        if directory is None:
+            raise RuntimeError("this call has no scratch directory")
+        size = 2 * 1024 * 1024 if text == "spool" else 2 * 1024 * 1024 * 1024
+        with tempfile.SpooledTemporaryFile(max_size=1024 * 1024, dir=str(directory)) as spooled:
+            block = b"s" * (1024 * 1024)
+            for _ in range(size // len(block)):
+                spooled.write(block)
+            spooled.seek(0)
+            if len(spooled.read()) != size:
+                raise RuntimeError("the spool lost bytes")
     elif text.startswith("write "):
         with open(text.removeprefix("write "), "wb") as target:  # noqa: PTH123 - the attack
             target.write(b"escaped")

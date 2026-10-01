@@ -9,16 +9,21 @@ methods::
     plan(source, config) -> Plan                   chunks with deterministic ids, plus findings
     ingest(source, chunk, config) -> ChunkOutput   pure per chunk: records, series and findings
 
-An adapter reads only through ``SourceReader`` and never writes: the runtime owns the store,
-resume, caching, sandboxing and explanation. Everything here is plain immutable data, so a chunk
-and its output can cross a process boundary (MVL-10) unchanged. ``neptune.adapters.check`` turns
-the contract's laws into checks, and ``neptune.adapters.text`` is the reference implementation.
+An adapter reads only through ``SourceReader`` and writes nowhere but the private scratch
+directory a ``plan`` or ``ingest`` call may be given (``scratch_directory``): the runtime owns
+the store, resume, caching, sandboxing and explanation. Everything here is plain immutable data,
+so a chunk and its output can cross a process boundary (MVL-10) unchanged.
+``neptune.adapters.check`` turns the contract's laws into checks, and ``neptune.adapters.text``
+is the reference implementation.
 """
 
 import hashlib
 import re
 from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final, NewType, Protocol, TypeAlias
 
 from neptune.identity import canonical_json
@@ -113,6 +118,34 @@ class SourceReader(Protocol):
 
 
 READ_SIZE: Final = 1024 * 1024
+
+# --- Scratch space -----------------------------------------------------------------------------
+
+_SCRATCH: Final[ContextVar[Path | None]] = ContextVar("neptune_adapter_scratch", default=None)
+
+
+def scratch_directory() -> Path | None:
+    """The empty private directory this call may write temporary files in, or ``None``.
+
+    The runtime makes one for each ``plan`` and ``ingest`` call under the workspace's scratch root
+    and removes it when the call returns (ADR 0029 §4, ADR 0033 §2): a spool for a nested archive,
+    a decoder that wants a file. Nothing in it outlives the call, so output never depends on it.
+    In the sandbox it is the only place a call can write, each file at most ``scratch_bytes``
+    (``neptune.runtime.sandbox.Limits``). ``None`` for ``probe`` and ``inspect``, outside a job,
+    and on a host without Landlock, where the sandbox cannot confine writes to one directory:
+    an adapter that needs scratch and has none reports that as a finding.
+    """
+    return _SCRATCH.get()
+
+
+@contextmanager
+def scratch_granted(directory: Path | None) -> Iterator[None]:
+    """The runtime's side: ``scratch_directory()`` answers ``directory`` inside the block."""
+    token = _SCRATCH.set(directory)
+    try:
+        yield
+    finally:
+        _SCRATCH.reset(token)
 
 
 class ShortReadError(Exception):

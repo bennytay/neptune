@@ -48,7 +48,7 @@ import time
 import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
@@ -74,7 +74,7 @@ from neptune.adapters.registry import AdapterRegistry, Candidate, Selection, Sel
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
 from neptune.discovery.reader import LocalReader, SourceChangedError
 from neptune.discovery.scan import fingerprint
-from neptune.discovery.scratch import ScratchError, clear_scratch
+from neptune.discovery.scratch import ScratchError, clear_scratch, scratch_space
 from neptune.discovery.source import (
     LocalSource,
     SkippedEntry,
@@ -652,11 +652,29 @@ class IngestJob:
     ) -> Returned[T] | Raised | Crashed | Exceeded:
         """One adapter call through the runner; a sandbox that stops working fails the job.
 
-        ``work`` returns the adapter's word, unchecked: the runner checks its type.
+        ``work`` returns the adapter's word, unchecked: the runner checks its type. A call that
+        reads the source (``plan``, ``ingest``) is given a fresh scratch directory under the
+        workspace, removed when it returns, whatever became of the call (ADR 0033 §2).
         """
-        keep = () if reader is None else (reader.fileno(),)
+        if reader is None:
+            return self._run(work, codec, (), None)
+        with ExitStack() as stack:
+            try:
+                space = scratch_space(self.workspace.scratch, ingest_root=self.root)
+                directory = stack.enter_context(space)
+            except (ScratchError, OSError) as exc:
+                raise JobError(f"the workspace cannot give a call scratch space: {exc}") from exc
+            return self._run(work, codec, (reader.fileno(),), directory)
+
+    def _run(
+        self,
+        work: Callable[[], object],
+        codec: sandbox.Codec[T],
+        keep: tuple[int, ...],
+        scratch: Path | None,
+    ) -> Returned[T] | Raised | Crashed | Exceeded:
         try:
-            return self._runner.call(work, codec, keep)
+            return self._runner.call(work, codec, keep, scratch)
         except SandboxError as exc:
             raise JobError(str(exc)) from exc
 

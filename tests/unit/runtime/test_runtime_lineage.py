@@ -50,6 +50,7 @@ def test_the_runtime_transform_is_its_id_version_retry_and_isolation_policy() ->
         "isolation": "subprocess",
         "memory_bytes": 2 * 1024**3,
         "reply_bytes": 64 * 1024 * 1024,
+        "scratch_bytes": 1024 * 1024 * 1024,
         "wall_seconds": 120,
     }
     assert TRANSFORM.libraries == () and TRANSFORM.upstream == ()
