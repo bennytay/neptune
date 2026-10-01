@@ -5,6 +5,9 @@ needed, runs every migration under ``migrations/`` that it has not run yet, in v
 ``search_path`` set to that schema alone, and records each one in ``schema_migration``. Everything
 happens in one transaction under an advisory lock, so a failure leaves the schema as it was and two
 runners for the same tenant never interleave. Running it again is a no-op.
+
+The database must use the libc ``C`` collation (Ledger ADR 0005 §4): the catalog API orders ids and
+kinds as UTF-8 bytes, and only ``C`` makes the default text order, and so every B-tree, that order.
 """
 
 import hashlib
@@ -21,6 +24,7 @@ from psycopg import sql
 _TENANT_ID: Final = re.compile(r"[a-z][a-z0-9_]{0,47}")
 _MIGRATION: Final = re.compile(r"(\d{4})_([a-z0-9_]+)\.sql")
 SCHEMA_PREFIX: Final = "tenant_"
+BYTE_ORDER_COLLATIONS: Final = frozenset({"C", "POSIX"})
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,21 @@ def tenant_schema(tenant_id: str) -> str:
     if not isinstance(tenant_id, str) or not _TENANT_ID.fullmatch(tenant_id):
         raise ValueError(f"tenant id must match {_TENANT_ID.pattern}, got {tenant_id!r}")
     return SCHEMA_PREFIX + tenant_id
+
+
+def check_collation(provider: str, collation: str) -> None:
+    """Refuse a database whose default text order is not byte order (ADR 0005 §4).
+
+    ``provider`` and ``collation`` are ``pg_database.datlocprovider`` and ``datcollate``: libc
+    (``c``) with ``C`` or ``POSIX``. ICU and every locale-aware libc collation sort by language
+    rules that differ from UTF-8 byte order and change between library versions.
+    """
+    if provider != "c" or collation not in BYTE_ORDER_COLLATIONS:
+        raise MigrationError(
+            f"the catalog database must use the libc C collation (byte order); it uses"
+            f" provider {provider!r}, collation {collation!r}. Create it with"
+            " TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C'"
+        )
 
 
 def migrations() -> tuple[Migration, ...]:
@@ -78,6 +97,13 @@ def apply_migrations(conn: psycopg.Connection[tuple[object, ...]], tenant_id: st
     schema = tenant_schema(tenant_id)
     shipped = migrations()
     applied: list[int] = []
+    locale = conn.execute(
+        "SELECT datlocprovider::text, datcollate FROM pg_database"
+        " WHERE datname = current_database()"
+    ).fetchone()
+    if locale is None:
+        raise MigrationError("cannot read the current database's collation")
+    check_collation(str(locale[0]), str(locale[1]))
     with conn.transaction():
         conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (schema,))
         conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
