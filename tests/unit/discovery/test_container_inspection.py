@@ -484,6 +484,41 @@ def test_the_byte_budget_bounds_a_compressed_tar_listing() -> None:
     assert probed.findings[0].details["listed"] == 1
 
 
+def _ustar(entries: list[tuple[str, bytes]]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        for name, payload in entries:
+            info = tarfile.TarInfo(name)
+            info.size, info.mtime = len(payload), 0
+            archive.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def test_a_compressed_tar_cut_by_the_budget_on_a_header_boundary_is_not_complete() -> None:
+    # Tar blocks and both budgets are 512-aligned, so a first member of budget - 512 bytes puts
+    # the second member's header exactly where the decoded bytes end: nothing of it is read, and
+    # that silence must not pass for the end of the archive.
+    for budget in (ProbePolicy().scan_bytes, PROBE_HEAD_SIZE):
+        tar = _ustar([("first", b"x" * (budget - 512)), *((f"more{i}", NOTES) for i in range(5))])
+        probed = probe(gzip.compress(tar, mtime=0), policy=ProbePolicy(scan_bytes=budget))
+        assert probed.container is not None
+        (outer,) = probed.container.members
+        assert outer.nested is not None
+        assert [m.name for m in outer.nested.members] == [b"first"]
+        assert not outer.nested.complete
+        assert codes(probed)[0] == ("container_limit", "bytes")
+        assert probed.findings[0].details == {
+            "decoded": budget,
+            "limit": "bytes",
+            "listed": 1,
+            "scan_bytes": budget,
+        }
+        whole = probe(gzip.compress(tar, mtime=0), policy=ProbePolicy(scan_bytes=2 * budget))
+        assert whole.container is not None
+        nested = whole.container.members[0].nested
+        assert nested is not None and nested.complete and len(nested.members) == 6
+
+
 def test_unopenable_containers_are_recognised_and_said_so() -> None:
     for name in ("cloud.zst", "cloud.7z"):
         probed = probe((FIXTURES / "probe" / "signatures" / name).read_bytes(), name)
@@ -492,13 +527,17 @@ def test_unopenable_containers_are_recognised_and_said_so() -> None:
         assert probed.findings[0].severity is Severity.INFO
 
 
-def test_bzip2_and_xz_sizes_are_known_only_when_the_stream_ends_in_the_head() -> None:
+def test_bzip2_and_xz_sizes_are_known_only_when_the_stream_ends_within_the_budget() -> None:
     big = b"y" * (PROBE_HEAD_SIZE * 2)
     for data in (bz2.compress(big), lzma.compress(big, format=lzma.FORMAT_XZ)):
-        probed = probe(data)
+        probed = probe(data)  # the default budget reaches the end: the size is what was decoded
         assert probed.container is not None
         (member,) = probed.container.members
-        assert member.size is None  # not stated, and the stream goes on past the head
+        assert (member.size, selected(member)) == (len(big), "text")
+        cut = probe(data, policy=ProbePolicy(scan_bytes=PROBE_HEAD_SIZE))
+        assert cut.container is not None
+        (member,) = cut.container.members
+        assert member.size is None  # not stated, and the stream goes on past the budget
         assert selected(member) == "text"
 
 
@@ -548,6 +587,7 @@ def test_a_gzip_whose_stated_size_disagrees_with_its_stream_is_a_finding() -> No
         "declared": len(NOTES) + 1,
         "decoded": len(NOTES),
         "member": 0,
+        "stream": 0,
     }
 
 
@@ -600,6 +640,132 @@ def test_an_extended_header_declaring_more_than_remains_is_corrupt() -> None:
     assert (
         "extended header" in probed.findings[0].message and "remain" in probed.findings[0].message
     )
+
+
+# --- Streams laid end to end: gzip members, bzip2 and xz streams ---------------------------------
+
+STREAMS: Final[dict[ContainerKind, tuple[Callable[[bytes], bytes], Callable[[bytes], bytes]]]] = {
+    ContainerKind.GZIP: (lambda data: gzip.compress(data, mtime=0), gzip.decompress),
+    ContainerKind.BZIP2: (bz2.compress, bz2.decompress),
+    ContainerKind.XZ: (lambda data: lzma.compress(data, format=lzma.FORMAT_XZ), lzma.decompress),
+}
+
+
+def test_streams_laid_end_to_end_are_one_member_holding_their_concatenation() -> None:
+    # `gzip -c >> log.gz`, pbzip2 and `cat a.xz b.xz` write streams end to end; their tools decode
+    # the lot as one. A tar written across two streams must list whole, with citations that the
+    # standard library's multi-stream readers resolve.
+    tar = fixture("members.tar")
+    cut = 1600  # inside the third member's header, so no stream boundary is a tar boundary
+    for kind, (compress, decompress) in STREAMS.items():
+        data = compress(tar[:cut]) + compress(tar[cut:])
+        probed = probe(data)
+        assert probed.container is not None and probed.container.kind is kind
+        (member,) = probed.container.members
+        assert (member.size, member.compressed_size) == (
+            len(tar),
+            len(data) if kind is not ContainerKind.GZIP else len(data) - 18,
+        )
+        assert member.nested is not None and member.nested.complete
+        assert [m.name for m in member.nested.members] == [
+            b"notes.txt",
+            b"logs/",
+            b"logs/lift.tally",
+            b"latest",
+            b"drive.bag",
+        ]
+        with tarfile.open(fileobj=io.BytesIO(tar)) as archive:
+            for inner in member.nested.members:
+                if inner.kind is MemberKind.FILE:
+                    extracted = archive.extractfile(inner.name.decode())
+                    assert extracted is not None
+                    assert resolve(data, inner.entry.locator, [decompress]) == extracted.read()
+        assert selected(by_name(member.nested)[b"logs/lift.tally"]) == "tally"
+        assert [f.code for f in probed.findings] == ["neptune.probe.unsupported"], kind
+
+
+def test_each_gzip_member_states_its_own_size_and_each_statement_is_checked() -> None:
+    first = bytearray(gzip.compress(NOTES, mtime=0))
+    first[-4:] = (len(NOTES) + 1).to_bytes(4, "little")  # the first member's trailer lies
+    probed = probe(bytes(first) + gzip.compress(NOTES, mtime=0))
+    assert probed.container is not None
+    (member,) = probed.container.members
+    assert member.size == 2 * len(NOTES) + 1  # the sum of what the members state
+    assert selected(member) == "text"
+    assert codes(probed) == [("container_corrupt", ""), ("unsupported", "")]
+    assert probed.findings[0].details == {
+        "declared": len(NOTES) + 1,
+        "decoded": len(NOTES),
+        "member": 0,
+        "stream": 0,
+    }
+
+
+def test_streams_the_budget_cuts_are_not_complete_and_state_no_total() -> None:
+    tar = _ustar([("big", b"x" * PROBE_HEAD_SIZE), ("after", NOTES)])
+    half = len(tar) // 2
+    for kind, (compress, _) in STREAMS.items():
+        data = compress(tar[:half]) + compress(tar[half:])
+        probed = probe(data, policy=ProbePolicy(scan_bytes=PROBE_HEAD_SIZE))
+        assert probed.container is not None
+        (member,) = probed.container.members
+        assert member.size is None, kind  # two streams seen, the end not reached: no total
+        assert member.nested is not None and not member.nested.complete
+        assert [m.name for m in member.nested.members] == [b"big"]
+        assert codes(probed)[0] == ("container_limit", "bytes")
+        whole = probe(data)
+        assert whole.container is not None
+        (member,) = whole.container.members
+        assert member.size == len(tar)
+        assert member.nested is not None and member.nested.complete
+
+
+def test_bytes_after_the_last_stream_are_padding_if_null_and_a_finding_otherwise() -> None:
+    # Null padding follows gzip members written to block devices; gzip and Python skip it. Other
+    # bytes open no stream: they are cited as corrupt and the member keeps what was decoded.
+    garbage = b"not a stream" + bytes(4)  # ends in nulls so gzip's trailer read is not a bomb
+    for kind, (compress, _) in STREAMS.items():
+        padded = probe(compress(NOTES) + bytes(64))
+        assert padded.container is not None
+        (member,) = padded.container.members
+        assert (member.size, selected(member)) == (len(NOTES), "text")
+        assert codes(padded) == [("unsupported", "")], kind
+        data = compress(NOTES) + garbage
+        probed = probe(data)
+        assert probed.container is not None
+        (member,) = probed.container.members
+        assert (member.size, selected(member)) == (len(NOTES), "text")
+        assert codes(probed) == [("container_corrupt", ""), ("unsupported", "")], kind
+        finding = probed.findings[0]
+        assert finding.subject.locator == (ByteRange(len(data) - len(garbage), len(garbage)),)  # type: ignore[union-attr]
+        assert finding.details == {"length": len(garbage), "member": 0, "offset": len(data) - 16}
+        assert f"open no {kind} stream" in finding.message
+
+
+def test_a_stream_the_input_cuts_short_is_a_finding_and_its_head_is_still_probed() -> None:
+    long = NOTES * 300  # a first stream past the head, so the cut leaves a whole head to probe
+    for kind, (compress, _) in STREAMS.items():
+        second = compress(NOTES)
+        cuts = [second[: len(second) // 2]]  # inside the second stream's data
+        if kind is ContainerKind.GZIP:
+            cuts += [second[:-3], second[:5]]  # inside the second member's trailer; its header
+        for tail in cuts:
+            probed = probe(compress(long) + tail)
+            assert probed.container is not None
+            (member,) = probed.container.members
+            assert member.size is None, (kind, len(tail))  # the end was never reached
+            assert selected(member) == "text"
+            assert codes(probed)[0] == ("container_corrupt", ""), (kind, len(tail))
+            finding = probed.findings[0]
+            assert (
+                "before its end marker" in finding.message and "not probed" not in finding.message
+            )
+            assert finding.details["decoded"] >= len(long)
+    short = compress(NOTES) + compress(NOTES)[:40]  # too little before the cut for a whole head
+    probed = probe(short)
+    assert probed.container is not None
+    assert probed.container.members[0].probe is None
+    assert "not probed" in probed.findings[0].message
 
 
 # --- Hostile input: never an exception, always the same answer -----------------------------------

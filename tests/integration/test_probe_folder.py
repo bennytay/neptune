@@ -34,6 +34,7 @@ from neptune.adapters.contract import (
 )
 from neptune.adapters.harness import ingest_source
 from neptune.adapters.registry import AdapterRegistry
+from neptune.discovery.containers import ContainerReport
 from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe, hint_name
 from neptune.discovery.reader import BytesReader
 from neptune.discovery.scan import scan
@@ -103,8 +104,16 @@ def corpus(tmp_path: Path) -> Path:
     (tmp_path / "logs" / "renamed").write_bytes(b"TALLY1\n7 70\n")
     (tmp_path / "logs" / "flight_log").write_bytes(ULOG_HEAD)
     (tmp_path / "blob.bin").write_bytes(b"\x00\x01\x02 binary payload \x00")
-    shutil.copy(FIXTURES / "probe" / "containers" / "members.zip", tmp_path / "bundle")
+    containers = FIXTURES / "probe" / "containers"
+    shutil.copy(containers / "members.zip", tmp_path / "bundle")  # a zip without its extension
+    shutil.copy(containers / "members.tar", tmp_path / "archive")  # a tar without its extension
+    shutil.copy(containers / "members.tar.gz", tmp_path / "archive.tgz")
     return tmp_path
+
+
+def _probed_members(container: ContainerReport) -> dict[bytes, str | None]:
+    """The adapter each probed member's bytes selected, by name."""
+    return {m.name: m.probe.selection.adapter for m in container.members if m.probe}
 
 
 def ingest_folder(root: Path, registry: AdapterRegistry) -> tuple[dict[str, SourceProbe], Any]:
@@ -133,6 +142,8 @@ def test_bytes_decide_what_reads_each_source_and_what_is_left_unread(corpus: Pat
     registry = AdapterRegistry([*builtin_adapters(), TALLY.TallyAdapter(), Rival()])
     probes, package = ingest_folder(corpus, registry)
     assert {path: probed.adapter for path, probed in probes.items()} == {
+        "archive": None,
+        "archive.tgz": None,
         "blob.bin": None,
         "bundle": None,
         "logs/flight_log": None,
@@ -147,6 +158,8 @@ def test_bytes_decide_what_reads_each_source_and_what_is_left_unread(corpus: Pat
         for source in receipt.sources
     }
     assert read_by == {
+        "archive": [(PROBE_ID, "0.1.0")],
+        "archive.tgz": [(PROBE_ID, "0.1.0")],
         "blob.bin": [(PROBE_ID, "0.1.0")],
         "bundle": [(PROBE_ID, "0.1.0")],
         "logs/flight_log": [(PROBE_ID, "0.1.0")],
@@ -163,6 +176,8 @@ def test_bytes_decide_what_reads_each_source_and_what_is_left_unread(corpus: Pat
     assert any("rival, tally" in m for m in messages)
     assert any("ULog signature" in m for m in messages)
     assert any("zip container holding 6 members" in m for m in messages)
+    assert any("tar container holding 5 members" in m for m in messages)
+    assert any("gzip container holding 1 member" in m for m in messages)
     rendering = package.files()[RECEIPT_TEXT].decode()
     assert f"{PROBE_ID} 0.1.0" in rendering
     assert f"{PROBE_ID}.unsupported" in rendering
@@ -180,11 +195,17 @@ def test_without_the_rival_the_renamed_tally_is_read_and_the_zip_members_are_rep
     assert [transforms[t] for t in renamed.read_by] == ["tally"]
     bundle = probes["bundle"]
     assert bundle.container is not None
-    inside = {m.name: m.probe.selection.adapter for m in bundle.container.members if m.probe}
-    assert inside == {
+    assert _probed_members(bundle.container) == {
         b"../escape.txt": "text",
         b"logs/lift.tally": "tally",
         b"logs/renamed": "tally",
         b"notes.txt": "text",
         b"recording.mcap": None,
     }
+    # The tar's members, and the same tar's inside a gzip, are probed by their bytes alike.
+    in_tar = {b"drive.bag": None, b"logs/lift.tally": "tally", b"notes.txt": "text"}
+    archive, compressed = probes["archive"], probes["archive.tgz"]
+    assert archive.container is not None and compressed.container is not None
+    assert _probed_members(archive.container) == in_tar
+    (outer,) = compressed.container.members
+    assert outer.nested is not None and _probed_members(outer.nested) == in_tar

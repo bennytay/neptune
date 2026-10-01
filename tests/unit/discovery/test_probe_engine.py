@@ -17,6 +17,7 @@ from neptune.adapters.contract import (
     ABI_VERSION,
     GENERIC,
     SIGNATURE,
+    VERIFIED,
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
@@ -414,14 +415,22 @@ def test_the_text_adapter_alone_still_claims_damaged_text_so_nothing_is_silently
     assert probed.sniff.text == "damaged_utf8"
 
 
-def test_the_descriptor_summary_of_the_stub_is_not_what_decides() -> None:
-    # A stub declaring the .tally extension but declining the bytes does not get the source.
+def test_what_a_descriptor_declares_does_not_decide_the_probe_does() -> None:
+    # A stub whose descriptor claims tally files every way a descriptor can (summary, extension,
+    # magic) yet whose probe declines the bytes does not get the source. Its declared magic is
+    # sniffed, an observation in the explanation, and nothing more.
+    claims_tally = FormatSpec("Tally too", extensions=(".tally",), magic=(Magic(0, b"TALLY1\n"),))
     declines = Stub(
-        descriptor("declines", FormatSpec("Tally too", extensions=(".tally",))),
+        replace(descriptor("declines", claims_tally), summary="Reads every tally file."),
         ProbeResult(0.0, ()),
     )
     probed = probe(TALLY_BYTES, "lift.tally", declines)
     assert probed.adapter == "tally"
     assert probed.findings == ()
-    other = replace(declines.descriptor, id="declines2")
-    assert other.id == "declines2"
+    assert ("Tally too", "declines") in {(s.name, s.adapter) for s in probed.sniff.signatures}
+    # The converse: a stub declaring nothing about tally files, whose probe verifies the bytes,
+    # takes the source from the adapter the name and the magic point to; the name is a footnote.
+    quiet = claims("quiet", VERIFIED, FormatSpec("Quiet"))
+    probed = probe(TALLY_BYTES, "lift.tally", quiet)
+    assert probed.adapter == "quiet"
+    assert codes(probed) == ["name_mismatch"]
