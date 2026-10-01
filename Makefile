@@ -37,3 +37,4 @@ schema: ## Regenerate docs/schema/canonical.schema.json from the model's types
 examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/fixtures/model/make_examples.py
 > $(UV) run python tests/golden/packages/make_packages.py
+> $(UV) run python tests/golden/mcap/make_mcap_golden.py

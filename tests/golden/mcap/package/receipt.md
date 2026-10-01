@@ -1,0 +1,67 @@
+# Ingest receipt
+
+Receipt `rec:sha256:dbc07d778aa9d6dc6e42d290e86502e3a64b9d80c8d7ffde6223665ad339bdb5`. Every id below is shortened; `receipt.json` has them whole.
+
+## Summary
+
+- Sources: 1 seen, 1 read, 0 not read, 0 gone
+- Runs: 1; streams: 4; entities: 0
+- Findings: 0 errors, 0 warnings, 5 info; ambiguous fields: 0
+
+## Sources
+
+| Location | Bytes | Content | Read by |
+|---|---|---|---|
+| `robot.mcap` | 4816 | `sha256:9e775857ab35` | mcap 0.1.0 |
+
+## Adapters
+
+| Adapter | Version | Config | Libraries | Transform |
+|---|---|---|---|---|
+| `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | none | `rec:ed890c24ddd0` |
+
+## Records
+
+| Kind | Records |
+|---|---|
+| `ingest_finding` | 5 |
+| `run` | 1 |
+| `source_artifact` | 1 |
+| `source_revision` | 1 |
+| `stream` | 4 |
+| `structured_record` | 3 |
+| `structured_table` | 1 |
+| `timestamp_domain` | 5 |
+| `transform_record` | 1 |
+
+## Runs
+
+| Run | Session | Machine | First | Last | Streams |
+|---|---|---|---|---|---|
+| `rec:654bd670c8d6` | unknown | unknown | 1790000000010000000 on `log_time` | 1790000000090000000 on `log_time` | 4 |
+
+## Streams
+
+| Stream | Run | Topic | Clocks | Messages | First | Last |
+|---|---|---|---|---|---|---|
+| `rec:09913b4cc277` | `rec:654bd670c8d6` | `/diagnostics` | `log_time`, `publish_time (/diagnostics)` | `3` | unknown | unknown |
+| `rec:8b786d59e0b9` | `rec:654bd670c8d6` | `/imu_rear` | `log_time`, `publish_time (/imu_rear)` | unknown | unknown | unknown |
+| `rec:e7e8c73d328c` | `rec:654bd670c8d6` | `/battery` | `log_time`, `publish_time (/battery)` | `4` | unknown | unknown |
+| `rec:f6ee7d482736` | `rec:654bd670c8d6` | `/imu` | `log_time`, `publish_time (/imu)` | `11` | unknown | unknown |
+
+## Entities
+
+| Kind | Record | Stated ids |
+|---|---|---|
+
+## Findings
+
+- **info** `mcap.attachment_not_extracted` (unsupported): an attachment of 50 bytes is an embedded file no record kind holds yet; it is cited here, its name and media type in the details · `rec:e02e86bbaee3`
+- **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded; each row cites its message's bytes · `rec:44d875224fb9`
+- **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:561663cb2eae`
+- **info** `mcap.payload_not_decoded` (unsupported): channel 4's message payloads are not decoded; each row cites its message's bytes · `rec:87acf08d4bb0`
+- **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:8a21352d9b96`
+
+## Ambiguous fields
+
+None.
