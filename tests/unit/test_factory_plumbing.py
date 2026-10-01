@@ -194,10 +194,11 @@ def _make_lint(tmp_path: Path, fail_format_in: str) -> tuple[int, list[str]]:
     _executable(tmp_path / "uv", FAKE_UV)
     log = tmp_path / "uv.log"
     log.touch()
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS"))}
+    # An outer `make check PKG=...` (CI) must not leak its package selection into this run.
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS", "PKG"))}
     env |= {"UV_LOG": str(log), "FAIL_FORMAT_IN": fail_format_in}
     result = subprocess.run(
-        ["make", "-C", str(workspace), "lint", f"UV={tmp_path / 'uv'}", "ADR_DIRS="],
+        ["make", "-C", str(workspace), "lint", f"UV={tmp_path / 'uv'}", "ADR_DIRS=", "PKG="],
         env=env,
         capture_output=True,
         text=True,
