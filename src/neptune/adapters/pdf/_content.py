@@ -21,6 +21,13 @@ Everything else (paths, colours, clipping, shading) is skipped as not text.
 Bounds: at most ``max_operations`` operators per page (forms included), ``max_content_bytes``
 decoded bytes of content (the page's and each form's, once), forms nested ``MAX_FORM_DEPTH`` deep
 and ``q`` nested ``MAX_STATE_DEPTH`` deep. Past an operator or byte bound the page stops there.
+A stream is parsed for at most the operators the page has left to run, so a dense stream never
+materializes more operators than ``max_operations`` (memory bounded by it, not by its bytes).
+
+Failures keep what was read. A stream that stops parsing (a truncation, a recursion bomb) keeps
+the operators before the fault and runs them; a form that cannot be parsed or run is recorded
+against that form (``PageContent.forms``, each form once) and the page goes on after its ``Do``;
+anything else that stops the page keeps the items drawn so far (``PageContent.error``).
 """
 
 import contextlib
@@ -30,6 +37,7 @@ from dataclasses import dataclass, field, replace
 from typing import Final
 
 from pypdf import PdfReader
+from pypdf.errors import LimitReachedError
 from pypdf.generic import ContentStream, DictionaryObject
 
 from neptune.adapters.contract import ShortReadError
@@ -125,14 +133,25 @@ class Item:
     artifact_kind: str
 
 
+@dataclass(frozen=True)
+class FormFailure:
+    """A form XObject the page draws that could not be parsed or run to its end."""
+
+    name: str  # its name in the resources that drew it first
+    error: str  # the exception's class: "RecursionError", "PdfReadError", "LimitReachedError"
+
+
 @dataclass
 class PageContent:
     items: list[Item] = field(default_factory=list)
     skipped: int = 0  # operators skipped: wrong operands, missing resources, unbalanced state
     missing_fonts: int = 0  # runs shown with no usable font
-    limited: str | None = None  # "max_operations" or "max_content_bytes" when a bound stopped it
+    limited: str | None = None  # "max_operations", "max_content_bytes" or "max_stream_bytes"
     content_bytes: int = 0
     operations: int = 0
+    error: str | None = None  # why the page's own content stopped before its end, if it did
+    forms: list[FormFailure] = field(default_factory=list)  # each failing form once
+    fonts_limited: int = 0  # fonts whose ToUnicode or widths were read only up to a bound
 
 
 @dataclass(frozen=True)
@@ -149,6 +168,45 @@ class GraphicsState:
 
 class _Stop(Exception):
     """A page bound was reached: stop interpreting the page."""
+
+
+class _Full(Exception):
+    """A stream's parse reached the operators its page has left to run."""
+
+
+class _Capped(list[tuple[object, bytes]]):
+    """pypdf's list of parsed operations, refusing to grow past ``limit``."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__()
+        self._limit = limit
+
+    def append(self, item: tuple[object, bytes]) -> None:
+        if len(self) >= self._limit:
+            raise _Full
+        super().append(item)
+
+
+class _Bounded(ContentStream):
+    """A content stream parsed for at most ``limit`` operators, keeping what parsed before a
+    fault: pypdf would otherwise build every operator of a dense stream before one runs, and
+    drop them all on a fault at the end. ``error`` names the fault."""
+
+    def __init__(self, source: object, reader: PdfReader, limit: int) -> None:
+        self._limit = limit
+        self.error: str | None = None
+        super().__init__(source, reader)
+
+    def _parse_content_stream(self, stream: object) -> None:
+        self._operations = _Capped(self._limit)
+        try:
+            super()._parse_content_stream(stream)  # type: ignore[arg-type]
+        except _Full:
+            pass  # the rest could never run: the page's operator bound stops it first
+        except (MemoryError, ShortReadError):
+            raise
+        except Exception as exc:  # RecursionError included: its stack is unwound here
+            self.error = type(exc).__name__
 
 
 @dataclass
@@ -175,7 +233,8 @@ class Interpreter:
         self._space = space_threshold / 1000.0
         self._content = PageContent()
         self._fonts: dict[object, Font | None] = {}
-        self._forms: dict[object, list[tuple[object, bytes]]] = {}
+        self._forms: dict[object, list[tuple[object, bytes]] | None] = {}
+        self._failed: set[object] = set()
         self._state = GraphicsState()
         self._stack: list[GraphicsState] = []
         self._marked: list[_Marked] = []
@@ -186,22 +245,37 @@ class Interpreter:
         self._form_depth = 0
 
     def run(self, page: DictionaryObject) -> PageContent:
-        contents = resolve(dict.get(page, "/Contents"))
-        if contents is None:
-            return self._content
-        resources = dictionary(entry(page, "/Resources"))
-        with contextlib.suppress(_Stop):
-            self._execute(self._operations(ContentStream(contents, self._reader)), resources)
+        """What the page draws, as far as it can be read; only a memory or source failure
+        raises. Whatever stopped it early is in the result (``limited``, ``error``)."""
+        try:
+            contents = resolve(dict.get(page, "/Contents"))
+            if contents is None:
+                return self._content
+            resources = dictionary(entry(page, "/Resources"))
+            with contextlib.suppress(_Stop):
+                operations, error = self._operations(contents)
+                self._content.error = error
+                self._execute(operations, resources)
+        except (MemoryError, ShortReadError):
+            raise
+        except LimitReachedError:
+            self._content.limited = "max_stream_bytes"
+        except Exception as exc:  # RecursionError included: what was drawn before it is kept
+            self._content.error = type(exc).__name__
         return self._content
 
     # --- Bounds -----------------------------------------------------------------------------
 
-    def _operations(self, content: ContentStream) -> list[tuple[object, bytes]]:
+    def _operations(self, source: object) -> tuple[list[tuple[object, bytes]], str | None]:
+        """A stream's operators, parsed for at most what the page has left to run, and why
+        the parse stopped early if it did."""
+        remaining = self._max_operations - self._content.operations
+        content = _Bounded(source, self._reader, max(remaining, 0) + 1)
         self._content.content_bytes += len(content.get_data())
         if self._content.content_bytes > self._max_content_bytes:
             self._content.limited = "max_content_bytes"
             raise _Stop
-        return list(content.operations)
+        return list(content.operations), content.error
 
     def _count(self) -> None:
         self._content.operations += 1
@@ -261,11 +335,14 @@ class Interpreter:
         key = reference(found) or id(found)
         if key not in self._fonts:
             try:
-                self._fonts[key] = load_font(found)
+                loaded = load_font(found)
             except (MemoryError, ShortReadError, RecursionError):
                 raise
             except Exception:
-                self._fonts[key] = None
+                loaded = None
+            self._fonts[key] = loaded
+            if loaded is not None and loaded.limited:
+                self._content.fonts_limited += 1
         return self._fonts[key]
 
     def set_text_state(self, field_name: str, value: float) -> None:
@@ -450,19 +527,41 @@ class Interpreter:
             raise ValueError("forms nested too deep")
         key = reference(xobject) or id(xobject)
         if key not in self._forms:
-            self._forms[key] = self._operations(ContentStream(xobject, self._reader))
+            self._forms[key] = None  # a form that fails is recorded once and never parsed again
+            try:
+                operations, error = self._operations(xobject)
+            except (_Stop, MemoryError, ShortReadError):
+                raise
+            except Exception as exc:  # it inflates past max_stream_bytes, or worse
+                self._form_failed(key, xobject_name, type(exc).__name__)
+                return
+            if error is not None:
+                self._form_failed(key, xobject_name, error)
+            self._forms[key] = operations
+        operations_or_none = self._forms[key]
+        if operations_or_none is None:
+            return
         matrix = _matrix(array(entry(xobject, "/Matrix")) or list(IDENTITY))
         saved = (self._state, len(self._stack), len(self._marked))
         self._state = replace(self._state, ctm=multiply(matrix, self._state.ctm))
         self._form_depth += 1
         try:
             form_resources = dictionary(entry(xobject, "/Resources")) or resources
-            self._execute(self._forms[key], form_resources)
+            self._execute(operations_or_none, form_resources)
+        except (_Stop, MemoryError, ShortReadError):
+            raise
+        except Exception as exc:  # RecursionError included: the page goes on after this Do
+            self._form_failed(key, xobject_name, type(exc).__name__)
         finally:
             self._form_depth -= 1
             self._state = saved[0]
             del self._stack[saved[1] :]
             del self._marked[saved[2] :]
+
+    def _form_failed(self, key: object, xobject_name: str, error: str) -> None:
+        if key not in self._failed:
+            self._failed.add(key)
+            self._content.forms.append(FormFailure(xobject_name, error))
 
     # --- Marked content ---------------------------------------------------------------------
 

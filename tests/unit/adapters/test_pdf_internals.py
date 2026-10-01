@@ -23,7 +23,7 @@ from pypdf.generic import (
 )
 
 from neptune.adapters.pdf._content import MAX_FORM_DEPTH, Box, Interpreter, Item, Line, PageContent
-from neptune.adapters.pdf._fonts import glyph_text, load_font, parse_to_unicode
+from neptune.adapters.pdf._fonts import Ranges, glyph_text, load_font, parse_to_unicode
 from neptune.adapters.pdf._page import PLACEHOLDER, blocks, join
 from neptune.model.world import BlockRole
 
@@ -86,6 +86,32 @@ def test_a_to_unicode_cmap_maps_single_codes_ranges_and_arrays() -> None:
 def test_a_malformed_cmap_maps_what_parses_and_nothing_else() -> None:
     cmap = parse_to_unicode(b"2 beginbfchar <01> <0041> <02> endbfchar beginbfrange <zz> ] [ <00>")
     assert cmap.lookup(1, 1) == "A" and cmap.lookup(2, 1) is None
+
+
+def test_indexed_ranges_answer_what_a_scan_in_declaration_order_would() -> None:
+    declared = [(10, 20, "a"), (15, 30, "b"), (5, 12, "c"), (40, 40, "d"), (0, 100, "e")]
+    indexed = Ranges(declared)
+    for code in range(-2, 103):
+        scanned = next((r for r in declared if r[0] <= code <= r[1]), None)
+        assert indexed.find(code) == scanned, code
+    assert Ranges([]).find(0) is None
+
+
+def test_overlapping_cmap_ranges_keep_the_first_declared() -> None:
+    cmap = parse_to_unicode(
+        b"1 begincodespacerange <0000> <00FF> endcodespacerange\n"
+        b"1 begincodespacerange <0080> <FFFF> endcodespacerange\n"
+        b"2 beginbfrange <0010> <0020> <0061> <0018> <0030> <0041> endbfrange"
+    )
+    assert [cmap.lookup(code, 2) for code in (0x10, 0x18, 0x20, 0x21, 0x30, 0x31)] == [
+        "a",
+        "i",
+        "q",
+        "J",
+        "Y",
+        None,
+    ]
+    assert list(cmap.split(b"\x00\x10\xff\xff")) == [(0x10, 2), (0xFFFF, 2)]
 
 
 # --- Fonts -------------------------------------------------------------------------------------

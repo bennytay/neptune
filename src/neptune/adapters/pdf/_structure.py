@@ -15,8 +15,12 @@ For each MCID on a page this module gives its **owner**, the element whose block
 - otherwise the top-level element above it, whose role is not declared.
 
 and its **path**, the child indices from the root to the MCID, which orders content in the
-structure's reading order. Every walk is bounded in depth and in elements visited; a tree that
-loops or exceeds a bound raises ``StructureError`` and the page is read as untagged.
+structure's reading order. Every walk is bounded in depth, and every step of every walk (an
+object read, a kid indexed, an ancestor climbed) counts against ``MAX_VISITS`` per page, so the
+cost of a page's tags is linear in what it reads. Each element's kids are indexed once: by
+identity for their positions, by MCID for marked content. A tree that loops or is malformed
+raises ``StructureError``, one past the bound ``StructureLimit``; either way the page is read as
+untagged.
 """
 
 from dataclasses import dataclass, field
@@ -119,7 +123,11 @@ TABLE_GROUPS: Final = frozenset({"THead", "TBody", "TFoot"})
 
 
 class StructureError(Exception):
-    """The structure tree cannot be read for this page: missing, looping or past a bound."""
+    """The structure tree cannot be read for this page: missing, looping or malformed."""
+
+
+class StructureLimit(StructureError):
+    """Reading the structure tree for this page took more than ``MAX_VISITS`` steps."""
 
 
 Key = tuple[int, int] | int
@@ -189,6 +197,9 @@ class Structure:
         self._tables: dict[Key, Table] = {}
         self._positions: dict[object, dict[object, int]] = {}
         self._table_rows: dict[Key, list[DictionaryObject]] = {}
+        self._mcids: dict[Key, tuple[dict[int, int], int]] = {}
+        self._paths: dict[Key, tuple[int, ...]] = {}
+        self._owners: dict[Key, tuple[Owner, int | None, int | None]] = {}
         self._visits = 0
 
     @property
@@ -200,7 +211,7 @@ class Structure:
     def _visit(self) -> None:
         self._visits += 1
         if self._visits > MAX_VISITS:
-            raise StructureError("the structure tree is larger than the adapter reads")
+            raise StructureLimit(f"reading the structure tree took over {MAX_VISITS} steps")
 
     @staticmethod
     def _key(obj: object, raw: object) -> Key:
@@ -302,20 +313,32 @@ class Structure:
         holder_key = "root" if self._is_root(holder) else ("kids", self._key(holder, holder))
         return self._position_of(holder_key, self.kids(holder), raw, child)
 
-    @staticmethod
-    def _path(node: _Node) -> tuple[int, ...]:
-        path: list[int] = []
+    def _path(self, node: _Node) -> tuple[int, ...]:
+        """Child indices from the root to ``node``, each climbed step a visit (once per node)."""
+        cached = self._paths.get(node.key)
+        if cached is not None:
+            return cached
+        steps: list[_Node] = []
         current: _Node | None = node
+        above: tuple[int, ...] = ()
         while current is not None:
-            path.append(current.index)
+            known = self._paths.get(current.key)
+            if known is not None:
+                above = known
+                break
+            self._visit()
+            steps.append(current)
             current = current.parent
-        return tuple(reversed(path))
+        for step in reversed(steps):
+            above = (*above, step.index)
+            self._paths[step.key] = above
+        return above
 
-    @staticmethod
-    def _ancestors(node: _Node) -> list[_Node]:
+    def _ancestors(self, node: _Node) -> list[_Node]:
         found: list[_Node] = []
         current: _Node | None = node
         while current is not None:
+            self._visit()
             found.append(current)
             current = current.parent
         return found
@@ -324,6 +347,12 @@ class Structure:
 
     def _owner(self, node: _Node) -> tuple[Owner, int | None, int | None]:
         """The owner of content under ``node``, and its row and column if in a table."""
+        cached = self._owners.get(node.key)
+        if cached is None:
+            cached = self._owners[node.key] = self._find_owner(node)
+        return cached
+
+    def _find_owner(self, node: _Node) -> tuple[Owner, int | None, int | None]:
         chain = self._ancestors(node)
         for depth, current in enumerate(chain):
             if current.kind == "TR":
@@ -460,18 +489,29 @@ class Structure:
                 continue
             node = self._node(raw)
             owner, row, column = self._owner(node)
-            own = self._mcid_index(node.obj, mcid)
+            own = self._mcid_index(node, mcid)
             result.placements[mcid] = Placement(owner, (*self._path(node), own), row, column)
             if owner.role is BlockRole.TABLE and owner.key in self._tables:
                 result.tables[owner.key] = self._tables[owner.key]
         return result
 
-    def _mcid_index(self, element: DictionaryObject, mcid: int) -> int:
-        kids = self.kids(element)
-        for index, raw in enumerate(kids):
-            if integer(raw) == mcid or integer(entry(raw, "/MCID")) == mcid:
-                return index
-        return len(kids)
+    def _mcid_index(self, node: _Node, mcid: int) -> int:
+        """``mcid``'s position among ``node``'s kids (the end if unlisted), indexed once per
+        element: a lookup per MCID, never a scan, since one element may own thousands."""
+        indexed = self._mcids.get(node.key)
+        if indexed is None:
+            kids = self.kids(node.obj)
+            positions: dict[int, int] = {}
+            for index, raw in enumerate(kids):
+                self._visit()
+                found = integer(raw)
+                if found is None:
+                    found = integer(entry(raw, "/MCID"))
+                if found is not None:
+                    positions.setdefault(found, index)
+            indexed = self._mcids[node.key] = (positions, len(kids))
+        positions, count = indexed
+        return positions.get(mcid, count)
 
     def _number_tree(self, node: DictionaryObject, key: int) -> object:
         """``key``'s value in a number tree, walking ``/Kids`` within their ``/Limits``."""

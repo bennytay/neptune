@@ -16,12 +16,21 @@ code; a composite font (Type0) uses the code lengths its CMap declares (two byte
 
 The encoding tables, the glyph list and the Core 14 metrics are pypdf's (``pypdf._codecs``),
 pinned with it; nothing here decodes a font program.
+
+Cost: a CMap is read for at most ``MAX_CMAP_BYTES`` and ``MAX_TABLE_ENTRIES`` entries, a ``W``
+table for ``MAX_TABLE_ENTRIES``; a font cut there says so (``Font.limited``). Ranges (code space,
+``bfrange``, ``W``) are indexed once into disjoint, sorted segments, so each code is a binary
+search, never a scan of every range; where declared ranges overlap the first declared wins, as
+a scan in declaration order would give. A font caches the glyphs it has decoded.
 """
 
+import bisect
+import heapq
+import itertools
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Final, Generic, TypeVar
 
 from pypdf._codecs import (
     _mac_encoding,
@@ -48,6 +57,8 @@ from ._objects import (
 # A CMap or a width table larger than this is not read: its codes stay unmapped or unmeasured.
 MAX_CMAP_BYTES: Final = 4 * 1024 * 1024
 MAX_TABLE_ENTRIES: Final = 1 << 17
+MAX_CODE_BYTES: Final = 4  # ISO 32000-1 §9.7.6.2: a code is one to four bytes
+MAX_CACHED_GLYPHS: Final = 1 << 16
 GLYPH_SPACE: Final = 1.0 / 1000.0  # glyph space units per unit of font size, but in Type3
 _ENCODINGS: Final[dict[str, list[str]]] = {
     "StandardEncoding": _std_encoding,
@@ -58,6 +69,51 @@ _ENCODINGS: Final[dict[str, list[str]]] = {
 _SYMBOLIC_FLAG: Final = 4
 _SUBSET: Final = re.compile(r"[A-Z]{6}\+")
 _CMAP_TOKEN: Final = re.compile(rb"<[0-9A-Fa-f\s]*>|\[|\]|/[^\s/<>\[\]()]+|[A-Za-z_][\w.]*|-?\d+")
+
+
+V = TypeVar("V")
+
+
+class Ranges(Generic[V]):
+    """Closed ranges of codes with a value each, indexed once for binary search.
+
+    Built in O(n log n) into disjoint sorted segments, each owned by the first declared range
+    covering it: ``find`` answers what a scan of the ranges in declaration order would, in
+    O(log n).
+    """
+
+    def __init__(self, declared: Sequence[tuple[int, int, V]]) -> None:
+        self._declared = list(declared)
+        self._starts: list[int] = []
+        self._ends: list[int] = []
+        self._owners: list[int] = []
+        bounds = sorted({point for low, high, _ in declared for point in (low, high + 1)})
+        by_start = sorted(range(len(declared)), key=lambda i: (declared[i][0], i))
+        active: list[tuple[int, int]] = []  # (declaration index, last code), first declared on top
+        upcoming = 0
+        for point, following in itertools.pairwise(bounds):
+            while upcoming < len(by_start) and declared[by_start[upcoming]][0] <= point:
+                index = by_start[upcoming]
+                heapq.heappush(active, (index, declared[index][1]))
+                upcoming += 1
+            while active and active[0][1] < point:
+                heapq.heappop(active)
+            if not active:
+                continue
+            owner = active[0][0]
+            if self._owners and self._owners[-1] == owner and self._ends[-1] == point - 1:
+                self._ends[-1] = following - 1
+            else:
+                self._starts.append(point)
+                self._ends.append(following - 1)
+                self._owners.append(owner)
+
+    def find(self, code: int) -> tuple[int, int, V] | None:
+        """The first declared range holding ``code``, or ``None``."""
+        at = bisect.bisect_right(self._starts, code) - 1
+        if at < 0 or code > self._ends[at]:
+            return None
+        return self._declared[self._owners[at]]
 
 
 @dataclass(frozen=True)
@@ -120,29 +176,55 @@ def _utf16(data: bytes) -> str | None:
         return None
 
 
+def _by_length(entries: Sequence[tuple[int, int, int, V]]) -> dict[int, Ranges[V]]:
+    """``(length, low, high, value)`` entries as one ``Ranges`` per code length."""
+    grouped: dict[int, list[tuple[int, int, V]]] = {}
+    for length, low, high, value in entries:
+        grouped.setdefault(length, []).append((low, high, value))
+    return {length: Ranges(found) for length, found in grouped.items()}
+
+
 @dataclass
 class ToUnicode:
-    """A ToUnicode CMap: code space ranges, single codes, and code ranges mapped to text."""
+    """A ToUnicode CMap: code space ranges, single codes, and code ranges mapped to text.
+
+    ``limited`` is set when the CMap is larger than ``MAX_CMAP_BYTES`` or ``MAX_TABLE_ENTRIES``
+    and was read only up to there. The range indexes are built on the first lookup.
+    """
 
     spaces: list[tuple[int, int, int]] = field(default_factory=list)  # (length, low, high)
     chars: dict[tuple[int, int], str] = field(default_factory=dict)  # (length, code) -> text
     ranges: list[tuple[int, int, int, str]] = field(default_factory=list)  # (length, lo, hi, base)
+    limited: bool = False
+    _ranges: dict[int, Ranges[str]] | None = field(default=None, repr=False, compare=False)
+    _spaces: dict[int, Ranges[None]] | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def entries(self) -> int:
+        return len(self.spaces) + len(self.chars) + len(self.ranges)
 
     def lookup(self, code: int, length: int) -> str | None:
         found = self.chars.get((length, code))
         if found is not None:
             return found
-        for size, low, high, base in self.ranges:
-            if size == length and low <= code <= high:
-                if not base:
-                    return None
-                last = _scalar(ord(base[-1]) + code - low)
-                return None if last is None else base[:-1] + last
-        return None
+        if self._ranges is None:
+            self._ranges = _by_length(self.ranges)
+        ranges = self._ranges.get(length)
+        hit = ranges.find(code) if ranges is not None else None
+        if hit is None:
+            return None
+        low, _, base = hit
+        if not base:
+            return None
+        last = _scalar(ord(base[-1]) + code - low)
+        return None if last is None else base[:-1] + last
 
     def split(self, data: bytes) -> Iterator[tuple[int, int]]:
         """``(code, length)`` for each code of ``data`` by the declared code space ranges."""
-        lengths = sorted({size for size, _, _ in self.spaces}) or [2]
+        if self._spaces is None:
+            self._spaces = _by_length([(size, low, high, None) for size, low, high in self.spaces])
+        spaces = self._spaces
+        lengths = sorted(spaces) or [2]
         position = 0
         while position < len(data):
             for size in lengths:
@@ -150,7 +232,7 @@ class ToUnicode:
                 if len(piece) < size:
                     continue
                 code = int.from_bytes(piece, "big")
-                if any(s == size and low <= code <= high for s, low, high in self.spaces):
+                if spaces[size].find(code) is not None:
                     yield code, size
                     position += size
                     break
@@ -171,14 +253,20 @@ def _hex(token: bytes) -> bytes | None:
 
 
 def parse_to_unicode(data: bytes) -> ToUnicode:
-    """Read the parts of a CMap that map codes to text; anything malformed is skipped."""
-    cmap = ToUnicode()
+    """Read the parts of a CMap that map codes to text; anything malformed is skipped.
+
+    Reading stops at ``MAX_CMAP_BYTES``, ``4 * MAX_TABLE_ENTRIES`` tokens or
+    ``MAX_TABLE_ENTRIES`` entries, and the CMap is then ``limited``.
+    """
+    cmap = ToUnicode(limited=len(data) > MAX_CMAP_BYTES)
     section = b""
     operands: list[bytes | list[bytes]] = []
     stack: list[bytes] | None = None
-    for count, token in enumerate(_CMAP_TOKEN.findall(data[:MAX_CMAP_BYTES])):
-        if count > MAX_TABLE_ENTRIES * 4:
+    for count, match in enumerate(_CMAP_TOKEN.finditer(data, 0, MAX_CMAP_BYTES)):
+        if count > MAX_TABLE_ENTRIES * 4 or cmap.entries >= MAX_TABLE_ENTRIES:
+            cmap.limited = True
             break
+        token = match.group()
         if token == b"[":
             stack = []
         elif token == b"]":
@@ -212,7 +300,9 @@ def _apply(cmap: ToUnicode, section: bytes, operands: list[bytes | list[bytes]])
     if section == b"begincodespacerange" and len(operands) == 2:
         low, high = (_hex(t) if isinstance(t, bytes) else None for t in operands)
         if low is not None and high is not None and len(low) == len(high) and low:
-            cmap.spaces.append((len(low), int.from_bytes(low, "big"), int.from_bytes(high, "big")))
+            bottom, top = int.from_bytes(low, "big"), int.from_bytes(high, "big")
+            if len(low) <= MAX_CODE_BYTES and bottom <= top:
+                cmap.spaces.append((len(low), bottom, top))
         operands.clear()
     elif section == b"beginbfchar" and len(operands) == 2:
         source, target = operands
@@ -234,7 +324,7 @@ def _apply(cmap: ToUnicode, section: bytes, operands: list[bytes | list[bytes]])
         if isinstance(target, list):
             for offset, token in enumerate(target[: hi - lo + 1]):
                 text = _destination(token)
-                if text is not None:
+                if text is not None and cmap.entries < MAX_TABLE_ENTRIES:
                     cmap.chars[(len(low), lo + offset)] = text
         else:
             base = _destination(target)
@@ -262,6 +352,9 @@ class Font:
     core_widths: dict[str, float] | None = None
     ascent: float | None = None
     descent: float | None = None
+    limited: bool = False  # its ToUnicode or W table was read only up to a bound
+    _width_index: Ranges[float] | None = field(default=None, repr=False, compare=False)
+    _cache: dict[tuple[int, int], Glyph] = field(default_factory=dict, repr=False, compare=False)
 
     def glyphs(self, data: bytes) -> list[Glyph]:
         if not self.composite:
@@ -275,12 +368,18 @@ class Font:
         return found
 
     def _glyph(self, code: int, length: int) -> Glyph:
+        cached = self._cache.get((code, length))
+        if cached is not None:
+            return cached
         text: str | None = None
         if self.to_unicode is not None:
             text = self.to_unicode.lookup(code, length)
         if text is None and not self.composite and code < 256:
             text = self.encoding[code]
-        return Glyph(code, length, text, self._width(code, length))
+        glyph = Glyph(code, length, text, self._width(code, length))
+        if len(self._cache) < MAX_CACHED_GLYPHS:
+            self._cache[(code, length)] = glyph
+        return glyph
 
     def _width(self, code: int, length: int) -> float | None:
         # A composite font's widths are by CID, which is the code only under an Identity CMap.
@@ -288,9 +387,12 @@ class Font:
             return self.default_width if not self.widths and not self.width_ranges else None
         if code in self.widths:
             return self.widths[code]
-        for low, high, width in self.width_ranges:
-            if low <= code <= high:
-                return width
+        if self.width_ranges:
+            if self._width_index is None:
+                self._width_index = Ranges(self.width_ranges)
+            hit = self._width_index.find(code)
+            if hit is not None:
+                return hit[2]
         if self.core_widths is not None and not self.composite and code < 256:
             char = self.encoding[code]
             if char is not None and char in self.core_widths:
@@ -378,13 +480,18 @@ def _cid_widths(font: Font, descendant: DictionaryObject) -> None:
     font.default_width = (default if default is not None else 1000.0) / 1000.0
     table: list[object] = list(array(entry(descendant, "/W")) or [])
     position, entries = 0, 0
-    while position < len(table) and entries < MAX_TABLE_ENTRIES:
+    while position < len(table):
+        if entries >= MAX_TABLE_ENTRIES:
+            font.limited = True
+            break
         first = integer(table[position])
         if first is None:
             break
         following = array(table[position + 1]) if position + 1 < len(table) else None
         if following is not None:
-            for offset, item in enumerate(following[:MAX_TABLE_ENTRIES]):
+            room = MAX_TABLE_ENTRIES - entries
+            font.limited = font.limited or len(following) > room
+            for offset, item in enumerate(following[:room]):
                 width = number(item)
                 if width is not None:
                     font.widths[first + offset] = width / 1000.0
@@ -395,7 +502,8 @@ def _cid_widths(font: Font, descendant: DictionaryObject) -> None:
         width = number(table[position + 2]) if position + 2 < len(table) else None
         if last is None or width is None:
             break
-        font.width_ranges.append((first, last, width / 1000.0))
+        if first <= last:
+            font.width_ranges.append((first, last, width / 1000.0))
         entries += 1
         position += 3
 
@@ -409,6 +517,7 @@ def load_font(font_dict: DictionaryObject) -> Font:
     to_unicode = stream(entry(font_dict, "/ToUnicode"))
     if to_unicode is not None:
         font.to_unicode = parse_to_unicode(to_unicode.get_data())
+        font.limited = font.to_unicode.limited
     if subtype == "Type0":
         font.composite = True
         encoding = name(entry(font_dict, "/Encoding")) or ""

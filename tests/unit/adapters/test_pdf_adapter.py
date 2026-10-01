@@ -429,8 +429,8 @@ def test_a_recursion_bomb_is_findings_and_the_next_page_is_read() -> None:
     unreadable = finding(output, "pdf.content_unreadable")
     assert unreadable.details == {"error": "RecursionError", "page": 0}
     assert finding(output, "pdf.value_unreadable").details == {"field": "title"}
-    # pypdf parses a page's operators before any is drawn: the bomb costs its whole page.
-    assert [text for *_, text in summary(output)] == ["After the nesting"]
+    # The operators parsed before the bomb are drawn: it costs only the rest of its page.
+    assert [text for *_, text in summary(output)] == ["Before the nesting", "After the nesting"]
 
 
 def test_a_decompression_bomb_stops_at_the_page_bound() -> None:
@@ -445,6 +445,7 @@ def test_a_decompression_bomb_stops_at_the_page_bound() -> None:
     assert finding(inflate, "pdf.content_limit").details == {
         "limit": "max_stream_bytes",
         "page": 0,
+        "value": 1024 * 1024,
     }
 
 

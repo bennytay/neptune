@@ -1,4 +1,5 @@
-"""Whole PDFs built in the test: large tags, image tables, page labels, broken boxes, repairs.
+"""Whole PDFs built in the test: large tags, image tables, page labels, broken boxes, repairs,
+and the hostile shapes whose cost must stay bounded.
 
 Each document is written with the fixture generator's PDF writer and read by the adapter through
 the harness, so every law of the contract is checked on it too.
@@ -6,6 +7,8 @@ the harness, so every law of the contract is checked on it too.
 
 import importlib.util
 import sys
+import time
+import tracemalloc
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
@@ -190,3 +193,172 @@ def test_a_repaired_encrypted_file_is_never_read_as_plain_text() -> None:
     output = ingest(data[: data.rindex(b"\nxref\n")])
     assert sorted(f.code for f in output.findings()) == ["pdf.encrypted", "pdf.repaired"]
     assert roles(output) == []
+
+
+# --- Hostile costs: each shape is the review's reproduction, built here, never committed --------
+
+
+def one_element_owning(count: int) -> bytes:
+    """A tagged page whose parent tree lists ``count`` MCIDs, all owned by one ``P`` whose ``/K``
+    lists ``count`` other MCIDs: every lookup misses, the shape that made the reader quadratic."""
+    pdf = MAKE.Pdf()
+    tree, root, element = pdf.reserve(), pdf.reserve(), pdf.reserve()
+    content = MAKE.text("F1", 12, 72, 700, b"Check the hydraulic line")
+    resources = {"Font": {"F1": pdf.add(MAKE.HELVETICA)}}
+    page_ref = MAKE.page(pdf, tree, content, resources, StructParents=0)
+    MAKE._element(pdf, element, "P", root, list(range(count, 2 * count)), page_ref)
+    parents: list[Any] = [element] * count
+    tree_root = {"Type": MAKE.Name("StructTreeRoot"), "K": [element]}
+    pdf.set(root, {**tree_root, "ParentTree": {"Nums": [0, parents]}})
+    MAKE.page_tree(pdf, [page_ref], tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree, StructTreeRoot=root, MarkInfo={"Marked": True})))
+
+
+def test_an_element_owning_thousands_of_mcids_is_indexed_once() -> None:
+    data = one_element_owning(8000)
+    started = time.process_time()
+    output = ingest(data)
+    assert time.process_time() - started < 5  # a scan per MCID took about a minute
+    assert [f.code for f in output.findings()] == []
+    assert roles(output) == ["Unknown"]  # the run itself carries no MCID: untagged content
+
+
+def test_a_structure_past_its_step_bound_is_a_limit_and_the_page_is_read_untagged() -> None:
+    output = ingest(one_element_owning(120_000))
+    assert [(f.code, f.details) for f in output.findings()] == [
+        ("pdf.structure_limit", {"limit": 200_000, "page": 0})
+    ]
+    assert roles(output) == ["Unknown"]
+
+
+def identity_font(pdf: Any, cmap: bytes) -> Any:
+    descendant = {
+        "Type": MAKE.Name("Font"),
+        "Subtype": MAKE.Name("CIDFontType2"),
+        "BaseFont": MAKE.Name("Ranges"),
+        "DW": 500,
+        "CIDSystemInfo": {"Registry": MAKE.Lit(b"Adobe"), "Ordering": MAKE.Lit(b"Identity")},
+        "FontDescriptor": {"Type": MAKE.Name("FontDescriptor"), "Ascent": 800, "Descent": -200},
+    }
+    return pdf.add(
+        {
+            "Type": MAKE.Name("Font"),
+            "Subtype": MAKE.Name("Type0"),
+            "BaseFont": MAKE.Name("Ranges"),
+            "Encoding": MAKE.Name("Identity-H"),
+            "DescendantFonts": [pdf.add(descendant)],
+            "ToUnicode": pdf.add(MAKE.Stream({}, cmap)),
+        }
+    )
+
+
+def ranges_cmap(count: int) -> bytes:
+    """``count`` one-code ``bfrange`` entries: code ``0x100 + i`` to letter ``i % 26``."""
+    lines = [b"begincmap\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"]
+    for start in range(0, count, 100):
+        group = range(start, min(start + 100, count))
+        lines.append(b"%d beginbfrange\n" % len(group))
+        lines += [b"<%04X> <%04X> <%04X>\n" % (0x100 + i, 0x100 + i, 0x41 + i % 26) for i in group]
+        lines.append(b"endbfrange\n")
+    return b"".join([*lines, b"endcmap\n"])
+
+
+def page_with_codes(cmap: bytes, codes: list[int]) -> bytes:
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    shown = b"BT /F1 12 Tf 72 700 Td <" + b"".join(b"%04X" % code for code in codes) + b"> Tj ET"
+    page_ref = MAKE.page(pdf, tree, shown, {"Font": {"F1": identity_font(pdf, cmap)}})
+    MAKE.page_tree(pdf, [page_ref], tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree)))
+
+
+def texts(output: SourceOutput) -> list[Any]:
+    found = [r for r in output.records() if isinstance(r, DocumentBlock)]
+    return [state(block.text) for block in sorted(found, key=lambda block: block.order)]
+
+
+def test_a_cmap_of_many_ranges_is_searched_not_scanned() -> None:
+    codes = [0x100 + (i * 7919) % 60_000 for i in range(20_000)]
+    data = page_with_codes(ranges_cmap(60_000), codes)
+    started = time.process_time()
+    output = ingest(data)
+    assert time.process_time() - started < 5  # a scan of every range per code took seconds
+    assert texts(output) == ["".join(chr(0x41 + (code - 0x100) % 26) for code in codes)]
+    assert [f.code for f in output.findings()] == []
+
+
+def test_a_cmap_past_the_entry_bound_is_a_font_limit_finding() -> None:
+    output = ingest(page_with_codes(ranges_cmap(140_000), [0x100, 0x100 + 139_999]))
+    assert texts(output) == ["Unknown"]  # the first code is mapped, the last is past the bound
+    assert sorted((f.code, f.details) for f in output.findings()) == [
+        ("pdf.font_limit", {"fonts": 1, "page": 0}),
+        ("pdf.unmapped_glyphs", {"blocks": 1, "page": 0}),
+    ]
+
+
+def page_drawing_form(form: bytes, **form_entries: Any) -> bytes:
+    """A page showing text, drawing form ``X1`` twice, then showing more text."""
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    entries = {
+        "Type": MAKE.Name("XObject"),
+        "Subtype": MAKE.Name("Form"),
+        "BBox": [0, 0, 10, 10],
+        **form_entries,
+    }
+    content = (
+        MAKE.text("F1", 12, 72, 700, b"Torque the flange bolts to 40 Nm")
+        + b"/X1 Do\n/X1 Do\n"
+        + MAKE.text("F1", 12, 72, 600, b"Then check the seal")
+    )
+    xobject = pdf.add(MAKE.Stream(entries, form))
+    resources = {"Font": {"F1": pdf.add(MAKE.HELVETICA)}, "XObject": {"X1": xobject}}
+    page_ref = MAKE.page(pdf, tree, content, resources)
+    MAKE.page_tree(pdf, [page_ref], tree)
+    return bytes(pdf.build(MAKE.catalog(pdf, tree)))
+
+
+def test_a_form_that_cannot_be_parsed_costs_the_form_not_the_page() -> None:
+    inside = MAKE.text("F1", 12, 72, 650, b"Inside the form")
+    output = ingest(page_drawing_form(inside + b"[" * 5000 + b"]" * 5000 + b" pop"))
+    assert [(f.code, f.details) for f in output.findings()] == [
+        ("pdf.content_unreadable", {"error": "RecursionError", "form": "X1", "forms": 1, "page": 0})
+    ]
+    # What the form drew before its fault is kept, each time it is drawn; the page goes on.
+    assert texts(output) == [
+        "Torque the flange bolts to 40 Nm",
+        "Inside the form",
+        "Inside the form",
+        "Then check the seal",
+    ]
+
+
+def test_a_form_that_inflates_past_the_stream_bound_is_a_limit_on_that_form() -> None:
+    inflated = MAKE.bomb_deflate(ord(" "), 2 * 1024 * 1024)  # 11 KiB on disk
+    form = page_drawing_form(inflated, Filter=MAKE.Name("FlateDecode"))
+    output = ingest(form, max_stream_bytes=1024 * 1024)
+    limit = {"form": "X1", "forms": 1, "limit": "max_stream_bytes", "page": 0, "value": 1 << 20}
+    assert [(f.code, f.details) for f in output.findings()] == [("pdf.content_limit", limit)]
+    assert texts(output) == ["Torque the flange bolts to 40 Nm", "Then check the seal"]
+
+
+def test_a_dense_content_stream_is_parsed_only_as_far_as_it_can_run() -> None:
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    content = MAKE.text("F1", 12, 72, 700, b"Before the operators") + b"q Q\n" * 1_000_000
+    page_ref = MAKE.page(pdf, tree, content, {"Font": {"F1": pdf.add(MAKE.HELVETICA)}})
+    MAKE.page_tree(pdf, [page_ref], tree)
+    data = bytes(pdf.build(MAKE.catalog(pdf, tree)))
+    tracemalloc.start()
+    try:
+        output = ingest(data, max_page_operations=10_000)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    # Two million operators parsed whole hold some 300 MB; the parse stops past the 10,000 the
+    # page may run.
+    assert peak < 64 * 1024 * 1024
+    assert [(f.code, f.details["limit"]) for f in output.findings()] == [
+        ("pdf.content_limit", "max_page_operations")
+    ]
+    assert texts(output) == ["Before the operators"]

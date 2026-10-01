@@ -19,7 +19,7 @@ Expected outcomes are asserted in `tests/unit/adapters/test_pdf_adapter.py`.
 | `encrypted_user.pdf` | RC4 128 with a user password | pages listed, `pdf.encrypted`, no text |
 | `encrypted_owner.pdf` | RC4 128, empty user password | read like `pump_sop.pdf` |
 | `encrypted_aes.pdf` | declares AESV2 | `pdf.encrypted`, never decrypted |
-| `hostile_nesting.pdf` | arrays nested 50,000 deep in content and in `/Info` | `pdf.content_unreadable`, `pdf.value_unreadable`; page 2 read |
+| `hostile_nesting.pdf` | arrays nested 50,000 deep in content and in `/Info` | `pdf.content_unreadable` (page 1 kept up to the nesting), `pdf.value_unreadable`; page 2 read |
 | `hostile_bomb.pdf` | page content inflating to 24 MiB of spaces | `pdf.content_limit`; page 2 read |
 | `hostile_active.pdf` | JavaScript on open, on a page and in the name tree; an embedded file | `pdf.javascript`, `pdf.embedded_files`; text read, nothing run |
 | `hostile_xref.pdf` | an xref section claiming two billion entries, a `/Prev` loop | rebuilt (`pdf.repaired`) |

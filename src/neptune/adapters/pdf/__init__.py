@@ -26,7 +26,6 @@ from collections.abc import Sequence
 from importlib.metadata import version
 from typing import Final
 
-from pypdf.errors import LimitReachedError
 from pypdf.generic import DictionaryObject, TextStringObject
 
 from neptune.adapters.contract import (
@@ -84,7 +83,7 @@ from neptune.model.world import (
     StructuredTable,
 )
 
-from ._content import Interpreter, PageContent
+from ._content import FormFailure, Interpreter, PageContent
 from ._labels import page_labels
 from ._objects import (
     array,
@@ -105,7 +104,8 @@ from ._reader import (
     page_list,
     pypdf_session,
 )
-from ._structure import Key, PageStructure, Structure
+from ._structure import MAX_VISITS as MAX_STRUCTURE_VISITS
+from ._structure import Key, PageStructure, Structure, StructureLimit
 
 HEADER: Final = b"%PDF-"
 HEADER_WINDOW: Final = 1024
@@ -157,7 +157,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "pdf.content_limit",
             "a page's content passed max_page_content_bytes, max_page_operations or"
-            " max_stream_bytes; it was read up to there (limit, error)",
+            " max_stream_bytes, or a form it draws inflates past max_stream_bytes; it was read"
+            " up to there (limit, error)",
         ),
         Documented(
             "pdf.content_skipped",
@@ -166,7 +167,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         Documented(
             "pdf.content_unreadable",
-            "a page's content streams could not be decoded or parsed (corrupt, error)",
+            "a page's content streams, or a form it draws, could not be decoded or parsed to"
+            " their end; the operators read before the fault are kept (corrupt, error)",
         ),
         Documented(
             "pdf.embedded_files",
@@ -176,6 +178,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "pdf.encrypted",
             "the document is encrypted and needs a password or AES: its pages are listed, its"
             " text is not read (unsupported, error)",
+        ),
+        Documented(
+            "pdf.font_limit",
+            "a font's ToUnicode CMap or W table is larger than the adapter reads (4 MiB,"
+            " 131,072 entries); codes past it are unmapped or unmeasured (limit, warning)",
         ),
         Documented(
             "pdf.geometry_unknown",
@@ -194,6 +201,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "pdf.repaired",
             "the file's cross-reference structure or trailer was rebuilt or repaired to read it"
             " (corrupt, warning)",
+        ),
+        Documented(
+            "pdf.structure_limit",
+            "reading a page's tags took over 200,000 steps; the page is read as untagged"
+            " (limit, warning)",
         ),
         Documented(
             "pdf.structure_unusable",
@@ -737,29 +749,23 @@ def _page(
         max_content_bytes=config.integer("max_page_content_bytes"),
         space_threshold=config.integer("space_threshold"),
     )
-    error: str | None = None
-    content: PageContent | None = None
-    try:
-        content = interpreter.run(page)
-    except (MemoryError, ShortReadError):
-        raise
-    except LimitReachedError:
-        out.finding(
-            "pdf.content_limit",
-            FindingCategory.LIMIT,
-            Severity.ERROR,
-            subject,
-            f"page {index} has a stream that inflates past max_stream_bytes; it is not read",
-            {"limit": "max_stream_bytes", "page": index},
-        )
-    except Exception as exc:
-        error = type(exc).__name__
+    content = interpreter.run(page)  # what was drawn before any fault is kept
     placed: PageStructure | None = None
     if structure is not None and structure.tagged:
         try:
             placed = structure.page(page)
         except (MemoryError, ShortReadError):
             raise
+        except StructureLimit:
+            out.finding(
+                "pdf.structure_limit",
+                FindingCategory.LIMIT,
+                Severity.WARNING,
+                subject,
+                f"reading the tags of page {index} took over {MAX_STRUCTURE_VISITS} steps;"
+                " it is read as untagged",
+                {"limit": MAX_STRUCTURE_VISITS, "page": index},
+            )
         except Exception as exc:
             out.finding(
                 "pdf.structure_unusable",
@@ -770,9 +776,10 @@ def _page(
                 {"error": type(exc).__name__, "page": index},
             )
     streams, other = captured.take()
-    if error is not None or streams:
+    if content.error is not None or streams:
         details: dict[str, JsonValue] = {"page": index}
-        details.update({"error": error} if error is not None else {"streams": streams})
+        details.update({"error": content.error} if content.error is not None else {})
+        details.update({"streams": streams} if streams else {})
         out.finding(
             "pdf.content_unreadable",
             FindingCategory.CORRUPT,
@@ -781,6 +788,7 @@ def _page(
             f"the content of page {index} could not be fully decoded; what was read is kept",
             details,
         )
+    _form_findings(out, content.forms, index)
     if other:
         out.finding(
             "pdf.page_repaired",
@@ -790,21 +798,56 @@ def _page(
             f"pypdf repaired {other} object(s) while reading page {index}",
             {"page": index, "warnings": other},
         )
-    if content is not None:
-        _content_findings(out, content.skipped, content.missing_fonts, content.limited, index)
-    items = content.items if content is not None else []
-    found = blocks(items, placed, config.integer("space_threshold") / 1000.0)
+    _content_findings(out, content, index)
+    found = blocks(content.items, placed, config.integer("space_threshold") / 1000.0)
     _emit_blocks(out, found, index)
 
 
-def _content_findings(
-    out: _Output, skipped: int, missing: int, limited: str | None, index: int
-) -> None:
+_LIMITS: Final = {
+    "max_content_bytes": "max_page_content_bytes",
+    "max_operations": "max_page_operations",
+    "max_stream_bytes": "max_stream_bytes",
+}
+
+
+def _form_findings(out: _Output, forms: Sequence[FormFailure], index: int) -> None:
+    """One finding per kind of form failure on a page, naming the first form and the count."""
     subject = out.evidence(Page(index))
-    if limited is not None:
-        limit = (
-            "max_page_content_bytes" if limited == "max_content_bytes" else "max_page_operations"
+    limited = [form for form in forms if form.error == "LimitReachedError"]
+    broken = [form for form in forms if form.error != "LimitReachedError"]
+    if limited:
+        out.finding(
+            "pdf.content_limit",
+            FindingCategory.LIMIT,
+            Severity.ERROR,
+            subject,
+            f"{len(limited)} form(s) on page {index}, the first {limited[0].name}, inflate past"
+            " max_stream_bytes; they are not drawn and the page goes on after them",
+            {
+                "form": limited[0].name,
+                "forms": len(limited),
+                "limit": "max_stream_bytes",
+                "page": index,
+                "value": out.config.integer("max_stream_bytes"),
+            },
         )
+    if broken:
+        out.finding(
+            "pdf.content_unreadable",
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            subject,
+            f"{len(broken)} form(s) on page {index}, the first {broken[0].name}, could not be"
+            " fully read; what they drew before the fault is kept and the page goes on",
+            {"error": broken[0].error, "form": broken[0].name, "forms": len(broken), "page": index},
+        )
+
+
+def _content_findings(out: _Output, content: PageContent, index: int) -> None:
+    subject = out.evidence(Page(index))
+    skipped, missing = content.skipped, content.missing_fonts
+    if content.limited is not None:
+        limit = _LIMITS[content.limited]
         out.finding(
             "pdf.content_limit",
             FindingCategory.LIMIT,
@@ -812,6 +855,16 @@ def _content_findings(
             subject,
             f"page {index} passed {limit} ({out.config.integer(limit)}); it was read up to there",
             {"limit": limit, "page": index, "value": out.config.integer(limit)},
+        )
+    if content.fonts_limited:
+        out.finding(
+            "pdf.font_limit",
+            FindingCategory.LIMIT,
+            Severity.WARNING,
+            subject,
+            f"{content.fonts_limited} font(s) on page {index} declare a ToUnicode CMap or width"
+            " table larger than the adapter reads; codes past the bound are unmapped or unmeasured",
+            {"fonts": content.fonts_limited, "page": index},
         )
     if skipped or missing:
         out.finding(
