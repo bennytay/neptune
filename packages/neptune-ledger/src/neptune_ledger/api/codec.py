@@ -44,7 +44,7 @@ from neptune.model.knowledge import (
     Unknown,
 )
 from neptune_ledger.api import types as api_types
-from neptune_ledger.api.types import API_MAJOR, CATALOG_API_VERSION, Constraint
+from neptune_ledger.api.types import API_MAJOR, CATALOG_API_VERSION, Constraint, StatedProvenance
 
 T = TypeVar("T")
 SCHEMA_DIALECT: Final = "https://json-schema.org/draft/2020-12/schema"
@@ -164,16 +164,25 @@ def dumps(value: object) -> bytes:
     return canonical_json.dumps(to_json(value))
 
 
-def _no_provenance(provenance: object, where: str) -> None:
-    if not isinstance(provenance, Inherited):
+def _stated(constraints: tuple[Constraint, ...]) -> bool:
+    return any(c.as_stated for c in constraints)
+
+
+def _check_provenance(provenance: object, stated: bool, where: str) -> None:
+    """The Ledger's own states carry none; a restated package field keeps the package's."""
+    if isinstance(provenance, Inherited):
+        return
+    if not stated:
         raise CodecError(f"{where}: catalog API knowledge carries no provenance")
+    if not isinstance(provenance, StatedProvenance):
+        raise CodecError(f"{where}: restated provenance must be StatedProvenance")
 
 
 def _encode(hint: Any, value: Any, where: str) -> JsonValue:
     hint, constraints = _split(hint)
     inner = _knowledge_inner(hint)
     if inner is not None:
-        return _encode_knowledge(inner, value, where)
+        return _encode_knowledge(inner, value, _stated(constraints), where)
     optional = _optional_inner(hint)
     if optional is not None:
         if value is None:
@@ -232,17 +241,19 @@ def _encode(hint: Any, value: Any, where: str) -> JsonValue:
     return out
 
 
-def _encode_knowledge(inner: Any, value: Any, where: str) -> JsonValue:
+def _encode_knowledge(inner: Any, value: Any, stated: bool, where: str) -> JsonValue:
     match value:
         case Known(provenance=p) | Unknown(provenance=p) | NotCovered(provenance=p):
-            _no_provenance(p, where)
+            _check_provenance(p, stated, where)
         case Ambiguous(candidates=candidates):
             for candidate in candidates:
-                _no_provenance(candidate.provenance, where)
+                _check_provenance(candidate.provenance, stated, where)
         case NotApplicable():
             pass
-        case KnownAbsent():
-            raise CodecError(f"{where}: the catalog API never states KnownAbsent")
+        case KnownAbsent(provenance=p):
+            if not stated:
+                raise CodecError(f"{where}: the Ledger never determines KnownAbsent itself")
+            _check_provenance(p, stated, where)
         case _:
             raise CodecError(f"{where}: expected a Knowledge state, got {type(value).__name__}")
     return knowledge_mod.to_json(value, lambda v: _encode(inner, v, f"{where}.value"))
@@ -271,13 +282,22 @@ def _reject_provenance(_: JsonObject) -> Any:
     raise CodecError("catalog API knowledge carries no provenance")
 
 
+def _keep_provenance(document: JsonObject) -> Any:
+    try:
+        return StatedProvenance(canonical_json.loads(canonical_json.dumps(document)))  # type: ignore[arg-type]
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise CodecError(f"provenance: {exc}") from exc
+
+
 def _decode(hint: Any, data: Any, where: str) -> Any:
     hint, constraints = _split(hint)
     inner = _knowledge_inner(hint)
     if inner is not None:
         try:
             return knowledge_mod.from_json(
-                data, lambda d: _decode(inner, d, f"{where}.value"), _reject_provenance
+                data,
+                lambda d: _decode(inner, d, f"{where}.value"),
+                _keep_provenance if _stated(constraints) else _reject_provenance,
             )
         except CodecError:
             raise
@@ -421,6 +441,9 @@ class _SchemaBuilder:
         keywords = _constraint_keywords(constraints)
         inner = _knowledge_inner(hint)
         if inner is not None:
+            if _stated(constraints):
+                name = f"StatedKnowledgeOf{_type_name(inner)}"
+                return self.ref(name, lambda: self._knowledge(inner, stated=True))
             return self.ref(f"KnowledgeOf{_type_name(inner)}", lambda: self._knowledge(inner))
         optional = _optional_inner(hint)
         if optional is not None:
@@ -460,38 +483,54 @@ class _SchemaBuilder:
             "type": "object",
         }
 
-    def _knowledge(self, inner: Any) -> dict[str, Any]:
+    def _knowledge(self, inner: Any, *, stated: bool = False) -> dict[str, Any]:
         value = self.schema(inner)
+        provenance = {
+            "description": "The package's provenance object, verbatim (package-schema).",
+            "properties": {"assertion_kind": {"enum": ["observed", "stated"]}},
+            "required": ["assertion_kind"],
+            "type": "object",
+        }
 
-        def state(tag: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-            properties = {"knowledge": {"const": tag}, **(extra or {})}
+        def obj(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+            if stated and "provenance" not in properties:
+                properties = {**properties, "provenance": provenance}
             return {
                 "additionalProperties": False,
                 "properties": properties,
-                "required": sorted(properties),
+                "required": sorted(required),
                 "type": "object",
             }
 
-        candidate = {
-            "additionalProperties": False,
-            "properties": {"value": value},
-            "required": ["value"],
-            "type": "object",
-        }
-        return {
-            "description": "A Knowledge state of the Ledger's own (no provenance; never "
-            "known_absent).",
-            "oneOf": [
-                state("known", {"value": value}),
-                state("unknown"),
-                state("not_covered"),
-                state("not_applicable"),
-                state(
-                    "ambiguous",
-                    {"candidates": {"items": candidate, "minItems": 2, "type": "array"}},
-                ),
-            ],
-        }
+        def state(tag: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+            properties = {"knowledge": {"const": tag}, **(extra or {})}
+            return obj(properties, list(properties))
+
+        candidate = obj({"value": value}, ["value"])
+        states = [
+            state("known", {"value": value}),
+            state("unknown"),
+            state("not_covered"),
+            {
+                "additionalProperties": False,
+                "properties": {"knowledge": {"const": "not_applicable"}},
+                "required": ["knowledge"],
+                "type": "object",
+            },
+            state(
+                "ambiguous", {"candidates": {"items": candidate, "minItems": 2, "type": "array"}}
+            ),
+        ]
+        if stated:
+            states.append(state("known_absent", {"provenance": provenance}))
+            description = (
+                "A package field's Knowledge state restated verbatim, provenance included."
+            )
+        else:
+            description = (
+                "A Knowledge state of the Ledger's own (no provenance; never known_absent)."
+            )
+        return {"description": description, "oneOf": states}
 
 
 def _json(value: Any) -> JsonValue:
@@ -526,6 +565,11 @@ def catalog_schema() -> dict[str, Any]:
     schema = canonical_json.loads(_catalog_schema_text())
     assert isinstance(schema, dict)
     return schema
+
+
+def decode_as(hint: Any, data: JsonValue) -> Any:
+    """Decode ``data`` as any API type hint (``Knowledge[WorldTime]``, ``tuple[X, ...]``)."""
+    return _decode(hint, data, "value")
 
 
 # Public names for the Arrow module, which maps QueryRow's hints to columns.

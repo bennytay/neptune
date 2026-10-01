@@ -1,5 +1,12 @@
 {
   "api_version": "1.0.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
   "files_checked": 0,
   "findings": [
     {

@@ -20,8 +20,11 @@ registration), [ADR 0003](adr/0003-entity-threads-and-the-lineage-current-view.m
   exception is `CatalogUnavailable`, raised when the store cannot answer; a call that raised it
   wrote nothing.
 - **Missingness is explicit.** `Knowledge[T]` is used where the catalog may not know. It takes the
-  compiler's JSON shape, carries no provenance, and is never `known_absent`. A field that does
-  not apply to a shape is omitted from JSON. There is no `null`.
+  compiler's JSON shape. The Ledger's own determinations carry no provenance and are never
+  `known_absent`. A field that restates a package field (`WorldTime.end`) is the package's state
+  verbatim, provenance included, with timestamps as `TimePoint`s that carry their own clock. A
+  field that does not apply to a shape is omitted from JSON. There is no `null`, except in
+  `query` results (below).
 - **Replayable reads.** Every read call is evaluated at a catalog point. Pass `as_of`, a `tx_seq`;
   without it, the latest committed point is used. Either way the response returns the point as a
   `TransactionKey`. The same call at the same point gives byte-identical canonical JSON, or
@@ -33,12 +36,12 @@ registration), [ADR 0003](adr/0003-entity-threads-and-the-lineage-current-view.m
 | Call | Returns | Guarantees | Never |
 |---|---|---|---|
 | `register(package_root)` | `Registration` | One transaction writes the log row, the package row and every index row, or nothing. It locks `tx_clock` before the lookup, so READ COMMITTED suffices; at stricter isolation it retries on 40001/40P01. An identical re-registration returns `already_registered` with the stored ids and locator and allocates no tick. `refused` writes nothing. | Edits, normalises or copies package bytes. Keeps the first value of a conflicting id (that is `refused` + `conflicting_id`). Records a second root locator. |
-| `verify(package_id)` | `VerifyReport` | Re-hashes `manifest.json` against the id and every listed file against the manifest, at the stored root locator. Verdict `intact`, `damaged` (every mismatch listed) or `unknown_package`. | Repairs, re-registers or changes the catalog. |
+| `verify(package_id)` | `VerifyReport` | Re-hashes `manifest.json` against the id and every listed file against the manifest, at the stored root locator. Verdict `intact`, `damaged` (every mismatch listed) or `unknown_package` (also for a package registered after `as_of`). Returns the `as_of` it used. | Repairs, re-registers or changes the catalog. |
 | `resolve(evidence_ref)` | `Resolution` | For an `EvidenceAnchor(source, locator)`: the source's size, the innermost locator step (`region`), every registered package's route to the bytes (`fetch`: package-relative blob path when materialised, stated locations when referenced, in registration order), and every record whose record-level anchor equals it exactly (`cited_by`). | Fetches bytes, follows a location, or matches locators other than by exact canonical JSON. |
-| `thread(key, order, preference)` | `Thread` | ADR 0003. `History()` returns every entry and leaves lineage sets `NotApplicable`. `LatestTransform()`, `Pinned(t)` or `AsRegisteredBy(p)` returns the current view: one transform per lineage set, resolved to `Known`, `Ambiguous` or `NotCovered`. `world` order gives per-clock partitions with the untimed partition last. `transaction` order gives one partition. Optional `merge` takes a reference clock and `ClockMapping` ids. | Defaults the preference (a missing one gives `preference_required`). Unions threads. Relates clocks without named mappings. Converts ticks. Orders by wall clock. |
+| `thread(key, order, preference)` | `Thread` | ADR 0003. `History()` returns every entry and leaves lineage sets `NotApplicable`. `LatestTransform()`, `Pinned(t)` or `AsRegisteredBy(p)` returns the current view: one transform per lineage set, resolved to `Known`, `Ambiguous` or `NotCovered`; only `Known` sets contribute entries. An entry's `world` has a `TimePoint` start and its end exactly as the package states it (open unless `Known` on the start's clock). `world` order gives per-clock partitions with the untimed partition last. `transaction` order gives one partition. Optional `merge` takes a reference clock and `ClockMapping` ids. | Defaults the preference (a missing one gives `preference_required`). Unions threads. Relates clocks without named mappings. Converts ticks. Orders by wall clock. |
 | `threads_of(record_id)` | `ThreadsOf` | Every thread the record is a member of, per registering package, with its roles, plus the threads an `Ambiguous` field names (`unresolved`). | Merges co-declared keys into one thread. |
 | `lineage(record_id)` | `LineageGraph` | The record's kind and transform, every package holding it, the transform DAG upstream of it (an unregistered upstream is a node with `NotCovered` info), and lineage siblings (same kind and anchor, other transforms). | Picks a "current" transform; that is `thread` with a preference. |
-| `query(spec)` | `pyarrow.Table` | Columns are exactly `QUERY_RESULT_SCHEMA` (`QueryRow`). Metadata `neptune.catalog_api` holds `QueryMeta` (`as_of`, findings). Filters on kinds (required), a `TimeWindow` on one clock (inclusive; records without world time never match), a `thread_id` (history entries) and packages, combined with AND. Rows are sorted by `(kind, record_id, package_id)` as UTF-8 bytes. | Accepts SQL. Applies a window across clocks. Returns record bodies (read the package). |
+| `query(spec)` | `pyarrow.Table` | Columns are exactly `QUERY_RESULT_SCHEMA` (`QueryRow`): the catalog's nullable index columns (ADR 0002 §5), where NULL means "not Known in the record" (`world_last`: the end is open), never "absent". Metadata `neptune.catalog_api` holds `QueryMeta` (`as_of`, findings). Filters on kinds (required), a `TimeWindow` on one clock (inclusive; records without world time never match), a `thread_id` (history entries) and packages, combined with AND. Rows are sorted by `(kind, record_id, package_id)` as UTF-8 bytes. | Accepts SQL. Applies a window across clocks. Returns record bodies (read the package). |
 
 ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 `current(thread, preference, order)` is `thread(key, order, preference)`.
@@ -69,7 +72,7 @@ ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 | `unresolvable_evidence` | resolve | No registered package holds the source |
 | `preference_required` | thread | The preference was missing |
 | `unknown_clock`, `unknown_mapping` | thread | The merge names a clock or mapping that the catalog does not hold |
-| `unsupported_mapping`, `mapping_out_of_range` | thread | ADR 0003 §3: a mapping that is not usable, or an entry that no usable path covers |
+| `unsupported_mapping`, `mapping_out_of_range` | thread | ADR 0003 §3: a mapping that is not usable, or an entry that no usable path covers; `mapping_out_of_range` lists the paths it tried in `paths_tried` |
 | `as_of_out_of_range` | read calls | `as_of` is beyond the latest committed point |
 | `invalid_request` | any | An argument outside the contract, for example a window with `first > last` |
 
@@ -85,11 +88,21 @@ class TestMyCatalog(CatalogContract):
         return MyCatalog(workdir)  # fresh and empty for every test
 ```
 
-The suite contains golden calls over the compiler's four worked-example packages (drone,
-manipulator, mobile robot, quadruped), the error cases (unknown package, tampered manifest and
-record table, refused tampered package, unresolvable evidence, missing preference, inverted window)
-and determinism checks: the same call twice gives identical bytes, and `as_of` replays an earlier
-point. It needs pytest and jsonschema (the `contract-tests` extra). Outside this repository, set
+The suite contains:
+
+- golden calls over the compiler's four worked-example packages (drone, manipulator, mobile
+  robot, quadruped);
+- current-view resolution over synthetic lineage siblings that the suite builds from the drone:
+  `latest_transform` dominance ({v1 cfgA, v1 cfgB, v2} gives `Known(v2)`), `Ambiguous`
+  ({v1 cfgA, v1 cfgB}), `pinned` and `as_registered_by`, including their `NotCovered` cases;
+- the error cases: unknown package, tampered manifest and record table, refused tampered package,
+  `conflicting_id` refusal, unresolvable evidence, missing preference, `as_of_out_of_range` and
+  an inverted window;
+- determinism checks: the same call twice gives identical bytes, and `as_of` replays an earlier
+  point.
+
+Clock-merge and `mapping_out_of_range` tests are deferred to MVL-92. They need MVL-82
+`ClockMapping` records, which no package carries yet. It needs pytest and jsonschema (the `contract-tests` extra). Outside this repository, set
 `NEPTUNE_WORKED_EXAMPLES` to the compiler's `tests/fixtures/model`.
 
 This package runs the suite against `StubCatalog` as strict expected failures

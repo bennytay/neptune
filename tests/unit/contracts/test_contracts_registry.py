@@ -86,7 +86,7 @@ def test_catalog_api_is_owned_by_the_ledger_export() -> None:
     draft, export = registry.versions("catalog-api")[:2]
     assert (draft.status, draft.version, draft.owner_version) == ("draft", (0, 0, 0), None)
     assert "superseded" in draft.note
-    assert (export.version, export.owner_version) == ((1, 0, 0), "1.0.0")
+    assert (export.status, export.version, export.owner_version) == ("draft", (1, 0, 0), "1.0.0")
     report = tool.check_owner(registry, "neptune-ledger")
     assert report.problems == []
 

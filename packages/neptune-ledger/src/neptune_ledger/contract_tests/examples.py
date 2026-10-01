@@ -13,15 +13,19 @@ import os
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from neptune.identity import canonical_json
+from neptune.identity.provenance import evidence_record_id, transform_record
 from neptune.model.kinds import RECORD_KINDS
+from neptune.model.knowledge import Knowledge, Known
 from neptune.store.package import MANIFEST, blob_path, package_files, write_package
+from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
     DeclaredKey,
     EvidenceAnchor,
     KindCount,
+    QueryRow,
     RecordRef,
     ThreadKey,
     WorldTime,
@@ -168,28 +172,64 @@ def _grounded(value: Any) -> bool:
     return provenance is None or provenance.get("assertion_kind") in ("observed", "stated")
 
 
-def world_time(record: Record) -> WorldTime | str | None:
-    """ADR 0003 §3: a ``WorldTime``; ``"unknown"`` when no bound is Known; ``None`` if the kind
-    has no world time."""
+def world_time(record: Record) -> Record:
+    """ADR 0003 §3: the JSON of ``ThreadEntry.world`` for a record.
+
+    ``not_applicable`` for kinds without world time, ``unknown`` when no bound is Known, else
+    ``Known(WorldTime)`` whose ``end`` is the package field the end comes from, verbatim.
+    """
     kind = record["kind"]
     if kind in ("run", "stream"):
-        start, end = _known(record.get("first")), _known(record.get("last"))
+        start_field, end_field = record.get("first"), record.get("last")
     elif kind == "calibration":
-        start = _known(record.get("valid_from"))
-        end = _known(record.get("valid_until"))
-        if start is None:
-            start = _known(record.get("performed"))
-            if end is None and start is not None:
-                end = start
+        start_field, end_field = record.get("valid_from"), record.get("valid_until")
+        if _known(start_field) is None:
+            start_field = record.get("performed")
+            if _known(end_field) is None and _known(start_field) is not None:
+                end_field = start_field
     else:
-        return None
+        return {"knowledge": "not_applicable"}
+    if _known(start_field) is None:
+        start_field = end_field  # a point at the end
+    start = _known(start_field)
     if start is None:
-        start = end
-    if start is None:
-        return "unknown"
-    if end is None or end["domain_id"] != start["domain_id"]:
-        return WorldTime(start["domain_id"], start["ticks"])
-    return WorldTime(start["domain_id"], start["ticks"], end["ticks"])
+        return {"knowledge": "unknown"}
+    point = {"domain_id": start["domain_id"], "ticks": start["ticks"]}
+    return {"knowledge": "known", "value": {"end": end_field, "start": point}}
+
+
+_WORLD: Final[Any] = cast("Any", Knowledge)[WorldTime]
+
+
+def world_value(record: Record) -> Knowledge[WorldTime]:
+    """``world_time`` as a value."""
+    return codec.decode_as(_WORLD, world_time(record))  # type: ignore[no-any-return]
+
+
+def timed(record: Record) -> WorldTime | None:
+    """The record's ``WorldTime`` when it has a Known one."""
+    value = world_value(record)
+    return value.value if isinstance(value, Known) else None
+
+
+def query_row(package: "WorkedPackage", kind: str, line: int, record: Record, seq: int) -> QueryRow:
+    """The ``query`` row a record gives (ADR 0002 §5 columns; world time per ADR 0003 §3)."""
+    anchor = evidence_anchor(record)
+    world = timed(record)
+    return QueryRow(
+        kind=kind,
+        record_id=record_key(record),
+        package_id=package.package_id,
+        line=line,
+        registration_seq=seq,
+        transform_id=transform_of(record),
+        source_content_id=anchor.source if anchor else None,
+        source_locator=canonical_json.dumps(list(anchor.locator)).decode() if anchor else None,
+        assertion_kind=record["provenance"]["assertion_kind"],
+        world_clock=world.clock if world else None,
+        world_first=world.start.ticks if world else None,
+        world_last=world.closed_end if world else None,
+    )
 
 
 def machine_keys(record: Record) -> list[tuple[str, DeclaredKey]]:
@@ -217,3 +257,94 @@ def machine_threads(packages: list[WorkedPackage]) -> dict[ThreadKey, set[tuple[
                 key = ThreadKey("machine", declared)
                 threads.setdefault(key, set()).add((package.package_id, record_key(record), role))
     return threads
+
+
+# --- Synthetic lineage siblings and conflicts, built deterministically from a worked example ----
+
+# Kinds whose ids do not come from a transform (or, for findings, from their own content).
+_NOT_TRANSFORMED: Final = frozenset(
+    {"source_artifact", "source_revision", "source_absence", "transform_record", "ingest_finding"}
+)
+
+
+def _replace_ids(value: Any, ids: Mapping[str, str]) -> Any:
+    if isinstance(value, str):
+        return ids.get(value, value)
+    if isinstance(value, list):
+        return [_replace_ids(v, ids) for v in value]
+    if isinstance(value, Mapping):
+        return {k: _replace_ids(v, ids) for k, v in value.items()}
+    return value
+
+
+def _read(kind: str, data: Any) -> Any:
+    _, read = RECORD_KINDS[kind]
+    return read(data)
+
+
+def reparse(
+    name: str, adapter_version: str, config: Mapping[str, Any], directory: Path | None = None
+) -> dict[str, bytes]:
+    """The package one worked example gives when its adapter runs at another version or config.
+
+    The same sources and locators, every record re-identified under the new transform (root ADR
+    0003 tier 2), every tier-2 reference rewritten to match: lineage siblings of the original, as
+    adapter v2 or a second config would produce them (ADR 0003 §4.1). Ingest findings are left
+    out; their ids hash their own content. Only single-transform examples whose locators hold no
+    tier-2 id qualify; anything else raises.
+    """
+    root = (directory or examples_dir()) / name / "records"
+    tables = {
+        path.stem: [canonical_json.loads(line) for line in path.read_bytes().splitlines()]
+        for path in sorted(root.glob("*.jsonl"))
+    }
+    (stated,) = tables["transform_record"]
+    old: Any = stated
+    new = transform_record(
+        adapter_id=old["adapter_id"],
+        adapter_version=adapter_version,
+        config=config,
+        libraries=old["libraries"],
+        upstream=old["upstream"],
+    )
+    ids: dict[str, str] = {old["id"]: new.id}
+    for kind, rows in tables.items():
+        if kind in _NOT_TRANSFORMED:
+            continue
+        for row in rows:
+            evidence = _read(kind, row).provenance.evidence
+            if "rec:" in canonical_json.dumps(evidence.locator_json()).decode():
+                raise ValueError(f"{name}: a {kind} locator holds a tier-2 id; cannot reparse")
+            ids[cast("Any", row)["id"]] = evidence_record_id(kind, evidence, new)
+    records: list[Any] = [new]
+    for kind, rows in tables.items():
+        if kind in ("transform_record", "ingest_finding"):
+            continue
+        records += [_read(kind, _replace_ids(row, ids)) for row in rows]
+    return package_files(records)
+
+
+def with_source_size(name: str, size: int, directory: Path | None = None) -> dict[str, bytes]:
+    """A worked example whose single source artifact states another ``size``.
+
+    Same content id, different fields: registering it after the original must be refused with
+    ``conflicting_id`` (ADR 0002 §6).
+    """
+    files = package_bytes(name, directory)
+    records: list[Any] = []
+    for path, data in sorted(files.items()):
+        if not (path.startswith("records/") and path.endswith(".jsonl")):
+            continue
+        kind = path.removeprefix("records/").removesuffix(".jsonl")
+        for line in data.splitlines():
+            row = canonical_json.loads(line)
+            assert isinstance(row, Mapping)
+            if kind == "source_artifact":
+                row = {**row, "size": size}
+            records.append(_read(kind, row))
+    return package_files(records)
+
+
+def write(name: str, root: Path, files: Mapping[str, bytes]) -> WorkedPackage:
+    """Write prepared package files into ``root``."""
+    return WorkedPackage(name, root, write_package(root, files), files)

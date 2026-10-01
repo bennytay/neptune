@@ -19,7 +19,7 @@ from typing import Annotated, Any, ClassVar, Final, Literal, TypeAlias
 
 from neptune.identity import canonical_json
 from neptune.model.kinds import RECORD_KINDS
-from neptune.model.knowledge import Knowledge
+from neptune.model.knowledge import AssertionKind, Knowledge, Known
 
 # The catalog API's registry version (contracts/catalog-api). It equals the registry version
 # exactly (platform ADR 0002 §3); a reader-incompatible change raises the major (ADR 0004 §5).
@@ -45,6 +45,9 @@ class Constraint:
     min_items: int | None = None
     unique_items: bool = False
     required: tuple[str, ...] = ()
+    # On a ``Knowledge[T]`` field: the state restates a package field verbatim, so it keeps the
+    # package's provenance (``StatedProvenance``) and may be ``known_absent`` (ADR 0004 §3).
+    as_stated: bool = False
 
 
 # A JSON object exactly as a package states it (a locator step, a location, libraries). Not the
@@ -180,6 +183,35 @@ class CatalogFinding:
     code: FindingCode
     subject: Text
     detail: str
+    paths_tried: tuple["MappingPath", ...] | None = None
+
+
+@dataclass(frozen=True)
+class MappingPath:
+    """One path of ``ClockMapping`` record ids, from an entry's clock to the reference clock."""
+
+    mappings: Annotated[tuple[TierTwoId, ...], Constraint(min_items=1)]
+
+
+@dataclass(frozen=True)
+class StatedProvenance:
+    """A package field's provenance exactly as the package states it, kept as its JSON."""
+
+    document: JsonObject
+
+    def __post_init__(self) -> None:
+        if self.document.get("assertion_kind") not in ("observed", "stated"):
+            raise ValueError("stated provenance must be observed or stated evidence")
+
+    @property
+    def assertion_kind(self) -> AssertionKind:
+        return AssertionKind(self.document["assertion_kind"])
+
+    def to_json(self) -> JsonObject:
+        return self.document
+
+    def __hash__(self) -> int:
+        return hash(canonical_json.dumps(self.document))
 
 
 @dataclass(frozen=True)
@@ -279,6 +311,7 @@ class VerifyRequest:
     """``verify(package_id)``: re-hash a registered package where it was registered from."""
 
     package_id: Text
+    as_of: TxSeq | None = None
 
 
 @dataclass(frozen=True)
@@ -295,6 +328,7 @@ class VerifyReport:
     registration_key: Knowledge[TransactionKey]
     root_locator: Knowledge[str]
     files_checked: Count
+    as_of: Knowledge[TransactionKey]
     findings: tuple[CatalogFinding, ...]
     api_version: ApiVersion = CATALOG_API_VERSION
 
@@ -433,12 +467,38 @@ class ThreadRequest:
 
 
 @dataclass(frozen=True)
-class WorldTime:
-    """An entry's world time (ADR 0003 §3), as stated. ``end`` absent means the end is open."""
+class TimePoint:
+    """A timestamp as a package states it: ticks on one clock (root ADR 0005). Never converted."""
 
-    clock: TierTwoId
-    start: Ticks
-    end: Ticks | None = None
+    domain_id: TierTwoId
+    ticks: Ticks
+
+
+@dataclass(frozen=True)
+class WorldTime:
+    """An entry's world time (ADR 0003 §3): its start ``s`` and its end ``e`` as stated.
+
+    ``start`` is the Known ``s`` (or ``e`` when only the end is Known); its clock is the entry's
+    ordering clock. ``end`` restates the package field the end comes from, state and provenance
+    included: ``Unknown`` and ``NotCovered`` stay distinct, and an end on another clock is
+    ``Known`` with its own ``domain_id``. The end is **open** unless it is ``Known`` on the start's
+    clock; it is never dropped or converted.
+    """
+
+    start: TimePoint
+    end: Annotated[Knowledge[TimePoint], Constraint(as_stated=True)]
+
+    @property
+    def clock(self) -> str:
+        return self.start.domain_id
+
+    @property
+    def closed_end(self) -> int | None:
+        """The end's ticks when it is Known on the start's clock; ``None`` when it is open."""
+        match self.end:
+            case Known(value=TimePoint(domain_id=clock, ticks=ticks)) if clock == self.clock:
+                return ticks
+        return None
 
 
 @dataclass(frozen=True)

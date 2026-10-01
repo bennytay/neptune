@@ -19,9 +19,11 @@ from neptune.model.knowledge import (
     Candidate,
     Known,
     KnownAbsent,
+    NotApplicable,
     NotCovered,
     Unknown,
 )
+from neptune.store.package import read_package
 from neptune_ledger import api
 from neptune_ledger.api import (
     CATALOG_API_VERSION,
@@ -154,6 +156,7 @@ def test_registry_holds_this_version_and_schema() -> None:
     version = CONTRACT / f"v{CATALOG_API_VERSION}"
     meta = json.loads((version / "version.json").read_text("utf-8"))
     assert meta["owner_version"] == CATALOG_API_VERSION
+    assert meta["status"] == "draft", "draft until the L1 gate (MVL-89) passes"
     schema_text = (version / "schema.json").read_text("utf-8")
     assert json.loads(schema_text) == catalog_schema()
 
@@ -182,8 +185,42 @@ def test_machine_thread_expectations_follow_adr_0003(tmp_path: Path) -> None:
     assert ("machine", "subject") in roles
     assert ("run", "cites") in roles
     run = drone.records("run")[0]
-    world = examples.world_time(run)
-    assert world == api.WorldTime(run["first"]["value"]["domain_id"], 12000000)
+    assert run["last"] == {"knowledge": "not_covered"}
+    world = examples.timed(run)
+    assert world is not None
+    assert world.start == api.TimePoint(run["first"]["value"]["domain_id"], 12000000)
+    assert world.end == NotCovered(), "a not_covered end stays not_covered, never a blank"
+    assert world.closed_end is None
+
+
+def test_synthetic_siblings_are_valid_packages_of_one_thread(tmp_path: Path) -> None:
+    original = examples.materialise("drone", tmp_path / "v1a")
+    built = {
+        "v1b": examples.reparse("drone", "1.0.0", {"variant": "b"}),
+        "v2": examples.reparse("drone", "2.0.0", {}),
+    }
+    assert built == {
+        "v1b": examples.reparse("drone", "1.0.0", {"variant": "b"}),
+        "v2": examples.reparse("drone", "2.0.0", {}),
+    }, "deterministic"
+    siblings = [examples.write(n, tmp_path / n, f) for n, f in built.items()]
+    keys = {key for p in (original, *siblings) for key in examples.machine_threads([p])}
+    assert len(keys) == 1, "one machine thread across the three lineages"
+    versions = [p.records("transform_record")[0]["adapter_version"] for p in siblings]
+    assert versions == ["1.0.0", "2.0.0"]
+    for package in siblings:
+        read_package(package.root)  # the compiler accepts it: ids and lineage recompute
+        ids = {examples.record_key(r) for _, _, r in package.every_record()}
+        assert not ids & {
+            examples.record_key(r)
+            for _, _, r in original.every_record()
+            if r["kind"] not in ("source_artifact", "source_revision")
+        }
+    liar = examples.with_source_size("drone", 745)
+    package = examples.write("liar", tmp_path / "liar", liar)
+    read_package(package.root)
+    assert package.package_id != original.package_id
+    assert package.records("source_artifact")[0]["size"] == 745
 
 
 def test_world_time_rules() -> None:
@@ -192,22 +229,30 @@ def test_world_time_rules() -> None:
     def ts(ticks: int, clock: str = clock_a) -> dict[str, Any]:
         return {"knowledge": "known", "value": {"domain_id": clock, "ticks": ticks}}
 
+    def world(record: dict[str, Any]) -> Any:
+        return examples.world_value(record)
+
     unknown = {"knowledge": "unknown"}
-    assert examples.world_time({"kind": "run", "first": unknown, "last": ts(9)}) == (
-        api.WorldTime(clock_a, 9, 9)
+    point_at_end = world({"kind": "run", "first": unknown, "last": ts(9)})
+    assert point_at_end == Known(
+        api.WorldTime(api.TimePoint(clock_a, 9), Known(api.TimePoint(clock_a, 9)))
     )
-    assert examples.world_time({"kind": "run", "first": ts(1), "last": ts(9, clock_b)}) == (
-        api.WorldTime(clock_a, 1)
-    )
-    assert examples.world_time({"kind": "run", "first": unknown, "last": unknown}) == "unknown"
+    other_clock = world({"kind": "run", "first": ts(1), "last": ts(9, clock_b)}).value
+    assert other_clock.end == Known(api.TimePoint(clock_b, 9)), "kept as stated, own clock"
+    assert other_clock.closed_end is None, "an end on another clock is open"
+    assert world({"kind": "run", "first": unknown, "last": unknown}) == Unknown()
     performed = {
         "kind": "calibration",
         "valid_from": unknown,
         "valid_until": unknown,
         "performed": ts(5),
     }
-    assert examples.world_time(performed) == api.WorldTime(clock_a, 5, 5)
-    assert examples.world_time({"kind": "machine"}) is None
+    assert world(performed).value.closed_end == 5
+    assert world({"kind": "machine"}) == NotApplicable()
+    stated_end = {"knowledge": "known_absent", "provenance": {"assertion_kind": "stated"}}
+    absent = world({"kind": "run", "first": ts(1), "last": stated_end}).value
+    assert isinstance(absent.end, KnownAbsent)
+    assert to_json(absent)["end"] == stated_end  # type: ignore[index, call-overload]
 
 
 # --- codec -------------------------------------------------------------------------------------

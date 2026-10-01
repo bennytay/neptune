@@ -91,8 +91,13 @@
           "world": {
             "knowledge": "known",
             "value": {
-              "clock": "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31",
-              "start": 12000000
+              "end": {
+                "knowledge": "not_covered"
+              },
+              "start": {
+                "domain_id": "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31",
+                "ticks": 12000000
+              }
             }
           }
         }

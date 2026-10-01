@@ -11,6 +11,7 @@
     "drone.thread_request.json": "#/$defs/ThreadRequest",
     "drone.thread_request.merge_example.json": "#/$defs/ThreadRequest",
     "drone.verify_report.json": "#/$defs/VerifyReport",
+    "error.finding_mapping_out_of_range.json": "#/$defs/CatalogFinding",
     "error.registration_refused.json": "#/$defs/Registration",
     "error.resolution_unresolvable.json": "#/$defs/Resolution",
     "error.verify_unknown_package.json": "#/$defs/VerifyReport",
@@ -39,7 +40,7 @@
     "query_spec.window.json": "#/$defs/QuerySpec"
   },
   "owner_version": "1.0.0",
-  "schema_sha256": "sha256:b6ca1770728e724c7ba3a9250ce482aa1eb14c55ca12eae45cd96f4814f21220",
+  "schema_sha256": "sha256:edc632eff3cdf06b1fbf195886232f1b743139fab2662b8f80198950568a6396",
   "status": "draft",
   "version": "1.0.0"
 }

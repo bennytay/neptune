@@ -61,7 +61,7 @@ class CatalogApi(Protocol):
         """
         ...
 
-    def verify(self, package_id: str) -> VerifyReport:
+    def verify(self, package_id: str, *, as_of: int | None = None) -> VerifyReport:
         """Re-hash a registered package at its stored root locator; report, never repair."""
         ...
 
@@ -114,7 +114,7 @@ class StubCatalog:
     def register(self, package_root: str | os.PathLike[str]) -> Registration:
         raise self._missing("register")
 
-    def verify(self, package_id: str) -> VerifyReport:
+    def verify(self, package_id: str, *, as_of: int | None = None) -> VerifyReport:
         raise self._missing("verify")
 
     def resolve(self, evidence_ref: EvidenceAnchor, *, as_of: int | None = None) -> Resolution:
@@ -157,8 +157,8 @@ def call(api: CatalogApi, request: Request) -> Any:
     match request:
         case RegisterRequest(package_root=root):
             return api.register(root)
-        case VerifyRequest(package_id=package_id):
-            return api.verify(package_id)
+        case VerifyRequest(package_id=package_id, as_of=as_of):
+            return api.verify(package_id, as_of=as_of)
         case ResolveRequest(evidence_ref=ref, as_of=as_of):
             return api.resolve(ref, as_of=as_of)
         case ThreadRequest(key=key, order=order, preference=preference, merge=merge, as_of=as_of):

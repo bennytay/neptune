@@ -23,8 +23,11 @@ them.
    `query(spec)`. ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
    `current(thread, preference, order)` is `thread(key, order, preference)` with a
    `LatestTransform`, `Pinned` or `AsRegisteredBy` preference. `preference` and `order` have no
-   default. Read calls take an optional `as_of` (`tx_seq`). When it is omitted they use the latest
-   committed point, and every read response returns the point it used. Each call has a request
+   default. Every read call (`verify`, `resolve`, `thread`, `threads_of`, `lineage`, `query`) takes
+   an optional `as_of` (`tx_seq`). When it is omitted they use the latest committed point, and
+   every read response returns the point it used. An `as_of` beyond that point is refused with
+   `as_of_out_of_range`. In a current view, a lineage set that resolves to `Ambiguous` or
+   `NotCovered` selects no records; only `Known` sets contribute entries. Each call has a request
    record, and `call(api, request)` dispatches a request to its call.
 2. **Error model.** No call raises because of evidence or arguments. Each call returns its typed
    response, and problems are `CatalogFinding(code, subject, detail)` entries in its `findings`:
@@ -33,15 +36,29 @@ them.
    response with the payload empty: every collection empty, and the Knowledge fields that the
    failure makes unavailable set to `Unknown`, `NotCovered` or `NotApplicable`. Its status field
    (`outcome`, `verdict`, `status`) names the failure. An unknown thread key is not an error; the
-   thread is empty. `query` carries its findings in the result's Arrow schema metadata
+   thread is empty. A `mapping_out_of_range` finding lists the paths it tried in `paths_tried`
+   (`MappingPath`s of `ClockMapping` ids, ADR 0003 §3.4); `detail` is never parsed. `query` carries
+   its findings in the result's Arrow schema metadata
    (`QueryMeta`). The only exception a conforming implementation raises is `CatalogUnavailable`:
    the store is unreachable, or a transaction kept failing after its retries. A call that raised
    it wrote nothing.
 3. **Absence.** `Knowledge[T]`, in the compiler's JSON shape, is used where the catalog or the
-   evidence may not know. These states are the Ledger's own determinations, so they carry no
-   provenance, and `KnownAbsent` never appears. `X | None` means the field does not apply to this
-   request or response shape, for example no merge was asked for. Such a key is omitted from JSON.
-   There is no `null`, so every document is canonical JSON (root ADR 0002). Each record's JSON
+   evidence may not know. Two kinds:
+   - The Ledger's own determinations (a lineage set's resolution, an entry's `world`, a
+     registration key) carry no provenance, and `KnownAbsent` never appears.
+   - A field that restates a package field (`WorldTime.end`, marked `as_stated`) is the package's
+     state verbatim: `Unknown`, `NotCovered` and `KnownAbsent` stay distinct, the package's
+     provenance is kept (`StatedProvenance`), and a timestamp is a `TimePoint` carrying its own
+     `domain_id`, so an end on another clock is returned `Known` as stated, never dropped or
+     converted. Whether the end is open is derived from it (`WorldTime.closed_end`).
+
+   `X | None` means only that the field does not apply to this request or response shape, for
+   example no merge was asked for or an entry is outside a merged partition. Such a key is omitted
+   from JSON. There is no `null`, so every document is canonical JSON (root ADR 0002).
+   **Exception:** a `query` result's Arrow columns are the catalog's nullable index columns
+   (ADR 0002 §5), so `QueryRow`'s optional fields are NULL in Arrow and omitted in JSON. There a
+   NULL means "not Known in the record" (for `world_last`: the end is open), never "absent in the
+   world"; the package keeps the state, and `thread` returns it. Each record's JSON
    Schema and its strict decoder are generated from its type hints, so they cannot drift from the
    types. Unknown keys are errors.
 4. **Registration transaction.** One transaction writes the registration-log row, the package row
@@ -68,6 +85,12 @@ them.
    `expected_failure = NotImplementedError`. Each test calling the API is marked
    `xfail(strict=True, raises=NotImplementedError)`, so another exception or a pass turns CI red.
    Tests that need no implementation (schema, codec, thread ids, goldens) are ordinary tests.
+   Current-view, conflict and `as_of` cases use synthetic packages that the suite builds
+   deterministically from the drone example with the compiler's own id rules: the same sources
+   re-identified under ulog 1.0.0 with another config and under 2.0.0 (lineage siblings), and a
+   copy whose source artifact states another size (a conflicting id). Clock-merge and
+   `mapping_out_of_range` tests are deferred to MVL-92: they need MVL-82 `ClockMapping` records,
+   which no package can carry yet.
 
 ## Alternatives considered
 

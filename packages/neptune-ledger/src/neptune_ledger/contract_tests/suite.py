@@ -20,16 +20,17 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import jsonschema
 import pytest
 
-from neptune.identity import canonical_json
-from neptune.model.knowledge import Known, NotApplicable, NotCovered, Unknown
+from neptune.model.knowledge import Ambiguous, Candidate, Known, NotApplicable, NotCovered, Unknown
 from neptune_ledger.api import arrow, codec
 from neptune_ledger.api.protocol import CatalogApi
 from neptune_ledger.api.types import (
     CATALOG_API_VERSION,
+    AsRegisteredBy,
     DeclaredKey,
     EvidenceAnchor,
     History,
     LatestTransform,
+    Pinned,
     QueryRow,
     QuerySpec,
     RecordRef,
@@ -45,9 +46,13 @@ from neptune_ledger.contract_tests.examples import (
     evidence_anchor,
     machine_threads,
     materialise,
+    query_row,
     record_key,
+    reparse,
     transform_of,
+    with_source_size,
     world_time,
+    write,
 )
 
 if TYPE_CHECKING:
@@ -352,12 +357,7 @@ class CatalogContract:
                     assert len(entry.packages) == 1, "history keeps one entry per package"
                     got |= {(entry.packages[0], entry.record_id, role) for role in entry.roles}
                     stated = world_time(records[(entry.packages[0], entry.record_id)])
-                    if stated is None:
-                        assert entry.world == NotApplicable()
-                    elif stated == "unknown":
-                        assert entry.world == Unknown()
-                    else:
-                        assert entry.world == Known(stated)
+                    assert codec.to_json(entry)["world"] == stated  # type: ignore[index, call-overload]
             assert got == members
             assert all(s.resolution == NotApplicable() for s in thread.lineage_sets)
 
@@ -381,10 +381,11 @@ class CatalogContract:
                     assert isinstance(entry.world, Known)
                     world: WorldTime = entry.world.value
                     assert world.clock == partition.clock_key
-                    end = (0, world.end) if world.end is not None else (1, 0)
+                    closed = world.closed_end
+                    end = (0, closed) if closed is not None else (1, 0)
                     sort_keys.append(
                         (
-                            world.start,
+                            world.start.ticks,
                             end,
                             entry.registration_key.tx_seq,
                             entry.record_id.encode(),
@@ -405,6 +406,129 @@ class CatalogContract:
             assert {e.record_id for p in current.partitions for e in p.entries} <= every
             for lineage_set in current.lineage_sets:
                 assert lineage_set.resolution.state.value in ("known", "ambiguous", "not_covered")
+
+    # --- current-view resolution over synthetic lineage siblings (ADR 0003 §4.4) ---------------
+
+    @pytest.fixture
+    def siblings(self, tmp_path: Path) -> dict[str, WorkedPackage]:
+        """The drone at ulog 1.0.0 (its own config), 1.0.0 with another config, and 2.0.0."""
+        root = tmp_path / "siblings"
+        return {
+            "v1a": materialise("drone", root / "v1a"),
+            "v1b": write("v1b", root / "v1b", reparse("drone", "1.0.0", {"variant": "b"})),
+            "v2": write("v2", root / "v2", reparse("drone", "2.0.0", {})),
+            "other": materialise("quadruped", root / "other"),
+        }
+
+    def _current(
+        self, catalog: CatalogApi, sibling: WorkedPackage, preference: Any
+    ) -> tuple[Any, set[tuple[str, str]]]:
+        """The current view of the drone's machine thread, and its entries as (package, record)."""
+        (key,) = machine_threads([sibling])
+        thread = catalog.thread(key, "world", preference)
+        _validate(thread)
+        assert thread.findings == ()
+        entries = {
+            (p, e.record_id) for part in thread.partitions for e in part.entries for p in e.packages
+        }
+        return thread, entries
+
+    @staticmethod
+    def _members(package: WorkedPackage) -> set[tuple[str, str]]:
+        (members,) = machine_threads([package]).values()
+        return {(p, r) for p, r, _ in members}
+
+    @staticmethod
+    def _transform(package: WorkedPackage) -> str:
+        (row,) = package.records("transform_record")
+        return row["id"]  # type: ignore[no-any-return]
+
+    def test_latest_transform_resolves_to_the_dominant_version(
+        self, catalog: CatalogApi, siblings: dict[str, WorkedPackage]
+    ) -> None:
+        for name in ("v1a", "v1b", "v2"):
+            assert catalog.register(siblings[name].root).outcome == "registered"
+        thread, entries = self._current(catalog, siblings["v2"], LatestTransform())
+        v2 = self._transform(siblings["v2"])
+        everything = sorted(self._transform(siblings[n]) for n in ("v1a", "v1b", "v2"))
+        assert thread.lineage_sets, "the drone's machine thread has lineage sets"
+        for lineage_set in thread.lineage_sets:
+            assert lineage_set.resolution == Known(v2), "{v1 cfgA, v1 cfgB, v2} -> Known(v2)"
+            assert list(lineage_set.transforms) == everything
+        assert entries == self._members(siblings["v2"])
+
+    def test_latest_transform_is_ambiguous_between_equal_versions(
+        self, catalog: CatalogApi, siblings: dict[str, WorkedPackage]
+    ) -> None:
+        for name in ("v1a", "v1b"):
+            catalog.register(siblings[name].root)
+        thread, entries = self._current(catalog, siblings["v1a"], LatestTransform())
+        tied = sorted(self._transform(siblings[n]) for n in ("v1a", "v1b"))
+        expected = Ambiguous(tuple(Candidate(t) for t in tied))
+        assert thread.lineage_sets
+        assert all(s.resolution == expected for s in thread.lineage_sets)
+        assert entries == set(), "an Ambiguous lineage set selects no records"
+
+    def test_pinned_selects_exactly_one_transform(
+        self, catalog: CatalogApi, siblings: dict[str, WorkedPackage]
+    ) -> None:
+        for name in ("v1a", "v1b", "v2"):
+            catalog.register(siblings[name].root)
+        v1b = self._transform(siblings["v1b"])
+        thread, entries = self._current(catalog, siblings["v1b"], Pinned(v1b))
+        assert all(s.resolution == Known(v1b) for s in thread.lineage_sets)
+        assert entries == self._members(siblings["v1b"])
+        absent = "rec:sha256:" + "9" * 64
+        thread, entries = self._current(catalog, siblings["v1b"], Pinned(absent))
+        assert all(s.resolution == NotCovered() for s in thread.lineage_sets)
+        assert entries == set(), "pinned never falls back"
+
+    def test_as_registered_by_follows_one_package(
+        self, catalog: CatalogApi, siblings: dict[str, WorkedPackage]
+    ) -> None:
+        for name in ("v1a", "v1b", "v2", "other"):
+            catalog.register(siblings[name].root)
+        v1a = siblings["v1a"]
+        thread, entries = self._current(catalog, v1a, AsRegisteredBy(v1a.package_id))
+        assert all(s.resolution == Known(self._transform(v1a)) for s in thread.lineage_sets)
+        assert entries == self._members(v1a)
+        other = siblings["other"].package_id
+        thread, entries = self._current(catalog, v1a, AsRegisteredBy(other))
+        assert all(s.resolution == NotCovered() for s in thread.lineage_sets)
+        assert entries == set()
+
+    def test_conflicting_id_is_refused_and_nothing_is_written(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        original = materialise("drone", tmp_path / "drone")
+        (source,) = original.records("source_artifact")
+        liar = write("liar", tmp_path / "liar", with_source_size("drone", source["size"] + 1))
+        assert catalog.register(original.root).outcome == "registered"
+        result = catalog.register(liar.root)
+        _validate(result)
+        assert result.outcome == "refused"
+        assert result.registration_key == NotApplicable()
+        assert ("conflicting_id", source["content_id"]) in {
+            (f.code, f.subject) for f in result.findings
+        }
+        assert catalog.verify(liar.package_id).verdict == "unknown_package"
+
+    def test_as_of_beyond_the_catalog_is_refused(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        first = catalog.register(packages["drone"].root)
+        assert isinstance(first.registration_key, Known)
+        beyond = first.registration_key.value.tx_seq + 1000
+        key = next(iter(machine_threads([packages["drone"]])))
+        thread = catalog.thread(key, "world", History(), as_of=beyond)
+        _validate(thread)
+        assert _codes(thread.findings) == {"as_of_out_of_range"}
+        assert thread.partitions == ()
+        table = catalog.query(QuerySpec(kinds=("run",), as_of=beyond))
+        assert table.num_rows == 0
+        assert _codes(arrow.query_meta(table).findings) == {"as_of_out_of_range"}
+        report = catalog.verify(packages["drone"].package_id, as_of=beyond)
+        assert _codes(report.findings) == {"as_of_out_of_range"}
 
     def test_thread_without_a_preference_is_rejected(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
@@ -465,27 +589,7 @@ class CatalogContract:
             package, key = packages[name], registered[name].registration_key
             assert isinstance(key, Known)
             for line, record in enumerate(package.records(kind), start=1):
-                anchor = evidence_anchor(record)
-                world = world_time(record)
-                timed = world if isinstance(world, WorldTime) else None
-                rows.append(
-                    QueryRow(
-                        kind=kind,
-                        record_id=record_key(record),
-                        package_id=package.package_id,
-                        line=line,
-                        registration_seq=key.value.tx_seq,
-                        transform_id=transform_of(record),
-                        source_content_id=anchor.source if anchor else None,
-                        source_locator=(
-                            canonical_json.dumps(list(anchor.locator)).decode() if anchor else None
-                        ),
-                        assertion_kind=record["provenance"]["assertion_kind"],
-                        world_clock=timed.clock if timed else None,
-                        world_first=timed.start if timed else None,
-                        world_last=timed.end if timed else None,
-                    )
-                )
+                rows.append(query_row(package, kind, line, record, key.value.tx_seq))
         return sorted(rows, key=lambda r: (r.kind, r.record_id.encode(), r.package_id.encode()))
 
     def test_query_by_kind_returns_catalog_rows(

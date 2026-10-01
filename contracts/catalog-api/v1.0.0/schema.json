@@ -53,6 +53,12 @@
         "detail": {
           "type": "string"
         },
+        "paths_tried": {
+          "items": {
+            "$ref": "#/$defs/MappingPath"
+          },
+          "type": "array"
+        },
         "subject": {
           "minLength": 1,
           "type": "string"
@@ -146,7 +152,7 @@
     },
     "KindCount": {
       "additionalProperties": false,
-      "description": "KindCount(kind: Annotated[str, Constraint(name='RecordKind', description='A record kind of package schema 1.', pattern=None, enum=('source_artifact', 'source_revision', 'source_absence', 'transform_record', 'ingest_finding', 'timestamp_domain', 'frame_graph', 'frame', 'frame_transform', 'run', 'stream', 'machine', 'hardware_configuration', 'hardware_component', 'software_configuration', 'calibration', 'site', 'asset', 'spatial_artifact', 'image', 'video', 'document_record', 'document_block', 'structured_table', 'structured_record'), minimum=None, maximum=None, min_length=None, min_items=None, unique_items=False, required=())], count: Annotated[int, Constraint(name=None, description=None, pattern=None, enum=None, minimum=0, maximum=None, min_length=None, min_items=None, unique_items=False, required=())])",
+      "description": "KindCount(kind: Annotated[str, Constraint(name='RecordKind', description='A record kind of package schema 1.', pattern=None, enum=('source_artifact', 'source_revision', 'source_absence', 'transform_record', 'ingest_finding', 'timestamp_domain', 'frame_graph', 'frame', 'frame_transform', 'run', 'stream', 'machine', 'hardware_configuration', 'hardware_component', 'software_configuration', 'calibration', 'site', 'asset', 'spatial_artifact', 'image', 'video', 'document_record', 'document_block', 'structured_table', 'structured_record'), minimum=None, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)], count: Annotated[int, Constraint(name=None, description=None, pattern=None, enum=None, minimum=0, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)])",
       "properties": {
         "count": {
           "minimum": 0,
@@ -1063,6 +1069,23 @@
       ],
       "type": "object"
     },
+    "MappingPath": {
+      "additionalProperties": false,
+      "description": "One path of ``ClockMapping`` record ids, from an entry's clock to the reference clock.",
+      "properties": {
+        "mappings": {
+          "items": {
+            "$ref": "#/$defs/TierTwoId"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "mappings"
+      ],
+      "type": "object"
+    },
     "Membership": {
       "additionalProperties": false,
       "description": "One thread a record is a member of, in one registering package, with its roles.",
@@ -1580,6 +1603,195 @@
       ],
       "type": "object"
     },
+    "StatedKnowledgeOfTimePoint": {
+      "description": "A package field's Knowledge state restated verbatim, provenance included.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "description": "The package's provenance object, verbatim (package-schema).",
+              "properties": {
+                "assertion_kind": {
+                  "enum": [
+                    "observed",
+                    "stated"
+                  ]
+                }
+              },
+              "required": [
+                "assertion_kind"
+              ],
+              "type": "object"
+            },
+            "value": {
+              "$ref": "#/$defs/TimePoint"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            },
+            "provenance": {
+              "description": "The package's provenance object, verbatim (package-schema).",
+              "properties": {
+                "assertion_kind": {
+                  "enum": [
+                    "observed",
+                    "stated"
+                  ]
+                }
+              },
+              "required": [
+                "assertion_kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            },
+            "provenance": {
+              "description": "The package's provenance object, verbatim (package-schema).",
+              "properties": {
+                "assertion_kind": {
+                  "enum": [
+                    "observed",
+                    "stated"
+                  ]
+                }
+              },
+              "required": [
+                "assertion_kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "description": "The package's provenance object, verbatim (package-schema).",
+                    "properties": {
+                      "assertion_kind": {
+                        "enum": [
+                          "observed",
+                          "stated"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "assertion_kind"
+                    ],
+                    "type": "object"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/TimePoint"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            },
+            "provenance": {
+              "description": "The package's provenance object, verbatim (package-schema).",
+              "properties": {
+                "assertion_kind": {
+                  "enum": [
+                    "observed",
+                    "stated"
+                  ]
+                }
+              },
+              "required": [
+                "assertion_kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "description": "The package's provenance object, verbatim (package-schema).",
+              "properties": {
+                "assertion_kind": {
+                  "enum": [
+                    "observed",
+                    "stated"
+                  ]
+                }
+              },
+              "required": [
+                "assertion_kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Thread": {
       "additionalProperties": false,
       "description": "One thread at one catalog point, in the requested order and view (ADR 0003 §3-§5).",
@@ -1938,6 +2150,23 @@
       "pattern": "^rec:sha256:[0-9a-f]{64}$",
       "type": "string"
     },
+    "TimePoint": {
+      "additionalProperties": false,
+      "description": "A timestamp as a package states it: ticks on one clock (root ADR 0005). Never converted.",
+      "properties": {
+        "domain_id": {
+          "$ref": "#/$defs/TierTwoId"
+        },
+        "ticks": {
+          "$ref": "#/$defs/Ticks"
+        }
+      },
+      "required": [
+        "domain_id",
+        "ticks"
+      ],
+      "type": "object"
+    },
     "TimeWindow": {
       "additionalProperties": false,
       "description": "``[first, last]`` ticks, both inclusive, on one clock. Never applied across clocks.",
@@ -2070,6 +2299,9 @@
         "api_version": {
           "$ref": "#/$defs/ApiVersion"
         },
+        "as_of": {
+          "$ref": "#/$defs/KnowledgeOfTransactionKey"
+        },
         "files_checked": {
           "minimum": 0,
           "type": "integer"
@@ -2101,6 +2333,7 @@
       },
       "required": [
         "api_version",
+        "as_of",
         "files_checked",
         "findings",
         "package_id",
@@ -2114,6 +2347,9 @@
       "additionalProperties": false,
       "description": "``verify(package_id)``: re-hash a registered package where it was registered from.",
       "properties": {
+        "as_of": {
+          "$ref": "#/$defs/TxSeq"
+        },
         "package_id": {
           "minLength": 1,
           "type": "string"
@@ -2126,20 +2362,17 @@
     },
     "WorldTime": {
       "additionalProperties": false,
-      "description": "An entry's world time (ADR 0003 §3), as stated. ``end`` absent means the end is open.",
+      "description": "An entry's world time (ADR 0003 §3): its start ``s`` and its end ``e`` as stated.",
       "properties": {
-        "clock": {
-          "$ref": "#/$defs/TierTwoId"
-        },
         "end": {
-          "$ref": "#/$defs/Ticks"
+          "$ref": "#/$defs/StatedKnowledgeOfTimePoint"
         },
         "start": {
-          "$ref": "#/$defs/Ticks"
+          "$ref": "#/$defs/TimePoint"
         }
       },
       "required": [
-        "clock",
+        "end",
         "start"
       ],
       "type": "object"

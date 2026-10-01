@@ -15,8 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from neptune.identity import canonical_json
-from neptune.model.knowledge import Known, NotApplicable, NotCovered, Unknown
+from neptune.model.knowledge import Known, NotApplicable, NotCovered
 from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
     CatalogFinding,
@@ -27,6 +26,7 @@ from neptune_ledger.api.types import (
     LineageGraph,
     LineageNode,
     LineageSet,
+    MappingPath,
     Partition,
     QueryMeta,
     QueryRow,
@@ -45,7 +45,6 @@ from neptune_ledger.api.types import (
     TransactionKey,
     TransformInfo,
     VerifyReport,
-    WorldTime,
 )
 from neptune_ledger.contract_tests.examples import (
     EXAMPLES,
@@ -53,9 +52,10 @@ from neptune_ledger.contract_tests.examples import (
     evidence_anchor,
     machine_keys,
     materialise,
+    query_row,
     record_key,
     transform_of,
-    world_time,
+    world_value,
 )
 
 LEDGER_VERSION = "0.0.1"
@@ -173,14 +173,7 @@ def machine_thread(package: WorkedPackage, seq: int) -> tuple[ThreadRequest, Thr
         anchor = evidence_anchor(record)
         transform = transform_of(record)
         assert anchor is not None and transform is not None
-        stated = world_time(record)
-        world: Any = (
-            NotApplicable()
-            if stated is None
-            else Unknown()
-            if stated == "unknown"
-            else Known(stated)
-        )
+        world = world_value(record)
         entry = ThreadEntry(
             record_id=record_key(record),
             kind=kind,
@@ -192,15 +185,16 @@ def machine_thread(package: WorkedPackage, seq: int) -> tuple[ThreadRequest, Thr
             world=world,
         )
         sets[(kind, anchor.source)].add(transform)
-        if isinstance(stated, WorldTime):
-            clocks[stated.clock].append(entry)
+        if isinstance(world, Known):
+            clocks[world.value.clock].append(entry)
         else:
             untimed.append(entry)
 
     def native(entry: ThreadEntry) -> tuple[Any, ...]:
         assert isinstance(entry.world, Known)
-        end = entry.world.value.end
-        return (entry.world.value.start, (0, end) if end is not None else (1, 0), entry.record_id)
+        end = entry.world.value.closed_end
+        start = entry.world.value.start.ticks
+        return (start, (0, end) if end is not None else (1, 0), entry.record_id)
 
     partitions = [
         Partition("clock", tuple(sorted(entries, key=native)), clock)
@@ -229,30 +223,10 @@ def machine_thread(package: WorkedPackage, seq: int) -> tuple[ThreadRequest, Thr
 
 
 def query_rows(package: WorkedPackage, seq: int) -> list[QueryRow]:
-    rows = []
-    for line, record in enumerate(package.records("run"), start=1):
-        anchor = evidence_anchor(record)
-        world = world_time(record)
-        timed = world if isinstance(world, WorldTime) else None
-        rows.append(
-            QueryRow(
-                kind="run",
-                record_id=record_key(record),
-                package_id=package.package_id,
-                line=line,
-                registration_seq=seq,
-                transform_id=transform_of(record),
-                source_content_id=anchor.source if anchor else None,
-                source_locator=(
-                    canonical_json.dumps(list(anchor.locator)).decode() if anchor else None
-                ),
-                assertion_kind=record["provenance"]["assertion_kind"],
-                world_clock=timed.clock if timed else None,
-                world_first=timed.start if timed else None,
-                world_last=timed.end if timed else None,
-            )
-        )
-    return rows
+    return [
+        query_row(package, "run", line, record, seq)
+        for line, record in enumerate(package.records("run"), start=1)
+    ]
 
 
 def goldens() -> dict[str, dict[str, Any]]:
@@ -272,6 +246,7 @@ def goldens() -> dict[str, dict[str, Any]]:
                 Known(tx(seq)),
                 Known(f"/srv/neptune/packages/{name}"),
                 package.listed_files(),
+                Known(tx(last)),
                 (),
             )
             found = resolution(package, last)
@@ -320,7 +295,15 @@ def goldens() -> dict[str, dict[str, Any]]:
             NotCovered(),
             NotCovered(),
             0,
+            Known(tx(last)),
             (CatalogFinding("unknown_package", unknown, "no package with this id is registered"),),
+        )
+        # A thread finding naming the mapping paths it tried (ADR 0003 §3.4); ids are placeholders.
+        documents["error.finding_mapping_out_of_range.json"] = CatalogFinding(
+            "mapping_out_of_range",
+            thread.partitions[0].entries[0].record_id,
+            "no usable path covers the entry's interval",
+            paths_tried=(MappingPath((mapping,)), MappingPath(("rec:sha256:" + "b" * 64, mapping))),
         )
         nowhere = EvidenceAnchor(
             "sha256:" + "f" * 64, ({"kind": "byte_range", "length": 1, "offset": 0},)
