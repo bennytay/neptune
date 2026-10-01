@@ -198,13 +198,67 @@ def test_a_plan_another_opener_moved_first_is_passed_over(
     assert list(workspace.plans()) == [owner(second)]
 
 
-def test_a_format_1_plan_that_cannot_be_read_stops_the_upgrade(tmp_path: Path) -> None:
-    path = format_1(tmp_path / "home", text_output())
-    path.write_bytes(b'{"chunks":[],"transform":{}}')
-    with pytest.raises(WorkspaceError, match="not a format-1 plan"):
-        Workspace(tmp_path / "home")
-    settings = canonical_json.loads((tmp_path / "home" / "workspace.json").read_bytes())
-    assert isinstance(settings, dict) and settings["format"] == 1  # nothing claimed format 2
+def format_1_plan(home: Path, output: SourceOutput) -> Path:
+    """Save ``output``'s plan where format 1 kept it, in a workspace that exists; its path."""
+    source, transform = owner(output)
+    digest = hashlib.sha256(canonical_json.dumps([source, transform])).hexdigest()
+    path = home / "plans" / digest[:2] / f"{digest[2:]}.json"
+    path.parent.mkdir(exist_ok=True)
+    document: JsonObject = {
+        "chunks": [chunk.to_json() for chunk in output.plan.chunks],
+        "findings": [f.to_json() for f in output.plan.findings],
+        "transform": output.config.transform.to_json(),
+    }
+    path.write_bytes(canonical_json.dumps(document))
+    return path
+
+
+@pytest.mark.parametrize(
+    "damaged", [b'{"chunks":[],"transform":{}}', b"{not json", b'{"chunks":[{}],"transform":{}}']
+)
+def test_a_format_1_plan_that_cannot_be_read_never_stops_the_workspace(
+    tmp_path: Path, damaged: bytes
+) -> None:
+    """A damaged old plan never stops a job: the upgrade leaves it, and collection removes it."""
+    home = tmp_path / "home"
+    path = format_1(home, text_output())
+    readable = text_output(b"another file\n")
+    format_1_plan(home, readable)
+    path.write_bytes(damaged)
+    workspace = Workspace(home)
+    settings = canonical_json.loads((home / "workspace.json").read_bytes())
+    assert isinstance(settings, dict) and settings["format"] == 2
+    assert list(workspace.plans()) == [owner(readable)]  # the readable one was moved
+    assert path.read_bytes() == damaged  # left where it was, and passed over
+    Workspace(home)  # every later open succeeds too
+    collected = workspace.collect({readable.config.transform.id})
+    assert collected.plans == 2  # the damaged one, and the readable one no ledger holds
+    assert not path.exists()
+    assert list(workspace.plans()) == []
+
+
+def test_a_format_1_plan_saved_after_the_upgrade_is_adopted_by_collection(
+    scanned: tuple[Workspace, Path],
+) -> None:
+    """A job of the previous version, still running, saves a plan where format 1 kept plans."""
+    workspace, _ = scanned
+    output = text_output()  # notes.txt's bytes: the ledger holds them
+    for chunk, out in zip(output.plan.chunks, output.outputs, strict=True):
+        workspace.commit(chunk, out.records, out.findings, out.series)
+    stray = format_1_plan(workspace.home, output)
+    assert list(workspace.plans()) == []  # passed over, never an error
+    collected = workspace.collect({output.config.transform.id})
+    assert (collected.plans, collected.chunks) == (0, 0)  # moved under its source, and kept
+    assert not stray.exists()
+    assert list(workspace.plans()) == [owner(output)]
+    stored = workspace.load_plan(*owner(output))
+    assert stored is not None
+    assert stored.chunks == tuple(chunk.to_json() for chunk in output.plan.chunks)
+    # a stray copy of a plan format 2 already keeps is removed; the kept one is untouched
+    format_1_plan(workspace.home, output)
+    assert workspace.collect({output.config.transform.id}).plans == 1
+    assert not stray.exists()
+    assert list(workspace.plans()) == [owner(output)]
 
 
 # --- Derivative keys ---------------------------------------------------------------------------

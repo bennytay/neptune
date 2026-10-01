@@ -112,7 +112,12 @@ it applies to; "only affected" means nothing outside that transform's chunks and
    was planned under; `derivatives/` and `lock` are added. Opening a format-1 workspace moves
    each plan under its source (one rename each) and then records format 2, so an upgrade killed
    midway finishes on the next open and ledger history is kept; a plan another opener moved
-   first is passed over.
+   first is passed over. A format-1 plan that cannot be read is left where it is: no job can
+   reuse it, so it never stops a workspace from opening. A job of the previous version still
+   running during the upgrade may save a plan at the old path afterwards; `plans()` passes over
+   anything at an old plan path, and collection settles each one before judging plans: moved
+   under its source if readable and not already kept, removed otherwise. Jobs of the previous
+   version hold no `lock`, so collect only once they have finished.
 
 ## Alternatives considered
 

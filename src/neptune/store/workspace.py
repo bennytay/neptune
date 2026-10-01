@@ -150,15 +150,20 @@ def _is_file(path: Path) -> bool:
     return not path.is_symlink() and path.is_file()
 
 
-def _ids(directory: Path, what: str) -> Iterator[tuple[str, Path]]:
+def _ids(
+    directory: Path, what: str, passed: re.Pattern[str] | None = None
+) -> Iterator[tuple[str, Path]]:
     """The 64 hex digits and path of each ``<2 hex>/<62 hex>/`` entry under ``directory``.
 
-    Anything else there is a ``WorkspaceError`` naming it, never a crash or a made-up id.
+    Entries named as ``passed`` are passed over. Anything else there is a ``WorkspaceError``
+    naming it, never a crash or a made-up id.
     """
     for prefix in sorted(directory.iterdir()):
         if not _is_directory(prefix, _PREFIX):
             raise WorkspaceError(f"{prefix} is not a {what}'s prefix directory")
         for entry in sorted(prefix.iterdir()):
+            if passed is not None and passed.fullmatch(entry.name):
+                continue
             if not _is_directory(entry, _REST):
                 raise WorkspaceError(f"{entry} is not a {what}")
             yield prefix.name + entry.name, entry
@@ -374,45 +379,58 @@ class Workspace:
         """Format 1 kept plans at ``plans/<2 hex>/<62 hex>.json``; move each under its source.
 
         Each move is one rename and the format changes last, so a process killed midway leaves a
-        format-1 workspace that the next open finishes upgrading. Nothing else moves.
+        format-1 workspace that the next open finishes upgrading. Nothing else moves. A plan that
+        cannot be read is left where it is: no job can reuse it, it never stops the workspace
+        from opening, and collection removes it (ADR 0031 §7).
         """
+        for entry in self._plans_1():
+            target = self._plan_1_target(entry)
+            if target is not None:
+                self._move_plan_1(entry, target)
+
+    def _plans_1(self) -> list[Path]:
+        """Every entry under ``plans/`` named as format 1 named a plan, in order.
+
+        After the upgrade, one is a plan a job of the previous version saved while the upgrade
+        ran, or one that could not be read; ``plans`` passes them over and ``collect`` settles them.
+        """
+        found: list[Path] = []
         for prefix in sorted((self.home / "plans").iterdir()):
             if not _is_directory(prefix, _PREFIX):
                 raise WorkspaceError(f"{prefix} is not a plan's prefix directory")
-            for entry in sorted(prefix.iterdir()):
-                if not _PLAN_1.fullmatch(entry.name):
-                    continue  # a source's directory: already in format 2
-                try:
-                    data = canonical_json.loads(entry.read_bytes())
-                except FileNotFoundError:
-                    continue  # another process opening the workspace moved it first
-                except ValueError as exc:
-                    raise WorkspaceError(f"{entry} is not a format-1 plan: {exc}") from exc
-                try:
-                    if not isinstance(data, dict):
-                        raise ValueError("not an object")
-                    transform, chunks = data["transform"], data["chunks"]
-                    if (
-                        not isinstance(transform, dict)
-                        or not isinstance(chunks, list)
-                        or not chunks
-                    ):
-                        raise ValueError("no transform or no chunks")
-                    first = chunks[0]
-                    if not isinstance(first, dict):
-                        raise ValueError("a chunk is not an object")
-                    target = self._plan_path(
-                        ContentId(str(first["source"])), RecordId(str(transform["id"]))
-                    )
-                except (KeyError, ValueError) as exc:
-                    raise WorkspaceError(f"{entry} is not a format-1 plan: {exc}") from exc
-                self._directories(target.parent)
-                try:
-                    entry.replace(target)
-                except FileNotFoundError:
-                    continue  # moved by another process between the read and the rename
-                fsync_directory(target.parent)
-            fsync_directory(prefix)
+            found.extend(e for e in sorted(prefix.iterdir()) if _PLAN_1.fullmatch(e.name))
+        return found
+
+    def _plan_1_target(self, entry: Path) -> Path | None:
+        """Where format 2 files the format-1 plan at ``entry``; ``None`` if it is no readable plan.
+
+        A plan another process moved first is no plan here either: ``None``.
+        """
+        if not _is_file(entry):
+            return None
+        try:
+            data = canonical_json.loads(entry.read_bytes())
+            if not isinstance(data, dict):
+                raise ValueError("not an object")
+            transform, chunks = data["transform"], data["chunks"]
+            if not isinstance(transform, dict) or not isinstance(chunks, list) or not chunks:
+                raise ValueError("no transform or no chunks")
+            first = chunks[0]
+            if not isinstance(first, dict):
+                raise ValueError("a chunk is not an object")
+            return self._plan_path(ContentId(str(first["source"])), RecordId(str(transform["id"])))
+        except (KeyError, ValueError, OSError):  # FileNotFoundError and WorkspaceError included
+            return None
+
+    def _move_plan_1(self, entry: Path, target: Path) -> None:
+        """Move a format-1 plan to ``target``, its place in format 2, in one rename."""
+        self._directories(target.parent)
+        try:
+            entry.replace(target)
+        except FileNotFoundError:
+            return  # moved by another process between the read and the rename
+        fsync_directory(target.parent)
+        fsync_directory(entry.parent)
 
     # --- Settings ------------------------------------------------------------------------------
 
@@ -649,8 +667,12 @@ class Workspace:
         )
 
     def plans(self) -> Iterator[Owner]:
-        """Every (source, transform) the workspace holds a plan of, in order."""
-        for source, directory in _ids(self.home / "plans", "source's plans"):
+        """Every (source, transform) the workspace holds a plan of, in order.
+
+        A file where format 1 kept a plan is passed over: a job of the previous version may save
+        one after the upgrade (ADR 0031 §7). ``collect`` moves it under its source, or removes it.
+        """
+        for source, directory in _ids(self.home / "plans", "source's plans", passed=_PLAN_1):
             for entry in sorted(directory.iterdir()):
                 match = _PLAN.fullmatch(entry.name)
                 if match is None or not _is_file(entry):
@@ -893,10 +915,12 @@ class Workspace:
         at the head of a location; the chunks those plans list; the derivatives whose owners are
         all kept plans. Removed: every other plan, chunk and derivative (superseded adapter
         versions and configs, sources gone from every root, orphans of interrupted work, plans
-        and derivatives that cannot be read), and staging debris. Ledgers are history and are
-        never collected; one that cannot be read stops collection (``WorkspaceError``). Refused with
-        ``WorkspaceBusyError`` while a job holds the workspace (``in_use``). Each removal is one
-        rename, so a collection killed midway leaves only debris the next one clears.
+        and derivatives that cannot be read), and staging debris. A plan where format 1 kept it
+        is first moved under its source, or removed if it cannot be read. Ledgers are history
+        and are never collected; one that cannot be read stops collection (``WorkspaceError``).
+        Refused with ``WorkspaceBusyError`` while a job holds the workspace (``in_use``). Each
+        removal is one rename, so a collection killed midway leaves only debris the next one
+        clears.
         """
         current = set(transforms)
         descriptor = os.open(self.home / LOCK, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o644)
@@ -910,6 +934,12 @@ class Workspace:
             kept: set[Owner] = set()
             kept_chunks: set[str] = set()
             plans = chunks = derivatives = 0
+            for entry in self._plans_1():  # format 1's: saved after the upgrade, or unreadable
+                target = self._plan_1_target(entry)
+                if target is None or target.exists():  # damaged, or a copy of one kept
+                    plans += self._remove(entry)
+                else:
+                    self._move_plan_1(entry, target)  # then judged like any other plan
             for source, transform in list(self.plans()):
                 live = source in held and transform in current
                 stored = self._readable_plan(source, transform) if live else None
