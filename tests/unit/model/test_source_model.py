@@ -12,7 +12,8 @@ from neptune.model.ids import (
     parse_record_id,
 )
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.record import SCHEMA_VERSION
+from neptune.model.kinds import KIND_SINCE
+from neptune.model.record import OLDEST_READABLE_VERSION
 from neptune.model.source import (
     LocalPath,
     RawLocalPath,
@@ -180,14 +181,14 @@ def test_ledger_records_carry_the_envelope_and_round_trip() -> None:
     ]
     for record, decode in records:
         data = record.to_json()
-        assert (data["kind"], data["schema_version"]) == (record.kind, SCHEMA_VERSION)
+        assert (data["kind"], data["schema_version"]) == (record.kind, KIND_SINCE[record.kind])
         assert decode(canonical_json.loads(canonical_json.dumps(data))) == record
     assert artifact.to_json() == {
         "chunk_size": 16,
         "chunks": [CID, CID],
         "content_id": CID,
         "kind": "source_artifact",
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": OLDEST_READABLE_VERSION,
         "size": 17,
     }
 

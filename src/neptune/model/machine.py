@@ -26,7 +26,7 @@ Which of these applied to which run is a binding (MVL-38), never a field here.
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import ClassVar, TypeAlias
+from typing import ClassVar, Final, TypeAlias
 
 from neptune.model._fields import (
     Identifiers,
@@ -665,6 +665,10 @@ def calibration_from_json(data: JsonValue) -> Calibration:
 
 # --- Robot descriptions (ADR 0039) ------------------------------------------------------------
 
+# The schema version that added the robot-description kinds; their records are written at it
+# (ADR 0037 §1).
+DESCRIPTION_SINCE: Final = 3
+
 
 @dataclass(frozen=True)
 class HardwareSpecification:
@@ -682,6 +686,7 @@ class HardwareSpecification:
 
     kind: ClassVar[str] = "hardware_specification"
     family: ClassVar[Family] = Family.MACHINE
+    since: ClassVar[int] = DESCRIPTION_SINCE
     id: RecordId
     provenance: Provenance
     subject: RecordId
@@ -703,13 +708,14 @@ class HardwareSpecification:
                 "parameters": [parameter.to_json() for parameter in self.parameters],
                 "subject": self.subject,
             },
+            self.since,
         )
 
 
 def hardware_specification_from_json(data: JsonValue) -> HardwareSpecification:
     """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
     obj, record_id, provenance = evidence_record_object(
-        data, HardwareSpecification.kind, {"parameters", "subject"}
+        data, HardwareSpecification.kind, {"parameters", "subject"}, HardwareSpecification.since
     )
     return HardwareSpecification(
         id=record_id,
@@ -732,6 +738,7 @@ class DescriptionExtension:
 
     kind: ClassVar[str] = "description_extension"
     family: ClassVar[Family] = Family.MACHINE
+    since: ClassVar[int] = DESCRIPTION_SINCE
     id: RecordId
     provenance: Provenance
     configuration: RecordId
@@ -756,13 +763,17 @@ class DescriptionExtension:
                 "element": self.element,
                 "parameters": [parameter.to_json() for parameter in self.parameters],
             },
+            self.since,
         )
 
 
 def description_extension_from_json(data: JsonValue) -> DescriptionExtension:
     """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
     obj, record_id, provenance = evidence_record_object(
-        data, DescriptionExtension.kind, {"configuration", "element", "parameters"}
+        data,
+        DescriptionExtension.kind,
+        {"configuration", "element", "parameters"},
+        DescriptionExtension.since,
     )
     return DescriptionExtension(
         id=record_id,
@@ -787,6 +798,7 @@ class DescriptionExpansion:
 
     kind: ClassVar[str] = "description_expansion"
     family: ClassVar[Family] = Family.MACHINE
+    since: ClassVar[int] = DESCRIPTION_SINCE
     id: RecordId
     provenance: Provenance
     language: str
@@ -818,13 +830,17 @@ class DescriptionExpansion:
                 "language": self.language,
                 "size": self.size,
             },
+            self.since,
         )
 
 
 def description_expansion_from_json(data: JsonValue) -> DescriptionExpansion:
     """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
     obj, record_id, provenance = evidence_record_object(
-        data, DescriptionExpansion.kind, {"arguments", "digest", "language", "size"}
+        data,
+        DescriptionExpansion.kind,
+        {"arguments", "digest", "language", "size"},
+        DescriptionExpansion.since,
     )
     return DescriptionExpansion(
         id=record_id,

@@ -102,9 +102,9 @@ def test_the_table_is_well_formed_and_every_magic_fits_in_a_head() -> None:
 
 
 def test_adapters_declared_magic_becomes_signatures_naming_the_adapter() -> None:
-    assert declared_signatures(default_registry().descriptors().values()) == ()  # text has none
+    assert declared_signatures(default_registry().descriptors().values()) == ()  # no magic
     spec = FormatSpec("Tally", magic=(Magic(0, b"TALLY1\n"),))
-    descriptor = next(iter(default_registry().descriptors().values()))
+    descriptor = default_registry().descriptors()["text"]
     from dataclasses import replace
 
     declared = declared_signatures([replace(descriptor, formats=(spec,))])

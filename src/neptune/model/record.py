@@ -1,8 +1,10 @@
-"""The envelope every canonical record shares, and the schema version that writes it (ADR 0017).
+"""The envelope every canonical record shares, and the schema versions that write it (ADR 0017).
 
 Each record is one canonical-JSON line in its kind's table (ADR 0002). Two envelope keys make the
 line self-describing: ``kind`` names the record kind, and so its table, and ``schema_version`` is
-the version of this model that wrote it. Readers refuse any other version instead of guessing.
+the lowest version of this model whose readers read the line: the version that added its kind
+(ADR 0037 §1). A reader refuses a newer version instead of guessing, and reads every older one
+as it is, since the model only grows.
 
 A record has one of three shapes:
 
@@ -23,12 +25,14 @@ from typing import Final
 from neptune.model._fields import exact_object, is_int
 from neptune.model.jsonvalue import JsonObject, JsonValue
 
-# The version of the canonical model that writes records. It became 1 at the M1 gate (ADR 0023).
-# From then on the model only grows: a newer version adds record kinds, enum members or locator
-# steps, through an ADR, and never changes an existing field. A record of any version from
-# OLDEST_READABLE_VERSION on is therefore valid as it is: its migration is the identity.
-# 2: hardware_specification, description_extension and description_expansion (ADR 0039).
-SCHEMA_VERSION: Final = 2
+# The newest version of the canonical model: what this code reads and can write. It became 1 at
+# the M1 gate (ADR 0023), 2 with the configuration kinds (ADR 0037) and 3 with the
+# robot-description kinds (ADR 0039). The model only grows: a newer version adds record kinds,
+# enum members or locator steps, through an ADR, and never changes an existing field. A record of
+# any version from OLDEST_READABLE_VERSION on is therefore valid as it is: its migration is the
+# identity. A record is written at the version that added its kind, so an addition never changes
+# the bytes of records that do not use it (ADR 0037 §1).
+SCHEMA_VERSION: Final = 3
 OLDEST_READABLE_VERSION: Final = 1
 ENVELOPE_KEYS: Final = frozenset({"kind", "schema_version"})
 
@@ -54,24 +58,37 @@ class SchemaVersionError(ValueError):
     """A record was written by a schema version this reader cannot read."""
 
 
-def envelope(kind: str, body: Mapping[str, JsonValue]) -> JsonObject:
-    """A record's JSON: its fields plus ``kind`` and ``schema_version``."""
+def envelope(
+    kind: str, body: Mapping[str, JsonValue], version: int = OLDEST_READABLE_VERSION
+) -> JsonObject:
+    """A record's JSON: its fields plus ``kind`` and ``schema_version``.
+
+    ``version`` is the lowest schema version whose readers read the line: the version that added
+    the kind, or for a package's documents the package's version (ADR 0037 §1).
+    """
     if ENVELOPE_KEYS & body.keys():
         raise ValueError(f"record fields may not use the envelope keys {sorted(ENVELOPE_KEYS)}")
-    return {**body, "kind": kind, "schema_version": SCHEMA_VERSION}
+    check_schema_version(version)
+    return {**body, "kind": kind, "schema_version": version}
 
 
-def record_object(data: JsonValue, kind: str, keys: set[str]) -> Mapping[str, JsonValue]:
-    """Check one record's JSON strictly: this schema version, this kind, and exactly ``keys``.
+def record_object(
+    data: JsonValue, kind: str, keys: set[str], since: int = OLDEST_READABLE_VERSION
+) -> Mapping[str, JsonValue]:
+    """Check one record's JSON strictly: a readable version, this kind, and exactly ``keys``.
 
-    The version is checked first, so a record from another version fails with a
-    ``SchemaVersionError``, never with an error about keys that version was entitled to have.
+    ``since`` is the version that added the kind, so no line of it is older. The version is
+    checked first, so a record from another version fails with a ``SchemaVersionError``, never
+    with an error about keys that version was entitled to have.
     """
     if not isinstance(data, Mapping):
         raise ValueError(f"a {kind} must be a JSON object, got {type(data).__name__}")
     if "schema_version" not in data:
         raise ValueError(f"a {kind} needs a schema_version")
-    check_schema_version(data["schema_version"])
+    version = data["schema_version"]
+    check_schema_version(version)
+    if is_int(version) and version < since:
+        raise SchemaVersionError(f"a {kind} is from schema version {since} on, not {version}")
     if data.get("kind") != kind:
         raise ValueError(f"expected kind {kind!r}, got {data.get('kind')!r}")
     return exact_object(data, kind, keys | ENVELOPE_KEYS)

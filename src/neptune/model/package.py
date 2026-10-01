@@ -44,7 +44,12 @@ from neptune.model.ids import (
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import Knowledge, from_json, to_json
 from neptune.model.provenance import provenance_from_json
-from neptune.model.record import envelope, record_object
+from neptune.model.record import (
+    OLDEST_READABLE_VERSION,
+    check_schema_version,
+    envelope,
+    record_object,
+)
 from neptune.model.source import SourceLocation, location_from_json
 from neptune.model.time import Timestamp, timestamp_from_json
 
@@ -165,11 +170,13 @@ class PackageManifest:
     """The package's table of contents (ADR 0022 §2). Its bytes' sha256 is the package id.
 
     - ``receipt``: the id of the receipt core in ``receipt.json``.
-    - ``tables``: the number of records in each table, for every record kind of this schema
-      version; a kind with none has an empty table.
+    - ``tables``: the number of records in each table, for every record kind of the package's
+      schema version; a kind with none has an empty table.
     - ``sources``: every source's handle, sorted by content id.
     - ``files``: every file but ``manifest.json`` and ``volatile/``, sorted by path.
     - ``store``: the settings the store wrote series and blobs with, as it records them.
+    - ``version``: the package's schema version, written as the envelope's ``schema_version``:
+      the lowest version whose kinds hold its records (ADR 0037 §1).
     """
 
     kind: ClassVar[str] = "package_manifest"
@@ -178,8 +185,10 @@ class PackageManifest:
     sources: tuple[SourceHandle, ...]
     files: tuple[PackageFile, ...]
     store: JsonObject
+    version: int = OLDEST_READABLE_VERSION
 
     def __post_init__(self) -> None:
+        check_schema_version(self.version)
         parse_record_id(self.receipt)
         _check_sorted_pairs("tables", self.tables)
         for kind, count in self.tables:
@@ -206,6 +215,7 @@ class PackageManifest:
                 "store": self.store,
                 "tables": dict(self.tables),
             },
+            self.version,
         )
 
 
@@ -223,6 +233,7 @@ def package_manifest_from_json(data: JsonValue) -> PackageManifest:
         sources=tuple(source_handle_from_json(h) for h in json_array(obj["sources"], "sources")),
         files=tuple(package_file_from_json(f) for f in json_array(obj["files"], "files")),
         store=store,
+        version=json_int(obj["schema_version"], "schema_version"),
     )
 
 
@@ -559,12 +570,14 @@ class IngestReceipt:
       that read it (none: seen but not decoded). ``absent``: locations seen to hold none.
     - ``transforms``: every producer, sorted by id: the adapters selected and their versions,
       configs and libraries, which is what a replay must match.
-    - ``records``: how many records of each kind the package holds.
+    - ``records``: how many records of each kind of the package's schema version it holds.
     - ``clocks``: every clock, by field and scope, sorted by id.
     - ``runs``, ``streams``: what was recorded and its declared time coverage, sorted by id.
     - ``entities``: machines, sites and assets with their stated ids, sorted by id.
     - ``findings``: every finding, most severe first, then by code and id.
     - ``ambiguous``: every field whose state is ``Ambiguous``, sorted by record and pointer.
+    - ``version``: the package's schema version, written as the envelope's ``schema_version``
+      and not hashed into ``id`` (ADR 0037 §1).
 
     ``id`` is ``record_id("ingest_receipt", …)`` over everything else, so the core carries its
     own hash (``neptune.store.receipt``). Bindings of runs to configurations join with MVL-38.
@@ -582,8 +595,10 @@ class IngestReceipt:
     entities: tuple[ReceiptEntity, ...]
     findings: tuple[ReceiptFinding, ...]
     ambiguous: tuple[AmbiguousField, ...]
+    version: int = OLDEST_READABLE_VERSION
 
     def __post_init__(self) -> None:
+        check_schema_version(self.version)
         parse_record_id(self.id)
         _check_members("sources", self.sources, ReceiptSource)
         locations = [source.location.key for source in self.sources]
@@ -632,7 +647,7 @@ class IngestReceipt:
         }
 
     def to_json(self) -> JsonObject:
-        return envelope(self.kind, {**self.content_json(), "id": self.id})
+        return envelope(self.kind, {**self.content_json(), "id": self.id}, self.version)
 
 
 def ingest_receipt_from_json(data: JsonValue) -> IngestReceipt:
@@ -674,6 +689,7 @@ def ingest_receipt_from_json(data: JsonValue) -> IngestReceipt:
         ambiguous=tuple(
             ambiguous_field_from_json(a) for a in json_array(obj["ambiguous"], "ambiguous")
         ),
+        version=json_int(obj["schema_version"], "schema_version"),
     )
 
 

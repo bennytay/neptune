@@ -3,7 +3,8 @@
 - Status: Accepted
 - Date: 2026-10-02
 - Issue: MVL-24
-- Extends: ADR 0019 §4 (the extension rule), ADR 0023 §1 (growth by addition); schema version 2
+- Extends: ADR 0019 §4 (the extension rule), ADR 0023 §1 and ADR 0037 §1 (growth by addition);
+  schema version 3
 
 ## Context
 
@@ -51,7 +52,7 @@ The forces:
      `sensor` components. Sensors get no frames of their own: inventing a frame name is a guess,
      so a placement is the link's frame plus the declared pose parameters.
 3. **`hardware_specification`: what a declaration states about one component or configuration**
-   (the extension rule's companion kind). `subject` names the `HardwareComponent` or
+   (the extension rule's companion kind; this and §4's and §5's kinds are `since` 3). `subject` names the `HardwareComponent` or
    `HardwareConfiguration` it adds to; `parameters` are `DeclaredParameter`s, sorted, unique, at
    least one. `CalibrationParameter` is generalised as `DeclaredParameter` (same JSON; the old
    name stays an alias).
@@ -169,9 +170,10 @@ The forces:
   specification (type, axis, limits), and a sensor's placement from its component's frame and its
   specification, with no XML. `tests/unit/adapters/test_urdf_adapter.py` checks this against
   `urdf_parser_py` and real xacro on three robots.
-- Schema version 2: three kinds, one locator step of the adapter's own. Every record's
-  `schema_version` is now 2; ids are unchanged, so the worked examples and golden documents
-  changed only there. Readers still read version 1.
+- Schema version 3: three kinds (`since` 3, after ADR 0037's configuration kinds at 2), and one
+  locator step of the adapter's own. As ADR 0037 §1 has it, their records are written at version
+  3 and every other record at its own kind's version, so no existing record, worked example or
+  golden document changes; a package holding description records is a version 3 package.
 - SDF and MJCF (MVL-25) reuse `hardware_specification`, `description_extension` and
   `description_expansion` with their own parameter names.
 - A Xacro robot split across files is partly `NotCovered` until includes can be followed.

@@ -46,6 +46,7 @@ exceptions. The fixtures are `tests/fixtures/hostile/` (README lists each file a
 | M2 (MVL-10) | done: every probe, plan and `ingest` in a forked, confined child per call (see below); CPU, wall-time and memory limits; a crash, hang or limit hit is a finding and the job goes on; the `hostile` fixture adapter (ADR 0030) |
 | M2 (MVL-16) | done: local-only mode on by default, network use refused until allowed; sources read in place and verified chunk by chunk; materialised and exported sources read through `LocalSource`, and package files opened with `O_NOFOLLOW`, regular files only (ADR 0026) |
 | M2 (MVL-57) | done: the probe engine, its container decoders included, runs in the sandbox, one call per source, its reply re-derived and refused unless exact; `plan` and `ingest` write only beneath a per-call scratch directory; short reads and changed sources verified; walk findings in every package; the hostile suite through a real job (ADR 0033) |
+| M5 (MVL-23) | done: configuration files read without constructing objects (PyYAML events only, so no YAML tag runs code); aliases never expanded, so alias bombs cost one value per alias; size, depth and scalar-length limits; invalid UTF-8, repeated keys and non-standard numbers are findings (ADR 0037) |
 | M6 (MVL-28/29) | malformed PDF/image safeguards; no active content execution |
 | M9 | auth/profile handling for connectors; presigned uploads; idempotency keys |
 | M10 (MVL-50) | consolidated adversarial suite; sandbox escape and exhaustion tests as acceptance |

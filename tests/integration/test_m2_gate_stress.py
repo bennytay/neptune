@@ -636,7 +636,8 @@ def test_a_large_sparse_source_is_inspected_cheaply_and_planned_small(tmp_path: 
     assert measured["plan_bytes"] < 64 * 1024 and measured["chunks"] == 17
     assert measured["parent_peak_rss_mib"] < 512 and measured["child_peak_rss_mib"] < 512
     rerun = measured["rerun"]
-    probes = len(builtin_adapters()) + 1  # one probe per adapter: the shipped ones and framelog
+    # One probe call per registered adapter: the shipped ones and the frame log adapter.
+    probes = len(builtin_adapters()) + 1
     assert rerun["calls"] == {"ingest": 0, "plan": 0, "probe": probes} and rerun["same_package"]
 
 

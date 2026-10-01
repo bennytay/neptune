@@ -116,7 +116,6 @@ def claims(adapter_id: str, confidence: float, *formats: FormatSpec) -> Stub:
 
 
 def engine(*extra: object, policy: ProbePolicy | None = None) -> ProbeEngine:
-    # The text adapter, not the shipped set: these tests are about the engine, not the formats.
     return ProbeEngine(AdapterRegistry([TextAdapter(), TALLY.TallyAdapter(), *extra]), policy)  # type: ignore[list-item]
 
 

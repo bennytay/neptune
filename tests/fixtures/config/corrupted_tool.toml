@@ -1,0 +1,40 @@
+# End-effector configuration for the UR5e pick cell (tool changer slot 2).
+name = "Robotiq 2F-85"
+serial = "2F85-SN-0047"
+slot = 2
+
+[mount]
+frame = "tool0"
+offset_xyz = [0.0, 0.0, 0.1493]   # metres, as the vendor sheet states
+offset_rpy = [0.0, 0.0, 1.5707963]
+
+[limits]
+stroke = 0.085
+force = { min = 20.0, max = }
+speed = { min = 0.02, max = 0.15 }
+
+[calibration]
+performed = 2026-08-14T09:30:00+08:00
+checked = 2026-09-01 07:15:00
+operator = "kt"
+zero_offset = -4e-4
+valid_until = 2027-02-14
+shift_start = 07:30:00
+
+[[fingertips]]
+name = "standard"
+material = "silicone"
+width_mm = 22
+
+[[fingertips]]
+name = "narrow"
+material = "polyurethane"
+width_mm = 0x0C
+
+[controller]
+ip = "192.168.1.11"
+port = 63_352
+modbus = true
+"literal key" = 'C:\tools\robotiq'
+note = """
+Keep the "fingertips" clean."""
