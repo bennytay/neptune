@@ -14,7 +14,7 @@ from typing import Any, Final
 
 from neptune.identity.ids import record_id
 from neptune.model.finding import IngestFinding, Severity
-from neptune.model.ids import LogicalId, RecordId
+from neptune.model.ids import ContentId, LogicalId, RecordId
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.kinds import RECORD_KINDS
 from neptune.model.knowledge import Ambiguous, Knowledge, Known, KnownAbsent
@@ -70,6 +70,26 @@ def _evidence_sources(data: JsonValue) -> Iterator[str]:
                 yield source
 
 
+def _read_by(record: Any, data: JsonValue) -> Iterator[tuple[str, str]]:
+    """``(source, transform)`` for each source ``record`` cites, with the transform citing it."""
+    yield from _cited_sources(data)
+    if isinstance(record, Stream):
+        yield record.series.source, record.provenance.transform
+    if isinstance(record, IngestFinding):
+        for source in _evidence_sources(data):
+            yield source, record.transform
+
+
+def cited_sources(records: Iterable[Any]) -> frozenset[ContentId]:
+    """Every source the records cite: those a transform read to make them (``read_by``)."""
+    return frozenset(
+        ContentId(source)
+        for record in records
+        if record.kind not in _LEDGER and record.kind != "transform_record"
+        for source, _ in _read_by(record, record.to_json())
+    )
+
+
 def _stated_ids(identifiers: Iterable[Knowledge[LogicalId]]) -> tuple[LogicalId, ...]:
     values: set[LogicalId] = set()
     for knowledge in identifiers:
@@ -99,13 +119,8 @@ def build_receipt(records: Iterable[Any]) -> IngestReceipt:
             continue
         for record in members:
             data = record.to_json()
-            for source, transform in _cited_sources(data):
+            for source, transform in _read_by(record, data):
                 read_by[source].add(transform)
-            if isinstance(record, Stream):
-                read_by[record.series.source].add(record.provenance.transform)
-            if isinstance(record, IngestFinding):
-                for source in _evidence_sources(data):
-                    read_by[source].add(record.transform)
             for pointer, value in _walk(data):
                 if isinstance(value, dict) and value.get("knowledge") == "ambiguous":
                     ambiguous.append(AmbiguousField(record.id, pointer))

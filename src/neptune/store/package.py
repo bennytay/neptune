@@ -49,7 +49,7 @@ from neptune.model.package import (
 )
 from neptune.model.provenance import Provenance, TransformRecord
 from neptune.store.receipt import build_receipt, check_receipt, render_receipt
-from neptune.store.series import SeriesError, check_series
+from neptune.store.series import SeriesError, check_series, check_settings
 
 MANIFEST: Final = "manifest.json"
 RECEIPT: Final = "receipt.json"
@@ -136,8 +136,8 @@ def package_contents(
             raise PackageError(f"two {kind} records share an id")
         files[table_path(kind)] = b"".join(_document(record) + b"\n" for record in members)
     streams = {stream.id for stream in tables["stream"]}
-    if series and not isinstance(store.get("series"), Mapping):
-        raise PackageError("series need the settings they were written with, under store.series")
+    if series:
+        _series_settings(store)
     for stream, data in series.items():
         if stream not in streams:
             raise PackageError(f"series for {stream}, which is not a stream of this package")
@@ -169,6 +169,16 @@ def package_contents(
     files[MANIFEST] = _document(manifest)
     read_files(files)  # never hand out a package the reader would refuse
     return files
+
+
+def _series_settings(store: JsonObject) -> JsonObject:
+    """The settings the package's series were written with, as ``store.series`` records them."""
+    try:
+        return check_settings(store.get("series"))
+    except SeriesError as exc:
+        raise PackageError(
+            f"series need the settings they were written with, under store.series: {exc}"
+        ) from exc
 
 
 def package_files(
@@ -312,6 +322,7 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
     artifacts = {record.content_id for record in records if record.kind == "source_artifact"}
     if set(handles) != artifacts:
         raise PackageError("the manifest's sources must be the package's source artifacts")
+    settings: JsonObject | None = None  # validated once, at the first series file
     for path, data in files.items():
         if path in (MANIFEST, RECEIPT, RECEIPT_TEXT) or _TABLE.fullmatch(path):
             continue
@@ -319,8 +330,10 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
             stream = parse_record_id(f"rec:sha256:{match[1]}")
             if stream not in streams:
                 raise PackageError(f"{path} names no stream of this package")
+            if settings is None:
+                settings = _series_settings(manifest.store)
             try:
-                check_series(streams[stream], data)
+                check_series(streams[stream], data, settings)
             except SeriesError as exc:
                 raise PackageError(f"{path}: {exc}") from exc
             series[stream] = data
@@ -334,8 +347,6 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
     for content, handle in handles.items():
         if (handle.storage is Storage.MATERIALISED) != (content in blobs):
             raise PackageError(f"source {content} is {handle.storage}, but its blob says otherwise")
-    if series and not isinstance(manifest.store.get("series"), Mapping):
-        raise PackageError("the package has series but its manifest records no store.series")
 
     receipt = ingest_receipt_from_json(_load(small[RECEIPT], RECEIPT))
     try:

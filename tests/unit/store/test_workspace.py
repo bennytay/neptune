@@ -16,6 +16,7 @@ from neptune.discovery.reader import BytesReader
 from neptune.discovery.scan import scan
 from neptune.discovery.source import LocalSource
 from neptune.identity import canonical_json
+from neptune.store.series import write_run
 from neptune.store.workspace import (
     HOME_VARIABLE,
     LocalOnlyError,
@@ -89,6 +90,22 @@ def test_allowing_the_network_is_explicit_and_remembered(tmp_path: Path) -> None
         Workspace(tmp_path).require_network("upload")
 
 
+def test_a_local_only_refusal_is_not_an_io_error(tmp_path: Path) -> None:
+    """Code that shrugs off I/O errors must not shrug off the policy."""
+    workspace = Workspace(tmp_path)
+
+    def fetch() -> str:
+        try:
+            workspace.require_network("fetch")
+        except OSError:
+            return "skipped, as if the disk had failed"
+        return "fetched"
+
+    with pytest.raises(LocalOnlyError):
+        fetch()
+    assert not issubclass(LocalOnlyError, (OSError, ValueError))
+
+
 def test_a_directory_that_is_not_a_workspace_is_refused(tmp_path: Path) -> None:
     (tmp_path / "workspace.json").write_bytes(b'{"kind":"other"}')
     with pytest.raises(WorkspaceError, match="not a Neptune workspace"):
@@ -122,6 +139,30 @@ def test_a_roots_ledger_survives_between_runs(tmp_path: Path) -> None:
     assert workspace.load_ledger(other).revisions() == ()
 
 
+def test_every_spelling_of_a_root_names_one_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "evidence" / "root"
+    root.mkdir(parents=True)
+    (root / "a.txt").write_bytes(b"a")
+    (tmp_path / "link").symlink_to(root)
+    workspace = Workspace(tmp_path / "home")
+    ledger = workspace.load_ledger(root)
+    scan(LocalSource(root), ledger)
+    workspace.save_ledger(root, ledger)
+    monkeypatch.chdir(tmp_path / "evidence")
+    for spelling in (
+        Path("root"),
+        Path("./root/."),
+        tmp_path / "evidence" / ".." / "evidence" / "root",
+        tmp_path / "link",
+    ):
+        assert workspace.load_ledger(spelling).revisions() == ledger.revisions(), spelling
+    workspace.save_ledger(tmp_path / "link", ledger)
+    (directory,) = (tmp_path / "home" / "ledgers").iterdir()
+    assert (directory / "root").read_bytes() == os.fsencode(root.resolve())
+
+
 # --- Plans and chunks --------------------------------------------------------------------------
 
 
@@ -137,6 +178,19 @@ def test_a_plan_is_kept_with_its_transform(tmp_path: Path) -> None:
     assert stored.chunks == tuple(chunk.to_json() for chunk in output.plan.chunks)
     with pytest.raises(WorkspaceError):
         workspace.save_plan(transform, (), ())
+
+
+def test_a_plan_is_kept_once_and_a_different_one_is_refused(tmp_path: Path) -> None:
+    """Planning is deterministic: the same plan again is a no-op, another one an error."""
+    workspace, output = Workspace(tmp_path), tally_output()
+    transform, chunks = output.config.transform, output.plan.chunks
+    workspace.save_plan(transform, chunks, output.plan.findings)
+    (kept,) = (tmp_path / "plans").rglob("*.json")
+    before = kept.read_bytes()
+    workspace.save_plan(transform, chunks, output.plan.findings)
+    with pytest.raises(WorkspaceError, match="different plan"):
+        workspace.save_plan(transform, chunks[:1], output.plan.findings)
+    assert kept.read_bytes() == before
 
 
 def test_a_committed_chunk_reads_back_whole(tmp_path: Path) -> None:
@@ -216,8 +270,64 @@ def test_a_commit_killed_midway_leaves_no_partial_chunk(tmp_path: Path) -> None:
     assert workspace.load(chunk.id).findings == out.findings
 
 
+def test_clearing_staging_leaves_a_commit_in_flight_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Another process clears staging mid-commit: dead debris goes, the live one stays."""
+    workspace, output = Workspace(tmp_path), tally_output()
+    chunk, out = output.plan.chunks[1], output.outputs[1]
+    abandoned = tmp_path / "staging" / "tmp-dead-writer"
+    abandoned.mkdir()
+    (abandoned / "chunk.json").write_bytes(b"{}")
+    cleared: list[int] = []
+
+    def clear_then_write(*args: object) -> None:
+        cleared.append(Workspace(tmp_path).clear_staging())  # its own open file: its own lock
+        write_run(*args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("neptune.store.workspace.write_run", clear_then_write)
+    assert workspace.commit(chunk, out.records, out.findings, out.series)
+    assert cleared and sum(cleared) == 1  # the abandoned directory, never the commit in flight
+    assert not abandoned.exists()
+    assert workspace.load(chunk.id).findings == out.findings
+    assert not any((tmp_path / "staging").iterdir())
+
+
 def test_loading_an_uncommitted_chunk_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(WorkspaceError, match="not committed"):
         Workspace(tmp_path).load("chunk:sha256:" + "0" * 64)
-    with pytest.raises(WorkspaceError, match="not a sha256 id"):
+    with pytest.raises(WorkspaceError, match="not a chunk:sha256 id"):
         Workspace(tmp_path).committed("chunk:nope")
+
+
+def test_only_a_chunk_id_names_a_chunk(tmp_path: Path) -> None:
+    """A stream's id has the same digits' shape; it must not answer for a chunk."""
+    workspace, output = Workspace(tmp_path), tally_output()
+    commit_all(workspace, output)
+    digest = output.plan.chunks[0].id.removeprefix("chunk:sha256:")
+    for impostor in (f"rec:sha256:{digest}", f"sha256:{digest}", f"x:chunk:sha256:{digest}"):
+        with pytest.raises(WorkspaceError, match="not a chunk:sha256 id"):
+            workspace.committed(impostor)
+    assert workspace.committed(output.plan.chunks[0].id)
+
+
+def test_a_stray_file_among_chunks_is_named_not_crashed_on(tmp_path: Path) -> None:
+    workspace, output = Workspace(tmp_path), tally_output()
+    commit_all(workspace, output)
+    (tmp_path / "chunks" / ".DS_Store").write_bytes(b"")
+    with pytest.raises(WorkspaceError, match=r"\.DS_Store"):
+        list(workspace.chunks())
+    (tmp_path / "chunks" / ".DS_Store").unlink()
+    prefix = workspace.chunk_path(output.plan.chunks[0].id).parent
+    (prefix / "notes.txt").write_bytes(b"")
+    with pytest.raises(WorkspaceError, match=r"notes\.txt is not a committed chunk"):
+        list(workspace.chunks())
+
+
+def test_a_stray_file_among_runs_is_not_read_as_a_stream(tmp_path: Path) -> None:
+    workspace, output = Workspace(tmp_path), tally_output()
+    commit_all(workspace, output)
+    chunk = output.plan.chunks[1].id
+    (workspace.chunk_path(chunk) / "runs" / "notes.parquet").write_bytes(b"")
+    with pytest.raises(WorkspaceError, match=r"notes\.parquet is not a stream's run"):
+        workspace.load(chunk)

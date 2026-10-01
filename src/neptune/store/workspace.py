@@ -3,8 +3,8 @@
 Everything an ingest needs to remember between runs lives here, never beside the evidence:
 
     workspace.json                     format version and settings (local-only mode)
-    ledgers/<root key>/ledger.jsonl    one ingest root's source ledger
-    ledgers/<root key>/root            the root's path, as the host names it
+    ledgers/<root key>/ledger.jsonl    one ingest root's source ledger, keyed by its resolved path
+    ledgers/<root key>/root            the root's resolved path, as the host names it
     plans/<2 hex>/<62 hex>.json        one source's plan under one transform, with the transform
     chunks/<2 hex>/<62 hex>/           one committed chunk output, by chunk id:
         chunk.json                     the chunk
@@ -12,20 +12,26 @@ Everything an ingest needs to remember between runs lives here, never beside the
         runs/<64 hex>.parquet          its rows of each stream, sorted (``store.series``)
     staging/                           work in progress; anything here is incomplete
 
-A chunk is committed by renaming its finished directory into ``chunks/``: a commit is atomic, so a
-process killed midway leaves no partial chunk, and committing a chunk again changes nothing. Its
-sources are never copied here: the workspace holds what was derived from them and where they are.
+A chunk is committed by renaming its finished, flushed directory into ``chunks/``: a commit is
+atomic, so a process killed midway leaves no partial chunk, and committing a chunk again changes
+nothing. Its sources are never copied here: the workspace holds what was derived from them and
+where they are. Each directory in ``staging/`` is locked (``flock``) by the process writing it, so
+``clear_staging`` removes what dead processes left and never what a live one is writing.
 
 The workspace is local-first. It is local-only by default: anything that would use the network asks
 ``require_network`` first and is refused until the workspace allows it.
 """
 
+import fcntl
 import hashlib
 import os
+import re
 import shutil
+import stat
 import tempfile
 from collections import defaultdict
 from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Protocol
@@ -41,6 +47,7 @@ from neptune.model.kinds import RECORD_KINDS, record_key
 from neptune.model.provenance import TransformRecord, transform_record_from_json
 from neptune.model.series import SeriesBatch
 from neptune.model.source import SourceAbsence, SourceArtifact, SourceRevision
+from neptune.store.durable import fsync_directory, fsync_tree
 from neptune.store.series import write_run
 
 FORMAT: Final = 1
@@ -52,8 +59,12 @@ class WorkspaceError(ValueError):
     """The workspace is not one this version can use, or what it holds is inconsistent."""
 
 
-class LocalOnlyError(PermissionError):
-    """Something asked for the network while the workspace is local-only."""
+class LocalOnlyError(Exception):
+    """Something asked for the network while the workspace is local-only.
+
+    A policy refusal, not an I/O failure: it is no ``OSError``, so code that retries or skips on
+    ``OSError`` cannot swallow it.
+    """
 
 
 def default_home() -> Path:
@@ -64,12 +75,22 @@ def default_home() -> Path:
     return Path(cache) / "neptune"
 
 
-def _hex(identifier: str) -> str:
-    """The 64 hex digits of a ``…sha256:<hex>`` id."""
-    digest = identifier.rsplit(":", 1)[-1]
-    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
-        raise WorkspaceError(f"not a sha256 id: {identifier!r}")
-    return digest
+_PREFIX: Final = re.compile(r"[0-9a-f]{2}")
+_REST: Final = re.compile(r"[0-9a-f]{62}")
+_RUN: Final = re.compile(r"([0-9a-f]{64})\.parquet")
+
+
+def _hex(identifier: str, scheme: str) -> str:
+    """The 64 hex digits of a ``<scheme>:sha256:<hex>`` id; any other id is refused."""
+    match = re.fullmatch(rf"{scheme}:sha256:([0-9a-f]{{64}})", identifier)
+    if match is None:
+        raise WorkspaceError(f"not a {scheme}:sha256 id: {identifier!r}")
+    return match[1]
+
+
+def _root_key(root: Path) -> bytes:
+    """An ingest root as the ledger knows it: resolved, so every spelling of it is one root."""
+    return os.fsencode(Path(root).resolve())
 
 
 def _lines(items: Iterable[Any]) -> bytes:
@@ -89,19 +110,19 @@ def _read_lines(data: bytes) -> list[Any]:
     return records
 
 
-def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+def _is_directory(path: Path, name: re.Pattern[str]) -> bool:
+    """A real directory (not a link to one) whose name is ``name``."""
+    return bool(name.fullmatch(path.name)) and not path.is_symlink() and path.is_dir()
+
+
+def _same_file(path: Path, descriptor: int) -> bool:
+    """Whether ``path`` still names the file or directory open at ``descriptor``."""
     try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _write_durably(path: Path, data: bytes) -> None:
-    with path.open("wb") as stream:
-        stream.write(data)
-        stream.flush()
-        os.fsync(stream.fileno())
+        named = path.lstat()
+    except FileNotFoundError:
+        return False
+    held = os.fstat(descriptor)
+    return (named.st_dev, named.st_ino) == (held.st_dev, held.st_ino)
 
 
 class ChunkLike(Protocol):
@@ -192,34 +213,92 @@ class Workspace:
 
     # --- Atomic writes -------------------------------------------------------------------------
 
-    def _stage(self) -> Path:
-        return Path(tempfile.mkdtemp(dir=self.home / "staging"))
+    @contextmanager
+    def _staging(self) -> Iterator[Path]:
+        """A new directory in ``staging/``, locked while in use and removed after, if still there.
+
+        The lock is what tells ``clear_staging`` the directory is in use. It is taken without
+        waiting: if it is held, or the directory is gone by the time it is taken, a clearer got
+        there first and the directory is abandoned for a new one.
+        """
+        while True:
+            path = Path(tempfile.mkdtemp(dir=self.home / "staging"))
+            try:
+                descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+            except FileNotFoundError:
+                continue
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(descriptor)
+                continue
+            if not _same_file(path, descriptor):
+                os.close(descriptor)
+                continue
+            break
+        try:
+            yield path
+        finally:
+            try:
+                if _same_file(path, descriptor):  # not renamed into place
+                    shutil.rmtree(path)
+            finally:
+                os.close(descriptor)
 
     def _replace(self, path: Path, data: bytes) -> None:
         """Write ``path`` whole or not at all."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        staged = Path(tempfile.mkdtemp(dir=self.home / "staging")) / path.name
-        _write_durably(staged, data)
-        staged.replace(path)
-        _fsync_directory(path.parent)
-        staged.parent.rmdir()
+        with self._staging() as staging:
+            staged = staging / path.name
+            with staged.open("wb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            staged.replace(path)
+            fsync_directory(path.parent)
 
     def clear_staging(self) -> int:
-        """Remove what interrupted writes left behind; return how many entries were removed."""
+        """Remove what interrupted writes left behind; return how many entries were removed.
+
+        An entry still locked by the process writing it, this one or another, is left alone.
+        """
         removed = 0
-        for entry in (self.home / "staging").iterdir():
-            shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
-            removed += 1
+        for entry in sorted((self.home / "staging").iterdir()):
+            try:
+                mode = entry.lstat().st_mode
+            except FileNotFoundError:
+                continue  # finished meanwhile
+            if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+                entry.unlink()  # nothing Neptune stages; no process holds it
+                removed += 1
+                continue
+            try:
+                descriptor = os.open(entry, os.O_RDONLY | os.O_NOFOLLOW)
+            except FileNotFoundError:
+                continue  # finished meanwhile
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if not _same_file(entry, descriptor):
+                    continue  # renamed into place or removed while this waited
+                shutil.rmtree(entry) if stat.S_ISDIR(mode) else entry.unlink()
+                removed += 1
+            except BlockingIOError:
+                continue  # in use
+            finally:
+                os.close(descriptor)
         return removed
 
     # --- Ledgers -------------------------------------------------------------------------------
 
     def _ledger_dir(self, root: Path) -> Path:
-        path = os.fsencode(Path(root).absolute())
-        return self.home / "ledgers" / hashlib.sha256(path).hexdigest()
+        return self.home / "ledgers" / hashlib.sha256(_root_key(root)).hexdigest()
 
     def load_ledger(self, root: Path) -> SourceLedger:
-        """The source ledger of ``root``'s earlier scans, or an empty one."""
+        """The source ledger of ``root``'s earlier scans, or an empty one.
+
+        ``root`` is resolved: a relative path, ``..``, or a symlink to the same directory all
+        name one ledger.
+        """
         table = self._ledger_dir(root) / "ledger.jsonl"
         if not table.exists():
             return SourceLedger()
@@ -234,7 +313,7 @@ class Workspace:
         directory = self._ledger_dir(root)
         records = (*ledger.artifacts(), *ledger.revisions(), *ledger.absences())
         self._replace(directory / "ledger.jsonl", _lines(records))
-        self._replace(directory / "root", os.fsencode(Path(root).absolute()))
+        self._replace(directory / "root", _root_key(root))
 
     # --- Plans ---------------------------------------------------------------------------------
 
@@ -248,7 +327,11 @@ class Workspace:
         chunks: Iterable[ChunkLike],
         findings: Iterable[IngestFinding],
     ) -> None:
-        """Keep a source's plan: its chunks, in order, and the findings planning made."""
+        """Keep a source's plan: its chunks, in order, and the findings planning made.
+
+        Planning is deterministic, so a source has one plan under one transform: saving it again
+        changes nothing, and saving a different one is refused.
+        """
         chunks = tuple(chunks)
         if not chunks:
             raise WorkspaceError("a plan has at least one chunk")
@@ -260,8 +343,16 @@ class Workspace:
             "findings": [f.to_json() for f in sorted(findings, key=lambda f: f.id)],
             "transform": transform.to_json(),
         }
-        path = self._plan_path(ContentId(sources.pop()), transform.id)
-        self._replace(path, canonical_json.dumps(document))
+        source = ContentId(sources.pop())
+        path, data = self._plan_path(source, transform.id), canonical_json.dumps(document)
+        if path.exists():
+            if path.read_bytes() != data:
+                raise WorkspaceError(
+                    f"a different plan of {source} under transform {transform.id} is already"
+                    " kept; planning must be deterministic"
+                )
+            return
+        self._replace(path, data)
 
     def load_plan(self, source: ContentId, transform: RecordId) -> StoredPlan | None:
         path = self._plan_path(source, transform)
@@ -285,7 +376,7 @@ class Workspace:
     # --- Chunks --------------------------------------------------------------------------------
 
     def chunk_path(self, chunk: str) -> Path:
-        digest = _hex(chunk)
+        digest = _hex(chunk, "chunk")
         return self.home / "chunks" / digest[:2] / digest[2:]
 
     def committed(self, chunk: str) -> bool:
@@ -306,23 +397,17 @@ class Workspace:
         final = self.chunk_path(chunk.id)
         if final.is_dir():
             return False
-        staged = self._stage()
-        try:
-            _write_durably(staged / "chunk.json", canonical_json.dumps(chunk.to_json()))
-            _write_durably(staged / "records.jsonl", _lines(records))
-            _write_durably(staged / "findings.jsonl", _lines(findings))
+        with self._staging() as staged:
+            (staged / "chunk.json").write_bytes(canonical_json.dumps(chunk.to_json()))
+            (staged / "records.jsonl").write_bytes(_lines(records))
+            (staged / "findings.jsonl").write_bytes(_lines(findings))
             (staged / "runs").mkdir()
             by_stream: dict[RecordId, list[SeriesBatch]] = defaultdict(list)
             for batch in series:
                 by_stream[batch.stream].append(batch)
             for stream, batches in sorted(by_stream.items()):
-                write_run(batches, staged / "runs" / f"{_hex(stream)}.parquet")
-            for path in (*(staged / "runs").iterdir(), staged / "runs", staged):
-                if path.is_file():
-                    with path.open("rb") as written:
-                        os.fsync(written.fileno())
-                else:
-                    _fsync_directory(path)
+                write_run(batches, staged / "runs" / f"{_hex(stream, 'rec')}.parquet")
+            fsync_tree(staged)
             final.parent.mkdir(parents=True, exist_ok=True)
             try:
                 staged.rename(final)
@@ -330,11 +415,8 @@ class Workspace:
                 if final.is_dir():  # another process committed it first: the same output
                     return False
                 raise
-            _fsync_directory(final.parent)
+            fsync_directory(final.parent)
             return True
-        finally:
-            if staged.exists():
-                shutil.rmtree(staged)
 
     def load(self, chunk: str) -> CommittedChunk:
         """A committed chunk's output."""
@@ -345,9 +427,14 @@ class Workspace:
         if not isinstance(data, dict) or data.get("id") != chunk:
             raise WorkspaceError(f"{path} does not hold chunk {chunk}")
         findings = _read_lines((path / "findings.jsonl").read_bytes())
-        runs = {
-            RecordId(f"rec:sha256:{run.stem}"): run for run in sorted((path / "runs").iterdir())
-        }
+        runs: dict[RecordId, Path] = {}
+        for run in sorted((path / "runs").iterdir()):
+            match = _RUN.fullmatch(run.name)
+            if match is None or run.is_symlink() or not run.is_file():
+                raise WorkspaceError(
+                    f"{run} is not a stream's run; a chunk's runs/ holds only those"
+                )
+            runs[RecordId(f"rec:sha256:{match[1]}")] = run
         return CommittedChunk(
             chunk=data,
             records=tuple(_read_lines((path / "records.jsonl").read_bytes())),
@@ -356,7 +443,11 @@ class Workspace:
         )
 
     def chunks(self) -> Iterator[str]:
-        """Every committed chunk's id."""
+        """Every committed chunk's id. Anything else in ``chunks/`` is a ``WorkspaceError``."""
         for prefix in sorted((self.home / "chunks").iterdir()):
+            if not _is_directory(prefix, _PREFIX):
+                raise WorkspaceError(f"{prefix} is not a committed chunk's prefix directory")
             for entry in sorted(prefix.iterdir()):
+                if not _is_directory(entry, _REST):
+                    raise WorkspaceError(f"{entry} is not a committed chunk")
                 yield f"chunk:sha256:{prefix.name}{entry.name}"
