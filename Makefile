@@ -26,7 +26,7 @@ EACH = set -ef; for p in $(SELECTED); do \
 ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  contracts-check
+  contracts-check harness
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -75,3 +75,7 @@ contracts-check: ## Owner rule, lock + upstream contract tests, matrix freshness
   $(RUN) python scripts/contracts.py check-owner --package "$$p"; done
 > $(if $(strip $(CONTRACT_CONSUMERS)),$(RUN) python scripts/contracts.py check $(CONTRACT_CONSUMERS),@true)
 > $(RUN) python scripts/contracts.py matrix --check
+
+HARNESS_RUN_DIR ?= harness/.run
+harness: ## Integration harness: contracts check, corpus through the stages, smoke query, report
+> $(RUN) python -m harness --run-dir "$(HARNESS_RUN_DIR)" $(HARNESS_ARGS)

@@ -28,13 +28,20 @@ python_version = "3.11"
 strict = true
 warn_unreachable = true
 files = ["src", "tests"]
-mypy_path = "src"
+# The repository root, so the tests can import the integration harness (harness/, MVL-123).
+mypy_path = "src:../.."
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["../.."]
 addopts = "-q --strict-markers --strict-config"
 xfail_strict = true
 markers = [
   "integration: exercises multiple components against real fixtures",
   "slow: takes more than a few seconds; excluded by `make test-fast`",
+]
+# The compiler's sandbox forks once per adapter call, after pyarrow's thread pool exists; the harness
+# tests run real ingests (root pyproject.toml carries the same filter and the reasoning).
+filterwarnings = [
+  "ignore:This process \\(pid=\\d+\\) is multi-threaded, use of fork\\(\\) may lead to deadlocks in the child:DeprecationWarning",
 ]
