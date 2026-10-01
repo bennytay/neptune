@@ -411,3 +411,15 @@ def test_location_absences_are_append_only(pg: Conn) -> None:
     ):
         with pytest.raises(psycopg.errors.RaiseException, match="append-only"):
             pg.execute(statement)
+
+
+def test_migrations_commit_on_a_connection_outside_autocommit(pg: Conn) -> None:
+    """The collation check runs inside the migration transaction, so nothing is left open."""
+    pg.autocommit = False
+    apply_migrations(pg, "acme")
+    assert pg.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+    pg.rollback()  # nothing to roll back: the migrations were committed
+    pg.autocommit = True
+    assert pg.execute("SELECT count(*) FROM tenant_acme.schema_migration").fetchone() == (
+        len(migrations()),
+    )

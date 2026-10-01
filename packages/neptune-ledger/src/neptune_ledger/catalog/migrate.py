@@ -97,14 +97,14 @@ def apply_migrations(conn: psycopg.Connection[tuple[object, ...]], tenant_id: st
     schema = tenant_schema(tenant_id)
     shipped = migrations()
     applied: list[int] = []
-    locale = conn.execute(
-        "SELECT datlocprovider::text, datcollate FROM pg_database"
-        " WHERE datname = current_database()"
-    ).fetchone()
-    if locale is None:
-        raise MigrationError("cannot read the current database's collation")
-    check_collation(str(locale[0]), str(locale[1]))
     with conn.transaction():
+        locale = conn.execute(
+            "SELECT datlocprovider::text, datcollate FROM pg_database"
+            " WHERE datname = current_database()"
+        ).fetchone()
+        if locale is None:
+            raise MigrationError("cannot read the current database's collation")
+        check_collation(str(locale[0]), str(locale[1]))
         conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (schema,))
         conn.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(sql.Identifier(schema)))
         conn.execute(sql.SQL("REVOKE ALL ON SCHEMA {} FROM PUBLIC").format(sql.Identifier(schema)))
