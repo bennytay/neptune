@@ -39,8 +39,9 @@ def test_today_only_the_compiler_resolves_to_real() -> None:
     assert resolved["compiler"].mode == "real"
     assert resolved["compiler"].contract_version == "1.0.0"
     assert resolved["ledger"].mode == "stub"
-    assert "neptune_ledger.api is not importable" in resolved["ledger"].reason
-    assert resolved["ledger"].contract_version == "0.0.0"
+    # neptune_ledger.api is importable (MVL-88) but only as a contract and stub: no real driver.
+    assert "no real driver for neptune-ledger" in resolved["ledger"].reason
+    assert resolved["ledger"].contract_version == "1.0.0"
     assert resolved["context"].mode == "stub"
     assert resolved["memory"].contract_version is None
 
