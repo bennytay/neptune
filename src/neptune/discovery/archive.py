@@ -526,33 +526,56 @@ def _read_up_to(fileobj: _Readable, count: int) -> bytes:
 
 # --- zip ---------------------------------------------------------------------------------------
 
-_EOCD: Final = b"PK\x05\x06"
-_EOCD_SIZE: Final = 22
-_ZIP64_LOCATOR: Final = b"PK\x06\x07"
-_ZIP64_LOCATOR_SIZE: Final = 20
-_ZIP64_EOCD: Final = b"PK\x06\x06"
-_ZIP64_EOCD_SIZE: Final = 56
+_CENTRAL_ENTRY: Final = b"PK\x01\x02"
+_CENTRAL_ENTRY_SIZE: Final = 46  # the fixed part; name, extra field and comment follow
+_DIRECTORY_BYTES_PER_MEMBER: Final = 1 << 10  # what one directory entry may average
 
 
-def _zip_entry_count(stream: IO[bytes], size: int) -> int | None:
-    """The member count the end-of-central-directory record declares, before parsing anything."""
-    tail_length = min(size, _EOCD_SIZE + 0xFFFF)
-    stream.seek(size - tail_length)
-    tail = _read_up_to(stream, tail_length)
-    position = tail.rfind(_EOCD)
-    if position < 0 or len(tail) - position < _EOCD_SIZE:
+@dataclass(frozen=True)
+class _Directory:
+    """The central directory as the end-of-central-directory record declares it."""
+
+    entries: int
+    start: int  # where zipfile reads it from: the end record's position less its size
+    size: int
+
+
+def _zip_directory(stream: IO[bytes]) -> _Directory | None:
+    """The directory exactly as zipfile will locate it, or ``None`` if there is no end record.
+
+    zipfile reads the whole directory into memory and builds every entry before a caller sees
+    one, and the end record's member count can lie low, so the directory is located with
+    zipfile's own reader of the end records (zip64 included) and bounded before zipfile parses it.
+    """
+    record = zipfile._EndRecData(stream)  # type: ignore[attr-defined]  # private since 2.x
+    if not record:
         return None
-    entries, directory_size, directory_offset = struct.unpack_from("<HII", tail, position + 10)
-    count: int = entries
-    if entries == 0xFFFF or 0xFFFFFFFF in (directory_size, directory_offset):
-        locator_at = position - _ZIP64_LOCATOR_SIZE
-        if locator_at >= 0 and tail[locator_at : locator_at + 4] == _ZIP64_LOCATOR:
-            (record_offset,) = struct.unpack_from("<Q", tail, locator_at + 8)
-            if record_offset + _ZIP64_EOCD_SIZE <= size:
-                stream.seek(record_offset)
-                record = _read_up_to(stream, _ZIP64_EOCD_SIZE)
-                if record[:4] == _ZIP64_EOCD:
-                    (count,) = struct.unpack_from("<Q", record, 32)
+    entries, size, location = record[4], record[5], record[9]  # zipfile's _ECD_* indices
+    return _Directory(entries, location - size, size)
+
+
+def _directory_cap(limits: ArchiveLimits) -> int:
+    """The most central-directory bytes zipfile may read into memory under ``limits``."""
+    return max(MAX_HEADER_SIZE, limits.max_members * _DIRECTORY_BYTES_PER_MEMBER)
+
+
+def _zip_directory_entries(stream: IO[bytes], directory: _Directory, stop: int) -> int:
+    """How many entries zipfile will parse from the directory, counting no further than ``stop``.
+
+    zipfile walks the entries until it has consumed the declared size; this walks the same
+    entries, reading each fixed part and seeking over its name, extra field and comment, so
+    nothing is held.
+    """
+    stream.seek(directory.start)
+    count = walked = 0
+    while walked < directory.size and count < stop:
+        fixed = _read_up_to(stream, _CENTRAL_ENTRY_SIZE)
+        if len(fixed) < _CENTRAL_ENTRY_SIZE or not fixed.startswith(_CENTRAL_ENTRY):
+            break  # zipfile refuses the directory here, and its finding says so
+        variable = sum(struct.unpack_from("<3H", fixed, 28))
+        stream.seek(variable, io.SEEK_CUR)
+        walked += _CENTRAL_ENTRY_SIZE + variable
+        count += 1
     return count
 
 
@@ -566,8 +589,19 @@ def _zip(
 ) -> tuple[list[ArchiveMember], bool]:
     limits = state.limits
     scope = (*prefix, ByteRange(0, size))
-    declared = _zip_entry_count(stream, size)
-    if declared is None:
+    try:
+        directory = _zip_directory(stream)
+    except Exception as exc:  # a zip64 record zipfile refuses, see _ERROR_CODES
+        state.finding(
+            CORRUPT,
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            scope,
+            "zip end-of-central-directory records cannot be read",
+            {"size": size, **_error(exc)},
+        )
+        return [], False
+    if directory is None:
         if head.startswith(b"PK\x03\x04"):
             state.finding(
                 TRUNCATED,
@@ -587,13 +621,44 @@ def _zip(
                 {"size": size},
             )
         return [], False
-    if declared > limits.max_members:
+    if directory.entries > limits.max_members:
         state.limit(
             MEMBER_COUNT_EXCEEDED,
             scope,
-            f"zip declares {declared} members, more than the {limits.max_members} allowed;"
-            " not inspected",
-            {"members": declared, **limits.to_json()},
+            f"zip declares {directory.entries} members, more than the {limits.max_members}"
+            " allowed; not inspected",
+            {"members": directory.entries, **limits.to_json()},
+        )
+        return [], False
+    if directory.start < 0:
+        state.finding(
+            CORRUPT,
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            scope,
+            f"zip central directory declares {directory.size} bytes, more than precede its end"
+            " record",
+            {"size": size, "directory_size": directory.size},
+        )
+        return [], False
+    cap = _directory_cap(limits)
+    if directory.size > cap:
+        state.limit(
+            HEADER_TOO_LARGE,
+            scope,
+            f"zip central directory declares {directory.size} bytes, more than the {cap}"
+            f" allowed for {limits.max_members} members; not inspected",
+            {"directory_size": directory.size, "max_directory_size": cap, **limits.to_json()},
+        )
+        return [], False
+    entries = _zip_directory_entries(stream, directory, limits.max_members + 1)
+    if entries > limits.max_members:
+        state.limit(
+            MEMBER_COUNT_EXCEEDED,
+            scope,
+            f"zip directory holds more than the {limits.max_members} members allowed, though"
+            f" its end record declares {directory.entries}; not inspected",
+            {"members": entries, **limits.to_json()},
         )
         return [], False
     stream.seek(0)

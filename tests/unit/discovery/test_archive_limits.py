@@ -1,5 +1,6 @@
 """Archive inspection within limits (ADR 0029 §2): every bomb, lie and defect is a finding."""
 
+import functools
 import gzip
 import io
 import struct
@@ -249,6 +250,65 @@ def test_member_count_is_checked_before_the_directory_is_parsed(tmp_path: Path) 
     assert codes(report) == [MEMBER_COUNT_EXCEEDED]
     assert report.findings[0].details["members"] == 1200
     assert report.members == ()
+
+
+def lying_count(data: bytes, entries: int) -> bytes:
+    """``data`` with its end-of-central-directory record declaring ``entries`` members."""
+    patched = bytearray(data)
+    struct.pack_into("<HH", patched, patched.rfind(b"PK\x05\x06") + 8, entries, entries)
+    return bytes(patched)
+
+
+@functools.cache
+def lying_directory_zip() -> bytes:
+    """30,000 empty members (a 1.5 MB directory) whose end record declares one."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for index in range(30_000):
+            archive.writestr(zipfile.ZipInfo(f"{index:05d}", (1980, 1, 1, 0, 0, 0)), b"")
+    return lying_count(buffer.getvalue(), 1)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_a_directory_that_outnumbers_its_end_record_is_refused_before_it_is_parsed(
+    tmp_path: Path, hostile: ModuleType, nested: bool
+) -> None:
+    """zipfile builds every entry before a caller sees one; the count is walked first, unheld."""
+    data = lying_directory_zip()
+    if nested:  # a directory bounded by the member limit, not the file on disk
+        data = hostile.make_zip([("inner.zip", data)], compression=zipfile.ZIP_DEFLATED)
+    report = inspect(data, tmp_path)
+    assert codes(report) == [MEMBER_COUNT_EXCEEDED]
+    assert report.findings[0].details["members"] == 10_001
+    assert peak_memory(lambda: inspect(data, tmp_path)) < 4 * MiB
+
+
+def test_a_lying_count_is_caught_at_the_exact_limit(tmp_path: Path) -> None:
+    data = lying_count(fixture("many_members.zip"), 1)
+    report = inspect(data, tmp_path, ArchiveLimits(max_members=1200))
+    assert (codes(report), len(report.members)) == ([], 1200)
+    report = inspect(data, tmp_path, ArchiveLimits(max_members=1199))
+    assert codes(report) == [MEMBER_COUNT_EXCEEDED]
+    assert (report.findings[0].details["members"], report.members) == (1200, ())
+
+
+def test_a_directory_larger_than_its_member_limit_allows_is_refused_unread(
+    tmp_path: Path,
+) -> None:
+    report = inspect(lying_directory_zip(), tmp_path, ArchiveLimits(max_members=100))
+    assert codes(report) == [HEADER_TOO_LARGE]
+    details = report.findings[0].details
+    assert (details["directory_size"], details["max_directory_size"]) == (51 * 30_000, MiB)
+
+
+def test_a_directory_larger_than_what_precedes_it_is_corrupt(
+    tmp_path: Path, hostile: ModuleType
+) -> None:
+    data = bytearray(hostile.make_zip([("a.txt", b"x")]))
+    struct.pack_into("<I", data, data.rfind(b"PK\x05\x06") + 12, 0x7FFFFFFF)
+    report = inspect(bytes(data), tmp_path)
+    assert codes(report) == [CORRUPT]
+    assert report.findings[0].details == {"size": len(data), "directory_size": 0x7FFFFFFF}
 
 
 def test_tar_member_count_stops_the_stream(tmp_path: Path) -> None:
