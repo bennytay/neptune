@@ -186,6 +186,12 @@ exit 0
 
 
 def _make_lint(tmp_path: Path, fail_format_in: str) -> tuple[int, list[str]]:
+    return _make(tmp_path, "lint", fail_format_in=fail_format_in)
+
+
+def _make(
+    tmp_path: Path, target: str, pkg: str = "", fail_format_in: str = ""
+) -> tuple[int, list[str]]:
     workspace = tmp_path / "ws"
     for member in ("_template", "alpha"):
         (workspace / "packages" / member).mkdir(parents=True)
@@ -198,7 +204,7 @@ def _make_lint(tmp_path: Path, fail_format_in: str) -> tuple[int, list[str]]:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS", "PKG"))}
     env |= {"UV_LOG": str(log), "FAIL_FORMAT_IN": fail_format_in}
     result = subprocess.run(
-        ["make", "-C", str(workspace), "lint", f"UV={tmp_path / 'uv'}", "ADR_DIRS=", "PKG="],
+        ["make", "-C", str(workspace), target, f"UV={tmp_path / 'uv'}", "ADR_DIRS=", f"PKG={pkg}"],
         env=env,
         capture_output=True,
         text=True,
@@ -219,6 +225,38 @@ def test_make_lint_runs_every_package_when_all_pass(tmp_path: Path) -> None:
     assert status == 0
     assert len(calls) == 4  # format + check for the compiler and for alpha
     assert sum(c.split(" ", 1)[0].endswith("/packages/alpha") for c in calls) == 2
+
+
+def _contracts_calls(calls: list[str]) -> list[str]:
+    return [c.split("scripts/contracts.py ", 1)[1] for c in calls if "scripts/contracts.py" in c]
+
+
+def test_make_contracts_check_runs_one_consumer_check_and_the_matrix(tmp_path: Path) -> None:
+    """Without PKG: the owner rule per package, then one `check` (so each owner's contract tests
+    run once) and the matrix freshness check."""
+    status, calls = _make(tmp_path, "contracts-check")
+    assert status == 0
+    assert _contracts_calls(calls) == [
+        "check-owner --package neptune",
+        "check-owner --package alpha",
+        "check --all --package alpha",
+        "matrix --check",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("pkg", "expected"),
+    [
+        ("neptune", ["check-owner --package neptune", "matrix --check"]),
+        ("alpha", ["check-owner --package alpha", "check --package alpha", "matrix --check"]),
+    ],
+)
+def test_make_contracts_check_for_one_package(
+    tmp_path: Path, pkg: str, expected: list[str]
+) -> None:
+    status, calls = _make(tmp_path, "contracts-check", pkg=pkg)
+    assert status == 0
+    assert [" ".join(c.split()) for c in _contracts_calls(calls)] == expected
 
 
 # --- new-package.sh: reserved names ------------------------------------------------------------

@@ -9,17 +9,22 @@ against; ``contracts/packages.toml`` routes announcements to each package's Line
 
 Subcommands:
 
-- ``check [--package P | --all]``: the registry is well formed, every golden validates against
-  its version's schema and every later minor/patch schema of its major, and P's lock entries are
-  not a major version behind (a minor or patch lag is a warning); then P's upstream owners'
-  contract tests run once each (skipped, with a message, while an owner is not installed yet).
+- ``check [--package P ...] [--all]``: the registry is well formed, every golden validates against
+  its version's schema, every stable version's goldens validate against every later minor/patch
+  schema of its major (a draft's goldens bind only the draft), and each named package's lock
+  entries (``--all``: every package in lock.toml) are not a major version behind (a minor or patch
+  lag is a warning); then the upstream owners' contract tests run once each (skipped, with a
+  message, while an owner module or its parent package does not exist yet).
 - ``check-owner --package P``: every schema P exports equals the registry's latest version, and
   P's version constant matches it. A changed export needs ``bump``.
 - ``register PACKAGE``: add a new member's ``packages.toml`` entry and empty lock section
   (stdlib only; ``scripts/new-package.sh`` runs it).
+- ``matrix [--check]``: write ``contracts/compatibility.md`` from the registry and lock.toml
+  (``--check``: fail if the committed file differs).
 - ``bump CONTRACT VERSION [--post]``: write ``v<VERSION>/`` from the owner's export and golden
-  generator, refusing a minor/patch that rejects an earlier golden of its major; a major version
-  raises every lock entry for the contract. Then print the announcement comments for the
+  generator, refusing a minor/patch that rejects an earlier stable golden of its major; the first
+  stable version, and every later major, sets the contract's lock entry of every in-repo consumer
+  (a package with a lock.toml section). Then print the announcement comments for the
   consumers' gate issues; ``--post`` sends them through the Linear GraphQL API, and needs
   ``LINEAR_API_KEY`` before anything is written.
 
@@ -32,7 +37,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib
-import importlib.util
 import json
 import os
 import re
@@ -357,14 +361,15 @@ def _check_version(contract: Contract, version: Version) -> list[str]:
 def compatibility_breaks(
     registry: Registry, contract_id: str, version: SemVer, schema: Mapping[str, Any]
 ) -> list[str]:
-    """Goldens of earlier versions with the same major that ``schema`` rejects.
+    """Goldens of earlier stable versions with the same major that ``schema`` rejects.
 
     Reader compatibility defines a breaking change: a minor or patch version must accept every
-    golden its major has published before it. Anything else needs a new major.
+    golden its major has published as stable before it. Anything else needs a new major. A draft
+    binds nobody, so its goldens do not constrain the versions after it.
     """
     breaks: list[str] = []
     for prior in registry.versions(contract_id):
-        if prior.version[0] != version[0] or prior.version >= version:
+        if prior.version[0] != version[0] or prior.version >= version or prior.status == "draft":
             continue
         for name, target in sorted(prior.goldens.items()):
             path = prior.path / "golden" / name
@@ -448,11 +453,21 @@ def check_registry(registry: Registry) -> Report:
 
 
 def _installed(module: str) -> bool:
-    """Whether the owner module itself is importable (its package may exist without it yet)."""
+    """Whether the owner module imports; False only while it or a parent package does not exist.
+
+    Any other import failure (a parent ``__init__`` importing something missing, or raising) is a
+    bug in the owner, never "not installed yet", so it raises ``ContractError``.
+    """
     try:
-        return importlib.util.find_spec(module) is not None
-    except (ImportError, ValueError):
-        return False
+        importlib.import_module(module)
+    except ModuleNotFoundError as error:
+        name = error.name or ""
+        if name and (module == name or module.startswith(f"{name}.")):
+            return False
+        raise ContractError(f"{module} fails to import: {error!r}") from error
+    except Exception as error:  # an import-time bug in the owner, reported rather than skipped
+        raise ContractError(f"{module} fails to import: {error!r}") from error
+    return True
 
 
 Runner = Callable[[Sequence[str], Path], int]
@@ -539,7 +554,12 @@ def _run_owner_tests(
     if not owner.contract_tests:
         report.notes.append(f"{contract.id}: owner {owner.package} declares no contract tests")
         return
-    if not _installed(owner.module):
+    try:
+        installed = _installed(owner.module)
+    except ContractError as error:
+        report.problems.append(f"{contract.id}: owner {owner.package}: {error}")
+        return
+    if not installed:
         report.notes.append(
             f"{contract.id}: SKIPPED owner contract tests, {owner.package} is not installed "
             f"({owner.module} is not importable)"
@@ -592,7 +612,12 @@ def check_owner(registry: Registry, package: str) -> Report:
     if not owned:
         report.notes.append(f"{package} exports no registered schema")
     for contract in owned:
-        if not _installed(contract.owner.module):
+        try:
+            installed = _installed(contract.owner.module)
+        except ContractError as error:
+            report.problems.append(f"{contract.id}: {error}")
+            continue
+        if not installed:
             report.notes.append(
                 f"{contract.id}: SKIPPED, {contract.owner.module} is not importable yet"
             )
@@ -621,6 +646,121 @@ def check_owner(registry: Registry, package: str) -> Report:
             )
         else:
             report.notes.append(f"{contract.id}: {package} matches {show(latest.version)}")
+    return report
+
+
+# --- Compatibility matrix ----------------------------------------------------------------------
+
+MATRIX_HEADER: Final = """\
+# Contract compatibility matrix
+
+Which contract versions exist and which version each consuming package is built against. Generated
+by `scripts/contracts.py matrix` from `contracts/<id>/contract.toml`,
+`contracts/<id>/v*/version.json`, `contracts/lock.toml` and `contracts/packages.toml`; do not edit
+it by hand. `make contracts-check` fails while it is stale. The policy is ADR 0002 in
+`packages/neptune-platform/docs/adr/`. The file at a release tag is that release's compatibility
+statement.
+"""
+
+MATRIX_LOCKS_NOTE: Final = """\
+Cells: the version `lock.toml` declares, then `current` (the latest stable), `behind` (an older
+stable) or `draft`; `no stable` when the contract has no stable version yet (nothing to declare);
+`not declared` when a stable version exists but the lock has no entry, `(no package yet)` when the
+package has no lock section; blank when the package does not consume the contract. A contract that
+is part of another rides on its version and has no column.
+"""
+
+
+def _matrix_cell(registry: Registry, contract: Contract, package: str, lock: Any) -> str:
+    if package not in contract.consumers:
+        return ""
+    stable = registry.latest(contract.id, stable=True)
+    declared = lock.get(package, {}).get(contract.id)
+    if declared is not None:
+        version = parse_semver(declared)
+        if stable is not None and version == stable.version:
+            return f"{declared} current"
+        if stable is not None and version < stable.version:
+            return f"{declared} behind"
+        return f"{declared} draft"
+    if stable is None:
+        return "no stable"
+    return "not declared" if package in lock else "not declared (no package yet)"
+
+
+def render_matrix(registry: Registry) -> str:
+    """The text of ``contracts/compatibility.md``: a pure function of the registry's files.
+
+    Contracts are ordered by their owner's position in packages.toml, then by id; consumer rows
+    follow packages.toml order.
+    """
+    packages = list(registry.packages())
+    lock = registry.lock()
+    rank = {package: index for index, package in enumerate(packages)}
+    contracts = sorted(
+        (registry.contract(i) for i in registry.contract_ids()),
+        key=lambda c: (rank.get(c.owner.package, len(rank)), c.id),
+    )
+    lines = [
+        MATRIX_HEADER,
+        "## Contracts\n",
+        "| Contract | Owner package | Status | Latest stable | Latest draft | Consumers |",
+        "|---|---|---|---|---|---|",
+    ]
+    for contract in contracts:
+        stable = registry.latest(contract.id, stable=True)
+        drafts = [v for v in registry.versions(contract.id) if v.status == "draft"]
+        draft = (
+            drafts[-1]
+            if drafts and (stable is None or drafts[-1].version > stable.version)
+            else None
+        )
+        owner = f"`{contract.owner.package}`"
+        if contract.part_of is not None:
+            owner += f" (part of `{contract.part_of}`)"
+        consumers = (
+            ", ".join(f"`{c}`" for c in sorted(contract.consumers)) or "none in this repository"
+        )
+        cells = [
+            f"`{contract.id}`",
+            owner,
+            contract.status,
+            show(stable.version) if stable else "—",
+            show(draft.version) if draft else "—",
+            consumers,
+        ]
+        lines.append("| " + " | ".join(cells) + " |")
+    columns = [c for c in contracts if c.part_of is None and c.consumers]
+    consumers = {p for c in columns for p in c.consumers}
+    rows = [p for p in packages if p in consumers] + sorted(consumers - set(packages))
+    lines += [
+        "",
+        "## Consumer locks\n",
+        MATRIX_LOCKS_NOTE,
+        "| Consumer | " + " | ".join(f"`{c.id}`" for c in columns) + " |",
+        "|---|" + "---|" * len(columns),
+    ]
+    for package in rows:
+        cells = [_matrix_cell(registry, c, package, lock) for c in columns]
+        lines.append(f"| `{package}` | " + " | ".join(cells) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def matrix(registry: Registry, *, check: bool = False) -> Report:
+    """Write ``compatibility.md`` (or, with ``check``, report that the committed file is stale)."""
+    report = Report()
+    path = registry.root / "compatibility.md"
+    text = render_matrix(registry)
+    current = path.read_text(encoding="utf-8") if path.is_file() else None
+    if current == text:
+        report.notes.append("contracts/compatibility.md is current")
+    elif check:
+        report.problems.append(
+            "contracts/compatibility.md is stale; run scripts/contracts.py matrix and commit it"
+        )
+    else:
+        path.write_text(text, encoding="utf-8")
+        report.notes.append("wrote contracts/compatibility.md")
     return report
 
 
@@ -729,6 +869,12 @@ def announcements(
         )
         if declared == new:
             body += f"`{package}` already declares it in `contracts/lock.toml`; nothing to do."
+        elif declared is None and lock.get(package, {}).get(contract.id) == new:
+            body += (
+                f"This is the contract's first stable version: the same PR adds `{package}` at "
+                f"{new} to `contracts/lock.toml`, and `{package}`'s contract tests must pass at "
+                f"{new} before it merges. Review the change for this project."
+            )
         elif lock.get(package, {}).get(contract.id) == new:
             body += (
                 f"This is a major version: the same PR raises `{package}` from {declared} to "
@@ -792,13 +938,18 @@ def bump(
             f"version: {breaks[0]}. Publish a major version (raise the constant first)."
         )
     before = registry.lock()
+    stable = registry.latest(contract_id, stable=True)
     write_version(
         contract.path / f"v{text}", contract_id, version, status, constant, schema, goldens
     )
-    if status == "stable" and (latest is None or version[0] > latest.version[0]):
-        # A major version raises every in-repo consumer's lock in the same PR (ADR 0002 §4).
+    if status == "stable" and (stable is None or version[0] > stable.version[0]):
+        # The first stable version adds, and a major version raises, the lock entry of every
+        # in-repo consumer in the same PR (ADR 0002 §4). A package is in the repository once it
+        # has a lock.toml section (``register``); one without a section has nothing to raise.
         raised = {
-            package: {**entries, contract_id: text} if contract_id in entries else dict(entries)
+            package: {**entries, contract_id: text}
+            if contract_id in entries or package in contract.consumers
+            else dict(entries)
             for package, entries in before.items()
         }
         registry.write_lock(raised)
@@ -848,14 +999,17 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT, help="the contracts/ dir")
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check", help="validate the registry and a consumer's lock")
-    which = check.add_mutually_exclusive_group()
-    which.add_argument("--package", help="consumer package to check (default: registry only)")
-    which.add_argument("--all", action="store_true", help="every package in lock.toml")
+    check.add_argument(
+        "--package", action="append", default=[], help="consumer to check (repeatable)"
+    )
+    check.add_argument("--all", action="store_true", help="every package in lock.toml as well")
     check.add_argument("--no-tests", action="store_true", help="skip owner contract tests")
     owner = commands.add_parser("check-owner", help="owner's export equals the registry")
     owner.add_argument("--package", required=True)
     registrar = commands.add_parser("register", help="add a new package to the registry")
     registrar.add_argument("package")
+    matrixer = commands.add_parser("matrix", help="write contracts/compatibility.md")
+    matrixer.add_argument("--check", action="store_true", help="fail if the file is stale")
     bumper = commands.add_parser("bump", help="publish a new version of a contract")
     bumper.add_argument("contract")
     bumper.add_argument("version")
@@ -867,13 +1021,14 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
     try:
         if args.command == "check":
             runner = None if args.no_tests else run_pytest
-            if args.all:
-                return _finish(check_packages(registry, registry.lock(), runner=runner))
-            if args.package is None:
+            named = [*args.package, *(registry.lock() if args.all else [])]
+            if not named:
                 return _finish(check_registry(registry))
-            return _finish(check_package(registry, args.package, runner=runner))
+            return _finish(check_packages(registry, dict.fromkeys(named), runner=runner))
         if args.command == "check-owner":
             return _finish(check_owner(registry, args.package))
+        if args.command == "matrix":
+            return _finish(matrix(registry, check=args.check))
         if args.command == "register":
             changed = register(registry, args.package)
             _print([f"registered {args.package}: {', '.join(changed) or 'already registered'}"])

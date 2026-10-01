@@ -67,9 +67,11 @@ examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/golden/packages/make_packages.py
 > $(UV) run python tests/golden/mcap/make_mcap_golden.py
 
-contracts-check: ## Owner rule, then lock + upstream contract tests per package (PKG=<name> for one)
+# One `check` call covers every selected member (and, without PKG, every package in lock.toml), so
+# each upstream owner's contract tests run once; the matrix must match the registry.
+CONTRACT_CONSUMERS = $(if $(PKG),,--all) $(SELECTED_MEMBERS:%=--package %)
+contracts-check: ## Owner rule, lock + upstream contract tests, matrix freshness (PKG=<name> for one)
 > @set -e; for p in $(SELECTED); do echo "--- contracts $$p" >&2; \
-  $(RUN) python scripts/contracts.py check-owner --package "$$p"; \
-  if [ "$$p" != $(COMPILER) ]; then $(RUN) python scripts/contracts.py check --package "$$p"; fi; \
-  done
-> $(if $(PKG),@true,$(RUN) python scripts/contracts.py check --all)
+  $(RUN) python scripts/contracts.py check-owner --package "$$p"; done
+> $(if $(strip $(CONTRACT_CONSUMERS)),$(RUN) python scripts/contracts.py check $(CONTRACT_CONSUMERS),@true)
+> $(RUN) python scripts/contracts.py matrix --check
