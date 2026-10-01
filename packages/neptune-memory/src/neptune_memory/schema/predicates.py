@@ -17,7 +17,7 @@ from functools import cached_property
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
-from neptune.model.ids import check_text, check_token
+from neptune.model.ids import LogicalId, check_text, check_token
 from neptune_memory.schema.claim import ValueType, is_inferred, object_type
 from neptune_memory.schema.nodes import CONTEXT_TYPES, DECLARED_ONLY, NodeRef, NodeType
 
@@ -137,6 +137,10 @@ class ViolationCode(StrEnum):
     SUBJECT_TYPE = "subject_type"
     OBJECT_TYPE = "object_type"
     DECLARED_ONLY = "declared_only"  # an inferred claim names a declared-only node (a person)
+    # An observed or stated claim names a person by something other than a declared identifier
+    # (``<namespace>:<value>``), or cites no Ledger record (ADR 0005 §5). The schema checks the
+    # shape and the citation; that the identifier comes from a declaration is consolidate/'s.
+    UNDECLARED_PERSON = "undeclared_person"
 
 
 @dataclass(frozen=True)
@@ -155,14 +159,29 @@ def violations(claim: Claim, registry: PredicateRegistry) -> tuple[SchemaViolati
     """Every way ``claim`` breaks the vocabulary; empty when it conforms."""
     found: list[SchemaViolation] = []
     nodes = [claim.subject, *([claim.object] if isinstance(claim.object, NodeRef) else [])]
-    if is_inferred(claim.assertion_kind):
-        for node in nodes:
-            if node.node_type in DECLARED_ONLY:
+    for node in nodes:
+        if node.node_type not in DECLARED_ONLY:
+            continue
+        if is_inferred(claim.assertion_kind):
+            found.append(
+                SchemaViolation(
+                    ViolationCode.DECLARED_ONLY,
+                    f"{node.node_type} nodes are declared only; an inferred claim cannot name"
+                    f" {node.node_id!r}",
+                )
+            )
+        else:
+            problems = [
+                *([] if _is_declared_identifier(node.node_id) else ["is not <namespace>:<value>"]),
+                *([] if claim.provenance.records else ["is cited with no Ledger record"]),
+            ]
+            if problems:
                 found.append(
                     SchemaViolation(
-                        ViolationCode.DECLARED_ONLY,
-                        f"{node.node_type} nodes are declared only; an inferred claim cannot name"
-                        f" {node.node_id!r}",
+                        ViolationCode.UNDECLARED_PERSON,
+                        f"{node.node_type} {node.node_id!r} {' and '.join(problems)}; a"
+                        f" {claim.assertion_kind} claim names a person only by a declared"
+                        " identifier from a cited Ledger record",
                     )
                 )
     if claim.predicate not in registry:
@@ -189,6 +208,18 @@ def violations(claim: Claim, registry: PredicateRegistry) -> tuple[SchemaViolati
             )
         )
     return tuple(found)
+
+
+def _is_declared_identifier(node_id: str) -> bool:
+    """Whether ``node_id`` is a declared logical id, ``<namespace>:<value>`` (ADR 0003 §1)."""
+    namespace, colon, value = node_id.partition(":")
+    if not colon:
+        return False
+    try:
+        LogicalId(namespace, value)
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def check_claim(claim: Claim, registry: PredicateRegistry) -> None:
