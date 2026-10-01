@@ -24,3 +24,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0017](0017-canonical-records-envelope-and-schema-version.md) | Canonical records: envelope, families, schema version and findings | Accepted |
 | [0018](0018-runs-streams-and-series-layout.md) | Runs, streams and the series layout | Accepted |
 | [0019](0019-machine-context-records.md) | Machine context: machines, hardware, software and calibration | Accepted |
+| [0020](0020-world-and-record-context-records.md) | World and record context: sites, assets, geometry, media, documents and tables | Accepted |

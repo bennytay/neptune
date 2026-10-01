@@ -1,8 +1,8 @@
 # Canonical data model
 
 Status: **draft**. Primitives are specified by MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66
-(ADR 0017), runs, streams and series by MVL-67 (ADR 0018), and machine context by MVL-68 (ADR 0019). World
-entities are specified by MVL-69. This page becomes authoritative when MVL-1 closes.
+(ADR 0017), runs, streams and series by MVL-67 (ADR 0018), machine context by MVL-68 (ADR 0019) and world
+context by MVL-69 (ADR 0020). This page becomes authoritative when MVL-1 closes.
 
 ## Record kinds (v0)
 
@@ -17,7 +17,7 @@ domains.
 | `reference` | `TimestampDomain`, `FrameGraph`, `Frame`, `FrameTransform` | `model/reference.py` |
 | `run` | `Run`, `Stream` | `model/run.py`, series contract in `model/series.py` (ADR 0018) |
 | `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration` | `model/machine.py` (ADR 0019) |
-| `world` | `Site`, `Asset`, `SpatialArtifact`, images, `DocumentRecord`, `StructuredRecord` | MVL-69 |
+| `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord` | `model/world.py` (ADR 0020) |
 | `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
 
 `IngestReceipt` is the package-level account of an ingest run, not a record table. Its layout belongs to MVL-5.
@@ -179,6 +179,27 @@ a bug, not a value.
   `FrameTransform` records it declares.
 - Which configuration or calibration applied to which run is a binding (MVL-38); nothing here points
   at a run.
+
+## World and record context (ADR 0020; `model/world.py`)
+
+- `Site` / `Asset`: a place or thing one declaration names (a register row, a manifest entry, a GeoJSON
+  feature): `identifiers`, `name`, `aliases` (each cited, an alias split from a cell cites its span),
+  `parent`, `location`; an asset adds its declared `category` and `site`. At least an id or a stated
+  name. The rest of a register row stays in its `StructuredRecord`.
+- `SpatialArtifact`: a mesh, CAD model, point cloud, map or scene by reference: `category`, `name`, the
+  declared coordinate `unit`, `crs` and `frame`. Geometry stays in the source bytes; objects are cited
+  with `ObjectLocator`.
+- `Image` (a still) and `Video` (one track of a standalone file): pixel `width` / `height`, `encoding`,
+  and `capture` (time, position, device make, model and ids). EXIF orientation is kept, never applied.
+  Regions are `ImageRegion`, after a `VideoFrame` for video. A video inside a log is a stream.
+- `DocumentRecord`: `format`, `title` and `pages` (label, size in page coordinates, rotation).
+  `DocumentBlock`: one unit of extracted text in reading order, with its `text` exactly as its
+  `[Page, Span]` citation holds it, its drawn `region` (`[Page, PageRegion]`), and `role` / `level`
+  only where the format declares them. Guessed roles are derived.
+- `StructuredTable`: `name` and `header` (verbatim cells, citing the header row). `StructuredRecord`:
+  one row, cells in their source's types (a CSV's text stays text). Blank is `Unknown`; a defined
+  "none" is `KnownAbsent` citing the definition. A row cited as `Row(r)` hoists its cells' citations:
+  cell `c` is `RowCell(r, c, header[c])` (`cell_evidence`).
 
 ## Serialization (ADR 0002)
 
