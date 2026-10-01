@@ -305,7 +305,7 @@ class Calls:
         return {"ingest": self.ingest, "plan": self.plan, "probe": self.probe}
 
 
-def _count(items: Sequence[ChunkCache | DerivativeCache | PlanCache]) -> JsonObject:
+def _count(items: Sequence[ChunkCache | DerivativeCache | PlanCache]) -> dict[str, int]:
     hits = sum(1 for item in items if item.cache is Cache.HIT)
     return {"hit": hits, "miss": len(items) - hits}
 
@@ -338,7 +338,8 @@ class CacheReport:
     def for_receipt(self, receipt: RecordId) -> "CacheReport":
         return replace(self, receipt=receipt)
 
-    def totals(self) -> JsonObject:
+    def totals(self) -> dict[str, dict[str, int]]:
+        """Hits and misses of chunks, derivatives and plans."""
         return {
             "chunks": _count([chunk for s in self.sources for chunk in s.chunks]),
             "derivatives": _count(self.derivatives),
