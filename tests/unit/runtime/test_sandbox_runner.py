@@ -415,10 +415,10 @@ def test_no_signal_through_o_async_on_the_jobs_terminal(monkeypatch: pytest.Monk
     foreground process group, the job's, with no ``F_SETOWN``; ``setsid`` cuts only ``/dev/tty``
     and the job's ``/dev/pts/N`` stays readable. Seccomp refuses the flag on every ABI. The job
     here is a session leader in its terminal's foreground, as in a shell, and runs at Landlock ABI
-    4 (Ubuntu 24.04) so ABI 6 signal scoping cannot hide a gap; the default action of SIGIO would
-    end it at the next keystroke."""
+    4 (Ubuntu 24.04), or the host's own if lower, so ABI 6 signal scoping cannot hide a gap; the
+    default action of SIGIO would end it at the next keystroke."""
     real = confine.host()
-    monkeypatch.setattr(confine, "host", lambda: confine.Host(real.arch, 4))
+    monkeypatch.setattr(confine, "host", lambda: confine.Host(real.arch, min(real.landlock, 4)))
     pid, master = pty.fork()
     if pid == 0:  # the job, its controlling terminal the pty, in that terminal's foreground
         code = 3

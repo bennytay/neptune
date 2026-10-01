@@ -93,9 +93,9 @@ partial chunk in the workspace.
    cannot exhaust the job as the parent reads and decodes it. The parent reads the reply into one
    buffer (no list joined into a second copy), decodes it once, and bounds the decode in count and
    depth as well as bytes: a reply under the byte cap that packs it with empty containers or short
-   strings would still build millions of objects, so a count past 4 Mi values (the byte cap at 16
-   bytes a value; the densest legitimate reply the test suite produces averages 16.4) is refused
-   as `reply_bytes` too, as is a reply nested past the JSON parser's recursion guard (a
+   strings would still build millions of objects, so a count past 8 Mi values is refused as
+   `reply_bytes` too (no lower: integer and boolean series cells cost 2 to 6 bytes each, so a
+   lower cap would refuse legitimate replies well under the byte cap), as is a reply nested past the JSON parser's recursion guard (a
    `RecursionError` anywhere in the decode), so neither is a crash the job retries. An exact
    depth scan before parsing would cost 30 to 90% of the parse on a large legitimate reply; the
    parser's guard costs nothing. The parent enforces wall time (it kills the child at the
@@ -166,8 +166,8 @@ partial chunk in the workspace.
 - Residual risks, recorded in `security.md`: a compromised parser can read files the user can
   read and put them in its own output (the contract checks citations, not every text); while
   it decodes one reply the parent holds it three times (buffer, payload, the parser's text) plus
-  the objects it decodes to, which the value cap bounds, not the byte cap: about 550 MiB at the
-  defaults for the worst shape measured (one object of 4 Mi distinct keys).
+  the objects it decodes to, which the value cap bounds, not the byte cap: about 1 GiB at the
+  defaults for the worst shape measured (one object of distinct keys filling the byte cap).
 - A committed chunk's id (ADR 0024 §4, ADR 0031) covers the adapter, its version, config and the
   source, not the isolation or the Landlock ABI it ran under, so a workspace shared between a
   degraded and a sound run reuses chunk outputs across them — as it already does between

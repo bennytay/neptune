@@ -61,7 +61,7 @@ confined before any adapter code runs. A sandboxed call:
 
 - is stopped at `cpu_seconds` (60), `wall_seconds` (120) and `memory_bytes` (2 GiB of address
   space above the job's); its reply may not exceed `reply_bytes` (64 MiB, a separate cap far
-  below `memory_bytes`) in size, in the number of containers and elements it decodes to (4 Mi),
+  below `memory_bytes`) in size, in the number of containers and elements it decodes to (8 Mi),
   or in nesting (the JSON parser's recursion guard);
 - opens no socket, starts no process or program, and signals no other process — neither directly
   (`kill`, `tgkill`, `tkill`, `rt_*sigqueueinfo`, `pidfd_send_signal`) nor through a descriptor's
@@ -93,7 +93,9 @@ Linux, no seccomp filter for its architecture) also fails the job before any sou
 `isolation = in_process` runs adapters unconfined, by explicit choice. Residual risks: a
 compromised parser can read files the user can read and put them into its own output; and while
 the job decodes one reply it holds it three times (the read buffer, the payload and the text the
-parser reads: up to 3 × `reply_bytes`) plus the Python objects it decodes to, which the 4 Mi value
-cap bounds, not the byte cap, at some 60 to 130 bytes a value. Measured at the defaults, a hostile
-reply peaks the job at about 550 MiB (one object of 4 Mi distinct keys, which the parser memoises
-as it decodes), about 300 to 450 MiB for lists of short strings, and 256 MiB for one 64 MiB string.
+parser reads: up to 3 × `reply_bytes`) plus the Python objects it decodes to, which the 8 Mi value
+cap bounds, not the byte cap. Measured at the defaults, a hostile reply peaks the job at about
+1 GiB (one object of distinct keys filling the byte cap, which the parser memoises as it decodes),
+0.3 to 0.6 GiB for lists of short strings, floats or empty containers, and 256 MiB for one 64 MiB
+string. A lower value cap would refuse legitimate replies first: integer and boolean series cells
+cost 2 to 6 bytes each on the wire.
