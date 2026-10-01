@@ -174,7 +174,10 @@ For sources that describe machines (manifests, robot descriptions, flight logs, 
   Never turn a model name, hostname, topic prefix or folder name into a machine.
 - A robot description (URDF, SDF, MJCF) is a `HardwareConfiguration` with `machine` `NotCovered`, plus a
   `HardwareComponent` per declared part citing its element, and the `FrameGraph` / `FrameTransform`s of
-  its kinematics. Another tool set or revision is another configuration; never edit one.
+  its kinematics. Another tool set or revision is another configuration; never edit one. A part's
+  declared detail is a `HardwareSpecification` of named parameters, a block for another tool a
+  `DescriptionExtension`, and a macro source's expansion a `DescriptionExpansion` (ADR 0039;
+  `neptune.adapters.urdf` is the model).
 - Software: one `SoftwareConfiguration` per declaration of what ran, one item per software unit.
   Put each identity in its own field. Where your format could state an identity and the file does not,
   write `Unknown` citing where you looked and emit `<adapter>.software_identity_missing`.

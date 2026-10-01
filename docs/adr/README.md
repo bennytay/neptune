@@ -38,3 +38,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0031](0031-cache-keys-invalidation-lazy-derivatives-and-collection.md) | The cache: chunk ids as keys, named invalidation rules, lazy derivatives, a report and collection | Accepted; §2 amended by 0033 |
 | [0032](0032-probe-listing-and-archive-inspection-stay-two-passes.md) | The probe's container listing and the archive inspector stay two passes | Accepted |
 | [0033](0033-m2-gate-probing-scratch-short-reads-and-reuse.md) | The M2 gate: the job probes in the sandbox, calls get scratch, short reads are the source's | Accepted |
+| [0039](0039-robot-descriptions-urdf-xacro-and-declared-parameters.md) | Robot descriptions: URDF and Xacro as hardware, frames and declared parameters | Accepted |
