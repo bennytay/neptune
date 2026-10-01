@@ -79,23 +79,27 @@ def _checkpoint_draft(entry: EvidenceRef) -> Draft:
     return draft
 
 
+# The safetensors specification bounds the header at 100 MB; a larger length is not this format.
+_SAFETENSORS_MAX_HEADER: Final = 100_000_000
+
+
 def _detect_safetensors(head: bytes, size: int) -> Detected | None:
     if len(head) < 10:
         return None
     (length,) = struct.unpack_from("<Q", head)
-    if length < 2 or 8 + length > size or head[8] != ord("{"):
+    if not 2 <= length <= _SAFETENSORS_MAX_HEADER or head[8] != ord("{"):
         return None
     if 8 + length <= len(head):
         try:
             header = loads_json(head[8 : 8 + length].decode("utf-8"))
-        except (ValueError, RecursionError):
-            return None
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            header = None
         if isinstance(header, dict) and all(
             key == "__metadata__" or (isinstance(value, dict) and "data_offsets" in value)
             for key, value in header.items()
         ):
             return Detected(VERIFIED, reason("safetensors", "a safetensors header that parses"))
-        return None
+    # A header cut short or damaged is still this format's, and reading it says how.
     return Detected(SIGNATURE, reason("safetensors", "a safetensors header length and JSON start"))
 
 

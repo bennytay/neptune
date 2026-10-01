@@ -49,9 +49,12 @@ def _is_text(head: bytes) -> bool:
 
 # --- package.xml -------------------------------------------------------------------------------
 
-# Leading XML declaration, processing instructions, comments and whitespace, then <package.
+# Leading XML declaration, processing instructions, comments, a doctype and whitespace, then
+# <package.
 _PACKAGE_ROOT: Final = re.compile(
-    rb"(?:\xef\xbb\xbf)?(?:\s+|<\?.*?\?>|<!--.*?-->)*<package[\s>/]", re.DOTALL
+    rb"(?:\xef\xbb\xbf)?(?:\s+|<\?.*?\?>|<!--.*?-->|<!DOCTYPE[^\[>]*(?:\[.*?\])?\s*>)*"
+    rb"<package[\s>/]",
+    re.DOTALL
 )
 
 

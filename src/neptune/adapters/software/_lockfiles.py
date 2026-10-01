@@ -168,11 +168,14 @@ def _npm_entry(
     draft = _package(reading, doc, path, entry, _declared)
     if "name" not in entry:
         draft.name = reading.text(draft, "name", name, name_at)
-    resolved = entry.get("resolved")
-    if isinstance(resolved, str) and resolved.startswith("git+"):
-        commit = _git_fragment(reading, draft, resolved, doc.ref(*path, "resolved"))
-        if commit is not None:
-            draft.commit = commit
+    # A git dependency's URL is its "resolved" (lockfileVersion 2, 3) or its "version" (1).
+    for key in ("resolved", "version"):
+        url = entry.get(key)
+        if isinstance(url, str) and url.startswith("git+"):
+            commit = _git_fragment(reading, draft, url, doc.ref(*path, key))
+            if commit is not None:
+                draft.commit = commit
+                break
     return draft
 
 
