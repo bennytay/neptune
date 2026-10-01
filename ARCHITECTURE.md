@@ -13,7 +13,7 @@ flowchart LR
     CAN["Canonical model<br/>records + provenance"]
     PKG[("Ingest package")]
     VAL["Validation &amp; alignment"]
-    DER["Derived annotations"]
+    DER["Derived annotations<br/>session proposals"]
   end
 
   subgraph D["Downstream, not Neptune"]
@@ -29,7 +29,8 @@ flowchart LR
   RT <-->|commit / reuse by key| WS
   WS --> PKG
   PKG <--> VAL
-  PKG --> DER
+  DISC -->|layout| DER
+  DER <-->|derived tables| PKG
   PKG ==> MEM --> RET --> USE
   DER -.-> MEM
 
@@ -45,8 +46,8 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class CAN,WS,K1 built
-  class DISC,RT,AD,PKG,K2 partial
-  class VAL,DER,K3 todo
+  class DISC,RT,AD,PKG,DER,K2 partial
+  class VAL,K3 todo
   class SB built
   class RAW,MEM,RET,USE ext
   style N fill:#8b949e0f,stroke:#8b949e

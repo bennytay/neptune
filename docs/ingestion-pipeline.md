@@ -12,7 +12,7 @@ together — M2's runtime is complete.
 | 2 | fingerprint | size, magic bytes, streaming sha256 + per-chunk hashes; emit `SourceArtifact` / `SourceRevision` | identity | MVL-2 |
 | 3 | probe | done: `discovery.probe.ProbeEngine` sniffs the head, asks every adapter (crashes isolated), applies the registry's rule, opens zip/tar/gzip/bzip2/xz within `ProbePolicy`, and reports ties, unclaimed sources and container problems as `neptune.probe.*` findings (ADR 0027); the job runs it in one sandboxed call per source and re-derives its reply (ADR 0033 §1) | discovery + adapters | MVL-8, MVL-57 |
 | 4 | inspect | cheap per-source summary (streams, extents, counts) without full parse | adapters | MVL-7 |
-| 5 | group | propose run/session groupings from filesystem signals (v0) and later from evidence (M7) | discovery | MVL-13, MVL-34 |
+| 5 | group | v0 done: `derived.grouping.LayoutGrouper` proposes sessions from the scan's observed layout (`discovery.layout`: locations, links, what names state; never contents or mtimes) by named rules with confidence bands; conflicting readings are contested, never chosen; every file is a member or unassigned; findings `neptune.grouping.*`; proposals reach the package as derived tables (ADR 0036). MVL-34 swaps in the evidence-graph assembler behind the same `Grouper` interface | discovery (layout) + derived (rules) | MVL-13, MVL-34 |
 | 6 | plan | adapters emit chunks with deterministic ids and cost estimates | adapters | MVL-7 |
 | 7 | ingest | done: per-chunk pure parse → canonical records + findings; the job (ADR 0028) reuses every committed chunk by its id, across jobs and roots (ADR 0031), retries a chunk that raises and quarantines its source with a `neptune.runtime.*` finding | runtime + adapters | MVL-6, MVL-9 |
 | 8 | store | done: each chunk's records, findings and sorted series runs are committed to the workspace atomically; each stream's runs are merged once into its series file, kept as a derivative and copied into every package that holds it (ADRs 0025, 0026, 0031) | store | MVL-5, MVL-16, MVL-9 |
@@ -43,7 +43,7 @@ state machine over the stages above, in nine phases (ADR 0028):
 |---|---|---|
 | `discover` | 1 | sweeps the workspace's scratch and staging debris; walks the root; every symlink, special or unreadable entry is discovery's finding (ADR 0029 §1) |
 | `fingerprint` | 2 | hashes every file into the root's persisted ledger, reconciles absences, saves the ledger; a size that changed while hashing is a finding |
-| `inspect` | 3 | reads each distinct source's head once and runs the probe engine over it in one sandboxed call (every adapter's probe, the container listing); selects and configures; a tie, an unclaimed source or a container problem is a `neptune.probe.*` finding (ADR 0033 §1) |
+| `inspect` | 3 | reads each distinct source's head once and runs the probe engine over it in one sandboxed call (every adapter's probe, the container listing); selects and configures; a tie, an unclaimed source or a container problem is a `neptune.probe.*` finding (ADR 0033 §1); then groups the scan's layout into session proposals (stage 5, no adapter call; `JobOptions.grouping` declares sessions that override every rule; ADR 0036) |
 | `plan` | 6 | reuses the workspace's saved plan for (source, transform) or calls `plan`, checks it, saves it |
 | `parse` | 7 | `ingest` on one chunk the workspace has not committed; `attempts` tries (default 2) |
 | `normalize` | 7–8 | `check_chunk_output` plus `seq` unique within the chunk; commit, whole or not at all |
@@ -86,7 +86,7 @@ state machine over the stages above, in nine phases (ADR 0028):
   (skipped, parsed, retried, committed, failed), `probe_failed` (the source's probe call, then
   each adapter that fails on its own), and `sandbox_ready` (the isolation, the limits, the host's
   Landlock ABI, and on a degraded host a `degraded` list of the guarantees it could not give) as
-  `inspect` starts. A sandboxed chunk stopped by a limit is a `limit_exceeded` finding naming the
+  `inspect` starts, and `sessions_proposed` (grouping's counts) as it ends. A sandboxed chunk stopped by a limit is a `limit_exceeded` finding naming the
   limit (`cpu_seconds`, `wall_seconds`, `memory_bytes` or `reply_bytes`). Canonical JSON, no clock:
   the consumer adds one.
 - **Job failure** (`JobError`) is reserved for the job itself: an unreadable root, a destination that
