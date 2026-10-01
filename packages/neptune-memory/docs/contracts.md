@@ -8,6 +8,10 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
 
 - Graph schema and claim model: `GRAPH_SCHEMA_VERSION = 0` (undefined until MVL-105 defines it); consumed by
   Context, Deploy and Learn. [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md).
+  - Contract stub (unversioned until MVL-105): `neptune_memory.schema` — `NodeRef`/`NodeType`/`Tier`, `Claim`
+    and its objects and provenance, `Interval`/`CivilClock`/`LedgerTx`, the predicate registry
+    (`CORE_PREDICATES`, `VOCABULARY_VERSION = 1`) and the superseding resolver (`resolve`, `as_of`).
+    [ADR 0002](adr/0002-graph-tiers-and-the-bi-temporal-claim-model.md).
 
 ## Consumes
 
