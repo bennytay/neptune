@@ -134,11 +134,25 @@ needs, and nothing else decides: no clock, file time or flag.
 
 ## Dry-run
 
-`IngestJob.dry_run()` (ADR 0035) runs `discover`, `fingerprint`, `inspect` and `plan`, then stops:
-state `planned`, a `job_planned` event, no package, never an `ingest` call. It needs no destination;
-the ledger and plans it saves are the ones `run` reuses, and its cache report marks the chunks the
-workspace already holds. The SDK's `dry_run` calls it (`sdk.md`); `explain` (MVL-15) adds adapters'
-`inspect`, grouping and the rendered plan on top. It must never call `ingest`.
+`IngestJob.dry_run()` (ADR 0035, ADR 0044) runs `discover`, `fingerprint`, `inspect` and `plan`, then
+stops: state `planned`, a `job_planned` event, no package, never an `ingest` call. It needs no
+destination and **keeps nothing**: the ledger is reconciled in memory and new plans are made in memory,
+neither saved (saved plans are read and reused); its cache report marks the chunks the workspace already
+holds. Each selected source is also given to its adapter's `inspect`, sandboxed; a failed `inspect` is
+shown, never quarantines. The outcome carries an `Explanation` (`neptune.runtime.explain`):
+
+- inventory (files, links, skipped entries), and per distinct source its status, detected format,
+  every adapter's verdict (`selected`/`tied`/`outranked`/`declined`/`failed`, confidence, reasons,
+  why), `inspect` summary, and plan (rule, chunks, committed, bytes left to read);
+- the session grouping (proposals with reasons, contested readings, unassigned files);
+- work left (chunks, bytes, `ingest` calls) and heavy sources (≥ 256 MiB or ≥ 1024 chunks left,
+  non-streaming memory growth, declared memory above the sandbox limit);
+- everything left out (unsupported, ambiguous, quarantined, unreadable, skipped, links) and the
+  ambiguity findings.
+
+`dumps()` is canonical JSON (`neptune.explanation/1`), byte-identical for the same root, adapters,
+config and workspace contents; `render()` is the same for people. The SDK's `dry_run` returns it as
+`IngestResult.explanation` (`sdk.md`).
 
 ## Determinism contract
 

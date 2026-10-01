@@ -27,7 +27,7 @@ print(result.package, result.receipt)
 | `Neptune` | `AsyncNeptune` | Does |
 |---|---|---|
 | `ingest(source, destination, *, on_event, cancel)` | `await ingest(...)` | the whole job → `IngestResult` |
-| `dry_run(source, *, on_event, cancel)` | `await dry_run(...)` | discover → plan, nothing parsed → `planned` |
+| `dry_run(source, *, on_event, cancel)` | `await dry_run(...)` | discover → plan + `inspect`, nothing parsed or kept → `planned`, with `explanation` |
 | `start(source, destination, *, cancel)` | `start(...)` | the job on its own thread → `Ingestion` / `AsyncIngestion` |
 | `start_dry_run(source, *, cancel)` | `start_dry_run(...)` | the dry run on its own thread |
 
@@ -76,11 +76,32 @@ async def ingest_with_progress() -> IngestResult:
 | `read_receipt()` | the package's receipt, every adapter's findings included, checked against `receipt` |
 | `read_package()` | the whole package, read and verified |
 | `cache` | per source: adapter, plan and chunks with hit/miss rules; calls per adapter method |
+| `explanation` | a planned dry run's `Explanation` (ADR 0044); `None` otherwise |
 | `ingested`, `job`, `destination`, `durations` | as in `JobOutcome` |
 
 Same sources + adapters + config ⇒ same `receipt` and `package`, sync or async, cold or warm workspace,
 whatever earlier dry runs or ingests saw: a package lists only its own job's scan (ADR 0035 §9).
 A dry run's `cache` says what is left: chunks with rule `committed` are done, the rest will be parsed.
+
+## Explain before ingesting
+
+```python
+from pathlib import Path
+from neptune.sdk import Neptune
+
+plan = Neptune().dry_run("runs/2026-09-30")
+print(plan.explanation.render())            # for people
+Path("plan.json").write_bytes(plan.explanation.dumps())  # canonical JSON, neptune.explanation/1
+```
+
+- What it holds: the inventory; per source its detected format, every adapter's verdict with probe
+  confidence, reasons and why it won or lost, the adapter's `inspect` summary and the plan; the
+  session grouping with reasons and contested readings; work left and heavy sources; everything left
+  out (unsupported, ambiguous, quarantined, unreadable, skipped, links) with why. ADR 0044.
+- It parses nothing (`ingest` is never called) and **keeps nothing** in the workspace: no ledger, no
+  plan. So the ingest after it plans again, and explaining never changes any later package.
+- Byte-identical for the same folder, adapters, config and workspace contents; no job id, clock or
+  absolute path inside.
 
 ## Adapters and options
 
