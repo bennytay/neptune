@@ -223,14 +223,15 @@ class JobOptions:
 
 @dataclass(frozen=True)
 class JobOutcome:
-    """How a job ended: committed with a package, or cancelled at a checkpoint without one.
+    """How a job ended: committed with a package, cancelled at a checkpoint without one, or
+    planned (a dry run, ADR 0035): stopped after ``plan``, without one.
 
     ``cache`` says what the job reused and recomputed, and why (ADR 0031 §5).
     """
 
     state: JobState
     job: str
-    destination: Path
+    destination: Path | None  # None for a dry run built without one
     package: ContentId | None
     ingested: tuple[tuple[ContentId, RecordId], ...]
     findings: tuple[IngestFinding, ...]
@@ -437,15 +438,16 @@ def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[JsonObje
 class IngestJob:
     """One ingest of ``root`` into a package at ``destination``, through ``workspace``.
 
-    Build it, then ``run`` it once. ``on_event`` receives every ``JobEvent`` as it happens;
-    ``cancel`` is checked at every checkpoint. Problems with one source become findings in the
-    package; problems with the job raise ``JobError``.
+    Build it, then ``run`` it once, or ``dry_run`` it once to see what ``run`` would ingest
+    (ADR 0035); a dry run needs no destination. ``on_event`` receives every ``JobEvent`` as it
+    happens; ``cancel`` is checked at every checkpoint. Problems with one source become findings
+    in the package; problems with the job raise ``JobError``.
     """
 
     def __init__(
         self,
         root: Path,
-        destination: Path,
+        destination: Path | None,
         workspace: Workspace,
         registry: AdapterRegistry,
         options: JobOptions | None = None,
@@ -454,10 +456,10 @@ class IngestJob:
         cancel: threading.Event | None = None,
     ) -> None:
         self.root = Path(root)
-        self.destination = Path(destination)
+        self.destination = Path(destination) if destination is not None else None
         if not self.root.is_dir():
             raise JobError(f"{self.root} is not a directory")
-        if self.destination.exists():
+        if self.destination is not None and self.destination.exists():
             raise JobError(f"{self.destination} exists; a package is written once")
         self.workspace = workspace
         self.registry = registry
@@ -523,6 +525,22 @@ class IngestJob:
 
     def run(self) -> JobOutcome:
         """Run every phase. Returns when the package is in place or the job was cancelled."""
+        if self.destination is None:
+            raise JobError("a job that writes a package needs a destination")
+        return self._execute(dry=False)
+
+    def dry_run(self) -> JobOutcome:
+        """Run ``discover``, ``fingerprint``, ``inspect`` and ``plan``, then stop (ADR 0035).
+
+        What ``run`` would ingest: every source's selection, its plan and which of its chunks
+        the workspace already holds (``JobOutcome.cache``), and the findings so far. No chunk is
+        parsed, nothing is assembled and no package is written, so the outcome is ``planned``
+        (or ``cancelled``) with no package. The ledger and plans it saves are the ones ``run``
+        saves, so a later ``run`` reuses them. MVL-15 adds adapters' ``inspect`` and grouping.
+        """
+        return self._execute(dry=True)
+
+    def _execute(self, *, dry: bool) -> JobOutcome:
         if self.state is not JobState.PENDING:
             raise JobError("a job runs once")
         self.state = JobState.RUNNING
@@ -530,7 +548,7 @@ class IngestJob:
         try:
             with self.workspace.in_use():  # collection waits until the job is done
                 self._sweep()
-                package = self._phases(started)
+                package = self._phases(started, dry=dry)
         except _Cancelled:
             self._discard()
             self.state = JobState.CANCELLED
@@ -547,6 +565,11 @@ class IngestJob:
             self._discard()  # the process is going down: leave nothing half-staged
             self.state = JobState.FAILED
             raise
+        if package is None:  # a dry run, stopped after plan
+            self.state = JobState.PLANNED
+            planned = sum(1 for item in self._sources if item.planned)
+            self._emit(events.JOB_PLANNED, {"sources": planned})
+            return self._outcome(None)
         self.state = JobState.COMMITTED
         return self._outcome(package)
 
@@ -564,12 +587,14 @@ class IngestJob:
             raise JobError(f"the workspace cannot be swept: {exc}") from exc
         self._emit(events.WORKSPACE_SWEPT, {"scratch": scratch, "staging": staging})
 
-    def _phases(self, started: str) -> ContentId:
+    def _phases(self, started: str, *, dry: bool) -> ContentId | None:
         source = self._local = LocalSource(self.root)
         entries = self._discover(source)
         ledger = self._fingerprint(source, entries)
         self._inspect(source)
         self._plan(source)
+        if dry:
+            return None
         self._ingest(source)
         self._assemble(ledger)
         receipt = self._validate()
@@ -1611,6 +1636,7 @@ class IngestJob:
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
             ]
+            assert self.destination is not None  # ``run`` refuses to start without one
             try:
                 self._staged = stage(
                     self.destination, self.workspace, ledger, self._ingested, extra=extra
