@@ -67,9 +67,13 @@ the wrong size, a raise naming another reader) and the call failed like any othe
     directory a `plan` or `ingest` call may write temporary files in (a spool for a nested
     archive, a decoder that wants a file), removed when the call returns; each file is at most
     `scratch_bytes` (1 GiB by default; past it the call stops with `limit_exceeded`). It is
-    `None` for `probe` and `inspect`, outside a job, and on a host without Landlock: an adapter
-    that needs scratch and has none reports that as a finding. Output never depends on what a
-    previous call left, since nothing is left.
+    `None` for `probe` and `inspect`, outside a job, with `scratch_bytes` 0, and on a host without
+    Landlock. An adapter that needs scratch and has none raises `contract.ScratchUnavailableError`
+    (a `ContractError`), never a finding: chunk ids do not name scratch, so a finding would be
+    committed and reused by a later run that has scratch, and that package would differ from a
+    fresh workspace's. The plan or chunk fails for that run only (`plan_failed`, `chunk_failed`
+    with `cause` `scratch_unavailable`, never retried) and nothing of it is committed. Output never
+    depends on scratch: not on whether it was given, nor on what a previous call left there.
 
 ## Config, chunks and output (ADR 0024)
 

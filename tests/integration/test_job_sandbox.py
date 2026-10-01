@@ -347,6 +347,49 @@ def test_a_call_spools_through_its_scratch_and_a_flood_is_the_scratch_limit(
     ]
 
 
+@pytest.mark.skipif(not confine.landlock_abi(), reason="no Landlock: no run has scratch")
+def test_a_call_that_needs_scratch_and_has_none_fails_for_that_run_only(tmp_path: Path) -> None:
+    """Law 11: an adapter given no scratch (here ``scratch_bytes`` 0; a degraded host is the
+    same) raises ``ScratchUnavailableError``. Its plan or chunk fails for that run with the
+    cause ``scratch_unavailable``, never retried, and nothing of it is committed, so a later run
+    that has scratch computes it afresh and writes what a fresh workspace writes: scratch is not
+    part of chunk identity, and nothing committed depends on it (ADR 0033 §2, §6)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    (root / "spool.hostile").write_bytes(HOSTILE.hostile("before", "spool", "after"))
+    (root / "plan.hostile").write_bytes(HOSTILE.hostile("plan-spool", "x"))
+    starved = Run(root, tmp_path, sandboxed(scratch_bytes=0), name="starved")
+    assert starved.codes() == ["neptune.runtime.chunk_failed", "neptune.runtime.plan_failed"]
+    chunk = starved.finding("neptune.runtime.chunk_failed")
+    spooled = chunk.details["chunk"]
+    assert chunk.details == {
+        "adapter": "hostile",
+        "attempts": 1,  # a contract error: never retried
+        "cause": "scratch_unavailable",
+        "chunk": spooled,
+        "error": "ScratchUnavailableError",
+        "step": "ingest",
+        "version": "1.0.0",
+    }
+    assert starved.finding("neptune.runtime.plan_failed").details == {
+        "adapter": "hostile",
+        "cause": "scratch_unavailable",
+        "error": "ScratchUnavailableError",
+        "step": "plan",
+        "version": "1.0.0",
+    }
+    assert not starved.of("chunk_retried")
+    assert isinstance(spooled, str) and not starved.workspace.committed(spooled)
+    assert starved.committed_for(starved.source("spool.hostile")) == 3  # every other chunk
+    assert [source for source, _ in starved.outcome.ingested] == [starved.source("notes.txt")]
+    sound = Run(root, tmp_path, sandboxed(), name="sound")  # the same workspace, with scratch
+    fresh = Run(root, tmp_path, sandboxed(), name="fresh", home="fresh-home")
+    assert sound.codes() == [] and sound.workspace.committed(spooled)
+    assert sound.outcome.package == fresh.outcome.package
+    assert {"before", "spool", "after", "plan-spool", "x"} <= set(sound.texts())
+
+
 def test_a_probe_that_crashes_takes_only_its_adapter_out(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()

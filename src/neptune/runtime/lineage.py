@@ -49,6 +49,10 @@ PLAN_FAILED: Final = f"{RUNTIME_ID}.plan_failed"
 SOURCE_CHANGED: Final = f"{RUNTIME_ID}.source_changed"
 SOURCE_UNREADABLE: Final = f"{RUNTIME_ID}.source_unreadable"
 
+# The ``cause`` a ``plan_failed`` or ``chunk_failed`` names when the call raised
+# ``ScratchUnavailableError``: it needed scratch space and had none (law 11, ADR 0033 §2).
+SCRATCH_UNAVAILABLE: Final = "scratch_unavailable"
+
 FINDING_CODES: Final[tuple[Documented, ...]] = (
     Documented(
         ADAPTER_CRASHED,
@@ -58,14 +62,15 @@ FINDING_CODES: Final[tuple[Documented, ...]] = (
     ),
     Documented(
         CHUNK_FAILED,
-        "an adapter raised, or broke the contract, on a chunk after every attempt; the source is"
-        " not in this package (failed, error)",
+        "an adapter raised, or broke the contract, on a chunk after every attempt (cause"
+        " scratch_unavailable: the call needed scratch space and had none); the source is not in"
+        " this package (failed, error)",
     ),
     Documented(
         LIMIT_EXCEEDED,
         "an adapter's plan or a chunk's ingest was stopped at a sandbox limit (cpu_seconds,"
-        " wall_seconds, memory_bytes, reply_bytes); never retried in the job; the source is not"
-        " in this package (failed, error)",
+        " wall_seconds, memory_bytes, reply_bytes, scratch_bytes); never retried in the job; the"
+        " source is not in this package (failed, error)",
     ),
     Documented(
         OUTPUT_INVALID,
@@ -74,7 +79,8 @@ FINDING_CODES: Final[tuple[Documented, ...]] = (
     ),
     Documented(
         PLAN_FAILED,
-        "an adapter raised, or broke the contract, while planning a source; the source is not in"
+        "an adapter raised, or broke the contract, while planning a source (cause"
+        " scratch_unavailable: the call needed scratch space and had none); the source is not in"
         " this package (failed, error)",
     ),
     Documented(

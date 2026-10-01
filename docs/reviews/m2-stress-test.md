@@ -118,7 +118,9 @@ concurrent job's sweep delete it mid-call).
 - Probing and archive inspection stay two passes; the inspector belongs to an archive adapter's
   call (ADR 0032).
 - One probe call per source with a per-adapter fallback, its reply re-derived (ADR 0033 §1).
-- Scratch for `plan` and `ingest` only, per file `scratch_bytes`, none without Landlock (§2).
+- Scratch for `plan` and `ingest` only, per file `scratch_bytes`, none without Landlock (§2). An
+  adapter that needs scratch and has none raises `ScratchUnavailableError`, so nothing that
+  depends on scratch is ever committed (law 11).
 - A short read is the source's, never retried, when the source no longer matches its artifact,
   and the adapter's otherwise; walk entries are discovery's findings (§3).
 - A degraded run's chunks may be reused by a sound run: output never depended on isolation; the

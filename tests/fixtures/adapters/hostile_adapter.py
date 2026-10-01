@@ -29,9 +29,10 @@ Chunk 0 emits the ``DocumentRecord``; every other chunk holds one line and emits
 - ``spool``: not an attack: spools 2 MiB through the call's scratch directory, as an archive
   adapter spools a nested member, and reads it back (a block ``spool``); ``flood``: writes one
   file past the scratch budget; ``unlock``: removes the lock of the directory its scratch is in.
+  A call given no scratch raises ``ScratchUnavailableError`` for these, as law 11 asks.
 
-A first line ``plan-hang`` or ``plan-segfault`` attacks ``plan`` instead, and a line
-``probe-segfault`` anywhere in the head makes ``probe`` segfault.
+A first line ``plan-hang``, ``plan-segfault`` or ``plan-spool`` does the same in ``plan``
+instead, and a line ``probe-segfault`` anywhere in the head makes ``probe`` segfault.
 """
 
 import ctypes
@@ -61,6 +62,7 @@ from neptune.adapters.contract import (
     ProbeReason,
     ProbeResult,
     Resources,
+    ScratchUnavailableError,
     SourceReader,
     make_chunk,
     scratch_directory,
@@ -172,14 +174,14 @@ def attack(text: str) -> str:
     elif text == "unlock":
         directory = scratch_directory()
         if directory is None:
-            raise RuntimeError("this call has no scratch directory")
+            raise ScratchUnavailableError()
         (directory.parent / ".lock").unlink()
     elif text == "nap":
         time.sleep(2)
     elif text in ("spool", "flood"):
         directory = scratch_directory()
         if directory is None:
-            raise RuntimeError("this call has no scratch directory")
+            raise ScratchUnavailableError()
         size = 2 * 1024 * 1024 if text == "spool" else 2 * 1024 * 1024 * 1024
         with tempfile.SpooledTemporaryFile(max_size=1024 * 1024, dir=str(directory)) as spooled:
             block = b"s" * (1024 * 1024)
@@ -216,7 +218,7 @@ class HostileAdapter:
 
     def plan(self, source: SourceReader, config: AdapterConfig) -> Plan:
         lines = _lines(source)
-        if lines and lines[0][1] in (b"plan-hang", b"plan-segfault"):
+        if lines and lines[0][1] in (b"plan-hang", b"plan-segfault", b"plan-spool"):
             attack(lines[0][1].decode("ascii").removeprefix("plan-"))
         chunks = [make_chunk(source, config, {"part": "document"}, source.size)]
         for order, (offset, line) in enumerate(lines):

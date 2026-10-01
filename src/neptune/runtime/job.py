@@ -68,6 +68,7 @@ from neptune.adapters.contract import (
     Plan,
     ProbeHints,
     ProbeResult,
+    ScratchUnavailableError,
     chunk_from_json,
     configure,
 )
@@ -286,13 +287,16 @@ def _now() -> str:
 
 
 def _failure(raised: Raised, call: Step, result: Step, check: Step) -> Failure:
-    """What an adapter call that raised failed as: at ``call`` with the exception's class; at
+    """What an adapter call that raised failed as: at ``call`` with the exception's class, and
+    the cause ``scratch_unavailable`` if that is ``ScratchUnavailableError`` (law 11); at
     ``result`` naming the type, if it returned the wrong one; at ``check`` if what it returned
     could not cross the sandbox, as the contract check that would have refused it."""
     if raised.returned is not None:
         return Failure(result, raised.error, {"returned": raised.returned})
     if raised.unencodable:
         return Failure(check, raised.error)
+    if raised.contract and raised.error == ScratchUnavailableError.__name__:
+        return Failure(call, raised.error, {"cause": lineage.SCRATCH_UNAVAILABLE})
     return Failure(call, raised.error)
 
 

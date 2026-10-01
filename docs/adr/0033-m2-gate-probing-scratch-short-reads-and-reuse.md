@@ -70,8 +70,15 @@ them did not all hold, and the coordinator recorded follow-ups the gate had to l
    - a host without Landlock (degraded, ABI 0) gives no call scratch: `RLIMIT_FSIZE` 0 is then
      the only bar on writes;
    - `probe` and `inspect` get none: they read a head or summarise.
-   The ABI gains `neptune.adapters.contract.scratch_directory()`: the call's directory or `None`.
-   It adds a function, not a parameter, so `ABI_VERSION` stays 1; output must not depend on it.
+   The ABI gains `neptune.adapters.contract.scratch_directory()`: the call's directory or `None`
+   (also with `scratch_bytes` 0), and `ScratchUnavailableError`, a `ContractError` an adapter
+   that needs scratch and has none must raise (law 11). It adds a function and an exception, not
+   a parameter, so `ABI_VERSION` stays 1. Output must not depend on scratch, including whether it
+   was given: a "no scratch" finding would be committed under a chunk id that does not name
+   scratch, so a later run with scratch would reuse it and differ from a fresh workspace
+   (non-negotiable 5). Raising commits nothing; the plan or chunk fails for that run only
+   (`plan_failed`, `chunk_failed` with `cause` `scratch_unavailable`, never retried), and the
+   next run with scratch computes it. Scratch availability stays out of chunk identity.
 3. **Short reads, changed sources and walk entries are the source's findings.** `Raised` carries
    a well-formed `ShortReadError`'s `(source, offset, length)` across the sandbox. The job's
    `LocalReader` cannot serve a short read (a piece that is not all there fails its hash and
@@ -106,7 +113,9 @@ them did not all hold, and the coordinator recorded follow-ups the gate had to l
    anything the user can write), which reaches every workspace entry and every source alike, not
    the chunks that run made; partitioning chunk ids by isolation would not contain it. A
    workspace a degraded run used is trusted as far as the user trusts that run: run degraded in a
-   workspace of its own when that matters.
+   workspace of its own when that matters. The one thing a degraded host changes for a call is
+   scratch (none is given), and an adapter that needs it raises rather than committing anything
+   (§2, law 11), so no committed chunk records the isolation it ran under.
 
 ## Alternatives considered
 
@@ -126,6 +135,10 @@ them did not all hold, and the coordinator recorded follow-ups the gate had to l
   the call bound it instead (an open risk in the review).
 - **`scratch` as a parameter of `plan` and `ingest`.** A signature change, so ABI 2 and every
   adapter touched, for something most adapters never use.
+- **A finding when scratch is missing** (this ADR's first text). Committed output would depend on
+  the host and the limits while chunk ids do not, so a later sound run would reuse a "no
+  scratch" chunk. **Scratch availability in the chunk id** instead: new record ids for the same
+  evidence, and a recomputation of every chunk of every adapter that never uses scratch.
 - **Keeping `entry_skipped` beside discovery's findings.** Two findings for one entry, from two
   producers, one of which did not see it.
 - **Retrying a short read.** The bytes behind it are the same on the next attempt.

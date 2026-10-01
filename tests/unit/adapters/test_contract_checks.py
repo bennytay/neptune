@@ -18,8 +18,10 @@ from neptune.adapters.contract import (
     ChunkOutput,
     ContractError,
     Plan,
+    ScratchUnavailableError,
     configure,
     make_chunk,
+    scratch_granted,
 )
 from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.text import DESCRIPTOR, TextAdapter
@@ -45,15 +47,16 @@ TEXT: Final = BytesReader(b"first paragraph\n\nsecond\n")
 OTHER: Final = BytesReader(b"another source\n")
 
 
-def _tally() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("tally_adapter", FIXTURES / "tally_adapter.py")
+def _fixture(name: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, FIXTURES / f"{name}.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-TALLY: Final = _tally()
+TALLY: Final = _fixture("tally_adapter")
+HOSTILE: Final = _fixture("hostile_adapter")  # only its scratch lines run here, never an attack
 TALLY_SOURCE: Final = BytesReader(b"TALLY1\n100 5\n200 6\n300 7\n")
 
 
@@ -287,3 +290,27 @@ def test_a_stream_record_is_what_series_rows_are_checked_against() -> None:
     for batch in batches(output):
         for row in batch.rows():
             stream.check_row(row)
+
+
+# --- Scratch (law 11) ----------------------------------------------------------------------------
+
+
+def test_an_adapter_that_needs_scratch_raises_without_it_and_never_reports_a_finding(
+    tmp_path: Path,
+) -> None:
+    """Law 11: given scratch, the output passes every check; given none, the call raises
+    ``ScratchUnavailableError``, a contract error, so no output exists that could be committed
+    and later reused by a run that has scratch (ADR 0033 §2)."""
+    source = BytesReader(HOSTILE.hostile("before", "spool"))
+    planned = BytesReader(HOSTILE.hostile("plan-spool", "x"))
+    with scratch_granted(tmp_path):
+        spooled = ingest_source(HOSTILE.HostileAdapter(), source)
+        ingest_source(HOSTILE.HostileAdapter(), planned)
+    assert not spooled.findings()
+    blocks = [r.text for r in spooled.records() if isinstance(r, DocumentBlock)]
+    assert Known("spool") in blocks
+    assert list(tmp_path.iterdir()) == []  # the spool is gone with the call
+    for reader in (source, planned):
+        with pytest.raises(ScratchUnavailableError) as raised:
+            ingest_source(HOSTILE.HostileAdapter(), reader)  # outside a job: no scratch
+        assert isinstance(raised.value, ContractError)

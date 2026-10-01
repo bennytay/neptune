@@ -72,9 +72,11 @@ state machine over the stages above, in nine phases (ADR 0028):
   `JobOptions(isolation=Isolation.IN_PROCESS)` runs adapters in the job's process instead.
   Each `plan` and `ingest` call gets a fresh scratch directory under `<workspace>/scratch`
   (`contract.scratch_directory()`), the only place it may write, removed when it returns; a
-  file past `scratch_bytes` is `limit_exceeded` (ADR 0033 §2). If a source's probe call dies,
-  each adapter is asked again on its own, and a container it was listing is left unopened
-  (`neptune.probe.inspection_failed`).
+  file past `scratch_bytes` is `limit_exceeded`, and a call that needs scratch and has none
+  raises `ScratchUnavailableError`: `plan_failed` or `chunk_failed` with `cause`
+  `scratch_unavailable`, never retried, nothing committed (ADR 0033 §2). If a source's probe
+  call dies, each adapter is asked again on its own, and a container it was listing is left
+  unopened (`neptune.probe.inspection_failed`).
 - **Cancellation.** A `threading.Event`, checked before each source, chunk and phase from `inspect`
   on (the walk and its ledger always finish). The chunk in hand finishes and commits; a staged
   package is discarded; the outcome is `cancelled` with no package.

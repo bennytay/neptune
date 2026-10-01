@@ -124,6 +124,21 @@ READ_SIZE: Final = 1024 * 1024
 _SCRATCH: Final[ContextVar[Path | None]] = ContextVar("neptune_adapter_scratch", default=None)
 
 
+class ScratchUnavailableError(ContractError):
+    """A ``plan`` or ``ingest`` call needs scratch space and was given none (law 11, ADR 0033 §2).
+
+    Raise it; never report the absence as a finding. A chunk's id does not name whether its call
+    had scratch, so a finding saying it had none would be committed, and reused by a later run
+    that has scratch, whose package would then differ from a fresh workspace's. Raised, nothing
+    of the call is kept: the runtime fails the plan or chunk for this run (``plan_failed``,
+    ``chunk_failed``, with ``cause`` ``scratch_unavailable``), never retries it, and the next run
+    that has scratch computes it afresh.
+    """
+
+    def __init__(self, message: str = "this call needs scratch space and was given none") -> None:
+        super().__init__(message)
+
+
 def scratch_directory() -> Path | None:
     """The empty private directory this call may write temporary files in, or ``None``.
 
@@ -132,8 +147,9 @@ def scratch_directory() -> Path | None:
     a decoder that wants a file. Nothing in it outlives the call, so output never depends on it.
     In the sandbox it is the only place a call can write, each file at most ``scratch_bytes``
     (``neptune.runtime.sandbox.Limits``). ``None`` for ``probe`` and ``inspect``, outside a job,
-    and on a host without Landlock, where the sandbox cannot confine writes to one directory:
-    an adapter that needs scratch and has none reports that as a finding.
+    with ``scratch_bytes`` 0, and on a host without Landlock, where the sandbox cannot confine
+    writes to one directory: an adapter that needs scratch and has none raises
+    ``ScratchUnavailableError``.
     """
     return _SCRATCH.get()
 
