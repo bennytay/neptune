@@ -13,9 +13,10 @@ execution in the job's process.
 - Plans travel as their chunks' ``to_json`` and findings; probe results as their ``to_json``.
 
 A decoder raises on anything it does not recognise; the sandbox reports that as a crash. The byte
-size of a reply is already capped (``Limits.reply_bytes``); the decode is bounded in count too, so
-a reply that stays under the byte cap yet packs it with millions of empty containers or bare
-numbers is refused (``ReplyTooLarge``) and reported as ``Limit.REPLY``, not decoded.
+size of a reply is already capped (``Limits.reply_bytes``); the decode is bounded in count and in
+depth too, so a reply that stays under the byte cap yet packs it with millions of empty containers
+or short strings, or nests past the parser's recursion guard, is refused (``ReplyTooLarge``) and
+reported as ``Limit.REPLY``, never decoded and never a crash that is retried.
 """
 
 import json
@@ -101,7 +102,10 @@ def _loads(data: bytes) -> object:
         upper_bound = data.count(b",") + data.count(b"[") + data.count(b"{")
         if upper_bound > _MAX_REPLY_NODES:  # might be over: the string-aware scan is exact
             _refuse_overlong(data)
-    return json.loads(data)
+    try:
+        return json.loads(data)
+    except RecursionError:  # nested past the parser's recursion guard, well under the node cap
+        raise ReplyTooLarge("a reply nested too deeply to decode is refused") from None
 
 
 def _dumps(value: object) -> bytes:

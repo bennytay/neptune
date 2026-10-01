@@ -118,6 +118,23 @@ def test_a_bounded_decode_refuses_a_reply_packed_with_values() -> None:
     assert wire._loads(b"[]") == [] and wire._loads(b'{"a":1}') == {"a": 1}
 
 
+@pytest.mark.parametrize("opener", [b"[", b'{"a":'])
+def test_a_bounded_decode_refuses_a_reply_nested_too_deep(opener: bytes) -> None:
+    """Far under the node cap, a reply nested past the parser's recursion guard is the reply's
+    limit (``ReplyTooLarge``), not a ``RecursionError`` the runner would report as a crash and
+    retry; shallow nesting still decodes."""
+    closer = b"]" if opener == b"[" else b"}"
+    depth = 100_000
+    deep = opener * depth + b"0" + closer * depth
+    assert deep.count(b"[") + deep.count(b"{") < wire._MAX_REPLY_NODES
+    with pytest.raises(ReplyTooLarge):
+        wire._loads(deep)
+    with pytest.raises(ReplyTooLarge):
+        wire.decode_output(deep)
+    shallow = opener * 200 + b"0" + closer * 200
+    assert wire._loads(shallow) is not None
+
+
 SCALARS: Final = {
     ColumnType.BOOL: st.booleans(),
     ColumnType.INT8: st.integers(-(2**7), 2**7 - 1),
@@ -232,11 +249,10 @@ def test_a_malformed_series_reply_is_refused(column: dict[str, object], why: str
         b'{"findings": [], "records": [{"kind": "document_record"}], "series": []}',
         b'{"findings": [{"kind": "ingest_finding"}], "records": [], "series": []}',
         b'{"findings": [], "records": [], "series": [{"columns": [], "stream": "x"}]}',
-        b"[" * 100_000 + b"]" * 100_000,
     ],
 )
 def test_a_malformed_output_reply_is_refused(data: bytes) -> None:
-    with pytest.raises((ValueError, TypeError, KeyError, RecursionError, ContractError)):
+    with pytest.raises((ValueError, TypeError, KeyError, ContractError)):
         wire.decode_output(data)
 
 

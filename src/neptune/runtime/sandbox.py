@@ -83,7 +83,7 @@ class Limit(StrEnum):
     CPU = "cpu_seconds"
     WALL = "wall_seconds"
     MEMORY = "memory_bytes"
-    REPLY = "reply_bytes"  # the reply's size, and the count of values it decodes to, are capped
+    REPLY = "reply_bytes"  # the reply's size, and the count and depth of what it decodes to
 
 
 @dataclass(frozen=True)
@@ -237,9 +237,10 @@ class SandboxError(Exception):
 
 
 class ReplyTooLarge(Exception):
-    """A reply within the byte cap still holds more containers or elements than a decode may
-    build. Raised by a codec's ``decode`` (``neptune.runtime.wire``) and turned into an
-    ``Exceeded(Limit.REPLY)`` by the runner, so the chunk fails and the job carries on."""
+    """A reply within the byte cap still holds more containers or elements, or nests deeper, than
+    a decode may build. Raised by a codec's ``decode`` (``neptune.runtime.wire``) and turned into
+    an ``Exceeded(Limit.REPLY)`` by the runner, so the chunk fails, unretried, and the job carries
+    on."""
 
 
 @dataclass(frozen=True)
@@ -587,7 +588,9 @@ class Subprocess:
                 return decode_raised(payload)
             if tag == _OUT_OF_MEMORY and not payload:
                 return Exceeded(Limit.MEMORY, limits.memory_bytes)
-        except ReplyTooLarge:  # too many containers or elements to build: the reply's own cap
+        except (ReplyTooLarge, RecursionError):  # too many values, or nested too deep, to build
+            # A RecursionError is the reply's nesting, met as the model rebuilds it from parsed
+            # JSON; the same bytes would meet it again, so it is the reply's limit, not a crash.
             return Exceeded(Limit.REPLY, limits.reply_bytes)
         except Exception:  # any failure to decode: the reply is not one a sound child writes
             pass

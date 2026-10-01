@@ -281,6 +281,28 @@ def test_a_reply_that_packs_the_byte_cap_with_values_is_refused_not_decoded() ->
     assert box.call(lambda: [], deep_codec) == Exceeded(Limit.REPLY, 128 * MIB)
 
 
+def rebuild_without_end(data: bytes) -> object:
+    """A decode that parses, then recurses as a rebuild of deeply nested JSON would."""
+
+    def descend(value: object) -> object:
+        return descend([value])
+
+    return descend(wire._loads(data))
+
+
+def test_a_reply_nested_too_deep_is_the_reply_limit_not_a_crash(box: Subprocess) -> None:
+    # Far under the node cap (200 KB), yet nested past the parser's recursion guard: the reply's
+    # limit, never a crash, which the job would retry only to meet the same bytes again. The same
+    # holds where the nesting strikes while the model rebuilds what parsed.
+    deep = b"[" * 100_000 + b"]" * 100_000
+    assert box.call(lambda: [], Codec(object, lambda _: deep, wire._loads)) == Exceeded(
+        Limit.REPLY, box.limits.reply_bytes
+    )
+    rebuilt = box.call(lambda: [], Codec(object, lambda _: b"[]", rebuild_without_end))
+    assert rebuilt == Exceeded(Limit.REPLY, box.limits.reply_bytes)
+    assert box.call(lambda: "fine", TEXT) == Returned("fine")  # the next call is unharmed
+
+
 def test_outcomes_are_deterministic(box: Subprocess) -> None:
     def calls() -> list[object]:
         return [
