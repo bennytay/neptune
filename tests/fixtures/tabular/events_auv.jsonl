@@ -1,0 +1,5 @@
+{"t":0,"kind":"dive","depth_m":0.0,"gps":null}
+{"t":5,"kind":"dive","depth_m":12.5,"sensors":{"ctd":{"temp_c":9.5,"sal":35.1}}}
+
+{"t":9,"kind":"fault","code":18446744073709551615,"detail":"","legs":[1,2.5,true]}
+{"t":12,"kind":"surface","big":123456789012345678901234567890}

@@ -427,7 +427,9 @@ def _rows_shape(values: list[object | None]) -> str:
         return "damaged"
     if all(isinstance(v, _Members) for v in values) or all(type(v) is list for v in values):
         return "records"
-    return "scalars"
+    # The first row says what the file is: records followed by a stray scalar or another kind of
+    # container are a damaged table; a first row that is a scalar is not a table at all.
+    return "damaged" if isinstance(values[0], list) else "scalars"
 
 
 def _line_shape(text: bytes, complete: bool) -> Shape | None:
@@ -439,9 +441,8 @@ def _line_shape(text: bytes, complete: bool) -> Shape | None:
     values = [_parsed(text[e.start : e.end]) for e in found[:PROBE_ROWS]]
     if not isinstance(values[0], list):  # _Members is a list too
         return None
-    shape = _rows_shape(values)
     reason = f"{len(values)} lines of the head are JSON texts, one per line"
-    return Shape(Layout.JSON_LINES, "damaged" if shape == "scalars" else shape, reason)
+    return Shape(Layout.JSON_LINES, _rows_shape(values), reason)
 
 
 def classify(head: bytes, complete: bool) -> Shape:
