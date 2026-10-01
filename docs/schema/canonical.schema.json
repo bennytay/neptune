@@ -285,6 +285,12 @@
         "document"
       ]
     },
+    "CollectionType": {
+      "enum": [
+        "mapping",
+        "sequence"
+      ]
+    },
     "ComponentCategory": {
       "enum": [
         "link",
@@ -297,9 +303,207 @@
         "tool"
       ]
     },
+    "ConfigAlias": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor": {
+          "type": "string"
+        },
+        "target": {
+          "items": {
+            "type": [
+              "string",
+              "integer"
+            ]
+          },
+          "type": "array"
+        },
+        "type": {
+          "const": "alias"
+        }
+      },
+      "required": [
+        "anchor",
+        "target",
+        "type"
+      ],
+      "type": "object"
+    },
+    "ConfigCollection": {
+      "additionalProperties": false,
+      "properties": {
+        "length": {
+          "type": "integer"
+        },
+        "type": {
+          "$ref": "#/$defs/CollectionType"
+        }
+      },
+      "required": [
+        "length",
+        "type"
+      ],
+      "type": "object"
+    },
+    "ConfigFormat": {
+      "enum": [
+        "json",
+        "toml",
+        "yaml"
+      ]
+    },
     "ConfigHash": {
       "pattern": "^sha256:[0-9a-f]{64}$",
       "type": "string"
+    },
+    "ConfigScalar": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/ScalarType"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "$ref": "#/$defs/NonFinite"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ConfigurationSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "byte_order_mark": {
+          "type": "boolean"
+        },
+        "comments": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string"
+          },
+          "type": "array"
+        },
+        "digest": {
+          "$ref": "#/$defs/ValueDigest"
+        },
+        "encoding": {
+          "$ref": "#/$defs/TextEncoding"
+        },
+        "format": {
+          "$ref": "#/$defs/ConfigFormat"
+        },
+        "format_version": {
+          "$ref": "#/$defs/Knowledge_DeclaredVersion"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "configuration_snapshot"
+        },
+        "line_endings": {
+          "$ref": "#/$defs/LineEndings"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "values": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "byte_order_mark",
+        "comments",
+        "digest",
+        "encoding",
+        "format",
+        "format_version",
+        "id",
+        "kind",
+        "line_endings",
+        "provenance",
+        "schema_version",
+        "values"
+      ],
+      "type": "object"
+    },
+    "ConfigurationValue": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "configuration_value"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "path": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "snapshot": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "tag": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "text": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "value": {
+          "$ref": "#/$defs/Knowledge_ConfigScalar_or_ConfigCollection_or_ConfigAlias"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "order",
+        "path",
+        "provenance",
+        "schema_version",
+        "snapshot",
+        "tag",
+        "text",
+        "value"
+      ],
+      "type": "object"
     },
     "ContainerImageDigest": {
       "additionalProperties": false,
@@ -1269,7 +1473,9 @@
           "type": "array"
         },
         "schema_version": {
-          "const": 1
+          "maximum": 2,
+          "minimum": 1,
+          "type": "integer"
         },
         "sources": {
           "items": {
@@ -1705,6 +1911,127 @@
                   },
                   "value": {
                     "$ref": "#/$defs/ClockRole"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_ConfigScalar_or_ConfigCollection_or_ConfigAlias": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ConfigScalar"
+                },
+                {
+                  "$ref": "#/$defs/ConfigCollection"
+                },
+                {
+                  "$ref": "#/$defs/ConfigAlias"
+                }
+              ]
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/ConfigScalar"
+                      },
+                      {
+                        "$ref": "#/$defs/ConfigCollection"
+                      },
+                      {
+                        "$ref": "#/$defs/ConfigAlias"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -4863,6 +5190,15 @@
         }
       ]
     },
+    "LineEndings": {
+      "enum": [
+        "none",
+        "lf",
+        "crlf",
+        "cr",
+        "mixed"
+      ]
+    },
     "LocalPath": {
       "additionalProperties": false,
       "properties": {
@@ -5028,7 +5364,9 @@
           "$ref": "#/$defs/RecordId"
         },
         "schema_version": {
-          "const": 1
+          "maximum": 2,
+          "minimum": 1,
+          "type": "integer"
         },
         "sources": {
           "items": {
@@ -5288,7 +5626,9 @@
           "type": "string"
         },
         "schema_version": {
-          "const": 1
+          "maximum": 2,
+          "minimum": 1,
+          "type": "integer"
         },
         "started": {
           "type": "string"
@@ -5637,6 +5977,19 @@
         "schema_version"
       ],
       "type": "object"
+    },
+    "ScalarType": {
+      "enum": [
+        "bool",
+        "int",
+        "float",
+        "string",
+        "binary",
+        "offset_datetime",
+        "local_datetime",
+        "local_date",
+        "local_time"
+      ]
     },
     "SemanticVersion": {
       "additionalProperties": false,
@@ -6210,6 +6563,15 @@
       ],
       "type": "object"
     },
+    "TextEncoding": {
+      "enum": [
+        "utf-8",
+        "utf-16-le",
+        "utf-16-be",
+        "utf-32-le",
+        "utf-32-be"
+      ]
+    },
     "Timescale": {
       "enum": [
         "utc",
@@ -6370,6 +6732,10 @@
       "description": "a catalogued unit's canonical symbol (ADR 0013)",
       "type": "string"
     },
+    "ValueDigest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
     "Video": {
       "additionalProperties": false,
       "properties": {
@@ -6455,7 +6821,7 @@
       "type": "object"
     }
   },
-  "$id": "urn:neptune:schema:canonical:1",
+  "$id": "urn:neptune:schema:canonical:2",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
     {
@@ -6507,6 +6873,12 @@
       "$ref": "#/$defs/Calibration"
     },
     {
+      "$ref": "#/$defs/ConfigurationSnapshot"
+    },
+    {
+      "$ref": "#/$defs/ConfigurationValue"
+    },
+    {
       "$ref": "#/$defs/Site"
     },
     {
@@ -6535,5 +6907,5 @@
     }
   ],
   "description": "One line of a Neptune ingest package's record tables (ADR 0002, ADR 0017). The package's manifest, receipt and receipt envelope are #/$defs/PackageManifest, #/$defs/IngestReceipt and #/$defs/ReceiptEnvelope (ADR 0022). Generated from neptune.model; the Python readers are stricter (ADR 0021).",
-  "title": "Neptune canonical record, schema version 1"
+  "title": "Neptune canonical record, schema version 2"
 }
