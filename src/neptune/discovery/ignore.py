@@ -226,7 +226,12 @@ def _parse_all(lines: Iterable[str | bytes], origin: str) -> tuple[IgnoreRule, .
 
 
 def _read_ignore_file(source: LocalSource) -> bytes | None:
-    """The root's ``.neptune-ignore``, opened as the walk opens any file; ``None`` if absent."""
+    """The root's ``.neptune-ignore``, opened as the walk opens any file; ``None`` if absent.
+
+    A root directory that cannot be opened at all is the root's problem, not the file's: its
+    ``OSError`` propagates, so the job reports the root as unreadable.
+    """
+    os.close(os.open(source.root, os.O_RDONLY | os.O_DIRECTORY))
     location = local_location(IGNORE_FILE)
     try:
         stream = source.open(location)

@@ -19,6 +19,7 @@ Ctrl-C stops the job at its next checkpoint (exit 130); the workspace keeps the 
 """
 
 import argparse
+import contextlib
 import json
 import os
 import signal
@@ -197,8 +198,9 @@ def run(
 ) -> int:
     """Parse ``argv`` and run the command, writing to ``stdout`` and ``stderr``; the exit code."""
     parser = build_parser()
-    try:
-        args = parser.parse_args(argv)
+    try:  # argparse writes help, its version and usage errors to sys.stdout and sys.stderr
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            args = parser.parse_args(argv)
     except SystemExit as exc:  # --help, --version (0) or a usage error (2)
         return exc.code if isinstance(exc.code, int) else exit_codes.USAGE
     if args.command is None:
