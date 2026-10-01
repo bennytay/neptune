@@ -156,7 +156,9 @@ finding. The configuration's hash is the **generation** (`MemoryReader.generatio
   Until it lands, a claim a consolidator stops emitting stays current: an operator cannot retract a `many`
   fact such as `same_as`, and an upgrade that emits nothing retires nothing. A `one` fact is corrected by a new
   stated claim, which supersedes it.
-- Names (`has_name`, ADR 0007 §2, MVL-126) and evidence status beside claims (ADR 0007 §6, MVL-132). A reader
-  returns `EvidenceRef`s with no availability; that is the absence of a signal, not "available".
+- Names (`has_name`, ADR 0007 §2, MVL-126).
+- Evidence status beside claims (ADR 0007 §6, MVL-132): a `Knowledge[EvidenceStatus]` for every cited source,
+  `NotCovered` until the Ledger catalog emits a retention signal. v1 results carry no status map, which never
+  means "available".
 
 Each lands as a minor version: the shapes above do not change.

@@ -25,6 +25,7 @@ from memory_g1_harness import (
     JUN_10_2026,
     MAR_02_2026,
     Fixed,
+    build,
     cite,
     civil,
     draft,
@@ -37,7 +38,7 @@ from memory_g1_harness import (
 )
 from neptune.model.ids import LogicalId
 from neptune.model.knowledge import AssertionKind, NotCovered
-from neptune_memory.consolidate.base import rebuild, run_consolidator
+from neptune_memory.consolidate.base import Consolidation, rebuild, run_consolidator
 from neptune_memory.consolidate.identity import SAME_AS, IdentityConsolidator
 from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -114,16 +115,18 @@ def _identity_packages(retracted: bool) -> dict[str, list[dict[str, object]]]:
     return packages
 
 
-def _identity(tx: int, retracted: bool) -> list[Claim]:
-    return list(
-        run_consolidator(
-            IdentityConsolidator(),
-            ledger(_identity_packages(retracted)),
-            (),
-            {},
-            recorded_at=ledger_tx(tx),
-        ).claims
+def _run(tx: int, retracted: bool) -> Consolidation:
+    return run_consolidator(
+        IdentityConsolidator(),
+        ledger(_identity_packages(retracted)),
+        (),
+        {},
+        recorded_at=ledger_tx(tx),
     )
+
+
+def _identity(tx: int, retracted: bool) -> list[Claim]:
+    return list(_run(tx, retracted).claims)
 
 
 def test_an_operator_same_as_is_a_stated_edge_with_its_record() -> None:
@@ -133,11 +136,14 @@ def test_an_operator_same_as_is_a_stated_edge_with_its_record() -> None:
 
 
 @pytest.mark.xfail(
-    strict=True, reason="GAP MVL-126 + MVL-132: no retraction or withdrawal yet (ADR 0007 §5)"
+    strict=True,
+    raises=AssertionError,
+    reason="GAP MVL-126 + MVL-132: no retraction or withdrawal yet (ADR 0007 §5)",
 )
 def test_a_retracted_same_as_stops_being_current_and_stays_in_history() -> None:
     claims = _identity(1, retracted=False) + _identity(2, retracted=True)
-    graph = reader(claims, {"memory.identity": 0}, head=2)
+    builds = [build(_run(1, retracted=False), 1), build(_run(2, retracted=True), 2)]
+    graph = reader(claims, {"memory.identity": 0}, head=2, builds=builds)
     a = NodeRef(NodeType.MACHINE, "fleet-register:apollo-03")
     assert graph.claims(a, SAME_AS, ledger_tx(1)).claims != ()
     assert graph.claims(a, SAME_AS, ledger_tx(2)).claims == ()

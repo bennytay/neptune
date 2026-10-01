@@ -276,8 +276,9 @@ def vector_top_k_sql(schema: str, *, filtered: bool) -> str:
     at most ``exact_limit`` of them, else the HNSW index filtered by the scope. A 2-hop scope is
     a tiny fraction of all embeddings, and a filtered HNSW scan exhausts its tuple budget before
     it finds them (recall@10 0.88, some queries 0), while the exact scan costs about the same
-    (8 ms against 6). A wide scope (many hops, a hub) makes the filter unselective, where HNSW
-    is accurate and exact is not affordable (ADR 0007 §7). Both branches are gated on the scope
+    (8 ms against 6). A scope above the fixed cutoff (many hops, a hub) keeps the filtered HNSW
+    scan so that cost stays bounded; its recall is below budget wherever measured, a risk owned
+    by MVL-132 (ADR 0007 §7). Both branches are gated on the scope
     size, computed once, so only one runs. The exact distances live in a materialized CTE the
     vector index cannot serve, and a ``LATERAL`` lookup per scope entity, fenced with
     ``OFFSET 0`` so it is not flattened into a join, keeps the subject index in the plan (a join
@@ -529,10 +530,13 @@ class PostgresStore:
             }
         # SET LOCAL lasts until the read's rollback. It steers unfiltered search and the wide-
         # scope branch of filtered search; iterative scans (pgvector >= 0.8) keep a filtered HNSW
-        # scan going until k rows pass the filter. A small scope is searched exactly.
+        # scan going until k rows pass the filter. A small scope is searched exactly. Custom
+        # plans only: psycopg prepares a statement after five executions and the server may then
+        # choose a generic plan, while every measured latency (ADR 0007 §7) is a custom plan's.
         setup = (
             f"SET LOCAL hnsw.ef_search = {int(self.ef_search)}",
             "SET LOCAL hnsw.iterative_scan = relaxed_order",
+            "SET LOCAL plan_cache_mode = force_custom_plan",
         )
         rows = self._read(vector_top_k_sql(self.schema, filtered=within is not None), params, setup)
         return [VectorHit(int(cid), float(d)) for cid, d in rows]

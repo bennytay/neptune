@@ -1,15 +1,15 @@
 """G1 scenario 4: a clock mapping revised after claims were made on it (quadruped).
 
-Expected (ADR 0002 §3, ADR 0005 §2, ADR 0007 §4): a claim keeps the clock its record declares. A
-consolidator places a time on civil time only when the source domain's timescale, epoch and
-resolution are all declared; it never applies a clock mapping. So a mapping, and any revision of
-it, re-times nothing: claim ids, valid times and every ``as_of`` answer are unchanged, and a
-boot-clock claim competing with a civil one is a ``clock_mismatch``, never a comparison.
-Verdict: HOLDS.
+Expected (ADR 0002 §3, ADR 0005 §2, ADR 0007 §4): a claim keeps the clock its record declares,
+and a boot-clock claim competing with a civil one is a ``clock_mismatch``, never a comparison. A
+claim re-timed through a mapping is a derivative that cites the mapping, and is withdrawn when the
+mapping is revised.
 
-A re-timed *derivative* through a mapping (MVL-130) must cite the mapping and be withdrawn when the
-mapping is revised. That needs build withdrawal (ADR 0007 §5, GAP owned by MVL-132), pinned by
-the strict ``xfail`` below.
+Verdict: the ``clock_mismatch`` refusal HOLDS. The revised-mapping handling is a GAP owned by
+MVL-130 + MVL-132. No consolidator reads ``clock_alignment`` records today, so nothing in the code
+can make a claim through a mapping. The ``Diagnostics`` consolidator below ignores the mapping as
+well, so its byte-identical rebuilds show only that a claim's id and valid time come from its own
+record, not that a revision is handled. The hostile case is the strict ``xfail`` at the end.
 """
 
 from __future__ import annotations
@@ -21,7 +21,9 @@ import pytest
 
 from memory_g1_harness import (
     MAR_02_2026,
+    Build,
     Record,
+    build,
     cite,
     civil,
     draft,
@@ -127,13 +129,15 @@ def _builds() -> list[Claim]:
     return claims
 
 
-def test_a_mapping_and_its_revision_re_time_nothing() -> None:
+def test_a_claim_keeps_its_declared_clock_and_id_across_rebuilds() -> None:
+    """Not evidence about mappings (``Diagnostics`` never reads them): only that a claim's valid
+    time is its record's, on its record's clock, and its id is stable across rebuilds."""
     claims = _builds()
     by_tx = {
         tx: sorted(canonical_json.dumps(c.content_json()) for c in claims if c.recorded_at == tx)
         for tx in (1, 2, 3)
     }
-    assert by_tx[1] == by_tx[2] == by_tx[3]  # same ids, same valid times, whatever the mapping
+    assert by_tx[1] == by_tx[2] == by_tx[3]  # same ids and valid times at every rebuild
     graph = reader(claims, {"test.diagnostics": 0}, head=3)
     snapshots = [graph.claims(SPOT, "maintenance_state", ledger_tx(tx)) for tx in (1, 2, 3)]
     assert snapshots[0].claims == snapshots[1].claims == snapshots[2].claims
@@ -151,22 +155,27 @@ def test_the_boot_clock_fact_competes_as_a_mismatch_never_as_a_comparison() -> N
 
 
 @pytest.mark.xfail(
-    strict=True, reason="GAP MVL-132 (+MVL-130): no build withdrawal yet (ADR 0007 §5)"
+    strict=True,
+    raises=AssertionError,
+    reason="GAP MVL-130 + MVL-132: no mapping derivatives or build withdrawal yet (ADR 0007 §4-§5)",
 )
 def test_a_derivative_through_a_revised_mapping_is_withdrawn() -> None:
     """A re-timing consolidator cites the mapping it used. When the mapping is revised, its claim
     through the old mapping must stop being current; today it stays current beside the new one."""
 
-    def retimed(tx: int, offset: int, name: str) -> list[Claim]:
-        (build,) = rebuild(
+    def retimed(tx: int, offset: int, name: str) -> tuple[list[Claim], Build]:
+        (run,) = rebuild(
             ledger({"obs": OBSERVATIONS}),
             [(_Retimer(offset, name), {})],
             recorded_at=ledger_tx(tx),
         )
-        return list(build.claims)
+        return list(run.claims), build(run, tx)
 
-    claims = retimed(2, 1_772_404_000, "v1") + retimed(3, 1_772_404_030, "v2")
-    graph = reader(claims, {"test.retime": 0}, head=3)
+    (old, old_build), (new, new_build) = (
+        retimed(2, 1_772_404_000, "v1"),
+        retimed(3, 1_772_404_030, "v2"),
+    )
+    graph = reader(old + new, {"test.retime": 0}, head=3, builds=[old_build, new_build])
     current = graph.claims(SPOT, "maintenance_state", ledger_tx(3)).claims
     assert all(rid("clock_alignment", "v1") not in c.provenance.records for c in current)
 

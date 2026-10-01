@@ -363,6 +363,18 @@ def test_graph_filtered_search_is_exact_for_a_small_scope_and_hnsw_for_a_wide_on
     assert params["exact_limit"] == 7
 
 
+@pytest.mark.parametrize("filtered", [False, True])
+def test_vector_search_forces_custom_plans_in_its_own_transaction(filtered: bool) -> None:
+    """A generic plan after psycopg's fifth execution would not be the plan G1 measured."""
+    conn = RecordingConnection()
+    within = ("site:01", 2, AT) if filtered else None
+    PostgresStore(conn, dimensions=2).vector_top_k([0.0, 1.0], 3, within=within)
+    statements = [q for q, _ in conn.log]
+    assert "SET LOCAL plan_cache_mode = force_custom_plan" in statements
+    assert statements.index("SET LOCAL plan_cache_mode = force_custom_plan") < len(statements) - 1
+    assert (conn.commits, conn.rollbacks) == (0, 1)  # SET LOCAL ends with the read
+
+
 def test_vector_search_sets_ef_search_locally_from_the_constructor() -> None:
     conn = RecordingConnection()
     PostgresStore(conn, dimensions=2, ef_search=250).vector_top_k([0.0, 1.0], 3)
@@ -370,6 +382,7 @@ def test_vector_search_sets_ef_search_locally_from_the_constructor() -> None:
     assert setup == [
         "SET LOCAL hnsw.ef_search = 250",
         "SET LOCAL hnsw.iterative_scan = relaxed_order",
+        "SET LOCAL plan_cache_mode = force_custom_plan",
     ]
     conn = RecordingConnection()
     PostgresStore(conn, dimensions=2).vector_top_k([0.0, 1.0], 3)
@@ -585,6 +598,29 @@ def test_live_corroboration_and_supersede_across_known_at(live: tuple[Any, Postg
     with pytest.raises(LookupError):
         store.supersede(3, replace(fix, claim_id=5))
     assert conn.info.transaction_status == 0
+
+
+@pytest.mark.slow
+def test_live_repeated_filtered_search_keeps_its_answer_past_auto_prepare(
+    live: tuple[Any, PostgresStore],
+) -> None:
+    """psycopg prepares a statement after five executions; ten identical filtered searches on one
+    connection must return the same hits, with custom plans, and leave the connection idle."""
+    conn, store = live
+    claims = list(generate(DeploymentSpec(claims=2_000, robots=8, sites=2)))
+    store.write_claims(claims)
+    store.write_embeddings(
+        ClaimEmbedding(c.claim_id, c.subject, (float(c.claim_id % 31), float(c.claim_id % 7), 1.0))
+        for c in claims[::2]
+    )
+    store.rebuild()
+    at = AsOf("fleet_utc", SPAN // 2, 2 * SPAN)
+    answers = [store.vector_top_k((3.0, 2.0, 1.0), 5, within=("site:00", 2, at)) for _ in range(10)]
+    assert answers[0] and all(answer == answers[0] for answer in answers)
+    assert conn.info.transaction_status == 0
+    mode = conn.execute("SHOW plan_cache_mode").fetchone()[0]
+    conn.rollback()
+    assert mode == "auto"  # SET LOCAL did not leak out of the read's transaction
 
 
 @pytest.mark.slow

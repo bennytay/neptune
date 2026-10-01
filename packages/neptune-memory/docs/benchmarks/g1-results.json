@@ -35,17 +35,17 @@
   {
    "budget": 300,
    "direction": "<",
-   "label": "extrapolated",
+   "label": "estimated",
    "name": "thread_cold_1e8_p50_ms",
-   "note": "2x the 1e7 measurement; the 1e6->1e7 decade grew x1.71",
+   "note": "2x the 1e7 measurement, from the one 1e6->1e7 step (x1.71)",
    "value": 6.75
   },
   {
    "budget": 1000,
    "direction": "<",
-   "label": "extrapolated",
+   "label": "estimated",
    "name": "thread_cold_1e8_p99_ms",
-   "note": "2x the 1e7 measurement; the 1e6->1e7 decade grew x1.32",
+   "note": "2x the 1e7 measurement, from the one 1e6->1e7 step (x1.32)",
    "value": 13.062
   },
   {
@@ -68,9 +68,19 @@
    "budget": 0.9,
    "direction": ">=",
    "label": "measured",
-   "name": "graph_filtered_recall_at_10_1e7",
-   "note": "200 queries, exact scan of the scope",
+   "name": "graph_filtered_recall_at_10_scope_up_to_500k",
+   "note": "200 queries; scopes up to the 500k cutoff only (exact scan)",
    "value": 1.0
+  },
+  {
+   "budget": 0.9,
+   "direction": ">=",
+   "label": "measured",
+   "name": "graph_filtered_recall_at_10_wide_scope",
+   "note": "scopes above the 500k cutoff (filtered HNSW, ef_search 400): not measured there; value is that branch's recall on 2.5%-selective 2-hop scopes, below budget",
+   "owner": "MVL-132",
+   "status": "gap",
+   "value": 0.899
   },
   {
    "budget": 300,
@@ -110,7 +120,8 @@
    "label": "extrapolated",
    "name": "rebuild_1e8_s",
    "note": "ADR 0004 upper bound; not evidence (GAP, MVL-132)",
-   "status": "unproven",
+   "owner": "MVL-132",
+   "status": "gap",
    "value": 5383.54
   }
  ],

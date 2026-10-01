@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 RESULTS: Final = Path(__file__).parents[1] / "docs" / "benchmarks" / "g1-results.json"
 HUB_SIZE: Final = 10_000
+#: Budget rows the gate leaves open (ADR 0007 §7), both owned by MVL-132.
+GAPS: Final = frozenset({"rebuild_1e8_s", "graph_filtered_recall_at_10_wide_scope"})
 
 
 @pytest.fixture(scope="module")
@@ -40,14 +42,15 @@ def results() -> dict[str, Any]:
 def test_published_results_are_small_and_labelled(results: dict[str, Any]) -> None:
     assert RESULTS.stat().st_size <= 100_000
     for row in results["budgets"]:
-        assert row["label"] in {"measured", "extrapolated"}, row
+        assert row["label"] in {"measured", "extrapolated", "estimated"}, row
+    assert {r["name"] for r in results["budgets"] if r.get("status") == "gap"} == GAPS
 
 
 def test_every_budget_row_is_met(results: dict[str, Any]) -> None:
     rows = {row["name"]: row for row in results["budgets"]}
     for name, row in rows.items():
-        if row.get("status") == "unproven":
-            assert name == "rebuild_1e8_s"  # the one GAP (MVL-132), labelled extrapolated
+        if row.get("status") == "gap":  # below budget or unproven, and owned: never a pass
+            assert name in GAPS and row["owner"] == "MVL-132", row
             continue
         value, budget = row["value"], row["budget"]
         assert (value >= budget) if row["direction"] == ">=" else (value < budget), row
@@ -58,7 +61,7 @@ def test_the_shipped_vector_settings_are_the_measured_ones(results: dict[str, An
     assert recall["queries"] >= 200
     assert recall["chosen"] == {"ef_search": pg.DEFAULT_EF_SEARCH, "graph_filtered": "exact"}
     assert (
-        8 * results["raw"]["g1_10000000_recall"]["scope_embeddings"]["max"]
+        10 * results["raw"]["g1_10000000_recall"]["scope_embeddings"]["max"]
         <= pg.DEFAULT_EXACT_SCOPE_LIMIT
     )  # the measured 2-hop scopes, 10x deeper at 10^8, still take the exact branch
 

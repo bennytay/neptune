@@ -8,6 +8,7 @@ instants; the dates in comments are UTC labels for the reader) or a robot's own 
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING, Final
@@ -30,11 +31,14 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from neptune.model.jsonvalue import JsonValue
+    from neptune_memory.consolidate.base import Consolidation
     from neptune_memory.ledger import LedgerReader
     from neptune_memory.schema.claim import Claim, ClaimAssertionKind, ClaimObject
     from neptune_memory.schema.nodes import NodeRef
 
 Record = dict[str, object]
+# A consolidator run (ADR 0007 §5.1): consolidator id, version, config hash, recorded_at.
+Build = dict[str, object]
 
 SECONDS: Final = CivilClock(Timescale.POSIX, Epoch.UNIX, Fraction(1))
 DAY: Final = 86_400
@@ -153,15 +157,39 @@ class Fixed:
         return ConsolidatorOutput(self.drafts)
 
 
+def build(consolidation: Consolidation, recorded_at: int) -> Build:
+    """One consolidator run as ADR 0007 §5.1 records it: its lineage and transaction."""
+    transform = consolidation.transform
+    return {
+        "consolidator_id": transform.consolidator_id,
+        "config_hash": transform.config_hash,
+        "recorded_at": recorded_at,
+        "version": transform.version,
+    }
+
+
+def accepts_builds() -> bool:
+    """Whether ``resolve`` takes ADR 0007 §5.5's ``builds`` yet (MVL-132)."""
+    return "builds" in inspect.signature(resolve).parameters
+
+
 def reader(
     claims: Sequence[Claim],
     priorities: Mapping[str, int],
     *,
     registry: PredicateRegistry = CORE_PREDICATES,
     head: int | None = None,
+    builds: Sequence[Build] = (),
 ) -> ReferenceReader:
-    """Resolve ``claims`` and wrap the history in the reference reader."""
-    resolution = resolve(claims, registry, priorities)
+    """Resolve ``claims`` and wrap the history in the reference reader.
+
+    ``builds`` go to ``resolve`` as soon as it accepts them, so the strict ``xfail`` tests that pass
+    them flip on their own when MVL-132 lands withdrawal; until then they are ignored.
+    """
+    if builds and accepts_builds():
+        resolution = resolve(claims, registry, priorities, builds=builds)  # type: ignore[call-arg]
+    else:
+        resolution = resolve(claims, registry, priorities)
     top = max((c.recorded_at for c in claims), default=0)
     document = GraphDocument(
         resolution,

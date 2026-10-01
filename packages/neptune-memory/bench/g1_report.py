@@ -66,6 +66,7 @@ def main() -> None:
     cold7, cold6 = raw["g1_10000000_cold"], raw["g1_1000000_cold"]
     recall, walk = raw["g1_10000000_recall"], raw["g1_10000000_walk"]
     filtered = recall["graph_filtered_shipped"]
+    wide = recall[f"graph_filtered_hnsw_ef{EF_SEARCH}"]
     write = raw["pg_10000000_write"]
     slope = {q: cold7[q] / cold6[q] for q in ("p50_ms", "p99_ms")}
     budgets = [
@@ -101,15 +102,15 @@ def main() -> None:
             "thread_cold_1e8_p50_ms",
             2 * cold7["p50_ms"],
             300,
-            "extrapolated",
-            f"2x the 1e7 measurement; the 1e6->1e7 decade grew x{slope['p50_ms']:.2f}",
+            "estimated",
+            f"2x the 1e7 measurement, from the one 1e6->1e7 step (x{slope['p50_ms']:.2f})",
         ),
         _row(
             "thread_cold_1e8_p99_ms",
             2 * cold7["p99_ms"],
             1000,
-            "extrapolated",
-            f"2x the 1e7 measurement; the 1e6->1e7 decade grew x{slope['p99_ms']:.2f}",
+            "estimated",
+            f"2x the 1e7 measurement, from the one 1e6->1e7 step (x{slope['p99_ms']:.2f})",
         ),
         _row(
             "traverse_3hop_1e7_p50_ms",
@@ -126,13 +127,26 @@ def main() -> None:
             "ADR 0004 upper bound (text[] walk; equal at ordinary sites)",
         ),
         _row(
-            "graph_filtered_recall_at_10_1e7",
+            "graph_filtered_recall_at_10_scope_up_to_500k",
             filtered["recall_at_10"],
             0.9,
             "measured",
-            f"{recall['queries']} queries, exact scan of the scope",
+            f"{recall['queries']} queries; scopes up to the 500k cutoff only (exact scan)",
             direction=">=",
         ),
+        {
+            **_row(
+                "graph_filtered_recall_at_10_wide_scope",
+                wide["recall_at_10"],
+                0.9,
+                "measured",
+                "scopes above the 500k cutoff (filtered HNSW, ef_search 400): not measured there;"
+                " value is that branch's recall on 2.5%-selective 2-hop scopes, below budget",
+                direction=">=",
+            ),
+            "status": "gap",
+            "owner": "MVL-132",
+        },
         _row(
             "graph_filtered_1e7_p50_ms",
             filtered["p50_ms"],
@@ -170,7 +184,8 @@ def main() -> None:
                 "extrapolated",
                 "ADR 0004 upper bound; not evidence (GAP, MVL-132)",
             ),
-            "status": "unproven",
+            "status": "gap",
+            "owner": "MVL-132",
         },
     ]
     out = {

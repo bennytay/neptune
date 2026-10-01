@@ -16,7 +16,9 @@ import pytest
 from memory_g1_harness import (
     JUN_10_2026,
     MAR_02_2026,
+    Build,
     Fixed,
+    build,
     cite,
     civil,
     draft,
@@ -26,7 +28,7 @@ from memory_g1_harness import (
     source,
 )
 from neptune.identity import canonical_json
-from neptune_memory.consolidate.base import ClaimDraft, rebuild
+from neptune_memory.consolidate.base import ClaimDraft, Consolidation, rebuild
 from neptune_memory.schema.claim import Claim, TypedLiteral, ValueType
 from neptune_memory.schema.interval import ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -51,13 +53,21 @@ def _state(text: str, *, start: int = MAR_02_2026) -> ClaimDraft:
     )
 
 
-def _build(version: str, tx: int, *drafts: ClaimDraft) -> list[Claim]:
-    (build,) = rebuild(
+def _consolidation(version: str, tx: int, *drafts: ClaimDraft) -> Consolidation:
+    (run,) = rebuild(
         ledger({"pkg": []}),
         [(Fixed(ID, tuple(drafts), version=version), {})],
         recorded_at=ledger_tx(tx),
     )
-    return list(build.claims)
+    return run
+
+
+def _build(version: str, tx: int, *drafts: ClaimDraft) -> list[Claim]:
+    return list(_consolidation(version, tx, *drafts).claims)
+
+
+def _run(version: str, tx: int, *drafts: ClaimDraft) -> Build:
+    return build(_consolidation(version, tx, *drafts), tx)
 
 
 def test_an_upgrade_that_changes_the_object_replaces_the_old_lineage_at_its_transaction() -> None:
@@ -110,9 +120,14 @@ def test_a_rollback_to_v1_is_a_new_version_never_a_reused_lineage() -> None:
     assert caught.value.code == "lineage_reuse"
 
 
-@pytest.mark.xfail(strict=True, reason="GAP MVL-132: no build withdrawal yet (ADR 0007 §5)")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="GAP MVL-132: no build withdrawal yet (ADR 0007 §5)",
+)
 def test_an_upgrade_that_emits_nothing_still_retires_the_old_lineage() -> None:
     v1 = _build("1", 1, _state("thruster fault", start=JUN_10_2026))
     v2: list[Claim] = _build("2", 2)  # the new parser finds nothing to claim
-    graph = reader(v1 + v2, PRIORITIES, head=2)
+    builds = [_run("1", 1, _state("thruster fault", start=JUN_10_2026)), _run("2", 2)]
+    graph = reader(v1 + v2, PRIORITIES, head=2, builds=builds)
     assert graph.claims(ROV, "maintenance_state", ledger_tx(2)).claims == ()

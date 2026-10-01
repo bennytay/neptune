@@ -9,8 +9,9 @@ when bytes expire).
 
 Verdict: GAP. Survival HOLDS. Marking the ref unavailable has no signal: the Ledger catalog API
 (``LedgerReader``, catalog-api v1) exposes no retention state, so readers cannot say "cited bytes
-expired at tx". ADR 0007 §6 defines the shape (``EvidenceStatus`` per source, joined at read
-time); owner MVL-132.
+expired at tx". ADR 0007 §6 defines the shape: a ``Knowledge[EvidenceStatus]`` for every cited
+source, joined at read time, which is ``NotCovered`` until the catalog emits a retention signal;
+owner MVL-132.
 """
 
 from __future__ import annotations

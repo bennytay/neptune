@@ -90,15 +90,22 @@ Shape fixed here; built by MVL-132 (resolver, graph document, rebuild), with MVL
 
 A claim's content, id and `EvidenceRef`s never change when cited bytes expire. The Ledger keeps catalog
 records after their bytes expire, so a rebuild is unchanged. Availability is a bi-temporal fact about a
-source, joined at read time:
+source, joined at read time, and it is stated in the compiler's missingness vocabulary (`Knowledge`, ADR
+0002), never in a vocabulary of Memory's own:
 
-- `LedgerReader.evidence_status(source: ContentId, as_of: LedgerTx) -> EvidenceStatus`, one of `available`,
-  `expired {at: LedgerTx, policy: str}` or `unknown`. An unknown status is never read as available.
-- `MemoryReader` results gain an optional `evidence_status` map, keyed by every source cited by a returned
-  claim, as of the query's `as_of`. This is a graph-schema minor release.
+- `EvidenceStatus` is `available` or `expired {at: LedgerTx, policy: str}`. It is only ever a value inside
+  `Knowledge`.
+- `LedgerReader.evidence_status(source: ContentId, as_of: LedgerTx) -> Knowledge[EvidenceStatus]`:
+  - `Known(available)` or `Known(expired {...})` when the catalog states it;
+  - `Unknown` when the catalog tracks the source but cannot say;
+  - `NotCovered` when the catalog emits no retention signal for it.
+- `MemoryReader` results gain an `evidence_status` map. It holds a `Knowledge[EvidenceStatus]` for **every**
+  source cited by a returned claim, as of the query's `as_of`. No cited source is ever left out of the map
+  or given a blank status.
 
-The catalog-api owner is asked for the signal; MVL-132 consumes it. Until then readers return refs without
-status, which is the explicit absence of a signal, not "available".
+Until the Ledger catalog emits a retention signal, every entry is `NotCovered`: Memory says it has no
+coverage, never "available". The owner is **MVL-132**, which consumes the signal once the catalog-api owner
+provides it. The map lands as a planned graph-schema minor release; 1.0.0 is unchanged.
 
 ### 7. The store decision is final
 
@@ -109,22 +116,28 @@ Two changes to the adapter come with it:
 
 - **Graph-filtered search is exact over the scope.** `vector_top_k(within=...)` computes distances for every
   embedding of the walk's scope, through the subject index, in a materialized CTE that the HNSW index cannot
-  serve. This applies to scopes of up to `exact_scope_limit` embeddings (default 500,000, about 160 ms). A
-  wider scope (many hops, a hub) makes the filter unselective, so it keeps the HNSW scan: one count gates
-  the two branches, and only one runs. Unfiltered search keeps HNSW.
+  serve. This applies to scopes of up to `exact_scope_limit` embeddings (a fixed count, default 500,000,
+  about 160 ms). A wider scope (many hops, a hub) keeps the filtered HNSW scan so that cost stays bounded:
+  one count gates the two branches, and only one runs. That branch's recall is below budget wherever it has
+  been measured (see Recall), a risk owned by MVL-132. Unfiltered search keeps HNSW.
+- **Vector reads force custom plans** (`SET LOCAL plan_cache_mode = force_custom_plan`). psycopg prepares
+  a statement after five executions and the server may then pick a generic plan, while every latency here
+  was measured with custom plans.
 - **`ef_search` defaults to 400** for unfiltered search.
 
 The C2 budgets stand as ADR 0004 set them. The G1 numbers are below; raw data is in
 [`../benchmarks/g1-results.json`](../benchmarks/g1-results.json), and `tests/test_g1_stress_scale.py` holds
-every row to its budget. m = measured; x = extrapolated upper bound at 10^8 claims.
+every row to its budget except the two marked GAP. m = measured; x = extrapolated to 10^8 claims; e =
+estimated from a single 10× step.
 
 | Budget | G1 value | Label |
 |---|---|---|
 | As-of thread p50 < 300 ms, p99 < 1 s, warm cache | 2.04 / 3.48 ms at 10^8 | x (ADR 0004) |
 | The same, cold: OS page cache evicted before every query, `shared_buffers` 16 MB | 3.38 / 6.53 ms at 10^7 (30 device reads, 2.6 ms of I/O per query) | m |
-| The same, cold | 6.75 / 13.1 ms at 10^8 | x: 2× 10^7 (10^6 → 10^7 grew ×1.71 at p50, ×1.32 at p99) |
+| The same, cold | 6.75 / 13.1 ms at 10^8 | e: 2× 10^7, from the one 10^6 → 10^7 step (×1.71 at p50, ×1.32 at p99) |
 | 3-hop traversal p50 < 300 ms | 0.89 ms at 10^7; 1.88 ms at 10^8 | m; x (ADR 0004) |
-| Graph-filtered top-10 recall@10 ≥ 0.9 | 1.0 at 10^6 embeddings, 200 queries | m |
+| Graph-filtered top-10 recall@10 ≥ 0.9, scopes ≤ 500,000 embeddings (exact) | 1.0 at 10^6 embeddings, 200 queries | m |
+| The same, scopes > 500,000 embeddings (filtered HNSW, `ef_search` 400) | not measured above 500,000. The nearest measurement is 0.899 (0.877 at `ef_search` 100) on 2.5%-selective scopes: below budget | **GAP**, recall risk, MVL-132 |
 | Graph-filtered top-10 p50 < 300 ms | 8.0 ms at 10^7 (25,000 embeddings per scope); 80 ms at 10^8 | m; x (linear in scope) |
 | Superseding writes ≥ 200/s, thread p99 < 1 s under them | 1,064/s, 1.68 ms at 10^7 | m (ADR 0004) |
 | Full rebuild of 10^8 claims < 2 h | 404 s at 10^7; 5,384 s at 10^8 | m; x, **unproven** (GAP, MVL-132) |
@@ -135,8 +148,11 @@ every row to its budget. m = measured; x = extrapolated upper bound at 10^8 clai
   a 2-hop scope holds about 2.5% of the embeddings, and the iterative scan gives up before it finds them.
   Tuning does not reach the budget. The exact scan does by construction, at 8.0 ms p50 against 6.1 ms. Its
   cost is linear in the scope's embeddings, so the 10^8 figure is 10× the 10^7 one, and those scopes (about
-  250,000 embeddings) stay under the exact limit. The wide-scope HNSW branch is not measured for recall here;
-  a wide scope is an unselective filter, which is where HNSW is accurate. Unfiltered recall@10 is
+  250,000 embeddings) stay under the exact limit. No scope above the 500,000 cutoff was measured. The only
+  evidence for that branch is the filtered HNSW scan on 2.5%-selective scopes, which is below budget. At
+  10^8 claims (about 10^7 embeddings) a 500,000-embedding scope is 5% selective, the same regime. So the
+  branch bounds cost, not recall. MVL-132 owns measuring it, and raising recall there (a larger cutoff,
+  partitioned exact scans, or a selectivity-relative cutoff). Unfiltered recall@10 is
   0.67 / 0.81 / 0.89 / 0.93 at the same settings. It has no budget, and 400 is the first setting above 0.9,
   at 4.1 ms p50.
 - **A measurement trap.** psycopg prepares a statement after five executions, and a prepared plan survives
@@ -144,7 +160,8 @@ every row to its budget. m = measured; x = extrapolated upper bound at 10^8 clai
   read 1.0 for every setting. `bench/g1_bench.py` now never prepares a vector query.
 - **Cold.** Each cold thread reads about 30 blocks from the device. Postgres's 16 MB of buffers keep only the
   upper index pages. A thread's visible rows do not grow with history depth, and the GiST index gains at most
-  one level per 10× claims, so 2× the 10^7 figure bounds 10^8. Both bounds are about 75× under budget.
+  one level per 10× claims, so 2× the 10^7 figure is the estimate for 10^8. It rests on a single 10× step
+  (×1.71 at p50), so it is an estimate, not an upper bound; it is about 75× under budget.
 - **Walk.** The keyed visited set (§F1 of the review) leaves ordinary sites unchanged (0.89 ms against 0.895 ms)
   and makes hubs linear: 10^4 machines in 379 ms against 2.09 s before, and 10^5 in 0.79 s against 173 s.
 - **Rebuild** is still the one unproven budget. MVL-132 owns measuring it at 10^8 on production-class
@@ -157,6 +174,9 @@ every row to its budget. m = measured; x = extrapolated upper bound at 10^8 clai
 - **Withdrawal inferred from re-recordings, with no build records**: `resolve` keeps only the earliest
   recording of an id, so the evidence is gone after one round trip, and an empty build is invisible.
 - **Delete the claim on retraction or expiry**: this breaks "nothing deleted" and every earlier `as_of`.
+- **A status vocabulary of Memory's own** (`available | expired | unknown`), with refs left blank until the
+  catalog signals: this redefines missingness, which ADR 0002 forbids, and a blank reads as a fact.
+  `Knowledge` already says `Unknown` and `NotCovered`.
 - **Put availability in `EvidenceRef` or the claim**: claim ids would change when bytes expire, which would
   re-id history for an operational fact.
 - **Add `has_name` in this gate**: it is a vocabulary change and a new generation with republished goldens.
@@ -169,7 +189,12 @@ every row to its budget. m = measured; x = extrapolated upper bound at 10^8 clai
 ## Consequences
 
 - C1 can code against v1 now: every change above is a minor graph-schema release.
-- G2 owns three GAPs: withdrawal and builds (MVL-132), retraction records and `has_name` (MVL-126), and
-  mapping derivatives (MVL-130). Strict `xfail` tests pin each one, and flip when it lands.
+- G2 owns these GAPs:
+  - withdrawal and builds, evidence status, wide-scope recall, and the 10^8 rebuild (MVL-132);
+  - retraction records and `has_name` (MVL-126);
+  - revised clock mappings (MVL-130 with MVL-132).
+
+  Strict `xfail(raises=AssertionError)` tests pin the behavioural ones. Their harness passes builds to
+  `resolve` as soon as it accepts them, so the tests flip when MVL-132 lands.
 - Revisit this ADR if production-scale rebuild misses its budget after partitioning, or if the Ledger cannot
   record builds.
