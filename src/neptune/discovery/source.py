@@ -99,6 +99,11 @@ class LocalSource:
         if not Path(self._root).is_dir():
             raise NotADirectoryError(self._root)
 
+    @property
+    def root(self) -> str:
+        """The ingest root as the caller named it. Never recorded; findings use relative paths."""
+        return self._root
+
     def walk(self) -> Iterator[WalkEntry]:
         stack: list[Iterator[WalkEntry | _Directory]] = [iter(self._list(()))]
         while stack:
