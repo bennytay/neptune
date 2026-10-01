@@ -21,7 +21,6 @@ from neptune.model.provenance import (
     EvidenceRef,
     Locator,
     Provenance,
-    Row,
     adapter_locator,
 )
 from neptune.model.scalars import real
@@ -418,7 +417,6 @@ __all__ = [
     "BLOCK",
     "Cite",
     "Findings",
-    "Row",
     "Slot",
     "Tables",
     "Window",

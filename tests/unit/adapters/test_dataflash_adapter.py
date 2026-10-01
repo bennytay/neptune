@@ -25,7 +25,7 @@ from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.discovery.reader import BytesReader
 from neptune.identity import canonical_json
 from neptune.model.finding import Severity
-from neptune.model.knowledge import AssertionKind, Known, Unknown
+from neptune.model.knowledge import AssertionKind, Known, KnownAbsent, Unknown
 from neptune.model.provenance import ByteRange
 from neptune.model.run import Run, Stream
 from neptune.model.series import SEQ
@@ -543,3 +543,49 @@ def test_inspect_lists_the_declared_types_without_decoding_records() -> None:
         ["PARM", "MSG", "ATT", "GPS", "MODE", "ARR", "RCOU", "FMTU", "UNIT", "MULT"]
     )
     assert result.findings == ()
+
+
+def test_a_log_with_only_a_millisecond_clock_declares_no_microsecond_clock() -> None:
+    output = run(fixture("legacy_timems.bin"))
+    fields = {r.field for r in output.records() if r.kind == "timestamp_domain"}  # type: ignore[unused-ignore]
+    assert fields == {"TimeMS"}
+
+
+def test_a_type_without_a_time_column_carries_a_clock_slot_that_declares_nothing() -> None:
+    log = MAKE.Log()
+    log.declare("RAW", "BB", "A,B")
+    log.out.append(MAKE.Log.record(129, bytes([1, 2])))
+    output = run(log.bytes())
+    (clock,) = [r for r in output.records() if r.kind == "timestamp_domain"]
+    assert clock.field == "none"  # type: ignore[unused-ignore]
+    for state in (clock.role, clock.resolution, clock.epoch, clock.timescale):  # type: ignore[unused-ignore]
+        assert isinstance(state, Unknown)
+    (stream,) = streams(output).values()
+    assert stream.clocks == (clock.id,)
+
+
+def test_a_declared_empty_unit_is_a_declared_none_and_an_undeclared_one_is_unknown() -> None:
+    output = run(fixture("copter.bin"))
+    status = next(
+        r
+        for r in output.records()
+        if isinstance(r, StructuredRecord)
+        and len(r.cells) == 7
+        and r.cells[1] == Known("Status", r.cells[1].provenance)  # type: ignore[union-attr]
+    )
+    assert isinstance(status.cells[4], KnownAbsent)  # unit id '-' is declared with an empty label
+    assert isinstance(status.cells[3], Known) and status.cells[3].value == "-"
+
+
+def test_a_parameter_integer_past_the_signed_range_is_unknown_with_a_finding() -> None:
+    log = MAKE.Log()
+    log.declare("PARM", "QNQ", "TimeUS,Name,Value")
+    log.out.append(MAKE.Log.record(129, struct.pack("<Q16sQ", 1, b"BIG", 2**64 - 1)))
+    output = run(log.bytes())
+    assert finding(output, "unreadable_value").details["reason"] == "range"
+    assert tables_of(output)["parameters"][0][2] is None
+
+
+def test_a_source_that_opens_with_the_record_header_but_not_a_fmt_is_not_a_log() -> None:
+    output = run(b"\xa3\x95\x81" + bytes(90))
+    assert codes(output) == ["bad_magic"] and not output.records()

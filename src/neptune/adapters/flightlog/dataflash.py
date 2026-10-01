@@ -63,7 +63,7 @@ from neptune.adapters.flightlog.ulog_format import FormatError
 from neptune.identity.provenance import EvidenceRecord
 from neptune.model.finding import FindingCategory, Severity
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.knowledge import Knowledge, Known, Unknown
+from neptune.model.knowledge import Knowledge, Known, KnownAbsent, Unknown
 from neptune.model.provenance import Row
 from neptune.model.reference import TimestampDomain
 from neptune.model.run import Run, Stream
@@ -74,8 +74,6 @@ from neptune.model.world import CellValue
 FORMAT: Final = "dataflash"
 PREFIX: Final = "flightlog."
 MAX_UNIT_RECORDS: Final = 1024
-DEFAULT_CHUNK_BYTES: Final = 8 * 1024 * 1024
-DEFAULT_MAX_ROWS: Final = 100_000
 FIELD_UNITS: Final = "field_units"
 PARAMETERS_TABLE: Final = "parameters"
 UNIT_KINDS: Final = ("FMTU", "MULT", "UNIT")
@@ -433,6 +431,18 @@ class Walk:
             for start, width in layout.strings:
                 if text_value(payload[start : start + width]) is None:
                     self._utf8(PARAMETERS_TABLE, place)
+            for index, char in enumerate(layout.chars):
+                start = layout.offsets[index]
+                if char == "Q" and int.from_bytes(payload[start : start + 8], "little") > INT64_MAX:
+                    self.findings.tally(
+                        "unreadable_value",
+                        f"{PARAMETERS_TABLE}:range",
+                        FindingCategory.UNREPRESENTABLE,
+                        Severity.WARNING,
+                        place,
+                        "an integer past 2^63-1 does not fit a cell; it is unknown",
+                        {"table": PARAMETERS_TABLE, "reason": "range"},
+                    )
             return
         assert self.tables is not None
         values = layout.struct.unpack(payload)
@@ -498,7 +508,18 @@ def unit_rows(shared: Shared, cite: Cite, findings: Findings) -> list[UnitRow]:
                     + unit_fmt.layout.offsets[unit_fmt.layout.labels.index("Label")],
                     64,
                 )
-                units.setdefault(chr(ident & 0xFF), (text_value(label) or None, where))
+                text = text_value(label)
+                if text is None:
+                    findings.tally(
+                        "invalid_utf8",
+                        "unit",
+                        FindingCategory.UNREPRESENTABLE,
+                        Severity.WARNING,
+                        where,
+                        "text that is not UTF-8 is unknown in its cell, never replaced",
+                        {"where": "unit"},
+                    )
+                units.setdefault(chr(ident & 0xFF), (text, where))
     if mult_fmt is not None and mult_fmt.layout is not None:
         for place, payload in shared.units["MULT"]:
             found = _by_label(mult_fmt, payload)
@@ -565,7 +586,11 @@ def unit_rows(shared: Shared, cite: Cite, findings: Findings) -> list[UnitRow]:
                 Known(label, stated(labels_at)),
                 Known((target.chars or "")[column], stated(format_at)),
                 Known(unit_char, stated(unit_id_at)),
-                Known(unit_text, stated(unit_where)) if unit_text else Unknown(stated(unit_where)),
+                Known(unit_text, stated(unit_where))
+                if unit_text
+                else KnownAbsent(stated(unit_where))
+                if unit_text == ""
+                else Unknown(stated(unit_where)),
                 Known(mult_char, stated(mult_id_at)),
                 real_cell(number, stated(mult_where))
                 if number is not None
@@ -596,13 +621,13 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
     findings = Findings(source, config, PREFIX)
     size = source.size
     head = b"".join(read_pieces(source, 0, min(size, 3))) if size else b""
-    if not head.startswith(HEAD):
+    if not head.startswith(HEAD + bytes([FMT_TYPE])):
         findings.add(
             "bad_magic",
             FindingCategory.CORRUPT,
             Severity.ERROR,
             (0, min(size, 3)),
-            "the source does not start with a DataFlash record header; nothing of it is read",
+            "the source does not start with a FMT record; nothing of it is read",
             {"size": size},
         )
         context: JsonObject = {"format": FORMAT, "part": "unreadable"}
@@ -744,6 +769,21 @@ def _domain(cite: Cite, shared: Shared, label: str) -> TimestampDomain:
     )
 
 
+def _no_clock(cite: Cite) -> TimestampDomain:
+    where = (0, HEADER)
+    return TimestampDomain(
+        id=cite.record_id(TimestampDomain.kind, where, time_field("none")),
+        provenance=cite.provenance(where, time_field("none")),
+        field="none",
+        scope=(),
+        role=Unknown(),
+        resolution=Unknown(),
+        epoch=Unknown(),
+        timescale=Unknown(),
+        declared_monotonic=Unknown(),
+    )
+
+
 def _declarations(
     source: SourceReader, cite: Cite, shared: Shared, findings: Findings
 ) -> tuple[list[EvidenceRecord], Tables | None]:
@@ -756,14 +796,19 @@ def _declarations(
         first=Unknown(),
         last=Unknown(),
     )
-    domains = {label: _domain(cite, shared, label) for label in TIME_LABELS}
-    used = {"TimeUS"} | {
+    timed = {
         f.layout.time_label
         for f in shared.fmts.values()
         if f.stream and f.layout and f.layout.time_label
     }
+    domains = {label: _domain(cite, shared, label) for label in TIME_LABELS if label in timed}
     records: list[EvidenceRecord] = [run]
-    records.extend(domains[label] for label in sorted(used) if label in domains)
+    records.extend(domains[label] for label in sorted(domains))
+    untimed = any(f.stream and f.layout and not f.layout.time_label for f in shared.fmts.values())
+    if untimed:  # a type with no time column still carries one clock slot, declared as nothing
+        none = _no_clock(cite)
+        domains[""] = none
+        records.append(none)
     unit_rows_ = unit_rows(shared, cite, findings)
     by_type: dict[int, list[UnitRow]] = {}
     for row in unit_rows_:
@@ -772,7 +817,7 @@ def _declarations(
     for fmt in sorted(shared.fmts.values(), key=lambda f: f.type):
         if not fmt.stream or fmt.name is None or fmt.layout is None:
             continue
-        label = fmt.layout.time_label or "TimeUS"
+        label = fmt.layout.time_label or ""
         where = cite.provenance(fmt.place)
         metadata = {
             "format": fmt.chars or "",
@@ -821,13 +866,13 @@ def inspect(source: SourceReader, config: AdapterConfig) -> InspectResult:
     summary: dict[str, JsonValue] = {"format": FORMAT, "size": size}
     findings = Findings(source, config, PREFIX)
     head = b"".join(read_pieces(source, 0, min(size, 3))) if size else b""
-    if not head.startswith(HEAD):
+    if not head.startswith(HEAD + bytes([FMT_TYPE])):
         findings.add(
             "bad_magic",
             FindingCategory.CORRUPT,
             Severity.ERROR,
             (0, min(size, 3)),
-            "the source does not start with a DataFlash record header",
+            "the source does not start with a FMT record",
             {"size": size},
         )
         return InspectResult(summary, findings.flush())

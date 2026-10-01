@@ -47,6 +47,7 @@ from neptune.adapters.contract import (
 )
 from neptune.adapters.flightlog import dataflash, ulog
 from neptune.adapters.flightlog.common import Findings
+from neptune.adapters.flightlog.dataflash_format import FMT_TYPE
 from neptune.adapters.flightlog.dataflash_format import HEAD as DATAFLASH_HEAD
 from neptune.adapters.flightlog.ulog_format import MAGIC as ULOG_MAGIC
 from neptune.model.finding import FindingCategory, Severity
@@ -54,6 +55,7 @@ from neptune.model.finding import FindingCategory, Severity
 if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonObject
 
+FMT_START: Final = bytes([FMT_TYPE])
 DEFAULT_CHUNK_BYTES: Final = 8 * 1024 * 1024
 DEFAULT_MAX_ROWS: Final = 100_000
 
@@ -193,8 +195,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         _code(
             "unreadable_value",
-            "an info or parameter value does not match its declared type or has too many"
-            " elements; it is unknown (unrepresentable, warning)",
+            "an info or parameter value does not match its declared type, has too many elements or"
+            " is an integer past 2^63-1; it is unknown (unrepresentable, warning)",
         ),
     ),
     locator_steps=(
@@ -288,14 +290,14 @@ class FlightLogAdapter:
     def probe(self, head: bytes, hints: ProbeHints) -> ProbeResult:
         if head.startswith(ULOG_MAGIC):
             return ulog.probe(head)
-        if head.startswith(DATAFLASH_HEAD):
+        if head.startswith(DATAFLASH_HEAD + FMT_START):
             return dataflash.probe(head)
         reason = ProbeReason("flightlog.no_magic", "neither a ULog header nor a DataFlash record")
         return ProbeResult(0.0, (reason,))
 
     def inspect(self, source: SourceReader, config: AdapterConfig) -> InspectResult:
         head = _head(source)
-        if head.startswith(DATAFLASH_HEAD):
+        if head.startswith(DATAFLASH_HEAD + FMT_START):
             return dataflash.inspect(source, config)
         return ulog.inspect(source, config)
 
@@ -303,7 +305,7 @@ class FlightLogAdapter:
         head = _head(source)
         if head.startswith(ULOG_MAGIC):
             return ulog.make_plan(source, config, self._chunk_bytes, self._max_rows)
-        if head.startswith(DATAFLASH_HEAD):
+        if head.startswith(DATAFLASH_HEAD + FMT_START):
             return dataflash.make_plan(source, config, self._chunk_bytes, self._max_rows)
         findings = Findings(source, config, "flightlog.")
         findings.add(

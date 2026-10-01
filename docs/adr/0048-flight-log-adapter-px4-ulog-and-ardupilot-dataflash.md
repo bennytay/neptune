@@ -31,7 +31,8 @@ opaque until MVL-21. These two formats carry their own schema, so their payloads
 2. **Probe.** ULog: the 7-byte magic is `SIGNATURE`; a complete header with version ≤ 1 and a plausible
    message type after it is `VERIFIED`. DataFlash has no magic: a source that opens with `A3 95 80` (a `FMT`
    record) is `SIGNATURE`, and one whose first record is the standard `FMT`-of-`FMT` payload is `VERIFIED`.
-   Anything else is 0 whatever its name (`.bin` is a hint only).
+   Anything else is 0 whatever its name (`.bin` is a hint only), and `plan` reads only what probe accepts
+   (`bad_magic` otherwise).
 3. **What a log becomes.**
    - One `Run` citing the ULog header (the first record header of a DataFlash log). A ULog's header
      timestamp is `first`, `stated`, on the boot clock; its info `sys_uuid`, when present, is `machine`
@@ -39,8 +40,11 @@ opaque until MVL-21. These two formats carry their own schema, so their payloads
      `Unknown`. No `Machine` record: a `sys_uuid` alone is not a description of a machine (MVL-41 binds
      firmware and software identity to runs).
    - One `TimestampDomain` for the log's boot clock: ULog `timestamp`, DataFlash `TimeUS` (or `TimeMS` in old
-     logs, a second domain). Scope `()`, role `sample`, resolution 1 µs (1 ms), epoch `boot`, timescale
-     `monotonic`, each `Known` citing the declaring header or `FMT` record. Ticks are stored as declared.
+     logs, a second domain), only for the labels a log's types use. Scope `()`, role `sample`, resolution 1 µs
+     (1 ms), epoch `boot`, timescale `monotonic`, each `Known` citing the declaring header or `FMT` record
+     (the specification's facts, cited to the bytes that establish the format, as ADR 0017 §6 has it).
+     A DataFlash type with no time column carries a clock slot that declares nothing (field `none`, every
+     interpretation `Unknown`) and its rows are `not_covered`. Ticks are stored as declared.
      **GPS time is never merged into it and never converted to UTC**: GPS messages are streams like any
      other and their `time_utc_usec` / `GWk` / `GMS` fields are plain value columns.
    - One `Stream` per ULog subscription (`A` message; topic the message name, metadata `msg_id`, `multi_id`
@@ -61,7 +65,8 @@ opaque until MVL-21. These two formats carry their own schema, so their payloads
      `FMT` labels) and `field_units`. Info and parameter values keep the type the key declares.
    - **Declared units** (DataFlash): `field_units` has a row per declared column with message, field, format
      character, unit id (`FMTU`), unit text (`UNIT`), multiplier id (`FMTU`) and multiplier (`MULT`), each cell
-     citing the bytes that state it and `stated`; a unit id with no `UNIT` record is `Unknown` with a
+     citing the bytes that state it and `stated`; a unit id whose `UNIT` record has an empty label ("no unit",
+     ArduPilot's `-`) is `KnownAbsent` citing that record; a unit id with no `UNIT` record is `Unknown` with a
      `unit_undeclared` finding; a log with no `FMTU` says `units_not_declared`. The same facts ride on the
      stream as verbatim text (`unit.<field>`, `unit_id.<field>`, `multiplier.<field>`, `multiplier_id.<field>`).
      A ULog declares no units, only types, which are the columns' types; nothing is invented.
@@ -80,7 +85,8 @@ opaque until MVL-21. These two formats carry their own schema, so their payloads
    up to the last real field, a shorter message is `size_mismatch` (error, no row), a longer one a warning.
    Data before its subscription, for an unsubscribed id or for a format that does not lay out has no rows
    (`unknown_message_id`). A subscription's first declaration wins. Unknown but plausible message types
-   (upper-case ASCII) are skipped by size and counted; a damaged header skips to the next sync message
+   (upper-case ASCII) are skipped by size and counted, provided the message after them starts like one (a
+   flipped type or size byte otherwise lands in `corrupt_bytes`); a damaged header skips to the next sync message
    (`corrupt_bytes`, with the bytes lost). Limits: 4,096 formats and subscriptions, 2,048 columns, 65,535
    bytes, 8 levels of nesting, 1,024 elements of an array value.
 6. **DataFlash rules.** The table starts with the standard `FMT`; the first declaration of a type wins, a

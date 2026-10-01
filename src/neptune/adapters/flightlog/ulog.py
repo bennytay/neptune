@@ -24,6 +24,7 @@ from neptune.adapters.contract import (
     ProbeResult,
     SourceReader,
     make_chunk,
+    read_pieces,
 )
 from neptune.adapters.flightlog.common import (
     KNOWN,
@@ -93,8 +94,6 @@ HEADER: Final[Place] = (0, HEADER_SIZE)
 MAGIC_PLACE: Final[Place] = (0, len(MAGIC))
 PREFIX: Final = "flightlog."
 MAX_CELLS: Final = 1024  # elements of an array value that become cells
-DEFAULT_CHUNK_BYTES: Final = 8 * 1024 * 1024
-DEFAULT_MAX_ROWS: Final = 100_000
 
 TABLES: Final = {
     (ord("B"), True): "flag_bits",
@@ -111,7 +110,6 @@ LOGGED: Final = "logged"
 DROPOUT: Final = "dropout"
 # bytes before the key length: multi info has is_continued, default parameters their default types
 KEY_PREFIX: Final = {ord("I"): 0, ord("P"): 0, ord("M"): 1, ord("Q"): 1}
-TABLE_KINDS: Final = tuple(TABLES.values())
 
 
 # --- Probe -------------------------------------------------------------------------------------
@@ -159,6 +157,7 @@ class Format:
 @dataclass
 class Shared:
     formats: dict[str, Format] = field(default_factory=dict)
+    parsed: dict[str, MessageFormat] = field(default_factory=dict)
     layouts: dict[str, Layout | None] = field(default_factory=dict)
     subs: dict[int, Sub] = field(default_factory=dict)
     defs_end: int | None = None
@@ -176,7 +175,7 @@ class Shared:
         layout: Layout | None = None
         if found is not None:
             try:
-                layout = layout_of(name, {n: f.parsed for n, f in self.formats.items()})
+                layout = layout_of(name, self.parsed)
             except FormatError as exc:
                 if findings is not None:
                     findings.tally(
@@ -253,8 +252,6 @@ class Walk:
         self.piece_weight = 0
         self.piece_seq: dict[str, int] = {}
         self.piece_rows: dict[str, int] = {}
-        self.syncs = 0
-        self.last_end = 0
 
     # -- driving ---------------------------------------------------------------------------
 
@@ -283,7 +280,12 @@ class Walk:
                     self._leftover(pos, end, total)
                     pos = end
                     break
-                pos = self._corrupt(window, pos, end, "overrun")
+                pos = self._corrupt(window, pos, end, "overrun", found)
+                continue
+            if kind not in DEFINED_TYPES and not self._header_follows(window, pos + total, end):
+                # a type the format does not define is skipped by size only if the message after
+                # it starts like a message; otherwise its type or size is the damage
+                pos = self._corrupt(window, pos, end, "header")
                 continue
             if shared.defs_end is None and kind not in DEFINITION_TYPES and self.plan:
                 shared.defs_end = pos
@@ -293,7 +295,6 @@ class Walk:
             self._message(kind, pos, total, window.buf[i + 3 : i + total])
             pos += total
         self._close(end)
-        self.last_end = pos
 
     def _begin(self, pos: int) -> None:
         self.piece_start = pos
@@ -312,9 +313,19 @@ class Walk:
         end = self.shared.defs_end
         return end is None or pos < end
 
-    def _corrupt(self, window: Window, pos: int, end: int, why: str) -> int:
+    @staticmethod
+    def _header_follows(window: Window, pos: int, end: int) -> bool:
+        if pos >= end:
+            return True
+        i = window.at(pos, 3)
+        return i < 0 or window.buf[i + 2] in PLAUSIBLE_TYPES
+
+    def _corrupt(
+        self, window: Window, pos: int, end: int, why: str, found: int | None = None
+    ) -> int:
         """A damaged header: skip to the next sync message, or to the end of the range."""
-        found = window.find(SYNC_MESSAGE, pos + 1)
+        if found is None:
+            found = window.find(SYNC_MESSAGE, pos + 1)
         stop = found if found >= 0 else end
         self.findings.tally(
             "corrupt_bytes",
@@ -372,7 +383,6 @@ class Walk:
         elif kind == ord("O"):
             self._dropout(place, payload)
         elif kind == ord("S"):
-            self.syncs += 1
             if payload != SYNC_MAGIC:
                 self.findings.tally(
                     "bad_sync",
@@ -465,6 +475,7 @@ class Walk:
             )
             return
         shared.formats[parsed.name] = Format(parsed.name, parsed, place, text)
+        shared.parsed[parsed.name] = parsed
 
     def _subscription(self, place: Place, payload: bytes) -> None:
         if not self.plan:
@@ -592,7 +603,9 @@ class Walk:
                 cells[name] = tuple(values[item.start : item.start + item.count])
             else:
                 cells[name] = values[item.start]
-        self.slots[key].row(place, ts, cells)
+        self.slots[key].row(
+            place, ts, cells, time_state=NOT_COVERED if layout.time_index is None else None
+        )
 
     def _time_range(self, what: str, place: Place) -> None:
         self.findings.tally(
@@ -742,7 +755,10 @@ class Walk:
             if isinstance(element, bool):
                 out.append(Known(element, provenance))
             elif isinstance(element, int):
-                out.append(int_cell(element, provenance))
+                cell = int_cell(element, provenance)
+                if isinstance(cell, Unknown):
+                    self._unreadable(table, place, "range")
+                out.append(cell)
             else:
                 assert isinstance(element, float)
                 out.append(real_cell(element, provenance))
@@ -769,7 +785,10 @@ class Walk:
         ]
         for n in range(3):
             raw = struct.unpack_from("<Q", payload, 16 + 8 * n)[0]
-            cells.append(int_cell(raw, cite.stated((base + 16 + 8 * n, 8))))
+            cell = int_cell(raw, cite.stated((base + 16 + 8 * n, 8)))
+            if isinstance(cell, Unknown):
+                self._unreadable("flag_bits", place, "range")
+            cells.append(cell)
         return tuple(cells)
 
 
@@ -905,8 +924,6 @@ def _base_context(shared: Shared) -> dict[str, JsonValue]:
 
 
 def _read(source: SourceReader, start: int, end: int) -> list[bytes]:
-    from neptune.adapters.contract import read_pieces
-
     return list(read_pieces(source, start, end)) if end > start else []
 
 
@@ -920,6 +937,7 @@ def _shared_from(context: JsonObject) -> Shared:
         parsed = parse_format(as_str(text))
         place = (as_int(offset), as_int(length))
         shared.formats[as_str(name)] = Format(as_str(name), parsed, place, as_str(text))
+        shared.parsed[as_str(name)] = parsed
     for item in as_list(context["streams"]):
         msg_id, multi_id, name, offset, length = as_list(item)
         sub = Sub(

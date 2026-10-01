@@ -654,3 +654,29 @@ def test_inspect_reports_the_header_flags_and_definitions_without_reading_data()
     assert result.findings == ()
     bad = FlightLogAdapter().inspect(BytesReader(b"nope"), configure(DESCRIPTOR))
     assert [f.code for f in bad.findings] == ["flightlog.bad_magic"]
+
+
+def test_a_format_without_a_timestamp_has_rows_whose_time_is_not_covered() -> None:
+    log = build(
+        MAKE.fmt("plain:uint32_t x;"),
+        MAKE.subscribe(0, 0, "plain"),
+        MAKE.data(0, struct.pack("<I", 7)),
+    )
+    output = run(log)
+    (row,) = rows_of(output)["plain:0"]
+    assert row["state/time/0"] == "not_covered" and row["value/x"] == 7
+    assert finding(output, "no_time_field").details["format"] == "plain"
+
+
+def test_an_unknown_type_followed_by_no_message_is_damage_not_a_skip() -> None:
+    bad = struct.pack("<HB", 20, ord("Z")) + b"\x01" * 23 + MAKE.sync()
+    output = run(build(*ATT_SUB, airspeed(1), bad, airspeed(2)))
+    assert finding(output, "corrupt_bytes").severity is Severity.ERROR
+    assert "unknown_message_type" not in codes(output)
+    assert len(rows_of(output)["airspeed:0"]) == 2
+
+
+def test_a_uint64_past_the_signed_range_in_info_is_unknown_with_a_finding() -> None:
+    output = run(build(MAKE.info("uint64_t big", struct.pack("<Q", 2**64 - 1))))
+    assert finding(output, "unreadable_value").details["reason"] == "range"
+    assert tables_of(output)["info"][0][2] is None
