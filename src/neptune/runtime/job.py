@@ -89,7 +89,7 @@ from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.package import ReceiptEnvelope
 from neptune.model.run import Stream
-from neptune.model.series import SEQ
+from neptune.model.series import SEQ, SeriesBatch
 from neptune.model.source import (
     LocalPath,
     RawLocalPath,
@@ -309,27 +309,44 @@ def _chunk_series_failure(output: ChunkOutput) -> Failure | None:
     """A chunk's batches of one stream agree on their columns, and ``seq`` is unique among them.
 
     Both are laws ``write_run`` relies on; across chunks, ``_run_problems`` checks the rest.
-    Memory is one entry per row of this chunk, which the chunk's output already holds.
+    The failure, and every fact it names, is a function of the chunk's content alone, never of
+    the order or batching the adapter emitted it in, which the workspace does not keep (ADR 0033
+    §5): streams are judged in id order, the first stream that breaks a law is the one named,
+    and within it the laws are tried in a fixed order and name the least offending value (the
+    least repeated ``seq``, the least type name). So a chunk judged again from its committed form
+    (``_judge``) fails exactly as it failed, or would fail, fresh. Memory is one entry per row of
+    this chunk, which the chunk's output already holds.
     """
 
     def broken(law: Law, stream: RecordId, **facts: JsonValue) -> Failure:
         details: dict[str, JsonValue] = {"law": str(law), "stream": stream, **facts}
         return Failure(Step.CHUNK_SERIES, ContractError.__name__, details)
 
-    schemas: dict[RecordId, object] = {}
-    seen: dict[RecordId, set[int]] = defaultdict(set)
+    by_stream: dict[RecordId, list[SeriesBatch]] = defaultdict(list)
     for batch in output.series:
-        if schemas.setdefault(batch.stream, batch.schema()) != batch.schema():
-            return broken(Law.BATCH_COLUMNS_DISAGREE, batch.stream)
-        for column in batch.columns:
-            if column.name != SEQ:
-                continue
-            for value in column.values:
-                if isinstance(value, bool) or not isinstance(value, int):
-                    return broken(Law.SEQ_NOT_INTEGER, batch.stream, type=type_name(value))
-                if value in seen[batch.stream]:
-                    return broken(Law.SEQ_REPEATED, batch.stream, seq=value)
-                seen[batch.stream].add(value)
+        by_stream[batch.stream].append(batch)
+    for stream, batches in sorted(by_stream.items()):
+        if len({batch.schema() for batch in batches}) > 1:
+            return broken(Law.BATCH_COLUMNS_DISAGREE, stream)
+        seen: set[int] = set()
+        repeated: int | None = None
+        strange: str | None = None  # the least type name of a seq cell that is no integer
+        for batch in batches:
+            for column in batch.columns:
+                if column.name != SEQ:
+                    continue
+                for value in column.values:
+                    if isinstance(value, bool) or not isinstance(value, int):
+                        name = type_name(value)
+                        strange = name if strange is None else min(strange, name)
+                    elif value in seen:
+                        repeated = value if repeated is None else min(repeated, value)
+                    else:
+                        seen.add(value)
+        if strange is not None:
+            return broken(Law.SEQ_NOT_INTEGER, stream, type=strange)
+        if repeated is not None:
+            return broken(Law.SEQ_REPEATED, stream, seq=repeated)
     return None
 
 
