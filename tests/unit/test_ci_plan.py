@@ -66,6 +66,46 @@ def test_contracts_run_every_member_but_not_the_compiler() -> None:
     assert _plan("contracts/ledger.schema.json") == (False, tuple(sorted(MEMBERS)), False)
 
 
+OWNERS = {"package-schema": "neptune", "catalog-api": "neptune-ledger"}
+
+
+@pytest.mark.parametrize(
+    ("path", "compiler"),
+    [
+        ("contracts/package-schema/v1.0.0/schema.json", True),
+        ("contracts/package-schema/contract.toml", True),
+        ("contracts/catalog-api/v0.0.0/golden/x.json", False),
+        ("contracts/lock.toml", False),
+        ("contracts/unknown/contract.toml", False),
+    ],
+)
+def test_a_compiler_owned_contract_runs_the_compiler(path: str, compiler: bool) -> None:
+    """The compiler job runs the owner check for the contracts it owns."""
+    result = ci_plan.plan([path], MEMBERS, OWNERS)
+    assert (result.compiler, result.packages) == (
+        compiler,
+        tuple(sorted(MEMBERS)),
+    )
+
+
+def test_contract_owners_reads_each_contract_toml(tmp_path: Path) -> None:
+    for name, text in [
+        ("a", '[owner]\npackage = "neptune"\n'),
+        ("b", '[owner]\npackage = "neptune-ledger"\n'),
+        ("broken", "owner = [\n"),
+        ("no-owner", 'title = "x"\n'),
+    ]:
+        (tmp_path / "contracts" / name).mkdir(parents=True)
+        (tmp_path / "contracts" / name / "contract.toml").write_text(text)
+    assert ci_plan.contract_owners(tmp_path) == {"a": "neptune", "b": "neptune-ledger"}
+    assert ci_plan.contract_owners(tmp_path / "nowhere") == {}
+
+
+def test_the_committed_package_schema_is_owned_by_the_compiler() -> None:
+    owners = ci_plan.contract_owners(Path(__file__).parents[2])
+    assert owners["package-schema"] == ci_plan.COMPILER
+
+
 @pytest.mark.parametrize(
     "path", ["pyproject.toml", "uv.lock", "Makefile", ".python-version", ".github/workflows/ci.yml"]
 )
