@@ -374,8 +374,8 @@ def _descriptors(keep: frozenset[int]) -> None:
         if fd not in keep and fd != null:
             os.dup2(null, fd)
     still_open = keep | {0, 1, 2}
-    for entry in Path("/proc/self/fd").iterdir():
-        fd = int(entry.name)
+    listed = [int(entry.name) for entry in Path("/proc/self/fd").iterdir()]  # read whole first
+    for fd in listed:
         if fd not in still_open:
             with contextlib.suppress(OSError):  # the listing's own descriptor, closed already
                 os.close(fd)

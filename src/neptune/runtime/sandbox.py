@@ -368,7 +368,10 @@ class Subprocess:
         for fd in keep:
             if isinstance(fd, bool) or not isinstance(fd, int) or fd < 0:
                 raise ValueError(f"not a descriptor: {fd!r}")
-        reply, write_end = os.pipe()
+        try:
+            reply, write_end = os.pipe()
+        except OSError as exc:  # out of descriptors: the host, not the source
+            raise SandboxError(f"cannot start a sandboxed call: {exc}") from exc
         parent = os.getpid()
         try:
             pid = os.fork()
@@ -380,7 +383,16 @@ class Subprocess:
             self._child(work, codec, frozenset(keep) | {write_end}, write_end, parent)
         os.close(write_end)
         try:
-            return self._await(pid, reply, codec)
+            try:
+                pidfd = os.pidfd_open(pid)
+            except OSError as exc:
+                os.kill(pid, signal.SIGKILL)  # not yet reaped, so the pid is still the child's
+                os.waitpid(pid, 0)
+                raise SandboxError(f"cannot watch a sandboxed call: {exc}") from exc
+            try:
+                return self._await(pid, pidfd, reply, codec)
+            finally:
+                os.close(pidfd)
         finally:
             os.close(reply)
 
@@ -428,9 +440,12 @@ class Subprocess:
         except BaseException:
             os._exit(_UNREPORTED)
 
-    def _await(self, pid: int, reply: int, codec: Codec[T]) -> Outcome[T]:
-        """Read the reply until the child exits or a limit is hit; reap it; classify."""
-        pidfd = os.pidfd_open(pid)
+    def _await(self, pid: int, pidfd: int, reply: int, codec: Codec[T]) -> Outcome[T]:
+        """Read the reply until the child exits or a limit is hit; reap it; classify.
+
+        The child is always reaped before this returns or raises: on any error here (an
+        interrupt included) it is killed first, so no call outlives the job's attention.
+        """
         os.set_blocking(reply, False)
         cap = self.limits.memory_bytes + 2  # the status byte and the reply's tag
         pieces: list[bytes] = []
@@ -473,7 +488,6 @@ class Subprocess:
             if not reaped:
                 _kill(pidfd)
                 os.waitpid(pid, 0)
-            os.close(pidfd)
         data = b"".join(pieces)
         if data[:1] == _UNCONFINED:  # written before any adapter code ran: the host's fault
             control = data[1:].decode("ascii", "replace")
