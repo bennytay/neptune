@@ -23,7 +23,7 @@ from neptune.adapters.contract import PROBE_HEAD_SIZE, ProbeHints, configure
 from neptune.adapters.registry import AdapterRegistry
 from neptune.discovery.reader import LocalReader, SourceChangedError
 from neptune.discovery.scan import scan
-from neptune.discovery.source import LocalSource
+from neptune.discovery.source import LocalSource, SourceAccessError
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.package import Storage
 from neptune.model.source import LocalPath, SourceRevision
@@ -179,7 +179,7 @@ def test_an_exported_package_holds_every_source_and_the_same_receipt(
 ) -> None:
     workspace = Workspace(tmp_path / "home")
     ingest_local(corpus, workspace, registry(), tmp_path / "package")
-    exported = export(tmp_path / "package", tmp_path / "portable", corpus)
+    exported = export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
     shutil.rmtree(corpus)  # the evidence is gone; the export does not need it
     original, portable = read_package(tmp_path / "package"), read_package(tmp_path / "portable")
     assert portable.id == exported != original.id
@@ -189,12 +189,53 @@ def test_an_exported_package_holds_every_source_and_the_same_receipt(
     assert set(portable.blobs) == {h.content_id for h in portable.manifest.sources}
 
 
+def _nothing_at(destination: Path) -> bool:
+    """Neither the destination nor the hidden staging directory beside it was left behind."""
+    return not any(p.name.startswith(destination.name) for p in destination.parent.iterdir())
+
+
 def test_exporting_without_the_sources_fails_loudly(corpus: Path, tmp_path: Path) -> None:
     ingest_local(corpus, Workspace(tmp_path / "home"), registry(), tmp_path / "package")
     (corpus / "notes.txt").unlink()
-    with pytest.raises(PackageError, match="is not under"):
-        export(tmp_path / "package", tmp_path / "portable", corpus)
-    assert not (tmp_path / "portable").exists()
+    with pytest.raises(SourceAccessError, match=r"notes\.txt"):
+        export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
+    assert _nothing_at(tmp_path / "portable")
+
+
+def test_exporting_a_source_that_changed_since_hashing_fails(corpus: Path, tmp_path: Path) -> None:
+    ingest_local(corpus, Workspace(tmp_path / "home"), registry(), tmp_path / "package")
+    (corpus / "blob.bin").write_bytes(b"\x00\x01BINARY\x00")  # the same size, other bytes
+    with pytest.raises(PackageError, match="do not hash"):
+        export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
+    assert _nothing_at(tmp_path / "portable")
+
+
+def test_a_symlink_at_a_sources_location_is_not_that_source(corpus: Path, tmp_path: Path) -> None:
+    """The walk's policy applies to export: a link where the file was is refused, not followed."""
+    ingest_local(corpus, Workspace(tmp_path / "home"), registry(), tmp_path / "package")
+    (corpus / "notes.txt").rename(corpus / "moved.txt")
+    (corpus / "notes.txt").symlink_to("moved.txt")
+    with pytest.raises(SourceAccessError, match="symlink"):
+        export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
+    assert _nothing_at(tmp_path / "portable")
+
+
+def test_a_source_seen_absent_has_no_location_to_export_from(corpus: Path, tmp_path: Path) -> None:
+    workspace = Workspace(tmp_path / "home")
+    ingest_local(corpus, workspace, registry(), tmp_path / "first")
+    (corpus / "notes.txt").unlink()
+    ingest_local(corpus, workspace, registry(), tmp_path / "second")  # the ledger gains an absence
+    with pytest.raises(PackageError, match="no local location holds"):
+        export(tmp_path / "second", tmp_path / "portable", LocalSource(corpus))
+    assert _nothing_at(tmp_path / "portable")
+
+
+def test_an_export_is_written_once(corpus: Path, tmp_path: Path) -> None:
+    ingest_local(corpus, Workspace(tmp_path / "home"), registry(), tmp_path / "package")
+    (tmp_path / "taken").mkdir()
+    with pytest.raises(PackageError, match="written once"):
+        export(tmp_path / "package", tmp_path / "taken", LocalSource(corpus))
+    assert list((tmp_path / "taken").iterdir()) == []
 
 
 def test_a_source_that_changes_after_hashing_is_never_read(corpus: Path, tmp_path: Path) -> None:

@@ -6,8 +6,10 @@ file, and writes the package beside its destination before renaming it into plac
 appears whole or not at all. Sources stay where they are unless asked for.
 
 ``export`` copies a package with every source materialised into ``blobs/``: the portable form,
-readable anywhere. Its records and receipt are the original's; only its manifest differs, because
-it now holds the bytes. It is written the same way, whole or not at all.
+readable anywhere. Each source is read through a ``Source`` (``neptune.discovery.source``), so the
+walk's policy applies, and checked against its content id as it lands. Its records and receipt are
+the original's; only its manifest differs, because it now holds the bytes. It is written the same
+way, whole or not at all.
 """
 
 import os
@@ -17,9 +19,8 @@ from collections import defaultdict
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Final, Protocol
 
-from neptune.discovery.source import LocalSource, SourceAccessError
 from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.run import Stream
@@ -33,6 +34,18 @@ from neptune.store.package import (
 )
 from neptune.store.series import SERIES_SETTINGS, merge_runs
 from neptune.store.workspace import Workspace
+
+_COPY_SIZE: Final = 1024 * 1024
+
+
+class SourceOpener(Protocol):
+    """What ``export`` needs of a ``Source`` (``neptune.discovery.source``): to open a location.
+
+    Opening applies the source's policy, so a symlink or special file at the location is refused,
+    and raises the source's own error when the location cannot be opened; the export passes it on.
+    """
+
+    def open(self, location: LocalPath | RawLocalPath) -> BinaryIO: ...
 
 
 def _umask() -> int:
@@ -140,54 +153,55 @@ def assemble(
     return package_id(contents)
 
 
-def _sources_under(
-    records: Iterable[Any], wanted: Iterable[ContentId], root: Path
-) -> dict[ContentId, Path]:
-    """Where each wanted source lies under ``root``: a location whose latest revision holds it.
+def _head_locations(
+    records: Iterable[Any], wanted: Iterable[ContentId]
+) -> dict[ContentId, LocalPath | RawLocalPath]:
+    """For each wanted source, the first local location whose latest revision holds it.
 
-    Only the head of each location's chain is tried, since a superseded revision's location holds
-    other bytes, or none, by now. Each location is opened through ``LocalSource`` first, so the
-    walk's policy applies: a symlink or special file there is not a source. The bytes are checked
-    against the content id as the package is written, so a changed file fails the export.
+    Only the head of each location's chain counts: a superseded revision's location holds other
+    bytes, or none, by now. An external location is a connector's to fetch (MVL-45), so a source
+    with no local head is an error here, not a gap.
     """
     chain = [r for r in records if isinstance(r, (SourceRevision, SourceAbsence))]
     superseded = {previous for entry in chain for previous in entry.supersedes}
-    source, wanted, found = LocalSource(root), set(wanted), {}
+    missing, found = set(wanted), {}
     for revision in sorted(chain, key=lambda entry: entry.id):
         if not isinstance(revision, SourceRevision) or revision.id in superseded:
             continue
-        if revision.content_id not in wanted or revision.content_id in found:
-            continue
         location = revision.location
-        if not isinstance(location, (LocalPath, RawLocalPath)):
-            continue  # an external object: fetching it is a connector's (MVL-45)
-        try:
-            source.open(location).close()
-        except SourceAccessError:
-            continue
-        found[revision.content_id] = Path(
-            os.fsdecode(os.path.join(os.fsencode(root), location.raw))
-        )
-    if missing := sorted(wanted - set(found)):
-        raise PackageError(f"sources not under {root}: {missing}")
+        if revision.content_id in missing and isinstance(location, (LocalPath, RawLocalPath)):
+            found[revision.content_id] = location
+            missing.remove(revision.content_id)
+    if missing:
+        raise PackageError(f"no local location holds sources: {sorted(missing)}")
     return found
 
 
-def export(package_root: Path, destination: Path, source_root: Path) -> ContentId:
-    """Copy a package with every source materialised, read from its locations under the root.
+def export(package_root: Path, destination: Path, source: SourceOpener) -> ContentId:
+    """Copy a package with every source materialised, each read through ``source``.
 
-    Each referenced source is found at a location its revisions record, relative to
-    ``source_root``, and its bytes are checked against its content id while copied. The export
-    appears at ``destination``, which must not exist, whole or not at all.
+    A referenced source is read from the location its revisions record, opened through ``source``
+    so its policy applies, streamed into the export, and checked against its content id as it
+    lands: a changed source fails the export. The export appears at ``destination``, which must
+    not exist, whole or not at all.
     """
     package = read_package(package_root)
-    blobs: dict[ContentId, Content] = dict(package.blobs)
-    if wanted := [h.content_id for h in package.manifest.sources if h.content_id not in blobs]:
-        blobs.update(_sources_under(package.records, wanted, source_root))
-    contents = package_contents(
-        package.records, series=package.series, blobs=blobs, store=package.manifest.store
-    )
+    wanted = [h.content_id for h in package.manifest.sources if h.content_id not in package.blobs]
+    locations = _head_locations(package.records, wanted)
     with _staged(destination) as staging:
-        _lay_out(staging, contents)
-        read_package(staging)  # the sources were hashed, then copied: check what landed
+        scratch = staging / ".blobs"
+        scratch.mkdir()
+        blobs: dict[ContentId, Content] = dict(package.blobs)
+        for content, location in sorted(locations.items()):
+            landed = scratch / content.removeprefix("sha256:")
+            with source.open(location) as data, landed.open("wb") as copy:
+                shutil.copyfileobj(data, copy, _COPY_SIZE)
+            blobs[content] = landed  # hashed as it lies here, so what is checked is what ships
+        contents = package_contents(
+            package.records, series=package.series, blobs=blobs, store=package.manifest.store
+        )
+        copied = _lay_out(staging, contents, movable=scratch)
+        scratch.rmdir()  # every landed source was moved into place
+        if copied:  # the original's series were hashed, then copied: check what landed
+            read_package(staging)
     return package_id(contents)

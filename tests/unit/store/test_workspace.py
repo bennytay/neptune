@@ -185,6 +185,8 @@ def test_a_failed_commit_leaves_nothing_behind(
 
 def test_a_commit_killed_midway_leaves_no_partial_chunk(tmp_path: Path) -> None:
     """A real SIGKILL just before the atomic rename: staging debris, and no committed chunk."""
+    if os.name != "posix":  # pragma: no cover
+        pytest.skip("SIGKILL is POSIX")
     script = textwrap.dedent(
         f"""
         import importlib.util, os, signal, sys
@@ -212,8 +214,6 @@ def test_a_commit_killed_midway_leaves_no_partial_chunk(tmp_path: Path) -> None:
     assert workspace.clear_staging() == 1  # the dead process's staging directory
     assert workspace.commit(chunk, out.records, out.findings, out.series)
     assert workspace.load(chunk.id).findings == out.findings
-    if os.name != "posix":  # pragma: no cover
-        pytest.skip("SIGKILL is POSIX")
 
 
 def test_loading_an_uncommitted_chunk_is_an_error(tmp_path: Path) -> None:
