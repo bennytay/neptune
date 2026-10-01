@@ -23,10 +23,16 @@ Chunk 0 emits the ``DocumentRecord``; every other chunk holds one line and emits
 - ``setown``: aims a pipe's SIGIO at the job (``fcntl`` F_SETOWN); ``fioasync``: turns a pipe's
   async signal on (``ioctl`` FIOASYNC) — the signal path only Landlock ABI 6 scopes;
   ``ttyasync <path>``: opens the terminal ``<path>`` read-only and turns ``O_ASYNC`` on with
-  ``fcntl`` F_SETFL, which aims SIGIO at the terminal's foreground process group.
+  ``fcntl`` F_SETFL, which aims SIGIO at the terminal's foreground process group;
+- ``nap``: not an attack: sleeps two seconds, then reads as a block ``nap`` (a slow chunk to
+  kill a job in the middle of);
+- ``spool``: not an attack: spools 2 MiB through the call's scratch directory, as an archive
+  adapter spools a nested member, and reads it back (a block ``spool``); ``flood``: writes one
+  file past the scratch budget; ``unlock``: removes the lock of the directory its scratch is in.
+  A call given no scratch raises ``ScratchUnavailableError`` for these, as law 11 asks.
 
-A first line ``plan-hang`` or ``plan-segfault`` attacks ``plan`` instead, and a line
-``probe-segfault`` anywhere in the head makes ``probe`` segfault.
+A first line ``plan-hang``, ``plan-segfault`` or ``plan-spool`` does the same in ``plan``
+instead, and a line ``probe-segfault`` anywhere in the head makes ``probe`` segfault.
 """
 
 import ctypes
@@ -35,6 +41,7 @@ import os
 import signal
 import socket
 import struct
+import tempfile
 import termios
 import time
 from typing import Final
@@ -55,8 +62,10 @@ from neptune.adapters.contract import (
     ProbeReason,
     ProbeResult,
     Resources,
+    ScratchUnavailableError,
     SourceReader,
     make_chunk,
+    scratch_directory,
 )
 from neptune.identity.provenance import evidence_record_id
 from neptune.model.jsonvalue import JsonObject
@@ -162,6 +171,25 @@ def attack(text: str) -> str:
         finally:
             os.close(read_fd)
             os.close(write_fd)
+    elif text == "unlock":
+        directory = scratch_directory()
+        if directory is None:
+            raise ScratchUnavailableError()
+        (directory.parent / ".lock").unlink()
+    elif text == "nap":
+        time.sleep(2)
+    elif text in ("spool", "flood"):
+        directory = scratch_directory()
+        if directory is None:
+            raise ScratchUnavailableError()
+        size = 2 * 1024 * 1024 if text == "spool" else 2 * 1024 * 1024 * 1024
+        with tempfile.SpooledTemporaryFile(max_size=1024 * 1024, dir=str(directory)) as spooled:
+            block = b"s" * (1024 * 1024)
+            for _ in range(size // len(block)):
+                spooled.write(block)
+            spooled.seek(0)
+            if len(spooled.read()) != size:
+                raise RuntimeError("the spool lost bytes")
     elif text.startswith("ttyasync "):
         terminal = os.open(text.removeprefix("ttyasync "), os.O_RDONLY)  # reads stay open
         try:
@@ -190,7 +218,7 @@ class HostileAdapter:
 
     def plan(self, source: SourceReader, config: AdapterConfig) -> Plan:
         lines = _lines(source)
-        if lines and lines[0][1] in (b"plan-hang", b"plan-segfault"):
+        if lines and lines[0][1] in (b"plan-hang", b"plan-segfault", b"plan-spool"):
             attack(lines[0][1].decode("ascii").removeprefix("plan-"))
         chunks = [make_chunk(source, config, {"part": "document"}, source.size)]
         for order, (offset, line) in enumerate(lines):

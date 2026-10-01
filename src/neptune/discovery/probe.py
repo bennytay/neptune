@@ -18,18 +18,28 @@ The engine is a producer in its own right: its findings name its ``TransformReco
 (``neptune.probe`` at ``PROBE_VERSION`` with the policy as config), so they enter a package like
 any adapter's and the receipt shows who looked at a source nobody read. Everything is a pure
 function of the bytes, the registry and the policy.
+
+The job runs ``probe`` for one source in one sandboxed call (ADR 0033 §1): every adapter's probe
+and the container inspection, whose decoders read hostile bytes, run confined. The reply is
+``SourceProbe.to_json()``; ``source_probe_from_json`` rebuilds it in the job and derives again
+everything the job can (the sniff, the selection, the conclusion), refusing a reply that differs
+from what the engine would have written. If the call dies or hits a limit, ``probe_head`` asks
+each adapter again, one call each, and leaves the container unopened with an
+``inspection_failed`` finding.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, TypeAlias
 
 from neptune.adapters.contract import (
     PROBE_HEAD_SIZE,
+    Adapter,
     Documented,
     ProbeHints,
     ProbeResult,
     SourceReader,
+    probe_result_from_json,
 )
 from neptune.adapters.registry import (
     AdapterRegistry,
@@ -42,25 +52,35 @@ from neptune.discovery.containers import (
     ContainerReport,
     MemberProbe,
     ProbePolicy,
+    container_report_from_json,
     inspect_container,
     selection_to_json,
 )
-from neptune.discovery.sniff import Signature, Sniff, declared_signatures, sniff
-from neptune.identity.findings import ingest_finding
+from neptune.discovery.sniff import Signature, Sniff, declared_signatures, sniff, sniff_from_json
+from neptune.identity import canonical_json
+from neptune.identity.findings import check_ingest_finding, ingest_finding
 from neptune.identity.provenance import transform_record
-from neptune.model.finding import FindingCategory, IngestFinding, Severity
+from neptune.model.finding import (
+    FindingCategory,
+    IngestFinding,
+    Severity,
+    ingest_finding_from_json,
+)
 from neptune.model.ids import ContentId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
 from neptune.model.source import LocalPath, RawLocalPath, SourceLocation
 
 PROBE_ID: Final = "neptune.probe"
-PROBE_VERSION: Final = "0.1.0"
+# 0.2.0: inspection_failed, and adapter_failed names a crash or a limit (ADR 0033 §1)
+PROBE_VERSION: Final = "0.2.0"
 
 FINDING_CODES: Final[tuple[Documented, ...]] = (
     Documented(
         f"{PROBE_ID}.adapter_failed",
-        "an adapter's probe raised; it is left out of this source's candidates (failed, error)",
+        "an adapter's probe raised, returned the wrong type, crashed or hit a sandbox limit"
+        " (details: error, signal, exit_status, reply, or limit and value); it is left out of"
+        " this source's candidates (failed, error)",
     ),
     Documented(
         f"{PROBE_ID}.ambiguous",
@@ -82,6 +102,11 @@ FINDING_CODES: Final[tuple[Documented, ...]] = (
         " unknown method (unsupported, info)",
     ),
     Documented(
+        f"{PROBE_ID}.inspection_failed",
+        "the sandboxed inspection of a container died or hit a limit; its adapters were asked"
+        " again one by one and the container was not opened (failed, warning)",
+    ),
+    Documented(
         f"{PROBE_ID}.name_mismatch",
         "the name's extension belongs to another adapter's format; the bytes decided"
         " (inconsistent, info)",
@@ -91,6 +116,40 @@ FINDING_CODES: Final[tuple[Documented, ...]] = (
         "no adapter claims the source; the message says what sniffing saw (unsupported, error)",
     ),
 )
+
+
+# Why an adapter gave no probe result: its exception's class (``{"error": ...}``), or, when the
+# probe ran in the sandbox, the cause the runner names (a signal, an exit status, a malformed
+# reply, or a limit and its value).
+ProbeFailure: TypeAlias = JsonObject
+# How the engine asks one adapter to probe one head.
+Ask: TypeAlias = Callable[[Adapter, bytes, ProbeHints], "ProbeResult | ProbeFailure"]
+_CONCLUDED: Final = frozenset(
+    f"{PROBE_ID}.{name}" for name in ("ambiguous", "name_mismatch", "unsupported")
+)
+
+
+def ask_in_process(adapter: Adapter, head: bytes, hints: ProbeHints) -> ProbeResult | ProbeFailure:
+    """Ask ``adapter`` here, isolating whatever it raises: only the exception's class is kept."""
+    try:
+        result = adapter.probe(head, hints)
+        if not isinstance(result, ProbeResult):
+            raise TypeError(f"probe returned {type(result).__name__}")
+    except Exception as exc:  # isolation is the point: a probe must not fail the job
+        return {"error": type(exc).__name__}
+    return result
+
+
+def _failure_text(cause: ProbeFailure) -> str:
+    if "signal" in cause:
+        return f"killed by {cause['signal']}"
+    if "exit_status" in cause:
+        return f"exit status {cause['exit_status']}"
+    if "limit" in cause:
+        return f"stopped at its {cause['limit']} limit"
+    if "reply" in cause:
+        return "a reply that does not decode"
+    return str(cause.get("error", "failed"))
 
 
 def hint_name(location: SourceLocation) -> str:
@@ -156,16 +215,22 @@ class ProbeEngine:
         self._signatures: tuple[Signature, ...] = declared_signatures(
             registry.descriptors().values()
         )
+        self._codes = frozenset(code.name for code in FINDING_CODES)
         self._extensions: dict[str, list[str]] = {}
         for adapter_id, descriptor in registry.descriptors().items():
             for spec in descriptor.formats:
                 for extension in spec.extensions:
                     self._extensions.setdefault(extension, []).append(adapter_id)
 
-    def probe(self, reader: SourceReader, name: str = "") -> SourceProbe:
-        """Probe one source. ``name`` is its last location name, advisory; ``""`` if none."""
+    def probe(self, reader: SourceReader, name: str = "", head: bytes | None = None) -> SourceProbe:
+        """Probe one source. ``name`` is its last location name, advisory; ``""`` if none.
+
+        ``head`` is the source's first ``min(size, PROBE_HEAD_SIZE)`` bytes when the caller has
+        read them already (the job, whose sandboxed child inherits them); otherwise they are read.
+        """
         size = reader.size
-        head = reader.read(0, min(size, PROBE_HEAD_SIZE))
+        if head is None:
+            head = reader.read(0, min(size, PROBE_HEAD_SIZE))
         if len(head) != min(size, PROBE_HEAD_SIZE):
             raise ValueError(
                 f"{reader.content_id}: the reader gave {len(head)} head bytes of a {size}-byte"
@@ -174,7 +239,9 @@ class ProbeEngine:
         findings: list[IngestFinding] = []
         whole = EvidenceRef(reader.content_id, (ByteRange(0, size),))
         sniffed = sniff(head, size, self._signatures)
-        probes, selection = self._select(head, ProbeHints(name, size), whole, findings)
+        probes, selection = self._select(
+            head, ProbeHints(name, size), whole, findings, ask_in_process
+        )
         container: ContainerReport | None = None
         if sniffed.container is not None:
             if self.policy.max_depth >= 1:
@@ -186,19 +253,139 @@ class ProbeEngine:
                     report=self._reporter(findings),
                 )
             else:
-                self._report(
-                    findings,
-                    "container_limit",
-                    FindingCategory.LIMIT,
-                    Severity.WARNING,
-                    whole,
-                    f"a {sniffed.container} container is not opened (max_depth 0)",
-                    {"container": str(sniffed.container), "limit": "depth", "max_depth": 0},
-                )
+                findings.append(self._unopened(sniffed, whole))
         self._conclude(findings, sniffed, probes, selection, name, whole, container)
         return SourceProbe(
             reader.content_id, size, name, sniffed, probes, selection, container, tuple(findings)
         )
+
+    def _unopened(self, sniffed: Sniff, whole: EvidenceRef) -> IngestFinding:
+        """The finding for a container the policy does not open (``max_depth`` 0)."""
+        found: list[IngestFinding] = []
+        self._report(
+            found,
+            "container_limit",
+            FindingCategory.LIMIT,
+            Severity.WARNING,
+            whole,
+            f"a {sniffed.container} container is not opened (max_depth 0)",
+            {"container": str(sniffed.container), "limit": "depth", "max_depth": 0},
+        )
+        return found[0]
+
+    def probe_head(
+        self, source: ContentId, size: int, name: str, head: bytes, ask: Ask, failed: JsonObject
+    ) -> SourceProbe:
+        """Probe one source from its head alone, asking each adapter through ``ask``: what the job
+        does when the sandboxed ``probe`` of the source died or hit a limit (``failed`` names the
+        cause). A container is left unopened, with an ``inspection_failed`` finding; an adapter
+        whose own probe fails again is an ``adapter_failed`` finding naming the cause.
+        """
+        if len(head) != min(size, PROBE_HEAD_SIZE):
+            raise ValueError(f"{source}: {len(head)} head bytes of a {size}-byte source")
+        findings: list[IngestFinding] = []
+        whole = EvidenceRef(source, (ByteRange(0, size),))
+        sniffed = sniff(head, size, self._signatures)
+        probes, selection = self._select(head, ProbeHints(name, size), whole, findings, ask)
+        if sniffed.container is not None:
+            self._report(
+                findings,
+                "inspection_failed",
+                FindingCategory.FAILED,
+                Severity.WARNING,
+                whole,
+                f"the inspection of a {sniffed.container} container failed"
+                f" ({_failure_text(failed)}); it was not opened",
+                {"container": str(sniffed.container), **failed},
+            )
+        self._conclude(findings, sniffed, probes, selection, name, whole, None)
+        return SourceProbe(source, size, name, sniffed, probes, selection, None, tuple(findings))
+
+    # --- Reading a sandboxed probe back --------------------------------------------------------
+
+    def _candidate(self, data: JsonValue) -> Candidate:
+        if not isinstance(data, dict) or data.keys() != {"adapter", "result", "version"}:
+            raise ValueError("a probe is exactly adapter, result and version")
+        adapter, version = data["adapter"], data["version"]
+        descriptors = self.registry.descriptors()
+        if not isinstance(adapter, str) or adapter not in descriptors:
+            raise ValueError(f"no registered adapter {adapter!r}")
+        if version != descriptors[adapter].version:
+            raise ValueError(f"adapter {adapter} is not at version {version!r}")
+        result = probe_result_from_json(data["result"])
+        return Candidate(adapter, descriptors[adapter].version, result)
+
+    def _member_probe(self, data: JsonValue) -> MemberProbe:
+        if not isinstance(data, dict) or data.keys() != {"selection", "sniff"}:
+            raise ValueError("a member's probe is exactly selection and sniff")
+        chosen = data["selection"]
+        if not isinstance(chosen, dict) or not isinstance(chosen.get("candidates"), list):
+            raise ValueError("a selection lists its candidates")
+        candidates = [self._candidate(item) for item in chosen["candidates"]]
+        return MemberProbe(sniff_from_json(data["sniff"], self._signatures), select(candidates))
+
+    def _finding(self, data: JsonValue, source: ContentId) -> IngestFinding:
+        finding = check_ingest_finding(ingest_finding_from_json(data))
+        if finding.transform != self.transform.id or finding.code not in self._codes:
+            raise ValueError(f"finding {finding.id} is not this engine's")
+        subject = finding.subject
+        if not isinstance(subject, EvidenceRef) or subject.source != source:
+            raise ValueError(f"finding {finding.id} cites another source")
+        return finding
+
+    def source_probe_from_json(
+        self, data: JsonValue, *, source: ContentId, size: int, name: str, head: bytes
+    ) -> SourceProbe:
+        """Read back the ``SourceProbe`` a sandboxed ``probe`` of this source returned.
+
+        The reply comes from a process that read hostile bytes, so it is rebuilt from its parts
+        and checked, never trusted: the sniff is taken again from ``head``, every adapter's
+        result must come from a registered adapter at its version (or that adapter must have
+        failed), the selection and the concluding findings are derived again, the container
+        report and the other findings are parsed strictly and must cite this source, and the
+        whole must be exactly what this engine writes. Anything else is a ``ValueError``.
+        """
+        keys = {"findings", "name", "probes", "selection", "size", "sniff", "source"}
+        if not isinstance(data, dict) or not keys <= data.keys() <= keys | {"container"}:
+            raise ValueError(f"a source's probe is exactly {sorted(keys)} and a container")
+        if (data["source"], data["size"], data["name"]) != (source, size, name):
+            raise ValueError("the probe is of another source")
+        if not isinstance(data["probes"], list) or not isinstance(data["findings"], list):
+            raise ValueError("a source's probes and findings are lists")
+        whole = EvidenceRef(source, (ByteRange(0, size),))
+        sniffed = sniff(head, size, self._signatures)
+        probes = tuple(self._candidate(item) for item in data["probes"])
+        container = (
+            None
+            if "container" not in data
+            else container_report_from_json(
+                data["container"], self._member_probe, self.policy.max_depth - 1, source
+            )
+        )
+        findings = [self._finding(item, source) for item in data["findings"]]
+        # The head decides whether a container is opened: one is reported exactly when the head
+        # sniffs as a container the policy opens, of that kind, and an unopened one says so.
+        opened = sniffed.container if self.policy.max_depth >= 1 else None
+        if (None if container is None else container.kind) != opened:
+            raise ValueError("the container report is not the one the head calls for")
+        unreported = sniffed.container is not None and opened is None
+        if unreported and self._unopened(sniffed, whole).id not in {f.id for f in findings}:
+            raise ValueError("an unopened container is not reported")
+        failed = sorted(
+            str(f.details.get("adapter"))
+            for f in findings
+            if f.code == f"{PROBE_ID}.adapter_failed" and f.subject == whole
+        )
+        asked = [c.adapter for c in probes]
+        if asked != sorted(asked) or sorted(asked + failed) != sorted(self.registry.descriptors()):
+            raise ValueError("every registered adapter is asked once, in id order")
+        kept = [f for f in findings if f.code not in _CONCLUDED]
+        selection = select(probes)
+        self._conclude(kept, sniffed, probes, selection, name, whole, container)
+        probed = SourceProbe(source, size, name, sniffed, probes, selection, container, tuple(kept))
+        if canonical_json.dumps(probed.to_json()) != canonical_json.dumps(data):
+            raise ValueError("the probe is not what this engine writes for the source")
+        return probed
 
     # --- Asking the adapters -------------------------------------------------------------------
 
@@ -208,16 +395,14 @@ class ProbeEngine:
         hints: ProbeHints,
         subject: EvidenceRef,
         findings: list[IngestFinding],
+        ask: Ask,
     ) -> tuple[tuple[Candidate, ...], Selection]:
-        """Every adapter's probe of ``head``, crashes isolated, and the rule applied to them."""
+        """Every adapter's probe of ``head``, failures isolated, and the rule applied to them."""
         candidates: list[Candidate] = []
         for adapter in self.registry.adapters():
             descriptor = adapter.descriptor
-            try:
-                result = adapter.probe(head, hints)
-                if not isinstance(result, ProbeResult):
-                    raise TypeError(f"probe returned {type(result).__name__}")
-            except Exception as exc:  # isolation is the point: a probe must not fail the job
+            result = ask(adapter, head, hints)
+            if not isinstance(result, ProbeResult):
                 self._report(
                     findings,
                     "adapter_failed",
@@ -225,12 +410,8 @@ class ProbeEngine:
                     Severity.ERROR,
                     subject,
                     f"adapter {descriptor.id} {descriptor.version} failed to probe"
-                    f" ({type(exc).__name__}); it is not a candidate for this source",
-                    {
-                        "adapter": descriptor.id,
-                        "error": type(exc).__name__,
-                        "version": descriptor.version,
-                    },
+                    f" ({_failure_text(result)}); it is not a candidate for this source",
+                    {"adapter": descriptor.id, "version": descriptor.version, **result},
                 )
                 continue
             candidates.append(Candidate(descriptor.id, descriptor.version, result))
@@ -240,7 +421,7 @@ class ProbeEngine:
         self, findings: list[IngestFinding]
     ) -> Callable[[bytes, ProbeHints, EvidenceRef], MemberProbe]:
         def prober(head: bytes, hints: ProbeHints, subject: EvidenceRef) -> MemberProbe:
-            _, selection = self._select(head, hints, subject, findings)
+            _, selection = self._select(head, hints, subject, findings, ask_in_process)
             return MemberProbe(sniff(head, hints.size, self._signatures), selection)
 
         return prober

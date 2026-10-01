@@ -197,7 +197,10 @@ def test_a_job_killed_inside_a_write_resumes_to_the_clean_package(
     clean = IngestJob(corpus, tmp_path / "clean", Workspace(tmp_path / "other"), registry()).run()
     assert outcome.package == clean.package == read_package(destination).id
     assert whole_chunks(workspace) == whole_chunks(Workspace(tmp_path / "other"))
-    assert workspace.clear_staging() == workspace_debris  # the dead writer's lock is gone
+    # The resuming job swept the dead writer's staging as it started (ADR 0033 §2).
+    (swept,) = [e.details for e in seen if e.kind == "workspace_swept"]
+    assert swept == {"scratch": 0, "staging": workspace_debris}
+    assert workspace.clear_staging() == 0
 
 
 def test_a_job_interrupted_in_process_resumes_the_same_way(corpus: Path, tmp_path: Path) -> None:

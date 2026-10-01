@@ -1,7 +1,8 @@
 # Ingestion pipeline
 
 Status: stage contract agreed; the job runtime (MVL-6), the local store (MVL-16), the cache
-(MVL-9) and the parser sandbox (MVL-10) are implemented — M2's runtime is complete.
+(MVL-9) and the parser sandbox (MVL-10) are implemented, and the M2 gate (MVL-57) wired them
+together — M2's runtime is complete.
 
 ## Stages
 
@@ -9,7 +10,7 @@ Status: stage contract agreed; the job runtime (MVL-6), the local store (MVL-16)
 |---|---|---|---|---|
 | 1 | discover | enumerate candidate sources through a `Source` (local FS now, object store later); apply ignore, symlink and traversal policy | discovery | MVL-2, MVL-45 |
 | 2 | fingerprint | size, magic bytes, streaming sha256 + per-chunk hashes; emit `SourceArtifact` / `SourceRevision` | identity | MVL-2 |
-| 3 | probe | done: `discovery.probe.ProbeEngine` sniffs the head, asks every adapter (crashes isolated), applies the registry's rule, opens zip/tar/gzip/bzip2/xz within `ProbePolicy`, and reports ties, unclaimed sources and container problems as `neptune.probe.*` findings (ADR 0027) | discovery + adapters | MVL-8 |
+| 3 | probe | done: `discovery.probe.ProbeEngine` sniffs the head, asks every adapter (crashes isolated), applies the registry's rule, opens zip/tar/gzip/bzip2/xz within `ProbePolicy`, and reports ties, unclaimed sources and container problems as `neptune.probe.*` findings (ADR 0027); the job runs it in one sandboxed call per source and re-derives its reply (ADR 0033 §1) | discovery + adapters | MVL-8, MVL-57 |
 | 4 | inspect | cheap per-source summary (streams, extents, counts) without full parse | adapters | MVL-7 |
 | 5 | group | propose run/session groupings from filesystem signals (v0) and later from evidence (M7) | discovery | MVL-13, MVL-34 |
 | 6 | plan | adapters emit chunks with deterministic ids and cost estimates | adapters | MVL-7 |
@@ -28,7 +29,7 @@ records with their own provenance and never rewrites what stages 1–10 produced
 | Resume after crash | runtime | deterministic chunk ids + the workspace's committed chunks and saved plans (ADR 0026; ADR 0028 §2) |
 | Cache | runtime | key = chunk id, which covers (source id, adapter id, adapter version, config hash, libraries, context) (ADR 0024 §4); derivatives by `DerivativeKey`; each miss names its rule (ADR 0031) |
 | Partial failure | runtime | per-chunk isolation and retries; adapter crash → finding, the source is quarantined, the job continues (ADR 0028 §3) |
-| Sandboxing | runtime | done: every probe, plan and `ingest` in a forked child confined by limits (CPU, wall, memory, a separate 64 MiB `reply_bytes` cap), seccomp and Landlock; its reply decoded as bounded JSON; only the job writes the workspace; fails closed below Landlock ABI 3 unless `allow_degraded_sandbox`; in-process only when chosen (ADR 0030) |
+| Sandboxing | runtime | done: each source's probe (the engine, containers included), each plan and each `ingest` in a forked child confined by limits (CPU, wall, memory, a separate 64 MiB `reply_bytes` cap), seccomp and Landlock; its reply decoded as bounded JSON; plan and ingest may write only beneath a per-call scratch directory (`scratch_bytes` per file); only the job writes the workspace; fails closed below Landlock ABI 3 unless `allow_degraded_sandbox`; in-process only when chosen (ADRs 0030, 0033) |
 | Adapter-local problems | adapter | `IngestFinding`s in the chunk output |
 | Cross-source validation | validate | runs over the store after all chunks |
 | Explanation | runtime | assembles `probe`/`plan` results + descriptors into the receipt |
@@ -40,9 +41,9 @@ state machine over the stages above, in nine phases (ADR 0028):
 
 | Phase | Stages above | Does |
 |---|---|---|
-| `discover` | 1 | walks the root; symlinks are events, unreadable or special entries are `entry_skipped` findings |
-| `fingerprint` | 2 | hashes every file into the root's persisted ledger, reconciles absences, saves the ledger |
-| `inspect` | 3 | reads each distinct source's head once, probes with every adapter (each isolated), selects and configures |
+| `discover` | 1 | sweeps the workspace's scratch and staging debris; walks the root; every symlink, special or unreadable entry is discovery's finding (ADR 0029 §1) |
+| `fingerprint` | 2 | hashes every file into the root's persisted ledger, reconciles absences, saves the ledger; a size that changed while hashing is a finding |
+| `inspect` | 3 | reads each distinct source's head once and runs the probe engine over it in one sandboxed call (every adapter's probe, the container listing); selects and configures; a tie, an unclaimed source or a container problem is a `neptune.probe.*` finding (ADR 0033 §1) |
 | `plan` | 6 | reuses the workspace's saved plan for (source, transform) or calls `plan`, checks it, saves it |
 | `parse` | 7 | `ingest` on one chunk the workspace has not committed; `attempts` tries (default 2) |
 | `normalize` | 7–8 | `check_chunk_output` plus `seq` unique within the chunk; commit, whole or not at all |
@@ -54,8 +55,12 @@ state machine over the stages above, in nine phases (ADR 0028):
   have changed), reuses saved plans, skips committed chunk ids, and builds the same package. Killing
   the process at any instant is safe: every workspace write is an atomic rename.
 - **Partial success.** A chunk that raises after every attempt, a plan that raises, a source that
-  changes under the job or cannot be opened, or output breaking a cross-chunk law quarantines that
-  source: its output stays out of the package and a `neptune.runtime.*` finding citing it says why.
+  changes under the job or cannot be opened, a read that comes up short, or output breaking a
+  cross-chunk law quarantines that source: its output stays out of the package and a finding
+  citing it says why (`neptune.runtime.*`; a short read from a source that no longer matches its
+  artifact is `neptune.discovery.short_read`, never retried, and a changed or short source also
+  gets `verify_artifact`'s account; over an intact source a short read is the adapter's own
+  raise, ADR 0033 §3).
   Every other source lands. A `ContractError` is a bug and is never retried. Committed chunks of a
   quarantined source stay in the workspace, so the rerun after a fix redoes only what failed. The
   finding names the step, law, exception class and ids, never an exception's text or a repr, so
@@ -65,20 +70,29 @@ state machine over the stages above, in nine phases (ADR 0028):
   `cpu_seconds`, `wall_seconds` or `memory_bytes` is `limit_exceeded` and is not. Both name the
   adapter, its version, the step and the chunk, and quarantine the source as any failure does.
   `JobOptions(isolation=Isolation.IN_PROCESS)` runs adapters in the job's process instead.
+  Each `plan` and `ingest` call gets a fresh scratch directory under `<workspace>/scratch`
+  (`contract.scratch_directory()`), the only place it may write, removed when it returns; a
+  file past `scratch_bytes` is `limit_exceeded`, and a call that needs scratch and has none
+  raises `ScratchUnavailableError`: `plan_failed` or `chunk_failed` with `cause`
+  `scratch_unavailable`, never retried, nothing committed (ADR 0033 §2). If a source's probe
+  call dies, each adapter is asked again on its own, and a container it was listing is left
+  unopened (`neptune.probe.inspection_failed`).
 - **Cancellation.** A `threading.Event`, checked before each source, chunk and phase from `inspect`
   on (the walk and its ledger always finish). The chunk in hand finishes and commits; a staged
   package is discarded; the outcome is `cancelled` with no package.
-- **Events.** `on_event(JobEvent(kind, phase, details))` for every phase start and finish, every source
-  (hashed, selected, unsupported, ambiguous, planned, admitted, quarantined, …) and chunk (skipped,
-  parsed, retried, committed, failed), and `sandbox_ready` (the isolation, the limits, the host's
+- **Events.** `on_event(JobEvent(kind, phase, details))` for every phase start and finish, the
+  start's sweep (`workspace_swept`: scratch and staging entries removed), every source (hashed,
+  selected, unsupported, ambiguous, short read, planned, admitted, quarantined, …) and chunk
+  (skipped, parsed, retried, committed, failed), `probe_failed` (the source's probe call, then
+  each adapter that fails on its own), and `sandbox_ready` (the isolation, the limits, the host's
   Landlock ABI, and on a degraded host a `degraded` list of the guarantees it could not give) as
   `inspect` starts. A sandboxed chunk stopped by a limit is a `limit_exceeded` finding naming the
   limit (`cpu_seconds`, `wall_seconds`, `memory_bytes` or `reply_bytes`). Canonical JSON, no clock:
   the consumer adds one.
 - **Job failure** (`JobError`) is reserved for the job itself: an unreadable root, a destination that
   exists, options naming an unknown adapter or option, a workspace or disk that will not write, a
-  host that cannot run the sandbox or whose Landlock ABI is below the floor (unless
-  `allow_degraded_sandbox`).
+  workspace whose scratch root overlaps the ingest root, a host that cannot run the sandbox or
+  whose Landlock ABI is below the floor (unless `allow_degraded_sandbox`).
 
 ## The cache (MVL-9)
 
@@ -112,8 +126,8 @@ needs, and nothing else decides: no clock, file time or flag.
 - **Collection.** `neptune.runtime.collect(workspace, registry, options)` keeps only plans under the
   current transforms for sources a saved ledger still holds, with their chunks and derivatives. Jobs
   hold the workspace's lock shared; collection is refused while any job runs.
-- **Cost of an unchanged source**: its fingerprint hash, a probe of its head, copying its series
-  files and verifying the new package. In the acceptance test a 4 GiB recording re-ingests with
+- **Cost of an unchanged source**: its fingerprint hash, one sandboxed probe call over its head,
+  copying its series files and verifying the new package. In the acceptance test a 4 GiB recording re-ingests with
   zero `plan` and `ingest` calls; hashing is the only pass over its bytes.
 
 ## Dry-run

@@ -35,7 +35,7 @@ from neptune.adapters.contract import (
 from neptune.adapters.harness import ingest_source
 from neptune.adapters.registry import AdapterRegistry
 from neptune.discovery.containers import ContainerReport
-from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe, hint_name
+from neptune.discovery.probe import PROBE_ID, PROBE_VERSION, ProbeEngine, SourceProbe, hint_name
 from neptune.discovery.reader import BytesReader
 from neptune.discovery.scan import scan
 from neptune.discovery.source import LocalSource
@@ -158,12 +158,12 @@ def test_bytes_decide_what_reads_each_source_and_what_is_left_unread(corpus: Pat
         for source in receipt.sources
     }
     assert read_by == {
-        "archive": [(PROBE_ID, "0.1.0")],
-        "archive.tgz": [(PROBE_ID, "0.1.0")],
-        "blob.bin": [(PROBE_ID, "0.1.0")],
-        "bundle": [(PROBE_ID, "0.1.0")],
-        "logs/flight_log": [(PROBE_ID, "0.1.0")],
-        "logs/renamed": [(PROBE_ID, "0.1.0")],
+        "archive": [(PROBE_ID, PROBE_VERSION)],
+        "archive.tgz": [(PROBE_ID, PROBE_VERSION)],
+        "blob.bin": [(PROBE_ID, PROBE_VERSION)],
+        "bundle": [(PROBE_ID, PROBE_VERSION)],
+        "logs/flight_log": [(PROBE_ID, PROBE_VERSION)],
+        "logs/renamed": [(PROBE_ID, PROBE_VERSION)],
         "notes.txt": [("text", "0.1.0")],
         "operator_log": [("text", "0.1.0")],
     }
@@ -179,7 +179,7 @@ def test_bytes_decide_what_reads_each_source_and_what_is_left_unread(corpus: Pat
     assert any("tar container holding 5 members" in m for m in messages)
     assert any("gzip container holding 1 member" in m for m in messages)
     rendering = package.files()[RECEIPT_TEXT].decode()
-    assert f"{PROBE_ID} 0.1.0" in rendering
+    assert f"{PROBE_ID} {PROBE_VERSION}" in rendering
     assert f"{PROBE_ID}.unsupported" in rendering
 
 

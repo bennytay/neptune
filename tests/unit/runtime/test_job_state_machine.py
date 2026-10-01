@@ -161,7 +161,8 @@ def test_the_envelope_names_the_job_and_times_every_phase(root: Path, tmp_path: 
     assert envelope.started <= envelope.finished
     assert dict(outcome.durations).keys() == dict(envelope.durations).keys()
     assert outcome.package == read_package(tmp_path / "p").id
-    assert len(outcome.ingested) == 2 and outcome.findings == ()
+    assert len(outcome.ingested) == 2  # the blob is unread: the probe engine says so
+    assert [f.code for f in outcome.findings] == ["neptune.probe.unsupported"]
 
 
 def test_a_job_name_is_random_unless_given(root: Path, tmp_path: Path) -> None:
@@ -200,6 +201,32 @@ def test_the_root_must_be_a_directory_and_the_destination_free(root: Path, tmp_p
     (tmp_path / "taken").mkdir()
     with pytest.raises(JobError, match="written once"):
         IngestJob(root, tmp_path / "taken", home, registry)
+
+
+def test_a_workspace_inside_the_root_fails_the_job_before_any_work(
+    root: Path, tmp_path: Path
+) -> None:
+    """Its scratch space would overlap the evidence, and the walk would read the workspace."""
+    job = IngestJob(root, tmp_path / "p", Workspace(root / ".neptune"), default_registry())
+    with pytest.raises(JobError, match="scratch space"):
+        job.run()
+    assert job.state is JobState.FAILED and not (tmp_path / "p").exists()
+    assert not (root / ".neptune" / "scratch").exists()  # nothing created inside the root
+
+
+def test_a_job_sweeps_what_killed_calls_and_writes_left(root: Path, tmp_path: Path) -> None:
+    home = Workspace(tmp_path / "home")
+    stale = home.scratch / "scratch-left-by-a-killed-call"
+    stale.mkdir(parents=True)
+    (stale / ".lock").write_bytes(b"")  # nobody holds it
+    (stale / "spool").write_bytes(b"x" * 100)
+    (home.home / "staging" / "half-written").mkdir()
+    seen: list[JobEvent] = []
+    IngestJob(root, tmp_path / "p", home, default_registry(), on_event=seen.append).run()
+    (swept,) = [e for e in seen if e.kind == "workspace_swept"]
+    assert swept.details == {"scratch": 1, "staging": 1} and swept.phase is Phase.DISCOVER
+    assert list(home.scratch.iterdir()) == [] and list((home.home / "staging").iterdir()) == []
+    assert oct(home.scratch.stat().st_mode & 0o777) == oct(0o700)
 
 
 def test_a_job_runs_once(root: Path, tmp_path: Path) -> None:
@@ -397,4 +424,7 @@ def test_a_registry_with_no_adapters_reads_nothing_and_still_packages(
     assert outcome.state is JobState.COMMITTED and outcome.ingested == ()
     assert len([e for e in seen if e.kind == "source_unsupported"]) == 3
     package = read_package(tmp_path / "p")
-    assert all(s.read_by == () for s in package.receipt.sources)
+    # Nothing read them: only the probe engine, which looked and says no adapter claims them.
+    (engine,) = [t for t in package.receipt.transforms if t.adapter_id == "neptune.probe"]
+    assert all(s.read_by == (engine.id,) for s in package.receipt.sources)
+    assert sorted(f.code for f in outcome.findings) == ["neptune.probe.unsupported"] * 3

@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -214,6 +215,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
             "cpu_seconds": 10,
             "memory_bytes": 256 * MIB,
             "reply_bytes": 64 * MIB,
+            "scratch_bytes": 1024 * MIB,
             "wall_seconds": 2,
         },
     }
@@ -229,6 +231,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
         "isolation": "subprocess",
         "memory_bytes": 256 * MIB,
         "reply_bytes": 64 * MIB,
+        "scratch_bytes": 1024 * MIB,
         "wall_seconds": 2,
     }
     assert {f.transform for f in run.outcome.findings} == {runtime.id}
@@ -317,16 +320,109 @@ def test_a_parser_cannot_reach_the_network_processes_or_files(tmp_path: Path, at
     assert sorted(p.name for p in root.iterdir()) == ["attack.hostile"]  # the source untouched
 
 
+@pytest.mark.skipif(not confine.landlock_abi(), reason="no Landlock: calls get no scratch")
+def test_a_call_spools_through_its_scratch_and_a_flood_is_the_scratch_limit(
+    tmp_path: Path,
+) -> None:
+    """Plan and ingest each get a fresh scratch directory under the workspace: a spool works,
+    one file past ``scratch_bytes`` stops the call, and nothing is left there (ADR 0033 §2)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "spool.hostile").write_bytes(HOSTILE.hostile("before", "spool", "after"))
+    (root / "flood.hostile").write_bytes(HOSTILE.hostile("flood"))
+    (root / "unlock.hostile").write_bytes(HOSTILE.hostile("unlock"))
+    run = Run(root, tmp_path, sandboxed(scratch_bytes=4 * MIB))
+    assert run.codes() == ["neptune.runtime.chunk_failed", "neptune.runtime.limit_exceeded"]
+    unlock = run.finding("neptune.runtime.chunk_failed")  # the lock is outside its scratch
+    assert (unlock.details["error"], unlock.details["step"]) == ("PermissionError", "ingest")
+    finding = run.finding("neptune.runtime.limit_exceeded")
+    assert (finding.details["limit"], finding.details["value"]) == ("scratch_bytes", 4 * MIB)
+    assert [source for source, _ in run.outcome.ingested] == [run.source("spool.hostile")]
+    assert {"before", "spool", "after"} <= set(run.texts())
+    assert list((run.home / "scratch").iterdir()) == [] and run.staging_is_empty()
+    assert sorted(p.name for p in root.iterdir()) == [
+        "flood.hostile",
+        "spool.hostile",
+        "unlock.hostile",
+    ]
+
+
+@pytest.mark.skipif(not confine.landlock_abi(), reason="no Landlock: no run has scratch")
+def test_a_call_that_needs_scratch_and_has_none_fails_for_that_run_only(tmp_path: Path) -> None:
+    """Law 11: an adapter given no scratch (here ``scratch_bytes`` 0; a degraded host is the
+    same) raises ``ScratchUnavailableError``. Its plan or chunk fails for that run with the
+    cause ``scratch_unavailable``, never retried, and nothing of it is committed, so a later run
+    that has scratch computes it afresh and writes what a fresh workspace writes: scratch is not
+    part of chunk identity, and nothing committed depends on it (ADR 0033 §2, §6)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    (root / "spool.hostile").write_bytes(HOSTILE.hostile("before", "spool", "after"))
+    (root / "plan.hostile").write_bytes(HOSTILE.hostile("plan-spool", "x"))
+    starved = Run(root, tmp_path, sandboxed(scratch_bytes=0), name="starved")
+    assert starved.codes() == ["neptune.runtime.chunk_failed", "neptune.runtime.plan_failed"]
+    chunk = starved.finding("neptune.runtime.chunk_failed")
+    spooled = chunk.details["chunk"]
+    assert chunk.details == {
+        "adapter": "hostile",
+        "attempts": 1,  # a contract error: never retried
+        "cause": "scratch_unavailable",
+        "chunk": spooled,
+        "error": "ScratchUnavailableError",
+        "step": "ingest",
+        "version": "1.0.0",
+    }
+    assert starved.finding("neptune.runtime.plan_failed").details == {
+        "adapter": "hostile",
+        "cause": "scratch_unavailable",
+        "error": "ScratchUnavailableError",
+        "step": "plan",
+        "version": "1.0.0",
+    }
+    assert not starved.of("chunk_retried")
+    assert isinstance(spooled, str) and not starved.workspace.committed(spooled)
+    assert starved.committed_for(starved.source("spool.hostile")) == 3  # every other chunk
+    assert [source for source, _ in starved.outcome.ingested] == [starved.source("notes.txt")]
+    sound = Run(root, tmp_path, sandboxed(), name="sound")  # the same workspace, with scratch
+    fresh = Run(root, tmp_path, sandboxed(), name="fresh", home="fresh-home")
+    assert sound.codes() == [] and sound.workspace.committed(spooled)
+    assert sound.outcome.package == fresh.outcome.package
+    assert {"before", "spool", "after", "plan-spool", "x"} <= set(sound.texts())
+
+
 def test_a_probe_that_crashes_takes_only_its_adapter_out(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     (root / "odd.hostile").write_bytes(HOSTILE.hostile("probe-segfault", "words"))
     run = Run(root, tmp_path, sandboxed())
-    (failed,) = run.of("probe_failed")
-    assert failed.details["adapter"] == "hostile" and failed.details["signal"] == "SIGSEGV"
+    # The engine's one call for the source dies; each adapter is asked again on its own, and
+    # only the one that crashes is out (ADR 0033 §1).
+    whole, one = run.of("probe_failed")
+    assert "adapter" not in whole.details and whole.details["signal"] == "SIGSEGV"
+    assert one.details["adapter"] == "hostile" and one.details["signal"] == "SIGSEGV"
     (selected,) = run.of("source_selected")
     assert selected.details["adapter"] == "text"  # the file is ASCII: the text adapter reads it
-    assert run.codes() == [] and len(run.outcome.ingested) == 1
+    assert run.codes() == ["neptune.probe.adapter_failed", "neptune.probe.name_mismatch"]
+    assert len(run.outcome.ingested) == 1
+    failed = run.finding("neptune.probe.adapter_failed")
+    assert failed.details == {"adapter": "hostile", "signal": "SIGSEGV", "version": "1.0.0"}
+
+
+def test_a_container_whose_member_crashes_a_probe_is_left_closed(tmp_path: Path) -> None:
+    """The engine inspects containers in the sandbox: a member whose head crashes an adapter's
+    probe kills that call, not the job; the container is reported unopened (ADR 0033 §1)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    with zipfile.ZipFile(root / "bundle.zip", "w") as bundle:
+        bundle.writestr("inner.hostile", HOSTILE.hostile("probe-segfault", "x"))
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    run = Run(root, tmp_path, sandboxed())
+    assert run.codes() == ["neptune.probe.inspection_failed", "neptune.probe.unsupported"]
+    failed = run.finding("neptune.probe.inspection_failed")
+    assert failed.details == {"container": "zip", "signal": "SIGSEGV"}
+    (whole,) = run.of("probe_failed")  # the engine's call; every adapter alone was fine
+    assert whole.details == {"signal": "SIGSEGV", "source": run.source("bundle.zip")}
+    assert len(run.outcome.ingested) == 1  # the notes
 
 
 def test_the_sandbox_changes_nothing_in_the_package(tmp_path: Path) -> None:

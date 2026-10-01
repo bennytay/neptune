@@ -12,10 +12,12 @@
 3. Resource limits: ``RLIMIT_CPU`` (SIGXCPU at the limit, SIGKILL a second later),
    ``RLIMIT_AS`` (the address space at fork plus the memory budget), ``RLIMIT_CORE`` 0 and not
    dumpable (a crash leaves no core dump holding source data), ``RLIMIT_FSIZE`` 0 (no byte is
-   written to any file).
+   written to any file), or the scratch budget when the call is given a scratch directory.
 4. ``no_new_privs``, then Landlock where the kernel offers it (5.13+): no file or directory is
-   created, written, truncated, renamed or removed; from ABI 4 no TCP bind or connect; from ABI
-   6 no signal to a process outside the sandbox and no abstract Unix socket outside it.
+   created, written, truncated, renamed or removed, except beneath the call's scratch directory
+   if it has one (ADR 0033 §2); from ABI 4 no TCP bind or connect; from ABI 6 no signal to a
+   process outside the sandbox and no abstract Unix socket outside it. A host without Landlock
+   gives no call a scratch directory: ``RLIMIT_FSIZE`` 0 is then all that stops a write.
 5. A seccomp filter: no socket, no new process or program (``fork``, ``vfork``, ``clone``
    without ``CLONE_THREAD``, ``clone3``, ``execve``, ``execveat``), no signal to another
    process, no ``ptrace`` or cross-process memory or descriptor access, no namespaces, no
@@ -274,7 +276,9 @@ ARCHES: Final = {
 # --- Landlock (linux/landlock.h) ---------------------------------------------------------------
 
 _LANDLOCK_CREATE_RULESET: Final = 444
+_LANDLOCK_ADD_RULE: Final = 445
 _LANDLOCK_RESTRICT_SELF: Final = 446
+_LANDLOCK_RULE_PATH_BENEATH: Final = 1
 _LANDLOCK_CREATE_RULESET_VERSION: Final = 1
 
 # Every filesystem right that changes something, by the ABI that introduced it. Execute and the
@@ -294,6 +298,18 @@ _FS_WRITE_V1: Final = sum(
         12,  # MAKE_SYM
     )
 )
+# What a call may do beneath its scratch directory: write, make and remove regular files and
+# directories. No device, socket, FIFO or symlink is made there, even in scratch.
+_FS_SCRATCH_V1: Final = sum(
+    1 << bit
+    for bit in (
+        1,  # WRITE_FILE
+        4,  # REMOVE_DIR
+        5,  # REMOVE_FILE
+        7,  # MAKE_DIR
+        8,  # MAKE_REG
+    )
+)
 _FS_REFER: Final = 1 << 13  # ABI 2
 _FS_TRUNCATE: Final = 1 << 14  # ABI 3
 _FS_IOCTL_DEV: Final = 1 << 15  # ABI 5
@@ -307,6 +323,11 @@ class _RulesetAttr(ctypes.Structure):
         ("handled_access_net", ctypes.c_uint64),
         ("scoped", ctypes.c_uint64),
     )
+
+
+class _PathBeneathAttr(ctypes.Structure):
+    _pack_ = 1  # the kernel's struct landlock_path_beneath_attr is packed: 12 bytes
+    _fields_ = (("allowed_access", ctypes.c_uint64), ("parent_fd", ctypes.c_int32))
 
 
 class _SockFilter(ctypes.Structure):
@@ -456,14 +477,19 @@ def _seccomp(arch: Arch) -> None:
         raise _fail("seccomp")
 
 
-def _landlock(abi: int) -> None:
+def _landlock(abi: int, scratch: int | None = None) -> None:
+    """Restrict every write right Landlock handles at ``abi``; grant the scratch rights beneath
+    the directory open at ``scratch``, if any."""
     if abi < 1:
         return
     fs = _FS_WRITE_V1
+    beneath = _FS_SCRATCH_V1
     if abi >= 2:
         fs |= _FS_REFER
+        beneath |= _FS_REFER  # renames and links within scratch
     if abi >= 3:
         fs |= _FS_TRUNCATE
+        beneath |= _FS_TRUNCATE
     if abi >= 5:
         fs |= _FS_IOCTL_DEV
     attr = _RulesetAttr(fs, _NET_TCP if abi >= 4 else 0, _SCOPE_ALL if abi >= 6 else 0)
@@ -476,6 +502,17 @@ def _landlock(abi: int) -> None:
     if ruleset < 0:
         raise _fail("landlock")
     try:
+        if scratch is not None:
+            rule = _PathBeneathAttr(beneath, scratch)
+            added = _c().syscall(
+                ctypes.c_long(_LANDLOCK_ADD_RULE),
+                ctypes.c_long(ruleset),
+                ctypes.c_long(_LANDLOCK_RULE_PATH_BENEATH),
+                ctypes.byref(rule),
+                ctypes.c_ulong(0),
+            )
+            if added != 0:
+                raise _fail("landlock")
         restricted = _c().syscall(
             ctypes.c_long(_LANDLOCK_RESTRICT_SELF), ctypes.c_long(ruleset), ctypes.c_ulong(0)
         )
@@ -522,9 +559,23 @@ def _descriptors(keep: frozenset[int]) -> None:
 
 
 def confine(
-    host: Host, keep: frozenset[int], parent: int, cpu_seconds: int, memory_bytes: int
-) -> None:
-    """Confine this forked process; ``ConfineError`` if any control cannot be applied."""
+    host: Host,
+    keep: frozenset[int],
+    parent: int,
+    cpu_seconds: int,
+    memory_bytes: int,
+    *,
+    scratch: Path | None = None,
+    scratch_bytes: int = 0,
+) -> bool:
+    """Confine this forked process; ``ConfineError`` if any control cannot be applied.
+
+    ``scratch`` is a directory the call may write beneath, each file at most ``scratch_bytes``.
+    Returns whether it was granted: only where Landlock can confine writes to it (ABI 1 and up)
+    and the budget is not 0; otherwise nothing can be written anywhere.
+    """
+    granted = scratch is not None and host.landlock >= 1 and scratch_bytes > 0
+    beneath: int | None = None
     try:
         _prctl("pdeathsig", _PR_SET_PDEATHSIG, signal.SIGKILL)
         if os.getppid() != parent:  # the job died before the line above took effect
@@ -540,9 +591,13 @@ def confine(
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGXCPU):
             signal.signal(signum, signal.SIG_DFL)
         signal.signal(signal.SIGXFSZ, signal.SIG_IGN)  # a write past RLIMIT_FSIZE raises
-        _descriptors(keep)
+        if granted:
+            assert scratch is not None
+            beneath = os.open(scratch, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        _descriptors(keep if beneath is None else keep | {beneath})
         _lower(resource.RLIMIT_CORE, 0, 0)
-        _lower(resource.RLIMIT_FSIZE, 0, 0)
+        budget = scratch_bytes if granted else 0
+        _lower(resource.RLIMIT_FSIZE, budget, budget)
         _lower(resource.RLIMIT_CPU, cpu_seconds, cpu_seconds + 1)
         space = _address_space() + memory_bytes
         _lower(resource.RLIMIT_AS, space, space)
@@ -553,5 +608,10 @@ def confine(
     # of RLIMIT_CORE, and would hold the dying process for a second or more.
     _prctl("dumpable", _PR_SET_DUMPABLE, 0)
     _prctl("no_new_privs", _PR_SET_NO_NEW_PRIVS, 1)
-    _landlock(host.landlock)
+    try:
+        _landlock(host.landlock, beneath)
+    finally:
+        if beneath is not None:
+            os.close(beneath)
     _seccomp(host.arch)
+    return granted

@@ -16,6 +16,7 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import termios
 import threading
 import time
@@ -26,8 +27,9 @@ from typing import Final
 
 import pytest
 
-from neptune.adapters.contract import ContractError
+from neptune.adapters.contract import ContractError, ShortReadError, scratch_directory
 from neptune.discovery.reader import SourceChangedError
+from neptune.model.ids import ContentId
 from neptune.runtime import confine, wire
 from neptune.runtime.sandbox import (
     DEFAULT_LIMITS,
@@ -50,6 +52,7 @@ from neptune.runtime.sandbox import (
 )
 
 MIB: Final = 1024 * 1024
+SOURCE: Final = ContentId("sha256:" + "5" * 64)
 TEXT: Final = Codec(str, str.encode, bytes.decode)
 RAW: Final = Codec(bytes, bytes, bytes)
 
@@ -88,11 +91,13 @@ def test_default_limits() -> None:
         "cpu_seconds": 60,
         "memory_bytes": 2 * 1024 * MIB,
         "reply_bytes": 64 * MIB,
+        "scratch_bytes": 1024 * MIB,
         "wall_seconds": 120,
     }
     assert DEFAULT_LIMITS.value(Limit.CPU) == 60 and DEFAULT_LIMITS.value(Limit.WALL) == 120
     assert DEFAULT_LIMITS.value(Limit.MEMORY) == 2 * 1024 * MIB  # the address space
     assert DEFAULT_LIMITS.value(Limit.REPLY) == 64 * MIB  # far below it: a separate cap
+    assert DEFAULT_LIMITS.value(Limit.SCRATCH) == 1024 * MIB  # one file in a call's scratch
 
 
 @pytest.mark.parametrize(
@@ -195,6 +200,25 @@ def test_what_the_call_raises_comes_back_as_its_class(box: Subprocess) -> None:
         raise SystemExit(0)
 
     assert box.call(leave, TEXT) == Raised("SystemExit")
+
+    def short() -> str:
+        raise ShortReadError(SOURCE, 7, 9)
+
+    assert box.call(short, TEXT) == Raised("ShortReadError", short_read=(SOURCE, 7, 9))
+
+
+def test_a_short_read_carries_where_and_only_when_it_is_well_formed() -> None:
+    assert Raised.of(ShortReadError(SOURCE, 0, 1)).short_read == (SOURCE, 0, 1)
+    for forged in (
+        ShortReadError(ContentId("not an id"), 0, 1),
+        ShortReadError(SOURCE, -1, 1),
+        ShortReadError(SOURCE, True, 1),
+    ):
+        assert Raised.of(forged) == Raised("ShortReadError")  # an adapter's raise like any other
+    with pytest.raises(ValueError, match="short read"):
+        Raised("ShortReadError", changed=True, short_read=(SOURCE, 0, 1))
+    with pytest.raises(ValueError, match="short read"):
+        Raised("ShortReadError", short_read=(SOURCE, 0))  # type: ignore[arg-type]
 
 
 def test_a_result_of_the_wrong_type_is_caught_in_either_isolation(box: Subprocess) -> None:
@@ -514,6 +538,73 @@ def test_with_landlock_nothing_is_created_changed_or_removed(
     assert kept.read_bytes() == b"source bytes"
 
 
+# --- Scratch space (ADR 0033 §2) ------------------------------------------------------------------
+
+
+def spool(size: int) -> Callable[[], str]:
+    """Work that spools ``size`` bytes through its scratch directory, as an archive adapter would
+    spool a nested member, and says what it found there."""
+
+    def work() -> str:
+        directory = scratch_directory()
+        if directory is None:
+            return "none"
+        with tempfile.SpooledTemporaryFile(max_size=1024, dir=str(directory)) as spooled:
+            spooled.write(b"x" * size)  # past max_size: rolls over to a real file in scratch
+            spooled.seek(0)
+            read = len(spooled.read())
+        (directory / "sub").mkdir()
+        (directory / "sub" / "kept").write_bytes(b"k")
+        (directory / "sub" / "kept").rename(directory / "moved")
+        os.truncate(directory / "moved", 0)
+        return f"{read} {sorted(p.name for p in directory.iterdir())}"
+
+    return work
+
+
+@pytest.mark.skipif(not confine.landlock_abi(), reason="this kernel has no Landlock")
+def test_a_call_writes_in_its_scratch_directory_and_nowhere_else(
+    box: Subprocess, tmp_path: Path
+) -> None:
+    scratch = tmp_path / "scratch"
+    scratch.mkdir(mode=0o700)
+    assert box.call(spool(64 * 1024), TEXT, scratch=scratch) == Returned("65536 ['moved', 'sub']")
+    denied = Raised("PermissionError")
+    beside = tmp_path / "beside"
+    assert box.call(doing(lambda: beside.write_bytes(b"")), TEXT, scratch=scratch) == denied
+    assert not beside.exists()
+    link = doing(lambda: (scratch / "link").symlink_to(tmp_path))
+    assert box.call(link, TEXT, scratch=scratch) == denied  # no symlink, even in scratch
+    escape = doing(lambda: (scratch / "moved").rename(tmp_path / "out"))
+    assert box.call(escape, TEXT, scratch=scratch) == Raised("PermissionError")
+    # Without one, the call has no scratch and writes nowhere.
+    assert box.call(spool(1), TEXT) == Returned("none")
+
+
+@pytest.mark.skipif(not confine.landlock_abi(), reason="this kernel has no Landlock")
+def test_a_scratch_file_past_its_budget_is_the_scratch_limit(tmp_path: Path) -> None:
+    small = Subprocess(Limits(cpu_seconds=5, wall_seconds=10, scratch_bytes=64 * 1024))
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    outcome = small.call(spool(64 * 1024 + 1), TEXT, scratch=scratch)
+    assert outcome == Exceeded(Limit.SCRATCH, 64 * 1024)
+    assert small.call(spool(64 * 1024), TEXT, scratch=scratch) == Returned("65536 ['moved', 'sub']")
+
+
+def test_a_zero_scratch_budget_grants_no_scratch(tmp_path: Path) -> None:
+    none = Subprocess(Limits(cpu_seconds=5, wall_seconds=10, scratch_bytes=0))
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    assert none.call(spool(1), TEXT, scratch=scratch) == Returned("none")
+
+
+def test_in_process_calls_get_their_scratch_directory_too(tmp_path: Path) -> None:
+    trusted = runner(Isolation.IN_PROCESS)
+    assert trusted.call(spool(10), TEXT, scratch=tmp_path) == Returned("10 ['moved', 'sub']")
+    assert trusted.call(spool(10), TEXT) == Returned("none")
+    assert scratch_directory() is None  # granted only for the call
+
+
 def test_only_kept_descriptors_stay_open(box: Subprocess, tmp_path: Path) -> None:
     (tmp_path / "kept").write_bytes(b"kept")
     (tmp_path / "other").write_bytes(b"other")
@@ -587,6 +678,7 @@ def test_the_sandbox_describes_its_limits_and_landlock(box: Subprocess) -> None:
             "cpu_seconds": 1,
             "memory_bytes": 128 * MIB,
             "reply_bytes": 64 * MIB,
+            "scratch_bytes": 1024 * MIB,
             "wall_seconds": 2,
         },
     }
@@ -647,7 +739,7 @@ def test_allow_degraded_must_be_a_bool() -> None:
 def test_a_control_that_fails_in_the_child_is_the_hosts_fault(
     box: Subprocess, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def refused(*args: object) -> None:
+    def refused(*args: object, **kwargs: object) -> None:
         raise confine.ConfineError("seccomp", "EINVAL")
 
     monkeypatch.setattr(confine, "confine", refused)  # the child inherits it at fork
@@ -660,9 +752,15 @@ def test_a_raised_reply_is_decoded_strictly() -> None:
         Raised("OSError"),
         Raised("SourceChangedError", changed=True),
         Raised("ContractError", contract=True, returned="builtins.NoneType"),
+        Raised("ShortReadError", short_read=(SOURCE, 7, 9)),
     ):
         assert decode_raised(encode_raised(raised)) == raised
+    fields = b'"changed":false,"contract":false,"error":"E","returned":null,"unencodable":false'
     for data in (
+        b"{" + fields + b',"short_read":["sha256:x",1,2]}',
+        b"{" + fields + b',"short_read":["' + SOURCE.encode() + b'",-1,2]}',
+        b"{" + fields + b',"short_read":["' + SOURCE.encode() + b'",1]}',
+        b"{" + fields + b',"short_read":"' + SOURCE.encode() + b'"}',
         b"",
         b"[]",
         b'{"changed":false,"contract":false,"error":"E"}',

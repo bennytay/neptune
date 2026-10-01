@@ -33,10 +33,8 @@ exceptions. The fixtures are `tests/fixtures/hostile/` (README lists each file a
 | Walk policy | `source.py` | `LocalPath` cannot spell `..`; directories open with `O_NOFOLLOW` per component; symlinks never followed, special files never opened (ADRs 0009, 0010) |
 | Walk findings | `policy.py`, `scan.py` | every symlink (`symlink_not_followed`, with its target as declared and a lexical inside/outside flag that never depends on where the root is mounted: an absolute target is outside), special file, vanished or unreadable entry, and a size that changed between walk and digest is a finding under the `neptune.discovery` transform |
 | Archive limits | `archive.py` | `ArchiveLimits`: 10,000 members, 8 GiB per member, 64 GiB total, 100:1, depth 3 by default. Declared sizes (a sparse tar member's expanded size, against the chunks it stores) refused before inflating, actual bytes counted while inflating, compressed tars inflated by a bounded reader, one tar member's headers and zip link targets capped at 1 MiB, a zip central directory bounded and its entries counted before `zipfile` parses it, member names checked for traversal, link and special members recorded and never followed, nested archives spooled to scratch, any parser exception a finding with a fixed error code. Limits are the `neptune.archive` transform's config |
-| Verification | `verify.py` | `verify_artifact` re-reads a source against its `SourceArtifact`: `truncated`, `grown`, `chunk_changed` findings citing the exact range; `short_read_finding` records a `ShortReadError` from `adapters.contract.read_pieces` (a reader served an adapter no bytes inside the declared size) so one plan or chunk fails alone and the job goes on |
-| Scratch space | `scratch.py` | `scratch_space(private_root, ingest_root=...)`: `0700`, owned by this user, never overlapping the ingest root (required, so the check always runs), removed on exit; `clear_scratch(private_root, ingest_root=...)` on resume removes only what no live process holds |
-
-Not in place yet (MVL-10): subprocess isolation, CPU/memory/time limits, crash capture.
+| Verification | `verify.py` | `verify_artifact` re-reads a source against its `SourceArtifact`: `truncated`, `grown`, `chunk_changed` findings citing the exact range; `short_read_finding` records a `ShortReadError` from `adapters.contract.read_pieces` (a reader served an adapter no bytes inside the declared size). The job records both: a short read in `plan` or `ingest` over a source that no longer matches its artifact quarantines it without a retry (over an intact one it is the adapter's failure), and a source that changed under the job is verified (ADR 0033 §3) |
+| Scratch space | `scratch.py` | `scratch_space(private_root, ingest_root=...)`: `0700`, owned by this user, never overlapping the ingest root (required, so the check always runs), removed on exit; `clear_scratch(private_root, ingest_root=...)` removes only what no live process holds. The job's private root is `<workspace>/scratch`, swept with `staging/` as each job starts; a workspace inside the ingest root fails the job (ADR 0033 §2) |
 
 ## Schedule
 
@@ -47,6 +45,7 @@ Not in place yet (MVL-10): subprocess isolation, CPU/memory/time limits, crash c
 | M2 (MVL-75) | done: walk findings, archive-bomb limits, truncation detection, scratch-space policy, hostile fixture suite (ADR 0029) |
 | M2 (MVL-10) | done: every probe, plan and `ingest` in a forked, confined child per call (see below); CPU, wall-time and memory limits; a crash, hang or limit hit is a finding and the job goes on; the `hostile` fixture adapter (ADR 0030) |
 | M2 (MVL-16) | done: local-only mode on by default, network use refused until allowed; sources read in place and verified chunk by chunk; materialised and exported sources read through `LocalSource`, and package files opened with `O_NOFOLLOW`, regular files only (ADR 0026) |
+| M2 (MVL-57) | done: the probe engine, its container decoders included, runs in the sandbox, one call per source, its reply re-derived and refused unless exact; `plan` and `ingest` write only beneath a per-call scratch directory; short reads and changed sources verified; walk findings in every package; the hostile suite through a real job (ADR 0033) |
 | M6 (MVL-28/29) | malformed PDF/image safeguards; no active content execution |
 | M9 | auth/profile handling for connectors; presigned uploads; idempotency keys |
 | M10 (MVL-50) | consolidated adversarial suite; sandbox escape and exhaustion tests as acceptance |
@@ -74,9 +73,14 @@ confined before any adapter code runs. A sandboxed call:
   does not open, and `TIOCSTI` injection and `TIOCSPGRP` fail on any terminal; SIGIO through a
   terminal is the O_ASYNC filter above, not `setsid`); traces nothing and enters no namespace
   (seccomp);
-- writes no byte to any file (`RLIMIT_FSIZE` 0), changes no file's mode, owner, times or xattrs
-  and punches no bytes (`chmod`/`chown`/`utimensat`/`*xattr`/`fallocate` refused — Landlock
-  covers none of these), and, under Landlock, creates, truncates, renames or removes nothing;
+- writes no byte to any file outside its scratch directory, changes no file's mode, owner, times
+  or xattrs and punches no bytes (`chmod`/`chown`/`utimensat`/`*xattr`/`fallocate` refused —
+  Landlock covers none of these), and, under Landlock, creates, truncates, renames or removes
+  nothing outside it. A `plan` or `ingest` call gets a fresh `0700` scratch directory under
+  `<workspace>/scratch`, removed when it returns: Landlock grants regular files and directories
+  beneath it and nothing else, and each file is bounded by `scratch_bytes` (1 GiB; a write past
+  it is `limit_exceeded`). `probe` and `inspect` get none, and neither does any call on a host
+  without Landlock, where `RLIMIT_FSIZE` stays 0 (ADR 0033 §2);
 - holds only its source's read-only descriptor and its reply pipe; prints to `/dev/null`;
   leaves no core dump; dies if the job dies;
 - answers in JSON that the job decodes strictly, bounded, and checks like any adapter's output;
@@ -99,3 +103,10 @@ cap bounds, not the byte cap. Measured at the defaults, a hostile reply peaks th
 0.3 to 0.6 GiB for lists of short strings, floats or empty containers, and 256 MiB for one 64 MiB
 string. A lower value cap would refuse legitimate replies first: integer and boolean series cells
 cost 2 to 6 bytes each on the wire.
+
+Two more residual risks came with the M2 gate (ADR 0033): scratch is bounded per file, not in
+total, so a hostile call can fill the disk at its write rate until its wall limit (removed when
+it returns); and the probe engine asks every adapter in one call per source, so a parser that a
+head compromises can forge the other adapters' claims in that reply. The job re-derives
+everything but the claims and the container listing, and a forged claim yields at worst a wrong
+adapter (whose own calls are sandboxed and checked) or an `unsupported` finding.

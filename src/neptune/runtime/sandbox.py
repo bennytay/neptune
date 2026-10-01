@@ -5,7 +5,8 @@ The job hands a runner one unit of adapter work at a time (a probe, a plan, one 
 
 - ``Returned``: the call's value, of the type its codec names;
 - ``Raised``: the call raised, or returned a value of another type; the exception's class (never
-  its text), whether it was a contract violation or a source that changed, and the wrong type;
+  its text), whether it was a contract violation, a source that changed or a read that came up
+  short (and where), and the wrong type;
 - ``Crashed``: the process died without a reply: killed by a signal, an exit, or a reply that
   does not decode;
 - ``Exceeded``: a limit stopped it: CPU seconds, wall seconds, memory, or the reply's size.
@@ -19,6 +20,7 @@ what the parent decoded and checked, so a killed child leaves no partial chunk a
 """
 
 import contextlib
+import errno
 import json
 import math
 import os
@@ -29,9 +31,10 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Final, Generic, NoReturn, Protocol, TypeAlias, TypeVar
 
-from neptune.adapters.contract import ContractError
+from neptune.adapters.contract import ContractError, ShortReadError, scratch_granted
 from neptune.discovery.reader import SourceChangedError
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.runtime import confine
@@ -44,6 +47,7 @@ _MIN_MEMORY: Final = 64 * _MIB  # below this the interpreter itself cannot run a
 _MAX_MEMORY: Final = 1 << 40
 _MIN_REPLY: Final = 64 * 1024  # a reply never has to be smaller than its own envelope
 _ERROR_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,99}")
+_CONTENT_ID: Final = re.compile(r"sha256:[0-9a-f]{64}")
 _TYPE_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.<>]{0,299}")
 
 # The Landlock ABI below which a source is not safe from a compromised parser, so the sandbox
@@ -84,6 +88,7 @@ class Limit(StrEnum):
     WALL = "wall_seconds"
     MEMORY = "memory_bytes"
     REPLY = "reply_bytes"  # the reply's size, and the count and depth of what it decodes to
+    SCRATCH = "scratch_bytes"  # one file in the call's scratch directory (ADR 0033 §2)
 
 
 @dataclass(frozen=True)
@@ -95,12 +100,15 @@ class Limits:
     reply the parent reads and decodes — kept far below ``memory_bytes`` (64 MiB by default), so
     one hostile call that emits a giant reply cannot exhaust the job while it copies and decodes
     it; the decode is bounded in count and depth as well (``neptune.runtime.wire``).
+    ``scratch_bytes`` bounds each file a ``plan`` or ``ingest`` call writes in its scratch
+    directory (the only place it can write; ADR 0033 §2); 0 gives calls no scratch at all.
     """
 
     cpu_seconds: int = 60
     wall_seconds: int = 120
     memory_bytes: int = 2 * 1024 * _MIB
     reply_bytes: int = 64 * _MIB
+    scratch_bytes: int = 1024 * _MIB
 
     def __post_init__(self) -> None:
         for name, value, low, high in (
@@ -108,6 +116,7 @@ class Limits:
             ("wall_seconds", self.wall_seconds, 1, _MAX_SECONDS),
             ("memory_bytes", self.memory_bytes, _MIN_MEMORY, _MAX_MEMORY),
             ("reply_bytes", self.reply_bytes, _MIN_REPLY, _MAX_MEMORY),
+            ("scratch_bytes", self.scratch_bytes, 0, _MAX_MEMORY),
         ):
             if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
                 raise ValueError(f"{name} is an integer in [{low}, {high}], got {value!r}")
@@ -119,6 +128,8 @@ class Limits:
             return self.wall_seconds
         if limit is Limit.REPLY:
             return self.reply_bytes
+        if limit is Limit.SCRATCH:
+            return self.scratch_bytes
         return self.memory_bytes
 
     def to_json(self) -> JsonObject:
@@ -126,6 +137,7 @@ class Limits:
             "cpu_seconds": self.cpu_seconds,
             "memory_bytes": self.memory_bytes,
             "reply_bytes": self.reply_bytes,
+            "scratch_bytes": self.scratch_bytes,
             "wall_seconds": self.wall_seconds,
         }
 
@@ -148,10 +160,14 @@ class Raised:
 
     ``contract`` marks a ``ContractError`` (a bug: never retried); ``changed`` a
     ``SourceChangedError`` (the source's bytes are not the ones fingerprinted: never retried,
-    reported as the source's problem, not the adapter's). ``returned`` is the ``module.qualname``
-    of a value of the wrong type the call returned; ``unencodable`` marks a value of the right
-    type that could not be encoded to cross back (a record with no JSON form), ``error`` being
-    what encoding raised. Both are contract errors: the value breaks the contract.
+    reported as the source's problem, not the adapter's). ``short_read`` is a ``ShortReadError``'s
+    ``(source, offset, length)``: a reader served no bytes inside the size it declares, which the
+    runtime blames on the source, never retried, only if it names the source it gave and the
+    source no longer matches its artifact; otherwise it is the adapter's raise (ADR 0033 §3).
+    ``returned`` is the ``module.qualname`` of a value of the wrong type the call returned;
+    ``unencodable`` marks a value of the right type that could not be encoded to cross back (a
+    record with no JSON form), ``error`` being what encoding raised. Both are contract errors:
+    the value breaks the contract.
     """
 
     error: str
@@ -159,6 +175,7 @@ class Raised:
     changed: bool = False
     returned: str | None = None
     unencodable: bool = False
+    short_read: tuple[str, int, int] | None = None
 
     def __post_init__(self) -> None:
         if not _ERROR_NAME.fullmatch(self.error):
@@ -169,14 +186,33 @@ class Raised:
             raise ValueError(f"a wrong result is a contract error naming a type: {self.returned!r}")
         if self.unencodable and (not self.contract or self.returned is not None or self.changed):
             raise ValueError("an unencodable result is a contract error of the right type")
+        if self.short_read is not None:
+            if self.contract or self.changed or self.returned is not None or self.unencodable:
+                raise ValueError("a short read is neither a contract error nor a changed source")
+            if not isinstance(self.short_read, tuple) or len(self.short_read) != 3:
+                raise ValueError(f"a short read is (source, offset, length): {self.short_read!r}")
+            source, offset, length = self.short_read
+            if not isinstance(source, str) or not _CONTENT_ID.fullmatch(source):
+                raise ValueError(f"a short read names its source's content id: {source!r}")
+            for value in (offset, length):
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise ValueError(f"a short read's offset and length are counts: {value!r}")
 
     @classmethod
     def of(cls, exc: BaseException) -> "Raised":
         name = type(exc).__name__
+        short: tuple[str, int, int] | None = None
+        if isinstance(exc, ShortReadError):
+            candidate = (exc.source, exc.offset, exc.length)
+            try:  # an adapter may build one from anything: only a well-formed one is a short read
+                short = cls("ShortReadError", short_read=candidate).short_read
+            except (TypeError, ValueError):
+                short = None
         return cls(
             error=name if _ERROR_NAME.fullmatch(name) else "Exception",
             contract=isinstance(exc, ContractError),
             changed=isinstance(exc, SourceChangedError),
+            short_read=short,
         )
 
     @classmethod
@@ -261,9 +297,14 @@ class Runner(Protocol):
     isolation: Isolation
 
     def call(
-        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
+        self,
+        work: Callable[[], object],
+        codec: Codec[T],
+        keep: tuple[int, ...] = (),
+        scratch: Path | None = None,
     ) -> Returned[T] | Raised | Crashed | Exceeded:
-        """Run ``work``; ``keep`` lists the descriptors it reads (a source's)."""
+        """Run ``work``; ``keep`` lists the descriptors it reads (a source's). ``scratch`` is an
+        empty private directory the call may write in (``scratch_directory``), if it has one."""
         ...
 
     def describe(self) -> JsonObject:
@@ -282,10 +323,15 @@ class InProcess:
     isolation = Isolation.IN_PROCESS
 
     def call(
-        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
+        self,
+        work: Callable[[], object],
+        codec: Codec[T],
+        keep: tuple[int, ...] = (),
+        scratch: Path | None = None,
     ) -> Returned[T] | Raised | Crashed | Exceeded:
         try:
-            value = work()
+            with scratch_granted(scratch):
+                value = work()
         except Exception as exc:
             return Raised.of(exc)
         if not isinstance(value, codec.kind):
@@ -308,11 +354,14 @@ _UNCONFINED: Final = b"U"
 _RETURNED: Final = b"R"
 _RAISED: Final = b"E"
 _OUT_OF_MEMORY: Final = b"M"
+_SCRATCH_FULL: Final = b"F"  # a write past ``scratch_bytes`` failed with EFBIG
 _UNREPORTED: Final = 70  # the child's exit status when it could not even write its reply
 
 
-_RAISED_KEYS: Final = frozenset({"changed", "contract", "error", "returned", "unencodable"})
-# A sound raised reply is five short fields; anything larger is a forged reply a compromised child
+_RAISED_KEYS: Final = frozenset(
+    {"changed", "contract", "error", "returned", "short_read", "unencodable"}
+)
+# A sound raised reply is six short fields; anything larger is a forged reply a compromised child
 # wrote, so it is refused before ``json.loads`` builds anything, never decoded unbounded.
 _MAX_RAISED_REPLY: Final = 4096
 
@@ -324,6 +373,7 @@ def encode_raised(raised: Raised) -> bytes:
             "contract": raised.contract,
             "error": raised.error,
             "returned": raised.returned,
+            "short_read": None if raised.short_read is None else list(raised.short_read),
             "unencodable": raised.unencodable,
         },
         separators=(",", ":"),
@@ -331,7 +381,7 @@ def encode_raised(raised: Raised) -> bytes:
 
 
 def decode_raised(data: bytes) -> Raised:
-    """A ``Raised`` reply, strictly: exactly its five fields, each of its type. Refused unread if
+    """A ``Raised`` reply, strictly: exactly its six fields, each of its type. Refused unread if
     it is larger than any sound raised reply, so the ``E`` tag cannot smuggle a giant payload
     past the value-count bound the returned reply gets."""
     if len(data) > _MAX_RAISED_REPLY:
@@ -345,8 +395,13 @@ def decode_raised(data: bytes) -> Raised:
         raise ValueError("a raised reply's error is text and its flags booleans")
     if not (returned is None or isinstance(returned, str)):
         raise ValueError("a raised reply's returned is a type name or null")
+    short = value["short_read"]
+    if short is not None and (not isinstance(short, list) or len(short) != 3):
+        raise ValueError("a raised reply's short read is [source, offset, length] or null")
     contract, changed, unencodable = flags
-    return Raised(error, contract, changed, returned, unencodable)
+    return Raised(
+        error, contract, changed, returned, unencodable, None if short is None else tuple(short)
+    )
 
 
 def _send(fd: int, data: bytes) -> None:
@@ -436,7 +491,11 @@ class Subprocess:
         return described
 
     def call(
-        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
+        self,
+        work: Callable[[], object],
+        codec: Codec[T],
+        keep: tuple[int, ...] = (),
+        scratch: Path | None = None,
     ) -> Returned[T] | Raised | Crashed | Exceeded:
         for fd in keep:
             if isinstance(fd, bool) or not isinstance(fd, int) or fd < 0:
@@ -453,7 +512,7 @@ class Subprocess:
             os.close(write_end)
             raise SandboxError(f"cannot start a sandboxed call: {exc}") from exc
         if pid == 0:  # pragma: no cover - the child's coverage is not collected
-            self._child(work, codec, frozenset(keep) | {write_end}, write_end, parent)
+            self._child(work, codec, frozenset(keep) | {write_end}, write_end, parent, scratch)
         os.close(write_end)
         try:
             try:
@@ -476,11 +535,18 @@ class Subprocess:
         keep: frozenset[int],
         reply: int,
         parent: int,
+        scratch: Path | None,
     ) -> NoReturn:  # pragma: no cover - runs in the child, whose coverage is not collected
         try:
             try:
-                confine.confine(
-                    self._host, keep, parent, self.limits.cpu_seconds, self.limits.memory_bytes
+                granted = confine.confine(
+                    self._host,
+                    keep,
+                    parent,
+                    self.limits.cpu_seconds,
+                    self.limits.memory_bytes,
+                    scratch=scratch,
+                    scratch_bytes=self.limits.scratch_bytes,
                 )
             except confine.ConfineError as exc:
                 _send(reply, _UNCONFINED + exc.control.encode("ascii", "replace"))
@@ -490,7 +556,8 @@ class Subprocess:
             tag, payload = _OUT_OF_MEMORY, b""  # held before the call: needs no allocation
             try:
                 try:
-                    value = work()
+                    with scratch_granted(scratch if granted else None):
+                        value = work()
                     if not isinstance(value, codec.kind):
                         payload, tag = encode_raised(Raised.mistyped(value)), _RAISED
                     else:
@@ -502,6 +569,11 @@ class Subprocess:
                             payload, tag = encode_raised(Raised.unencoded(exc)), _RAISED
                 except MemoryError:
                     pass
+                except OSError as exc:
+                    if exc.errno == errno.EFBIG:  # past RLIMIT_FSIZE: SIGXFSZ is ignored
+                        tag, payload = _SCRATCH_FULL, b""
+                    else:
+                        payload, tag = encode_raised(Raised.of(exc)), _RAISED
                 except BaseException as exc:
                     payload = encode_raised(Raised.of(exc))
                     tag = _RAISED
@@ -588,6 +660,8 @@ class Subprocess:
                 return decode_raised(payload)
             if tag == _OUT_OF_MEMORY and not payload:
                 return Exceeded(Limit.MEMORY, limits.memory_bytes)
+            if tag == _SCRATCH_FULL and not payload:
+                return Exceeded(Limit.SCRATCH, limits.scratch_bytes)
         except (ReplyTooLarge, RecursionError):  # too many values, or nested too deep, to build
             # A RecursionError is the reply's nesting, met as the model rebuilds it from parsed
             # JSON; the same bytes would meet it again, so it is the reply's limit, not a crash.

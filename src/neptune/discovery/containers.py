@@ -43,7 +43,7 @@ from neptune.discovery.sniff import ContainerKind, Sniff
 from neptune.model.finding import FindingCategory, Severity
 from neptune.model.ids import ContentId
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.provenance import ByteRange, EvidenceRef, Locator
+from neptune.model.provenance import ByteRange, EvidenceRef, Locator, evidence_ref_from_json
 
 _READ: Final = 64 * 1024
 _ZIP_TAIL: Final = 64 * 1024 + 22  # the end record plus the longest comment it can carry
@@ -195,6 +195,102 @@ class ContainerReport:
         if self.declared_count is not None:
             out["declared_count"] = self.declared_count
         return out
+
+
+def _count(value: JsonValue, what: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value < _MAX_INDEX:
+        raise ValueError(f"{what} is a count, got {value!r}")
+    return value
+
+
+def _name_from_json(data: dict[str, JsonValue], key: str) -> bytes | None:
+    """A name kept as ``<key>`` (UTF-8 text) or ``<key>_hex``, as ``_name_json`` wrote it."""
+    text, hexed = data.get(key), data.get(f"{key}_hex")
+    if text is not None and hexed is None:
+        if not isinstance(text, str):
+            raise ValueError(f"{key} is text")
+        return text.encode("utf-8")
+    if hexed is not None and text is None:
+        if not isinstance(hexed, str):
+            raise ValueError(f"{key}_hex is hex")
+        raw = bytes.fromhex(hexed)
+        if _name_json(key, raw) != (f"{key}_hex", hexed):
+            raise ValueError(f"{key}_hex holds UTF-8, or is not lowercase hex")
+        return raw
+    return None
+
+
+_MEMBER_KEYS: Final = frozenset(
+    {"entry", "index", "kind", "size", "compressed_size", "method", "probe", "nested"}
+    | {"name", "name_hex", "link_target", "link_target_hex"}
+)
+
+
+def container_report_from_json(
+    data: JsonValue,
+    member_probe: Callable[[JsonValue], MemberProbe],
+    depth: int,
+    source: ContentId,
+) -> ContainerReport:
+    """A ``ContainerReport`` of ``source`` from its JSON, strictly; ``member_probe`` reads a
+    member's probe.
+
+    ``depth`` is how many more containers may nest inside this one (the policy's ``max_depth``
+    less the levels already open), so a report cannot claim more nesting than the engine opens.
+    Every member must cite ``source``. Every field is checked for its type; the caller compares
+    the report's JSON with what it was read from, so nothing the types allow but ``to_json``
+    would not write gets through.
+    """
+    if not isinstance(data, dict) or not {"complete", "kind", "members"} <= data.keys():
+        raise ValueError("a container report has complete, kind and members")
+    if not data.keys() <= {"complete", "kind", "members", "declared_count"}:
+        raise ValueError("a container report has complete, kind, members and a declared count")
+    complete, kind, members = data["complete"], data["kind"], data["members"]
+    if not isinstance(complete, bool) or not isinstance(kind, str) or not isinstance(members, list):
+        raise ValueError("a container report's fields are a flag, a kind and a list")
+    declared = data.get("declared_count")
+    parsed: list[Member] = []
+    for item in members:
+        if not isinstance(item, dict) or not item.keys() <= _MEMBER_KEYS:
+            raise ValueError("a member is an object of a member's fields")
+        if not {"entry", "index", "kind"} <= item.keys():
+            raise ValueError("a member has an entry, an index and a kind")
+        name = _name_from_json(item, "name")
+        if name is None:
+            raise ValueError("a member has a name")
+        method = item.get("method")
+        if not (method is None or isinstance(method, str)):
+            raise ValueError("a member's method is text")
+        nested = item.get("nested")
+        if nested is not None and depth < 1:
+            raise ValueError("a member nests deeper than the policy opens")
+        entry = evidence_ref_from_json(item["entry"])
+        if entry.source != source:
+            raise ValueError("a member cites another source")
+        parsed.append(
+            Member(
+                index=_count(item["index"], "a member's index"),
+                name=name,
+                kind=MemberKind(str(item["kind"])),
+                entry=entry,
+                size=None if item.get("size") is None else _count(item["size"], "a size"),
+                compressed_size=None
+                if item.get("compressed_size") is None
+                else _count(item["compressed_size"], "a compressed size"),
+                method=method,
+                link_target=_name_from_json(item, "link_target"),
+                probe=None if item.get("probe") is None else member_probe(item["probe"]),
+                nested=None
+                if nested is None
+                else container_report_from_json(nested, member_probe, depth - 1, source),
+            )
+        )
+    return ContainerReport(
+        ContainerKind(kind),
+        tuple(parsed),
+        None if declared is None else _count(declared, "a declared count"),
+        complete,
+    )
 
 
 # --- Views: the bytes a parser sees, whole or a bounded decoded prefix ------------------------

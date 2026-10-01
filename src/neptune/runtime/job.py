@@ -42,13 +42,14 @@ Each miss names the rule that caused it, and the job leaves a ``CacheReport`` be
 """
 
 import errno
+import os
 import platform
 import threading
 import time
 import uuid
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
@@ -67,12 +68,17 @@ from neptune.adapters.contract import (
     ContractError,
     Plan,
     ProbeHints,
+    ProbeResult,
+    ScratchUnavailableError,
     chunk_from_json,
     configure,
 )
-from neptune.adapters.registry import AdapterRegistry, Candidate, Selection, SelectionStatus, select
+from neptune.adapters.registry import AdapterRegistry, SelectionStatus
+from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
+from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe
 from neptune.discovery.reader import LocalReader, SourceChangedError
 from neptune.discovery.scan import fingerprint
+from neptune.discovery.scratch import ScratchError, clear_scratch, scratch_space
 from neptune.discovery.source import (
     LocalSource,
     SkippedEntry,
@@ -82,14 +88,16 @@ from neptune.discovery.source import (
     SymlinkEntry,
     WalkEntry,
 )
+from neptune.discovery.verify import short_read_finding, verify_artifact
 from neptune.identity import canonical_json
 from neptune.identity.revisions import Observation, SourceLedger
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.package import ReceiptEnvelope
+from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
 from neptune.model.run import Stream
-from neptune.model.series import SEQ
+from neptune.model.series import SEQ, SeriesBatch
 from neptune.model.source import (
     LocalPath,
     RawLocalPath,
@@ -140,6 +148,7 @@ from neptune.store.workspace import (
 )
 
 DEFAULT_ATTEMPTS: Final = 2
+ADAPTER_FAILED: Final = f"{PROBE_ID}.adapter_failed"
 # What the runtime's own reads of a source raise: opening it, its size, its head. An adapter's
 # reads are the adapter's: anything but ``SourceChangedError`` from ``plan`` or ``ingest`` is its
 # failure (``plan_failed``, ``chunk_failed``).
@@ -243,6 +252,7 @@ class _Source:
     replaced: ContentId | None = None  # bytes a location of it held before, if any
     plan_cache: PlanCache | None = None  # set once the job decides to plan or reuse
     hits: set[str] = field(default_factory=set)  # chunks the workspace had committed
+    intact: tuple[int, ...] | None = None  # the file's state when last verified intact
 
     @property
     def content_id(self) -> ContentId:
@@ -279,13 +289,16 @@ def _now() -> str:
 
 
 def _failure(raised: Raised, call: Step, result: Step, check: Step) -> Failure:
-    """What an adapter call that raised failed as: at ``call`` with the exception's class; at
+    """What an adapter call that raised failed as: at ``call`` with the exception's class, and
+    the cause ``scratch_unavailable`` if that is ``ScratchUnavailableError`` (law 11); at
     ``result`` naming the type, if it returned the wrong one; at ``check`` if what it returned
     could not cross the sandbox, as the contract check that would have refused it."""
     if raised.returned is not None:
         return Failure(result, raised.error, {"returned": raised.returned})
     if raised.unencodable:
         return Failure(check, raised.error)
+    if raised.contract and raised.error == ScratchUnavailableError.__name__:
+        return Failure(call, raised.error, {"cause": lineage.SCRATCH_UNAVAILABLE})
     return Failure(call, raised.error)
 
 
@@ -309,27 +322,44 @@ def _chunk_series_failure(output: ChunkOutput) -> Failure | None:
     """A chunk's batches of one stream agree on their columns, and ``seq`` is unique among them.
 
     Both are laws ``write_run`` relies on; across chunks, ``_run_problems`` checks the rest.
-    Memory is one entry per row of this chunk, which the chunk's output already holds.
+    The failure, and every fact it names, is a function of the chunk's content alone, never of
+    the order or batching the adapter emitted it in, which the workspace does not keep (ADR 0033
+    §5): streams are judged in id order, the first stream that breaks a law is the one named,
+    and within it the laws are tried in a fixed order and name the least offending value (the
+    least repeated ``seq``, the least type name). So a chunk judged again from its committed form
+    (``_judge``) fails exactly as it failed, or would fail, fresh. Memory is one entry per row of
+    this chunk, which the chunk's output already holds.
     """
 
     def broken(law: Law, stream: RecordId, **facts: JsonValue) -> Failure:
         details: dict[str, JsonValue] = {"law": str(law), "stream": stream, **facts}
         return Failure(Step.CHUNK_SERIES, ContractError.__name__, details)
 
-    schemas: dict[RecordId, object] = {}
-    seen: dict[RecordId, set[int]] = defaultdict(set)
+    by_stream: dict[RecordId, list[SeriesBatch]] = defaultdict(list)
     for batch in output.series:
-        if schemas.setdefault(batch.stream, batch.schema()) != batch.schema():
-            return broken(Law.BATCH_COLUMNS_DISAGREE, batch.stream)
-        for column in batch.columns:
-            if column.name != SEQ:
-                continue
-            for value in column.values:
-                if isinstance(value, bool) or not isinstance(value, int):
-                    return broken(Law.SEQ_NOT_INTEGER, batch.stream, type=type_name(value))
-                if value in seen[batch.stream]:
-                    return broken(Law.SEQ_REPEATED, batch.stream, seq=value)
-                seen[batch.stream].add(value)
+        by_stream[batch.stream].append(batch)
+    for stream, batches in sorted(by_stream.items()):
+        if len({batch.schema() for batch in batches}) > 1:
+            return broken(Law.BATCH_COLUMNS_DISAGREE, stream)
+        seen: set[int] = set()
+        repeated: int | None = None
+        strange: str | None = None  # the least type name of a seq cell that is no integer
+        for batch in batches:
+            for column in batch.columns:
+                if column.name != SEQ:
+                    continue
+                for value in column.values:
+                    if isinstance(value, bool) or not isinstance(value, int):
+                        name = type_name(value)
+                        strange = name if strange is None else min(strange, name)
+                    elif value in seen:
+                        repeated = value if repeated is None else min(repeated, value)
+                    else:
+                        seen.add(value)
+        if strange is not None:
+            return broken(Law.SEQ_NOT_INTEGER, stream, type=strange)
+        if repeated is not None:
+            return broken(Law.SEQ_REPEATED, stream, seq=repeated)
     return None
 
 
@@ -461,10 +491,15 @@ class IngestJob:
         self._entered_at: float | None = None
         self._durations: dict[Phase, float] = dict.fromkeys(PHASES, 0.0)
         self._findings: dict[RecordId, IngestFinding] = {}
+        # Every producer whose findings the job records, by transform id: the runtime, and the
+        # discovery and probe transforms whose findings it records for them (ADR 0033 §1, §3).
+        self._producers: dict[RecordId, TransformRecord] = {self.transform.id: self.transform}
+        self._local: LocalSource | None = None
         self._sources: list[_Source] = []
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
         self._calls: dict[str, int] = {"ingest": 0, "plan": 0, "probe": 0}
+        self._engine = ProbeEngine(registry)
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
 
@@ -494,6 +529,7 @@ class IngestJob:
         started = _now()
         try:
             with self.workspace.in_use():  # collection waits until the job is done
+                self._sweep()
                 package = self._phases(started)
         except _Cancelled:
             self._discard()
@@ -514,8 +550,22 @@ class IngestJob:
         self.state = JobState.COMMITTED
         return self._outcome(package)
 
+    def _sweep(self) -> None:
+        """Remove what killed jobs and calls left: scratch directories and staging debris whose
+        lock no live process holds (ADR 0029 §4, ADR 0033 §2). The scratch root must not overlap
+        the ingest root, or the job would read its own scratch space as evidence: ``JobError``.
+        """
+        try:
+            scratch = clear_scratch(self.workspace.scratch, ingest_root=self.root)
+            staging = self.workspace.clear_staging()
+        except ScratchError as exc:
+            raise JobError(f"the workspace cannot hold scratch space: {exc}") from exc
+        except OSError as exc:
+            raise JobError(f"the workspace cannot be swept: {exc}") from exc
+        self._emit(events.WORKSPACE_SWEPT, {"scratch": scratch, "staging": staging})
+
     def _phases(self, started: str) -> ContentId:
-        source = LocalSource(self.root)
+        source = self._local = LocalSource(self.root)
         entries = self._discover(source)
         ledger = self._fingerprint(source, entries)
         self._inspect(source)
@@ -612,17 +662,45 @@ class IngestJob:
     ) -> Returned[T] | Raised | Crashed | Exceeded:
         """One adapter call through the runner; a sandbox that stops working fails the job.
 
-        ``work`` returns the adapter's word, unchecked: the runner checks its type.
+        ``work`` returns the adapter's word, unchecked: the runner checks its type. A call that
+        reads the source (``plan``, ``ingest``) is given a fresh scratch directory under the
+        workspace, removed when it returns, whatever became of the call (ADR 0033 §2).
         """
-        keep = () if reader is None else (reader.fileno(),)
+        if reader is None:
+            return self._run(work, codec, (), None)
+        with ExitStack() as stack:
+            try:
+                space = scratch_space(self.workspace.scratch, ingest_root=self.root)
+                # The call writes beneath a directory of its own inside the locked one, so it
+                # cannot remove the lock that tells a sweep the directory is in use.
+                directory = stack.enter_context(space) / "call"
+                directory.mkdir(mode=0o700)
+            except (ScratchError, OSError) as exc:
+                raise JobError(f"the workspace cannot give a call scratch space: {exc}") from exc
+            return self._run(work, codec, (reader.fileno(),), directory)
+
+    def _run(
+        self,
+        work: Callable[[], object],
+        codec: sandbox.Codec[T],
+        keep: tuple[int, ...],
+        scratch: Path | None,
+    ) -> Returned[T] | Raised | Crashed | Exceeded:
         try:
-            return self._runner.call(work, codec, keep)
+            return self._runner.call(work, codec, keep, scratch)
         except SandboxError as exc:
             raise JobError(str(exc)) from exc
 
     # --- Findings ------------------------------------------------------------------------------
 
-    def _record(self, finding: IngestFinding) -> None:
+    def _record(self, finding: IngestFinding, producer: TransformRecord | None = None) -> None:
+        """Keep ``finding`` for the package; ``producer`` is its transform if not the runtime's."""
+        if producer is not None:
+            if producer.id != finding.transform:
+                raise ValueError(f"finding {finding.id} is not {producer.id}'s")
+            self._producers[producer.id] = producer
+        elif finding.transform != self.transform.id:
+            raise ValueError(f"finding {finding.id} names a producer the job does not know")
         self._findings[finding.id] = finding
 
     def _quarantine(self, source: _Source, finding: IngestFinding) -> None:
@@ -631,8 +709,8 @@ class IngestJob:
         source.quarantined.append(finding.code)
 
     def _skip(self, entry: SkippedEntry) -> None:
+        """A walk entry that was not read: discovery's finding says why; this is its event."""
         location = local_location(entry.raw_path)
-        self._record(lineage.entry_skipped(self.transform, location, entry.reason))
         self._emit(
             events.ENTRY_SKIPPED, {"location": location.to_json(), "reason": str(entry.reason)}
         )
@@ -647,6 +725,7 @@ class IngestJob:
         if isinstance(exc, SourceChangedError):
             finding = lineage.source_changed(self.transform, source.location, source.content_id)
             self._emit(events.SOURCE_CHANGED, {"location": location, "source": source.content_id})
+            self._verify(source)
         else:
             reason = exc.reason if isinstance(exc, SourceAccessError) else SkipReason.UNREADABLE
             finding = lineage.source_unreadable(
@@ -657,6 +736,77 @@ class IngestJob:
                 {"location": location, "reason": str(reason), "source": source.content_id},
             )
         self._quarantine(source, finding)
+
+    def _differences(self, item: _Source) -> tuple[IngestFinding, ...] | None:
+        """How the source differs now from the artifact it was hashed as: ``verify_artifact``'s
+        findings (truncated, grown, changed chunks; ADR 0029 §3), empty when it is intact, and
+        ``None`` when it cannot be opened.
+
+        One pass over the file as it is now, except that a file found intact is not read again
+        while its device, inode, size and change times stay the same: an adapter whose own
+        window reads short fails every chunk, and every attempt, the same way.
+        """
+        assert self._local is not None
+        try:
+            with self._local.open(item.location) as stream:
+                info = os.fstat(stream.fileno())
+                state = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                if state == item.intact:
+                    return ()
+                found = verify_artifact(stream, item.artifact)
+        except _UNREADABLE:
+            return None
+        item.intact = None if found else state
+        return found
+
+    def _verify(self, item: _Source) -> None:
+        """Record exactly what differs in a source that changed under the job.
+
+        Nothing is said if it cannot be opened, since the finding that brought the job here
+        already says the source was not read.
+        """
+        for finding in self._differences(item) or ():
+            self._record(finding, DISCOVERY_TRANSFORM)
+
+    def _read_short(self, item: _Source, raised: Raised, step: Step, chunk: Chunk | None) -> bool:
+        """Whether a call that raised is the source's short read; if so, it is recorded.
+
+        ``LocalReader`` cannot serve a short read: a piece that is not all there fails its hash
+        and raises ``SourceChangedError``. So a ``ShortReadError`` naming an intact source came
+        from the adapter's own code (a window over the reader with the wrong size, a raise of its
+        own), and the job checks before blaming the source (ADR 0033 §3). One that names this
+        source and a range inside it, where ``verify_artifact`` finds the file no longer matches
+        its artifact (or the file cannot be opened at all), is the source's: discovery's
+        ``short_read`` for the unserved range, then the account, the source quarantined and never
+        retried, and ``True``. Anything else is ``False``: the adapter's failure at ``step``,
+        which the caller handles as any other raise (``plan_failed``; ``chunk_failed`` after the
+        usual retries), naming ``ShortReadError`` as its class.
+        """
+        if raised.short_read is None:
+            return False
+        assert item.adapter is not None
+        source, offset, length = raised.short_read
+        if source != item.content_id or length == 0 or offset + length > item.artifact.size:
+            return False
+        found = self._differences(item)
+        if found == ():
+            return False  # intact: the adapter's reader read short, not the source
+        finding = short_read_finding(item.content_id, offset, length)
+        self._record(finding, DISCOVERY_TRANSFORM)
+        item.quarantined.append(finding.code)
+        details: dict[str, JsonValue] = {
+            "adapter": item.adapter.descriptor.id,
+            "length": length,
+            "offset": offset,
+            "source": item.content_id,
+            "step": str(step),
+        }
+        if chunk is not None:
+            details["chunk"] = chunk.id
+        self._emit(events.SOURCE_SHORT_READ, details)
+        for difference in found or ():
+            self._record(difference, DISCOVERY_TRANSFORM)
+        return True
 
     # --- discover ------------------------------------------------------------------------------
 
@@ -694,6 +844,8 @@ class IngestJob:
                 self.workspace.save_ledger(self.root, ledger)
             except OSError as exc:
                 raise JobError(f"the ledger of {self.root} cannot be saved: {exc}") from exc
+            for finding in result.findings:  # what the walk saw and did not read (ADR 0029 §1)
+                self._record(finding, result.transform)
             walked = {
                 (e.raw_path, e.reason, e.detail) for e in entries if isinstance(e, SkippedEntry)
             }
@@ -744,29 +896,45 @@ class IngestJob:
 
     # --- inspect -------------------------------------------------------------------------------
 
-    def _select(self, head: bytes, source: _Source) -> Selection:
-        """Every adapter's probe, each its own call to the runner, under the registry's rule
-        (ADR 0024 §7).
+    def _probe(self, item: _Source, reader: LocalReader, head: bytes) -> SourceProbe | None:
+        """The probe engine over one source, in one sandboxed call (ADR 0027, ADR 0033 §1).
 
-        A probe that raises, returns the wrong type, crashes or hits a limit is reported and takes
-        that adapter out of this source's candidates. The probe engine (MVL-8) replaces this
-        method.
+        Every adapter's probe and the container inspection run in the child; its reply is read
+        back strictly (``ProbeEngine.source_probe_from_json``). If the call dies, hits a limit,
+        raises or replies with anything but what the engine writes, each adapter is asked again
+        in a call of its own, so the one that fails is named, and a container is left unopened
+        (``inspection_failed``). ``None`` once the source is quarantined: it changed under the
+        probe. The engine's findings are recorded under its transform.
         """
-        hints = ProbeHints(_hint_name(source.location), source.artifact.size)
-        candidates: list[Candidate] = []
-        for adapter in self.registry.adapters():
-            descriptor = adapter.descriptor
-            self._calls["probe"] += 1
-            outcome = self._call(partial(adapter.probe, head, hints), wire.PROBE)
-            if not isinstance(outcome, Returned):
-                details: dict[str, JsonValue] = {
-                    "adapter": descriptor.id,
-                    "source": source.content_id,
-                }
-                self._emit(events.PROBE_FAILED, details | outcome.cause())
-                continue
-            candidates.append(Candidate(descriptor.id, descriptor.version, outcome.value))
-        return select(candidates)
+        name = _hint_name(item.location)
+        size = item.artifact.size
+        adapters = self.registry.adapters()
+        self._calls["probe"] += len(adapters)
+        codec = wire.source_probe(self._engine, item.content_id, size, name, head)
+        work = partial(self._engine.probe, reader, name, head)
+        outcome = self._run(work, codec, (reader.fileno(),), None)
+        if isinstance(outcome, Raised) and outcome.changed:
+            self._unreadable(item, SourceChangedError(item.content_id))
+            return None
+        if isinstance(outcome, Returned):
+            probed = outcome.value
+        else:
+            failed = outcome.cause()
+            self._emit(events.PROBE_FAILED, {"source": item.content_id, **failed})
+
+            def ask(adapter: Adapter, head: bytes, hints: ProbeHints) -> ProbeResult | JsonObject:
+                self._calls["probe"] += 1
+                asked = self._run(partial(adapter.probe, head, hints), wire.PROBE, (), None)
+                return asked.value if isinstance(asked, Returned) else asked.cause()
+
+            probed = self._engine.probe_head(item.content_id, size, name, head, ask, failed)
+        whole = EvidenceRef(item.content_id, (ByteRange(0, size),))
+        for finding in probed.findings:
+            self._record(finding, self._engine.transform)
+            if finding.code == ADAPTER_FAILED and finding.subject == whole:
+                cause = {k: v for k, v in finding.details.items() if k != "version"}
+                self._emit(events.PROBE_FAILED, {"source": item.content_id, **cause})
+        return probed
 
     def _inspect(self, source: LocalSource) -> None:
         with self._enter(Phase.INSPECT):
@@ -775,13 +943,23 @@ class IngestJob:
             for item in self._sources:
                 self._check_cancel()
                 try:
-                    with LocalReader(source, item.location, item.artifact) as reader:
-                        head = reader.read(0, min(reader.size, PROBE_HEAD_SIZE))
+                    reader = LocalReader(source, item.location, item.artifact)
                 except _UNREADABLE as exc:
                     self._unreadable(item, exc)
                     counts["unreadable"] += 1
                     continue
-                selection = self._select(head, item)
+                with reader:
+                    try:
+                        head = reader.read(0, min(reader.size, PROBE_HEAD_SIZE))
+                    except _UNREADABLE as exc:
+                        self._unreadable(item, exc)
+                        counts["unreadable"] += 1
+                        continue
+                    probed = self._probe(item, reader, head)
+                if probed is None:
+                    counts["unreadable"] += 1
+                    continue
+                selection = probed.selection
                 details: dict[str, JsonValue] = {
                     "location": item.location.to_json(),
                     "source": item.content_id,
@@ -889,10 +1067,11 @@ class IngestJob:
         """Call the adapter's ``plan`` through the runner and check it; ``None`` once the source
         is quarantined.
 
-        The adapter's reads are its own: a ``SourceChangedError`` is ``source_changed``, and
-        anything else it raises, an ``OSError`` included, is ``plan_failed`` at ``plan``. A plan
-        that crashes or hits a limit is not retried: a failed plan is never saved, so the next
-        job plans again anyway.
+        The adapter's reads are its own: a ``SourceChangedError`` is ``source_changed``, a
+        ``ShortReadError`` the source's ``short_read`` only if the source no longer matches its
+        artifact, and anything else it raises, an ``OSError`` included, is ``plan_failed`` at
+        ``plan``. A plan that crashes or hits a limit is not retried: a failed plan is never
+        saved, so the next job plans again anyway.
         """
         assert item.adapter is not None and item.config is not None
         adapter, config = item.adapter, item.config
@@ -901,7 +1080,7 @@ class IngestJob:
         if isinstance(outcome, Raised):
             if outcome.changed:
                 self._unreadable(item, SourceChangedError(item.content_id))
-            else:
+            elif not self._read_short(item, outcome, Step.PLAN, None):
                 self._fail_plan(
                     item, _failure(outcome, Step.PLAN, Step.PLAN_RESULT, Step.CHECK_PLAN)
                 )
@@ -1023,6 +1202,7 @@ class IngestJob:
                         if item.quarantined and item.quarantined[-1] in (
                             lineage.SOURCE_CHANGED,
                             lineage.SOURCE_UNREADABLE,
+                            SHORT_READ,
                         ):
                             break  # nothing more of this source can be read
                         continue
@@ -1045,9 +1225,10 @@ class IngestJob:
         failed for good.
 
         A ``ContractError`` is a bug, not a fault, so it is not retried, and neither is a result
-        of the wrong type; a source that changed is reported and never retried; nor is a limit,
-        which the same bytes would hit again. Any other exception, and a crash, which may be the
-        host's (an OOM killer), get the remaining attempts.
+        of the wrong type; a source that changed or read short under it is reported and never
+        retried; nor is a limit, which the same bytes would hit again. Any other exception (a
+        ``ShortReadError`` from the adapter's own reader over an intact source included), and a
+        crash, which may be the host's (an OOM killer), get the remaining attempts.
         """
         assert item.adapter is not None and item.config is not None
         adapter, config = item.adapter, item.config
@@ -1059,6 +1240,8 @@ class IngestJob:
                 outcome = self._call(work, wire.OUTPUT, reader)
             if isinstance(outcome, Raised) and outcome.changed:
                 self._unreadable(item, SourceChangedError(item.content_id))
+                return None
+            if isinstance(outcome, Raised) and self._read_short(item, outcome, Step.INGEST, chunk):
                 return None
             if not isinstance(outcome, Returned):
                 retry = isinstance(outcome, Crashed) or (
@@ -1419,13 +1602,15 @@ class IngestJob:
                     self._ingested.append(item.key)
                     self._emit(events.SOURCE_ADMITTED, details)
             # A degraded run records its runtime transform even with no findings, so the receipt
-            # always names the guarantees it could not give; a sound run adds it only to carry a
-            # finding, keeping its lineage unchanged (ADR 0030).
-            extra = (
-                [self.transform, *self._findings.values()]
-                if self._findings or self._lost_guarantees
-                else []
-            )
+            # always names the guarantees it could not give; a sound run adds a transform only to
+            # carry a finding, keeping its lineage unchanged (ADR 0030).
+            cited = {finding.transform for finding in self._findings.values()}
+            if self._lost_guarantees:
+                cited.add(self.transform.id)
+            extra = [
+                *(self._producers[transform] for transform in sorted(cited)),
+                *self._findings.values(),
+            ]
             try:
                 self._staged = stage(
                     self.destination, self.workspace, ledger, self._ingested, extra=extra

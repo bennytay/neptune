@@ -41,6 +41,7 @@ from neptune.discovery.probe import (
     PROBE_VERSION,
     ProbeEngine,
     SourceProbe,
+    ask_in_process,
     hint_name,
 )
 from neptune.discovery.reader import BytesReader
@@ -312,6 +313,12 @@ def test_every_finding_is_well_formed_declared_and_cites_the_source() -> None:
     seen.update(f.code for f in probed.findings)
     probed = probe(TALLY_BYTES, "misleading.txt")
     seen.update(f.code for f in probed.findings)
+    zipped = (FIXTURES / "probe" / "containers" / "members.zip").read_bytes()
+    reader = BytesReader(zipped)
+    fallback = engine().probe_head(
+        reader.content_id, reader.size, "bundle", zipped, ask_in_process, {"signal": "SIGSEGV"}
+    )
+    seen.update(f.code for f in fallback.findings)
     assert seen == declared  # every documented code is exercised, and nothing undocumented is
 
 

@@ -7,7 +7,7 @@ flowchart LR
   subgraph N["Neptune"]
     DISC["Discovery &amp; identity"]
     RT["Ingestion runtime"]
-    WS[("Local workspace + cache<br/>ledgers · plans · chunks<br/>derivatives")]
+    WS[("Local workspace + cache<br/>ledgers · plans · chunks<br/>derivatives · scratch")]
     AD["Format adapters"]
     SB["Parser sandbox<br/>confined process per call"]
     CAN["Canonical model<br/>records + provenance"]
@@ -23,7 +23,7 @@ flowchart LR
   end
 
   RAW --> DISC --> RT
-  RT <-->|chunks / records| SB
+  RT <-->|probes / chunks / records| SB
   SB <-->|one call, limits| AD
   AD -.->|conforms to| CAN
   RT <-->|commit / reuse by key| WS

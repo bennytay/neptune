@@ -14,7 +14,7 @@ from neptune.model.finding import (
     Severity,
     subject_to_json,
 )
-from neptune.model.source import LocalPath, RawLocalPath
+from neptune.model.source import LocalPath
 from neptune.runtime import lineage
 from neptune.runtime.lineage import (
     FINDING_CODES,
@@ -50,6 +50,7 @@ def test_the_runtime_transform_is_its_id_version_retry_and_isolation_policy() ->
         "isolation": "subprocess",
         "memory_bytes": 2 * 1024**3,
         "reply_bytes": 64 * 1024 * 1024,
+        "scratch_bytes": 1024 * 1024 * 1024,
         "wall_seconds": 120,
     }
     assert TRANSFORM.libraries == () and TRANSFORM.upstream == ()
@@ -107,7 +108,6 @@ def every_finding() -> list[tuple[str, IngestFinding]]:
             "unreadable",
             lineage.source_unreadable(TRANSFORM, LocalPath("a"), SkipReason.UNREADABLE, "EACCES"),
         ),
-        ("skipped", lineage.entry_skipped(TRANSFORM, RawLocalPath(b"\xff"), SkipReason.MISSING)),
         ("signal", lineage.adapter_crashed(*ADAPTER, INGEST, CHUNK, {"signal": "SIGSEGV"}, 2)),
         ("exit", lineage.adapter_crashed(*ADAPTER, PLAN, None, {"exit_status": 3}, 1)),
         ("reply", lineage.adapter_crashed(*ADAPTER, INGEST, CHUNK, {"reply": "malformed"}, 2)),
@@ -301,17 +301,8 @@ def test_location_findings_cite_the_location_not_bytes() -> None:
     assert plain.details == {"reason": "not_regular_file"} and "(not_regular_file)" in plain.message
 
 
-@pytest.mark.parametrize(
-    ("reason", "severity"),
-    [
-        (SkipReason.NOT_REGULAR_FILE, Severity.INFO),
-        (SkipReason.MISSING, Severity.WARNING),
-        (SkipReason.SYMLINK, Severity.WARNING),
-        (SkipReason.UNREADABLE, Severity.ERROR),
-    ],
-)
-def test_a_skipped_entry_is_as_severe_as_its_reason(reason: SkipReason, severity: Severity) -> None:
-    finding = lineage.entry_skipped(TRANSFORM, LocalPath("x"), reason)
-    assert finding.severity is severity
-    assert finding.category is FindingCategory.SKIPPED
-    assert finding.details == {"reason": str(reason)}
+def test_a_walk_entry_not_read_is_discoverys_finding_not_the_runtimes() -> None:
+    """The runtime retired ``entry_skipped`` (ADR 0033 §3): discovery, which saw the entry,
+    says why it was not read, so a package never carries two findings for one entry."""
+    assert not hasattr(lineage, "entry_skipped")
+    assert "neptune.runtime.entry_skipped" not in {code.name for code in FINDING_CODES}

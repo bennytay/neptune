@@ -9,16 +9,21 @@ methods::
     plan(source, config) -> Plan                   chunks with deterministic ids, plus findings
     ingest(source, chunk, config) -> ChunkOutput   pure per chunk: records, series and findings
 
-An adapter reads only through ``SourceReader`` and never writes: the runtime owns the store,
-resume, caching, sandboxing and explanation. Everything here is plain immutable data, so a chunk
-and its output can cross a process boundary (MVL-10) unchanged. ``neptune.adapters.check`` turns
-the contract's laws into checks, and ``neptune.adapters.text`` is the reference implementation.
+An adapter reads only through ``SourceReader`` and writes nowhere but the private scratch
+directory a ``plan`` or ``ingest`` call may be given (``scratch_directory``): the runtime owns
+the store, resume, caching, sandboxing and explanation. Everything here is plain immutable data,
+so a chunk and its output can cross a process boundary (MVL-10) unchanged.
+``neptune.adapters.check`` turns the contract's laws into checks, and ``neptune.adapters.text``
+is the reference implementation.
 """
 
 import hashlib
 import re
 from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final, NewType, Protocol, TypeAlias
 
 from neptune.identity import canonical_json
@@ -114,15 +119,61 @@ class SourceReader(Protocol):
 
 READ_SIZE: Final = 1024 * 1024
 
+# --- Scratch space -----------------------------------------------------------------------------
+
+_SCRATCH: Final[ContextVar[Path | None]] = ContextVar("neptune_adapter_scratch", default=None)
+
+
+class ScratchUnavailableError(ContractError):
+    """A ``plan`` or ``ingest`` call needs scratch space and was given none (law 11, ADR 0033 §2).
+
+    Raise it; never report the absence as a finding. A chunk's id does not name whether its call
+    had scratch, so a finding saying it had none would be committed, and reused by a later run
+    that has scratch, whose package would then differ from a fresh workspace's. Raised, nothing
+    of the call is kept: the runtime fails the plan or chunk for this run (``plan_failed``,
+    ``chunk_failed``, with ``cause`` ``scratch_unavailable``), never retries it, and the next run
+    that has scratch computes it afresh.
+    """
+
+    def __init__(self, message: str = "this call needs scratch space and was given none") -> None:
+        super().__init__(message)
+
+
+def scratch_directory() -> Path | None:
+    """The empty private directory this call may write temporary files in, or ``None``.
+
+    The runtime makes one for each ``plan`` and ``ingest`` call under the workspace's scratch root
+    and removes it when the call returns (ADR 0029 §4, ADR 0033 §2): a spool for a nested archive,
+    a decoder that wants a file. Nothing in it outlives the call, so output never depends on it.
+    In the sandbox it is the only place a call can write, each file at most ``scratch_bytes``
+    (``neptune.runtime.sandbox.Limits``). ``None`` for ``probe`` and ``inspect``, outside a job,
+    with ``scratch_bytes`` 0, and on a host without Landlock, where the sandbox cannot confine
+    writes to one directory: an adapter that needs scratch and has none raises
+    ``ScratchUnavailableError``.
+    """
+    return _SCRATCH.get()
+
+
+@contextmanager
+def scratch_granted(directory: Path | None) -> Iterator[None]:
+    """The runtime's side: ``scratch_directory()`` answers ``directory`` inside the block."""
+    token = _SCRATCH.set(directory)
+    try:
+        yield
+    finally:
+        _SCRATCH.reset(token)
+
 
 class ShortReadError(Exception):
-    """A reader served no bytes inside the size it declares (ADR 0029 §3).
+    """A reader served no bytes inside the size it declares (ADR 0029 §3, ADR 0033 §3).
 
-    The source is shorter than the artifact it was hashed as, or changed under the reader. It is
-    not an adapter bug, and it is not the adapter's to report: adapters let it propagate, and the
-    runtime records ``neptune.discovery.verify.short_read_finding(source, offset, length)`` for
-    it and goes on with the job. ``[offset, offset + length)`` is the declared range that was not
-    served.
+    Either the source is shorter than the artifact it was hashed as, or changed under the
+    reader, or a reader in the adapter's own code (a window over the source) declares more than
+    it serves. Adapters let it propagate and never report it themselves. The runtime re-reads
+    the source: if it no longer matches its artifact, the short read is the source's,
+    ``neptune.discovery.verify.short_read_finding(source, offset, length)`` with
+    ``verify_artifact``'s account, never retried; if it is intact, the call failed like any other
+    raise. ``[offset, offset + length)`` is the declared range that was not served.
     """
 
     def __init__(self, source: ContentId, offset: int, length: int) -> None:
@@ -523,6 +574,28 @@ class ProbeResult:
         if self.version is not None:
             out["version"] = self.version
         return out
+
+
+def probe_result_from_json(data: JsonValue) -> ProbeResult:
+    """Parse strictly: a ``confidence`` float, ``reasons`` and an optional ``version``."""
+    if not isinstance(data, Mapping) or not {"confidence", "reasons"} <= data.keys():
+        raise ContractError("a probe result has a confidence and reasons")
+    if not data.keys() <= {"confidence", "reasons", "version"}:
+        raise ContractError("a probe result has a confidence, reasons and a version")
+    reasons, confidence, version = data["reasons"], data["confidence"], data.get("version")
+    if not isinstance(reasons, list | tuple):
+        raise ContractError("a probe result's reasons are a list")
+    parsed = []
+    for reason in reasons:
+        if not isinstance(reason, Mapping) or reason.keys() != {"code", "message"}:
+            raise ContractError("a probe reason is exactly a code and a message")
+        code, message = reason["code"], reason["message"]
+        if not isinstance(code, str) or not isinstance(message, str):
+            raise ContractError("a probe reason's code and message are strings")
+        parsed.append(ProbeReason(code, message))
+    if not isinstance(confidence, float) or not (version is None or isinstance(version, str)):
+        raise ContractError("a probe's confidence is a float and its version a string")
+    return ProbeResult(confidence, tuple(parsed), version)
 
 
 @dataclass(frozen=True)

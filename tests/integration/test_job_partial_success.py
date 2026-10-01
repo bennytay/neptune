@@ -28,11 +28,15 @@ from neptune.adapters.contract import (
     make_chunk,
 )
 from neptune.adapters.registry import AdapterRegistry
+from neptune.discovery.verify import verify_artifact
+from neptune.identity.hashing import content_id
 from neptune.model.finding import FindingCategory, Severity, subject_to_json
 from neptune.model.knowledge import Known
+from neptune.model.provenance import ByteRange, EvidenceRef
 from neptune.model.series import ColumnType, SeriesBatch, SeriesColumn
 from neptune.model.world import DocumentBlock, DocumentRecord
 from neptune.runtime import IngestJob, Isolation, JobError, JobEvent, JobOptions, JobState, Phase
+from neptune.runtime import job as job_module
 from neptune.runtime import lineage as runtime_lineage
 from neptune.store.package import read_package
 from neptune.store.workspace import Workspace
@@ -126,13 +130,14 @@ def corpus(tmp_path: Path) -> Path:
 def test_one_crashing_source_does_not_invalidate_the_others(corpus: Path, tmp_path: Path) -> None:
     outcome, package, seen = run(corpus, tmp_path)
     assert codes(package) == [
+        "neptune.probe.unsupported",
         "neptune.runtime.chunk_failed",
         "neptune.runtime.plan_failed",
         "tally.bad_row",
         "text.invalid_utf8",
     ]
     assert read_by(package) == {
-        "blob.bin": 0,
+        "blob.bin": 1,  # by the probe engine, which says no adapter claims it
         "corrupted.txt": 1,
         "crash.brittle": 1,  # read by the runtime, which says why nothing came of it
         "lift.tally": 1,
@@ -262,7 +267,10 @@ def test_a_source_that_changes_during_the_job_is_reported_and_the_rest_proceed(
 
     outcome, package, seen = run(corpus, tmp_path, on_event=rewrite_notes_after_planning)
     assert "neptune.runtime.source_changed" in codes(package)
-    assert read_by(package)["notes.txt"] == 0  # not read: nothing could cite its bytes
+    # Not read by its adapter: only discovery's verification cites it, naming the changed chunk.
+    assert read_by(package)["notes.txt"] == 1
+    (verified,) = [f for f in outcome.findings if f.code == "neptune.discovery.chunk_changed"]
+    assert verified.details == {"chunk_size": 8 * 1024 * 1024, "first_chunk": 0, "last_chunk": 0}
     assert read_by(package)["corrupted.txt"] == 1 and read_by(package)["lift.tally"] == 1
     changed = [e for e in seen if e.kind == "source_changed"]
     assert [path_of(e.details) for e in changed] == ["notes.txt"]
@@ -278,10 +286,16 @@ def test_entries_that_cannot_be_read_are_findings_by_reason(tmp_path: Path) -> N
     os.mkfifo(root / "pipe")
     (root / "latest").symlink_to("notes.txt")
     outcome, package, seen = run(root, tmp_path)
-    assert codes(package) == ["neptune.runtime.entry_skipped"]
-    (finding,) = outcome.findings
-    assert finding.severity is Severity.INFO and finding.details == {"reason": "not_regular_file"}
-    assert subject_to_json(finding.subject) == {"kind": "local", "path": "pipe"}
+    # Discovery, which saw both entries, says why it read neither (ADR 0029 §1, ADR 0033 §3).
+    assert codes(package) == [
+        "neptune.discovery.special_file",
+        "neptune.discovery.symlink_not_followed",
+    ]
+    special, link = sorted(outcome.findings, key=lambda f: f.code)
+    assert special.severity is Severity.INFO and special.category is FindingCategory.SKIPPED
+    assert subject_to_json(special.subject) == {"kind": "local", "path": "pipe"}
+    assert subject_to_json(link.subject) == {"kind": "local", "path": "latest"}
+    assert link.details == {"absolute": False, "inside_root": True, "target": "notes.txt"}
     assert [e.details for e in seen if e.kind == "symlink_recorded"] == [
         {"location": {"kind": "local", "path": "latest"}, "target_hex": b"notes.txt".hex()}
     ]
@@ -300,9 +314,10 @@ def test_an_unreadable_file_is_an_error_finding_and_the_rest_proceed(tmp_path: P
         outcome, package, _ = run(root, tmp_path)
     finally:
         secret.chmod(0o644)
-    assert codes(package) == ["neptune.runtime.entry_skipped"]
+    assert codes(package) == ["neptune.discovery.unreadable"]
     (finding,) = outcome.findings
-    assert finding.severity is Severity.ERROR and finding.details == {"reason": "unreadable"}
+    assert finding.severity is Severity.ERROR and finding.category is FindingCategory.SKIPPED
+    assert subject_to_json(finding.subject) == {"kind": "local", "path": "secret.txt"}
     assert read_by(package) == {"notes.txt": 1}  # the unreadable file was never fingerprinted
 
 
@@ -616,3 +631,147 @@ def test_a_committed_run_the_workspace_cannot_read_fails_the_job_not_the_source(
     with pytest.raises(JobError, match="cannot be read"):
         job.run()
     assert job.state is JobState.FAILED and not (tmp_path / "p").exists()
+
+
+@pytest.mark.parametrize("isolation", [Isolation.SUBPROCESS, Isolation.IN_PROCESS])
+def test_a_short_read_over_an_intact_source_is_the_adapters_failure(
+    tmp_path: Path, isolation: Isolation, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The job's reader never reads short, so a ``ShortReadError`` naming a source that still
+    matches its artifact came from the adapter's own window over it: ``plan_failed`` or
+    ``chunk_failed`` naming ``ShortReadError``, after the usual retries, and no finding blames
+    the source; one naming another reader is the adapter's too (ADR 0033 §3). An unchanged file
+    found intact is verified once, not once per attempt."""
+    verified: list[str] = []
+
+    def counting(stream: Any, artifact: Any) -> Any:
+        verified.append(artifact.content_id)
+        return verify_artifact(stream, artifact)
+
+    monkeypatch.setattr(job_module, "verify_artifact", counting)
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    short = BRITTLE.brittle("first", "short", "last")
+    (root / "short.brittle").write_bytes(short)
+    planned = BRITTLE.brittle("plan-short", "x")
+    (root / "plan.brittle").write_bytes(planned)
+    elsewhere = BRITTLE.brittle("short-elsewhere")
+    (root / "elsewhere.brittle").write_bytes(elsewhere)
+    outcome, package, seen = run(root, tmp_path, options=JobOptions(isolation=isolation))
+    assert codes(package) == [
+        "neptune.runtime.chunk_failed",
+        "neptune.runtime.chunk_failed",
+        "neptune.runtime.plan_failed",
+    ]
+    failed = {f.subject.source: f.details for f in outcome.findings}
+    assert failed[content_id(planned)] == {
+        "adapter": "brittle",
+        "error": "ShortReadError",
+        "step": "plan",
+        "version": "1.0.0",
+    }
+    for data in (short, elsewhere):
+        details = failed[content_id(data)]
+        assert (details["error"], details["step"], details["attempts"]) == (
+            "ShortReadError",
+            "ingest",
+            2,  # retried as any other raise
+        )
+    retried = sorted(str(e.details["error"]) for e in seen if e.kind == "chunk_retried")
+    assert retried == ["ShortReadError", "ShortReadError"]
+    assert sorted(verified) == sorted([content_id(short), content_id(planned)])  # never elsewhere
+    assert not [e for e in seen if e.kind == "source_short_read"]
+    assert not [c for c in codes(package) if c.startswith("neptune.discovery.")]
+    assert len(outcome.ingested) == 1  # the notes
+
+
+class WindowBrittle(BRITTLE.BrittleAdapter):  # type: ignore[misc, name-defined]
+    """Reads each line through a window of its own that serves nothing, before the job's reader
+    is touched: a ``ShortReadError`` naming the source and the line's range, whatever the file
+    now holds."""
+
+    def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput:
+        if chunk.context.get("part") != "document":
+            start, end = chunk.context["start"], chunk.context["end"]
+            assert isinstance(start, int) and isinstance(end, int)
+            BRITTLE._read_short(source, start, end)
+        output: ChunkOutput = super().ingest(source, chunk, config)
+        return output
+
+
+@pytest.mark.parametrize("isolation", [Isolation.SUBPROCESS, Isolation.IN_PROCESS])
+@pytest.mark.parametrize(
+    ("adapter", "blamed"),
+    [
+        (BRITTLE.BrittleAdapter, "neptune.runtime.source_changed"),  # its read fails the hash
+        (WindowBrittle, "neptune.discovery.short_read"),  # its own window reads short
+    ],
+)
+def test_a_source_cut_under_the_adapter_is_the_sources_finding_never_retried(
+    tmp_path: Path, isolation: Isolation, adapter: type, blamed: str
+) -> None:
+    """A source cut while its chunks are being ingested: an adapter that reads it through the
+    job's reader meets ``SourceChangedError`` (``source_changed``); one whose own window raises
+    ``ShortReadError`` naming it is the source's ``short_read`` for the unserved range, since the
+    job finds the file no longer matches its artifact. Either way ``verify_artifact``'s account
+    follows, the source is quarantined and nothing is retried (ADR 0033 §3)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    data = BRITTLE.brittle("first", "second", "third")
+    (root / "cut.brittle").write_bytes(data)
+    cut = 20
+
+    def cut_after_the_first_chunk(event: JobEvent) -> None:
+        mine = event.kind == "chunk_committed" and event.details["source"] == content_id(data)
+        if mine and (root / "cut.brittle").stat().st_size == len(data):
+            (root / "cut.brittle").write_bytes(data[:cut])
+
+    adapters = AdapterRegistry([*builtin_adapters(), adapter()])
+    outcome, package, seen = run(
+        root,
+        tmp_path,
+        adapters,
+        options=JobOptions(isolation=isolation),
+        on_event=cut_after_the_first_chunk,
+    )
+    assert codes(package) == sorted([blamed, "neptune.discovery.truncated"])
+    (truncated,) = [f for f in outcome.findings if f.code == "neptune.discovery.truncated"]
+    assert truncated.subject == EvidenceRef(content_id(data), (ByteRange(cut, len(data) - cut),))
+    first = data.index(b"first")
+    if blamed == "neptune.discovery.short_read":
+        (short,) = [f for f in outcome.findings if f.code == blamed]
+        assert short.subject == EvidenceRef(content_id(data), (ByteRange(first, 5),))
+        assert short.details == {"offset": first, "unread_bytes": 5}
+        (event,) = [e for e in seen if e.kind == "source_short_read"]
+        assert (event.details["step"], event.details["offset"]) == ("ingest", first)
+    else:
+        assert not [e for e in seen if e.kind == "source_short_read"]
+    assert not [e for e in seen if e.kind == "chunk_retried"]
+    quarantined = [codes_of(e.details) for e in seen if e.kind == "source_quarantined"]
+    assert quarantined == [(blamed,)]
+    assert len(outcome.ingested) == 1  # the notes
+
+
+def test_a_source_cut_after_hashing_is_verified_against_its_artifact(tmp_path: Path) -> None:
+    """A source that shrinks under the job is ``source_changed`` with ``verify_artifact``'s
+    exact account: here, the missing range (ADR 0029 §3)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    data = BRITTLE.brittle("first", "second", "third")
+    (root / "cut.brittle").write_bytes(data)
+
+    def cut_after_planning(event: JobEvent) -> None:
+        if event.kind == "phase_finished" and event.phase is Phase.PLAN:
+            (root / "cut.brittle").write_bytes(data[:20])
+
+    outcome, package, _ = run(root, tmp_path, on_event=cut_after_planning)
+    assert codes(package) == ["neptune.discovery.truncated", "neptune.runtime.source_changed"]
+    (truncated,) = [f for f in outcome.findings if f.code == "neptune.discovery.truncated"]
+    assert truncated.subject == EvidenceRef(content_id(data), (ByteRange(20, len(data) - 20),))
+    assert truncated.details == {
+        "actual_size": 20,
+        "declared_size": len(data),
+        "missing_bytes": len(data) - 20,
+    }

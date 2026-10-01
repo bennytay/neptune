@@ -10,7 +10,9 @@ execution in the job's process.
 - Series cells travel by column type, exactly: integers and booleans as JSON, strings as
   strings, binary as hex, and every float as the hex of its eight IEEE-754 bytes, so NaN
   payloads, infinities and ``-0.0`` cross unchanged. A null cell is ``null``.
-- Plans travel as their chunks' ``to_json`` and findings; probe results as their ``to_json``.
+- Plans travel as their chunks' ``to_json`` and findings; probe results as their ``to_json``;
+  ``inspect``'s result as its summary and findings (for dry runs, MVL-15); the probe engine's
+  view of a source as ``SourceProbe.to_json``, read back by the engine.
 
 A decoder raises on anything it does not recognise; the sandbox reports that as a crash. The byte
 size of a reply is already capped (``Limits.reply_bytes``); the decode is bounded in count and in
@@ -22,20 +24,21 @@ reported as ``Limit.REPLY``, never decoded and never a crash that is retried.
 import json
 import re
 import struct
-from collections.abc import Mapping
 from typing import Any, Final, cast
 
 from neptune.adapters.contract import (
     EVIDENCE_KINDS,
     ChunkOutput,
+    InspectResult,
     Plan,
-    ProbeReason,
     ProbeResult,
     chunk_from_json,
+    probe_result_from_json,
 )
+from neptune.discovery.probe import ProbeEngine, SourceProbe
 from neptune.identity.provenance import EvidenceRecord
 from neptune.model.finding import IngestFinding, ingest_finding_from_json
-from neptune.model.ids import RecordId, parse_record_id
+from neptune.model.ids import ContentId, RecordId, parse_record_id
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.kinds import RECORD_KINDS
 from neptune.model.series import Cell, ColumnType, ScalarCell, SeriesBatch, SeriesColumn
@@ -286,24 +289,44 @@ def encode_probe(result: ProbeResult) -> bytes:
 
 
 def decode_probe(data: bytes) -> ProbeResult:
-    value = _loads(data)
-    if not isinstance(value, Mapping) or not {"confidence", "reasons"} <= value.keys():
-        raise ValueError("a probe result has a confidence and reasons")
-    if not value.keys() <= {"confidence", "reasons", "version"}:
-        raise ValueError("a probe result has a confidence, reasons and a version")
-    reasons = []
-    for item in _list(value["reasons"], "reasons"):
-        reason = _object(item, {"code", "message"}, "a probe reason")
-        code, message = reason["code"], reason["message"]
-        if not isinstance(code, str) or not isinstance(message, str):
-            raise ValueError("a probe reason's code and message are strings")
-        reasons.append(ProbeReason(code, message))
-    confidence, version = value["confidence"], value.get("version")
-    if not isinstance(confidence, float) or not (version is None or isinstance(version, str)):
-        raise ValueError("a probe's confidence is a float and its version a string")
-    return ProbeResult(confidence, tuple(reasons), version)
+    return probe_result_from_json(cast("JsonValue", _loads(data)))
+
+
+def encode_inspect(result: InspectResult) -> bytes:
+    return _dumps(
+        {
+            "findings": [finding.to_json() for finding in result.findings],
+            "summary": result.summary,
+        }
+    )
+
+
+def decode_inspect(data: bytes) -> InspectResult:
+    value = _object(_loads(data), {"findings", "summary"}, "an inspect result")
+    summary = value["summary"]
+    if not isinstance(summary, dict):
+        raise ValueError("an inspect result's summary is an object")
+    return InspectResult(summary, _findings_from_json(value["findings"]))
+
+
+def source_probe(
+    engine: ProbeEngine, source: ContentId, size: int, name: str, head: bytes
+) -> Codec[SourceProbe]:
+    """The codec of the probe engine's ``probe`` of one source: its ``to_json``, read back by
+    ``ProbeEngine.source_probe_from_json``, which derives again what the job can and refuses a
+    reply that is not what the engine writes (ADR 0033 §1)."""
+
+    def encode(probed: SourceProbe) -> bytes:
+        return _dumps(probed.to_json())
+
+    def decode(data: bytes) -> SourceProbe:
+        value = cast("JsonValue", _loads(data))
+        return engine.source_probe_from_json(value, source=source, size=size, name=name, head=head)
+
+    return Codec(SourceProbe, encode, decode)
 
 
 OUTPUT: Final = Codec(ChunkOutput, encode_output, decode_output)
 PLAN: Final = Codec(Plan, encode_plan, decode_plan)
 PROBE: Final = Codec(ProbeResult, encode_probe, decode_probe)
+INSPECT: Final = Codec(InspectResult, encode_inspect, decode_inspect)
