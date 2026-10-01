@@ -406,6 +406,7 @@ def test_bump_writes_a_version_and_announces(
     registry = _toy(tmp_path, monkeypatch)
     _owner(tmp_path, {"type": "object", "required": ["n"]}, 1)
     assert tool.main(["--root", str(registry.root), "bump", "toy", "1.1.0"]) == 0
+    assert tool.main(["--root", str(registry.root), "matrix", "--check"]) == 0  # bump wrote it
     out = capsys.readouterr().out
     assert "comment for MVL-1 (toy-consumer)" in out and "declares 1.0.0" in out
     assert tool.check_owner(registry, "toy-owner").ok
@@ -574,3 +575,17 @@ def test_register_makes_a_new_package_green(registry: Any) -> None:
     assert _check(registry, "demo").ok
     with pytest.raises(tool.ContractError, match="not a package name"):
         tool.register(registry, "Demo_Bad")
+    assert tool.main(["--root", str(registry.root), "matrix", "--check"]) == 0
+
+
+def test_register_regenerates_the_matrix(registry: Any) -> None:
+    """A planned consumer's scaffold turns `not declared (no package yet)` into `not declared`,
+    and `new-package.sh` stays green because register writes the matrix."""
+    root = ["--root", str(registry.root)]
+    assert tool.register(registry, "neptune-deploy") == [
+        "contracts/lock.toml",
+        "contracts/compatibility.md",
+    ]
+    assert tool.main([*root, "matrix", "--check"]) == 0
+    assert "| `neptune-deploy` | not declared |" in _text(registry.root / "compatibility.md")
+    assert tool.register(registry, "neptune-deploy") == []

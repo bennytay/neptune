@@ -17,16 +17,16 @@ Subcommands:
   message, while an owner module or its parent package does not exist yet).
 - ``check-owner --package P``: every schema P exports equals the registry's latest version, and
   P's version constant matches it. A changed export needs ``bump``.
-- ``register PACKAGE``: add a new member's ``packages.toml`` entry and empty lock section
-  (stdlib only; ``scripts/new-package.sh`` runs it).
+- ``register PACKAGE``: add a new member's ``packages.toml`` entry and empty lock section, and
+  regenerate the matrix (stdlib only; ``scripts/new-package.sh`` runs it).
 - ``matrix [--check]``: write ``contracts/compatibility.md`` from the registry and lock.toml
   (``--check``: fail if the committed file differs).
 - ``bump CONTRACT VERSION [--post]``: write ``v<VERSION>/`` from the owner's export and golden
   generator, refusing a minor/patch that rejects an earlier stable golden of its major; the first
   stable version, and every later major, sets the contract's lock entry of every in-repo consumer
-  (a package with a lock.toml section). Then print the announcement comments for the
-  consumers' gate issues; ``--post`` sends them through the Linear GraphQL API, and needs
-  ``LINEAR_API_KEY`` before anything is written.
+  (a package with a lock.toml section); the matrix is regenerated. Then print the announcement
+  comments for the consumers' gate issues; ``--post`` sends them through the Linear GraphQL API,
+  and needs ``LINEAR_API_KEY`` before anything is written.
 
 Stdlib plus ``jsonschema`` (already a dev dependency). Output files are canonical JSON: sorted
 keys, two-space indent, UTF-8, one trailing newline, so the same inputs give the same bytes.
@@ -691,15 +691,20 @@ def _matrix_cell(registry: Registry, contract: Contract, package: str, lock: Any
 def render_matrix(registry: Registry) -> str:
     """The text of ``contracts/compatibility.md``: a pure function of the registry's files.
 
-    Contracts are ordered by their owner's position in packages.toml, then by id; consumer rows
-    follow packages.toml order.
+    Contracts are ordered by their owner's position in packages.toml, then by id with each
+    contract's parts right after it; consumer rows follow packages.toml order.
     """
     packages = list(registry.packages())
     lock = registry.lock()
     rank = {package: index for index, package in enumerate(packages)}
     contracts = sorted(
         (registry.contract(i) for i in registry.contract_ids()),
-        key=lambda c: (rank.get(c.owner.package, len(rank)), c.id),
+        key=lambda c: (
+            rank.get(c.owner.package, len(rank)),
+            c.part_of or c.id,
+            c.part_of is not None,
+            c.id,
+        ),
     )
     lines = [
         MATRIX_HEADER,
@@ -746,21 +751,32 @@ def render_matrix(registry: Registry) -> str:
     return "\n".join(lines) + "\n"
 
 
+def write_matrix(registry: Registry) -> bool:
+    """Regenerate ``compatibility.md``; True when its bytes changed."""
+    path = registry.root / "compatibility.md"
+    text = render_matrix(registry)
+    if path.is_file() and path.read_text(encoding="utf-8") == text:
+        return False
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
 def matrix(registry: Registry, *, check: bool = False) -> Report:
     """Write ``compatibility.md`` (or, with ``check``, report that the committed file is stale)."""
     report = Report()
     path = registry.root / "compatibility.md"
-    text = render_matrix(registry)
-    current = path.read_text(encoding="utf-8") if path.is_file() else None
-    if current == text:
-        report.notes.append("contracts/compatibility.md is current")
-    elif check:
-        report.problems.append(
-            "contracts/compatibility.md is stale; run scripts/contracts.py matrix and commit it"
-        )
-    else:
-        path.write_text(text, encoding="utf-8")
+    if check:
+        current = path.read_text(encoding="utf-8") if path.is_file() else None
+        if current != render_matrix(registry):
+            report.problems.append(
+                "contracts/compatibility.md is stale; run scripts/contracts.py matrix and commit it"
+            )
+        else:
+            report.notes.append("contracts/compatibility.md is current")
+    elif write_matrix(registry):
         report.notes.append("wrote contracts/compatibility.md")
+    else:
+        report.notes.append("contracts/compatibility.md is current")
     return report
 
 
@@ -770,7 +786,8 @@ def matrix(registry: Registry, *, check: bool = False) -> Report:
 def register(registry: Registry, package: str) -> list[str]:
     """Give a new workspace member its packages.toml entry and an empty lock section.
 
-    Idempotent; returns the files it changed. ``scripts/new-package.sh`` calls it so a fresh
+    Idempotent; returns the files it changed (the matrix too, when the package was a planned
+    consumer). ``scripts/new-package.sh`` calls it so a fresh
     scaffold's ``make contracts-check PKG=<name>`` is green without hand edits.
     """
     if not _PACKAGE.match(package):
@@ -785,6 +802,8 @@ def register(registry: Registry, package: str) -> list[str]:
     if package not in lock:
         registry.write_lock({**lock, package: {}})
         changed.append("contracts/lock.toml")
+    if write_matrix(registry):
+        changed.append("contracts/compatibility.md")
     return changed
 
 
@@ -953,6 +972,7 @@ def bump(
             for package, entries in before.items()
         }
         registry.write_lock(raised)
+    write_matrix(registry)
     return announcements(registry, contract, version, before)
 
 
@@ -1037,7 +1057,7 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
         if args.post and not key:
             raise ContractError("--post needs LINEAR_API_KEY; nothing was written")
         notes = bump(registry, args.contract, args.version, status=args.status)
-        _print([f"wrote contracts/{args.contract}/v{args.version}/"])
+        _print([f"wrote contracts/{args.contract}/v{args.version}/ and contracts/compatibility.md"])
         for note in notes:
             target = note.issue or f"<no gate issue for {note.package} in packages.toml>"
             _print([f"--- comment for {target} ({note.package})", note.body])

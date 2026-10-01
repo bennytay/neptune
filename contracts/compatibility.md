@@ -11,9 +11,9 @@ statement.
 
 | Contract | Owner package | Status | Latest stable | Latest draft | Consumers |
 |---|---|---|---|---|---|
+| `package-schema` | `neptune` | active | 1.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
 | `alignment-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-memory` |
 | `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
-| `package-schema` | `neptune` | active | 1.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
 | `catalog-api` | `neptune-ledger` | active | — | 0.0.0 | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
 | `graph-schema` | `neptune-memory` | planned | — | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
 | `query-packet` | `neptune-context` | planned | — | — | `neptune-deploy`, `neptune-learn` |
