@@ -41,8 +41,11 @@ those choices; `packages/neptune-platform/docs/playbook.md` is the operating pro
 6. **Merge flow.** Verdict comment `Review: MERGE @ <sha>`, then `scripts/factory-merge.sh <pr> <sha>`,
    which enqueues with `gh pr merge --squash --auto`. A clean merge of `main` into a reviewed branch carries
    the verdict to the new head (`Review: MERGE @ <new> (carried from <old>, …)`); a hand-resolved conflict
-   needs a fresh review. Until the ruleset of ADR 0001 §5 is applied, coordinators hand-refresh as in
-   `docs/developer-workflow.md` and the script's REST fallback merges.
+   needs a fresh review. Applying the ruleset of ADR 0001 §5 failed (`merge_queue` needs an
+   organisation-owned repository; MVL-192 moves it). Until then, the script's REST fallback merges and
+   coordinators hand-refresh as in `docs/developer-workflow.md`. Once the queue rule is live, the REST
+   fallback is rejected by design (the ruleset has no bypass actors). A verdict counts only from an
+   OWNER, MEMBER or COLLABORATOR author, and the latest one wins (MVL-193 enforces this in the script).
 7. **Package versions.** Semver in each package's `[project].version`. Before a layer's final gate and the
    X4 integration gate are Done, versions are `0.<m>.<p>` where `<m>` is the number of the last gate passed;
    `1.0.0` at the final gate; after that, standard semver with a major bump of an owned contract counting as

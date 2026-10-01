@@ -143,7 +143,8 @@ Acceptance: k/n met · make check: green | <what failed>
 2. `scripts/factory-merge.sh <pr> <sha>`. It refuses unless the PR is open, not draft, based on `main`,
    conflict-free, at the reviewed head with a matching `Review: MERGE` line, `check` green, and (if it edits an
    `ARCHITECTURE.md`) a filled **Architecture change** section. It then runs
-   `gh pr merge --squash --auto --match-head-commit <sha>`: the merge queue rebuilds the PR on top of `main`
+   `gh pr merge --squash --auto --match-head-commit <sha>`. Once the queue is live (MVL-192; until then see
+   the REST fallback below), the merge queue rebuilds the PR on top of `main`
    and the PRs ahead of it, runs `check` on `merge_group`, merges, and the script prints the merge SHA.
 3. If the queue ejects the PR (conflict or red `check` in the group): merge `origin/main` into the branch,
    push, and get a new verdict for the new head. A conflict-free merge of `main` keeps the review valid; the
@@ -153,14 +154,25 @@ Acceptance: k/n met · make check: green | <what failed>
 5. Stacked PR whose base just merged: `gh api -X PATCH repos/bennytay/neptune/pulls/<n> -f base=main`, then
    step 3.
 
-**Fallback until the ruleset is live.** Until the programme coordinator has applied
-`.github/rulesets/main.json` (ADR 0001 §5; a user-owned repository may first have to move to a free
-organisation), `main` keeps classic protection with the strict up-to-date rule and `factory-merge.sh` falls
-back to the REST squash merge pinned to the head, which needs `mergeable_state` `clean`. In that mode every
-coordinator hand-refreshes as in `docs/developer-workflow.md` loop step 4 after every merge to `main`
-(theirs or another project's), re-posts the carried verdict for the new head as in step 3 above, and merges
-one PR at a time. Expect contention: only one PR across all projects can be up to date at once, so keep live
-coordinators at 3 until the queue works.
+**Live today: REST fallback with hand refresh.** GitHub rejected the ruleset's `merge_queue` rule (422
+`Invalid rule 'merge_queue'`) because `bennytay/neptune` belongs to a personal account; merge queues need an
+organisation-owned repository. MVL-192 moves the repository to an organisation. Until MVL-192 is Done and
+`.github/rulesets/main.json` is applied (ADR 0001 §5):
+
+- `main` keeps classic protection with the strict up-to-date rule. `factory-merge.sh` falls back to the REST
+  squash merge pinned to the head, which needs `mergeable_state` `clean`.
+- After every merge to `main` (this project's or another's), each coordinator hand-refreshes its open PRs:
+  `git merge origin/main`, push, wait for `check` (`docs/developer-workflow.md` loop step 4). It re-posts the
+  carried verdict for the new head as in step 3 above and merges one PR at a time.
+- Expect contention: only one PR across all projects can be up to date at a time, so keep at most 3
+  coordinators live until the queue is live.
+
+Once the queue rule is live, the REST fallback is rejected, because the ruleset has no bypass actors. Hand
+refresh then stops working by design, and every merge goes through the queue (steps 2–3).
+
+**Verdict authority.** A `Review:` line counts only if its author is OWNER, MEMBER or COLLABORATOR on the
+repository. Among those, the latest line for the head wins. MVL-193 adds this check to `factory-merge.sh`;
+coordinators follow the rule now.
 
 ## 6. Budget: weekly usage check and pause order
 
