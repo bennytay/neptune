@@ -181,7 +181,7 @@ def test_an_explanation_covers_inventory_formats_adapters_grouping_work_and_left
     left = {(show(e.location), e.disposition) for e in explanation.left_out}
     assert left == {("blob.bin", Disposition.UNSUPPORTED), ("latest", Disposition.LINK)}
     selected = {use.descriptor.id: use.selected for use in explanation.adapters}
-    assert set(selected) == {"markdown", "mcap", "pdf", "tabular", "text"}
+    assert set(selected) == {a.descriptor.id for a in builtin_adapters()}
     assert len(selected["tabular"]) == 5
     assert explanation.findings == outcome.findings
 
