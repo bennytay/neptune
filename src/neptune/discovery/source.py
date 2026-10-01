@@ -12,6 +12,11 @@ Walking policy (ADR 0009 §5 as amended by ADR 0010, ``docs/security.md``):
   directory swapped for a symlink mid-walk cannot redirect the walk or ``open`` outside the root.
 - Order is deterministic: depth-first, siblings in byte order of their names (which is code-point
   order for UTF-8 names).
+- Ignore rules (``neptune.discovery.ignore``, ADR 0043) name entries the walk leaves unread on
+  purpose. Each is yielded as a ``SkippedEntry`` with reason ``ignored`` and the rule that matched;
+  an ignored directory is not entered.
+- A root that is a regular file is a source of one entry, located by the file's own name, so it
+  ingests exactly as a folder holding only that file would (ADR 0043).
 """
 
 import errno
@@ -21,9 +26,12 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import BinaryIO, Protocol, TypeAlias
+from typing import TYPE_CHECKING, BinaryIO, Protocol, TypeAlias
 
 from neptune.model.source import LocalPath, RawLocalPath, SourceLocation, local_location
+
+if TYPE_CHECKING:
+    from neptune.discovery.ignore import IgnoreRule, IgnoreRules
 
 
 class SkipReason(StrEnum):
@@ -31,6 +39,7 @@ class SkipReason(StrEnum):
     NOT_REGULAR_FILE = "not_regular_file"
     MISSING = "missing"
     UNREADABLE = "unreadable"
+    IGNORED = "ignored"  # an ignore rule matched it: not read on purpose (ADR 0043)
 
 
 @dataclass(frozen=True)
@@ -51,11 +60,15 @@ class SymlinkEntry:
 
 @dataclass(frozen=True)
 class SkippedEntry:
-    """Something a walk saw and did not yield. ``raw_path`` is relative to the root, undecoded."""
+    """Something a walk saw and did not yield. ``raw_path`` is relative to the root, undecoded.
+
+    ``rule`` is the ignore rule that matched, for reason ``ignored`` only.
+    """
 
     raw_path: bytes
     reason: SkipReason
     detail: str
+    rule: "IgnoreRule | None" = None
 
 
 WalkEntry: TypeAlias = SourceEntry | SymlinkEntry | SkippedEntry
@@ -89,22 +102,45 @@ class _Directory:
 
 
 class LocalSource:
-    """Regular files under one root directory.
+    """Regular files under one root directory, or one regular file.
 
-    The root itself may be a symlink (the caller chose it); nothing below it is followed.
+    The root itself may be a symlink (the caller chose it); nothing below it is followed. A root
+    that is a regular file is walked as one entry named by the file's own name (the last
+    component of the path it resolves to), so its locations are what a folder holding only that
+    file would give. ``ignore`` rules apply below a root directory, never to the root itself.
     """
 
-    def __init__(self, root: str | os.PathLike[str]) -> None:
+    def __init__(
+        self, root: str | os.PathLike[str], *, ignore: "IgnoreRules | None" = None
+    ) -> None:
         self._root = os.fspath(root)
-        if not Path(self._root).is_dir():
+        path = Path(self._root)
+        self._name: bytes | None = None
+        if path.is_file():
+            self._name = os.fsencode(path.resolve().name)
+        elif not path.is_dir():
             raise NotADirectoryError(self._root)
+        self._ignore = ignore
 
     @property
     def root(self) -> str:
         """The ingest root as the caller named it. Never recorded; findings use relative paths."""
         return self._root
 
+    @property
+    def is_file(self) -> bool:
+        """The root is one regular file rather than a directory."""
+        return self._name is not None
+
+    @property
+    def ignore(self) -> "IgnoreRules | None":
+        """The ignore rules the walk applies, if any."""
+        return self._ignore
+
     def walk(self) -> Iterator[WalkEntry]:
+        if self._name is not None:
+            yield self._file_entry(self._name)
+            return
         stack: list[Iterator[WalkEntry | _Directory]] = [iter(self._list(()))]
         while stack:
             item = next(stack[-1], None)
@@ -118,18 +154,7 @@ class LocalSource:
     def open(self, location: SourceLocation) -> BinaryIO:
         if not isinstance(location, (LocalPath, RawLocalPath)):
             raise TypeError(f"LocalSource cannot open {type(location).__name__}")
-        *directories, name = location.raw.split(b"/")
-        try:
-            dir_fd = self._open_directory(tuple(directories))
-        except _WalkError as exc:
-            raise SourceAccessError(location, exc.reason, exc.detail) from exc
-        try:
-            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
-        except OSError as exc:
-            reason = _classify(exc, name, dir_fd)
-            raise SourceAccessError(location, reason, exc.strerror or str(exc)) from exc
-        finally:
-            os.close(dir_fd)
+        fd = self._open_file(location) if self._name is not None else self._open_below(location)
         try:
             mode = os.fstat(fd).st_mode
         except OSError:
@@ -141,6 +166,46 @@ class LocalSource:
         os.set_blocking(fd, True)
         return os.fdopen(fd, "rb")
 
+    def _open_below(self, location: LocalPath | RawLocalPath) -> int:
+        """Open ``location`` under the root directory, refusing any symlink on the way."""
+        *directories, name = location.raw.split(b"/")
+        try:
+            dir_fd = self._open_directory(tuple(directories))
+        except _WalkError as exc:
+            raise SourceAccessError(location, exc.reason, exc.detail) from exc
+        try:
+            return os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+        except OSError as exc:
+            reason = _classify(exc, name, dir_fd)
+            raise SourceAccessError(location, reason, exc.strerror or str(exc)) from exc
+        finally:
+            os.close(dir_fd)
+
+    def _open_file(self, location: LocalPath | RawLocalPath) -> int:
+        """Open the root file, the one location a file root has (followed as the caller named
+        it, as a root directory is)."""
+        if location.raw != self._name:
+            raise SourceAccessError(location, SkipReason.MISSING, "not the source file")
+        try:
+            return os.open(self._root, os.O_RDONLY | os.O_NONBLOCK)
+        except FileNotFoundError as exc:
+            raise SourceAccessError(location, SkipReason.MISSING, exc.strerror or str(exc)) from exc
+        except OSError as exc:
+            reason = SkipReason.UNREADABLE
+            raise SourceAccessError(location, reason, exc.strerror or str(exc)) from exc
+
+    def _file_entry(self, name: bytes) -> WalkEntry:
+        """The root file as a walk entry; a root that is no longer a regular file is skipped."""
+        try:
+            info = Path(self._root).stat()
+        except FileNotFoundError:
+            return SkippedEntry(_join(()), SkipReason.MISSING, "vanished during walk")
+        except OSError as exc:
+            return SkippedEntry(_join(()), SkipReason.UNREADABLE, exc.strerror or str(exc))
+        if not stat.S_ISREG(info.st_mode):
+            return SkippedEntry(_join(()), SkipReason.NOT_REGULAR_FILE, stat.filemode(info.st_mode))
+        return SourceEntry(local_location(name), info.st_size)
+
     def _list(self, parts: tuple[bytes, ...]) -> list[WalkEntry | _Directory]:
         try:
             dir_fd = self._open_directory(parts)
@@ -149,11 +214,27 @@ class LocalSource:
         try:
             with os.scandir(dir_fd) as scan:
                 names = sorted(os.fsencode(entry.name) for entry in scan)
-            return [self._classify_entry(dir_fd, (*parts, name)) for name in names]
+            return [self._ignored(dir_fd, (*parts, name)) for name in names]
         except OSError as exc:
             return [SkippedEntry(_join(parts), SkipReason.UNREADABLE, exc.strerror or str(exc))]
         finally:
             os.close(dir_fd)
+
+    def _ignored(self, dir_fd: int, child: tuple[bytes, ...]) -> WalkEntry | _Directory:
+        """``child`` classified, or skipped as ``ignored`` if a rule matches it.
+
+        Rules see what the entry is (a directory or not), so an entry that could not be examined
+        keeps its own reason: nothing the walk failed to see is reported as a choice.
+        """
+        entry = self._classify_entry(dir_fd, child)
+        if self._ignore is None:
+            return entry
+        if isinstance(entry, SkippedEntry) and entry.reason is not SkipReason.NOT_REGULAR_FILE:
+            return entry
+        rule = self._ignore.match(child, is_dir=isinstance(entry, _Directory))
+        if rule is None:
+            return entry
+        return SkippedEntry(_join(child), SkipReason.IGNORED, rule.text, rule)
 
     def _classify_entry(self, dir_fd: int, child: tuple[bytes, ...]) -> WalkEntry | _Directory:
         raw = _join(child)

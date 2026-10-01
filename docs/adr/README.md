@@ -42,5 +42,7 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0035](0035-python-sdk-one-surface-dry-runs-results-and-errors.md) | The Python SDK: one sync and async surface over the job, dry runs, results and a stable error taxonomy | Accepted |
 | [0036](0036-session-grouping-v0-observed-layout-and-derived-proposals.md) | Session grouping v0: an observed layout, inferred proposals, derived tables in the package | Accepted |
 | [0038](0038-layout-preserving-pdf-and-markdown-adapters.md) | Layout-preserving PDF and Markdown adapters: pypdf, markdown-it-py, declared order and exact spans | Accepted |
+| [0041](0041-standalone-image-ingestion-as-declared-with-region-citations.md) | Standalone image ingestion: containers read as declared, no pixel decoded, regions cited | Accepted |
 | [0042](0042-tabular-adapter-csv-json-parquet-as-cited-cells.md) | The tabular adapter: CSV, JSON and Parquet as tables of cited cells | Accepted |
+| [0043](0043-neptune-ingest-cli-exit-codes-ignore-rules-and-file-sources.md) | `neptune ingest`: a thin CLI over the SDK, fixed exit codes, declared ignore rules and single-file sources | Accepted |
 | [0045](0045-rosbag2-adapter-metadata-sqlite3-reader-and-mcap-delegation.md) | rosbag2: one adapter for `metadata.yaml` and sqlite3 storage, MCAP left to the MCAP adapter, a SQLite reader over bytes | Accepted |
