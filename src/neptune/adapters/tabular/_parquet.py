@@ -518,7 +518,7 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
                 "row": row + first,
                 "row_group": index,
                 "rows_per_block": per_block,
-                "statistics": first == 0,
+                "statistics": first == 0 and group.num_columns == len(found),
             }
             low, high = _group_range(group, footer)
             chunks.append(make_chunk(source, config, context, high - low if take else 0))
@@ -737,13 +737,17 @@ def _rows(
     if found is None:
         return ChunkOutput()
     records: list[StructuredRecord] = []
-    if context_flag(context, "statistics"):
+    if context_flag(context, "statistics") and pf.metadata.row_group(index).num_columns == len(
+        found
+    ):
         records.extend(_statistics(source, config, pf, footer, index, found))
     if not count:
         return ChunkOutput(records=tuple(records))
     absent = observed(footer.ref(source), config)
     table_id = record_id(StructuredTable.kind, whole(source), config)
     columns = sorted({leaf.walk[0] for leaf in found if leaf.decoded})
+    if not columns and found:  # nothing to decode: read one column anyway, to count the rows
+        columns = [found[0].walk[0]]
     position = {column: at for at, column in enumerate(columns)}
     # The batches hold only the columns read, so each leaf walks from its place among them.
     walked = [

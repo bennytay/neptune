@@ -15,7 +15,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from neptune.adapters.contract import STRUCTURE, VERIFIED, ProbeHints
+from neptune.adapters.contract import PROBE_HEAD_SIZE, STRUCTURE, VERIFIED, ProbeHints
 from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.tabular import TabularAdapter, _json
 from neptune.discovery.reader import BytesReader
@@ -365,6 +365,31 @@ def test_rows_past_max_rows_are_not_read() -> None:
     assert [r.row for r in rows(output)] == [0, 1, 2, 3, 4]
     (finding,) = [f for f in output.findings() if f.code == "tabular.row_limit"]
     assert finding.details == {"max_rows": 5, "row": 5}
+
+
+def test_json_lines_with_rows_larger_than_the_probe_head_are_still_json_lines() -> None:
+    big = [{"i": i, "blob": "x" * 100_000} for i in range(3)]
+    data = b"\n".join(json.dumps(row).encode() for row in big) + b"\n"
+    output = run(data)
+    assert [r.row for r in rows(output)] == [0, 1, 2] and codes(output) == []
+    assert [values(r)["/i"] for r in rows(output)] == [0, 1, 2]
+    arrays = b"\n".join(json.dumps(["y" * 100_000, i]).encode() for i in range(3)) + b"\n"
+    assert [r.row for r in rows(run(arrays))] == [0, 1, 2]
+    # a head holds no second row, so probing cannot claim it; a manifest's choice plans it right
+    head = data[:PROBE_HEAD_SIZE]
+    assert TabularAdapter().probe(head, ProbeHints("x", len(data))).confidence == 0.0
+
+
+def test_a_single_object_larger_than_the_probe_head_is_still_one_document() -> None:
+    document = json.dumps({"k": "x" * 100_000, "n": 1}).encode()
+    assert [r.row for r in rows(run(document))] == [0]
+
+
+def test_a_depth_limit_beyond_the_interpreters_reach_is_a_finding_not_a_crash() -> None:
+    deep = b"[" * 20_000 + b"1" + b"]" * 20_000
+    output = run(b"[" + deep + b",[1]]", max_json_depth=100_000)
+    assert "tabular.json_too_deep" in codes(output)
+    assert [r.row for r in rows(output)] == [1]
 
 
 def test_a_giant_string_is_one_cell_and_linear_to_scan() -> None:

@@ -70,7 +70,9 @@ Parquet magic, then JSON shape, then CSV dialect.
    table-shaped objects with `config.shape_not_configuration`); this adapter takes arrays and JSON
    Lines of records and declines every root object. A table-shaped object such as
    `{"columns": [...], "rows": [...]}` is read by neither, and falls to the text adapter.
-8. **Streaming.** `plan` scans once for row boundaries (quote-aware for CSV, string- and
+8. **Streaming.** `plan` takes the layout from the source, not only the probe's 64 KiB head: a head
+   that cannot tell JSON Lines from one JSON text is extended to what two rows of `max_row_bytes`
+   need. It then scans once for row boundaries (quote-aware for CSV, string- and
    nesting-aware for JSON, the footer for Parquet) without decoding, and cuts blocks between rows:
    CSV 8,192 rows or 1 MiB, JSON 4,096 rows or 256 KiB, Parquet a row group or a slice of 65,536
    cells (8,192 rows at most). Block bounds are constants of this adapter version, never settings or
@@ -79,8 +81,9 @@ Parquet magic, then JSON shape, then CSV dialect.
 9. **Hostile input.** Settings, checked before a row is parsed, bound what a row or footer may cost:
    `max_row_bytes` (1 MiB), `max_columns` (16,384), `max_json_depth` (64, measured without
    recursion), `max_rows` (100,000,000, past which `row_limit`), `max_footer_bytes` (16 MiB) and
-   `max_column_chunk_bytes` (256 MiB). A refused row has no record and a finding; the rest of the
-   table lands. Parquet's declared offsets are checked against the file before pyarrow reads a
+   `max_column_chunk_bytes` (256 MiB, against the size the footer declares; a footer that
+   understates is stopped by the sandbox's memory limit). A refused row has no record and a
+   finding; the rest of the table lands. Parquet's declared offsets are checked against the file before pyarrow reads a
    page; pyarrow is the adapter's one library (already a dependency), reads single-threaded through
    the source reader, opens no file and runs inside the sandbox (ADR 0030).
 10. **Damage is findings, per block.** A finding about rows is one per code per block, citing the
@@ -117,5 +120,8 @@ Parquet magic, then JSON shape, then CSV dialect.
   have different cells. Consumers align by pointer.
 - A parser upgrade or any change to the constants in 8 changes chunk ids and so creates new lineage
   (non-negotiable 6); the golden files under `tests/golden/tabular/` pin the current output.
+- JSON Lines whose first two rows do not both fit in the 64 KiB probe head are declined by probing
+  (the head cannot tell them from one document) and fall to the text adapter; a manifest that picks
+  `tabular` gets them read correctly.
 - Bytes columns and list items are left in the source until a decision on binary cells is taken;
   revisit when a consumer needs them.

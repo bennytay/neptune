@@ -412,6 +412,15 @@ class Shape:
     rows: str
     reason: str
 
+    @property
+    def undecided(self) -> bool:
+        """Whether a longer head could change the layout: an object root with fewer than two
+        whole lines (a document, or JSON Lines with large rows), or an array whose first element
+        is not whole."""
+        return (self.layout is Layout.JSON_DOCUMENT) or (
+            self.layout is Layout.JSON_ARRAY and self.rows == "unknown"
+        )
+
 
 def _parsed(data: bytes) -> object | None:
     if deeper_than(data, PROBE_DEPTH):
@@ -687,9 +696,16 @@ def _rows(
                 details={"max_json_depth": limits.max_json_depth},
             )
             continue
+        too_deep = (
+            f"row {here[2]} nests deeper than the interpreter reads; it is not decoded",
+            {"max_json_depth": limits.max_json_depth},
+        )
         try:
             value = loads(text)
-        except (ValueError, RecursionError) as exc:
+        except RecursionError:  # a max_json_depth set beyond what the interpreter can walk
+            issues.add("json_too_deep", *here, too_deep[0], details=too_deep[1])
+            continue
+        except ValueError as exc:
             at_char = getattr(exc, "pos", None)
             where = f" at character {at_char}" if isinstance(at_char, int) else ""
             issues.add("json_syntax", *here, f"row {here[2]} is not valid JSON{where}")
@@ -700,6 +716,9 @@ def _rows(
                 observed(EvidenceRef(at.source, (*at.locator, JsonPointer(pointer))), config)
                 for pointer, _ in found
             ]
+        except RecursionError:
+            issues.add("json_too_deep", *here, too_deep[0], details=too_deep[1])
+            continue
         except TooManyLeaves:
             issues.add(
                 "too_many_columns",

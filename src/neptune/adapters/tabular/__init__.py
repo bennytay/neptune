@@ -107,7 +107,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ConfigOption(
             "max_column_chunk_bytes",
             256 * 1024 * 1024,
-            "a Parquet row group with a column chunk decoding to more bytes is not read",
+            "a Parquet row group with a column chunk the footer declares as decoding to more"
+            " bytes is not read",
         ),
         ConfigOption(
             "max_columns",
@@ -207,18 +208,31 @@ DESCRIPTOR: Final = AdapterDescriptor(
         " max_json_depth, checked before any row is parsed; nesting is measured without"
         " recursion.",
         "Parquet footers are bounded and their declared offsets checked against the file before"
-        " pyarrow reads a page; column chunks decoding past max_column_chunk_bytes are not read.",
+        " pyarrow reads a page; column chunks the footer declares as decoding past"
+        " max_column_chunk_bytes are not read (a footer that understates is bounded by the"
+        " sandbox's memory limit).",
         "pyarrow reads single-threaded through the source reader: no file is opened, nothing is"
         " written, no thread pool is used.",
     ),
 )
 
 
-def _layout(head: bytes, size: int) -> Layout:
-    """How ``plan`` reads a source the registry gave it: by its bytes, as ``probe`` does."""
+def _layout(source: SourceReader, limits: Limits) -> Layout:
+    """How ``plan`` reads a source the registry gave it: by its bytes, as ``probe`` does.
+
+    A head too short to tell JSON Lines from one JSON text (rows larger than half of it) is
+    extended to what two rows of ``max_row_bytes`` need, so the layout never depends on how big
+    the rows happen to be.
+    """
+    size = source.size
+    window = min(size, PROBE_HEAD_SIZE)
+    head = source.read(0, window)
     if head.startswith(_parquet.MAGIC):
         return Layout.PARQUET
-    shape = _json.classify(head, len(head) == size)
+    shape = _json.classify(head, window == size)
+    if window < size and shape.undecided:
+        window = min(size, 2 * limits.max_row_bytes + PROBE_HEAD_SIZE)
+        shape = _json.classify(source.read(0, window), window == size)
     return shape.layout if shape.layout is not None else Layout.CSV
 
 
@@ -293,7 +307,7 @@ class TabularAdapter:
 
     def inspect(self, source: SourceReader, config: AdapterConfig) -> InspectResult:
         head = source.read(0, min(source.size, PROBE_HEAD_SIZE))
-        layout = _layout(head, source.size)
+        layout = _layout(source, Limits.of(config))
         summary: JsonObject = {"layout": layout.value, "size": source.size}
         if layout is Layout.PARQUET:
             summary = {**summary, **_parquet.inspect(source, Limits.of(config))}
@@ -311,9 +325,8 @@ class TabularAdapter:
         return InspectResult(summary)
 
     def plan(self, source: SourceReader, config: AdapterConfig) -> Plan:
-        head = source.read(0, min(source.size, PROBE_HEAD_SIZE))
-        layout = _layout(head, source.size)
         limits = Limits.of(config)
+        layout = _layout(source, limits)
         if layout is Layout.PARQUET:
             return _parquet.plan(source, config, limits)
         if layout is Layout.CSV:

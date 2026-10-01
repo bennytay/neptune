@@ -372,3 +372,19 @@ def test_a_file_whose_every_column_is_undecoded_still_has_its_rows(tmp_path: Pat
     records = rows_of(output, data)
     assert [isinstance(r.cells[0], Unknown) for r in records] == [True, True]
     assert codes(output) == ["tabular.parquet_column_not_decoded"]
+
+
+def test_undecoded_columns_do_not_make_rows_the_data_cannot_back(tmp_path: Path) -> None:
+    import pyarrow as pa
+
+    path = tmp_path / "bytes.parquet"
+    pq.write_table(pa.table({"raw": [b"\x00" * 50] * 20}), path, compression="none")
+    damaged = bytearray(path.read_bytes())
+    for index in range(4, 40):  # the column chunk's page header
+        damaged[index] ^= 0xFF
+    output = run(bytes(damaged))
+    assert codes(output) == [
+        "tabular.parquet_column_not_decoded",
+        "tabular.parquet_rows_unreadable",
+    ]
+    assert rows_of(output, tables(output)["data"]) == []
