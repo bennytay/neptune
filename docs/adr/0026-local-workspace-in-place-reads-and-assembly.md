@@ -18,16 +18,22 @@ package is built from committed work, how it becomes portable, and what "local-o
 1. **A workspace directory holds all ingest state** (`neptune.store.workspace`), never the evidence
    folder: `$NEPTUNE_HOME`, else `$XDG_CACHE_HOME/neptune`, else `~/.cache/neptune`, or an explicit
    path. Its layout is versioned by `workspace.json` (format 1); another format is refused.
-   - `ledgers/<sha256 of the root's absolute path>/`: each ingest root's source ledger, so revisions
-     and absences continue across runs (ADR 0010).
-   - `plans/`: each source's plan under each transform, with the transform record.
-   - `chunks/<chunk id>/`: each committed chunk's records, findings and per-stream runs.
+   - `ledgers/<sha256 of the root's resolved path>/`: each ingest root's source ledger, so revisions
+     and absences continue across runs (ADR 0010). The root is resolved, so a relative path, `..`
+     or a symlink to the same directory names one ledger.
+   - `plans/`: each source's plan under each transform, with the transform record. Planning is
+     deterministic, so saving the same plan again is a no-op and a different one is refused.
+   - `chunks/<chunk id>/`: each committed chunk's records, findings and per-stream runs. Anything
+     else found there is a `WorkspaceError` naming it, never a crash or a made-up id.
    - `staging/`: work in progress, and nothing else.
-2. **Commits are atomic and idempotent.** A chunk is written into `staging/`, flushed, and renamed
-   into `chunks/` in one step. A process killed before the rename leaves only staging debris, which
-   `clear_staging` removes; one killed after it leaves a whole chunk. Outputs are deterministic, so
-   a chunk committed again, by a rerun or a second process, is the same: the second commit is a
-   no-op. Resume is "skip committed chunk ids", exactly as ADR 0008 §5 planned.
+2. **Commits are atomic, durable and idempotent.** A chunk is written into its own directory in
+   `staging/`, every file and directory flushed (`fsync`), and renamed into `chunks/` in one step.
+   A process killed before the rename leaves only staging debris; one killed after it leaves a
+   whole chunk. The writer holds an `flock` on its staging directory from creation until it is
+   renamed or removed, and `clear_staging` removes only entries whose lock it can take, so it
+   clears what dead processes left and never another process's commit in flight. Outputs are
+   deterministic, so a chunk committed again, by a rerun or a second process, is the same: the
+   second commit is a no-op. Resume is "skip committed chunk ids", exactly as ADR 0008 §5 planned.
 3. **Sources are read in place** (`neptune.discovery.reader.LocalReader`). It opens the file through
    `LocalSource` (its symlink and special-file policy apply), refuses a file whose size changed,
    and serves bytes only from artifact chunks (8 MiB) it has just read whole and hashed against
@@ -35,22 +41,31 @@ package is built from committed work, how it becomes portable, and what "local-o
    instead of handing an adapter bytes its citations would not name. Nothing is copied to disk.
 4. **Packages are assembled from the workspace** (`neptune.store.assemble.assemble`): the ledger,
    each ingested (source, transform) pair's plan, every chunk's records and findings, and each
-   stream's runs merged into its series file. Every chunk of each plan must be committed, and every
-   stream must have runs. The package is built in a hidden sibling directory and renamed into
-   place, so it appears whole or not at all; an existing destination is refused, as packages are
-   written once. The manifest records `store.series` whenever there are series.
+   stream's runs merged into its series file. Every ingested source must be in the ledger, so a
+   package never cites a source it does not list; every chunk of each plan must be committed, and
+   every stream must have runs. The package is built in a hidden sibling directory (made with
+   `mkdir`, so the umask applies and is never read, which would mean setting it), flushed, and
+   renamed into place, so it appears whole or not at all and stays once it has appeared; an
+   existing destination is refused, as packages are written once. A materialised source is
+   copied, so it is hashed again where it lands, against the manifest; nothing else is re-read.
+   The manifest records `store.series` whenever there are series.
 5. **Portable export** (`export`) copies a package with every referenced source materialised into
    `blobs/`. Each source is read from the head of a location chain that holds it, opened through
    the `Source` the caller gives (the store never imports discovery), so the walk's policy applies:
    a symlink where the file was is refused, not followed. The bytes are streamed into the export
-   and hashed where they land, so what is checked is what ships. The records and the receipt are
-   the original's; the manifest, and so the package id, differ because the package now holds the
-   bytes. A source with no local location, one that cannot be opened, or one that changed since
-   it was hashed is an error, not a gap. The export is written like a package: staged beside its
-   destination, which must not exist, and renamed into place.
+   and hashed where they land, so what is checked is what ships; of the rest, only the files
+   copied from the original package are hashed again. The records and the receipt are the
+   original's; the manifest, and so the package id, differ because the package now holds the
+   bytes. A source the package's records cite that has no local location left, cannot be opened,
+   or changed since it was hashed is an error, not a gap. A source no record cites whose last
+   known state is absence stays referenced: nothing in the package was read from it, and there
+   is nothing to copy. The export is written like a package: staged beside its destination,
+   which must not exist, flushed, and renamed into place.
 6. **Local-only by default.** A new workspace is local-only. Anything that would use the network
    (object-store connectors, uploads, remote models) calls `require_network(purpose)` first and is
    refused with `LocalOnlyError` until the workspace explicitly allows it; the choice is remembered.
+   `LocalOnlyError` is a policy refusal, not an `OSError`, so code that shrugs off I/O errors
+   cannot swallow it.
    Today nothing in Neptune touches the network, and a test runs a whole ingest with sockets
    disabled.
 
@@ -78,5 +93,7 @@ package is built from committed work, how it becomes portable, and what "local-o
 - Reading in place costs a hash of every chunk an adapter touches, roughly one more pass over the
   bytes it reads; the 2 GiB acceptance run takes seconds.
 - A workspace grows with every chunk ever committed. Garbage collection is MVL-9's.
+- The workspace relies on POSIX `flock` and `O_DIRECTORY`, as discovery already does on
+  `O_NOFOLLOW`; a Windows port needs another lock.
 - Revisit if many processes contend on one workspace (M9 queues), if hashing reads dominates
   ingest time, or if a platform's cache directory convention should replace XDG's.
