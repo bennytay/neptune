@@ -50,7 +50,7 @@ silently replaces what a downstream consumer reproduced against.
      is used only for kinds that have no declared identifier (§2). It identifies "what this evidence
      declares", never a real-world individual: two byte-identical files are the same evidence.
 3. `thread_id = "sha256:" + hex(sha256(canonical JSON of {"key": …, "kind": …}))`, canonical JSON as in root
-   ADR 0002. It is a derived index key, rebuildable from packages alone.
+   ADR 0002. It is a derived index key, rebuildable as §8 states.
 4. **A thread never spans two keys.** A `Machine` that declares both `("serial", "BD-1047")` and
    `("manifest", "spot-07")` is a member of two machine threads. Co-declaration is evidence that identity
    resolution (MVL-35) uses; the Ledger reports it (`threads_of(record)`) and never unions the threads.
@@ -109,12 +109,14 @@ Only `Known` timestamps count. If `s` is not `Known` but `e` is, `s := e` (a poi
 entry's clock is the domain of `s`. If `e` is not `Known`, or is on a different clock from `s`, it is
 **open** (sorts after every closed end) and is returned to the caller as stated, never converted.
 
-**Ordering clock.** Two `TimestampDomain` records are one ordering clock iff they have the same source
-content id, `field` and `scope` (root ADR 0012 §2) and their `resolution`, `epoch` and `timescale` are all
-`Known` and equal. This lets lineage siblings of one source share a clock without conversion: their ticks
-are the same integers at the same resolution. Otherwise a clock is its own domain id. The **clock key** is
-the canonical JSON of `{content_id, epoch, field, resolution, scope, timescale}` in the first case and
-`{"domain": domain_id}` in the second. Two sources never share a clock, whatever their timescale.
+**Ordering clock = one `domain_id`.** Each `TimestampDomain` record is its own ordering clock, and its
+**clock key** is its `domain_id` (a tier-2 id). There is no Ledger-side equivalence between domains, as
+root ADR 0005 §6 and §3 require. That holds even for lineage siblings that read the same field of the same
+bytes: adapter v1 and v2 give two domain ids and therefore two partitions until an explicit MVL-82
+`ClockMapping` joins them. A v2 that corrects tick values under the same field declaration would otherwise
+interleave silently with v1. `current()` (§4) selects one transform per lineage set, so the current view of
+a set uses one lineage's domains and orders cleanly; only `history()` shows sibling lineages in separate
+partitions. Two sources never share a clock, whatever their timescale.
 
 **World order** (the thread's order) is a sequence of **partitions**:
 
@@ -129,19 +131,34 @@ and package id compare as UTF-8 bytes of their canonical strings. Entry identity
 id)`, so the key is a strict total order. Adjacency carries temporal meaning **only inside a partition**;
 the response marks partition boundaries and each partition's clock key.
 
-**Cross-clock merge** only when the caller names a reference clock key and a set of MVL-82 `ClockMapping`
-record ids. The Ledger builds an undirected graph whose nodes are clocks and whose edges are the named
-mappings. A clock with exactly one simple path to the reference is mapped along it. A clock with no path
-stays separate. A clock with more than one path stays separate and the result reports
-`ambiguous_mapping_path` with the paths; the Ledger never chooses. A mapping that is not monotone
-increasing is not used and is reported. An instant outside a mapping's validity window is not mapped; its
-entry stays in its native partition. Mapping is evaluated in exact rationals as MVL-82 freezes the
-function. The mapped start is the interval `[lo, hi]` in reference ticks: `lo = floor(f(s) − bound)` and
-`hi = ceil(f(s) + bound)`, where `bound` is the mapping's declared residual bound and 0 if it declares
-none. Merged entries are sorted by `(lo, hi, clock key bytes, then their native partition key)`. Because
-mappings are monotone and the native key follows, the merged order restricted to one clock equals that
-clock's own order. Each entry carries its mapped interval and the mapping ids used; stored ticks are
-never rewritten.
+**Cross-clock merge** happens only when the caller names a reference clock (a `domain_id`) and a set of
+MVL-82 `ClockMapping` record ids. The Ledger builds an undirected graph: its nodes are clocks, and its
+edges are the named mappings that are usable. All arithmetic is in exact rationals, and nothing is
+rounded before the last step.
+
+1. **Usable mappings.** A mapping is usable iff its function is affine and monotone increasing:
+   `f(t) = a·t + b` in the two domains' ticks with rational `a > 0`, which is MVL-82's offset plus linear
+   drift. Its `bound` is its declared residual bound in target-domain ticks, or 0 if it declares none. Any
+   other mapping is not used, and the result reports it as `unsupported_mapping`. Supporting another drift
+   model takes a superseding ADR.
+2. **Inversion.** Walking a mapping `A→B` backwards uses
+   `f⁻¹(t) = (t − b) / a`, with bound `bound / a` in A's ticks. The inverse is used over the image of the
+   mapping's validity window.
+3. **Path.** For each clock, the Ledger considers every simple path of usable mappings to the reference.
+   A path's **total bound** is the sum of its hops' bounds, each carried into reference ticks by the slopes
+   of the hops after it. That equals the half-width the path adds to a point, which for affine hops does not
+   depend on the instant. The Ledger picks the path with the smallest total bound. Ties go to the path whose
+   sequence of mapping record ids, from the clock to the reference, is smallest as UTF-8 bytes, compared
+   element-wise with a shorter prefix first. A clock with no path stays in its own partition.
+4. **Mapping an entry.** Start from `[s, s]`. Each hop sends both ends through its function (monotone, so
+   ends stay ends) and widens by the hop's bound: `lo := f(lo) − bound`, `hi := f(hi) + bound`. At the end,
+   `lo := floor(lo)` and `hi := ceil(hi)` in reference ticks. Entries already on the reference clock get
+   `lo = hi = s`. If `s` falls outside the validity window of any hop on the chosen path, the entry is not
+   mapped and stays in its native partition.
+5. **Order.** Merged entries are sorted by `(lo, hi, clock key bytes, then their native partition key)`.
+   Because hops are monotone and the native key follows, the merged order restricted to one clock equals
+   that clock's own order. Each entry carries its mapped interval and the mapping ids of its path. Stored
+   ticks are never rewritten.
 
 **Transaction order**, only when the caller asks for it: `(registration key, record id, package id)` over
 all entries, timed or not. This is the only order in which ingestion time leads. The Ledger never uses
@@ -164,11 +181,13 @@ host wall clock, file mtime or source-declared ingest time for any order.
    - `latest_transform`: each transform has a **chain**: the `(adapter_id, adapter_version)` pairs from the
      root adapter to itself, flattening `upstream` depth first in consumed order (root ADR 0016 §4). Two
      chains are comparable iff their adapter-id sequences are equal. They compare element-wise from the
-     root by SemVer §11 precedence. The greatest chain wins. Equal precedence (different config hash, or
-     build metadata only) is broken by the transform's first registration key, latest wins, and the result
-     says `tie_broken_by: registration`. Incomparable candidates (different adapter ids or chain shapes,
-     or a version that is not valid SemVer) give `Ambiguous`. "Latest" never means "most recently
-     ingested" except as that final tie-breaker.
+     root by SemVer §11 precedence. A candidate is **dominated** if some comparable candidate has strictly
+     greater precedence. If exactly one candidate is undominated, the set resolves to `Known` with it.
+     Otherwise the result is `Ambiguous`, listing every undominated candidate sorted by transform id
+     (UTF-8 bytes). Candidates whose adapter ids or chain shapes differ, or whose version is not valid
+     SemVer, are incomparable. Equal precedence is also `Ambiguous`: the same versions with a different
+     `config_hash`, or versions that differ only in build metadata. Registration order never picks between
+     them, so "latest" never means "most recently ingested".
    - `pinned(transform id)`: that transform in every lineage set where it appears; `NotCovered` elsewhere.
      Never a fallback.
    - `as_registered_by(package id)`: the transform that package used for the set; `NotCovered` where the
@@ -182,12 +201,16 @@ host wall clock, file mtime or source-declared ingest time for any order.
 
 - Registering a package only adds rows. A newer package re-ingesting the same source with another
   transform adds lineage siblings. The older rows stay, unflagged and unchanged.
-- "Current" is computed at read time, or held in a derived index that is rebuildable and marked derived.
+- "Current" is computed at read time, or held in a derived index that is marked derived and rebuildable (§8).
   It is never a flag, tombstone or update written onto a record row.
 - A **source revision** (new bytes at the same location, root ADR 0009 `supersedes`) is new evidence, not a
-  lineage sibling. It forms a different lineage set, keeps its own world time, and is exposed as a
-  `revises` relation between the two entries. No preference hides the earlier revision. Which one is "in
-  force" at an instant is a question for the layers above, answered from the intervals the Ledger returns.
+  lineage sibling. It forms a different lineage set and keeps its own world time. `revises` is defined
+  between **lineage sets**, never between entries: `(thread, kind, c2) revises (thread, kind, c1)` iff some
+  `source_revision` with content id `c2` `supersedes` one with content id `c1`. The edge carries those
+  source revision ids, and one edge exists per such pair. Entries inside two revisions of a file (several
+  cameras in one camchain) are never paired; doing so would be a heuristic. No preference hides the earlier
+  revision. Which one is "in force" at an instant is a question for the layers above, answered from the
+  intervals the Ledger returns.
 - Removing a package (for example for legal reasons) is out of scope here and needs its own ADR.
 
 ### 6. Worked examples
@@ -228,8 +251,9 @@ host wall clock, file mtime or source-declared ingest time for any order.
 - With reference clock D1 and an MVL-82 `ClockMapping` M (D2→D1, offset 0, stated, bound 0), the merged
   partition is C1 (`lo` 1714000000) then C2 (`lo` 1719000000), each carrying M's id.
 - C1 and C2 are **not** siblings: they are in different lineage sets (b1 ≠ b2). `current(latest_transform)`
-  returns both. The replacement shows as a `revises` edge C2 → C1 from r2 `supersedes` r1, and nothing is
-  hidden. Whether C2 is in force at a given instant is for Context or Memory to decide from `valid_from` /
+  returns both. The replacement shows as the set-level edge `(machine thread, calibration, b2) revises
+  (machine thread, calibration, b1)`, carrying r2 and r1. Nothing is hidden, and C2 is not paired with C1
+  by entry. Whether C2 is in force at a given instant is for Context or Memory to decide from `valid_from` /
   `valid_until`.
 
 **C. Mobile robot run spanning two packages.** A manifest declares run `("manifest", "night-42")` on
@@ -249,7 +273,10 @@ machine `("manifest", "amr-11")`. It was recorded as two MCAP splits ingested a 
 - With reference L0 and an estimated `ClockMapping` L1→L0 from MVL-36 (bound 2 ticks), the two partitions
   merge into one interval-ordered sequence. Without it they stay apart; the Ledger never assumes two
   `log_time`s agree.
-- `current(as_registered_by(P6))` gives R1, S1, O1, and `NotCovered` for the three c0 lineage sets. A
+- The run thread has four lineage sets: `(run, c0)` = {R0}, `(stream, c0)` = {S0, O0}, `(run, c1)` = {R1}
+  and `(stream, c1)` = {S1, O1}. S0 and O0 share one set because a set is keyed by kind and source, not by
+  topic.
+- `current(as_registered_by(P6))` gives R1, S1, O1, and `NotCovered` for the two c0 lineage sets. A
   missing half is stated, not blank.
 - If the manifest had not declared `night-42`, R0 and R1 would each open an anchored run thread. Relating
   them is MVL-34's `RunAssembly`, not a Ledger guess.
@@ -269,14 +296,23 @@ monotone and non-monotone `ClockMapping`s with validity windows.
 | # | Property |
 |---|---|
 | P1 | **Input-order invariance.** For a fixed catalog state, permuting the order in which records, packages, transforms or mappings are supplied to the indexer yields an identical result. |
-| P2 | **Byte determinism.** The serialised result (canonical JSON) is byte-identical across two runs, two processes and different `PYTHONHASHSEED` values. |
+| P2 | **Byte determinism.** The serialised result (canonical JSON) is byte-identical across two runs, two processes and different `PYTHONHASHSEED` values, and after a rebuild that replays the registration log (§8). |
 | P3 | **Strict total order.** The entry comparator is irreflexive, antisymmetric and transitive, and no two distinct entries compare equal. |
-| P4 | **Clock isolation.** Without mappings, every partition holds exactly one clock key. Adding or removing entries on clock B never changes the relative order of entries on clock A. |
+| P4 | **Clock isolation.** Without mappings, every partition holds exactly one `domain_id`, and lineage siblings with different domain ids never share a partition. Adding or removing entries on clock B never changes the relative order of entries on clock A. |
 | P5 | **Append-only history.** For `t1 < t2`, `history(as_of t1)` is a subsequence of `history(as_of t2)`, and the relative order of two entries on one clock never changes as packages are added. |
 | P6 | **Ingestion time only breaks ties.** Changing registration keys while keeping their relative order leaves world order unchanged. Inside a partition, entries with distinct `s` are ordered by `s` whatever their registration keys. |
-| P7 | **Merge consistency.** With monotone mappings, the merged order restricted to any one clock equals that clock's unmerged order. Non-monotone, out-of-window and multi-path mappings never move an entry out of its native partition. |
-| P8 | **Resolver.** `current` without a preference is rejected. `pinned(T)` returns only T's records. `as_registered_by(P)` returns only transforms that P registered. `latest_transform` picks the maximum under §4.4, or `Ambiguous` exactly when the candidates are incomparable. Every lineage set appears exactly once as `Known`, `Ambiguous` or `NotCovered`. `history` ⊇ `current` for every preference. |
+| P7 | **Merge consistency.** With monotone mappings, the merged order restricted to any one clock equals that clock's unmerged order. Unsupported mappings and out-of-window instants never move an entry out of its native partition. The chosen path has the smallest total bound, and equal totals are broken by mapping-id sequence. Inverting a mapping and then re-applying it returns the original instant exactly. Reference-clock entries have `lo = hi = s`. |
+| P8 | **Resolver.** `current` without a preference is rejected. `pinned(T)` returns only T's records. `as_registered_by(P)` returns only transforms that P registered. `latest_transform` resolves to `Known` exactly when one candidate is undominated. Otherwise `Ambiguous` lists all undominated candidates sorted by transform id, and equal precedence with a different `config_hash` is always `Ambiguous`. Every lineage set appears exactly once as `Known`, `Ambiguous` or `NotCovered`. `history` ⊇ `current` for every preference. |
 | P9 | **Worked examples.** §6 A–C are golden fixtures whose expected orders and resolutions are written out in full. |
+
+### 8. Rebuild input
+
+Thread indexes are rebuilt from two inputs: the registered packages, and the **Ledger registration log**.
+The log is the ordered list of `(package id, transaction time, sequence)` defined in ADR 0002 (catalog
+data model). A rebuild replays the log in order, registering each package exactly as before. It therefore
+reproduces every registration key, so every partition order, tie-break and `as_of` point comes out the same.
+Packages alone are not enough, because registration keys are catalog transaction data and are not in any
+package. The log is append-only, and replaying a prefix of it reproduces the catalog as of that point.
 
 ## Alternatives considered
 
@@ -294,8 +330,17 @@ monotone and non-monotone `ClockMapping`s with validity windows.
 - **Default preference `latest_transform`.** Rejected: a consumer that reproduced results against v1
   would silently move to v2. Naming the preference costs one argument.
 - **"Latest" = most recently registered transform.** Rejected: backfilling an old adapter version would
-  make it "latest". SemVer precedence on comparable chains reflects intent; registration order only breaks
-  exact ties.
+  make it "latest". SemVer precedence on comparable chains reflects intent. Registration order never
+  picks, not even between exact ties.
+- **Break equal-precedence ties (different `config_hash`) by latest registration.** Rejected: that is "most
+  recently ingested" choosing between two configurations. `Ambiguous` plus `pinned` makes the caller choose.
+- **Treat lineage siblings' domains as one clock when field, scope, resolution, epoch and timescale match.**
+  Rejected: it relates two domains without an alignment record (root ADR 0005 §3, §6). A v2 that corrects
+  tick values would also interleave silently with v1. `current()` already orders cleanly, because it
+  selects one lineage per set.
+- **Keep a path only when it is the unique path to the reference.** Rejected: redundant mappings are normal
+  (declared and estimated), and refusing to merge would discard the tighter one. Smallest total bound,
+  with mapping ids breaking ties, is deterministic and keeps the best evidence.
 - **Pick a winner across different adapters.** Rejected: there is no evidence-based order between, for
   example, a URDF adapter and an SDF adapter. `Ambiguous` plus `pinned` is honest.
 - **Select per sibling (per locator) in `current`.** Rejected: an adapter that makes locators finer would
@@ -307,8 +352,8 @@ monotone and non-monotone `ClockMapping`s with validity windows.
 
 ## Consequences
 
-- Threads, partitions and current-views are derived indexes over ADR 0002's tables, rebuildable from
-  packages alone. L2 implements them against §7. MVL-88 fixes the API names and types for `history`,
+- Threads, partitions and current-views are derived indexes over ADR 0002's tables. They are rebuildable
+  from packages plus the registration log (§8), not from packages alone. L2 implements them against §7. MVL-88 fixes the API names and types for `history`,
   `current`, `threads_of`, the preference variants and the result states.
 - Consumers get world order that never lies about cross-clock simultaneity. In return they have to handle
   partitions, and they have to name mappings when they want one timeline.
