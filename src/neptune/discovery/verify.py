@@ -1,4 +1,4 @@
-"""Checking a source's bytes against the artifact hashed from them (ADR 0027 §3).
+"""Checking a source's bytes against the artifact hashed from them (ADR 0028 §3).
 
 A ``SourceArtifact`` declares a size and a hash per chunk. Before an adapter reads a source, or
 when a read comes up short, the runtime can re-read the file and learn exactly what differs:
@@ -6,13 +6,24 @@ fewer bytes than declared (truncated), more (grown, as a log still being written
 whose bytes changed. Each outcome is a finding citing the affected range of the declared
 artifact, never an exception: a source that changed under Neptune is evidence of that.
 
+A short read is the same fact seen from inside an adapter: ``neptune.adapters.contract.read_pieces``
+raises ``ShortReadError`` when a reader serves no bytes inside the size it declares, and
+``short_read_finding`` records that as it happened. ``verify_artifact`` then says exactly what
+differs.
+
 Memory is bounded: the stream is read in 1 MiB blocks and one chunk digest is held at a time.
 """
 
 import hashlib
 from typing import BinaryIO, Final
 
-from neptune.discovery.policy import CHUNK_CHANGED, DISCOVERY_TRANSFORM, GROWN, TRUNCATED
+from neptune.discovery.policy import (
+    CHUNK_CHANGED,
+    DISCOVERY_TRANSFORM,
+    GROWN,
+    SHORT_READ,
+    TRUNCATED,
+)
 from neptune.identity.findings import ingest_finding
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import ContentId
@@ -106,4 +117,25 @@ def _grown(artifact: SourceArtifact, extra: int) -> IngestFinding:
             "actual_size": artifact.size + extra,
             "extra_bytes": extra,
         },
+    )
+
+
+def short_read_finding(source: ContentId, offset: int, length: int) -> IngestFinding:
+    """The finding for a ``ShortReadError``: no bytes at ``offset`` though ``length`` were declared.
+
+    The subject is the declared range that was not served. The runtime emits this where the read
+    failed (a plan, a chunk) so the rest of the job goes on, and may call ``verify_artifact`` on
+    the source for the full account.
+    """
+    return ingest_finding(
+        code=SHORT_READ,
+        category=FindingCategory.CORRUPT,
+        severity=Severity.ERROR,
+        subject=EvidenceRef(source, (ByteRange(offset, length),)),
+        transform=DISCOVERY_TRANSFORM,
+        message=(
+            f"the reader served no bytes at offset {offset}; {length} declared bytes were not"
+            " read, so the source is shorter than its artifact or changed under the reader"
+        ),
+        details={"offset": offset, "unread_bytes": length},
     )

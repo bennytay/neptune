@@ -1,9 +1,10 @@
-# 0027 — Hostile file handling: walk findings, archive limits, source verification, scratch space
+# 0028 — Hostile file handling: walk findings, archive limits, source verification, scratch space
 
 - Status: Accepted
 - Date: 2026-10-01
 - Issue: MVL-75 (sub-issue of MVL-10)
-- Extends: ADR 0009 §5 and ADR 0010 §2 (walk policy), ADR 0017 §9 (findings), ADR 0026 (workspace)
+- Extends: ADR 0009 §5 and ADR 0010 §2 (walk policy), ADR 0017 §9 (findings), ADR 0024 §2
+  (`read_pieces`), ADR 0026 (workspace; MVL-73, in review)
 
 ## Context
 
@@ -32,6 +33,7 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
    | `neptune.discovery.truncated` | error · corrupt | the missing range | `verify_artifact`: fewer bytes than the artifact declares |
    | `neptune.discovery.grown` | warning · inconsistent | the extra range | more bytes than declared; the declared prefix is intact |
    | `neptune.discovery.chunk_changed` | error · inconsistent | the chunk run | a chunk whose hash differs; consecutive chunks are one finding |
+   | `neptune.discovery.short_read` | error · corrupt | the unserved range | `short_read_finding`: a reader served an adapter no bytes inside the declared size |
 
    Symlinks stay **never followed**, inside or outside the root. The issue's "followed only inside
    the root" is met by not following at all: the bytes behind an in-root link are reached through
@@ -62,7 +64,8 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
    - Compressed tars are inflated by this module's bounded reader, not by `tarfile`'s stream layer,
      which inflates each 10 KiB input block whole (bzip2 turns such a block into gigabytes).
    - Pax and GNU long-name headers above 1 MiB are refused (`header_too_large`): `tarfile` reads
-     them whole into memory.
+     them whole into memory. A zip symlink's target is member data read whole to record it, so
+     it is capped the same way; a tar link name lives in its header and is already bounded.
    - Nested archives are read through a spool (memory to 1 MiB, then a file in scratch space) and
      inspected recursively against the same total budget. The spool is deleted when the level ends.
    - Member names are recorded exactly as declared (zip: before the NUL `zipfile` cuts at). A name
@@ -82,6 +85,12 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
    findings in the table above, citing the affected range of the declared artifact. One chunk digest
    is held at a time. `LocalReader` (ADR 0026) keeps raising `SourceChangedError` to stop an
    adapter mid-read; the runtime turns that into these findings by calling `verify_artifact`.
+   Inside an adapter, `neptune.adapters.contract.read_pieces` raises
+   `ShortReadError(source, offset, length)` when a reader serves no bytes inside the size it
+   declares, instead of a bare `ValueError`. It is not the adapter's finding (its codes are
+   declared per adapter, and the fault is the source's), so the adapter lets it propagate and
+   the runtime records `short_read_finding(source, offset, length)` for the unserved range,
+   goes on to the next source, and calls `verify_artifact` for the full account.
 4. **Scratch space** (`neptune.discovery.scratch`). The caller names a **private root**; the
    workspace's is `<workspace>/scratch` (wired when MVL-73 lands). It is created `0700`, must be a
    real directory owned by this user (tightened to `0700` if looser), and must not overlap the
@@ -124,7 +133,11 @@ provenance, with fixtures that cannot read outside the root or exhaust disk or m
 - Memory during inspection is bounded by one 1 MiB block plus the zip central directory, which is
   itself bounded by the archive on disk; the hostile suite peaks under 2 MiB (tracemalloc).
 - The workspace wiring (`Workspace.scratch_root`, `clear_scratch` at start-up) is a one-line
-  follow-up after ADR 0026's PR; MVL-6 calls `verify_artifact` on `SourceChangedError`.
+  follow-up after ADR 0026's PR; MVL-6 catches `ShortReadError` and `SourceChangedError` per
+  source and records `short_read_finding` and `verify_artifact`'s findings.
+- MVL-8's probe engine (ADR 0027, in review) lists container members under its own bounded
+  policy to select adapters; `inspect_archive` is the ingest-time limit. Whether the two fuse
+  into one pass is decided once both are merged.
 - Revisit if a format needs its own limits (video containers, bags of bags), if `tarfile` or
   `zipfile` change the private hooks relied on (`TarInfo._proc_member`), or if inspection time on
   compressed corpora is measured to dominate ingest.

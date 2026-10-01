@@ -1,4 +1,4 @@
-"""Discovery's own findings: what a walk saw and, by policy, did not read (ADR 0027 §1).
+"""Discovery's own findings: what a walk saw and, by policy, did not read (ADR 0028 §1).
 
 Discovery is a producer like an adapter. Its transform is ``neptune.discovery`` at one version with
 an empty config, so every finding it emits names what found it, and a policy change is a new
@@ -28,7 +28,7 @@ DISCOVERY_TRANSFORM: Final[TransformRecord] = transform_record(
     adapter_id=DISCOVERY_ADAPTER_ID, adapter_version=DISCOVERY_VERSION, config={}
 )
 
-# Finding codes. Every code is ``<producer>.<name>`` and is documented in ADR 0027.
+# Finding codes. Every code is ``<producer>.<name>`` and is documented in ADR 0028.
 SYMLINK_NOT_FOLLOWED: Final = "neptune.discovery.symlink_not_followed"
 SPECIAL_FILE: Final = "neptune.discovery.special_file"
 VANISHED: Final = "neptune.discovery.vanished"
@@ -37,6 +37,7 @@ SIZE_CHANGED: Final = "neptune.discovery.size_changed"
 TRUNCATED: Final = "neptune.discovery.truncated"
 GROWN: Final = "neptune.discovery.grown"
 CHUNK_CHANGED: Final = "neptune.discovery.chunk_changed"
+SHORT_READ: Final = "neptune.discovery.short_read"
 
 # The root's own skip has no location to name and is not a finding: a root that cannot be read is
 # a job-level condition the caller sees in ``ScanResult.skipped``.

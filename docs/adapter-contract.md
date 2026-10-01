@@ -28,7 +28,10 @@ class Adapter(Protocol):
 ```
 
 `SourceReader` is one artifact's bytes: `content_id`, `size`, `read(offset, length)`
-(`read_pieces` streams a range). `discovery.reader.BytesReader` serves bytes from memory.
+(`read_pieces` streams a range). `discovery.reader.BytesReader` serves bytes from memory. A reader
+that serves no bytes inside the size it declares makes `read_pieces` raise `ShortReadError`: the
+source's fault, not the adapter's, so it propagates, and the runtime records
+`neptune.discovery.short_read` for the unserved range and goes on with the job (ADR 0028 §3).
 
 ## Laws
 

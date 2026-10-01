@@ -1,4 +1,4 @@
-"""Archive inspection within limits (ADR 0027 §2).
+"""Archive inspection within limits (ADR 0028 §2).
 
 Zip and tar archives, plain or gzip/bzip2/xz compressed, and single compressed streams are
 inspected without extracting anything. ``ArchiveLimits`` bounds what one source may cost: how many
@@ -45,13 +45,13 @@ ARCHIVE_ADAPTER_ID: Final = "neptune.archive"
 ARCHIVE_VERSION: Final = "1.0.0"
 
 PROBE_SIZE: Final = 512  # covers every magic, including ``ustar`` at offset 257
-MAX_HEADER_SIZE: Final = 1 << 20  # tarfile reads pax and GNU long-name headers whole into memory
+MAX_HEADER_SIZE: Final = 1 << 20  # headers and link targets are read whole: pax, GNU long names
 GiB: Final = 1 << 30
 _BLOCK: Final = 1 << 20
 _SPOOL_MEMORY: Final = 1 << 20
 _TAR_BLOCK: Final = 512
 
-# Finding codes; each is documented in ADR 0027 §2.
+# Finding codes; each is documented in ADR 0028 §2.
 UNRECOGNISED: Final = "neptune.archive.unrecognised"
 TRUNCATED: Final = "neptune.archive.truncated"
 CORRUPT: Final = "neptune.archive.corrupt"
@@ -620,6 +620,20 @@ def _zip_member(
             locator,
             "member is encrypted; not read",
             text_field("name", name),
+        )
+        return member(0)
+    if kind is MemberKind.SYMLINK and info.file_size > MAX_HEADER_SIZE:
+        # A link's target is its member data, read whole to record it: capped like a header.
+        state.limit(
+            HEADER_TOO_LARGE,
+            locator,
+            f"symlink target declares {info.file_size} bytes, more than the {MAX_HEADER_SIZE}"
+            " allowed; not read",
+            {
+                **text_field("name", name),
+                "declared_size": info.file_size,
+                "max_header_size": MAX_HEADER_SIZE,
+            },
         )
         return member(0)
     if not _declared_within(state, name, locator, info.file_size, compressed=info.compress_size):

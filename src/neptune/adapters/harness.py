@@ -3,7 +3,9 @@
 This is the contract end to end with nothing else in the way: no store, no resume, no sandbox.
 Adapter tests use it, so every test runs the contract's checks; the runtime (MVL-6) adds
 persistence, isolation and resume around the same four calls. An adapter that raises is a bug,
-and here the exception propagates.
+and here the exception propagates. So does a ``ShortReadError``: it is the source's fault, not
+the adapter's, and the runtime records it as ``neptune.discovery.short_read`` and goes on to the
+next source (``neptune.discovery.verify.short_read_finding``).
 """
 
 from collections import defaultdict

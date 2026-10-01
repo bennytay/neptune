@@ -1,11 +1,13 @@
-"""Archive inspection within limits (ADR 0027 §2): every bomb, lie and defect is a finding."""
+"""Archive inspection within limits (ADR 0028 §2): every bomb, lie and defect is a finding."""
 
 import gzip
 import io
 import tarfile
 import tracemalloc
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 from typing import IO
 
 import pytest
@@ -280,6 +282,20 @@ def test_tar_links_specials_and_escapes(tmp_path: Path) -> None:
         assert isinstance(finding.subject, EvidenceRef)
         [step] = finding.subject.locator  # an uncompressed tar: the member's own bytes
         assert isinstance(step, ByteRange) and step.offset % 512 == 0
+
+
+def test_a_zip_symlink_target_is_capped_like_a_header(tmp_path: Path, hostile: ModuleType) -> None:
+    """A link's target is read whole to record it; a 2 MiB target is refused, not held in memory."""
+    link = hostile.zip_info("latest", 0o120777)
+    members = [(link, bytes(2 * MiB)), ("ok.txt", b"ok\n")]
+    data = hostile.make_zip(members, compression=zipfile.ZIP_DEFLATED)
+    limits = ArchiveLimits(max_compression_ratio=10_000)  # so the ratio does not refuse it first
+    report = inspect(data, tmp_path, limits)
+    assert codes(report) == [HEADER_TOO_LARGE]
+    assert report.findings[0].details["declared_size"] == 2 * MiB
+    assert [(m.name, m.read_bytes) for m in report.members] == [("latest", 0), ("ok.txt", 3)]
+    assert report.complete
+    assert peak_memory(lambda: inspect(data, tmp_path, limits)) < MiB
 
 
 # --- headers, truncation and corruption --------------------------------------------------------

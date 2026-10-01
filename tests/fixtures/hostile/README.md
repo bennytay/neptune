@@ -33,4 +33,5 @@ file that must still ingest, and a copy of every archive above. Every link is a
 What is deliberately absent: a zip member whose declared size is smaller than its inflated size.
 `zipfile` stops at the declared size, so such a member cannot inflate past what it declares; it is
 not a bomb vector here. Gzip, bzip2 and xz single streams declare nothing trustworthy, so they are
-bounded by actual bytes (`tests/unit/discovery/test_archive_limits.py` builds one in memory).
+bounded by actual bytes; a zip symlink whose target declares 2 MiB is refused as a header too large.
+`tests/unit/discovery/test_archive_limits.py` builds both in memory.

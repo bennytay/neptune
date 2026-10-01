@@ -8,23 +8,30 @@ import zipfile
 import zlib
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING
 
 import pytest
 
+from neptune.adapters.contract import ShortReadError
+from neptune.adapters.harness import SourceOutput, ingest_source
+from neptune.adapters.text import TextAdapter
 from neptune.discovery.archive import ArchiveLimits, inspect_archive, sniff
-from neptune.discovery.policy import DISCOVERY_TRANSFORM, SYMLINK_NOT_FOLLOWED, TRUNCATED
+from neptune.discovery.policy import (
+    DISCOVERY_TRANSFORM,
+    SHORT_READ,
+    SYMLINK_NOT_FOLLOWED,
+    TRUNCATED,
+)
 from neptune.discovery.scan import scan
 from neptune.discovery.scratch import scratch_space
 from neptune.discovery.source import LocalSource
-from neptune.discovery.verify import verify_artifact
+from neptune.discovery.verify import short_read_finding, verify_artifact
+from neptune.identity.findings import check_ingest_finding
 from neptune.identity.hashing import content_id
 from neptune.identity.revisions import SourceLedger
-from neptune.model.provenance import EvidenceRef
-from neptune.model.source import LocalPath, SourceRevision
-
-if TYPE_CHECKING:
-    from neptune.model.finding import IngestFinding
+from neptune.model.finding import IngestFinding
+from neptune.model.ids import ContentId
+from neptune.model.provenance import ByteRange, EvidenceRef
+from neptune.model.source import LocalPath, SourceArtifact, SourceRevision
 
 pytestmark = pytest.mark.integration
 
@@ -163,3 +170,58 @@ def test_a_source_truncated_after_hashing_is_a_finding_not_a_read(corpus: Path) 
     assert finding.code == TRUNCATED
     assert finding.details == {"declared_size": 1024, "actual_size": 700, "missing_bytes": 324}
     assert finding.subject == EvidenceRef(artifact.content_id, finding.subject.locator)  # type: ignore[union-attr]
+
+
+class CutAfterHash:
+    """A reader over a file cut after it was hashed: declares the artifact, serves what is left."""
+
+    def __init__(self, artifact: SourceArtifact, present: bytes) -> None:
+        self._artifact = artifact
+        self._present = present
+
+    @property
+    def content_id(self) -> ContentId:
+        return self._artifact.content_id
+
+    @property
+    def size(self) -> int:
+        return self._artifact.size
+
+    def read(self, offset: int, length: int) -> bytes:
+        return self._present[offset : offset + length]
+
+
+def test_a_short_read_inside_plan_is_a_finding_and_the_other_sources_still_ingest(
+    corpus: Path, hostile: ModuleType
+) -> None:
+    """What the runtime does per source: a ShortReadError becomes a finding; the job goes on."""
+    ledger = SourceLedger()
+    source = LocalSource(corpus)
+    scan(source, ledger)
+    (corpus / "benign.txt").write_bytes(hostile.BENIGN[:20])  # cut after it was hashed
+    job: dict[str, SourceOutput | IngestFinding] = {}
+    artifacts: dict[str, SourceArtifact] = {}
+    for path in ("names/..hidden", "benign.txt", "names/a..b"):
+        head = ledger.head(LocalPath(path))
+        assert isinstance(head, SourceRevision)
+        artifact = ledger.artifact(head.content_id)
+        assert artifact is not None
+        artifacts[path] = artifact
+        with source.open(LocalPath(path)) as stream:
+            reader = CutAfterHash(artifact, stream.read())
+        try:
+            job[path] = ingest_source(TextAdapter(), reader)
+        except ShortReadError as exc:
+            job[path] = short_read_finding(exc.source, exc.offset, exc.length)
+
+    finding = job["benign.txt"]
+    assert isinstance(finding, IngestFinding)
+    assert finding.code == SHORT_READ
+    declared = artifacts["benign.txt"]
+    assert finding.subject == EvidenceRef(declared.content_id, (ByteRange(20, declared.size - 20),))
+    assert finding.transform == DISCOVERY_TRANSFORM.id
+    assert check_ingest_finding(finding) == finding
+    for path in ("names/..hidden", "names/a..b"):
+        output = job[path]
+        assert isinstance(output, SourceOutput) and output.records()
+        assert all(f.code != SHORT_READ for f in output.findings())

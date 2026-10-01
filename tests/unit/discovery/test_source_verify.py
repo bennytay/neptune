@@ -6,8 +6,14 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from neptune.discovery.policy import CHUNK_CHANGED, DISCOVERY_TRANSFORM, GROWN, TRUNCATED
-from neptune.discovery.verify import verify_artifact
+from neptune.discovery.policy import (
+    CHUNK_CHANGED,
+    DISCOVERY_TRANSFORM,
+    GROWN,
+    SHORT_READ,
+    TRUNCATED,
+)
+from neptune.discovery.verify import short_read_finding, verify_artifact
 from neptune.identity import canonical_json
 from neptune.identity.findings import check_ingest_finding
 from neptune.identity.hashing import digest_stream
@@ -129,3 +135,21 @@ def test_any_chunk_size_works(chunk_size: int) -> None:
     assert isinstance(finding.subject, EvidenceRef)
     [step] = finding.subject.locator
     assert isinstance(step, ByteRange) and step.offset <= 1500 < step.offset + step.length
+
+
+def test_a_short_read_is_a_finding_citing_the_unserved_range() -> None:
+    declared = artifact()
+    finding = short_read_finding(declared.content_id, 1500, 1060)
+    assert (finding.code, finding.severity, finding.category) == (
+        SHORT_READ,
+        Severity.ERROR,
+        FindingCategory.CORRUPT,
+    )
+    assert finding.subject == EvidenceRef(declared.content_id, (ByteRange(1500, 1060),))
+    assert finding.details == {"offset": 1500, "unread_bytes": 1060}
+    assert finding.transform == DISCOVERY_TRANSFORM.id
+    assert finding == short_read_finding(declared.content_id, 1500, 1060)
+    line = canonical_json.dumps(finding.to_json())
+    assert check_ingest_finding(ingest_finding_from_json(canonical_json.loads(line))) == finding
+    [truncated] = verify_artifact(io.BytesIO(DATA[:1500]), declared)
+    assert truncated.subject == finding.subject  # the full account cites the same range
