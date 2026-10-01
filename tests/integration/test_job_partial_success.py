@@ -11,6 +11,7 @@ import importlib.util
 import os
 import shutil
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
@@ -370,3 +371,38 @@ def test_one_sources_broken_series_is_a_finding_and_the_rest_land(
     assert [e.details["codes"] for e in seen if e.kind == "source_quarantined"] == [
         ["neptune.runtime.output_invalid"]
     ]
+
+
+class SplitTally(TALLY.TallyAdapter):  # type: ignore[misc, name-defined]
+    """Each chunk's rows come as two batches of the stream, the second with a column more."""
+
+    def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput:
+        output: ChunkOutput = super().ingest(source, chunk, config)
+        if not output.series or output.series[0].length < 2:
+            return output
+        (batch,) = output.series
+        head = SeriesBatch(
+            batch.stream, tuple(replace(c, values=c.values[:1]) for c in batch.columns)
+        )
+        tail = SeriesBatch(
+            batch.stream,
+            (
+                *(replace(c, values=c.values[1:]) for c in batch.columns),
+                SeriesColumn("value/extra", ColumnType.INT8, (0,) * (batch.length - 1)),
+            ),
+        )
+        return ChunkOutput(output.records, (head, tail), output.findings)
+
+
+def test_batches_of_one_chunk_that_disagree_fail_that_chunk_not_the_job(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    (root / "lift.tally").write_bytes(b"TALLY1\n10 1\n20 2\n")
+    adapters = AdapterRegistry([*builtin_adapters(), SplitTally(rows_per_chunk=2)])
+    outcome, package, _ = run(root, tmp_path, adapters)
+    assert codes(package) == ["neptune.runtime.chunk_failed"]
+    (finding,) = outcome.findings
+    assert finding.details["error"] == "ContractError" and finding.details["attempts"] == 1
+    assert "disagree on their columns" in str(finding.details["problem"])
+    assert len(outcome.ingested) == 1  # the notes

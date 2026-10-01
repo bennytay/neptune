@@ -280,6 +280,34 @@ def test_cancelling_after_assembly_discards_the_staged_package(root: Path, tmp_p
     assert sorted(p.name for p in tmp_path.iterdir()) == ["home", "root"]  # nothing left beside
 
 
+def test_cancelling_during_assembly_stops_before_the_next_source(
+    root: Path, tmp_path: Path
+) -> None:
+    cancel = threading.Event()
+    seen: list[JobEvent] = []
+
+    def stop_after_one_admission(event: JobEvent) -> None:
+        seen.append(event)
+        if event.kind == "source_admitted":
+            cancel.set()
+
+    job = IngestJob(
+        root,
+        tmp_path / "p",
+        Workspace(tmp_path / "home"),
+        default_registry(),
+        on_event=stop_after_one_admission,
+        cancel=cancel,
+    )
+    assert job.run().state is JobState.CANCELLED
+    assert [e.kind for e in seen if e.phase is Phase.ASSEMBLE] == [
+        "phase_started",
+        "source_admitted",
+        "job_cancelled",
+    ]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["home", "root"]
+
+
 def test_a_cancellation_requested_before_the_run_does_no_work(root: Path, tmp_path: Path) -> None:
     cancel = threading.Event()
     cancel.set()

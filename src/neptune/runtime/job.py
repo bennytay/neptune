@@ -163,10 +163,19 @@ def _hint_name(location: LocalPath | RawLocalPath) -> str:
     return location.raw.rsplit(b"/", 1)[-1].decode("utf-8", "replace")
 
 
-def _check_chunk_seqs(output: ChunkOutput) -> None:
-    """``seq`` is unique within the chunk, per stream; across chunks, ``_cross_chunk_problems``."""
+def _check_chunk_series(output: ChunkOutput) -> None:
+    """A chunk's batches of one stream agree on their columns, and ``seq`` is unique among them.
+
+    Both are laws ``write_run`` relies on; across chunks, ``_run_problems`` checks the rest.
+    Memory is one entry per row of this chunk, which the chunk's output already holds.
+    """
+    schemas: dict[RecordId, object] = {}
     seen: dict[RecordId, set[int]] = defaultdict(set)
     for batch in output.series:
+        if schemas.setdefault(batch.stream, batch.schema()) != batch.schema():
+            raise ContractError(
+                f"stream {batch.stream}: two batches of one chunk disagree on their columns"
+            )
         for column in batch.columns:
             if column.name != SEQ:
                 continue
@@ -696,7 +705,12 @@ class IngestJob:
                     if attempt < attempts and not isinstance(exc, ContractError):
                         self._emit(
                             events.CHUNK_RETRIED,
-                            {"attempt": attempt, "chunk": chunk.id, "error": error},
+                            {
+                                "attempt": attempt,
+                                "chunk": chunk.id,
+                                "error": error,
+                                "source": item.content_id,
+                            },
                         )
                         continue
                     problem = str(exc) if isinstance(exc, ContractError) else None
@@ -753,7 +767,7 @@ class IngestJob:
         with self._enter(Phase.NORMALIZE):
             try:
                 check_chunk_output(item.adapter.descriptor, reader, item.config, chunk, output)
-                _check_chunk_seqs(output)
+                _check_chunk_series(output)
             except ContractError as exc:
                 self._fail_chunk(item, chunk, type(exc).__name__, attempt, str(exc))
                 return False
@@ -799,7 +813,10 @@ class IngestJob:
         for finding in stored.findings:
             finding_ids.add(finding.id)
         for chunk in item.chunks:
-            output = self.workspace.load(chunk.id)
+            try:
+                output = self.workspace.load(chunk.id)
+            except (WorkspaceError, ValueError, OSError) as exc:
+                raise JobError(f"committed chunk {chunk.id} cannot be read: {exc}") from exc
             said_something = said_something or bool(output.records or output.findings)
             for record in output.records:
                 if record.id in record_ids:
@@ -831,6 +848,7 @@ class IngestJob:
             for item in self._sources:
                 if item.adapter is None or item.config is None:
                     continue  # never selected: nothing to admit, nothing to quarantine
+                self._check_cancel()  # each source's runs are read whole: a checkpoint between
                 if (
                     item.planned
                     and not item.quarantined
