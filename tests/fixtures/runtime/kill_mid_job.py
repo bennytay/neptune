@@ -12,8 +12,9 @@ way a crashed machine or an OOM killer ends a job. The points:
   chunk's staging directory, before the rest of it is written or flushed;
 - ``chunk-staged``: inside ``Workspace.commit``, the chunk's staging directory written whole and
   flushed, not yet renamed into ``chunks/``;
-- ``package-staging``: inside ``assemble.stage``, a merged series written into the package's
-  hidden staging directory beside its destination;
+- ``package-staging``: inside ``assemble.stage``, a merged series written into the workspace's
+  staging as a derivative (ADR 0031), the package's hidden staging directory open beside its
+  destination;
 - ``before-publish``: the envelope written into the staged package, not yet renamed into place;
 - ``never``: the job runs to the end.
 

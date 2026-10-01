@@ -28,13 +28,18 @@ from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import transform_record
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import ContentId
-from neptune.model.jsonvalue import JsonValue
+from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
 from neptune.model.source import LocalPath, RawLocalPath
 from neptune.runtime.sandbox import DEFAULT_LIMITS, Isolation, Limits
 
 RUNTIME_ID: Final = "neptune.runtime"
-RUNTIME_VERSION: Final = "0.2.0"
+# Changes whenever a law the runtime applies to a chunk's committed output changes: the contract's
+# checks (``check_chunk_output``), the series laws within a chunk, the cross-chunk laws. Committed
+# chunks and verdicts record it, so a new version judges what is kept again (ADR 0031). The sandbox
+# (ADR 0030) does not bump it: isolation and limits ride in the transform config, and a crash or a
+# limit stops a chunk before it commits, so they never re-judge what is kept.
+RUNTIME_VERSION: Final = "0.1.0"
 
 ADAPTER_CRASHED: Final = f"{RUNTIME_ID}.adapter_crashed"
 CHUNK_FAILED: Final = f"{RUNTIME_ID}.chunk_failed"
@@ -163,6 +168,21 @@ class Failure:
         if {"error", "step"} & set(self.facts):
             raise ValueError("a failure's facts never name its error or step")
         return {**self.facts, "error": self.error, "step": str(self.step)}
+
+    def to_json(self) -> JsonObject:
+        return {"error": self.error, "facts": dict(self.facts), "step": str(self.step)}
+
+
+def failure_from_json(data: JsonValue) -> Failure:
+    """Parse strictly: exactly ``error`` (text), ``facts`` (an object) and a known ``step``."""
+    if not isinstance(data, dict) or data.keys() != {"error", "facts", "step"}:
+        raise ValueError(f"a failure is an object of error, facts and step: {data!r}")
+    error, facts, step = data["error"], data["facts"], data["step"]
+    if not isinstance(error, str) or not error or not isinstance(facts, dict):
+        raise ValueError(f"a failure's error is text and its facts an object: {data!r}")
+    if step not in tuple(str(known) for known in Step):
+        raise ValueError(f"not a step: {step!r}")
+    return Failure(Step(str(step)), error, facts)
 
 
 def runtime_transform(

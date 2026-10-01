@@ -38,6 +38,7 @@ from neptune.store.series import (
     check_settings,
     merge_runs,
     read_rows,
+    read_run,
     write_run,
     write_series,
 )
@@ -470,6 +471,57 @@ def raw_run(tmp_path: Path, table: Any, stream: bytes | None = None) -> Path:
     metadata = {RUN_KEY: STREAM.id.encode() if stream is None else stream}
     pq.write_table(table.replace_schema_metadata(metadata), path)
     return path
+
+
+def test_a_run_reads_back_as_one_batch_of_its_rows_in_run_order(tmp_path: Path) -> None:
+    """What the runtime judges a committed chunk's series by when the laws change (ADR 0031)."""
+    extra = (
+        SeriesColumn("value/g", ColumnType.FLOAT32, ((1.5, 2.25), (), None), repeated=True),
+        SeriesColumn("value/e", ColumnType.BINARY, (b"\x00\xff", None, b"")),
+        SeriesColumn("value/a", ColumnType.UINT64, (2**64 - 1, 0, 1)),
+    )
+    rows = [(5, 1), (3, 9), (9, None)]
+    run = tmp_path / "run.parquet"
+    write_run(
+        [
+            batch(rows[:1], extra=tuple(replace(c, values=c.values[:1]) for c in extra)),
+            batch(rows[1:], extra=tuple(replace(c, values=c.values[1:]) for c in extra)),
+        ],
+        run,
+    )
+    back = read_run(run)
+    assert back.stream == STREAM.id
+    assert back.schema() == batch(rows, extra=extra).schema()
+    assert [(row["seq"], row["time/0"]) for row in back.rows()] == order(rows)
+    by_seq = {row["seq"]: row for row in back.rows()}
+    assert (by_seq[5]["value/g"], by_seq[3]["value/g"], by_seq[9]["value/g"]) == (
+        (1.5, 2.25),
+        (),
+        None,
+    )
+    assert (by_seq[5]["value/a"], by_seq[3]["value/e"]) == (2**64 - 1, None)
+    write_run([back], tmp_path / "again.parquet")  # it reads back as what it was written from
+    assert (tmp_path / "again.parquet").read_bytes() == run.read_bytes()
+    write_run([batch([])], tmp_path / "empty.parquet")
+    assert read_run(tmp_path / "empty.parquet").length == 0
+
+
+def test_reading_back_what_is_not_a_run_is_a_series_error(tmp_path: Path) -> None:
+    decimal = pa.table(
+        {
+            "seq": pa.array([1], pa.int64()),
+            "value/x": pa.array([Decimal(1)], pa.decimal128(3, 0)),
+        }
+    )
+    with pytest.raises(SeriesError, match="no series type"):
+        read_run(raw_run(tmp_path, decimal))
+    with pytest.raises(SeriesError, match="names its stream"):
+        read_run(raw_run(tmp_path, decimal, stream=b"not an id"))
+    no_seq = pa.table({"value/x": pa.array([1], pa.int64())})
+    with pytest.raises(SeriesError, match="not a batch"):
+        read_run(raw_run(tmp_path, no_seq))
+    with pytest.raises(SeriesError):
+        read_run(tmp_path / "missing.parquet")
 
 
 def test_check_run_refuses_what_would_break_the_merge_or_the_package(tmp_path: Path) -> None:

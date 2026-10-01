@@ -85,12 +85,14 @@ def whole_chunks(workspace: Workspace) -> set[str]:
     for chunk in workspace.chunks():
         directory = workspace.chunk_path(chunk)
         assert sorted(p.name for p in directory.iterdir()) == [
+            "admitted.json",
             "chunk.json",
             "findings.jsonl",
             "records.jsonl",
             "runs",
         ]
         workspace.load(chunk)  # every file reads back
+        assert workspace.admitted(chunk) is not None
         found.add(chunk)
     return found
 
@@ -161,7 +163,8 @@ def test_a_job_killed_mid_ingest_resumes_without_redoing_committed_chunks(
     [
         ("chunk-writing", 3, 1, 0),  # a run written into a chunk's staging; the rest not yet
         ("chunk-staged", 4, 1, 0),  # a chunk staged whole and flushed, not renamed into chunks/
-        ("package-staging", 1, 0, 1),  # a series merged into the staged package beside it
+        # a series merged into a derivative's staging (ADR 0031), the package staged beside
+        ("package-staging", 1, 1, 1),
         ("before-publish", 1, 0, 1),  # the staged package with its envelope, not renamed
     ],
 )

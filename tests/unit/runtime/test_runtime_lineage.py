@@ -23,6 +23,7 @@ from neptune.runtime.lineage import (
     Failure,
     Law,
     Step,
+    failure_from_json,
     runtime_transform,
     type_name,
 )
@@ -234,6 +235,36 @@ def test_a_failure_is_a_step_an_error_class_and_facts_never_a_repr() -> None:
         "chunk_series",
         "commit",
     ]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        CRASH,
+        Failure.returned(Step.INGEST_RESULT, 7),
+        Failure(Step.CHUNK_SERIES, "ContractError", {"law": "seq_repeated", "stream": STREAM}),
+    ],
+)
+def test_a_failure_reads_back_from_its_json(failure: Failure) -> None:
+    """A chunk's verdict keeps its failure, so a later job fails the chunk the same way."""
+    assert failure_from_json(failure.to_json()) == failure
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        None,
+        [],
+        {"error": "E", "facts": {}},
+        {"error": "E", "facts": {}, "step": "elsewhere"},
+        {"error": "", "facts": {}, "step": "ingest"},
+        {"error": "E", "facts": [], "step": "ingest"},
+        {"error": "E", "facts": {}, "step": "ingest", "extra": 1},
+    ],
+)
+def test_a_malformed_failure_is_refused(data: object) -> None:
+    with pytest.raises(ValueError, match=r"failure|step"):
+        failure_from_json(data)  # type: ignore[arg-type]
 
 
 def test_output_invalid_lists_every_problem_and_names_each_law_once() -> None:
