@@ -115,16 +115,37 @@ class SourceReader(Protocol):
 READ_SIZE: Final = 1024 * 1024
 
 
+class ShortReadError(Exception):
+    """A reader served no bytes inside the size it declares (ADR 0029 §3).
+
+    The source is shorter than the artifact it was hashed as, or changed under the reader. It is
+    not an adapter bug, and it is not the adapter's to report: adapters let it propagate, and the
+    runtime records ``neptune.discovery.verify.short_read_finding(source, offset, length)`` for
+    it and goes on with the job. ``[offset, offset + length)`` is the declared range that was not
+    served.
+    """
+
+    def __init__(self, source: ContentId, offset: int, length: int) -> None:
+        super().__init__(f"{source} served no bytes at {offset}; {length} declared bytes unread")
+        self.source = source
+        self.offset = offset
+        self.length = length
+
+
 def read_pieces(
     source: SourceReader, start: int, end: int, size: int = READ_SIZE
 ) -> Iterator[bytes]:
-    """The bytes ``[start, end)`` of ``source`` in order, at most ``size`` at a time."""
+    """The bytes ``[start, end)`` of ``source`` in order, at most ``size`` at a time.
+
+    A range outside the source is the caller's error (``ValueError``). A reader that serves no
+    bytes inside the range raises ``ShortReadError``.
+    """
     if not 0 <= start <= end <= source.size or size <= 0:
         raise ValueError(f"cannot read [{start}, {end}) of {source.size} bytes in {size}s")
     while start < end:
         piece = source.read(start, min(size, end - start))
         if not piece:
-            raise ValueError(f"{source.content_id} ended at {start}, before its size")
+            raise ShortReadError(source.content_id, start, end - start)
         yield piece
         start += len(piece)
 
