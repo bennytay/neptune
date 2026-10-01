@@ -287,7 +287,9 @@ def test_every_way_of_dying_is_a_finding(
     assert len(run.outcome.ingested) == 1 and run.staging_is_empty()
 
 
-@pytest.mark.parametrize("attack", ["socket", "fork", "exec", "kill-parent", "write"])
+@pytest.mark.parametrize(
+    "attack", ["socket", "fork", "exec", "kill-parent", "write", "setown", "fioasync"]
+)
 def test_a_parser_cannot_reach_the_network_processes_or_files(tmp_path: Path, attack: str) -> None:
     escaped = tmp_path / "escaped"
     line = f"write {escaped}" if attack == "write" else attack

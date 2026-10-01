@@ -6,11 +6,15 @@ checks that a test cannot otherwise make fail.
 
 import contextlib
 import ctypes
+import errno
+import fcntl
 import os
 import signal
 import socket
+import struct
 import subprocess
 import sys
+import termios
 import threading
 import time
 from collections.abc import Callable
@@ -299,6 +303,55 @@ def test_no_signal_to_another_process(box: Subprocess) -> None:
     assert box.call(doing(lambda: os.kill(parent, 0)), TEXT) == Raised("PermissionError")
     assert box.call(doing(lambda: os.kill(0, 0)), TEXT) == Raised("PermissionError")  # its group
     assert box.call(doing(lambda: os.kill(os.getpid(), 0)), TEXT) == Returned("None")  # itself
+
+
+def test_no_signal_through_async_io_descriptor_ownership(box: Subprocess) -> None:
+    """The kernel also delivers a signal through a descriptor's owner (``fcntl`` F_SETOWN, the
+    ``ioctl`` FIOASYNC/FIOSETOWN requests), which only Landlock ABI 6 scopes. Seccomp refuses it
+    on every ABI, and a refusal is a raise the job survives, not a dead job."""
+
+    def set_owner() -> str:
+        read_fd, write_fd = os.pipe()  # a pipe, not a socket: socket() itself is denied
+        try:
+            return str(fcntl.fcntl(write_fd, fcntl.F_SETOWN, os.getppid()))
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    def set_async() -> str:
+        read_fd, write_fd = os.pipe()
+        try:
+            return str(fcntl.ioctl(write_fd, termios.FIOASYNC, struct.pack("i", 1)))
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+    assert box.call(set_owner, TEXT) == Raised("PermissionError")
+    assert box.call(set_async, TEXT) == Raised("PermissionError")
+    # The job is unharmed: an ordinary call right after still returns.
+    assert box.call(lambda: "alive", TEXT) == Returned("alive")
+
+
+def test_a_child_cannot_clear_its_parent_death_signal(box: Subprocess) -> None:
+    """A hostile child must not clear ``PR_SET_PDEATHSIG`` (it would outlive a killed job) or make
+    itself dumpable again (a core dump holding source data): seccomp refuses both options."""
+    libc = ctypes.CDLL(None, use_errno=True)
+
+    def clear_pdeathsig() -> str:
+        ctypes.set_errno(0)
+        result = libc.prctl(1, 0, 0, 0, 0)  # PR_SET_PDEATHSIG, no signal
+        return f"{result} {ctypes.get_errno()}"
+
+    def make_dumpable() -> str:
+        ctypes.set_errno(0)
+        result = libc.prctl(4, 1, 0, 0, 0)  # PR_SET_DUMPABLE, dumpable
+        return f"{result} {ctypes.get_errno()}"
+
+    for work in (clear_pdeathsig, make_dumpable):
+        outcome = box.call(work, TEXT)
+        assert isinstance(outcome, Returned)
+        result, code = outcome.value.split()
+        assert result == "-1" and int(code) == errno.EPERM
 
 
 def test_nothing_is_written_to_any_file(box: Subprocess, tmp_path: Path) -> None:

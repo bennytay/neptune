@@ -15,7 +15,12 @@
 5. A seccomp filter: no socket, no new process or program (``fork``, ``vfork``, ``clone``
    without ``CLONE_THREAD``, ``clone3``, ``execve``, ``execveat``), no signal to another
    process, no ``ptrace`` or cross-process memory or descriptor access, no namespaces, no
-   ``bpf``, no ``io_uring``. Threads stay allowed.
+   ``bpf``, no ``io_uring``. Threads stay allowed. The filter also denies the async-I/O path
+   to a signal the kernel delivers through descriptor ownership, which only Landlock ABI 6
+   scopes: ``fcntl`` ``F_SETOWN``/``F_SETOWN_EX``/``F_SETSIG`` and ``ioctl``
+   ``FIOSETOWN``/``SIOCSPGRP``/``FIOASYNC`` (EPERM), and ``prctl`` ``PR_SET_PDEATHSIG`` and
+   ``PR_SET_DUMPABLE`` so a hostile child can neither outlive a killed job nor re-enable a
+   core dump after confinement. These argument filters hold on every Landlock ABI.
 
 Reading files stays allowed, so lazy imports, codecs and shared libraries keep working; ADR 0030
 records why and what that leaves open. The syscall numbers below are the kernel's ``unistd``
@@ -59,9 +64,26 @@ _NR: Final = 0
 _ARCH: Final = 4
 _ARG0_LOW: Final = 16  # little-endian: the low word first
 _ARG0_HIGH: Final = 20
+_ARG1_LOW: Final = 24  # args[1], its low word
 
 _CLONE_THREAD: Final = 0x00010000
 _X32_SYSCALL_BIT: Final = 0x40000000
+
+# Commands and requests that aim a signal through a descriptor's owner, the kernel's async-I/O
+# path (``fcntl`` cmd, ``ioctl`` request) the ``kill``/``tkill`` family does not cover and only
+# Landlock ABI 6 scopes. The kernel reads each as a 32-bit int, so matching the low word is
+# enough (and necessary: a high-bit-padded value truncates to the same command).
+_F_SETOWN: Final = 8
+_F_SETSIG: Final = 10
+_F_SETOWN_EX: Final = 15
+_FIOSETOWN: Final = 0x8901
+_SIOCSPGRP: Final = 0x8902
+_FIOASYNC: Final = 0x5452
+# ``prctl`` options a confined child must never reach after setup: clearing its parent-death
+# signal (so it could outlive a killed job) or making itself dumpable again (a core dump holding
+# source data). Every other option — a thread naming itself, say — stays allowed.
+_PR_SET_PDEATHSIG_OPT: Final = 1
+_PR_SET_DUMPABLE_OPT: Final = 4
 
 # Answered ENOSYS, as if the kernel lacked them: libc then makes threads with ``clone``, and a
 # library that would use io_uring falls back to plain reads. Everything else refused is EPERM.
@@ -88,6 +110,8 @@ class Arch:
     denied: tuple[tuple[str, int], ...]  # refused outright, by name and number
     clone: int  # allowed only with CLONE_THREAD: a thread, never a process
     self_only: tuple[tuple[str, int], ...]  # kill and tgkill: only towards this process
+    # Allowed, but EPERM for a few argument values: (name, number, arg's low-word offset, values).
+    arg_denied: tuple[tuple[str, int, int, tuple[int, ...]], ...]
 
 
 ARCHES: Final = {
@@ -120,6 +144,11 @@ ARCHES: Final = {
         ),
         clone=56,
         self_only=(("kill", 62), ("tgkill", 234)),
+        arg_denied=(
+            ("fcntl", 72, _ARG1_LOW, (_F_SETOWN, _F_SETSIG, _F_SETOWN_EX)),
+            ("ioctl", 16, _ARG1_LOW, (_FIOSETOWN, _SIOCSPGRP, _FIOASYNC)),
+            ("prctl", 157, _ARG0_LOW, (_PR_SET_PDEATHSIG_OPT, _PR_SET_DUMPABLE_OPT)),
+        ),
     ),
     "aarch64": Arch(
         name="aarch64",
@@ -148,6 +177,11 @@ ARCHES: Final = {
         ),
         clone=220,
         self_only=(("kill", 129), ("tgkill", 131)),
+        arg_denied=(
+            ("fcntl", 25, _ARG1_LOW, (_F_SETOWN, _F_SETSIG, _F_SETOWN_EX)),
+            ("ioctl", 29, _ARG1_LOW, (_FIOSETOWN, _SIOCSPGRP, _FIOASYNC)),
+            ("prctl", 167, _ARG0_LOW, (_PR_SET_PDEATHSIG_OPT, _PR_SET_DUMPABLE_OPT)),
+        ),
     ),
 }
 
@@ -307,6 +341,14 @@ def seccomp_program(arch: Arch, pid: int) -> list[tuple[int, int, int, int]]:
             (_RET_K, 0, 0, _RET_ALLOW),
             (_RET_K, 0, 0, _RET_ERRNO | errno.EPERM),
         ]
+    for _, nr, offset, values in arch.arg_denied:  # EPERM only for the named argument values
+        count = len(values)
+        program.append((_JEQ_K, 0, count + 3, nr))  # not this syscall: skip the block
+        program.append((_LD_W_ABS, 0, 0, offset))  # the argument's low word
+        for index, value in enumerate(values):
+            program.append((_JEQ_K, count - index, 0, value))  # a match jumps to the EPERM return
+        program.append((_RET_K, 0, 0, _RET_ALLOW))  # this syscall, an argument we allow
+        program.append((_RET_K, 0, 0, _RET_ERRNO | errno.EPERM))
     program.append((_RET_K, 0, 0, _RET_ALLOW))
     return program
 

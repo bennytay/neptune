@@ -21,6 +21,7 @@ EPERM: Final = 0x00050000 | errno.EPERM
 ENOSYS: Final = 0x00050000 | errno.ENOSYS
 PID: Final = 4242
 CLONE_THREAD: Final = 0x00010000
+ARG1_LOW: Final = 24  # seccomp_data args[1], low word
 
 
 def run(arch: Arch, nr: int, *args: int, audit: int | None = None) -> int:
@@ -132,8 +133,31 @@ def test_the_numbers_are_the_kernels(name: str) -> None:
         for match in re.finditer(r"#define __NR(?:3264)?_(\w+)\s+(\d+)", header.read_text())
     }
     arch = ARCHES[name]
-    for syscall, nr in (*arch.denied, *arch.self_only, ("clone", arch.clone)):
+    arg_denied = tuple((entry[0], entry[1]) for entry in arch.arg_denied)
+    for syscall, nr in (*arch.denied, *arch.self_only, *arg_denied, ("clone", arch.clone)):
         assert table[syscall] == nr, syscall
+
+
+@pytest.mark.parametrize("arch", ARCH_LIST, ids=lambda arch: arch.name)
+def test_async_io_signal_ownership_and_dangerous_prctl_are_denied(arch: Arch) -> None:
+    """The signal path the kernel delivers through descriptor ownership, which only Landlock ABI
+    6 scopes, is refused on every ABI; a benign use of the same syscall is allowed."""
+    denied = {name: (nr, offset, values) for name, nr, offset, values in arch.arg_denied}
+    fcntl_nr, fcntl_off, fcntl_values = denied["fcntl"]
+    ioctl_nr, _, ioctl_values = denied["ioctl"]
+    prctl_nr, _, prctl_values = denied["prctl"]
+    assert fcntl_off == ARG1_LOW
+    for cmd in fcntl_values:  # F_SETOWN, F_SETSIG, F_SETOWN_EX
+        assert run(arch, fcntl_nr, 5, cmd) == EPERM, cmd
+    assert run(arch, fcntl_nr, 5, fcntl_values[0] | (1 << 32)) == EPERM  # the kernel truncates
+    for allowed in (3, 4):  # F_GETFL, F_SETFL (os.set_blocking): untouched
+        assert run(arch, fcntl_nr, 5, allowed) == ALLOW
+    for request in ioctl_values:  # FIOSETOWN, SIOCSPGRP, FIOASYNC
+        assert run(arch, ioctl_nr, 5, request) == EPERM, request
+    assert run(arch, ioctl_nr, 5, 0x5401) == ALLOW  # TCGETS, a harmless ioctl
+    for option in prctl_values:  # PR_SET_PDEATHSIG, PR_SET_DUMPABLE
+        assert run(arch, prctl_nr, option) == EPERM, option
+    assert run(arch, prctl_nr, 15) == ALLOW  # PR_SET_NAME: a thread may still name itself
 
 
 # --- A confined process, from the inside --------------------------------------------------------

@@ -19,16 +19,21 @@ Chunk 0 emits the ``DocumentRecord``; every other chunk holds one line and emits
 - ``hang``: sleeps for an hour; ``spin``: burns CPU forever; ``hog``: allocates 8 MiB at a time
   forever;
 - ``socket``: opens a socket; ``fork``: forks; ``exec``: runs ``/bin/true``;
-  ``kill-parent``: signals the job's process; ``write <path>``: writes ``<path>``.
+  ``kill-parent``: signals the job's process; ``write <path>``: writes ``<path>``;
+- ``setown``: aims a pipe's SIGIO at the job (``fcntl`` F_SETOWN); ``fioasync``: turns a pipe's
+  async signal on (``ioctl`` FIOASYNC) — the signal path only Landlock ABI 6 scopes.
 
 A first line ``plan-hang`` or ``plan-segfault`` attacks ``plan`` instead, and a line
 ``probe-segfault`` anywhere in the head makes ``probe`` segfault.
 """
 
 import ctypes
+import fcntl
 import os
 import signal
 import socket
+import struct
+import termios
 import time
 from typing import Final
 
@@ -141,6 +146,20 @@ def attack(text: str) -> str:
         os.execv("/bin/true", ["true"])
     elif text == "kill-parent":
         os.kill(os.getppid(), signal.SIGTERM)
+    elif text == "setown":
+        read_fd, write_fd = os.pipe()  # a pipe, not a socket: socket() is already denied
+        try:
+            fcntl.fcntl(write_fd, fcntl.F_SETOWN, os.getppid())
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+    elif text == "fioasync":
+        read_fd, write_fd = os.pipe()
+        try:
+            fcntl.ioctl(write_fd, termios.FIOASYNC, struct.pack("i", 1))
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
     elif text.startswith("write "):
         with open(text.removeprefix("write "), "wb") as target:  # noqa: PTH123 - the attack
             target.write(b"escaped")
