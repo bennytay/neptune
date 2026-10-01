@@ -1,7 +1,7 @@
 """Graph schema and claim model: the graph-schema contract (ADR 0002, 0005, 0006).
 
 Rule: a claim without provenance and ``assertion_kind`` is a bug. Nothing here infers; inferred
-claims are produced under ``derived/`` and merely carry ``assertion_kind = inferred`` and their model.
+claims are produced under ``derived/`` and merely carry ``assertion_kind = inferred`` and a model.
 
 - ``nodes``: tiers, node types, ``NodeRef``.
 - ``interval``: valid time (``Interval``, ``CivilClock``) and transaction time (``LedgerTx``).

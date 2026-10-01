@@ -15,7 +15,7 @@ compatibility statement.
 | `alignment-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-memory` |
 | `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `catalog-api` | `neptune-ledger` | active | — | 0.0.0 | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
-| `graph-schema` | `neptune-memory` | planned | — | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
+| `graph-schema` | `neptune-memory` | active | 1.0.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
 | `query-packet` | `neptune-context` | planned | — | — | `neptune-deploy`, `neptune-learn` |
 | `dataset-manifest` | `neptune-learn` | planned | — | — | external training pipelines |
 
@@ -29,6 +29,6 @@ consume the contract. Planned parts of `package-schema` ride on its version.
 |---|---|---|---|---|
 | `neptune-ledger` | 1.0.0 current | | | |
 | `neptune-memory` | | no stable | | |
-| `neptune-context` | | no stable | no stable | |
-| `neptune-deploy` | not declared (no package yet) | no stable | no stable | no stable |
-| `neptune-learn` | not declared (no package yet) | no stable | no stable | no stable |
+| `neptune-context` | | no stable | not declared (no package yet) | |
+| `neptune-deploy` | not declared (no package yet) | no stable | not declared (no package yet) | no stable |
+| `neptune-learn` | not declared (no package yet) | no stable | not declared (no package yet) | no stable |

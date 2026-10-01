@@ -43,3 +43,15 @@ def test_docs_state_the_same_pins() -> None:
     # ADR 0001 recorded the graph pin as 0 before v1; ADR 0006 sets it, and ADRs are not edited.
     for text in (contracts, graph_adr):
         assert f"GRAPH_SCHEMA_VERSION = {pins.GRAPH_SCHEMA_VERSION}" in text
+
+
+def test_graph_schema_doc_lists_every_node_predicate_and_finding_code() -> None:
+    from neptune_memory.schema.nodes import NodeType
+    from neptune_memory.schema.predicates import CORE_PREDICATES, VOCABULARY_VERSION
+    from neptune_memory.schema.supersede import FindingCode
+
+    doc = (ROOT / "docs" / "graph-schema.md").read_text(encoding="utf-8")
+    names = [*map(str, NodeType), *(s.name for s in CORE_PREDICATES.specs), *map(str, FindingCode)]
+    assert [n for n in names if f"`{n}`" not in doc] == []
+    assert f"GRAPH_SCHEMA_VERSION = {pins.GRAPH_SCHEMA_VERSION}" in doc
+    assert f"VOCABULARY_VERSION = {VOCABULARY_VERSION}" in doc

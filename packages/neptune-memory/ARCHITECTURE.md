@@ -9,6 +9,8 @@ flowchart LR
     CON["consolidate/"]
     DER["derived/"]
     SCH["schema/"]
+    RD["schema/reader: MemoryReader + reference"]
+    CT["contract/: golden graph + suite"]
     STO["store/: MemoryStore"]
     SPA["spatial/"]
     EPI["episodes/"]
@@ -18,6 +20,9 @@ flowchart LR
   LED --> SEAM --> CON --> SCH --> STO
   DER --> SCH
   SCH --> SPA & EPI
+  SCH --> RD --> OUT
+  CON & DER --> CT --> RD
+  CT --> REG[("contracts/graph-schema v1.0.0")]
   STO --> OUT
   CLI --> STO
   STO --> PG
@@ -37,8 +42,8 @@ flowchart LR
   class K2 partial
   class DER,SPA,EPI,CLI,K3 todo
   class CON,SCH,STO partial
-  class SEAM built
-  class LED,OUT,PG ext
+  class SEAM,RD,CT built
+  class LED,OUT,PG,REG ext
   style M fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none
   linkStyle default stroke:#8b949e

@@ -468,8 +468,9 @@ def _closure(
     """The part of ``version`` over ``valid`` that no winner covers, recorded at ``recorded_at``.
 
     Its evidence is ``root``'s (the assertion ``version`` is of) then the ``cutters``' (the claims
-    that took the rest); its model is ``root``'s (ADR 0006 §3); its ``config_hash`` covers the resolver's configuration and the version it
-    narrows, so pieces of different versions never share an id even when they share evidence.
+    that took the rest); its model is ``root``'s (ADR 0006 §3); its ``config_hash`` covers the
+    resolver's configuration and the version it narrows, so pieces of different versions never
+    share an id even when they share evidence.
     """
     evidence: list[EvidenceRef] = []
     for ref in (*root.provenance.evidence, *(r for c in cutters for r in c.provenance.evidence)):
