@@ -71,6 +71,12 @@ def _load(name: str) -> ModuleType:
     return module
 
 
+def placed(outcome: JobOutcome) -> Path:
+    """Where a committed job put its package (a dry run has no destination, ADR 0035)."""
+    assert outcome.destination is not None
+    return outcome.destination
+
+
 TALLY: Final = _load("tally_adapter")
 BRITTLE: Final = _load("brittle_adapter")
 FRAMELOG: Final = _load("framelog_adapter")
@@ -209,11 +215,11 @@ def rules(entry: Any) -> set[str]:
 def check_report(outcome: JobOutcome) -> CacheReport:
     """The report in the package is the outcome's, reads back as itself, and names the receipt."""
     assert outcome.state is JobState.COMMITTED
-    stored = read_cache_report(outcome.destination)
+    stored = read_cache_report(placed(outcome))
     report = cache_report_from_json(stored)
     assert report == outcome.cache
-    assert report.receipt == read_envelope(outcome.destination).receipt
-    assert report.receipt == read_package(outcome.destination).manifest.receipt
+    assert report.receipt == read_envelope(placed(outcome)).receipt
+    assert report.receipt == read_package(placed(outcome)).manifest.receipt
     return report
 
 
@@ -242,7 +248,7 @@ def test_reingesting_unchanged_sources_calls_no_adapter_and_builds_the_same_pack
     recipes = {d.recipe for d in report.derivatives}
     assert recipes == {"neptune.runtime.admission/1", "neptune.store.series/1"}
     assert {"chunk_parsed", "chunk_committed", "derivative_built"}.isdisjoint(e.kind for e in seen)
-    assert read_package(again.destination).id == read_package(first.destination).id == again.package
+    assert read_package(placed(again)).id == read_package(placed(first)).id == again.package
 
 
 def test_the_cache_report_is_deterministic(corpus: Path, tmp_path: Path) -> None:
@@ -253,7 +259,7 @@ def test_the_cache_report_is_deterministic(corpus: Path, tmp_path: Path) -> None
         first, _ = runner(corpus, adapters())
         again, _ = runner(corpus, adapters())
         reports.append(
-            [read_cache_report(o.destination) for o in (first, again)],
+            [read_cache_report(placed(o)) for o in (first, again)],
         )
     assert canonical_json.dumps(reports[0]) == canonical_json.dumps(reports[1])
     assert reports[0][0] != reports[0][1]  # the rerun hit where the first run missed
@@ -401,7 +407,7 @@ def test_a_new_per_chunk_law_judges_kept_chunks_as_a_fresh_workspace_would(
     skipped = {e.details["chunk"] for e in seen if e.kind == "chunk_skipped"}
     assert skipped and not skipped & {f.details["chunk"] for f in failed}  # refused, not reused
     assert judged.findings == fresh.findings
-    assert judged.package == fresh.package == read_package(judged.destination).id
+    assert judged.package == fresh.package == read_package(placed(judged)).id
     assert counted.calls("ingest") == {"tally": 0, "text": 0}  # judged as kept: no adapter call
     report = check_report(judged)
     assert report.totals()["chunks"]["miss"] == 0
@@ -558,7 +564,7 @@ def test_reingesting_a_multi_gb_recording_does_no_transform_work(tmp_path: Path)
     }
     assert report.totals()["derivatives"]["miss"] == 0  # no verdict recomputed, no series merged
     assert again.package == first.package
-    durations = dict(read_envelope(again.destination).durations)
-    first_durations = dict(read_envelope(first.destination).durations)
+    durations = dict(read_envelope(placed(again)).durations)
+    first_durations = dict(read_envelope(placed(first)).durations)
     transform = ("plan", "parse", "normalize")
     assert sum(durations[p] for p in transform) < sum(first_durations[p] for p in transform)

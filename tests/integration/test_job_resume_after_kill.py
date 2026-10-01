@@ -259,13 +259,22 @@ def test_a_source_that_changes_between_jobs_gets_a_new_revision_and_keeps_the_ol
     outcome = IngestJob(
         corpus, tmp_path / "b", Workspace(home), registry(), on_event=seen.append
     ).run()
+    # The workspace keeps the chain; the package lists only what this job's scan saw (ADR 0035 §9).
+    kept = [
+        r
+        for r in Workspace(home).load_ledger(corpus).revisions()
+        if r.location.to_json()["path"] == "notes.txt"
+    ]
+    assert len(kept) == 2 and sum(1 for r in kept if r.supersedes) == 1
     package = read_package(tmp_path / "b")
-    revisions = [
+    listed = [
         r
         for r in package.records
         if isinstance(r, SourceRevision) and r.location.to_json()["path"] == "notes.txt"
     ]
-    assert len(revisions) == 2 and sum(1 for r in revisions if r.supersedes) == 1
+    assert len(listed) == 1 and listed[0].supersedes == ()
+    fresh = IngestJob(corpus, tmp_path / "fresh", Workspace(tmp_path / "w2"), registry()).run()
+    assert outcome.package == fresh.package
     hashed = {path_of(e.details): e.details for e in seen if e.kind == "source_hashed"}
     assert hashed["notes.txt"]["new_revision"] and not hashed["lift.tally"]["new_revision"]
     # Only the changed source's chunks were new work; the rest were committed by the first job.
