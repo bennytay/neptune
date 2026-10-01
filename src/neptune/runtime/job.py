@@ -76,6 +76,7 @@ from neptune.adapters.contract import (
 )
 from neptune.adapters.registry import AdapterRegistry, SelectionStatus
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
+from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.layout import Layout, layout_from_scan
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
 from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe
@@ -195,7 +196,9 @@ class JobOptions:
     under. ``config`` gives each adapter, by id, the option values to configure it with. ``job``
     names the job in its envelope; by default a fresh random token. ``grouping`` configures
     session grouping (ADR 0036): its gap, and the sessions the user declares, stated and set
-    against the rules' readings; it is the grouping transform's config.
+    against the rules' readings; it is the grouping transform's config. ``ignore`` says which
+    ignore rules the walk applies (ADR 0043): by default version-control internals, OS metadata
+    and the root's ``.neptune-ignore``; whatever they leave unread is a finding naming the rule.
     """
 
     attempts: int = DEFAULT_ATTEMPTS
@@ -205,8 +208,11 @@ class JobOptions:
     limits: Limits = DEFAULT_LIMITS
     allow_degraded_sandbox: bool = False
     grouping: GroupingConfig = field(default_factory=GroupingConfig)
+    ignore: IgnorePolicy = field(default_factory=IgnorePolicy)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.ignore, IgnorePolicy):
+            raise JobError(f"ignore must be an IgnorePolicy, got {self.ignore!r}")
         if isinstance(self.attempts, bool) or not isinstance(self.attempts, int):
             raise JobError(f"attempts must be an integer, got {self.attempts!r}")
         if self.attempts < 1:
@@ -486,8 +492,8 @@ class IngestJob:
     ) -> None:
         self.root = Path(root)
         self.destination = Path(destination) if destination is not None else None
-        if not self.root.is_dir():
-            raise JobError(f"{self.root} is not a directory")
+        if not self.root.is_dir() and not self.root.is_file():  # one file is a root too (ADR 0043)
+            raise JobError(f"{self.root} is neither a directory nor a regular file")
         if self.destination is not None and self.destination.exists():
             raise JobError(f"{self.destination} exists; a package is written once")
         self.workspace = workspace
@@ -536,8 +542,8 @@ class IngestJob:
         self._grouper = LayoutGrouper(self.options.grouping)
         self._layout = Layout(())
         self._grouping: Grouping | None = None
-        self._dry = False  # a dry run: stops after plan, writes nothing kept (ADR 0035, 0044)
-        self._inventory = explain.Inventory((), (), ())
+        self._dry = False  # a dry run: stops after plan and explains (ADR 0035, 0044)
+        self._inventory = explain.Inventory.of((), (), ())
         self._inspected = 0  # adapter ``inspect`` calls, in a dry run
         self._explanation: explain.Explanation | None = None
         self._published: ContentId | None = None  # the package, once renamed into place
@@ -574,8 +580,8 @@ class IngestJob:
         ``Explanation`` of all of it (``JobOutcome.explanation``). Each selected source is also
         given to its adapter's ``inspect``. No chunk is parsed, nothing is assembled and no
         package is written, so the outcome is ``planned`` (or ``cancelled``) with no package.
-        Nothing is kept in the workspace: the ledger and plans are read, never saved, so a dry
-        run leaves no trace a later job could see (ADR 0044 §2).
+        The ledger and plans it saves are the ones ``run`` saves, so a later ``run`` reuses them;
+        the sources are only read, and no package id depends on the workspace (ADR 0035 §9).
         """
         return self._execute(dry=True)
 
@@ -644,7 +650,7 @@ class IngestJob:
         self._emit(events.WORKSPACE_SWEPT, {"scratch": scratch, "staging": staging})
 
     def _phases(self, started: str, *, dry: bool) -> ContentId | None:
-        source = self._local = LocalSource(self.root)
+        source = self._local = self._source()
         entries = self._discover(source)
         scanned = self._fingerprint(source, entries)
         self._inspect(source)
@@ -758,11 +764,11 @@ class IngestJob:
             "plan": self._calls["plan"],
             "probe": self._calls["probe"],
         }
-        return explain.Explanation(
+        whole = explain.Explanation(
             inventory=self._inventory,
             sources=tuple(sources),
             adapters=tuple(
-                (descriptors[adapter_id], tuple(sorted(selected[adapter_id])))
+                explain.AdapterUse(descriptors[adapter_id], tuple(sorted(selected[adapter_id])))
                 for adapter_id in sorted(descriptors)
             ),
             grouping=explain.GroupingExplanation.of(self._grouping),
@@ -770,6 +776,7 @@ class IngestJob:
             left_out=explain.left_out(sources, self._inventory),
             findings=tuple(sorted(self._findings.values(), key=lambda f: f.id)),
         )
+        return explain.bounded(whole)  # ADR 0044 §8
 
     # --- Phases, events, checkpoints -----------------------------------------------------------
 
@@ -867,9 +874,13 @@ class IngestJob:
     def _skip(self, entry: SkippedEntry) -> None:
         """A walk entry that was not read: discovery's finding says why; this is its event."""
         location = local_location(entry.raw_path)
-        self._emit(
-            events.ENTRY_SKIPPED, {"location": location.to_json(), "reason": str(entry.reason)}
-        )
+        details: dict[str, JsonValue] = {
+            "location": location.to_json(),
+            "reason": str(entry.reason),
+        }
+        if entry.rule is not None:  # left unread by an ignore rule: which one (ADR 0043)
+            details["rule"] = entry.rule.to_json()
+        self._emit(events.ENTRY_SKIPPED, details)
 
     def _unreadable(self, source: _Source, exc: Exception) -> None:
         """A source could not be read when the job came to it: changed, refused, or an I/O error.
@@ -924,7 +935,7 @@ class IngestJob:
         for finding in self._differences(item) or ():
             self._record(finding, DISCOVERY_TRANSFORM)
 
-    def _read_short(self, item: _Source, raised: Raised, step: Step, chunk: Chunk | None) -> bool:
+    def _read_short(self, item: _Source, raised: Raised, step: str, chunk: Chunk | None) -> bool:
         """Whether a call that raised is the source's short read; if so, it is recorded.
 
         ``LocalReader`` cannot serve a short read: a piece that is not all there fails its hash
@@ -966,6 +977,21 @@ class IngestJob:
 
     # --- discover ------------------------------------------------------------------------------
 
+    def _source(self) -> LocalSource:
+        """The root as a source, walked under the job's ignore rules (ADR 0043).
+
+        The rules are the policy's and the root's ``.neptune-ignore``; one that cannot be used
+        fails the job as a configuration error, before anything is walked.
+        """
+        with self._enter(Phase.DISCOVER):
+            try:
+                rules = self.options.ignore.rules(LocalSource(self.root))
+            except IgnoreError as exc:
+                raise JobError(f"the ignore rules cannot be used: {exc}") from exc
+            except OSError as exc:
+                raise JobError(f"{self.root} cannot be read: {exc}") from exc
+            return LocalSource(self.root, ignore=rules)
+
     def _discover(self, source: LocalSource) -> tuple[WalkEntry, ...]:
         with self._enter(Phase.DISCOVER):
             entries = tuple(source.walk())
@@ -1005,14 +1031,14 @@ class IngestJob:
                 message = f"the ledger of {self.root} cannot be loaded: {exc}"
                 raise JobError(message) from _unusable(exc)
             result = fingerprint(source, ledger, entries)
-            if not self._dry:  # a dry run reconciles the ledger in memory only (ADR 0044 §2)
-                try:
-                    self.workspace.save_ledger(self.root, ledger)
-                except OSError as exc:
-                    message = f"the ledger of {self.root} cannot be saved: {exc}"
-                    raise JobError(message) from _unusable(exc)
+            try:
+                self.workspace.save_ledger(self.root, ledger)
+            except OSError as exc:
+                message = f"the ledger of {self.root} cannot be saved: {exc}"
+                raise JobError(message) from _unusable(exc)
+            producers = result.producers  # discovery's, and the ignore rules' (ADR 0043)
             for finding in result.findings:  # what the walk saw and did not read (ADR 0029 §1)
-                self._record(finding, result.transform)
+                self._record(finding, producers[finding.transform])
             walked = {
                 (e.raw_path, e.reason, e.detail) for e in entries if isinstance(e, SkippedEntry)
             }
@@ -1064,18 +1090,10 @@ class IngestJob:
                 for entry in result.skipped
                 if entry.raw_path != b"."
             }
-            self._inventory = explain.Inventory(
-                tuple(sorted(files, key=lambda f: f.location.raw)),
-                tuple(
-                    sorted(
-                        (
-                            explain.InventoryLink(link.location, link.target)
-                            for link in result.symlinks
-                        ),
-                        key=lambda link: link.location.raw,
-                    )
-                ),
-                tuple(skipped[key] for key in sorted(skipped)),
+            self._inventory = explain.Inventory.of(
+                files,
+                (explain.InventoryLink(link.location, link.target) for link in result.symlinks),
+                skipped.values(),
             )
             self._finish(
                 Phase.FINGERPRINT,
@@ -1203,8 +1221,12 @@ class IngestJob:
             result: InspectResult = outcome.value
             item.inspection = explain.Inspection(result.summary, result.findings)
         elif isinstance(outcome, Raised):
+            # As for ``plan``: a source that changed, or whose bytes are no longer all there, is
+            # the source's problem; any other raise is the adapter's, shown (ADR 0033 §3).
             if outcome.changed:
                 self._unreadable(item, SourceChangedError(item.content_id))
+                return
+            if self._read_short(item, outcome, "inspect", None):  # the event's step only
                 return
             failure: JsonObject = {"error": outcome.error}
             item.inspection = explain.Inspection(None, (), failure)
@@ -1268,8 +1290,7 @@ class IngestJob:
                         failed += 1
                         continue
                     try:
-                        if not self._dry:  # a dry run keeps nothing (ADR 0044 §2)
-                            self.workspace.save_plan(config.transform, plan.chunks, plan.findings)
+                        self.workspace.save_plan(config.transform, plan.chunks, plan.findings)
                     except (WorkspaceError, OSError) as exc:
                         raise JobError(
                             f"the plan of {item.content_id} cannot be saved: {exc}"

@@ -39,7 +39,9 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0032](0032-probe-listing-and-archive-inspection-stay-two-passes.md) | The probe's container listing and the archive inspector stay two passes | Accepted |
 | [0033](0033-m2-gate-probing-scratch-short-reads-and-reuse.md) | The M2 gate: the job probes in the sandbox, calls get scratch, short reads are the source's | Accepted |
 | [0034](0034-mcap-adapter-container-reading-planning-and-citations.md) | The MCAP adapter: our own container reader, planning from the summary, exact citations | Accepted |
-| [0035](0035-python-sdk-one-surface-dry-runs-results-and-errors.md) | The Python SDK: one sync and async surface over the job, dry runs, results and a stable error taxonomy | Accepted; §4 amended by 0044 |
+| [0035](0035-python-sdk-one-surface-dry-runs-results-and-errors.md) | The Python SDK: one sync and async surface over the job, dry runs, results and a stable error taxonomy | Accepted |
 | [0036](0036-session-grouping-v0-observed-layout-and-derived-proposals.md) | Session grouping v0: an observed layout, inferred proposals, derived tables in the package | Accepted |
+| [0038](0038-layout-preserving-pdf-and-markdown-adapters.md) | Layout-preserving PDF and Markdown adapters: pypdf, markdown-it-py, declared order and exact spans | Accepted |
 | [0042](0042-tabular-adapter-csv-json-parquet-as-cited-cells.md) | The tabular adapter: CSV, JSON and Parquet as tables of cited cells | Accepted |
-| [0044](0044-explain-dry-runs-inspect-read-only-and-a-typed-explanation.md) | Explain: the dry run inspects, keeps nothing, and returns a typed explanation | Accepted |
+| [0043](0043-neptune-ingest-cli-exit-codes-ignore-rules-and-file-sources.md) | `neptune ingest`: a thin CLI over the SDK, fixed exit codes, declared ignore rules and single-file sources | Accepted |
+| [0044](0044-explain-dry-runs-inspect-read-only-and-a-typed-explanation.md) | Explain: the dry run inspects, warms the cache, and returns a typed explanation | Accepted |

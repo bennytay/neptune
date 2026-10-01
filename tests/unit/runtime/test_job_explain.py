@@ -5,7 +5,7 @@ import json
 import os
 import shutil
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final
@@ -24,10 +24,12 @@ from neptune.adapters.contract import (
     ProbeHints,
     ProbeResult,
     Resources,
+    ShortReadError,
     SourceReader,
 )
 from neptune.adapters.registry import AdapterRegistry
 from neptune.adapters.text import TextAdapter
+from neptune.identity import canonical_json
 from neptune.model.ids import RecordId
 from neptune.runtime import (
     IngestJob,
@@ -40,16 +42,20 @@ from neptune.runtime import (
     Phase,
     Rule,
 )
+from neptune.runtime import explain as explain_module
 from neptune.runtime.explain import (
     HEAVY_BYTES,
     HEAVY_CHUNKS,
     SCHEMA,
+    TRUNCATED,
+    Bounds,
     Disposition,
     Explanation,
     PlanEstimate,
     SourceExplanation,
     SourceStatus,
     Verdict,
+    explain_transform,
     heavy_reasons,
     show,
 )
@@ -174,12 +180,19 @@ def test_an_explanation_covers_inventory_formats_adapters_grouping_work_and_left
 
     left = {(show(e.location), e.disposition) for e in explanation.left_out}
     assert left == {("blob.bin", Disposition.UNSUPPORTED), ("latest", Disposition.LINK)}
-    selected = {d.id: ids for d, ids in explanation.adapters}
-    assert set(selected) == {"mcap", "tabular", "text"} and len(selected["tabular"]) == 5
+    selected = {use.descriptor.id: use.selected for use in explanation.adapters}
+    assert set(selected) == {"markdown", "mcap", "pdf", "tabular", "text"}
+    assert len(selected["tabular"]) == 5
     assert explanation.findings == outcome.findings
 
     text = explanation.render()
-    for needle in ("Inventory: 9 files", "telemetry_amr.csv", "Sessions:", "Work:", "Left out:"):
+    for needle in (
+        "Inventory: 9 files",
+        "telemetry_amr.csv",
+        "Sessions (inferred",
+        "Work:",
+        "Left out:",
+    ):
         assert needle in text
 
 
@@ -213,6 +226,25 @@ def test_an_inspect_that_fails_is_shown_and_the_source_is_still_planned(tmp_path
     assert item.inspection is not None and item.inspection.summary is None
     assert item.inspection.failure == {"error": "ValueError"}
     assert "inspect failed" in explanation.render()
+
+
+def test_an_inspect_that_reads_short_is_judged_as_plan_is(tmp_path: Path) -> None:
+    """ADR 0033 §3, as for ``plan``: a short read of an intact source is the adapter's failure; of
+    a source no longer all there, the source's ``short_read``, and it is quarantined."""
+    root = tmp_path / "root"
+    root.mkdir()
+    victim = root / "notes.txt"
+    shutil.copy(FIXTURES / "text" / "notes.txt", victim)
+    _, intact = explain(root, tmp_path / "home", AdapterRegistry([ShortInspect()]))
+    (item,) = intact.sources
+    assert item.status is SourceStatus.PLANNED and item.inspection is not None
+    assert item.inspection.failure == {"error": "ShortReadError"}
+
+    shrink = ShortInspect(lambda: victim.write_bytes(victim.read_bytes()[:10]))
+    _, cut = explain(root, tmp_path / "home2", AdapterRegistry([shrink]))
+    (item,) = cut.sources
+    assert item.status is SourceStatus.QUARANTINED
+    assert "neptune.discovery.short_read" in item.quarantined
 
 
 def test_a_dry_run_after_an_ingest_explains_that_nothing_is_left(
@@ -265,29 +297,43 @@ def test_explain_never_calls_ingest(root: Path, tmp_path: Path) -> None:
     outcome, explanation = explain(root, tmp_path / "home", registry)
     assert calls["ingest"] == 0 and outcome.cache.calls.ingest == 0
     assert calls["inspect"] == calls["plan"] == explanation.work.sources == 7
-    assert calls["probe"] == 3 * 8  # every adapter, every distinct source's head
+    assert calls["probe"] == len(builtin_adapters()) * 8  # every adapter, every distinct head
 
 
-def test_explain_keeps_nothing_in_the_workspace_and_touches_no_source(
+def test_explain_touches_no_source_and_writes_no_chunk_derivative_or_package(
     root: Path, tmp_path: Path
 ) -> None:
+    """The sources are only read; the workspace is the cache, warmed as ADR 0035 §4 says (its
+    ledger and plans), never given a chunk or a derivative."""
     home = tmp_path / "home"
     IngestJob(root, tmp_path / "package", Workspace(home), default_registry(), IN_PROCESS).run()
     (root / "notes" / "new.txt").write_text("a file the workspace has never seen\n")
     before, source = tree(home), tree(root)
     stats = {p: p.lstat().st_mtime_ns for p in root.rglob("*")}
     _, explanation = explain(root, home)
-    assert tree(home) == before and tree(root) == source
+    assert tree(root) == source
     assert {p: p.lstat().st_mtime_ns for p in root.rglob("*")} == stats
+    after = tree(home)
+    for kept in ("chunks/", "derivatives/"):
+        assert {k: v for k, v in after.items() if k.startswith(kept)} == {
+            k: v for k, v in before.items() if k.startswith(kept)
+        }
     new = by_location(explanation)["notes/new.txt"]
     assert new.plan is not None and new.plan.rule is Rule.SOURCE_NEW
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["fleet", "home", "package"]
 
 
-def test_explain_with_a_fresh_workspace_saves_no_ledger_or_plan(root: Path, tmp_path: Path) -> None:
+def test_explain_warms_the_cache_so_the_ingest_after_it_plans_nothing(
+    root: Path, tmp_path: Path
+) -> None:
     home = tmp_path / "home"
     explain(root, home)
-    for kept in ("ledgers", "plans", "chunks", "derivatives"):
-        assert list((home / kept).iterdir()) == [], kept
+    assert list((home / "chunks").iterdir()) == [] and list((home / "derivatives").iterdir()) == []
+    assert any((home / "ledgers").iterdir()) and any((home / "plans").iterdir())
+    outcome = IngestJob(
+        root, tmp_path / "package", Workspace(home), default_registry(), IN_PROCESS
+    ).run()
+    assert outcome.state is JobState.COMMITTED and outcome.cache.calls.plan == 0
 
 
 # --- Determinism -------------------------------------------------------------------------------
@@ -297,14 +343,17 @@ def test_the_explanation_is_byte_identical_across_runs_copies_and_workspaces(
     root: Path, tmp_path: Path
 ) -> None:
     _, first = explain(root, tmp_path / "home")
-    _, again = explain(root, tmp_path / "home")  # the first kept nothing that changes the second
     copy = mixed_root(tmp_path / "elsewhere")
     _, moved = explain(copy, tmp_path / "other-home")
-    assert first.dumps() == again.dumps() == moved.dumps()
-    assert first.render() == again.render() == moved.render()
+    assert first.dumps() == moved.dumps() and first.render() == moved.render()
+    assert first == moved  # the typed form too
+    # Warm workspaces agree with each other: the second dry run reuses the first's plans.
+    _, warm = explain(root, tmp_path / "home")
+    _, warm_again = explain(root, tmp_path / "home")
+    assert warm.dumps() == warm_again.dumps() != first.dumps()
+    assert {s.plan.rule for s in warm.sources if s.plan} == {Rule.PLANNED}
     data = json.loads(first.dumps())
     assert str(tmp_path) not in first.dumps().decode() and "job" not in data
-    assert first == again  # the typed form too
 
 
 def test_explain_never_changes_a_later_package(root: Path, tmp_path: Path) -> None:
@@ -337,6 +386,76 @@ def test_an_empty_root_is_explained(tmp_path: Path) -> None:
     assert explanation.work.chunks == 0 and explanation.inventory.bytes == 0
     assert explanation.grouping.proposals == ()
     assert explanation.render().startswith("Inventory: 0 files")
+
+
+# --- Bounds ------------------------------------------------------------------------------------
+
+
+def test_an_explanation_is_bounded_and_says_what_it_cut(
+    root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shutil.copy(FIXTURES / "hostile" / "many_members.zip", root / "many_members.zip")
+    _, whole = explain(root, tmp_path / "whole")
+    tight = Bounds(entries=2, locations=1, reasons=1, members=3, summary_bytes=64)
+    monkeypatch.setattr(explain_module, "DEFAULT_BOUNDS", tight)
+    _, cut = explain(root, tmp_path / "cut")
+    data = json.loads(cut.dumps())
+    assert data["bounds"] == tight.to_json()
+    inventory = data["inventory"]
+    assert len(inventory["files"]) == 2 and inventory["files_omitted"] == 8
+    assert inventory["bytes"] == whole.inventory.bytes and inventory["sources"] == 9
+    assert len(data["sources"]) == 2 and data["sources_omitted"] == len(whole.sources) - 2
+    assert data["work"] == json.loads(whole.dumps())["work"]  # totals are over everything
+    assert len(data["left_out"]) <= 2 and len(data["grouping"]["proposals"]) <= 2
+    tabular = next(u for u in data["adapters"] if u["id"] == "tabular")
+    assert len(tabular["selected"]) == 2 and tabular["selected_omitted"] == 3
+    for item in data["sources"]:
+        assert len(item["locations"]) <= 1
+        assert all(len(v["reasons"]) <= 1 for v in item["verdicts"])
+        summary = item.get("inspection", {}).get("summary")
+        assert summary is None or len(canonical_json.dumps(summary)) <= 64
+    cuts = {f.details["list"]: f for f in cut.findings if f.code == TRUNCATED}
+    assert {"inventory.files", "sources", "findings", "adapters.tabular.selected"} <= set(cuts)
+    assert cuts["inventory.files"].details == {
+        "kept": 2,
+        "limit": 2,
+        "list": "inventory.files",
+        "omitted": 8,
+    }
+    assert all(f.category.value == "limit" for f in cuts.values())
+    assert len(cut.findings) == 2 + len(cuts)  # the bound holds, and every cut is listed
+    assert "Truncated:" in cut.render()
+
+
+def test_a_large_inspect_summary_and_container_listing_are_cut(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "mcap" / "robot.mcap", root / "robot.mcap")
+    shutil.copy(FIXTURES / "hostile" / "many_members.zip", root / "many_members.zip")
+    monkeypatch.setattr(explain_module, "DEFAULT_BOUNDS", Bounds(members=5, summary_bytes=100))
+    _, cut = explain(root, tmp_path / "home")
+    sources = by_location(cut)
+    mcap, archive = sources["robot.mcap"], sources["many_members.zip"]
+    assert mcap.inspection is not None and mcap.inspection.summary is None
+    assert mcap.inspection.summary_omitted_bytes > 100
+    assert archive.probe is not None and archive.probe.container is not None
+    listed = len(archive.probe.container.members)
+    assert archive.members_omitted == listed - 5
+    container = json.loads(canonical_json.dumps(archive.to_json()))["format"]["container"]
+    assert len(container["members"]) == 5 and container["members_omitted"] == listed - 5
+    lists = {f.details["list"] for f in cut.findings if f.code == TRUNCATED}
+    assert lists == {"container.members", "inspection.summary"}
+
+
+def test_bounds_refuse_what_is_not_a_positive_count() -> None:
+    with pytest.raises(ValueError, match="entries"):
+        Bounds(entries=0)
+    with pytest.raises(ValueError, match="summary_bytes"):
+        Bounds(summary_bytes=True)
+    assert Bounds(inspect_findings=0).inspect_findings == 0
+    assert explain_transform(Bounds()).adapter_id == "neptune.explain"
 
 
 # --- Heavy transforms: boundaries --------------------------------------------------------------
@@ -433,3 +552,16 @@ class BadInspect(TextAdapter):
 
     def inspect(self, source: SourceReader, config: AdapterConfig) -> InspectResult:
         raise ValueError("no summary")
+
+
+class ShortInspect(TextAdapter):
+    """The text adapter, whose ``inspect`` reads short (after ``before`` runs, if given)."""
+
+    def __init__(self, before: Callable[[], object] | None = None) -> None:
+        super().__init__()
+        self.before = before
+
+    def inspect(self, source: SourceReader, config: AdapterConfig) -> InspectResult:
+        if self.before is not None:
+            self.before()
+        raise ShortReadError(source.content_id, 0, source.size)

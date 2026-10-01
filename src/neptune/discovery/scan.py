@@ -11,7 +11,10 @@ gone.
 
 Everything the walk saw and did not read is also a finding (ADR 0029 §1): every symlink, every
 skipped entry below the root, and every file whose size changed between the walk and the digest.
-``ScanResult.transform`` is the discovery transform the findings name; store it with them.
+``ScanResult.transform`` is the discovery transform the findings name; store it with them. An
+entry an ignore rule left unread (ADR 0043) is the ignore rules' finding instead, under
+``ScanResult.ignore``, and like an entry the walk could not see, nothing is asserted absent at or
+below it.
 """
 
 from collections.abc import Iterable
@@ -36,6 +39,7 @@ from neptune.discovery.source import (
 from neptune.identity.hashing import DEFAULT_CHUNK_SIZE, digest_stream
 from neptune.identity.revisions import Observation, SourceLedger
 from neptune.model.finding import IngestFinding
+from neptune.model.ids import RecordId
 from neptune.model.provenance import TransformRecord
 from neptune.model.source import LocalPath, RawLocalPath, SourceAbsence, SourceRevision
 
@@ -48,6 +52,15 @@ class ScanResult:
     skipped: tuple[SkippedEntry, ...]
     findings: tuple[IngestFinding, ...]  # walk order
     transform: TransformRecord
+    ignore: TransformRecord | None = None  # the ignore rules', if the walk applied any
+
+    @property
+    def producers(self) -> dict[RecordId, TransformRecord]:
+        """Every transform a finding here may name, by id."""
+        producers = {self.transform.id: self.transform}
+        if self.ignore is not None:
+            producers[self.ignore.id] = self.ignore
+        return producers
 
 
 def scan(
@@ -81,7 +94,10 @@ def fingerprint(
             findings.append(symlink_finding(entry))
         elif isinstance(entry, SkippedEntry):
             skipped.append(entry)
-            if entry.raw_path != ROOT_ENTRY:
+            if entry.reason is SkipReason.IGNORED:
+                assert source.ignore is not None and entry.rule is not None
+                findings.append(source.ignore.finding(entry.raw_path, entry.rule))
+            elif entry.raw_path != ROOT_ENTRY:
                 findings.append(skipped_finding(entry))
         else:
             outcome = _digest(source, ledger, entry, chunk_size)
@@ -114,11 +130,13 @@ def fingerprint(
         tuple(skipped),
         tuple(findings),
         DISCOVERY_TRANSFORM,
+        source.ignore.transform if source.ignore is not None else None,
     )
 
 
-# Reasons that mean "could not look", as opposed to "looked and it is not a regular file".
-_BLIND = frozenset({SkipReason.MISSING, SkipReason.UNREADABLE})
+# Reasons that mean "did not look" (could not, or chose not to), as opposed to "looked and it is
+# not a regular file".
+_BLIND = frozenset({SkipReason.MISSING, SkipReason.UNREADABLE, SkipReason.IGNORED})
 
 
 def _digest(

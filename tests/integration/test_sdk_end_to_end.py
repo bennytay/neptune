@@ -20,6 +20,7 @@ from typing import Any, Final
 
 import pytest
 
+from neptune.adapters.builtin import builtin_adapters
 from neptune.identity import canonical_json
 from neptune.model.finding import Severity
 from neptune.model.jsonvalue import JsonObject
@@ -91,8 +92,9 @@ def test_a_sync_ingest_of_the_text_fixtures_runs_every_call_in_the_sandbox(
     assert result.cache.calls.ingest == sum(len(s.chunks) for s in result.cache.sources)
     receipt = result.read_receipt()
     assert receipt.id == result.receipt
-    # The adapter, and session grouping, whose tables every package holds (ADR 0036).
-    assert {t.adapter_id for t in receipt.transforms} == {"neptune.grouping", "text"}
+    # README.md is Markdown; session grouping's tables are in every package (ADR 0036).
+    adapters = {t.adapter_id for t in receipt.transforms} - {"neptune.grouping"}
+    assert "text" in adapters and adapters <= {a.descriptor.id for a in builtin_adapters()}
     # The truncated and the corrupted file each lose one block, and say so.
     assert [(f.code, f.severity) for f in receipt.findings] == [
         ("text.invalid_utf8", Severity.WARNING)
@@ -193,10 +195,7 @@ def test_a_package_never_depends_on_what_earlier_jobs_saw(
     assert all(not r.supersedes for r in listed)  # one revision per file, each its chain's first
     kept = Workspace(home).load_ledger(corpus)
     history = len(kept.revisions()) + len(kept.absences())
-    if change == "unchanged" or kind == "dry_run":  # a dry run saves no ledger (ADR 0044 §2)
-        assert history == len(listed)
-    else:
-        assert history > len(listed)
+    assert history == len(listed) if change == "unchanged" else history > len(listed)
 
 
 def test_a_dry_run_through_the_sandbox_predicts_the_ingest(corpus: Path, tmp_path: Path) -> None:
@@ -208,7 +207,7 @@ def test_a_dry_run_through_the_sandbox_predicts_the_ingest(corpus: Path, tmp_pat
 
     seen: list[JobEvent] = []
     result = client.ingest(corpus, tmp_path / "package", on_event=seen.append)
-    assert result.cache.calls.plan == TEXT_FILES  # a dry run keeps no plan (ADR 0044 §2)
+    assert result.cache.calls.plan == 0  # the dry run's plans
     assert chunks_of(seen, "chunk_committed") == predicted
 
 

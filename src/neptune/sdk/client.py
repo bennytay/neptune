@@ -45,6 +45,7 @@ from neptune.sdk.errors import (
     InvalidDestinationError,
     InvalidSourceError,
     NetworkRefusedError,
+    NothingToResumeError,
     UnsupportedError,
     WorkspaceUnusableError,
     from_job_error,
@@ -71,7 +72,7 @@ def _require_network(workspace: Workspace, purpose: str) -> None:
 
 
 def _local_root(source: StrPath, workspace: Workspace) -> Path:
-    """The local directory ``source`` names: a path, or a ``file:`` URI on this host.
+    """The local directory or file ``source`` names: a path, or a ``file:`` URI on this host.
 
     Any other scheme names something only a connector can read over the network: refused while
     the workspace is local-only, and unsupported until a connector lands (MVL-45, MVL-46).
@@ -85,14 +86,14 @@ def _local_root(source: StrPath, workspace: Workspace) -> Path:
         if parts.netloc.lower() not in _LOCAL_HOSTS:
             raise UnsupportedError(f"{source} names another host; a file URI names this one")
         if parts.query or parts.fragment or not parts.path:
-            raise InvalidSourceError(f"{source} is not a file URI of a directory")
+            raise InvalidSourceError(f"{source} is not a file URI of a directory or a file")
         root = Path(os.fsdecode(urllib.parse.unquote_to_bytes(parts.path)))
     else:
         root = Path(source)
     if not root.exists():
         raise InvalidSourceError(f"{root} does not exist")
-    if not root.is_dir():
-        raise InvalidSourceError(f"{root} is not a directory; ingest the folder that holds it")
+    if not root.is_dir() and not root.is_file():  # one regular file is a source too (ADR 0043)
+        raise InvalidSourceError(f"{root} is neither a directory nor a regular file")
     return root
 
 
@@ -367,10 +368,15 @@ class Neptune:
     def options(self) -> JobOptions:
         return self._options
 
-    def _builder(self, source: StrPath, destination: StrPath | None) -> Build:
+    def _builder(self, source: StrPath, destination: StrPath | None, resume: bool = False) -> Build:
         """Resolve and check the call now; return what builds its job around a sink and event."""
         root = _local_root(source, self._workspace)
         target = _destination(destination, root) if destination is not None else None
+        if resume and not self._workspace.has_ledger(root):
+            raise NothingToResumeError(
+                f"the workspace {self._workspace.home} holds no earlier work on {root}; "
+                "a resume continues a job that scanned it here"
+            )
 
         def build(on_event: EventSink | None, cancel: threading.Event | None) -> IngestJob:
             try:
@@ -395,13 +401,15 @@ class Neptune:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        resume: bool = False,
     ) -> IngestResult:
-        """Ingest the folder ``source`` (a path or a ``file:`` URI) into a package at
+        """Ingest the folder or file ``source`` (a path or a ``file:`` URI) into a package at
         ``destination``, on this thread. ``on_event`` gets every ``JobEvent`` as it happens; an
         exception it raises stops the job and propagates. Setting ``cancel`` stops the job at its
         next checkpoint: the result is ``cancelled`` and the workspace keeps the work. Run it
-        again to resume: committed chunks are reused, not redone."""
-        job = self._builder(source, destination)(on_event, cancel)
+        again to resume: committed chunks are reused, not redone. ``resume=True`` insists on it:
+        ``NothingToResumeError`` if the workspace holds no earlier work on ``source``."""
+        job = self._builder(source, destination, resume)(on_event, cancel)
         return _execute(job, dry=False)
 
     def dry_run(
@@ -410,23 +418,31 @@ class Neptune:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        resume: bool = False,
     ) -> IngestResult:
         """What ``ingest`` would do with ``source``, without parsing anything or writing a
         package: the job's ``discover``, ``fingerprint``, ``inspect`` and ``plan`` phases. The
         result is ``planned``; its findings say what is unsupported or ambiguous and its cache
         report what each source's adapter planned and what the workspace already holds."""
-        job = self._builder(source, None)(on_event, cancel)
+        job = self._builder(source, None, resume)(on_event, cancel)
         return _execute(job, dry=True)
 
     def start(
-        self, source: StrPath, destination: StrPath, *, cancel: threading.Event | None = None
+        self,
+        source: StrPath,
+        destination: StrPath,
+        *,
+        cancel: threading.Event | None = None,
+        resume: bool = False,
     ) -> Ingestion:
         """``ingest`` on a thread of its own: iterate the handle for events, then ``result()``."""
-        return Ingestion(self._builder(source, destination), dry=False, cancel=cancel)
+        return Ingestion(self._builder(source, destination, resume), dry=False, cancel=cancel)
 
-    def start_dry_run(self, source: StrPath, *, cancel: threading.Event | None = None) -> Ingestion:
+    def start_dry_run(
+        self, source: StrPath, *, cancel: threading.Event | None = None, resume: bool = False
+    ) -> Ingestion:
         """``dry_run`` on a thread of its own."""
-        return Ingestion(self._builder(source, None), dry=True, cancel=cancel)
+        return Ingestion(self._builder(source, None, resume), dry=True, cancel=cancel)
 
 
 class AsyncNeptune:
@@ -468,9 +484,11 @@ class AsyncNeptune:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        resume: bool = False,
     ) -> IngestResult:
         """``Neptune.ingest``, awaited."""
-        return await _drive(self.start(source, destination, cancel=cancel), on_event)
+        run = self.start(source, destination, cancel=cancel, resume=resume)
+        return await _drive(run, on_event)
 
     async def dry_run(
         self,
@@ -478,22 +496,28 @@ class AsyncNeptune:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        resume: bool = False,
     ) -> IngestResult:
         """``Neptune.dry_run``, awaited."""
-        return await _drive(self.start_dry_run(source, cancel=cancel), on_event)
+        return await _drive(self.start_dry_run(source, cancel=cancel, resume=resume), on_event)
 
     def start(
-        self, source: StrPath, destination: StrPath, *, cancel: threading.Event | None = None
+        self,
+        source: StrPath,
+        destination: StrPath,
+        *,
+        cancel: threading.Event | None = None,
+        resume: bool = False,
     ) -> AsyncIngestion:
         """``ingest`` on a thread of its own: ``async for`` its events, ``await`` its result."""
-        builder = self._sync._builder(source, destination)
+        builder = self._sync._builder(source, destination, resume)
         return AsyncIngestion(builder, dry=False, cancel=cancel)
 
     def start_dry_run(
-        self, source: StrPath, *, cancel: threading.Event | None = None
+        self, source: StrPath, *, cancel: threading.Event | None = None, resume: bool = False
     ) -> AsyncIngestion:
         """``dry_run`` on a thread of its own."""
-        return AsyncIngestion(self._sync._builder(source, None), dry=True, cancel=cancel)
+        return AsyncIngestion(self._sync._builder(source, None, resume), dry=True, cancel=cancel)
 
 
 async def _drive(run: AsyncIngestion, on_event: EventSink | None) -> IngestResult:
@@ -549,10 +573,11 @@ def ingest(
     options: JobOptions | None = None,
     on_event: EventSink | None = None,
     cancel: threading.Event | None = None,
+    resume: bool = False,
 ) -> IngestResult:
     """``Neptune(workspace, adapters=..., options=...).ingest(source, destination, ...)``."""
     client = Neptune(workspace, adapters=adapters, options=options)
-    return client.ingest(source, destination, on_event=on_event, cancel=cancel)
+    return client.ingest(source, destination, on_event=on_event, cancel=cancel, resume=resume)
 
 
 def dry_run(
@@ -563,7 +588,8 @@ def dry_run(
     options: JobOptions | None = None,
     on_event: EventSink | None = None,
     cancel: threading.Event | None = None,
+    resume: bool = False,
 ) -> IngestResult:
     """``Neptune(workspace, adapters=..., options=...).dry_run(source, ...)``."""
     client = Neptune(workspace, adapters=adapters, options=options)
-    return client.dry_run(source, on_event=on_event, cancel=cancel)
+    return client.dry_run(source, on_event=on_event, cancel=cancel, resume=resume)

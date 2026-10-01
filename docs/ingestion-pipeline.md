@@ -41,7 +41,7 @@ state machine over the stages above, in nine phases (ADR 0028):
 
 | Phase | Stages above | Does |
 |---|---|---|
-| `discover` | 1 | sweeps the workspace's scratch and staging debris; walks the root; every symlink, special or unreadable entry is discovery's finding (ADR 0029 §1) |
+| `discover` | 1 | sweeps the workspace's scratch and staging debris; walks the root (a directory, or one regular file: ADR 0043) under the job's ignore rules; every symlink, special, unreadable or ignored entry is discovery's finding (ADR 0029 §1, ADR 0043 §6) |
 | `fingerprint` | 2 | hashes every file into the root's persisted ledger, reconciles absences, saves the ledger; a size that changed while hashing is a finding |
 | `inspect` | 3 | reads each distinct source's head once and runs the probe engine over it in one sandboxed call (every adapter's probe, the container listing); selects and configures; a tie, an unclaimed source or a container problem is a `neptune.probe.*` finding (ADR 0033 §1); then groups the scan's layout into session proposals (stage 5, no adapter call; `JobOptions.grouping` declares sessions, stated and set against the rules' readings; ADR 0036) |
 | `plan` | 6 | reuses the workspace's saved plan for (source, transform) or calls `plan`, checks it, saves it |

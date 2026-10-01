@@ -12,10 +12,17 @@ function of the root's bytes and names, the adapters, the config and what the wo
 holds (its committed chunks and saved plans); it carries no job id, clock, duration, absolute path
 or host, so ``dumps`` is byte-identical for the same inputs. ``render`` is the same content as
 lines for people.
+
+It is bounded (``Bounds``, ADR 0044 §8): every list keeps at most ``entries`` items, each source
+at most ``locations`` locations, each verdict ``reasons`` reasons, each container listing
+``members`` members, each ``inspect`` summary ``summary_bytes`` canonical bytes and ``inspect``
+findings; what a bound cuts is counted in a ``*_omitted`` field beside it, and one
+``neptune.explain.truncated`` finding per bound that cut says where. Totals (bytes, sources, work)
+are always over everything.
 """
 
-from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Final
 
@@ -26,10 +33,12 @@ from neptune.derived.sessions import SessionProposal, Status, UnassignedFile
 from neptune.discovery.probe import PROBE_ID, SourceProbe
 from neptune.discovery.source import SkipReason
 from neptune.identity import canonical_json
-from neptune.model.finding import FindingCategory, IngestFinding
+from neptune.identity.findings import ingest_finding
+from neptune.identity.provenance import transform_record
+from neptune.model.finding import FindingCategory, FindingSubject, IngestFinding, Severity
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.provenance import ByteRange, EvidenceRef
+from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
 from neptune.model.source import LocalPath, RawLocalPath
 from neptune.runtime.cache import Rule
 from neptune.runtime.sandbox import Limits
@@ -41,6 +50,52 @@ HEAVY_BYTES: Final = 256 * 1024 * 1024
 HEAVY_CHUNKS: Final = 1024
 ADAPTER_FAILED: Final = f"{PROBE_ID}.adapter_failed"
 RENDER_WIDTH: Final = 160  # ``render`` abridges an inspect summary to this many characters
+EXPLAIN_ID: Final = "neptune.explain"
+EXPLAIN_VERSION: Final = "0.1.0"
+TRUNCATED: Final = f"{EXPLAIN_ID}.truncated"
+
+
+@dataclass(frozen=True)
+class Bounds:
+    """How much one explanation holds (ADR 0044 §8). ``entries`` bounds every list: inventory
+    files, links and skipped entries, sources, left-out locations, session proposals, unassigned
+    files, findings, and each adapter's selected sources."""
+
+    entries: int = 10_000
+    locations: int = 64
+    reasons: int = 16
+    members: int = 256
+    summary_bytes: int = 16 * 1024
+    inspect_findings: int = 64
+
+    def __post_init__(self) -> None:
+        for name in ("entries", "locations", "reasons", "members", "summary_bytes"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} is a positive integer, got {value!r}")
+        if isinstance(self.inspect_findings, bool) or self.inspect_findings < 0:
+            raise ValueError(f"inspect_findings is a count, got {self.inspect_findings!r}")
+
+    def to_json(self) -> JsonObject:
+        return {
+            "entries": self.entries,
+            "inspect_findings": self.inspect_findings,
+            "locations": self.locations,
+            "members": self.members,
+            "reasons": self.reasons,
+            "summary_bytes": self.summary_bytes,
+        }
+
+
+DEFAULT_BOUNDS: Final = Bounds()
+
+
+def explain_transform(bounds: Bounds) -> TransformRecord:
+    """The explanation as a producer: its truncation findings name this transform."""
+    return transform_record(
+        adapter_id=EXPLAIN_ID, adapter_version=EXPLAIN_VERSION, config=bounds.to_json()
+    )
+
 
 Location = LocalPath | RawLocalPath
 
@@ -109,22 +164,38 @@ class Inventory:
     files: tuple[InventoryFile, ...]
     links: tuple[InventoryLink, ...]
     skipped: tuple[InventorySkipped, ...]
+    bytes: int  # over every file, listed or omitted
+    sources: int  # distinct sources: identical bytes at two locations are one
+    files_omitted: int = 0
+    links_omitted: int = 0
+    skipped_omitted: int = 0
 
-    @property
-    def bytes(self) -> int:
-        return sum(entry.size for entry in self.files)
-
-    @property
-    def sources(self) -> int:
-        """Distinct sources: identical bytes at two locations are one."""
-        return len({entry.source for entry in self.files})
+    @classmethod
+    def of(
+        cls,
+        files: Iterable[InventoryFile],
+        links: Iterable[InventoryLink],
+        skipped: Iterable[InventorySkipped],
+    ) -> "Inventory":
+        """Everything, each list sorted by location bytes."""
+        listed = tuple(sorted(files, key=lambda f: f.location.raw))
+        return cls(
+            listed,
+            tuple(sorted(links, key=lambda link: link.location.raw)),
+            tuple(sorted(skipped, key=lambda entry: (entry.location.raw, str(entry.reason)))),
+            sum(entry.size for entry in listed),
+            len({entry.source for entry in listed}),
+        )
 
     def to_json(self) -> JsonObject:
         return {
             "bytes": self.bytes,
             "files": [entry.to_json() for entry in self.files],
+            "files_omitted": self.files_omitted,
             "links": [link.to_json() for link in self.links],
+            "links_omitted": self.links_omitted,
             "skipped": [entry.to_json() for entry in self.skipped],
+            "skipped_omitted": self.skipped_omitted,
             "sources": self.sources,
         }
 
@@ -154,11 +225,13 @@ class AdapterVerdict:
     reasons: tuple[ProbeReason, ...]
     why: str
     failure: JsonObject | None = None
+    reasons_omitted: int = 0
 
     def to_json(self) -> JsonObject:
         out: dict[str, JsonValue] = {
             "adapter": self.adapter,
             "reasons": [reason.to_json() for reason in self.reasons],
+            "reasons_omitted": self.reasons_omitted,
             "verdict": str(self.verdict),
             "version": self.version,
             "why": self.why,
@@ -254,9 +327,15 @@ class Inspection:
     summary: JsonObject | None
     findings: tuple[IngestFinding, ...] = ()
     failure: JsonObject | None = None
+    summary_omitted_bytes: int = 0  # the summary's canonical size, when a bound left it out
+    findings_omitted: int = 0
 
     def to_json(self) -> JsonObject:
-        out: dict[str, JsonValue] = {"findings": [f.to_json() for f in self.findings]}
+        out: dict[str, JsonValue] = {
+            "findings": [f.to_json() for f in self.findings],
+            "findings_omitted": self.findings_omitted,
+            "summary_omitted_bytes": self.summary_omitted_bytes,
+        }
         if self.summary is not None:
             out["summary"] = self.summary
         if self.failure is not None:
@@ -371,6 +450,12 @@ class SourceExplanation:
     plan: PlanEstimate | None
     heavy: tuple[Heavy, ...]
     quarantined: tuple[str, ...]  # the codes of the findings that took it out, in order
+    locations_omitted: int = 0
+    members_omitted: int = 0  # container members a bound left out of ``format.container``
+
+    @property
+    def whole(self) -> EvidenceRef:
+        return EvidenceRef(self.source, (ByteRange(0, self.size),))
 
     def format_line(self) -> str:
         if self.probe is None:
@@ -385,6 +470,7 @@ class SourceExplanation:
         out: dict[str, JsonValue] = {
             "heavy": [reason.to_json() for reason in self.heavy],
             "locations": [location.to_json() for location in self.locations],
+            "locations_omitted": self.locations_omitted,
             "quarantined": list(self.quarantined),
             "size": self.size,
             "source": self.source,
@@ -399,7 +485,12 @@ class SourceExplanation:
                 "sniff": self.probe.sniff.to_json(),
             }
             if self.probe.container is not None:
-                detected["container"] = self.probe.container.to_json()
+                container = dict(self.probe.container.to_json())
+                members = container["members"]
+                assert isinstance(members, Sequence)
+                container["members"] = list(members[: len(members) - self.members_omitted])
+                container["members_omitted"] = self.members_omitted
+                detected["container"] = container
             out["format"] = detected
         if self.inspection is not None:
             out["inspection"] = self.inspection.to_json()
@@ -483,7 +574,9 @@ class GroupingExplanation:
     transform: RecordId
     proposals: tuple[SessionProposal, ...]
     unassigned: tuple[UnassignedFile, ...]
-    summary: JsonObject
+    summary: JsonObject  # over every proposal and file, listed or omitted
+    proposals_omitted: int = 0
+    unassigned_omitted: int = 0
 
     @classmethod
     def of(cls, grouping: Grouping) -> "GroupingExplanation":
@@ -494,9 +587,11 @@ class GroupingExplanation:
     def to_json(self) -> JsonObject:
         return {
             "proposals": [proposal.to_json() for proposal in self.proposals],
+            "proposals_omitted": self.proposals_omitted,
             "summary": self.summary,
             "transform": self.transform,
             "unassigned": [entry.to_json() for entry in self.unassigned],
+            "unassigned_omitted": self.unassigned_omitted,
         }
 
 
@@ -547,6 +642,24 @@ def work_estimate(sources: Iterable[SourceExplanation], calls: JsonObject) -> Wo
 
 
 @dataclass(frozen=True)
+class AdapterUse:
+    """A registered adapter and the sources it was selected for, by id."""
+
+    descriptor: AdapterDescriptor
+    selected: tuple[ContentId, ...]
+    selected_omitted: int = 0
+
+    def to_json(self) -> JsonObject:
+        return {
+            "id": self.descriptor.id,
+            "selected": list(self.selected),
+            "selected_omitted": self.selected_omitted,
+            "summary": self.descriptor.summary,
+            "version": self.descriptor.version,
+        }
+
+
+@dataclass(frozen=True)
 class Explanation:
     """What a run of this job would do, and why (ADR 0044).
 
@@ -558,11 +671,15 @@ class Explanation:
 
     inventory: Inventory
     sources: tuple[SourceExplanation, ...]
-    adapters: tuple[tuple[AdapterDescriptor, tuple[ContentId, ...]], ...]
+    adapters: tuple[AdapterUse, ...]
     grouping: GroupingExplanation
     work: WorkEstimate
     left_out: tuple[LeftOut, ...]
     findings: tuple[IngestFinding, ...]
+    bounds: Bounds = DEFAULT_BOUNDS
+    sources_omitted: int = 0
+    left_out_omitted: int = 0
+    findings_omitted: int = 0
 
     @property
     def ambiguities(self) -> tuple[IngestFinding, ...]:
@@ -574,23 +691,19 @@ class Explanation:
 
     def to_json(self) -> JsonObject:
         return {
-            "adapters": [
-                {
-                    "id": descriptor.id,
-                    "selected": list(selected),
-                    "summary": descriptor.summary,
-                    "version": descriptor.version,
-                }
-                for descriptor, selected in self.adapters
-            ],
+            "adapters": [use.to_json() for use in self.adapters],
             "ambiguities": [finding.id for finding in self.ambiguities],
+            "bounds": self.bounds.to_json(),
             "findings": [finding.to_json() for finding in self.findings],
+            "findings_omitted": self.findings_omitted,
             "grouping": self.grouping.to_json(),
             "heavy": [item.source for item in self.heavy],
             "inventory": self.inventory.to_json(),
             "left_out": [entry.to_json() for entry in self.left_out],
+            "left_out_omitted": self.left_out_omitted,
             "schema": SCHEMA,
             "sources": [item.to_json() for item in self.sources],
+            "sources_omitted": self.sources_omitted,
             "work": self.work.to_json(),
         }
 
@@ -601,9 +714,11 @@ class Explanation:
     def render(self) -> str:
         """The explanation as lines for people; the same facts as ``to_json``, abridged."""
         inv, work = self.inventory, self.work
+        files = len(inv.files) + inv.files_omitted
+        links, skipped = len(inv.links) + inv.links_omitted, len(inv.skipped) + inv.skipped_omitted
         lines = [
-            f"Inventory: {len(inv.files)} files ({_size(inv.bytes)}) holding {inv.sources}"
-            f" distinct sources; {len(inv.links)} links; {len(inv.skipped)} skipped",
+            f"Inventory: {files} files ({_size(inv.bytes)}) holding {inv.sources}"
+            f" distinct sources; {links} links; {skipped} skipped",
             "",
             "Sources:",
         ]
@@ -629,15 +744,17 @@ class Explanation:
         counts = self.grouping.summary
         lines += [
             "",
-            f"Sessions: {counts['proposals']} proposals ({counts['contested']} contested),"
-            f" {counts['ambiguous']} ambiguous and {counts['unknown']} unplaced files",
+            f"Sessions (inferred from names and folders, ADR 0036): {counts['proposals']}"
+            f" proposals ({counts['contested']} contested), {counts['ambiguous']} ambiguous and"
+            f" {counts['unknown']} unplaced files",
         ]
         for proposal in self.grouping.proposals:
             place = proposal.directory
             where = "the root" if not isinstance(place, LocalPath | RawLocalPath) else show(place)
             contested = " contested" if proposal.status is Status.CONTESTED else ""
             lines.append(
-                f"  [{proposal.confidence} {proposal.rule}{contested}] {where}:"
+                f"  [{proposal.assertion_kind} {proposal.confidence} {proposal.rule}{contested}]"
+                f" {where}:"
                 f" {len(proposal.members)} files; "
                 + "; ".join(reason.message for reason in proposal.reasons)
             )
@@ -660,4 +777,200 @@ class Explanation:
         if self.ambiguities:
             lines += ["", "Ambiguities:"]
             lines += [f"  {finding.code}: {finding.message}" for finding in self.ambiguities]
+        truncated = [f for f in self.findings if f.code == TRUNCATED]
+        if truncated:
+            lines += ["", "Truncated:"]
+            lines += [f"  {finding.message}" for finding in truncated]
         return "\n".join(lines) + "\n"
+
+
+# --- Bounds --------------------------------------------------------------------------------------
+
+
+class _Cuts:
+    """The truncation findings one bounding makes: one per list a bound cut."""
+
+    def __init__(self, transform: TransformRecord) -> None:
+        self.transform = transform
+        self.findings: list[IngestFinding] = []
+
+    def cut(
+        self,
+        what: str,
+        subject: FindingSubject,
+        kept: int,
+        omitted: int,
+        limit: int,
+        unit: str,
+        sources: int | None = None,
+    ) -> None:
+        """``what`` kept ``kept`` and omitted ``omitted``; per-source bounds name how many
+        ``sources`` they cut in, and ``kept`` is then the bound each was cut to."""
+        if omitted <= 0:
+            return
+        where = f" in {sources} sources" if sources is not None else ""
+        details: dict[str, JsonValue] = {
+            "kept": kept,
+            "limit": limit,
+            "list": what,
+            "omitted": omitted,
+        }
+        if sources is not None:
+            details["sources"] = sources
+        self.findings.append(
+            ingest_finding(
+                code=TRUNCATED,
+                category=FindingCategory.LIMIT,
+                severity=Severity.INFO,
+                subject=subject,
+                transform=self.transform,
+                message=f"{what}: {omitted} {unit} omitted{where} past the bound of {limit};"
+                " the subject is the first one cut",
+                details=details,
+            )
+        )
+
+
+def bounded(explanation: Explanation, bounds: Bounds | None = None) -> Explanation:
+    """``explanation`` within ``bounds`` (``DEFAULT_BOUNDS`` when ``None``, read at call time):
+    each list cut to its bound, each cut counted beside it and named by one
+    ``neptune.explain.truncated`` finding, which is always listed."""
+    bounds = bounds if bounds is not None else DEFAULT_BOUNDS
+    cuts = _Cuts(explain_transform(bounds))
+    n = bounds.entries
+    inv = explanation.inventory
+    for what, entries in (("inventory.files", inv.files), ("inventory.links", inv.links),
+                          ("inventory.skipped", inv.skipped)):  # fmt: skip
+        if len(entries) > n:
+            cuts.cut(what, entries[n].location, n, len(entries) - n, n, "entries")
+    inventory = replace(
+        inv,
+        files=inv.files[:n],
+        links=inv.links[:n],
+        skipped=inv.skipped[:n],
+        files_omitted=max(0, len(inv.files) - n),
+        links_omitted=max(0, len(inv.links) - n),
+        skipped_omitted=max(0, len(inv.skipped) - n),
+    )
+
+    per_source: dict[str, tuple[FindingSubject, int, int]] = {}  # what -> first, sources, total
+
+    def note(what: str, item: SourceExplanation, omitted: int) -> None:
+        if omitted > 0:
+            first, count, total = per_source.get(what, (item.whole, 0, 0))
+            per_source[what] = (first, count + 1, total + omitted)
+
+    kept_sources = []
+    for item in explanation.sources[:n]:
+        locations = item.locations[: bounds.locations]
+        note("source.locations", item, len(item.locations) - len(locations))
+        verdicts = []
+        for verdict in item.verdicts:
+            reasons = verdict.reasons[: bounds.reasons]
+            note("verdict.reasons", item, len(verdict.reasons) - len(reasons))
+            verdicts.append(
+                replace(
+                    verdict, reasons=reasons, reasons_omitted=len(verdict.reasons) - len(reasons)
+                )
+            )
+        members = 0
+        if item.probe is not None and item.probe.container is not None:
+            members = max(0, len(item.probe.container.members) - bounds.members)
+            note("container.members", item, members)
+        inspection = item.inspection
+        if inspection is not None:
+            if inspection.summary is not None:
+                size = len(canonical_json.dumps(inspection.summary))
+                if size > bounds.summary_bytes:
+                    note("inspection.summary", item, 1)
+                    inspection = replace(inspection, summary=None, summary_omitted_bytes=size)
+            extra = len(inspection.findings) - bounds.inspect_findings
+            if extra > 0:
+                note("inspection.findings", item, extra)
+                inspection = replace(
+                    inspection,
+                    findings=inspection.findings[: bounds.inspect_findings],
+                    findings_omitted=extra,
+                )
+        kept_sources.append(
+            replace(
+                item,
+                locations=locations,
+                locations_omitted=len(item.locations) - len(locations),
+                verdicts=tuple(verdicts),
+                members_omitted=members,
+                inspection=inspection,
+            )
+        )
+    for what, (first, count, total) in sorted(per_source.items()):
+        limit = getattr(bounds, _PER_SOURCE[what])
+        cuts.cut(what, first, limit, total, limit, "items", sources=count)
+    sources = explanation.sources
+    if len(sources) > n:
+        cuts.cut("sources", sources[n].whole, n, len(sources) - n, n, "sources")
+
+    by_id = {item.source: item for item in sources}
+    adapters = []
+    for use in explanation.adapters:
+        if len(use.selected) > n:
+            chosen = by_id[use.selected[n]]
+            cuts.cut(f"adapters.{use.descriptor.id}.selected", chosen.whole, n,
+                     len(use.selected) - n, n, "sources")  # fmt: skip
+        adapters.append(
+            replace(use, selected=use.selected[:n], selected_omitted=max(0, len(use.selected) - n))
+        )
+
+    left = explanation.left_out
+    if len(left) > n:
+        cuts.cut("left_out", left[n].location, n, len(left) - n, n, "locations")
+    grouping = explanation.grouping
+    if len(grouping.proposals) > n:
+        proposal = grouping.proposals[n]
+        place = proposal.directory
+        subject: FindingSubject | None = (
+            proposal.members[0].location
+            if proposal.members
+            else place
+            if isinstance(place, LocalPath | RawLocalPath)
+            else None
+        )
+        if subject is None and inv.files:
+            subject = inv.files[0].location
+        if subject is not None:
+            cuts.cut("grouping.proposals", subject, n, len(grouping.proposals) - n, n, "proposals")
+    if len(grouping.unassigned) > n:
+        cuts.cut("grouping.unassigned", grouping.unassigned[n].location, n,
+                 len(grouping.unassigned) - n, n, "files")  # fmt: skip
+    grouping = replace(
+        grouping,
+        proposals=grouping.proposals[:n],
+        unassigned=grouping.unassigned[:n],
+        proposals_omitted=max(0, len(grouping.proposals) - n),
+        unassigned_omitted=max(0, len(grouping.unassigned) - n),
+    )
+    findings = explanation.findings
+    if len(findings) > n:
+        cuts.cut("findings", findings[n].subject, n, len(findings) - n, n, "findings")
+    kept = findings[:n] + tuple(cuts.findings)
+    return replace(
+        explanation,
+        inventory=inventory,
+        sources=tuple(kept_sources),
+        adapters=tuple(adapters),
+        grouping=grouping,
+        left_out=left[:n],
+        findings=tuple(sorted(kept, key=lambda f: f.id)),
+        bounds=bounds,
+        sources_omitted=max(0, len(sources) - n),
+        left_out_omitted=max(0, len(left) - n),
+        findings_omitted=max(0, len(findings) - n),
+    )
+
+
+_PER_SOURCE: Final = {
+    "container.members": "members",
+    "inspection.findings": "inspect_findings",
+    "inspection.summary": "summary_bytes",
+    "source.locations": "locations",
+    "verdict.reasons": "reasons",
+}
