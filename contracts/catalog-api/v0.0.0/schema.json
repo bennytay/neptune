@@ -1,0 +1,225 @@
+{
+  "$defs": {
+    "CatalogPackage": {
+      "additionalProperties": false,
+      "description": "An ingest package the catalog has registered, by its content id.",
+      "properties": {
+        "api_version": {
+          "const": "0.0.0"
+        },
+        "kind": {
+          "const": "catalog_package"
+        },
+        "package_id": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "package_schema_version": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "record_counts": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/RecordKind"
+          },
+          "type": "object"
+        },
+        "registered": {
+          "$ref": "#/$defs/Sequence"
+        }
+      },
+      "required": [
+        "api_version",
+        "kind",
+        "package_id",
+        "package_schema_version",
+        "record_counts",
+        "registered"
+      ],
+      "type": "object"
+    },
+    "ContentId": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "CurrentView": {
+      "additionalProperties": false,
+      "description": "The record a thread resolves to at a registration sequence; older records stay addressable.",
+      "properties": {
+        "api_version": {
+          "const": "0.0.0"
+        },
+        "as_of": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "current": {
+          "$ref": "#/$defs/RecordRef"
+        },
+        "kind": {
+          "const": "current_view"
+        },
+        "superseded": {
+          "items": {
+            "$ref": "#/$defs/RecordRef"
+          },
+          "type": "array"
+        },
+        "thread_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "api_version",
+        "as_of",
+        "current",
+        "kind",
+        "superseded",
+        "thread_id"
+      ],
+      "type": "object"
+    },
+    "EntityThread": {
+      "additionalProperties": false,
+      "description": "Every record the catalog has linked to one entity, oldest registration first. Links come from declared identity only; identical content is never merged.",
+      "properties": {
+        "api_version": {
+          "const": "0.0.0"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/RecordRef"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "kind": {
+          "const": "entity_thread"
+        },
+        "record_kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "thread_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "api_version",
+        "entries",
+        "kind",
+        "record_kind",
+        "thread_id"
+      ],
+      "type": "object"
+    },
+    "Lineage": {
+      "additionalProperties": false,
+      "description": "Which transform produced a record, from which source artifacts, and which records it cites.",
+      "properties": {
+        "api_version": {
+          "const": "0.0.0"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/ContentId"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "kind": {
+          "const": "lineage"
+        },
+        "record": {
+          "$ref": "#/$defs/RecordRef"
+        },
+        "related_records": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "transform": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "api_version",
+        "evidence",
+        "kind",
+        "record",
+        "related_records",
+        "transform"
+      ],
+      "type": "object"
+    },
+    "RecordId": {
+      "pattern": "^rec:sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "RecordKind": {
+      "description": "A package-schema record kind, e.g. run or calibration.",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "type": "string"
+    },
+    "RecordRef": {
+      "additionalProperties": false,
+      "description": "One record of one registered package; source artifacts are named by content id.",
+      "properties": {
+        "package_id": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "record_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecordId"
+            },
+            {
+              "$ref": "#/$defs/ContentId"
+            }
+          ]
+        },
+        "record_kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "registered": {
+          "$ref": "#/$defs/Sequence"
+        }
+      },
+      "required": [
+        "package_id",
+        "record_id",
+        "record_kind",
+        "registered"
+      ],
+      "type": "object"
+    },
+    "Sequence": {
+      "description": "The catalog's registration order (transaction time).",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "$id": "urn:neptune:contract:catalog-api:0.0.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/CatalogPackage"
+    },
+    {
+      "$ref": "#/$defs/EntityThread"
+    },
+    {
+      "$ref": "#/$defs/Lineage"
+    },
+    {
+      "$ref": "#/$defs/CurrentView"
+    }
+  ],
+  "description": "DRAFT authored by Platform (MVL-121) from the programme document: the catalog API the Ledger serves over compiler ingest packages. One response document per kind: a registered package, an entity thread, a record's lineage, and an entity's current view. Superseded by the Ledger's first exported schema (neptune_ledger.api); do not build against field details. Ordering uses the catalog's registration sequence, never a wall clock.",
+  "title": "Neptune Ledger catalog API, version 0.0.0 (draft)"
+}
