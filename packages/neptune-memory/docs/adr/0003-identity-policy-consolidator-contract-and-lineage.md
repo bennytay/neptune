@@ -76,7 +76,7 @@ with a token `consolidator_id`, a `version` and a `model` that is `None` for det
   sorts evidence and records, and returns claims and findings sorted by id. A draft `Claim` refuses, one that
   breaks the predicate vocabulary, or one with the wrong `assertion_kind` becomes a finding; a raised exception
   becomes `consolidate.failed` and output of the wrong type `consolidate.bad_output`. A consolidator never sets
-  ids.
+  ids, and may not use the id `memory.supersede`, which ADR 0002 reserves for the superseding resolver.
 - **"Previous claims"** are the claims of consolidators *earlier in the same build's declared order*; never a
   consolidator's own output and never a previous build's graph. That is what makes a re-run idempotent. A claim
   resting on earlier claims cites their records and evidence (provenance holds Ledger record ids only).

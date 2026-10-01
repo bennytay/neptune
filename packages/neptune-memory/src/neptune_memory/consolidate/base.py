@@ -29,6 +29,7 @@ from neptune.model.knowledge import Knowledge, NotApplicable
 from neptune_memory.schema.claim import Claim, ClaimProvenance, is_inferred
 from neptune_memory.schema.interval import OPEN, LedgerTx, Open
 from neptune_memory.schema.predicates import CORE_PREDICATES, PredicateRegistry, violations
+from neptune_memory.schema.supersede import RESOLVER_ID
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -284,9 +285,11 @@ def run_consolidator(
 ) -> Consolidation:
     """Run one consolidator and stamp its output. Contract breaches become findings, not errors.
 
-    Raises only for a caller error: a config that is not canonical JSON, or a model-based
-    consolidator whose resolved config does not name its model.
+    Raises only for a caller error: a config that is not canonical JSON, a model-based
+    consolidator whose resolved config does not name its model, or the reserved resolver id.
     """
+    if consolidator.consolidator_id == RESOLVER_ID:
+        raise ValueError(f"{RESOLVER_ID!r} is reserved for the superseding resolver (ADR 0002)")
     model = consolidator.model
     if model is not None and config.get("model") != model.to_json():
         raise ValueError("a model-based consolidator's resolved config must hold its model")

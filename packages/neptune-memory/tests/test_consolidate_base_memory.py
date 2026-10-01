@@ -315,6 +315,13 @@ def test_rebuild_feeds_only_earlier_claims_forward() -> None:
     assert seen == [("test.evidenced", 0), ("test.spy", 2)]
 
 
+def test_reserved_resolver_id_is_refused() -> None:
+    with pytest.raises(ValueError, match="reserved"):
+        _run(EvidencedBy(consolidator_id="memory.supersede"))
+    with pytest.raises(ValueError, match="reserved"):
+        rebuild(_ledger(), [(EvidencedBy(consolidator_id="memory.supersede"), {})], recorded_at=TX)
+
+
 def test_rebuild_rejects_a_duplicate_consolidator() -> None:
     with pytest.raises(ValueError, match="twice"):
         rebuild(_ledger(), [(EvidencedBy(), {}), (EvidencedBy(version="2"), {})], recorded_at=TX)
