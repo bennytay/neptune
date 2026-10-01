@@ -2,21 +2,26 @@
 
 - ``events``: the nine phases, the job's states, and the structured events a job emits.
 - ``lineage``: the runtime as a producer: its transform record and the findings it makes.
-- ``job``: ``IngestJob``, the state machine over discovery, adapters, the workspace and the store.
+- ``cache``: what a job reuses and why it recomputes: invalidation rules and the cache report.
+- ``job``: ``IngestJob``, the state machine over discovery, adapters, the workspace and the store;
+  ``collect``, which removes from a workspace what no job with these adapters can reuse.
 
 Imports everything above it (``model``, ``identity``, ``discovery``, ``adapters``, ``store``);
 nothing imports the runtime but the CLI.
 """
 
+from neptune.runtime.cache import RULES, CacheReport, Rule, cache_report_from_json
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
-from neptune.runtime.job import IngestJob, JobError, JobOptions, JobOutcome
+from neptune.runtime.job import IngestJob, JobError, JobOptions, JobOutcome, collect
 from neptune.runtime.lineage import FINDING_CODES, RUNTIME_ID, RUNTIME_VERSION, runtime_transform
 
 __all__ = [
     "FINDING_CODES",
     "PHASES",
+    "RULES",
     "RUNTIME_ID",
     "RUNTIME_VERSION",
+    "CacheReport",
     "EventSink",
     "IngestJob",
     "JobError",
@@ -25,5 +30,8 @@ __all__ = [
     "JobOutcome",
     "JobState",
     "Phase",
+    "Rule",
+    "cache_report_from_json",
+    "collect",
     "runtime_transform",
 ]

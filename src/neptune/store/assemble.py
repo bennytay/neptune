@@ -1,8 +1,9 @@
 """Assembling an ingest package from a workspace, and exporting a portable copy (ADR 0026).
 
 ``stage`` gathers what an ingest committed (each source's plan under its transform, every
-chunk's records and findings, every stream's runs), merges each stream's runs into its series
-file, and builds the package in a hidden directory beside its destination. ``publish`` flushes it
+chunk's records and findings, every stream's runs), takes each stream's series file from the
+workspace (merging its runs the first time a package needs it, ADR 0031 §4), and builds the
+package in a hidden directory beside its destination. ``publish`` flushes it
 to disk and renames it into place: a package appears whole or not at all, and survives a crash
 once it has appeared. ``assemble`` is the two in one call; the runtime (MVL-6) verifies the staged
 package and writes its envelope between them. Sources stay where they are unless asked for.
@@ -14,6 +15,7 @@ as it lands. Its records and receipt are the original's; only its manifest diffe
 holds the bytes. It is written the same way, whole or not at all.
 """
 
+import hashlib
 import secrets
 import shutil
 from collections import defaultdict
@@ -21,7 +23,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO, Final, Protocol
+from typing import TYPE_CHECKING, Any, BinaryIO, Final, Protocol
 
 from neptune.identity import canonical_json
 from neptune.identity.hashing import digest_stream
@@ -41,9 +43,78 @@ from neptune.store.package import (
 )
 from neptune.store.receipt import cited_sources
 from neptune.store.series import SERIES_SETTINGS, merge_runs
-from neptune.store.workspace import Workspace
+from neptune.store.workspace import DerivativeKey, Held, Owner, Workspace
+
+if TYPE_CHECKING:
+    from neptune.model.jsonvalue import JsonObject
 
 _COPY_SIZE: Final = 1024 * 1024
+# A stream's series file, as a derivative of the runs of the chunks it merges (ADR 0031 §4). The
+# version changes whenever the merge would write other bytes from the same runs and settings.
+SERIES_RECIPE: Final = "neptune.store.series/1"
+SERIES_FILE: Final = "series.parquet"
+
+
+def series_key(stream: RecordId, chunks: Iterable[str], owners: Iterable[Owner]) -> DerivativeKey:
+    """The key of ``stream``'s series file: the chunks whose runs it merges, and the settings.
+
+    Committed chunks never change (their id is their content), so these are everything the file
+    is a function of. A new adapter version or config is new chunk ids, so a new key; a new
+    pyarrow is new settings, so a new key.
+    """
+    inputs: JsonObject = {
+        "chunks": sorted(set(chunks)),
+        "settings": SERIES_SETTINGS,
+        "stream": stream,
+    }
+    return DerivativeKey(SERIES_RECIPE, inputs, tuple(sorted(set(owners))))
+
+
+@dataclass(frozen=True)
+class DerivativeUse:
+    """A derivative a package needed, and how the workspace came by it."""
+
+    key: DerivativeKey
+    held: Held
+
+
+def _copy_checked(source: Path, target: Path, expected: tuple[int, ContentId]) -> bool:
+    """Copy ``source`` to ``target``, hashing as it goes; whether it is the file that was kept.
+
+    A copy that is not is removed: what a package holds is what the workspace recorded.
+    """
+    digest, size = hashlib.sha256(), 0
+    with source.open("rb") as data, target.open("wb") as copy:
+        while block := data.read(_COPY_SIZE):
+            digest.update(block)
+            size += len(block)
+            copy.write(block)
+    if (size, "sha256:" + digest.hexdigest()) == expected:
+        return True
+    target.unlink()
+    return False
+
+
+def _series_file(
+    workspace: Workspace, key: DerivativeKey, stream: Stream, runs: list[Path], target: Path
+) -> Held:
+    """Put ``stream``'s series file at ``target``, from the workspace, merging it if not kept.
+
+    A kept file that no longer hashes as it was kept is discarded and merged again.
+    """
+
+    def build(directory: Path) -> None:
+        merge_runs(stream, runs, directory / SERIES_FILE)
+
+    derivative, held = workspace.materialise(key, build)
+    kept = derivative.files.get(SERIES_FILE)
+    if kept is not None and _copy_checked(derivative.file(SERIES_FILE), target, kept):
+        return held
+    workspace.discard(key)
+    derivative, _ = workspace.materialise(key, build)
+    if not _copy_checked(derivative.file(SERIES_FILE), target, derivative.files[SERIES_FILE]):
+        raise PackageError(f"the series file of {stream.id} changed while it was copied")
+    return Held.REBUILT
 
 
 class SourceOpener(Protocol):
@@ -144,11 +215,15 @@ def _check_copies(staging: Path, contents: Mapping[str, Content], copied: Iterab
 
 @dataclass(frozen=True)
 class StagedPackage:
-    """A package built whole beside ``destination`` and not yet renamed into place."""
+    """A package built whole beside ``destination`` and not yet renamed into place.
+
+    ``derivatives`` are the series files it holds, each as the workspace kept or built it.
+    """
 
     path: Path
     destination: Path
     id: ContentId
+    derivatives: tuple[DerivativeUse, ...] = ()
 
     def discard(self) -> None:
         """Remove the staged package. Nothing was published."""
@@ -173,13 +248,17 @@ def stage(
     sources to copy into the package, with a path holding each one's bytes; every other source is
     referenced. ``destination`` must not exist. The package waits in a hidden sibling directory
     until ``publish`` renames it into place.
+
+    Each stream's series file is a derivative (``series_key``): merged from its runs the first
+    time a package needs it, kept in the workspace, and copied, checked against its hash, into
+    every later package that holds the stream.
     """
     if destination.exists():
         raise PackageError(f"{destination} exists; a package is written once")
     records: dict[tuple[str, str], Any] = {}
     for item in extra:
         records[item.kind, item.id] = item
-    runs: dict[RecordId, list[Path]] = defaultdict(list)
+    runs: dict[RecordId, list[tuple[str, Path, Owner]]] = defaultdict(list)
     for source, transform in sorted(set(ingested)):
         if ledger.artifact(source) is None:
             raise PackageError(f"source {source} was ingested but the ledger does not hold it")
@@ -188,10 +267,11 @@ def stage(
             raise PackageError(f"no plan of {source} under transform {transform}")
         found: list[Any] = [plan.transform, *plan.findings]
         for chunk in plan.chunks:
-            output = workspace.load(str(chunk["id"]))
+            chunk_id = str(chunk["id"])
+            output = workspace.load(chunk_id)
             found += [*output.records, *output.findings]
             for stream, run in output.runs.items():
-                runs[stream].append(run)
+                runs[stream].append((chunk_id, run, (source, transform)))
         for item in found:
             records[item.kind, item.id] = item
     streams = {r.id: r for r in records.values() if isinstance(r, Stream)}
@@ -205,10 +285,16 @@ def stage(
         scratch = staging / ".series"
         scratch.mkdir()
         series: dict[RecordId, Content] = {}
+        uses: list[DerivativeUse] = []
         for stream_id, stream_runs in sorted(runs.items()):
+            key = series_key(
+                stream_id, (chunk for chunk, _, _ in stream_runs), (o for _, _, o in stream_runs)
+            )
             merged = scratch / f"{stream_id.removeprefix('rec:sha256:')}.parquet"
-            merge_runs(streams[stream_id], sorted(stream_runs), merged)
+            paths = sorted(run for _, run, _ in stream_runs)
+            held = _series_file(workspace, key, streams[stream_id], paths, merged)
             series[stream_id] = merged
+            uses.append(DerivativeUse(key, held))
         ledger_records = (*ledger.artifacts(), *ledger.revisions(), *ledger.absences())
         contents = package_contents(
             [*ledger_records, *records.values()],
@@ -222,7 +308,7 @@ def stage(
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    return StagedPackage(staging, destination, package_id(contents))
+    return StagedPackage(staging, destination, package_id(contents), tuple(uses))
 
 
 def publish(staged: StagedPackage) -> ContentId:

@@ -27,6 +27,11 @@ exists, a config naming an option no adapter has, a workspace or disk that will 
 Cancellation is checked between units of work (sources and chunks) and between phases from
 inspect on; the walk and its saved ledger always finish. A chunk in progress finishes and commits;
 nothing in the workspace is left half-written.
+
+The workspace is also the cache (ADR 0031): a plan, a chunk's output and a derivative (a source's
+verdict on the cross-chunk laws, a stream's series file) are each reused whenever the workspace
+keeps them under the key the job needs, so an unchanged source costs a hash and no adapter call.
+Each miss names the rule that caused it, and the job leaves a ``CacheReport`` beside the envelope.
 """
 
 import platform
@@ -34,7 +39,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -68,20 +73,50 @@ from neptune.discovery.source import (
     SymlinkEntry,
     WalkEntry,
 )
-from neptune.identity.revisions import SourceLedger
+from neptune.identity import canonical_json
+from neptune.identity.revisions import Observation, SourceLedger
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.package import ReceiptEnvelope
 from neptune.model.run import Stream
 from neptune.model.series import SEQ
-from neptune.model.source import LocalPath, RawLocalPath, SourceArtifact, local_location
+from neptune.model.source import (
+    LocalPath,
+    RawLocalPath,
+    SourceArtifact,
+    local_location,
+)
 from neptune.runtime import events, lineage
+from neptune.runtime.cache import (
+    VERDICT_FILE,
+    CacheReport,
+    Calls,
+    ChunkCache,
+    DerivativeCache,
+    PlanCache,
+    Rule,
+    SourceCache,
+    admission_key,
+    explain_plan,
+)
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
 from neptune.store.assemble import StagedPackage, publish, stage
-from neptune.store.package import PackageError, read_package, write_envelope
+from neptune.store.package import (
+    PackageError,
+    read_package,
+    write_cache_report,
+    write_envelope,
+)
 from neptune.store.series import RunCheck, SeriesError, check_run
-from neptune.store.workspace import Workspace, WorkspaceError
+from neptune.store.workspace import (
+    Collected,
+    Derivative,
+    DerivativeKey,
+    Held,
+    Workspace,
+    WorkspaceError,
+)
 
 DEFAULT_ATTEMPTS: Final = 2
 _UNREADABLE: Final = (SourceChangedError, SourceAccessError, OSError)
@@ -120,7 +155,10 @@ class JobOptions:
 
 @dataclass(frozen=True)
 class JobOutcome:
-    """How a job ended: committed with a package, or cancelled at a checkpoint without one."""
+    """How a job ended: committed with a package, or cancelled at a checkpoint without one.
+
+    ``cache`` says what the job reused and recomputed, and why (ADR 0031 §5).
+    """
 
     state: JobState
     job: str
@@ -129,6 +167,7 @@ class JobOutcome:
     ingested: tuple[tuple[ContentId, RecordId], ...]
     findings: tuple[IngestFinding, ...]
     durations: tuple[tuple[str, float], ...]
+    cache: CacheReport = field(default_factory=CacheReport)
 
 
 @dataclass
@@ -142,6 +181,9 @@ class _Source:
     chunks: tuple[Chunk, ...] = ()
     planned: bool = False
     quarantined: list[str] = field(default_factory=list)  # the codes of its runtime findings
+    replaced: ContentId | None = None  # bytes a location of it held before, if any
+    plan_cache: PlanCache | None = None  # set once the job decides to plan or reuse
+    hits: set[str] = field(default_factory=set)  # chunks the workspace had committed
 
     @property
     def content_id(self) -> ContentId:
@@ -188,6 +230,29 @@ def _check_chunk_series(output: ChunkOutput) -> None:
                         f"stream {batch.stream}: seq {value} appears twice in one chunk"
                     )
                 seen[batch.stream].add(value)
+
+
+def _replaced(
+    ledger: SourceLedger, observations: Iterable[Observation]
+) -> dict[ContentId, ContentId]:
+    """For each source a location now holds in place of other bytes, those bytes (the least).
+
+    What a ``source_changed`` miss names (ADR 0031 §3). Bytes returning to a location that was
+    seen empty replace nothing.
+    """
+    held: dict[RecordId, ContentId] = {r.id: r.content_id for r in ledger.revisions()}
+    replaced: dict[ContentId, ContentId] = {}
+    for observation in observations:
+        revision = observation.revision
+        if not observation.new_revision:
+            continue
+        for previous in revision.supersedes:
+            before = held.get(previous)  # None for an absence
+            if before is not None and before != revision.content_id:
+                replaced[revision.content_id] = min(
+                    before, replaced.get(revision.content_id, before)
+                )
+    return replaced
 
 
 def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[str]:
@@ -263,6 +328,9 @@ class IngestJob:
         self._sources: list[_Source] = []
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
+        self._calls: dict[str, int] = {"ingest": 0, "plan": 0, "probe": 0}
+        self._derivatives: dict[str, DerivativeCache] = {}
+        self._receipt: RecordId | None = None
 
     @staticmethod
     def _configure(
@@ -289,15 +357,8 @@ class IngestJob:
         self.state = JobState.RUNNING
         started = _now()
         try:
-            source = LocalSource(self.root)
-            entries = self._discover(source)
-            ledger = self._fingerprint(source, entries)
-            self._inspect(source)
-            self._plan(source)
-            self._ingest(source)
-            self._assemble(ledger)
-            receipt = self._validate()
-            package = self._commit(receipt, started)
+            with self.workspace.in_use():  # collection waits until the job is done
+                package = self._phases(started)
         except _Cancelled:
             self._discard()
             self.state = JobState.CANCELLED
@@ -307,6 +368,8 @@ class IngestJob:
             self._discard()
             self.state = JobState.FAILED
             self._emit(events.JOB_FAILED, {"error": type(exc).__name__})
+            if isinstance(exc, WorkspaceError):
+                raise JobError(f"the workspace cannot be used: {exc}") from exc
             raise
         except BaseException:
             self._discard()  # the process is going down: leave nothing half-staged
@@ -314,6 +377,17 @@ class IngestJob:
             raise
         self.state = JobState.COMMITTED
         return self._outcome(package)
+
+    def _phases(self, started: str) -> ContentId:
+        source = LocalSource(self.root)
+        entries = self._discover(source)
+        ledger = self._fingerprint(source, entries)
+        self._inspect(source)
+        self._plan(source)
+        self._ingest(source)
+        self._assemble(ledger)
+        receipt = self._validate()
+        return self._commit(receipt, started)
 
     def _outcome(self, package: ContentId | None) -> JobOutcome:
         return JobOutcome(
@@ -324,6 +398,36 @@ class IngestJob:
             ingested=tuple(sorted(self._ingested)),
             findings=tuple(sorted(self._findings.values(), key=lambda f: f.id)),
             durations=self._durations_pairs(),
+            cache=self._cache_report(),
+        )
+
+    def _cache_report(self) -> CacheReport:
+        """What this job reused and recomputed so far, and why (ADR 0031 §5)."""
+        sources = []
+        for item in self._sources:
+            if item.config is None or item.plan_cache is None:
+                continue  # never selected, or never reached the plan phase
+            plan, transform = item.plan_cache, item.config.transform
+            chunks = tuple(
+                ChunkCache(chunk.id, Rule.COMMITTED if chunk.id in item.hits else plan.chunk_miss)
+                for chunk in item.chunks
+            )
+            sources.append(
+                SourceCache(
+                    source=item.content_id,
+                    transform=transform.id,
+                    adapter=transform.adapter_id,
+                    adapter_version=transform.adapter_version,
+                    config_hash=transform.config_hash,
+                    plan=plan,
+                    chunks=chunks,
+                )
+            )
+        return CacheReport(
+            sources=tuple(sorted(sources, key=lambda s: (s.source, s.transform))),
+            derivatives=tuple(self._derivatives[key] for key in sorted(self._derivatives)),
+            calls=Calls(**self._calls),
+            receipt=self._receipt,
         )
 
     # --- Phases, events, checkpoints -----------------------------------------------------------
@@ -446,6 +550,7 @@ class IngestJob:
                     self._skip(entry)
             by_content: dict[ContentId, _Source] = {}
             new_artifacts = new_revisions = 0
+            replaced = _replaced(ledger, result.observations)
             for observation in result.observations:
                 revision = observation.revision
                 location = revision.location
@@ -467,7 +572,9 @@ class IngestJob:
                     },
                 )
                 if revision.content_id not in by_content:
-                    by_content[revision.content_id] = _Source(artifact, location)
+                    by_content[revision.content_id] = _Source(
+                        artifact, location, replaced=replaced.get(revision.content_id)
+                    )
             for absence in result.absences:
                 self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
             self._sources = list(by_content.values())
@@ -496,6 +603,7 @@ class IngestJob:
         for adapter in self.registry.adapters():
             descriptor = adapter.descriptor
             try:
+                self._calls["probe"] += 1
                 result = adapter.probe(head, hints)
                 if not isinstance(result, ProbeResult):
                     raise ContractError(f"probe returned {result!r}")
@@ -551,6 +659,15 @@ class IngestJob:
 
     # --- plan ----------------------------------------------------------------------------------
 
+    def _explain(self, item: _Source) -> PlanCache:
+        """Why ``item`` must be planned: the first invalidation rule that holds (ADR 0031 §3)."""
+        assert item.config is not None
+        try:
+            kept = self.workspace.transforms_of(item.content_id)
+        except (WorkspaceError, ValueError, OSError) as exc:
+            raise JobError(f"the plans of {item.content_id} cannot be read: {exc}") from exc
+        return explain_plan(item.config.transform, kept, item.replaced)
+
     def _plan(self, source: LocalSource) -> None:
         with self._enter(Phase.PLAN):
             planned = chunks_total = committed_total = failed = 0
@@ -567,9 +684,11 @@ class IngestJob:
                         f"the stored plan of {item.content_id} is corrupt: {exc}"
                     ) from exc
                 reused = stored is not None
+                item.plan_cache = PlanCache(Rule.PLANNED) if reused else self._explain(item)
                 if stored is None:
                     try:
                         with LocalReader(source, item.location, item.artifact) as reader:
+                            self._calls["plan"] += 1
                             plan = adapter.plan(reader, config)
                             check_plan(adapter.descriptor, reader, config, plan)
                     except _UNREADABLE as exc:
@@ -619,6 +738,7 @@ class IngestJob:
                         "committed": done,
                         "cost": sum(chunk.cost for chunk in chunks),
                         "reused": reused,
+                        "rule": str(item.plan_cache.rule),
                         "source": item.content_id,
                         "transform": config.transform.id,
                     },
@@ -649,6 +769,7 @@ class IngestJob:
                     self._phase = Phase.PARSE  # between chunks, the job is about to parse
                     self._check_cancel()
                     if self.workspace.committed(chunk.id):
+                        item.hits.add(chunk.id)  # its output is reused: no adapter call
                         skipped += 1
                         self._emit(
                             events.CHUNK_SKIPPED,
@@ -701,6 +822,7 @@ class IngestJob:
         for attempt in range(1, attempts + 1):
             with self._enter(Phase.PARSE):
                 try:
+                    self._calls["ingest"] += 1
                     output = adapter.ingest(reader, chunk, config)
                     if not isinstance(output, ChunkOutput):
                         raise ContractError(f"ingest returned a {type(output).__name__}")
@@ -848,6 +970,56 @@ class IngestJob:
                 problems.extend(_run_problems(streams[stream], found))
         return problems
 
+    def _verdict(self, item: _Source) -> list[str]:
+        """The cross-chunk laws' verdict on ``item``: kept by the workspace, or computed now.
+
+        A function of the source's chunk ids (their outputs never change) and of the runtime's
+        version (which changes with the laws), so it is a derivative (ADR 0031 §4): an unchanged
+        source is not read again to be admitted.
+        """
+        assert item.config is not None
+        key = admission_key(
+            item.content_id,
+            item.config.transform.id,
+            [chunk.id for chunk in item.chunks],
+            lineage.RUNTIME_VERSION,
+        )
+
+        def build(directory: Path) -> None:
+            problems: list[JsonValue] = list(self._cross_chunk_problems(item))
+            (directory / VERDICT_FILE).write_bytes(canonical_json.dumps({"problems": problems}))
+
+        def read(derivative: Derivative) -> list[str] | None:
+            try:
+                data = canonical_json.loads(derivative.read(VERDICT_FILE))
+            except ValueError:  # a WorkspaceError too: not what was kept
+                return None
+            found = data.get("problems") if isinstance(data, dict) else None
+            if not isinstance(found, list) or not all(isinstance(p, str) for p in found):
+                return None
+            return [str(problem) for problem in found]
+
+        try:
+            derivative, held = self.workspace.materialise(key, build)
+            verdict = read(derivative)
+            if verdict is None:  # kept but damaged: build it again
+                self.workspace.discard(key)
+                derivative, _ = self.workspace.materialise(key, build)
+                held, verdict = Held.REBUILT, read(derivative)
+        except (WorkspaceError, OSError) as exc:
+            raise JobError(f"the verdict on {item.content_id} cannot be kept: {exc}") from exc
+        if verdict is None:
+            raise JobError(f"the verdict on {item.content_id} does not read back as written")
+        self._derived(key, held)
+        return verdict
+
+    def _derived(self, key: DerivativeKey, held: Held) -> None:
+        """Note a derivative the job read, and how the workspace came by it."""
+        entry = DerivativeCache.of(key, held)
+        self._derivatives[key.id] = entry
+        kind = events.DERIVATIVE_REUSED if held is Held.HELD else events.DERIVATIVE_BUILT
+        self._emit(kind, {"derivative": key.id, "recipe": key.recipe, "rule": str(entry.rule)})
+
     def _assemble(self, ledger: SourceLedger) -> None:
         with self._enter(Phase.ASSEMBLE):
             self._check_cancel()
@@ -856,11 +1028,7 @@ class IngestJob:
                 if item.adapter is None or item.config is None:
                     continue  # never selected: nothing to admit, nothing to quarantine
                 self._check_cancel()  # each source's runs are read whole: a checkpoint between
-                if (
-                    item.planned
-                    and not item.quarantined
-                    and (problems := self._cross_chunk_problems(item))
-                ):
+                if item.planned and not item.quarantined and (problems := self._verdict(item)):
                     self._quarantine(
                         item,
                         lineage.output_invalid(
@@ -889,6 +1057,8 @@ class IngestJob:
                 )
             except (PackageError, WorkspaceError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the package cannot be assembled: {exc}") from exc
+            for use in self._staged.derivatives:
+                self._derived(use.key, use.held)
             self._emit(
                 events.PACKAGE_STAGED,
                 {"package": self._staged.id, "sources": len(self._ingested)},
@@ -921,11 +1091,12 @@ class IngestJob:
     # --- commit --------------------------------------------------------------------------------
 
     def _commit(self, receipt: RecordId, started: str) -> ContentId:
-        """Write the envelope into the staged package and rename it into place."""
+        """Write the envelope and the cache report into the staged package; rename it into place."""
         with self._enter(Phase.COMMIT):
             self._check_cancel()
             staged = self._staged
             assert staged is not None
+            self._receipt = receipt
             envelope = ReceiptEnvelope(
                 receipt=receipt,
                 job=self.job,
@@ -937,6 +1108,7 @@ class IngestJob:
             )
             try:
                 write_envelope(staged.path, envelope)
+                write_cache_report(staged.path, self._cache_report().to_json())
                 package = publish(staged)
             except (PackageError, OSError) as exc:
                 raise JobError(f"the package cannot be committed: {exc}") from exc
@@ -944,3 +1116,19 @@ class IngestJob:
             self._emit(events.JOB_COMMITTED, {"package": package, "sources": len(self._ingested)})
             self._finish(Phase.COMMIT, {"package": package})
         return package
+
+
+def collect(
+    workspace: Workspace, registry: AdapterRegistry, options: JobOptions | None = None
+) -> Collected:
+    """Collect ``workspace`` for jobs run with ``registry`` and ``options`` (ADR 0031 §6).
+
+    Keeps what such a job could reuse: plans under the transforms these adapters and this config
+    define, for sources some saved ledger still holds, with their chunks and derivatives.
+    Removes the rest. Refused (``JobError``) while a job holds the workspace.
+    """
+    configs = IngestJob._configure(registry, (options or JobOptions()).config)
+    try:
+        return workspace.collect({config.transform.id for config in configs.values()})
+    except (WorkspaceError, OSError) as exc:
+        raise JobError(f"the workspace cannot be collected: {exc}") from exc
