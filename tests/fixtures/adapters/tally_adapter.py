@@ -11,7 +11,8 @@ The format, ``tally``::
 
 A line that is not two integers is a ``tally.bad_row`` finding and no series row. Every line after
 the signature is a sample position, so ``seq`` is the line's index among them, bad lines included.
-Chunk 0 emits the clock, the run and the stream; every other chunk holds ``rows_per_chunk`` lines.
+Chunk 0 emits the clock, the run, the stream and an empty batch that types the stream's columns;
+every other chunk holds ``rows_per_chunk`` lines.
 """
 
 from typing import TYPE_CHECKING, Final
@@ -89,6 +90,20 @@ def _lines(data: bytes, start: int) -> list[tuple[int, bytes]]:
         out.append((offset, line))
         offset += len(line) + 1
     return out
+
+
+COLUMNS: Final = ("locator/0/length", "locator/0/offset", "seq", "time/0", "value/value")
+
+
+def _empty() -> dict[str, list[int]]:
+    return {name: [] for name in COLUMNS}
+
+
+def _batch(stream: RecordId, columns: dict[str, list[int]]) -> SeriesBatch:
+    return SeriesBatch(
+        stream,
+        tuple(SeriesColumn(name, ColumnType.INT64, tuple(columns[name])) for name in COLUMNS),
+    )
 
 
 class TallyAdapter:
@@ -175,12 +190,9 @@ class TallyAdapter:
                     ),
                 ),
             )
-            return ChunkOutput(records=records)
+            return ChunkOutput(records=records, series=(_batch(stream, _empty()),))
         start, end, first = (_int(chunk.context, key) for key in ("start", "end", "first"))
-        columns: dict[str, list[int]] = {
-            name: []
-            for name in ("locator/0/length", "locator/0/offset", "seq", "time/0", "value/value")
-        }
+        columns = _empty()
         findings: list[IngestFinding] = []
         for index, (offset, line) in enumerate(_lines(source.read(start, end - start), start)):
             parts = line.split(b" ")
@@ -197,19 +209,10 @@ class TallyAdapter:
                 )
                 continue
             for name, value in zip(
-                ("locator/0/length", "locator/0/offset", "seq", "time/0", "value/value"),
+                COLUMNS,
                 (len(line), offset, first + index, int(parts[0]), int(parts[1])),
                 strict=True,
             ):
                 columns[name].append(value)
-        series: tuple[SeriesBatch, ...] = ()
-        if columns["seq"]:
-            batch = SeriesBatch(
-                stream,
-                tuple(
-                    SeriesColumn(name, ColumnType.INT64, tuple(values))
-                    for name, values in columns.items()
-                ),
-            )
-            series = (batch,)
+        series = (_batch(stream, columns),) if columns["seq"] else ()
         return ChunkOutput(series=series, findings=tuple(findings))

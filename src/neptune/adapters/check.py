@@ -13,6 +13,8 @@ What they check, beyond the types' own validation:
   the one source the adapter was given;
 - every finding was made by that transform, has a declared code, and cites that source;
 - every adapter-specific locator step is declared;
+- the chunk that emits a ``Stream`` also emits a series batch for it, empty if need be, so every
+  stream's columns are typed even when it has no samples;
 - across a source's chunks: no record or finding twice, every series batch belongs to a stream
   of the output and keeps its row contract, and the output cites the source at least once.
 """
@@ -152,6 +154,13 @@ def check_chunk_output(
         check_record(descriptor, source, config, record)
     for finding in output.findings:
         check_finding(descriptor, source, config, finding)
+    batched = {batch.stream for batch in output.series}
+    for record in output.records:
+        if isinstance(record, Stream) and record.id not in batched:
+            raise ContractError(
+                f"stream {record.id} has no series batch in the chunk that declares it;"
+                " emit one, empty if the chunk holds none of its rows"
+            )
 
 
 def check_source_output(

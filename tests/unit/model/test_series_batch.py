@@ -81,6 +81,14 @@ def test_a_column_lives_in_a_series_namespace(name: str) -> None:
         SeriesColumn(name, ColumnType.INT64, ())
 
 
+def test_a_batch_may_hold_no_rows_and_still_types_its_columns() -> None:
+    empty = SeriesBatch(
+        STREAM, (column("seq", ColumnType.INT64), column("value/v", ColumnType.BOOL))
+    )
+    assert (empty.length, list(empty.rows())) == (0, [])
+    assert empty.schema()[1] == ("value/v", ColumnType.BOOL, False)
+
+
 def test_a_batch_has_seq_unique_names_and_equal_lengths() -> None:
     seq = column("seq", ColumnType.INT64, 0, 1)
     value = column("value/v", ColumnType.STRING, "a", "b")
@@ -97,7 +105,5 @@ def test_a_batch_has_seq_unique_names_and_equal_lengths() -> None:
         SeriesBatch(STREAM, (seq, seq))
     with pytest.raises((ValueError, TypeError)):
         SeriesBatch(STREAM, (seq, column("value/v", ColumnType.STRING, "a")))
-    with pytest.raises((ValueError, TypeError)):
-        SeriesBatch(STREAM, (column("seq", ColumnType.INT64),))
     with pytest.raises(ValueError):
         SeriesBatch(RecordId("stream"), (seq,))

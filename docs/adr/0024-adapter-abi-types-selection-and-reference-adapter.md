@@ -70,6 +70,8 @@ receipt a function of the package's records alone.
    - an adapter's finding cites bytes, never a location;
    - no record or finding is emitted by two chunks;
    - every series batch names a stream of the same source's output and keeps its row contract;
+   - the chunk that emits a `Stream` emits a series batch for it too, empty if it holds none of
+     the stream's rows, so every stream's columns are typed even when it has no samples;
    - **the output cites its source at least once**, so a source an adapter read always shows the
      adapter in the receipt.
 7. **Registry and selection** (`neptune.adapters.registry`). A registry is explicit, built per

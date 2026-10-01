@@ -447,9 +447,11 @@ def _fixed_types(name: str) -> frozenset[ColumnType] | None:
 class SeriesBatch:
     """Rows of one stream's series, column by column: what an adapter emits and the store writes.
 
-    ``stream`` is the id of the ``Stream`` the rows belong to. An adapter emits one batch per
-    stream per chunk (``neptune.adapters.contract.ChunkOutput``); the store writes a stream's
-    batches into its Parquet file (MVL-16). ``rows`` yields them for ``Stream.check_row``.
+    ``stream`` is the id of the ``Stream`` the rows belong to. An adapter emits batches per chunk
+    (``neptune.adapters.contract.ChunkOutput``); the store writes a stream's batches into its
+    Parquet file (MVL-16). A batch may hold no rows: it still fixes the stream's column types, so
+    a stream with no samples has a typed, empty series. ``rows`` yields rows for
+    ``Stream.check_row``.
     """
 
     stream: RecordId
@@ -464,8 +466,8 @@ class SeriesBatch:
             raise ValueError(f"a batch repeats a column: {names}")
         if SEQ not in names:
             raise ValueError("a batch has a seq column")
-        if len({len(column.values) for column in self.columns}) != 1 or not self.length:
-            raise ValueError("a batch's columns hold the same number of rows, at least one")
+        if len({len(column.values) for column in self.columns}) != 1:
+            raise ValueError("a batch's columns hold the same number of rows")
 
     @property
     def length(self) -> int:

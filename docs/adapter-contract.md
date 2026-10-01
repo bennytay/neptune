@@ -136,6 +136,8 @@ For formats with timestamped samples (logs, bags, flight logs, telemetry tables,
   `state/<column>` and leave the value null where the state is not `known`. `KnownAbsent` and `Ambiguous`
   do not fit one cell: write `unknown` plus a finding.
 - A payload you do not decode still gets its rows (times and locators) plus a finding.
+- The chunk that emits a `Stream` emits a `SeriesBatch` for it, empty if that chunk holds none of
+  its rows: the batch types the stream's columns, so a stream with no samples still has a series.
 - Give each `SeriesColumn` the `ColumnType` the source encodes (a ROS `float32` stays `float32`,
   a `uint8` stays `uint8`); arrays are `repeated` columns. `seq` and `time/<i>` are `int64`.
 - Tests check every row with `Stream.check_row` and resolve `Stream.row_provenance` back to the bytes.

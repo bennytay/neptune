@@ -81,7 +81,7 @@ def test_well_behaved_adapters_pass_every_check() -> None:
     text, tally = text_output(), tally_output()
     assert len(text.plan.chunks) == 3
     assert {r.kind for r in tally.records()} == {"run", "stream", "timestamp_domain"}
-    assert [batch.length for batches in tally.series().values() for batch in batches] == [2, 1]
+    assert [batch.length for batches in tally.series().values() for batch in batches] == [0, 2, 1]
 
 
 # --- Records -----------------------------------------------------------------------------------
@@ -232,7 +232,7 @@ def with_series(output: SourceOutput, chunk: int, *series: SeriesBatch) -> list[
 
 def test_a_batch_for_a_stream_the_source_did_not_declare_is_refused() -> None:
     output = tally_output()
-    first = batches(output)[0]
+    first = batches(output)[1]
     stranger = replace(first, stream=a_block(text_output()).id)
     with pytest.raises(ContractError, match="not a stream of this source"):
         check(output, with_series(output, 1, stranger), TALLY_SOURCE)
@@ -240,15 +240,17 @@ def test_a_batch_for_a_stream_the_source_did_not_declare_is_refused() -> None:
 
 def test_a_row_that_breaks_its_streams_contract_is_refused() -> None:
     output = tally_output()
-    first = batches(output)[0]
-    columns = tuple(c for c in first.columns if c.name != "locator/0/offset")
-    with pytest.raises(ContractError, match="missing columns"):
+    first = batches(output)[1]
+    columns = tuple(
+        replace(c, values=(-1, 13)) if c.name == "locator/0/offset" else c for c in first.columns
+    )
+    with pytest.raises(ContractError, match="offset must be in"):
         check(output, with_series(output, 1, replace(first, columns=columns)), TALLY_SOURCE)
 
 
 def test_a_seq_written_twice_is_refused() -> None:
     output = tally_output()
-    _, second = batches(output)
+    _, _, second = batches(output)
     repeated = replace(
         second,
         columns=tuple(replace(c, values=(0,)) if c.name == "seq" else c for c in second.columns),
@@ -259,11 +261,24 @@ def test_a_seq_written_twice_is_refused() -> None:
 
 def test_batches_of_one_stream_must_agree_on_their_columns() -> None:
     output = tally_output()
-    _, second = batches(output)
+    _, _, second = batches(output)
     extra = SeriesColumn("value/extra", ColumnType.INT8, (1,))
     widened = replace(second, columns=(*second.columns, extra))
     with pytest.raises(ContractError, match="disagree"):
         check(output, with_series(output, 2, widened), TALLY_SOURCE)
+
+
+def test_a_stream_without_a_batch_in_its_own_chunk_is_refused() -> None:
+    output = tally_output()
+    with pytest.raises(ContractError, match="no series batch in the chunk that declares it"):
+        check(output, with_series(output, 0), TALLY_SOURCE)
+
+
+def test_an_empty_batch_types_a_stream_with_no_samples() -> None:
+    output = ingest_source(TALLY.TallyAdapter(), BytesReader(b"TALLY1\n"))
+    ((empty,),) = output.series().values()
+    assert empty.length == 0
+    assert [name for name, _, _ in empty.schema()] == sorted(TALLY.COLUMNS)
 
 
 def test_a_stream_record_is_what_series_rows_are_checked_against() -> None:
