@@ -13,7 +13,7 @@ Status: stage contract agreed; runtime implementation is M2 (MVL-6, MVL-9, MVL-1
 | 5 | group | propose run/session groupings from filesystem signals (v0) and later from evidence (M7) | discovery | MVL-13, MVL-34 |
 | 6 | plan | adapters emit chunks with deterministic ids and cost estimates | adapters | MVL-7 |
 | 7 | ingest | per-chunk pure parse → canonical records + findings; runtime skips committed chunks (resume) and cached ones | runtime + adapters | MVL-6, MVL-9 |
-| 8 | store | write records (JSON Lines), time-series (Parquet), blobs (CAS) into the ingest package | store | MVL-5, MVL-16 |
+| 8 | store | commit each chunk's output to the local workspace; assemble records (JSON Lines), time-series (Parquet) and blobs (CAS) into the ingest package (ADR 0026) | store | MVL-5, MVL-16 |
 | 9 | validate | cross-source integrity checks over the store; findings, not exceptions | validate | MVL-41 |
 | 10 | receipt | core computed from the package's records (store); volatile envelope (runtime); human and machine renderings | store + runtime | MVL-5, MVL-6 |
 
@@ -24,8 +24,8 @@ records with their own provenance and never rewrites what stages 1–10 produced
 
 | Concern | Owner | Mechanism |
 |---|---|---|
-| Resume after crash | runtime | deterministic chunk ids + committed-chunk index |
-| Cache | runtime | key = (source id, adapter id, adapter version, config hash, chunk id) |
+| Resume after crash | runtime | deterministic chunk ids + the workspace's committed chunks (ADR 0026) |
+| Cache | runtime | key = chunk id, which covers (source id, adapter id, adapter version, config hash, context) (ADR 0024 §4) |
 | Partial failure | runtime | per-chunk isolation; adapter crash → finding, job continues |
 | Sandboxing | runtime | subprocess with CPU/memory/time limits (MVL-10) |
 | Adapter-local problems | adapter | `IngestFinding`s in the chunk output |
