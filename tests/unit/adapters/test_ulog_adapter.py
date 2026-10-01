@@ -680,3 +680,18 @@ def test_a_uint64_past_the_signed_range_in_info_is_unknown_with_a_finding() -> N
     output = run(build(MAKE.info("uint64_t big", struct.pack("<Q", 2**64 - 1))))
     assert finding(output, "unreadable_value").details["reason"] == "range"
     assert tables_of(output)["info"][0][2] is None
+
+
+def test_formats_that_repeat_padding_cannot_burn_the_cpu_budget() -> None:
+    import time
+
+    pad = MAKE.fmt("Pad:uint8_t _padding0;")
+    formats = [MAKE.fmt(f"F{n}:uint64_t timestamp;Pad[65535] p;") for n in range(4096)]
+    subs = [MAKE.subscribe(0, n, f"F{n}") for n in range(4096)]
+    data = build(pad, *formats, *subs)
+    started = time.perf_counter()
+    plan = FlightLogAdapter().plan(BytesReader(data), configure(DESCRIPTOR))
+    assert time.perf_counter() - started < 1.0
+    work = [f for f in plan.findings if f.code == "flightlog.limit_exceeded"]
+    assert any(f.details["key"] == "layout_work" for f in work)
+    assert any(f.code == "flightlog.bad_format" for f in plan.findings)

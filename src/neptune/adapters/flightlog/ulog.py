@@ -57,6 +57,7 @@ from neptune.adapters.flightlog.ulog_format import (
     DEFINITION_TYPES,
     FLAG_BITS_SIZE,
     HEADER_SIZE,
+    LOG_NODES,
     MAGIC,
     MAX_FORMATS,
     MAX_STREAMS,
@@ -67,6 +68,8 @@ from neptune.adapters.flightlog.ulog_format import (
     KeyType,
     Layout,
     MessageFormat,
+    Work,
+    WorkLimitError,
     decode_value,
     layout_of,
     parse_format,
@@ -159,6 +162,7 @@ class Shared:
     formats: dict[str, Format] = field(default_factory=dict)
     parsed: dict[str, MessageFormat] = field(default_factory=dict)
     layouts: dict[str, Layout | None] = field(default_factory=dict)
+    work: Work | None = None
     subs: dict[int, Sub] = field(default_factory=dict)
     defs_end: int | None = None
     tables: dict[str, Place] = field(default_factory=dict)
@@ -175,7 +179,18 @@ class Shared:
         layout: Layout | None = None
         if found is not None:
             try:
-                layout = layout_of(name, self.parsed)
+                layout = layout_of(name, self.parsed, self.work)
+            except WorkLimitError:
+                if findings is not None:
+                    findings.aggregate(
+                        "limit_exceeded",
+                        "layout_work",
+                        FindingCategory.LIMIT,
+                        Severity.ERROR,
+                        found.place,
+                        "the log formats need more layout work than is spent; the rest get no rows",
+                        {"limit": LOG_NODES},
+                    )
             except FormatError as exc:
                 if findings is not None:
                     findings.aggregate(
@@ -871,7 +886,7 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
                     continue
                 appended.append(offset)
                 last = offset
-    shared = Shared()
+    shared = Shared(work=Work())
     walk = Walk(
         source, cite, shared, findings, plan=True, chunk_bytes=chunk_bytes, max_rows=max_rows
     )
@@ -1151,7 +1166,7 @@ def inspect(source: SourceReader, config: AdapterConfig) -> InspectResult:
         summary["compat_flags"] = flags[0]
         summary["incompat_flags"] = flags[1]
         summary["appended_offsets"] = flags[2]
-    shared = Shared()
+    shared = Shared(work=Work())
     limit = min(size, 8 * 1024 * 1024)
     walk = Walk(
         source,

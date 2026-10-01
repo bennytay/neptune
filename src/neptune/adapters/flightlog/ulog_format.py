@@ -27,6 +27,8 @@ PLAUSIBLE_TYPES: Final = frozenset(range(ord("A"), ord("Z") + 1))
 MAX_FORMATS: Final = 4096
 MAX_STREAMS: Final = 4096
 MAX_DEPTH: Final = 8
+MAX_NODES: Final = 8192  # fields visited, padding and nested repeats included, per layout
+LOG_NODES: Final = 500_000  # fields visited for all layouts of one log
 MAX_ARRAY: Final = 65535
 MAX_ROW_BYTES: Final = 65535
 
@@ -118,16 +120,28 @@ class Layout:
     nested: tuple[str, ...]  # the nested format names the layout used, sorted
 
 
+class WorkLimitError(FormatError):
+    """The layouts of this log have used all the work the adapter spends on them."""
+
+
+class Work:
+    """What is left of a log's layout budget, shared by every layout of the plan."""
+
+    def __init__(self, nodes: int = LOG_NODES) -> None:
+        self.left = nodes
+
+
 class _State:
     def __init__(self) -> None:
         self.size = 0
+        self.nodes = 0
         self.values = 0
         self.data_end = 0
         self.time: int | None = None
         self.time_offset: int | None = None
 
 
-def layout_of(name: str, formats: dict[str, MessageFormat]) -> Layout:
+def layout_of(name: str, formats: dict[str, MessageFormat], work: Work | None = None) -> Layout:
     """Flatten ``name`` (nested types and arrays expanded) into one struct. Raises FormatError."""
     codes: list[str] = []
     items: list[Item] = []
@@ -146,6 +160,13 @@ def layout_of(name: str, formats: dict[str, MessageFormat]) -> Layout:
         if type_name != name or stack:
             used.add(type_name)
         for field in found.fields:
+            state.nodes += 1
+            if work is not None:
+                work.left -= 1
+                if work.left < 0:
+                    raise WorkLimitError("the log's formats need more layout work than is spent")
+            if state.nodes > MAX_NODES:
+                raise FormatError(f"a message visits more than {MAX_NODES} fields")
             path = prefix + field.name
             if field.type in PRIMITIVES:
                 code, size, column = PRIMITIVES[field.type]
