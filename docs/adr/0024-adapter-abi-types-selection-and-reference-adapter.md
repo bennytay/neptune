@@ -61,6 +61,8 @@ receipt a function of the package's records alone.
    int64, float64 or string, a state string). The store maps the types to Parquet (MVL-16).
    The batch types live in `neptune.model.series`, beside the column contract they type, so the
    store writes them without importing adapters. They are not records: the schema is unchanged.
+   The adapter numbers `seq`, which ADR 0018 §7 left to MVL-7: `plan` gives each chunk the `seq`
+   its rows start from, so rows are numbered in source order however the source is chunked.
 6. **Laws added to ADR 0008's**, checked by `neptune.adapters.check` on every harness run:
    - every record's id derives from its record-level evidence and the config's transform, and it
      reads back from its JSON as itself;
