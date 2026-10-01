@@ -76,6 +76,7 @@ IFD_HEADER: Final = ("tag", "type", "count", "value")
 _CHILDREN: Final = {EXIF_POINTER: "Exif", GPS_POINTER: "GPS", SUBIFDS: "SubIFD"}
 _EXIF_CHILDREN: Final = {INTEROP_POINTER: "Interop"}
 _MAX_DEPTH: Final = 4
+_ENTRY_BLOCK: Final = 1024  # IFD entries read from the source at a time, each charged first
 _EMBEDDED: Final = frozenset({XMP_TAG, ICC_TAG})
 
 
@@ -247,13 +248,18 @@ class Tiff:
         ifd = Ifd(name, offset, locator, table, [], 0, space.cite(next_at, tail))
         self.read[offset] = ifd
         try:
+            block, block_at = b"", 0
             for index in range(held):
                 ctx.budget.entry()
-                start = (
-                    count_size + index * entry_size
-                )  # one entry at a time: the budget bounds reads
-                raw = space.read(offset + start, entry_size)
-                ifd.entries.append(self._entry(ifd, index, offset + start, raw))
+                if index == block_at + len(block) // entry_size:  # the next block of entries
+                    block_at = index
+                    block = space.read(
+                        offset + count_size + index * entry_size,
+                        min(_ENTRY_BLOCK, held - index) * entry_size,
+                    )
+                start = (index - block_at) * entry_size
+                at = offset + count_size + index * entry_size
+                ifd.entries.append(self._entry(ifd, index, at, block[start : start + entry_size]))
         except LimitHit as hit:
             ctx.stopped(hit)
             return ifd

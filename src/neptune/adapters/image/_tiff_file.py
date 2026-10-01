@@ -88,7 +88,10 @@ def _raster(ctx: Context, tiff: Tiff, ifd: Ifd) -> None:
         offsets_entry, counts_entry = ifd.get(offsets_tag), ifd.get(counts_tag)
         if offsets_entry is None or counts_entry is None:
             continue
-        ctx.budget.values(offsets_entry.count + counts_entry.count)
+        # Only arrays that ``numbers`` will read are charged; a count past the cap is skipped.
+        for entry in (offsets_entry, counts_entry):
+            if entry.items is None and entry.count <= _MAX_OFFSETS:
+                ctx.budget.values(entry.count)
         offsets = tiff.numbers(offsets_entry, _MAX_OFFSETS)
         counts = tiff.numbers(counts_entry, _MAX_OFFSETS)
         if offsets is None or counts is None:

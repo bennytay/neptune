@@ -132,7 +132,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "max_entries",
             DEFAULT_MAX_ENTRIES,
             "table rows one source may emit (IFD entries, XMP values, ICC tags, structure rows);"
-            " past it parsing stops with image.limit_exceeded",
+            " past it parsing stops with image.limit_exceeded. It also bounds the strip and tile"
+            " offsets and byte counts checked against the file, at 256 per row",
         ),
         ConfigOption(
             "max_metadata_bytes",

@@ -156,7 +156,6 @@ class _Png:
                 f"a second {name} chunk; the first is read",
             )
             return
-        self.seen.add(name)
         if name in _STRUCTS:
             wanted = struct.calcsize(_STRUCTS[name][0])
             if length != wanted:
@@ -171,6 +170,7 @@ class _Png:
                 {"bytes": length, "max_metadata_bytes": self.ctx.max_metadata_bytes},
             )
             return
+        self.seen.add(name)
         data = space.read(data_at, length)
         (crc,) = struct.unpack(">I", space.read(data_at + length, 4))
         if zlib.crc32(name.encode("ascii") + data) != crc:
@@ -245,16 +245,8 @@ class _Png:
         )
 
     def _text_cell(self, text: Space, locator: tuple[Locator, ...], codec: str) -> CellInput:
-        """``text`` as a cell: ``Unknown`` with a finding if it is not ``codec`` or too long."""
+        """``text`` (at most ``max_metadata_bytes``) as a cell: ``Unknown`` if not ``codec``."""
         out = self.ctx.out
-        if text.size > self.ctx.max_value_bytes:
-            out.finding(
-                VALUE_NOT_COPIED,
-                locator,
-                f"a text of {text.size} bytes is over max_value_bytes; it stays cited in the bytes",
-                {"bytes": text.size, "max_value_bytes": self.ctx.max_value_bytes},
-            )
-            return Unknown()
         try:
             return text.read(0, text.size).decode(codec)
         except UnicodeDecodeError:

@@ -19,7 +19,8 @@ from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.image import ImageAdapter
 from neptune.discovery.reader import BytesReader
 from neptune.model.finding import FindingCategory, Severity
-from neptune.model.world import Image, StructuredTable
+from neptune.model.knowledge import Known
+from neptune.model.world import Image, StructuredRecord, StructuredTable
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures" / "image"
 VALID: Final = (
@@ -434,9 +435,15 @@ def test_an_os2_bitmap_with_huffman_compression_is_not_judged_by_an_uncompressed
     assert "image.raster_truncated" in codes(run(bytes(plain)))
 
 
-def test_a_png_text_over_max_value_bytes_is_cited_not_copied() -> None:
+def test_a_long_png_text_is_kept_as_declared_up_to_max_metadata_bytes() -> None:
     output = run(png_with_chunk(b"tEXt", b"Comment\x00" + b"a" * 5000))
-    assert "image.value_not_copied" in codes(output) and len(images(output)) == 1
+    assert "image.value_not_copied" not in codes(output)
+    longest = max(
+        (len(c.value) for r in output.records() if isinstance(r, StructuredRecord)
+         for c in r.cells if isinstance(c, Known) and isinstance(c.value, str)),
+        default=0,
+    )  # fmt: skip
+    assert longest == 5000
 
 
 def test_a_png_chunk_over_max_metadata_bytes_is_not_read_at_all() -> None:
@@ -471,3 +478,35 @@ def test_a_chunk_with_the_wrong_size_for_its_structure_is_not_read_whole() -> No
     data[8:12] = struct.pack(">I", 1 << 30)  # IHDR claims a gigabyte, the file holds 3 KiB
     output = run(bytes(data))
     assert codes(output) & {"image.truncated", "image.malformed", "image.unreadable"}
+
+
+def test_zero_padded_netpbm_numbers_parse_and_only_the_value_is_bounded() -> None:
+    (image,) = images(run(b"P5 0000000640 000480 255\n" + bytes(640 * 480)))
+    assert (image.width, image.height) == (640, 480)
+    assert images(run(b"P5 " + b"0" * 5000 + b"2 1 255\n\x00\x00"))
+    pam = b"P7\nWIDTH 000000000002\nHEIGHT 1\nDEPTH 1\nMAXVAL 255\nTUPLTYPE GRAYSCALE\nENDHDR\n"
+    assert images(run(pam + b"\x00\x00"))
+
+
+def test_a_pam_header_ends_its_lines_at_lf_only() -> None:
+    crlf = b"P7\r\nWIDTH 2\r\nHEIGHT 1\r\nDEPTH 1\r\nMAXVAL 255\r\nENDHDR\r\n\x00\x00"
+    assert codes(run(crlf)) == {"image.unreadable"}
+    odd = b"P7\nWIDTH 2\x0b\nHEIGHT 1\nDEPTH 1\nMAXVAL 255\nENDHDR\n\x00\x00"
+    assert codes(run(odd)) == {"image.unreadable"}
+
+
+def test_an_oversize_first_exif_chunk_does_not_hide_a_valid_second_one() -> None:
+    exif = data_of("amr_dock.png")[data_of("amr_dock.png").index(b"eXIf") + 4 :][:150]
+    first = chunk(b"eXIf", exif + bytes(3000))
+    png = data_of("amr_dock.png")
+    cut = png.index(b"eXIf") - 4  # drop the original, then add an oversize one and a valid one
+    original_end = cut + 12 + 150
+    data = png[:cut] + first + chunk(b"eXIf", exif) + png[original_end:]
+    output = run(data, max_metadata_bytes=1024)
+    assert "image.value_not_copied" in codes(output) and "image.repeated" not in codes(output)
+
+
+def test_strip_arrays_past_the_offset_cap_are_not_charged_to_the_budget() -> None:
+    entries = [(256, 3, 1, 8), (257, 3, 1, 8), (273, 4, 0xFFFFFFFF, 8), (279, 4, 0xFFFFFFFF, 8)]
+    output = run(tiff_of(entries, bytes(64)), max_entries=10)
+    assert "image.limit_exceeded" not in codes(output) and len(images(output)) == 1

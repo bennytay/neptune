@@ -80,9 +80,10 @@ def _token(data: bytes, position: int) -> tuple[int, int] | None:
     end = position
     while end < size and 0x30 <= data[end] <= 0x39:
         end += 1
-    if end == position or end - position > MAX_DIGITS:
+    digits = data[position:end].lstrip(b"0")  # zero padding is free: only the value is bounded
+    if end == position or len(digits) > MAX_DIGITS:
         return None
-    return int(data[position:end]), end
+    return int(digits or b"0"), end
 
 
 def _pam(data: bytes) -> Header | None:
@@ -98,8 +99,11 @@ def _pam(data: bytes) -> Header | None:
         newline = data.find(b"\n", position)
         if newline < 0:
             return None
-        parts = data[position:newline].split(None, 1)
+        line = data[position:newline]
         position = newline + 1
+        if any(byte in line for byte in b"\r\x0b\x0c"):
+            return None  # PAM lines end at LF and separate with spaces or tabs, nothing else
+        parts = line.split(None, 1)
         if not parts or not (parts[0].isalpha() and parts[0].isupper()):
             return None
         key, value = parts[0], parts[1].strip() if len(parts) > 1 else b""
@@ -110,7 +114,7 @@ def _pam(data: bytes) -> Header | None:
         elif (
             key in (b"WIDTH", b"HEIGHT", b"DEPTH", b"MAXVAL")
             and value.isdigit()
-            and len(value) <= MAX_DIGITS
+            and len(value.lstrip(b"0")) <= MAX_DIGITS
         ):
             fields[key.decode("ascii").lower()] = int(value)
         else:
