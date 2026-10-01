@@ -2,8 +2,9 @@
 
 Run ``uv run python tests/golden/tabular/make_tabular_golden.py`` after a deliberate change to the
 adapter's output, and explain the changed files in the PR. ``test_tabular_golden.py`` checks the
-committed files are exactly what ingesting the committed fixtures gives: one canonical JSON Lines (`.golden`)
-file per fixture, holding the transform, every record and every finding, in package order.
+committed files are exactly what ingesting the committed fixtures gives: one canonical JSON
+Lines file per fixture (``.golden``), holding the transform, every record and every finding,
+in package order.
 """
 
 from pathlib import Path
