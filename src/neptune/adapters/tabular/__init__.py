@@ -164,7 +164,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "rows are read in blocks between rows: CSV 8,192 rows or 1 MiB, JSON 4,096 rows or"
             " 256 KiB, Parquet a slice of a row group of 65,536 cells (8,192 rows at most) or the"
             " statistics of up to 8,192 column chunks; at most 100,000 chunks, and chunks times"
-            " footer bytes under 8 GiB; at most 2,048 slices of one row group; findings about rows"
+            " footer bytes under 8 GiB; at most 512 slices of one row group; findings about rows"
             " count per block",
         ),
         Documented(
@@ -180,8 +180,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "json",
             "rows are a root array's elements or the non-blank lines of JSON Lines, cited by"
             " their bytes; cells are leaves in document order cited by JSON pointer; an empty"
-            " object or array is an Unknown leaf; null is KnownAbsent citing itself; "
-            " is Unknown and other strings are text; an integer"
+            " object or array is an Unknown leaf; null is KnownAbsent citing itself; the"
+            " empty string is Unknown and any other string is text; an integer"
             " is an int within int64 or uint64, another number a double when its shortest digits"
             " equal the literal, else its text; NaN and Infinity are non-finite reals; header is"
             " NotApplicable when every row is an object, Unknown otherwise",
@@ -190,7 +190,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "parquet",
             "cells keep declared types; DECIMAL is exact decimal text; DATE, TIME, TIMESTAMP and"
             " durations are the stored integers (unit and zone in the schema table, never"
-            " converted); null is KnownAbsent citing the footer; bytes, INT96, intervals and"
+            " converted); null is KnownAbsent citing the footer; an empty string is Unknown, any"
+            " other string text; bytes, INT96, intervals and"
             " list or map items are not decoded (Unknown); the data table's header is the leaf"
             " paths joined with '.'; statistics are the raw min and max read as the column's"
             " cells, Unknown where none fits",

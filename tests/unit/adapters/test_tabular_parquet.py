@@ -433,6 +433,10 @@ def test_fragmented_files_past_the_parse_budget_stop_with_a_finding(
     monkeypatch.setattr(_parquet, "PARSE_BUDGET", footer * 40)
     output = run(data)
     assert len(output.plan.chunks) <= 40
+    parts = [c.context["part"] for c in output.plan.chunks]
+    assert parts[0] == "table" and "statistics" in parts and "row_group" in parts
+    # the statistics are not starved by the rows: all 600 column chunks still land
+    assert len(rows_of(output, tables(output)["row_groups"])) == 600
     (finding,) = [f for f in output.findings() if f.code == "tabular.row_limit"]
     assert finding.details["parse_budget"] == footer * 40
     data_rows = rows_of(output, tables(output)["data"])
@@ -470,3 +474,30 @@ def test_strings_are_values_empty_is_unknown_and_whitespace_is_text(tmp_path: Pa
     cells_ = [r.cells[0] for r in rows_of(output, tables(output)["data"])]
     assert [type(c) for c in cells_] == [Unknown, Known, Known, KnownAbsent]
     assert cells(rows_of(output, tables(output)["data"])[1]) == ["  "]
+
+
+def test_a_group_over_the_slice_cap_and_the_row_limit_is_judged_once_capped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_parquet, "BLOCK_ROWS", 1)
+    monkeypatch.setattr(_parquet, "MAX_SLICES", 3)
+    # groups of 4 rows are capped to 3; the second would pass max_rows=5, so it stops there
+    output = run(HUMANOID, max_rows=5)
+    data = tables(output)["data"]
+    assert [r.row for r in rows_of(output, data)] == [0, 1, 2]
+    reasons = sorted(
+        str(f.details.get("max_slices", "limit"))
+        for f in output.findings()
+        if f.code == "tabular.row_limit"
+    )
+    assert reasons == ["3", "3", "limit"]
+    assert len(rows_of(output, tables(output)["row_groups"])) == 30  # statistics are not cut
+
+
+def test_statistics_beyond_the_chunk_cap_are_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_parquet, "STAT_ROWS", 10)
+    monkeypatch.setattr(_parquet, "MAX_STAT_CHUNKS", 1)
+    output = run(HUMANOID)
+    stats = [c for c in output.plan.chunks if c.context["part"] == "statistics"]
+    assert len(stats) == 1  # three groups of ten columns need three; one is allowed
+    assert any("statistics" in f.message for f in output.findings())

@@ -82,12 +82,12 @@ Parquet magic, then JSON shape, then CSV dialect.
    rows has no chunk of its own). Block bounds are constants of this adapter version, never settings or
    host facts, so the chunk ids and findings are deterministic. Memory is bounded by a read piece,
    whatever a row's length. Two Parquet costs are bounded in the plan. Every chunk's `ingest` opens
-   the footer again (a separate sandboxed call), so a table has at most 100,000 chunks and its
+   the footer again (a separate sandboxed call), so a table has at most 100,000 chunks (64 of them for statistics) and its
    chunks times the footer's bytes stay under 8 GiB (about 40 s of parsing at the measured
    190 MB/s); past either, `row_limit` says where reading stopped. And pyarrow cannot seek into a
    row group, so each slice decodes its group from the start: the native re-decoding grows with the
    square of a group's slices. Measured on 1M rows x 4 columns (125 slices): 24 s in all, about 1 s
-   of it re-decoding, the rest building records. A group is read for at most 2,048 slices (33M rows
+   of it re-decoding, the rest building records. A group is read for at most 512 slices (8M rows
    at 4 columns); the rest is a `row_limit` finding naming the first row not read. A schema with no
    leaf columns has no cells to cite: `parquet_footer`, no records.
 9. **Hostile input.** Settings, checked before a row is parsed, bound what a row or footer may cost:

@@ -112,6 +112,7 @@ Never decide from the name alone when the bytes can say: a renamed file must sti
 | Source shows | Emit | Never |
 |---|---|---|
 | missing key, empty or whitespace-only cell | `Unknown` | a default, `""`, `0`, "none" |
+| a typed source's (JSON, Parquet) empty string | `Unknown` (the model holds no empty text); other strings, whitespace-only included, are `Known` | `Known("")` |
 | a token the source or its format spec defines as "none" | `KnownAbsent(provenance=<that definition>)` | `KnownAbsent` without a citation |
 | a spec-defined sentinel (e.g. ROS covariance `[0] == -1`) | the state the spec gives it, e.g. `NotCovered` | the sentinel as a `Known` number |
 | any other value, however implausible | `Known(value)` | "fixing" it; plausibility is `validate/` |

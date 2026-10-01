@@ -75,14 +75,15 @@ BLOCK_ROWS: Final = 8192
 BLOCK_CELLS: Final = 65536
 # The column chunks' statistics rows one chunk covers (a group of more columns is a chunk alone).
 STAT_ROWS: Final = 8192
+MAX_STAT_CHUNKS: Final = 64
 # Every chunk parses the footer again: the chunks of a table, times the footer's bytes, stay under
 # this (about 40 s of parsing at the measured 190 MB/s).
 PARSE_BUDGET: Final = 8 * 1024**3
 # A slice decodes its row group from the start (pyarrow cannot seek), so a group's native decoding
 # grows with the square of its slices. Measured: 1M rows x 4 columns, 125 slices, 24 s in all, of
-# which about 1 s is re-decoding; at 2,048 slices re-decoding matches the linear work. More slices
-# than this in one group are not read.
-MAX_SLICES: Final = 2048
+# which about 1 s is re-decoding, so 512 slices cost about 17 s of it beside 100 s of linear work.
+# More slices than this in one group are not read.
+MAX_SLICES: Final = 512
 # The most blocks a table is read in; a declared row count past it is a ``row_limit``.
 MAX_BLOCKS: Final = 100_000
 READ_BUFFER: Final = 1024 * 1024
@@ -391,7 +392,7 @@ def _statistic(raw: Any, column: Any) -> Knowledge[CellValue]:
                 text = raw.decode("utf-8")
             except UnicodeDecodeError:
                 return Unknown()
-            return Known(text) if text else Unknown()
+            return Known(text) if text.strip() else Unknown()  # a bound may be truncated
         if logical == "Decimal" and column.scale >= 0 and raw:
             return Known(_exact_decimal(int.from_bytes(raw, "big", signed=True), column.scale))
     return Unknown()
@@ -506,7 +507,6 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
     # Every chunk's ingest opens the footer again, so the chunks are bounded by their number and by
     # the footer bytes they would parse in all; a group with no rows costs a chunk of statistics at
     # most, and many groups share one.
-    metadata = pf.metadata
     stats: list[tuple[int, int]] = []  # [first, stop) row groups, as the statistics chunks cover
     held, first_group = 0, 0
     for index in range(metadata.num_row_groups):
@@ -521,19 +521,26 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
         held += group.num_columns
     if held:
         stats.append((first_group, metadata.num_row_groups))
-    chunks += [
-        make_chunk(
-            source,
-            config,
-            {**base, "first": a, "part": "statistics", "stop": b},
-            footer.length,
-        )
-        for a, b in stats
-    ]
 
     def room(more: int) -> bool:
         total = len(chunks) + more
         return total <= MAX_BLOCKS and total * footer.length <= PARSE_BUDGET
+
+    for added, (a, b) in enumerate(stats):
+        if added >= MAX_STAT_CHUNKS or not room(1):
+            findings.append(
+                finding(
+                    config,
+                    "row_limit",
+                    footer.ref(source),
+                    f"the statistics of row groups {a} on are not read: over {MAX_STAT_CHUNKS}"
+                    " statistics chunks or the footer parse budget",
+                    {"max_stat_chunks": MAX_STAT_CHUNKS, "row_group": a},
+                )
+            )
+            break
+        context = {**base, "first": a, "part": "statistics", "stop": b}
+        chunks.append(make_chunk(source, config, context, footer.length))
 
     per_block = max(1, min(BLOCK_ROWS, BLOCK_CELLS // max(1, len(found))))
     row, limited = 0, False
@@ -542,14 +549,26 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
         problem = _check_group(group, index, footer, found, limits)
         declared = max(0, group.num_rows)
         count = 0 if problem is not None or limited else declared
+        low, high = _group_range(group, footer)
         if problem is not None:
             name, message, details = problem
+            findings.append(finding(config, name, bytes_at(source, low, high), message, details))
+        slices = -(-count // per_block)
+        if slices > MAX_SLICES:
+            # A slice decodes its row group from the start (pyarrow cannot seek), so the work of
+            # a group grows with the square of its slices: only the first ones are read.
+            kept = MAX_SLICES * per_block
             findings.append(
                 finding(
-                    config, name, bytes_at(source, *_group_range(group, footer)), message, details
+                    config,
+                    "row_limit",
+                    bytes_at(source, low, high),
+                    f"row group {index} holds {count} rows in {slices} slices, over {MAX_SLICES};"
+                    f" its rows from {row + kept} on are not read",
+                    {"max_slices": MAX_SLICES, "row": row + kept, "row_group": index},
                 )
             )
-        slices = -(-count // per_block)
+            count, slices = kept, MAX_SLICES
         if count and (row + count > limits.max_rows or not room(slices)):
             limited = True
             count = 0
@@ -557,7 +576,7 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
                 finding(
                     config,
                     "row_limit",
-                    bytes_at(source, *_group_range(group, footer)),
+                    bytes_at(source, low, high),
                     f"row group {index} would take the table past max_rows ({limits.max_rows})"
                     f" rows, {MAX_BLOCKS} chunks or {PARSE_BUDGET} footer bytes parsed;"
                     f" rows from {row} on are not read",
@@ -569,24 +588,8 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
                     },
                 )
             )
-        elif slices > MAX_SLICES:
-            # A slice decodes its row group from the start (pyarrow cannot seek), so the work of
-            # a group grows with the square of its slices: only the first ones are read.
-            kept = MAX_SLICES * per_block
-            findings.append(
-                finding(
-                    config,
-                    "row_limit",
-                    bytes_at(source, *_group_range(group, footer)),
-                    f"row group {index} holds {count} rows in {slices} slices, over {MAX_SLICES};"
-                    f" its rows from {row + kept} on are not read",
-                    {"max_slices": MAX_SLICES, "row": row + kept, "row_group": index},
-                )
-            )
-            count = kept
-        low, high = _group_range(group, footer)
         for first in range(0, count, per_block):
-            context: JsonObject = {
+            context = {
                 **base,
                 "count": min(per_block, count - first),
                 "first": first,
