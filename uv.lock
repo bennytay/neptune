@@ -10,6 +10,7 @@ resolution-markers = [
 members = [
     "neptune",
     "neptune-ledger",
+    "neptune-memory",
     "neptune-platform",
 ]
 
@@ -558,6 +559,17 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pgserver", specifier = "==0.1.4" }]
+
+[[package]]
+name = "neptune-memory"
+version = "0.0.1"
+source = { editable = "packages/neptune-memory" }
+dependencies = [
+    { name = "neptune" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "neptune", editable = "." }]
 
 [[package]]
 name = "neptune-platform"

@@ -1,0 +1,42 @@
+{
+  "filled_bullet": {
+    "filled": true,
+    "body": "Closes MVL-1\n\n**TL;DR:** x\n\n**Architecture change**\n- Added: the validation box\n- Changed:\n- Removed:\n\n<details><summary>Details</summary>\n</details>"
+  },
+  "filled_inline_on_heading": {
+    "filled": true,
+    "body": "**Architecture change**: runtime to package arrow now carries receipts\n\n**Progress:** M1"
+  },
+  "filled_crlf": {
+    "filled": true,
+    "body": "**Architecture change**\r\n- Removed: the legacy box\r\n"
+  },
+  "filled_prose_line": {
+    "filled": true,
+    "body": "**Architecture change**\nThe store box is now built.\n"
+  },
+  "no_section": {
+    "filled": false,
+    "body": "Closes MVL-1\n\n**TL;DR:** x\n\n**Decided**\n- y"
+  },
+  "template_section_still_commented": {
+    "filled": false,
+    "body": "**Progress:** M1\n\n<!-- Only if the PR changes ARCHITECTURE.md; otherwise delete.\n**Architecture change**\n- Added: e.g. \"added the validation box\"\n-->\n\n<details><summary>Details</summary>\n</details>"
+  },
+  "heading_only": {
+    "filled": false,
+    "body": "**Architecture change**\n\n<details><summary>Details</summary>\n\n**Acceptance**\n- [x] everything\n</details>"
+  },
+  "empty_skeleton": {
+    "filled": false,
+    "body": "**Architecture change**\n- Added:\n- Changed:\n- Removed:\n\n**Follow-ups:** none"
+  },
+  "content_only_in_a_comment": {
+    "filled": false,
+    "body": "**Architecture change**\n- Added: <!-- the validation box -->\n\n## Notes\nsomething else"
+  },
+  "null_body": {
+    "filled": false,
+    "body": null
+  }
+}

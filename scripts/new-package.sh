@@ -19,6 +19,10 @@ usage() {
 name=$1
 [[ $name =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]] || usage
 [[ $name != neptune ]] || { echo "'neptune' is the compiler (the root project)" >&2; exit 1; }
+# `check`, `plan` and `template` are CI job names; a package of that name would collide with them.
+case $name in
+  check | plan | template) echo "'$name' is reserved" >&2; exit 1 ;;
+esac
 module=${name//-/_}
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
