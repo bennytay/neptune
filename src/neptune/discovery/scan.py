@@ -1,5 +1,8 @@
 """One deterministic pass over a local source: walk, digest, record, reconcile absences (ADR 0010).
 
+``scan`` walks and fingerprints in one call. The runtime (MVL-6) walks first, as its discover
+phase, and hands the entries to ``fingerprint``; the two give the same result.
+
 Absence is asserted only with coverage. A previously present location that this scan did not yield
 is marked absent unless the scan could not see it: it, or an ancestor, was unreadable or vanished
 mid-walk, or an ancestor is now a symlink (not followed, so what lies behind it is unknown). A
@@ -7,6 +10,7 @@ symlink, FIFO or directory now sitting exactly at the location *is* coverage: th
 gone.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from neptune.discovery.source import (
@@ -16,6 +20,7 @@ from neptune.discovery.source import (
     SourceAccessError,
     SourceEntry,
     SymlinkEntry,
+    WalkEntry,
 )
 from neptune.identity.hashing import DEFAULT_CHUNK_SIZE, digest_stream
 from neptune.identity.revisions import Observation, SourceLedger
@@ -33,11 +38,27 @@ class ScanResult:
 def scan(
     source: LocalSource, ledger: SourceLedger, *, chunk_size: int = DEFAULT_CHUNK_SIZE
 ) -> ScanResult:
+    """Walk ``source`` and fingerprint what it finds into ``ledger``."""
+    return fingerprint(source, ledger, source.walk(), chunk_size=chunk_size)
+
+
+def fingerprint(
+    source: LocalSource,
+    ledger: SourceLedger,
+    entries: Iterable[WalkEntry],
+    *,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+) -> ScanResult:
+    """Digest the regular files among ``entries`` (one walk of ``source``) and reconcile absences.
+
+    A file that changed or vanished between the walk and its digest is skipped as blind for this
+    pass, so nothing is asserted about it; the next pass decides.
+    """
     observations: list[Observation] = []
     symlinks: list[SymlinkEntry] = []
     skipped: list[SkippedEntry] = []
     seen: set[bytes] = set()
-    for entry in source.walk():
+    for entry in entries:
         if isinstance(entry, SymlinkEntry):
             symlinks.append(entry)
         elif isinstance(entry, SkippedEntry):
