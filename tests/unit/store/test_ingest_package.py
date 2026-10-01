@@ -324,6 +324,28 @@ def test_a_series_that_breaks_its_stream_is_refused(tmp_path: Path) -> None:
         package_files(records(), series={stream.id: b"PAR1 fake parquet PAR1"}, store=STORE)
 
 
+def test_series_settings_are_checked_in_shape_and_against_the_files(tmp_path: Path) -> None:
+    """``store.series`` holds every pinned setting, and each file's metadata must agree with it."""
+    stream = stream_of(records())
+    series = tmp_path / "imu.parquet"
+    write_series(stream, [imu_batch(stream)], series)
+    misshapen: list[dict[str, Any]] = [
+        {"series": {}},
+        {"series": {**SERIES_SETTINGS, "row_group_rows": "65536"}},
+    ]
+    for store in misshapen:
+        with pytest.raises(PackageError, match=r"store\.series: series setting"):
+            package_contents(records(), series={stream.id: series}, store=store)
+    other: dict[str, Any] = {"series": {**SERIES_SETTINGS, "writer": "pyarrow 0.0.0"}}
+    with pytest.raises(PackageError, match="written by 'pyarrow"):
+        package_contents(records(), series={stream.id: series}, store=other)
+    # A manifest whose recorded settings were changed after the fact is refused on read.
+    files = package_files(records(), series={stream.id: series.read_bytes()}, store=STORE)
+    manifest = replace(read_files(files).manifest, store=other)
+    with pytest.raises(PackageError, match="written by 'pyarrow"):
+        read_files({**files, MANIFEST: canonical_json.dumps(manifest.to_json())})
+
+
 def test_the_package_documents_validate_against_the_schema() -> None:
     schema = canonical_schema()
     files = package_files(records())

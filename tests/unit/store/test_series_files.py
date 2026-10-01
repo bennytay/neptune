@@ -3,6 +3,7 @@
 import random
 from collections.abc import Sequence
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ from neptune.store.series import (
     SeriesError,
     arrow_schema,
     check_series,
+    check_settings,
     merge_runs,
     read_rows,
     write_run,
@@ -152,7 +154,8 @@ def test_every_column_type_round_trips(tmp_path: Path) -> None:
     assert check_series(STREAM, path) == 2
     schema = pq.ParquetFile(path).schema_arrow
     assert schema.field("value/a").type == pa.uint64()
-    assert schema.field("value/g").type == pa.list_(pa.float32())
+    assert schema.field("value/g").type == pa.list_(pa.field("item", pa.float32(), nullable=False))
+    assert not schema.field("value/g").type.value_field.nullable  # a repeated cell has no null item
     assert not schema.field("seq").nullable and not schema.field("state/time/0").nullable
 
 
@@ -163,10 +166,16 @@ def test_a_stream_with_no_samples_has_a_typed_empty_series(tmp_path: Path) -> No
     assert pq.ParquetFile(path).schema_arrow.field("value/v").type == pa.float32()
 
 
+def group_rows(monkeypatch: pytest.MonkeyPatch, rows: int) -> None:
+    """Row groups of ``rows`` rows: the writer's constant and the setting that records it."""
+    monkeypatch.setattr(series_module, "ROW_GROUP_ROWS", rows)
+    monkeypatch.setitem(series_module.SERIES_SETTINGS, "row_group_rows", rows)
+
+
 @pytest.fixture
 def small_groups(monkeypatch: pytest.MonkeyPatch) -> None:
     """Row groups of 4 rows, reads of 3 and merges of 2 runs, so small tests reach every path."""
-    monkeypatch.setattr(series_module, "ROW_GROUP_ROWS", 4)
+    group_rows(monkeypatch, 4)
     monkeypatch.setattr(series_module, "READ_ROWS", 3)
     monkeypatch.setattr(series_module, "FAN_IN", 2)
 
@@ -205,6 +214,51 @@ def test_the_same_rows_in_any_chunks_and_order_give_the_same_file(
     assert check_series(STREAM, one) == len(rows)
 
 
+def wide_batch(rows: Sequence[tuple[int, int | None]]) -> SeriesBatch:
+    """Rows with a 36-float64 covariance, as a ROS pose message carries one."""
+    covariance = SeriesColumn(
+        "value/covariance",
+        ColumnType.FLOAT64,
+        tuple(tuple(float(seq * 36 + k) / 7 for k in range(36)) for seq, _ in rows),
+        repeated=True,
+    )
+    return batch(rows, extra=(covariance,))
+
+
+def test_bytes_do_not_depend_on_how_wide_rows_were_chunked(tmp_path: Path) -> None:
+    """pyarrow cuts pages and abandons dictionaries per array it is handed, so a row group must
+    be written from whole arrays, not from the pieces the merge produced (review of MVL-72).
+
+    70,000 rows of 36 doubles cross the 1 MiB page limit and the 1 MiB dictionary limit many times
+    in each row group, and the second row group starts inside the rows.
+    """
+    count = 70_000
+    rows: list[tuple[int, int | None]] = [(seq, seq * 10) for seq in range(count)]
+    quarter = count // 4
+    cuts = {
+        "one": [rows],
+        "quarters-reversed": [rows[i : i + quarter] for i in range(0, count, quarter)][::-1],
+        "interleaved": [rows[k::5] for k in range(5)],  # every run spans the whole time range
+        "uneven": [rows[:23_333], rows[23_333:46_666], rows[46_666:]],
+    }
+    files = {}
+    for name, pieces in cuts.items():
+        path = written(tmp_path, [wide_batch(piece) for piece in pieces], f"{name}.parquet")
+        files[name] = path.read_bytes()
+    assert len(set(files.values())) == 1, {name: len(data) for name, data in files.items()}
+    metadata = pq.ParquetFile(tmp_path / "one.parquet").metadata
+    assert [metadata.row_group(i).num_rows for i in range(2)] == [65_536, count - 65_536]
+    group = metadata.row_group(0)
+    covariance = next(
+        group.column(i)
+        for i in range(group.num_columns)
+        if group.column(i).path_in_schema.startswith("value/covariance")
+    )
+    assert {"RLE_DICTIONARY", "PLAIN"} <= set(covariance.encodings)  # the dictionary gave up
+    assert covariance.total_uncompressed_size > 8 * 1024 * 1024  # many 1 MiB pages
+    assert check_series(STREAM, tmp_path / "one.parquet") == count
+
+
 @pytest.mark.usefixtures("small_groups")
 def test_many_runs_merge_in_rounds(tmp_path: Path) -> None:
     rows = [(seq, 1000 - seq if seq % 3 else None) for seq in range(37)]
@@ -224,7 +278,7 @@ def test_merging_needs_memory_that_does_not_grow_with_the_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Readers hold one row group per run and the writer one row group, whatever the total."""
-    monkeypatch.setattr(series_module, "ROW_GROUP_ROWS", 512)
+    group_rows(monkeypatch, 512)
     monkeypatch.setattr(series_module, "READ_ROWS", 256)
 
     def peak(rows: int) -> int:
@@ -327,17 +381,81 @@ def test_check_series_refuses_what_the_writer_never_writes(tmp_path: Path) -> No
         check_series(STREAM, b"PAR1 not really PAR1")
 
 
-def test_a_row_whose_provenance_does_not_parse_is_refused(tmp_path: Path) -> None:
-    table = good_table([(0, 1)])
-    index = table.schema.get_field_index("locator/0/offset")
-    negative = table.set_column(index, table.schema.field(index), pa.array([-4]))
-    with pytest.raises(SeriesError, match="offset"):
-        check_series(STREAM, raw(tmp_path, negative))
+@pytest.mark.parametrize(
+    "values",
+    [
+        pa.array([1, 2], type=pa.timestamp("ns", tz="UTC")),
+        pa.array([Decimal("1.50"), Decimal("2.25")], type=pa.decimal128(10, 2)),
+        pa.array([{"x": 1}, {"x": 2}], type=pa.struct([("x", pa.int64())])),
+        pa.array(["a", "b"]).dictionary_encode(),
+        pa.array([[1.0], [2.0, None]], type=pa.list_(pa.float64())),
+        pa.array([[[1.0]], [[2.0]]], type=pa.list_(pa.list_(pa.float64()))),
+        pa.array(["a", "b"], type=pa.large_string()),
+    ],
+    ids=["timestamp", "decimal", "struct", "dictionary", "nullable items", "nested", "large"],
+)
+def test_a_value_column_of_a_type_no_adapter_emits_is_refused(tmp_path: Path, values: Any) -> None:
+    """A value column is one ColumnType or a list of it with no null item (ADR 0025 §5)."""
+    table = good_table([(0, 1), (1, 2)]).append_column("value/x", values)
+    assert pq.read_schema(raw(tmp_path, table)).field("value/x").type == values.type
+    with pytest.raises(SeriesError, match=r"column value/x \(.*\) breaks the contract"):
+        check_series(STREAM, raw(tmp_path, table))
+
+
+def test_every_row_is_checked_wherever_it_sits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A locator or seq that does not parse is refused in the middle of a batch and in a later one,
+    not only at the head of a batch (review of MVL-72)."""
+    monkeypatch.setattr(series_module, "READ_ROWS", 3)
+    rows: list[tuple[int, int | None]] = [(seq, 100 + seq) for seq in range(7)]
+    table = good_table(rows)
+    for row in read_rows(raw(tmp_path, table)):
+        STREAM.check_row(row)
+    assert check_series(STREAM, raw(tmp_path, table)) == 7
+    offset = table.schema.get_field_index("locator/0/offset")
+    for bad in (0, 1, 5):  # at the head of the first batch, inside it, inside the last
+        offsets = [8 + 4 * seq for seq in range(7)]
+        offsets[bad] = -4
+        negative = table.set_column(offset, table.schema.field(offset), pa.array(offsets))
+        with pytest.raises(SeriesError, match=rf"seq {bad}: .*offset"):
+            check_series(STREAM, raw(tmp_path, negative))
+        with pytest.raises(ValueError, match="offset"):
+            STREAM.row_provenance(list(read_rows(raw(tmp_path, negative)))[bad])
+    seq = table.schema.get_field_index("seq")
+    seqs = table.set_column(seq, table.schema.field(seq), pa.array([0, 1, 2, 3, -4, 5, 6]))
+    with pytest.raises(SeriesError, match="never negative"):
+        check_series(STREAM, raw(tmp_path, seqs))
 
 
 def test_the_settings_name_the_writer() -> None:
     assert SERIES_SETTINGS["writer"] == f"pyarrow {pa.__version__}"
     assert SERIES_SETTINGS["row_group_rows"] == series_module.ROW_GROUP_ROWS
+    assert check_settings(dict(SERIES_SETTINGS)) == SERIES_SETTINGS
+
+
+def test_a_file_must_agree_with_the_settings_recorded_for_it(tmp_path: Path) -> None:
+    """The settings' shape is pinned; their values are held against the file's own metadata."""
+    path = written(tmp_path, [batch([(0, 1), (1, 2)])])
+    assert check_series(STREAM, path, SERIES_SETTINGS) == 2
+    for key, value, message in (
+        ("writer", "pyarrow 0.0.0", f"written by 'pyarrow {pa.__version__}'"),
+        ("format_version", "2.4", "Parquet format 2.6"),
+        ("row_group_rows", 1, "row groups do not hold 1 rows"),
+    ):
+        with pytest.raises(SeriesError, match=message):
+            check_series(STREAM, path, {**SERIES_SETTINGS, key: value})
+    for bad in (
+        None,
+        {},
+        [*SERIES_SETTINGS.items()],
+        {**SERIES_SETTINGS, "extra": 1},
+        {key: value for key, value in SERIES_SETTINGS.items() if key != "writer"},
+        {**SERIES_SETTINGS, "row_group_rows": "65536"},
+        {**SERIES_SETTINGS, "dictionary": 1},
+    ):
+        with pytest.raises(SeriesError, match="series setting"):
+            check_settings(bad)
 
 
 def test_a_stream_line_changes_the_file(tmp_path: Path) -> None:

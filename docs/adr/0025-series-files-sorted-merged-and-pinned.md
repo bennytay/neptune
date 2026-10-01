@@ -34,20 +34,31 @@ streams need several files per stream to be written and resumed in pieces.
    - Resume does not need partial series files: the runs are the checkpoint (MVL-73 keeps them per
      chunk), and the merge is a deterministic step that can always run again.
 3. **Bytes depend only on the rows.** Row groups hold exactly `ROW_GROUP_ROWS` (65,536) rows,
-   counted along the merged order, the last one fewer. Columns are in name order. So the same rows,
-   cut into any chunks and merged in any order, give the same file.
+   counted along the merged order, the last one fewer. Columns are in name order. Each row group
+   is written from one contiguous array per column: pyarrow cuts pages and abandons dictionary
+   encoding per array it is handed, so the pieces the merge produced must never reach the writer.
+   So the same rows, cut into any chunks and merged in any order, give the same file.
 4. **Pinned writer settings**, recorded under `series` in the manifest's `store` by whoever
    assembles the package: zstd level 3, dictionary encoding, statistics, the page index, 1 MiB data
-   pages, Parquet format 2.6, 65,536-row groups, and the writer, `pyarrow <version>`. A pyarrow
+   pages, Parquet format 2.6, 65,536-row groups, the writer, `pyarrow <version>`, and every pyarrow
+   default that shapes bytes (data page version 1.0, a 1 MiB dictionary page limit, 1,024-value
+   write batches, 20,000-row pages, no page checksums, no byte-stream split, compliant nested
+   types, the Arrow schema stored), so that a default that moves cannot move the bytes. A pyarrow
    upgrade may change bytes, so it is output-changing (ADR 0002) and visible in the settings.
 5. **Types.** Each `ColumnType` maps to the Arrow type of the same name; a repeated column is a
-   list of it. `seq`, locator fields and state columns are non-nullable fields. State columns are
-   strings, dictionary-encoded by the writer. Ticks stay plain `int64`, never a timestamp type.
-6. **Reading checks every series against its stream**, a batch at a time: the `Stream` line in the
-   metadata, the column names and types, strict order on (clock-0 ticks, unknown last, `seq`), the
-   null rules and the state vocabulary. The first row of every batch goes through
-   `Stream.check_row`, which rebuilds its provenance. `seq` uniqueness across different ticks is
-   left to the ingest checks, because proving it needs memory that grows with the rows.
+   list of it whose items are never null (a repeated cell is a tuple of scalars). `seq`, locator
+   fields and state columns are non-nullable fields. State columns are strings,
+   dictionary-encoded by the writer. Ticks stay plain `int64`, never a timestamp type.
+6. **Reading checks every series against its stream and its recorded settings**, a batch at a
+   time. The file's own metadata (writer, format version, row-group sizes) must agree with the
+   settings its manifest records, which must hold every pinned setting. Then the `Stream` line in
+   the metadata, the column names and types (a value column is one `ColumnType` or a list of it;
+   a timestamp, decimal, struct or dictionary type asserts what no adapter did), strict order on
+   (clock-0 ticks, unknown last, `seq`), the null rules and the state vocabulary, all vectorised
+   over the batch. Every row's `seq` is non-negative (one minimum) and every row's locator
+   parses, read from the locator columns alone (`Stream.row_evidence`): together, what
+   `Stream.check_row` checks, for every row. `seq` uniqueness across different ticks is left to
+   the ingest checks, because proving it needs memory that grows with the rows.
 7. **A series file is optional in a package.** A records-only package, like the worked examples,
    holds streams without series. A package the store assembles from an ingest (MVL-73) holds one
    for every stream, empty ones included. A zero-row file and a missing file say different things.
@@ -76,7 +87,8 @@ streams need several files per stream to be written and resumed in pieces.
 - The store depends on `pyarrow` (ADR 0001 §4), pinned through `uv.lock`; mypy treats it as
   untyped, and only `neptune.store` imports it.
 - MVL-73 commits each chunk's runs with the chunk and merges them when it assembles a package.
-- Reading a package reads every series once, a batch at a time. Packages with very large series
-  take as long to verify as to read.
+- Reading a package reads every series once, a batch at a time. Parsing each row's locator is a
+  Python step per row (a few microseconds), so a billion-row package takes about an hour to
+  verify; a vectorised check per locator kind is the remedy if that ever dominates.
 - Revisit if consumers need series partitioned by time for object stores (M9), if the merge
   dominates ingest time, or if row widths make fixed-row groups unworkable.
