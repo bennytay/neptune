@@ -15,6 +15,7 @@ from neptune_memory.schema.claim import (
     ClaimAssertionKind,
     ClaimObject,
     ClaimProvenance,
+    ModelRef,
     is_inferred,
 )
 from neptune_memory.schema.interval import OPEN, CivilClock, Open, ledger_tx
@@ -34,6 +35,8 @@ DAYS = CivilClock(Timescale.POSIX, Epoch.UNIX, Fraction(86400))
 BOOT_CLOCK: RecordId = record_id("timestamp_domain", {"test": "boot clock of amr-12"})
 
 CONFIG = config_hash({"test": True})
+# The model every inferred test claim names in its provenance (ADR 0006 §3).
+MODEL = ModelRef("test-model", "1")
 
 
 def evidence(n: int) -> EvidenceRef:
@@ -41,9 +44,12 @@ def evidence(n: int) -> EvidenceRef:
 
 
 def provenance(
-    n: int = 0, consolidator: str = "memory.test", records: tuple[RecordId, ...] = ()
+    n: int = 0,
+    consolidator: str = "memory.test",
+    records: tuple[RecordId, ...] = (),
+    model: ModelRef | None = None,
 ) -> ClaimProvenance:
-    return ClaimProvenance((evidence(n),), records, consolidator, "1", CONFIG)
+    return ClaimProvenance((evidence(n),), records, consolidator, "1", CONFIG, model)
 
 
 def at(ticks: int, clock: CivilClock | RecordId = SECONDS) -> Timestamp:
@@ -79,5 +85,5 @@ def claim(
         recorded_at=ledger_tx(tx),
         assertion_kind=kind,
         confidence=confidence,
-        provenance=provenance(ev, consolidator),
+        provenance=provenance(ev, consolidator, model=MODEL if is_inferred(kind) else None),
     )

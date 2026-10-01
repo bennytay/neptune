@@ -169,8 +169,12 @@ def test_a_newer_draft_does_not_make_a_lock_behind(registry: Any) -> None:
 
 def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> None:
     current = tool.show(registry.latest("package-schema", stable=True).version)
+    graph = tool.show(registry.latest("graph-schema", stable=True).version)
     registry.write_lock(
-        {p: {"package-schema": current} for p in ("neptune-deploy", "neptune-ledger")}
+        {
+            "neptune-deploy": {"graph-schema": graph, "package-schema": current},
+            "neptune-ledger": {"package-schema": current},
+        }
     )
     calls: list[Any] = []
 
@@ -179,7 +183,7 @@ def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> Non
         return 0
 
     report = tool.check_packages(registry, registry.lock(), runner=runner)
-    assert report.ok and len(calls) == 1
+    assert report.ok and len(calls) == 2  # one per owner: the compiler and neptune-memory
     assert sum("54 goldens checked" in n for n in report.notes) == 1
 
 
@@ -329,7 +333,7 @@ def test_malformed_registry_is_reported(registry: Any, damage: str, expected: st
     elif damage == "extra_golden":
         (version / "golden" / "stray.json").write_text("{}\n")
     elif damage == "planned_with_version":
-        shutil.copytree(version, registry.root / "graph-schema" / "v1.0.0")
+        shutil.copytree(version, registry.root / "query-packet" / "v1.0.0")
     elif damage == "unknown_package":
         path = registry.root / "query-packet" / "contract.toml"
         path.write_text(_text(path).replace('"neptune-learn"]', '"neptune-nowhere"]'))
@@ -511,7 +515,7 @@ def test_the_first_stable_version_adds_every_in_repo_consumer(
 
 def test_bump_refuses_planned_contracts(registry: Any) -> None:
     with pytest.raises(tool.ContractError, match="planned"):
-        tool.bump(registry, "graph-schema", "0.1.0")
+        tool.bump(registry, "query-packet", "0.1.0")
 
 
 def test_post_needs_a_key_and_never_guesses(
