@@ -18,14 +18,18 @@ One registration is one transaction in the tenant's schema:
 2. Look up `package_id` = sha256 of `manifest.json`'s bytes. If it is there, stop: return the stored
    id and `tx_seq`, write nothing (ADR 0002 §6).
 3. `next_tx()` gives the Ledger's next tick: `tx_seq` 1, 2, 3, 4 for the four packages, `tx_time`
-   the host's UTC time as RFC 3339 with microseconds, never earlier than the previous tick's.
-4. `package`: one row with `schema_version` and `receipt_id` from the manifest, the root locator
-   it was registered from, the Ledger's version and the tick.
-5. `source` (once per content id, `ON CONFLICT DO NOTHING`) and `package_source` (per package)
-   from `manifest.sources`; every example references its sources in place (`referenced`).
+   the host's UTC time as RFC 3339 with microseconds, never earlier than the previous tick's. A
+   rebuild uses `replay_tx` with the logged tick instead.
+4. `registration_log`: the tick, the package id, the root locator it was registered from and the
+   Ledger's version. Then `package`, with `schema_version` and `receipt_id` from the manifest; the
+   rest is copied from the log row.
+5. `source` (once per content id; an existing one with another size is refused) and
+   `package_source` (per package) from `manifest.sources`; every example references its sources in
+   place (`referenced`).
 6. `source_location` from each `source_revision` record: the location object as stated
    (`{"kind": "local", "path": "flight.ulg"}`) and the revisions it supersedes.
-7. `transform` (once per transform id) and `transform_upstream` from each `transform_record`.
+7. `transform` (once per transform id; an existing one with other fields is refused) and
+   `transform_upstream` from each `transform_record`.
    The examples have nine transforms, one per adapter (`ulog`, `rosbag2`, `mcap`, `urdf`, `stl`,
    `handeye`, `rosbag1`, `csv`, `png`, all `1.0.0`), and no upstream edges.
 8. `clock` from each `timestamp_domain` record: its field and scope.
@@ -153,5 +157,5 @@ list agrees, which the test checks for all four packages.
 ## Re-registration
 
 Registering all four packages again returns the same four `(package_id, tx_seq)` pairs, allocates
-no tick (`tx_clock.last_seq` stays 4) and changes no row. A second tenant that registers the same
-packages holds identical rows apart from its own transaction times.
+no tick (`tx_clock.last_seq` stays 4) and changes no row. Replaying the registration log into a
+fresh tenant reproduces every column of every table byte for byte, transaction times included.

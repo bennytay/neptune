@@ -5,6 +5,7 @@ import re
 import psycopg
 import pytest
 
+from ledger_catalog_rows import add_package
 from neptune_ledger.catalog.migrate import apply_migrations
 
 Conn = psycopg.Connection[tuple[object, ...]]
@@ -51,6 +52,7 @@ def test_the_schema_has_the_tables_the_adr_names(catalog: Conn) -> None:
         "package",
         "package_source",
         "record",
+        "registration_log",
         "schema_migration",
         "source",
         "source_location",
@@ -66,9 +68,9 @@ def test_every_table_has_a_non_null_tenant_id(catalog: Conn) -> None:
     tables = _tables(catalog)
     assert len(tables) > 25
     tenant_columns = {t for t, c, _, nullable in _columns(catalog) if c == "tenant_id"}
-    assert tenant_columns == set(tables) | {"registration_log"}  # the one view carries it too
+    assert tenant_columns == set(tables)
     nullable = {t for t, c, _, null in _columns(catalog) if c == "tenant_id" and null == "YES"}
-    assert nullable == {"registration_log"}  # views report every column as nullable
+    assert nullable == set()
 
 
 def test_every_tenant_id_references_the_schemas_single_tenant(catalog: Conn) -> None:
@@ -98,11 +100,7 @@ def test_the_interpretation_pattern_would_catch_the_usual_suspects() -> None:
 
 
 def test_assertion_kind_admits_only_the_canonical_kinds(catalog: Conn) -> None:
-    package = "sha256:" + "b" * 64
-    catalog.execute(
-        f"INSERT INTO {SCHEMA}.package VALUES ('acme', %s, 1, %s, 'root', '0.0.1', 1, %s)",
-        (package, "rec:sha256:" + "c" * 64, "2026-10-02T00:00:00.000000Z"),
-    )
+    package = add_package(catalog, SCHEMA, "sha256:" + "b" * 64, 1)
     insert = (
         f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id,"
         " registration_key, line, schema_version, assertion_kind)"
@@ -124,7 +122,7 @@ def test_transaction_time_and_world_time_never_share_a_table(catalog: Conn) -> N
     columns = _columns(catalog)
     tx_tables = {t for t, c, _, _ in columns if c.startswith("tx_")}
     world_tables = {t for t, c, _, _ in columns if c.startswith("world_")}
-    assert tx_tables == {"package", "registration_log"}  # the log is a view of package
+    assert tx_tables == {"package", "registration_log"}  # package copies its log entry
     assert all(t == "record" or t.startswith("record_") for t in world_tables)
     assert tx_tables.isdisjoint(world_tables)
     tx_types = {(c, d) for t, c, d, _ in columns if t == "package" and c.startswith("tx_")}
@@ -138,11 +136,7 @@ def test_transaction_time_and_world_time_never_share_a_table(catalog: Conn) -> N
 
 
 def test_world_ticks_need_a_named_clock(catalog: Conn) -> None:
-    package = "sha256:" + "b" * 64
-    catalog.execute(
-        f"INSERT INTO {SCHEMA}.package VALUES ('acme', %s, 1, %s, 'root', '0.0.1', 1, %s)",
-        (package, "rec:sha256:" + "c" * 64, "2026-10-02T00:00:00.000000Z"),
-    )
+    package = add_package(catalog, SCHEMA, "sha256:" + "b" * 64, 1)
     with pytest.raises(psycopg.errors.CheckViolation):
         catalog.execute(
             f"INSERT INTO {SCHEMA}.record (tenant_id, kind, record_id, package_id,"
@@ -168,18 +162,21 @@ def test_nothing_references_outside_the_tenant_schema(catalog: Conn) -> None:
 
 
 def _package(conn: Conn, seq: int) -> str:
-    package = "sha256:" + f"{seq:064x}"
-    conn.execute(
-        f"INSERT INTO {SCHEMA}.package VALUES ('acme', %s, 1, %s, 'root', '0.0.1', %s, %s)",
-        (package, "rec:sha256:" + "c" * 64, seq, f"2026-10-02T00:00:0{seq}.000000Z"),
-    )
-    return package
+    return add_package(conn, SCHEMA, "sha256:" + f"{seq:064x}", seq)
 
 
 def test_the_registration_log_is_the_packages_in_sequence_order(catalog: Conn) -> None:
-    packages = [_package(catalog, seq) for seq in (2, 1, 3)]
-    rows = catalog.execute(f"SELECT tx_seq, package_id FROM {SCHEMA}.registration_log").fetchall()
-    assert rows == [(1, packages[1]), (2, packages[0]), (3, packages[2])]
+    packages = [_package(catalog, seq) for seq in (1, 2, 3)]
+    rows = catalog.execute(
+        f"SELECT tx_seq, package_id FROM {SCHEMA}.registration_log ORDER BY tx_seq"
+    ).fetchall()
+    assert rows == list(zip((1, 2, 3), packages, strict=True))
+    copied = catalog.execute(
+        f"SELECT tx_seq, tx_time, package_id, root_locator, ledger_version FROM {SCHEMA}.package"
+        f" EXCEPT SELECT tx_seq, tx_time, package_id, root_locator, ledger_version"
+        f" FROM {SCHEMA}.registration_log"
+    ).fetchall()
+    assert copied == []
 
 
 @pytest.mark.parametrize(

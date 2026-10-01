@@ -8,9 +8,9 @@
 
 Every later Ledger component (registration, entity threads, the lineage current-view, the lakehouse,
 the catalog API) writes into or reads from the catalog. The catalog must therefore be a deterministic
-function of the packages registered and the order they were registered in, so it can be rebuilt
-(ADR 0001 §3, ADR 0003 §8), and it must hold no fact the packages do not state. Packages are immutable files outside the database; a
-package's identity is the sha256 of its `manifest.json` (root ADR 0022). Times in packages are
+function of the packages registered and the log of their registrations, so it can be rebuilt
+(ADR 0001 §3, ADR 0003 §8), and it must hold no fact the packages do not state. Packages are
+immutable files outside the database; a package's identity is the sha256 of its `manifest.json` (root ADR 0022). Times in packages are
 integer ticks on named clocks (root ADRs 0005, 0012); the Ledger also needs its own time, for when
 it learned of a package. Customers' catalogs must never meet. Getting any of this wrong means a
 rebuild that differs from the original, a blank that turns into a link, or one tenant reading
@@ -28,39 +28,52 @@ another's evidence.
    `[a-z][a-z0-9_]{0,47}`); the schema is the isolation unit and `PUBLIC` has no privilege on it.
    Each schema has a one-row `tenant` table, and every other table has `tenant_id NOT NULL`
    referencing it, so a row of another tenant cannot exist in the schema and no foreign key leaves
-   it. Cross-tenant joins have nothing to join: the migrations never name a schema, and the access
-   layer (a later issue) connects as a role granted one schema. Secondary indexes omit `tenant_id`, which is
-   constant within a schema; primary keys keep it so foreign keys carry it.
+   it; the migrations never name a schema. That is row containment, not access isolation: today
+   one owner role holds every `tenant_*` schema and **can** join `tenant_a.record` with
+   `tenant_b.record`. Cross-tenant joins become impossible only once `access/` (MVL-99) connects
+   each tenant through its own role, granted that one schema and nothing else. MVL-99 therefore
+   blocks any multi-tenant deployment. Secondary indexes omit `tenant_id`, which is constant within
+   a schema; primary keys keep it so foreign keys carry it.
 3. **No foreign keys into package files.** The catalog references packages by id only and never
    copies record bodies. A `record` row points into its package by `(package_id, kind, line)`: the
    record's 1-based line in `records/<kind>.jsonl`. Foreign keys exist only between catalog tables.
 4. **Two times, never mixed.** *Transaction time* is the Ledger's own clock: `next_tx()` locks the
    one-row `tx_clock`, increments `tx_seq` (strictly increasing per tenant) and returns `tx_time`,
    the host's UTC time as RFC 3339 text with exactly six fractional digits, raised to the previous
-   tick's time if the host clock went back. A package's **transaction key** is `(tx_time, tx_seq)`;
-   `tx_time` never decreases as `tx_seq` grows, so transaction order is `tx_seq` order. Only
-   `package` carries transaction time. *World time* is what the evidence states: `record.world_clock` (a
+   tick's time if the host clock went back. A trigger lets `tx_clock` only move forward: an
+   `UPDATE` must raise `last_seq` and keep or raise `last_time`, and `DELETE` and `TRUNCATE` are
+   refused. A package's **transaction key** is `(tx_time, tx_seq)`; `tx_time` never decreases as
+   `tx_seq` grows, so transaction order is `tx_seq` order. Only `registration_log` and `package`
+   carry transaction time. *World time* is what the evidence states: `record.world_clock` (a
    `timestamp_domain` record id) with `world_first` / `world_last` ticks as `bigint`, unconverted.
    No column has a timestamp, date or interval type.
-   The **Ledger registration log** is the ordered, append-only list of `(package id, transaction
-   time, sequence)`: the `package` table read in `tx_seq` order, exposed as the view
-   `registration_log`. Together with the packages it is the whole rebuild input (ADR 0003 §8). A
-   rebuild replays it in order, advancing the clock with `replay_tx(tx_seq, tx_time)`, which
-   accepts only a tick after the clock's last; the rebuilt catalog equals the original, transaction
-   times included, and live ticks continue after it. Each `record` row carries its registering
+   The **Ledger registration log** (ADR 0003 §8) is the append-only table `registration_log`:
+   one row `(tenant_id, tx_seq, tx_time, package_id, root_locator, ledger_version)` per
+   registration, read in `tx_seq` order. It holds everything a registration knows that no package
+   states. A log row must use the tick just allocated and may not precede an earlier row; `package`
+   copies `tx_seq`, `tx_time`, `root_locator` and `ledger_version` from its log row (a foreign key
+   plus a trigger that fills them and refuses any disagreement) and likewise may not precede an
+   earlier package. **Rebuild guarantee:** the same Ledger version plus the packages plus the
+   registration log gives a byte-identical catalog, transaction times included. A rebuild replays
+   the log in order, advancing the clock with `replay_tx(tx_seq, tx_time)`, which accepts only a
+   tick after the clock's last, so live ticks continue after it. Re-registering the packages with
+   a **different** Ledger version is not a replay: it builds a new catalog lineage, with its own log
+   recording that version, by design, as a parser upgrade creates new lineage in the compiler. It
+   does not violate the guarantee. Each `record` row carries its registering
    package's `tx_seq` as `registration_key`, enforced by a foreign key to
    `package (package_id, tx_seq)`: the per-record registration key ADR 0003 §3 uses as a tie-break
    and §4.5 evaluates `as_of` against.
 5. **Tables.**
-   - `package`: `package_id` (manifest sha256), `schema_version`, `receipt_id`, `root_locator` (where
-     it was registered from), `ledger_version`, `tx_seq`, `tx_time`.
+   - `registration_log` (§4) and `package`: `package_id` (manifest sha256), `schema_version`,
+     `receipt_id`, and the log's `root_locator` (where it was registered from), `ledger_version`,
+     `tx_seq` and `tx_time`.
    - `source` (content id, size; once per content id), `package_source` (which packages cite it and
      each one's `storage`: `referenced` or `materialised`, from `manifest.sources`) and
      `source_location` (every location seen: one row per `source_revision` per package, with the
      location object as stated and the revisions it supersedes).
-   - Locators and locations are stored as canonical JSON text (root ADR 0002), never `jsonb`: text
-     keeps the canonical bytes, so sibling locators compare by exact string equality, and it holds
-     an escaped NUL (`\u0000`) from hostile input, which `jsonb` refuses.
+   - Locators, locations and `libraries` are stored as canonical JSON text (root ADR 0002), never
+     `jsonb`: text keeps the canonical bytes, so sibling locators compare by exact string equality,
+     and it holds an escaped NUL (`\u0000`) from hostile input, which `jsonb` refuses.
    - `transform` (adapter id, adapter version, config hash, libraries; once per transform id) and
      `transform_upstream` (the lineage DAG's edges as declared). `upstream_id` has no foreign key: a
      declared edge to a transform not yet registered is kept, not dropped.
@@ -87,7 +100,13 @@ another's evidence.
    no-op: it returns the stored `package_id` and `tx_seq`, allocates no tick and writes nothing,
    so record ids are unchanged. A registration locks `tx_clock` before looking the package up, so
    two concurrent registrations of one package cannot both insert it. A different `root_locator`
-   for the same id is not recorded; the stored one stands.
+   for the same id is not recorded; the stored one stands. Rows shared across packages (`source` by
+   content id, `transform` by transform id with its upstream edges) are written once. The
+   registration API (MVL-88, MVL-90) **must refuse** a package that brings an existing id with
+   different fields (a source of another size, a transform with another adapter, version, config
+   hash, libraries or upstream set). It reports the conflict as a structured finding and writes
+   nothing. A silent `ON CONFLICT DO NOTHING` that keeps the first value is forbidden. The test
+   harness raises in that case.
 7. **Indexes for threads, lineage and time windows.** Thread keys, membership and the current view
    are ADR 0003's; the thread index itself is a derived table its implementation adds by a later
    migration. The catalog indexes the columns it reads, every lookup within one tenant's schema:

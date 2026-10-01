@@ -43,6 +43,27 @@ CREATE TABLE tx_clock (
   CHECK ((last_seq = 0) = (last_time IS NULL))
 );
 
+-- The clock only moves forward: every UPDATE must raise last_seq and keep last_time or raise it;
+-- DELETE and TRUNCATE are refused (§4).
+CREATE FUNCTION tx_clock_forward() RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND NEW.tenant_id = OLD.tenant_id
+     AND NEW.last_seq > OLD.last_seq
+     AND NEW.last_time IS NOT NULL
+     AND (OLD.last_time IS NULL OR NEW.last_time COLLATE "C" >= OLD.last_time COLLATE "C") THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'the transaction clock only moves forward';
+END
+$$;
+CREATE TRIGGER tx_clock_forward BEFORE UPDATE OR DELETE ON tx_clock
+  FOR EACH ROW EXECUTE FUNCTION tx_clock_forward();
+CREATE TRIGGER tx_clock_no_truncate BEFORE TRUNCATE ON tx_clock
+  FOR EACH STATEMENT EXECUTE FUNCTION tx_clock_forward();
+
 -- Allocate the next transaction tick. Locks the clock row, so registrations in one tenant are
 -- serialised; the lock is held until the calling transaction ends.
 CREATE FUNCTION next_tx(OUT tx_seq bigint, OUT tx_time text)
@@ -89,27 +110,95 @@ BEGIN
 END
 $$;
 
--- One row per registered package. Re-registering the same package id changes nothing (§6).
--- Read in tx_seq order, this table is the Ledger registration log (§4; ADR 0003 §8).
-CREATE TABLE package (
+-- The Ledger registration log (§4; ADR 0003 §8): one row per registration, in tx_seq order,
+-- append-only. With the packages and the same Ledger version it is the whole rebuild input, so it
+-- holds everything a registration knows that no package states.
+CREATE TABLE registration_log (
   tenant_id text NOT NULL REFERENCES tenant (tenant_id),
+  tx_seq bigint NOT NULL CHECK (tx_seq >= 1),
+  tx_time tx_time NOT NULL,
   package_id content_id NOT NULL,       -- sha256 of the package's manifest.json bytes
-  schema_version integer NOT NULL CHECK (schema_version >= 1),
-  receipt_id record_id NOT NULL,        -- manifest.receipt
   root_locator text NOT NULL CHECK (root_locator <> ''),  -- where it was registered from
   ledger_version text NOT NULL CHECK (ledger_version ~ '^[0-9]+\.[0-9]+\.[0-9]+$'),
-  tx_seq bigint NOT NULL CHECK (tx_seq >= 1),
+  PRIMARY KEY (tenant_id, tx_seq),
+  UNIQUE (tenant_id, package_id),
+  UNIQUE (tenant_id, package_id, tx_seq)  -- target of package's foreign key
+);
+
+-- A log entry uses the tick just allocated (next_tx or replay_tx) and never goes back.
+CREATE FUNCTION registration_log_follows_clock() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path FROM CURRENT
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM registration_log
+              WHERE tx_seq >= NEW.tx_seq OR tx_time COLLATE "C" > NEW.tx_time COLLATE "C") THEN
+    RAISE EXCEPTION 'transaction time never goes backwards: (%, %) follows a later registration',
+      NEW.tx_seq, NEW.tx_time;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM tx_clock
+                  WHERE last_seq = NEW.tx_seq AND last_time = NEW.tx_time) THEN
+    RAISE EXCEPTION 'registration (%, %) is not the tick just allocated', NEW.tx_seq, NEW.tx_time;
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER registration_log_follows_clock BEFORE INSERT ON registration_log
+  FOR EACH ROW EXECUTE FUNCTION registration_log_follows_clock();
+
+-- One row per registered package. Re-registering the same package id changes nothing (§6). The
+-- transaction and registration columns are copied from the package's log entry.
+CREATE TABLE package (
+  tenant_id text NOT NULL REFERENCES tenant (tenant_id),
+  package_id content_id NOT NULL,
+  schema_version integer NOT NULL CHECK (schema_version >= 1),
+  receipt_id record_id NOT NULL,        -- manifest.receipt
+  root_locator text NOT NULL,
+  ledger_version text NOT NULL,
+  tx_seq bigint NOT NULL,
   tx_time tx_time NOT NULL,
   PRIMARY KEY (tenant_id, package_id),
   UNIQUE (tenant_id, tx_seq),
-  UNIQUE (tenant_id, package_id, tx_seq)  -- target of record.registration_key
+  UNIQUE (tenant_id, package_id, tx_seq),  -- target of record.registration_key
+  FOREIGN KEY (tenant_id, package_id, tx_seq)
+    REFERENCES registration_log (tenant_id, package_id, tx_seq)
 );
 CREATE INDEX package_by_tx_time ON package (tx_time, tx_seq);
 CREATE INDEX package_by_receipt ON package (receipt_id);
 
--- The registration log: (package id, transaction time, sequence), ordered by tx_seq, append-only.
-CREATE VIEW registration_log AS
-  SELECT tenant_id, tx_seq, tx_time, package_id FROM package ORDER BY tx_seq;
+-- Fill a package's log columns from its log entry, refuse any that disagree, and refuse a package
+-- whose registration is older than one already in the catalog.
+CREATE FUNCTION package_from_log() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path FROM CURRENT
+AS $$
+DECLARE
+  entry registration_log%ROWTYPE;
+BEGIN
+  SELECT * INTO entry FROM registration_log WHERE package_id = NEW.package_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'package % is not in the registration log', NEW.package_id;
+  END IF;
+  IF (NEW.tx_seq IS NOT NULL AND NEW.tx_seq <> entry.tx_seq)
+     OR (NEW.tx_time IS NOT NULL AND NEW.tx_time <> entry.tx_time)
+     OR (NEW.root_locator IS NOT NULL AND NEW.root_locator <> entry.root_locator)
+     OR (NEW.ledger_version IS NOT NULL AND NEW.ledger_version <> entry.ledger_version) THEN
+    RAISE EXCEPTION 'package % disagrees with its registration log entry', NEW.package_id;
+  END IF;
+  NEW.tx_seq := entry.tx_seq;
+  NEW.tx_time := entry.tx_time;
+  NEW.root_locator := entry.root_locator;
+  NEW.ledger_version := entry.ledger_version;
+  IF EXISTS (SELECT 1 FROM package
+              WHERE tx_seq >= NEW.tx_seq OR tx_time COLLATE "C" > NEW.tx_time COLLATE "C") THEN
+    RAISE EXCEPTION 'transaction time never goes backwards: package % follows a later one',
+      NEW.package_id;
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER package_from_log BEFORE INSERT ON package
+  FOR EACH ROW EXECUTE FUNCTION package_from_log();
 
 -- Source bytes by content id: one row however many packages cite them.
 CREATE TABLE source (
@@ -153,7 +242,7 @@ CREATE TABLE transform (
   adapter_id text NOT NULL CHECK (adapter_id <> ''),
   adapter_version text NOT NULL CHECK (adapter_version <> ''),
   config_hash content_id NOT NULL,
-  libraries jsonb NOT NULL CHECK (jsonb_typeof(libraries) = 'object'),
+  libraries text NOT NULL CHECK (libraries LIKE '{%}'),  -- canonical JSON text
   PRIMARY KEY (tenant_id, transform_id)
 );
 CREATE INDEX transform_by_adapter ON transform (adapter_id, adapter_version);
@@ -282,6 +371,10 @@ CREATE TABLE record_logical_id (
 CREATE INDEX record_logical_id_by_value ON record_logical_id (namespace, value, kind);
 
 -- Append-only, every table registration writes.
+CREATE TRIGGER registration_log_append_only BEFORE UPDATE OR DELETE ON registration_log
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER registration_log_no_truncate BEFORE TRUNCATE ON registration_log
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
 CREATE TRIGGER package_append_only BEFORE UPDATE OR DELETE ON package
   FOR EACH ROW EXECUTE FUNCTION refuse_change();
 CREATE TRIGGER source_append_only BEFORE UPDATE OR DELETE ON source

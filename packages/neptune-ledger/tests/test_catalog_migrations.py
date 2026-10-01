@@ -6,6 +6,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from ledger_catalog_rows import add_package
 from neptune.model.kinds import RECORD_KINDS
 from neptune_ledger.catalog import migrate
 from neptune_ledger.catalog.migrate import (
@@ -142,10 +143,7 @@ def test_record_partitions_are_exactly_the_package_schema_kinds(pg: Conn) -> Non
 
 def test_a_record_of_an_unknown_kind_is_refused(pg: Conn) -> None:
     apply_migrations(pg, "acme")
-    pg.execute(
-        "INSERT INTO tenant_acme.package VALUES ('acme', %s, 1, %s, 'root', '0.0.1', 1, %s)",
-        (PACKAGE, ROBOT, "2026-10-02T00:00:00.000000Z"),
-    )
+    add_package(pg, "tenant_acme", PACKAGE, 1)
     with pytest.raises(psycopg.errors.CheckViolation):  # no partition for the value
         pg.execute(
             "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
@@ -164,8 +162,8 @@ def test_the_transaction_clock_is_strictly_sequenced_and_never_goes_back(pg: Con
     assert times == sorted(times)
     # A host clock that has gone backwards cannot move transaction time back.
     future = "2999-01-01T00:00:00.000000Z"
-    pg.execute("UPDATE tenant_acme.tx_clock SET last_time = %s", (future,))
-    assert pg.execute("SELECT * FROM tenant_acme.next_tx()").fetchone() == (4, future)
+    pg.execute("SELECT tenant_acme.replay_tx(4, %s)", (future,))
+    assert pg.execute("SELECT * FROM tenant_acme.next_tx()").fetchone() == (5, future)
 
 
 def test_the_transaction_clock_lives_in_its_tenants_schema(pg: Conn) -> None:
@@ -184,9 +182,11 @@ def test_the_transaction_clock_lives_in_its_tenants_schema(pg: Conn) -> None:
 def test_transaction_time_is_rfc3339_utc_with_microseconds_only(pg: Conn, bad: str) -> None:
     apply_migrations(pg, "acme")
     with pytest.raises(psycopg.errors.CheckViolation):
+        pg.execute("SELECT tenant_acme.replay_tx(1, %s)", (bad,))
+    with pytest.raises(psycopg.errors.CheckViolation):
         pg.execute(
-            "INSERT INTO tenant_acme.package VALUES ('acme', %s, 1, %s, 'root', '0.0.1', 1, %s)",
-            (PACKAGE, ROBOT, bad),
+            "INSERT INTO tenant_acme.registration_log VALUES ('acme', 1, %s, %s, 'root', '0.0.1')",
+            (bad, PACKAGE),
         )
 
 
@@ -221,10 +221,7 @@ def test_a_replayed_tick_must_follow_the_clock(pg: Conn, tick: tuple[int, str]) 
 )
 def test_a_record_key_must_have_its_kinds_shape(pg: Conn, kind: str, key: str) -> None:
     apply_migrations(pg, "acme")
-    pg.execute(
-        "INSERT INTO tenant_acme.package VALUES ('acme', %s, 1, %s, 'root', '0.0.1', 1, %s)",
-        (PACKAGE, ROBOT, "2026-10-02T00:00:00.000000Z"),
-    )
+    add_package(pg, "tenant_acme", PACKAGE, 1)
     with pytest.raises(psycopg.errors.CheckViolation):
         pg.execute(
             "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
@@ -250,3 +247,88 @@ def test_misnamed_or_missing_migration_files_are_refused(
     monkeypatch.setattr(migrate, "files", lambda _: tmp_path)
     with pytest.raises(MigrationError, match=message):
         migrations()
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        "SET last_seq = 1, last_time = NULL",  # forget the time
+        "SET last_seq = 2",  # reuse a sequence
+        "SET last_seq = 1",  # go back
+        "SET last_seq = 4, last_time = '2026-10-01T08:00:00.000000Z'",  # earlier time
+    ],
+)
+def test_the_clock_refuses_any_update_that_does_not_move_it_forward(pg: Conn, update: str) -> None:
+    apply_migrations(pg, "acme")
+    pg.execute("SELECT tenant_acme.replay_tx(2, '2026-10-01T09:00:00.000000Z')")
+    with pytest.raises(psycopg.errors.RaiseException, match="only moves forward"):
+        pg.execute(f"UPDATE tenant_acme.tx_clock {update}")
+    with pytest.raises(psycopg.errors.RaiseException, match="only moves forward"):
+        pg.execute("DELETE FROM tenant_acme.tx_clock")
+    assert pg.execute("SELECT last_seq, last_time FROM tenant_acme.tx_clock").fetchone() == (
+        2,
+        "2026-10-01T09:00:00.000000Z",
+    )
+
+
+def test_a_registration_older_than_the_last_is_refused(pg: Conn) -> None:
+    apply_migrations(pg, "acme")
+    add_package(pg, "tenant_acme", PACKAGE, 2)
+    with pytest.raises(psycopg.errors.RaiseException, match="never goes backwards"):
+        pg.execute(
+            "INSERT INTO tenant_acme.registration_log VALUES"
+            " ('acme', 1, '2026-10-02T00:00:01.000000Z', %s, 'root', '0.0.1')",
+            ("sha256:" + "e" * 64,),
+        )
+
+
+def test_a_registration_must_use_the_tick_just_allocated(pg: Conn) -> None:
+    apply_migrations(pg, "acme")
+    pg.execute("SELECT tenant_acme.next_tx()")
+    with pytest.raises(psycopg.errors.RaiseException, match="not the tick just allocated"):
+        pg.execute(
+            "INSERT INTO tenant_acme.registration_log VALUES"
+            " ('acme', 2, '2999-01-01T00:00:00.000000Z', %s, 'root', '0.0.1')",
+            (PACKAGE,),
+        )
+
+
+def test_a_package_older_than_the_last_registered_is_refused(pg: Conn) -> None:
+    apply_migrations(pg, "acme")
+    older, newer = "sha256:" + "1" * 64, "sha256:" + "2" * 64
+    for seq, package in ((1, older), (2, newer)):
+        time = f"2026-10-02T00:00:0{seq}.000000Z"
+        pg.execute("SELECT tenant_acme.replay_tx(%s, %s)", (seq, time))
+        pg.execute(
+            "INSERT INTO tenant_acme.registration_log VALUES ('acme', %s, %s, %s, 'root', '0.0.1')",
+            (seq, time, package),
+        )
+    insert = (
+        "INSERT INTO tenant_acme.package (tenant_id, package_id, schema_version, receipt_id)"
+        " VALUES ('acme', %s, 1, %s)"
+    )
+    pg.execute(insert, (newer, ROBOT))
+    with pytest.raises(psycopg.errors.RaiseException, match="never goes backwards"):
+        pg.execute(insert, (older, ROBOT))
+
+
+def test_a_package_must_match_its_log_entry(pg: Conn) -> None:
+    apply_migrations(pg, "acme")
+    with pytest.raises(psycopg.errors.RaiseException, match="not in the registration log"):
+        pg.execute(
+            "INSERT INTO tenant_acme.package (tenant_id, package_id, schema_version, receipt_id)"
+            " VALUES ('acme', %s, 1, %s)",
+            (PACKAGE, ROBOT),
+        )
+    pg.execute("SELECT tenant_acme.replay_tx(1, '2026-10-02T00:00:01.000000Z')")
+    pg.execute(
+        "INSERT INTO tenant_acme.registration_log VALUES"
+        " ('acme', 1, '2026-10-02T00:00:01.000000Z', %s, 'root', '0.0.1')",
+        (PACKAGE,),
+    )
+    with pytest.raises(psycopg.errors.RaiseException, match="disagrees"):
+        pg.execute(
+            "INSERT INTO tenant_acme.package (tenant_id, package_id, schema_version, receipt_id,"
+            " root_locator) VALUES ('acme', %s, 1, %s, 'elsewhere')",
+            (PACKAGE, ROBOT),
+        )

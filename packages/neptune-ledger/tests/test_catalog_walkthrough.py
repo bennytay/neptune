@@ -11,7 +11,6 @@ The packages are the compiler's committed examples: ``manifest.json`` and ``rece
 
 import hashlib
 import json
-import re
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -155,8 +154,38 @@ def provenance_summary(kind: str, record: dict[str, Any]) -> tuple[str | None, .
     )
 
 
-def register(conn: Conn, schema: str, package: Package) -> tuple[str, int, bool]:
-    """Register ``package``; return (package id, tx_seq, newly registered). ADR 0002 §6."""
+class CatalogConflict(Exception):
+    """An id already in the catalog arrived with different fields (ADR 0002 §6)."""
+
+
+def _insert_once(conn: Conn, table: str, keys: dict[str, Any], fields: dict[str, Any]) -> bool:
+    """Insert a row keyed by ``keys`` once; True if new. A stored row must agree on ``fields``."""
+    columns = {**keys, **fields}
+    inserted = conn.execute(
+        f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join(['%s'] * len(columns))})"
+        " ON CONFLICT DO NOTHING RETURNING 1",
+        tuple(columns.values()),
+    ).fetchone()
+    if inserted is not None:
+        return True
+    where = " AND ".join(f"{key} = %s" for key in keys)
+    stored = conn.execute(
+        f"SELECT {', '.join(fields)} FROM {table} WHERE {where}", tuple(keys.values())
+    ).fetchone()
+    if stored != tuple(fields.values()):
+        raise CatalogConflict(f"{table} {keys} is stored as {stored}, arrived as {fields}")
+    return False
+
+
+def register(
+    conn: Conn, schema: str, package: Package, logged: tuple[Any, ...] | None = None
+) -> tuple[str, int, bool]:
+    """Register ``package``; return (package id, tx_seq, newly registered). ADR 0002 §4, §6.
+
+    Live, the tick comes from ``next_tx()``. On a rebuild, ``logged`` is the package's
+    registration-log row ``(tx_seq, tx_time, package_id, root_locator, ledger_version)``, replayed
+    through ``replay_tx`` so every column comes out as it was.
+    """
     tenant = schema.removeprefix("tenant_")
     pid = package.package_id
     with conn.transaction():
@@ -166,26 +195,30 @@ def register(conn: Conn, schema: str, package: Package) -> tuple[str, int, bool]
         row = existing.fetchone()
         if row is not None:
             return pid, int(str(row[0])), False
-        tick = conn.execute("SELECT tx_seq, tx_time FROM next_tx()").fetchone()
-        assert tick is not None
-        tx_seq, tx_time = tick
+        if logged is None:
+            tick = conn.execute("SELECT tx_seq, tx_time FROM next_tx()").fetchone()
+            assert tick is not None
+            tx_seq, tx_time = tick
+            root, version = f"tests/golden/packages/{package.name}", neptune_ledger.__version__
+        else:
+            tx_seq, tx_time, logged_pid, root, version = logged
+            assert logged_pid == pid
+            conn.execute("SELECT replay_tx(%s, %s)", (tx_seq, tx_time))
         conn.execute(
-            "INSERT INTO package VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-            (
-                tenant,
-                pid,
-                package.manifest["schema_version"],
-                package.manifest["receipt"],
-                f"tests/golden/packages/{package.name}",
-                neptune_ledger.__version__,
-                tx_seq,
-                tx_time,
-            ),
+            "INSERT INTO registration_log VALUES (%s, %s, %s, %s, %s, %s)",
+            (tenant, tx_seq, tx_time, pid, root, version),
+        )
+        conn.execute(
+            "INSERT INTO package (tenant_id, package_id, schema_version, receipt_id)"
+            " VALUES (%s, %s, %s, %s)",
+            (tenant, pid, package.manifest["schema_version"], package.manifest["receipt"]),
         )
         for source in package.manifest["sources"]:
-            conn.execute(
-                "INSERT INTO source VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                (tenant, source["content_id"], source["size"]),
+            _insert_once(
+                conn,
+                "source",
+                {"tenant_id": tenant, "content_id": source["content_id"]},
+                {"size": source["size"]},
             )
             conn.execute(
                 "INSERT INTO package_source VALUES (%s, %s, %s, %s)",
@@ -204,22 +237,26 @@ def register(conn: Conn, schema: str, package: Package) -> tuple[str, int, bool]
                 ),
             )
         for transform in package.tables["transform_record"]:
-            conn.execute(
-                "INSERT INTO transform VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
-                (
-                    tenant,
-                    transform["id"],
-                    transform["adapter_id"],
-                    transform["adapter_version"],
-                    transform["config_hash"],
-                    json.dumps(transform["libraries"]),
-                ),
-            )
-            for upstream in transform["upstream"]:
-                conn.execute(
-                    "INSERT INTO transform_upstream VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
-                    (tenant, transform["id"], upstream),
-                )
+            fields = {
+                "adapter_id": transform["adapter_id"],
+                "adapter_version": transform["adapter_version"],
+                "config_hash": transform["config_hash"],
+                "libraries": canonical(transform["libraries"]),
+            }
+            keys = {"tenant_id": tenant, "transform_id": transform["id"]}
+            if _insert_once(conn, "transform", keys, fields):
+                for upstream in transform["upstream"]:
+                    conn.execute(
+                        "INSERT INTO transform_upstream VALUES (%s, %s, %s)",
+                        (tenant, transform["id"], upstream),
+                    )
+                continue
+            stored = conn.execute(
+                "SELECT upstream_id FROM transform_upstream WHERE transform_id = %s",
+                (transform["id"],),
+            ).fetchall()
+            if sorted(str(edge[0]) for edge in stored) != sorted(transform["upstream"]):
+                raise CatalogConflict(f"transform {transform['id']} arrived with other upstream")
         for domain in package.tables["timestamp_domain"]:
             conn.execute(
                 "INSERT INTO clock VALUES (%s, %s, %s, %s, %s)",
@@ -375,8 +412,8 @@ def test_reregistering_an_identical_package_is_a_no_op(catalog: Conn) -> None:
 
 
 def test_the_catalog_is_a_deterministic_function_of_the_packages(catalog: Conn) -> None:
-    """Two tenants registering the same packages in the same order hold identical rows,
-    transaction times aside; those are replayed from the registration log on a rebuild."""
+    """Two tenants registering the same packages live in the same order hold identical rows,
+    apart from the host times their clocks read."""
     apply_migrations(catalog, "replica")
     for name in EXAMPLES:
         register(catalog, "tenant_acme", load_package(name))
@@ -386,20 +423,83 @@ def test_the_catalog_is_a_deterministic_function_of_the_packages(catalog: Conn) 
     )
 
 
-def _snapshot(conn: Conn, schema: str, *, tx: bool = True) -> dict[str, list[tuple[Any, ...]]]:
-    tables = (
-        "package",
-        "source",
-        "package_source",
-        "source_location",
-        "transform",
-        "transform_upstream",
-        "clock",
-        "record",
-        "record_logical_id",
-        "tx_clock",
-    )
-    out: dict[str, list[tuple[Any, ...]]] = {}
+def test_replaying_the_registration_log_rebuilds_the_catalog_byte_for_byte(catalog: Conn) -> None:
+    """ADR 0002 §4: same Ledger version + packages + registration log = the same catalog,
+    transaction times included."""
+    for name in EXAMPLES:
+        register(catalog, "tenant_acme", load_package(name))
+    log = catalog.execute(
+        "SELECT tx_seq, tx_time, package_id, root_locator, ledger_version"
+        " FROM tenant_acme.registration_log ORDER BY tx_seq"
+    ).fetchall()
+    packages = {load_package(name).package_id: load_package(name) for name in EXAMPLES}
+    apply_migrations(catalog, "rebuilt")
+    for entry in log:
+        register(catalog, "tenant_rebuilt", packages[str(entry[2])], logged=entry)
+    original, rebuilt = _snapshot(catalog, "tenant_acme"), _snapshot(catalog, "tenant_rebuilt")
+    assert set(original) == set(rebuilt)
+    assert {"registration_log", "package", "record", "tx_clock"} <= set(original)
+    for table, rows in original.items():
+        assert rows == rebuilt[table], table
+    assert sum(len(rows) for rows in original.values()) > 100
+
+
+def _altered(package: Package, manifest: dict[str, Any], tables: Any = None) -> Package:
+    """``package`` with another manifest (so another package id) and optionally other tables."""
+    data = canonical(manifest).encode()
+    return Package(package.name, data, manifest, package.receipt, tables or package.tables)
+
+
+def test_an_existing_source_with_another_size_is_refused(catalog: Conn) -> None:
+    original = load_package("manipulator")
+    register(catalog, "tenant_acme", original)
+    manifest = json.loads(original.manifest_bytes)
+    manifest["sources"][0]["size"] = 1
+    conflicting = _altered(original, manifest)
+    assert conflicting.package_id != original.package_id
+    with pytest.raises(CatalogConflict, match="source"):
+        register(catalog, "tenant_acme", conflicting)
+    assert _count(catalog, "SELECT count(*) FROM tenant_acme.package") == 1
+    assert _count(catalog, "SELECT last_seq FROM tenant_acme.tx_clock") == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("adapter_version", "9.9.9"),
+        ("libraries", {"zstd": "1.0"}),
+        ("upstream", ["rec:sha256:" + "f" * 64]),
+    ],
+)
+def test_an_existing_transform_with_other_fields_is_refused(
+    catalog: Conn, field: str, value: Any
+) -> None:
+    original = load_package("manipulator")
+    register(catalog, "tenant_acme", original)
+    tables = {kind: [dict(r) for r in records] for kind, records in original.tables.items()}
+    tables["transform_record"][0][field] = value
+    manifest = json.loads(original.manifest_bytes)
+    for entry in manifest["files"]:  # the altered table would hash differently
+        if entry["path"] == "records/transform_record.jsonl":
+            entry["sha256"] = "sha256:" + "0" * 64
+    conflicting = _altered(original, manifest, tables)
+    assert conflicting.package_id != original.package_id
+    with pytest.raises(CatalogConflict, match="transform"):
+        register(catalog, "tenant_acme", conflicting)
+    assert _count(catalog, "SELECT count(*) FROM tenant_acme.package") == 1
+
+
+def _snapshot(conn: Conn, schema: str, *, tx: bool = True) -> dict[str, list[str]]:
+    """Every row of every table in ``schema`` as PostgreSQL's text rendering, tenant_id aside."""
+    tables = [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+            " WHERE n.nspname = %s AND c.relkind IN ('r', 'p') AND NOT c.relispartition",
+            (schema,),
+        ).fetchall()
+    ]
+    out: dict[str, list[str]] = {}
     for table in tables:
         columns = [
             str(row[0])
@@ -411,9 +511,9 @@ def _snapshot(conn: Conn, schema: str, *, tx: bool = True) -> dict[str, list[tup
             ).fetchall()
         ]
         if not tx:
-            columns = [c for c in columns if not re.match(r"tx_|last_time", c)]
-        listing = ", ".join(columns)
-        out[table] = conn.execute(
-            f"SELECT {listing} FROM {schema}.{table} ORDER BY {listing}"
+            columns = [c for c in columns if c not in ("tx_time", "last_time")]
+        rows = conn.execute(
+            f"SELECT ROW({', '.join(columns)})::text FROM {schema}.{table} ORDER BY 1"
         ).fetchall()
+        out[table] = [str(row[0]) for row in rows]
     return out
