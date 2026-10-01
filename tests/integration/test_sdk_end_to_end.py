@@ -14,6 +14,7 @@ import socket
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
@@ -132,6 +133,66 @@ def test_the_same_inputs_give_the_same_receipt_id(corpus: Path, tmp_path: Path) 
     assert len({r.package for r in results}) == 1
     assert len({(tmp_path / f"p{n}" / "receipt.json").read_bytes() for n in (1, 2, 3, 4)}) == 1
     assert len({r.job for r in results}) == 4  # job ids are the runtime's, in the envelope only
+
+
+def earlier(kind: str, corpus: Path, home: Path, tmp_path: Path) -> None:
+    """A job over ``corpus`` that leaves its history in ``home``'s ledger, and no package."""
+    client = Neptune(home)
+    if kind == "dry_run":
+        assert client.dry_run(corpus).planned
+    elif kind == "cancelled":
+        cancel = threading.Event()
+
+        def on_event(event: JobEvent) -> None:
+            if event.kind == "chunk_committed":
+                cancel.set()
+
+        done = client.ingest(corpus, tmp_path / "cancelled", on_event=on_event, cancel=cancel)
+        assert done.cancelled
+    elif kind == "killed":
+        paths = [str(p) for p in (corpus, tmp_path / "killed", home, tmp_path / "killed-events")]
+        killed = subprocess.run(
+            [sys.executable, str(VICTIM), *paths, "2"], check=False, timeout=180
+        )
+        assert killed.returncode == -signal.SIGKILL
+    else:
+        assert client.ingest(corpus, tmp_path / "earlier").committed
+
+
+CHANGES: Final[dict[str, Callable[[Path], object]]] = {
+    "unchanged": lambda root: None,
+    "edited": lambda root: (root / "notes.txt").write_bytes(b"Dock 5: revised.\n"),
+    "deleted": lambda root: (root / "notes.txt").unlink(),
+    "renamed": lambda root: (root / "notes.txt").rename(root / "notes-2026-10-02.txt"),
+}
+
+
+@pytest.mark.parametrize("change", sorted(CHANGES))
+@pytest.mark.parametrize("kind", ["dry_run", "cancelled", "killed", "ingest"])
+def test_a_package_never_depends_on_what_earlier_jobs_saw(
+    kind: str, change: str, corpus: Path, tmp_path: Path
+) -> None:
+    """A dry run, a cancelled, killed or finished ingest, then the folder changes (or not): the
+    next ingest in that workspace writes the package a fresh workspace writes from the folder as
+    it is now. The workspace keeps the history; the package lists only its job's scan (ADR 0035
+    §9)."""
+    home = tmp_path / "home"
+    earlier(kind, corpus, home, tmp_path)
+    CHANGES[change](corpus)
+    later = Neptune(home).ingest(corpus, tmp_path / "later")
+    fresh = Neptune(tmp_path / "fresh-home").ingest(corpus, tmp_path / "fresh")
+
+    assert later.committed and fresh.committed
+    assert later.package == fresh.package and later.receipt == fresh.receipt
+    for name in ("receipt.json", "manifest.json"):
+        assert (tmp_path / "later" / name).read_bytes() == (tmp_path / "fresh" / name).read_bytes()
+    chain = ("source_revision", "source_absence")
+    listed = [r for r in later.read_package().records if r.kind in chain]
+    assert len(listed) == sum(1 for path in corpus.iterdir() if path.is_file())
+    assert all(not r.supersedes for r in listed)  # one revision per file, each its chain's first
+    kept = Workspace(home).load_ledger(corpus)
+    history = len(kept.revisions()) + len(kept.absences())
+    assert history == len(listed) if change == "unchanged" else history > len(listed)
 
 
 def test_a_dry_run_through_the_sandbox_predicts_the_ingest(corpus: Path, tmp_path: Path) -> None:

@@ -141,5 +141,6 @@ workspace already holds. The SDK's `dry_run` calls it (`sdk.md`); `explain` (MVL
 ## Determinism contract
 
 Given identical source bytes, adapter versions and config, stages 2–10 produce byte-identical package
-contents. Ordering is defined everywhere (sorted paths, sorted ids, sorted keys). Wall-clock, host and
+contents, whatever the workspace held: the package's ledger is the job's own scan, never the root's
+history (ADR 0035 §9). Ordering is defined everywhere (sorted paths, sorted ids, sorted keys). Wall-clock, host and
 duration live only in the receipt envelope.

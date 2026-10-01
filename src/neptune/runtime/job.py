@@ -592,13 +592,13 @@ class IngestJob:
     def _phases(self, started: str, *, dry: bool) -> ContentId | None:
         source = self._local = LocalSource(self.root)
         entries = self._discover(source)
-        ledger = self._fingerprint(source, entries)
+        scanned = self._fingerprint(source, entries)
         self._inspect(source)
         self._plan(source)
         if dry:
             return None
         self._ingest(source)
-        self._assemble(ledger)
+        self._assemble(scanned)
         receipt = self._validate()
         return self._commit(receipt, started)
 
@@ -861,6 +861,14 @@ class IngestJob:
     # --- fingerprint ---------------------------------------------------------------------------
 
     def _fingerprint(self, source: LocalSource, entries: tuple[WalkEntry, ...]) -> SourceLedger:
+        """Hash every file into the root's ledger and save it; return what this scan observed.
+
+        The workspace's ledger keeps the root's whole history, for resume and the cache (ADR 0026
+        §1, ADR 0031 §3). The package lists only this scan (ADR 0035 §9): a new ledger that
+        observed each location as the walk found it, holding the artifact the job reads its bytes
+        as. Each revision is the first of its location's chain and nothing is absent, so what
+        earlier jobs, dry runs or cancelled ingests saw never reaches a package or its receipt.
+        """
         with self._enter(Phase.FINGERPRINT):
             try:
                 ledger = self.workspace.load_ledger(self.root)
@@ -880,6 +888,7 @@ class IngestJob:
                 if (entry.raw_path, entry.reason, entry.detail) not in walked:
                     self._skip(entry)
             by_content: dict[ContentId, _Source] = {}
+            scanned = SourceLedger()
             new_artifacts = new_revisions = 0
             replaced = _replaced(ledger, result.observations)
             for observation in result.observations:
@@ -892,6 +901,7 @@ class IngestJob:
                 artifact = ledger.artifact(revision.content_id)
                 if artifact is None:
                     raise JobError(f"the ledger lost artifact {revision.content_id}")
+                scanned.observe(location, artifact)
                 self._emit(
                     events.SOURCE_HASHED,
                     {
@@ -919,7 +929,7 @@ class IngestJob:
                     "sources": len(self._sources),
                 },
             )
-        return ledger
+        return scanned
 
     # --- inspect -------------------------------------------------------------------------------
 
@@ -1601,7 +1611,9 @@ class IngestJob:
         kind = events.DERIVATIVE_REUSED if held is Held.HELD else events.DERIVATIVE_BUILT
         self._emit(kind, {"derivative": key.id, "recipe": key.recipe, "rule": str(entry.rule)})
 
-    def _assemble(self, ledger: SourceLedger) -> None:
+    def _assemble(self, scanned: SourceLedger) -> None:
+        """Admit each source that passes the cross-chunk laws and stage the package of those,
+        listing ``scanned``: this job's scan, never the workspace's history (ADR 0035 §9)."""
         with self._enter(Phase.ASSEMBLE):
             self._check_cancel()
             quarantined = 0
@@ -1644,7 +1656,7 @@ class IngestJob:
             assert self.destination is not None  # ``run`` refuses to start without one
             try:
                 self._staged = stage(
-                    self.destination, self.workspace, ledger, self._ingested, extra=extra
+                    self.destination, self.workspace, scanned, self._ingested, extra=extra
                 )
             except (PackageError, WorkspaceError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the package cannot be assembled: {exc}") from exc

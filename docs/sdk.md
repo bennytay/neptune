@@ -74,7 +74,8 @@ async def ingest_with_progress() -> IngestResult:
 | `cache` | per source: adapter, plan and chunks with hit/miss rules; calls per adapter method |
 | `ingested`, `job`, `destination`, `durations` | as in `JobOutcome` |
 
-Same sources + adapters + config ⇒ same `receipt` and `package`, sync or async, cold or warm workspace.
+Same sources + adapters + config ⇒ same `receipt` and `package`, sync or async, cold or warm workspace,
+whatever earlier dry runs or ingests saw: a package lists only its own job's scan (ADR 0035 §9).
 A dry run's `cache` says what is left: chunks with rule `committed` are done, the rest will be parsed.
 
 ## Adapters and options

@@ -4,7 +4,8 @@
 - Date: 2026-10-02
 - Issue: MVL-12
 - Extends: ADR 0028 §1, §6, §7 (the job gains a dry run that ends `planned`), ADR 0026 §6
-  (local-only, now enforced at the SDK's door for remote sources and remote execution)
+  (local-only, now enforced at the SDK's door for remote sources and remote execution), ADR 0026
+  §4 (a package lists its own job's scan, not the root's ledger history: §9)
 
 ## Context
 
@@ -109,12 +110,23 @@ sandbox without parsing text.
    `JobOptions.config` sets each adapter's options by id. Selection stays the probe engine's
    rule (ADR 0024 §7, ADR 0033 §1); pinning an adapter to a source past the probe is the
    manifest's (MVL-14). The SDK adds no selection logic.
-9. **No clock, no randomness, no default destination.** The SDK reads no time and draws no
-   random number; a job's id comes from `JobOptions.job` or the runtime, and lives only in the
-   envelope. A destination is always the caller's: no default derived from the working
+9. **No clock, no randomness, no default destination, no history.** The SDK reads no time and
+   draws no random number; a job's id comes from `JobOptions.job` or the runtime, and lives only
+   in the envelope. A destination is always the caller's: no default derived from the working
    directory, the root or the time. The same sources, adapters and config give the same receipt
    id and package id through either client, from any workspace state and from another root
    holding the same bytes.
+   - **A package lists only what its own job's scan observed.** Its ledger records are a new
+     ledger that observed each location as this job's walk found it: the artifacts the job read
+     the bytes as, one revision per location holding bytes, each the first of its chain, and no
+     absences. The workspace's ledger keeps the root's whole history (revisions superseding
+     revisions, absences, artifacts no location holds now) for resume and the cache, exactly as
+     ADR 0026 §1 and ADR 0031 §3 define; none of it is hashed into a package or its receipt.
+   - So a dry run, a cancelled or killed ingest, or an earlier ingest of other bytes at the same
+     paths never changes what a later ingest writes: it is the package a fresh workspace writes
+     from the folder as it is now. History across packages is read by comparing their receipts;
+     within a job, the `source_hashed` (`new_revision`) and `source_absent` events and the cache
+     report's `source_changed` rule still say what changed since the workspace last looked.
 
 ## Alternatives considered
 
@@ -141,6 +153,14 @@ sandbox without parsing text.
   the workspace). The working directory may be inside the root, the root's parent may be
   read-only, and the workspace is a cache that `collect` prunes: each would put a package
   somewhere the caller did not choose.
+- **Packages that list the root's whole ledger** (ADR 0026 §4 as first built; the M1 review's
+  O2). A package would then depend on which dry runs, cancelled ingests and earlier jobs saw the
+  root: a dry run before an edit, or a deleted file, gives a package that no fresh ingest of the
+  same folder reproduces. Revisions re-derived without their `supersedes` keep every location and
+  content id the history would, and only drop the chain, which the workspace keeps.
+- **Ledger records of this scan copied from the workspace's ledger as they are.** A revision's id
+  hashes what it supersedes, so a changed file's revision would still carry the workspace's
+  history into the package.
 - **Re-exporting the SDK from `neptune`.** `import neptune.model` would then import the
   runtime, the sandbox and pyarrow, against the package layering.
 - **Leaving out `remote` until MVL-46.** The constructor's signature would change when it lands.
@@ -154,6 +174,9 @@ sandbox without parsing text.
 - MVL-15 extends `IngestJob.dry_run` (adapters' `inspect`, grouping) and renders it; the SDK's
   `dry_run` returns whatever it adds. MVL-45 and MVL-46 fill in URI schemes and `remote`
   behind the checks that exist now.
+- A package records no absence and no revision chain (§9): what was deleted or replaced since
+  the workspace last looked is in the job's events and cache report, and across packages in their
+  receipts. Tests that read a chain read the workspace's ledger.
 - A source is a directory: a single file is `invalid_source`, with a message saying to ingest
   its folder. Ingesting one file alone needs a walk over a single entry, a runtime change.
 - Each async or `start`ed job holds one thread for its life; many concurrent jobs in one process

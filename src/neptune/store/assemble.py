@@ -248,6 +248,9 @@ def stage(
 ) -> StagedPackage:
     """Build the package of ``ingested`` sources, each a (content id, transform id) pair.
 
+    ``ledger`` is every artifact, revision and absence the package lists, as given: the job
+    passes its own scan's, never the workspace's history (ADR 0035 §9), since every entry is
+    hashed into the package and its receipt.
     Every ingested source must be in ``ledger``, since the package lists the sources it cites,
     and every chunk of its plan must be committed in ``workspace``. ``extra`` adds records that
     are no adapter's output: the runtime's own transform and findings. ``materialise`` names
