@@ -111,6 +111,13 @@ class SeriesError(ValueError):
     """Batches, runs or a series file break the series contract (ADR 0018, ADR 0025)."""
 
 
+class SeriesReadError(SeriesError):
+    """A run or series file cannot be opened as Parquet: missing, unreadable, or not Parquet.
+
+    Distinct so a caller can tell storage that will not read from rows that break the contract.
+    """
+
+
 # --- Schema ------------------------------------------------------------------------------------
 
 
@@ -139,7 +146,7 @@ def _open(source: Source) -> Any:
     try:
         return pq.ParquetFile(pa.BufferReader(source) if isinstance(source, bytes) else source)
     except (pa.ArrowException, OSError) as exc:
-        raise SeriesError(f"not a readable Parquet file: {exc}") from exc
+        raise SeriesReadError(f"not a readable Parquet file: {exc}") from exc
 
 
 def _writer(destination: Path, schema: Any) -> Any:

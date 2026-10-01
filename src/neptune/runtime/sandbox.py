@@ -3,9 +3,9 @@
 The job hands a runner one unit of adapter work at a time (a probe, a plan, one chunk's
 ``ingest``) and gets back one of four outcomes, never an exception:
 
-- ``Returned``: the call's value;
-- ``Raised``: the call raised; the exception's class, and whether it was a contract violation, a
-  source that changed, or an operating-system error;
+- ``Returned``: the call's value, of the type its codec names;
+- ``Raised``: the call raised, or returned a value of another type; the exception's class (never
+  its text), whether it was a contract violation or a source that changed, and the wrong type;
 - ``Crashed``: the process died without a reply: killed by a signal, an exit, or a reply that
   does not decode;
 - ``Exceeded``: a limit stopped it: CPU seconds, wall seconds, memory, or the reply's size.
@@ -43,6 +43,7 @@ _MAX_SECONDS: Final = 24 * 60 * 60
 _MIN_MEMORY: Final = 64 * _MIB  # below this the interpreter itself cannot run a call
 _MAX_MEMORY: Final = 1 << 40
 _ERROR_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,99}")
+_TYPE_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.<>]{0,299}")
 
 
 class Isolation(StrEnum):
@@ -111,31 +112,59 @@ class Returned(Generic[T]):
 
 @dataclass(frozen=True)
 class Raised:
-    """The call raised. ``error`` is the exception's class name, never its text.
+    """The call raised, or returned what cannot be its result. ``error`` is a class name, never
+    an exception's text.
 
-    ``contract`` marks a ``ContractError`` (a bug: never retried), with its message as
-    ``problem``; ``changed`` a ``SourceChangedError`` (the source's bytes are not the ones
-    fingerprinted: never retried, reported as the source's, not the adapter's).
+    ``contract`` marks a ``ContractError`` (a bug: never retried); ``changed`` a
+    ``SourceChangedError`` (the source's bytes are not the ones fingerprinted: never retried,
+    reported as the source's problem, not the adapter's). ``returned`` is the ``module.qualname``
+    of a value of the wrong type the call returned; ``unencodable`` marks a value of the right
+    type that could not be encoded to cross back (a record with no JSON form), ``error`` being
+    what encoding raised. Both are contract errors: the value breaks the contract.
     """
 
     error: str
     contract: bool = False
     changed: bool = False
-    problem: str | None = None
+    returned: str | None = None
+    unencodable: bool = False
 
     def __post_init__(self) -> None:
         if not _ERROR_NAME.fullmatch(self.error):
             raise ValueError(f"not an exception class name: {self.error!r}")
+        if self.returned is not None and (
+            not _TYPE_NAME.fullmatch(self.returned) or not self.contract
+        ):
+            raise ValueError(f"a wrong result is a contract error naming a type: {self.returned!r}")
+        if self.unencodable and (not self.contract or self.returned is not None or self.changed):
+            raise ValueError("an unencodable result is a contract error of the right type")
 
     @classmethod
     def of(cls, exc: BaseException) -> "Raised":
         name = type(exc).__name__
-        contract = isinstance(exc, ContractError)
         return cls(
             error=name if _ERROR_NAME.fullmatch(name) else "Exception",
-            contract=contract,
+            contract=isinstance(exc, ContractError),
             changed=isinstance(exc, SourceChangedError),
-            problem=str(exc) if contract else None,
+        )
+
+    @classmethod
+    def unencoded(cls, exc: BaseException) -> "Raised":
+        """Encoding the call's value raised ``exc``: the value is not what the contract allows."""
+        name = type(exc).__name__
+        return cls(
+            name if _ERROR_NAME.fullmatch(name) else "Exception", contract=True, unencodable=True
+        )
+
+    @classmethod
+    def mistyped(cls, value: object) -> "Raised":
+        """The call returned ``value`` where its codec's type was due."""
+        kind = type(value)
+        name = f"{kind.__module__}.{kind.__qualname__}"  # as ``lineage.type_name`` writes it
+        return cls(
+            ContractError.__name__,
+            contract=True,
+            returned=name if _TYPE_NAME.fullmatch(name) else "builtins.object",
         )
 
     def cause(self) -> dict[str, JsonValue]:
@@ -178,9 +207,14 @@ class SandboxError(Exception):
 
 @dataclass(frozen=True)
 class Codec(Generic[T]):
-    """How a call's value crosses the process boundary. ``decode`` must refuse what is not a
-    valid encoding: its input comes from a process that read hostile bytes."""
+    """The type a call returns and how a value of it crosses the process boundary.
 
+    A runner checks the value is a ``kind`` before anything else: another type is a ``Raised``
+    contract error naming it. ``decode`` must refuse what is not a valid encoding: its input
+    comes from a process that read hostile bytes.
+    """
+
+    kind: type[T]
     encode: Callable[[T], bytes]
     decode: Callable[[bytes], T]
 
@@ -189,7 +223,7 @@ class Runner(Protocol):
     isolation: Isolation
 
     def call(
-        self, work: Callable[[], T], codec: Codec[T], keep: tuple[int, ...] = ()
+        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
     ) -> Returned[T] | Raised | Crashed | Exceeded:
         """Run ``work``; ``keep`` lists the descriptors it reads (a source's)."""
         ...
@@ -205,12 +239,15 @@ class InProcess:
     isolation = Isolation.IN_PROCESS
 
     def call(
-        self, work: Callable[[], T], codec: Codec[T], keep: tuple[int, ...] = ()
+        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
     ) -> Returned[T] | Raised | Crashed | Exceeded:
         try:
-            return Returned(work())
+            value = work()
         except Exception as exc:
             return Raised.of(exc)
+        if not isinstance(value, codec.kind):
+            return Raised.mistyped(value)
+        return Returned(value)
 
     def describe(self) -> JsonObject:
         return {"isolation": str(self.isolation)}
@@ -228,32 +265,35 @@ _OUT_OF_MEMORY: Final = b"M"
 _UNREPORTED: Final = 70  # the child's exit status when it could not even write its reply
 
 
+_RAISED_KEYS: Final = frozenset({"changed", "contract", "error", "returned", "unencodable"})
+
+
 def encode_raised(raised: Raised) -> bytes:
     return json.dumps(
         {
             "changed": raised.changed,
             "contract": raised.contract,
             "error": raised.error,
-            "problem": raised.problem,
+            "returned": raised.returned,
+            "unencodable": raised.unencodable,
         },
         separators=(",", ":"),
     ).encode("ascii")
 
 
 def decode_raised(data: bytes) -> Raised:
-    """A ``Raised`` reply, strictly: exactly its four fields, each of its type."""
+    """A ``Raised`` reply, strictly: exactly its five fields, each of its type."""
     value = json.loads(data)
-    if not isinstance(value, dict) or value.keys() != {"changed", "contract", "error", "problem"}:
-        raise ValueError("a raised reply is exactly {changed, contract, error, problem}")
-    error, contract = value["error"], value["contract"]
-    changed, problem = value["changed"], value["problem"]
-    if not isinstance(error, str) or not isinstance(contract, bool):
-        raise ValueError("a raised reply's error is text and contract a boolean")
-    if not isinstance(changed, bool) or not (problem is None or isinstance(problem, str)):
-        raise ValueError("a raised reply's changed is a boolean and problem text or null")
-    if problem is not None and not contract:
-        raise ValueError("only a contract violation has a problem")
-    return Raised(error, contract, changed, problem)
+    if not isinstance(value, dict) or value.keys() != _RAISED_KEYS:
+        raise ValueError(f"a raised reply is exactly {sorted(_RAISED_KEYS)}")
+    error, returned = value["error"], value["returned"]
+    flags = (value["contract"], value["changed"], value["unencodable"])
+    if not isinstance(error, str) or not all(isinstance(flag, bool) for flag in flags):
+        raise ValueError("a raised reply's error is text and its flags booleans")
+    if not (returned is None or isinstance(returned, str)):
+        raise ValueError("a raised reply's returned is a type name or null")
+    contract, changed, unencodable = flags
+    return Raised(error, contract, changed, returned, unencodable)
 
 
 def _send(fd: int, data: bytes) -> None:
@@ -287,7 +327,7 @@ def _nothing(data: bytes) -> None:
         raise ValueError("expected an empty reply")
 
 
-_NOTHING: Final = Codec[None](lambda _: b"", _nothing)
+_NOTHING: Final = Codec[None](type(None), lambda _: b"", _nothing)
 
 
 class Subprocess:
@@ -323,7 +363,7 @@ class Subprocess:
         }
 
     def call(
-        self, work: Callable[[], T], codec: Codec[T], keep: tuple[int, ...] = ()
+        self, work: Callable[[], object], codec: Codec[T], keep: tuple[int, ...] = ()
     ) -> Returned[T] | Raised | Crashed | Exceeded:
         for fd in keep:
             if isinstance(fd, bool) or not isinstance(fd, int) or fd < 0:
@@ -346,7 +386,7 @@ class Subprocess:
 
     def _child(
         self,
-        work: Callable[[], T],
+        work: Callable[[], object],
         codec: Codec[T],
         keep: frozenset[int],
         reply: int,
@@ -365,8 +405,16 @@ class Subprocess:
             tag, payload = _OUT_OF_MEMORY, b""  # held before the call: needs no allocation
             try:
                 try:
-                    payload = codec.encode(work())
-                    tag = _RETURNED
+                    value = work()
+                    if not isinstance(value, codec.kind):
+                        payload, tag = encode_raised(Raised.mistyped(value)), _RAISED
+                    else:
+                        try:
+                            payload, tag = codec.encode(value), _RETURNED
+                        except MemoryError:
+                            raise
+                        except Exception as exc:
+                            payload, tag = encode_raised(Raised.unencoded(exc)), _RAISED
                 except MemoryError:
                     pass
                 except BaseException as exc:

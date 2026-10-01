@@ -245,6 +245,6 @@ def decode_probe(data: bytes) -> ProbeResult:
     return ProbeResult(confidence, tuple(reasons), version)
 
 
-OUTPUT: Final = Codec(encode_output, decode_output)
-PLAN: Final = Codec(encode_plan, decode_plan)
-PROBE: Final = Codec(encode_probe, decode_probe)
+OUTPUT: Final = Codec(ChunkOutput, encode_output, decode_output)
+PLAN: Final = Codec(Plan, encode_plan, decode_plan)
+PROBE: Final = Codec(ProbeResult, encode_probe, decode_probe)

@@ -163,7 +163,7 @@ def test_a_confined_call_runs_under_every_control() -> None:
             ]
         )
 
-    outcome = box.call(controls, Codec[str](str.encode, bytes.decode))
+    outcome = box.call(controls, Codec(str, str.encode, bytes.decode))
     assert isinstance(outcome, Returned)
     seccomp, no_new_privs, core, cpu, fsize, as_fixed, fds = json.loads(outcome.value)
     assert (seccomp, no_new_privs) == ("2", "1")  # filter mode; no privilege can be gained

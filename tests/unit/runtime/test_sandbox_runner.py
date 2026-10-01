@@ -42,8 +42,8 @@ from neptune.runtime.sandbox import (
 )
 
 MIB: Final = 1024 * 1024
-TEXT: Final = Codec[str](lambda text: text.encode(), lambda data: data.decode())
-RAW: Final = Codec[bytes](lambda data: data, lambda data: data)
+TEXT: Final = Codec(str, str.encode, bytes.decode)
+RAW: Final = Codec(bytes, bytes, bytes)
 
 
 @pytest.fixture(scope="module")
@@ -119,16 +119,24 @@ def test_limits_out_of_bounds_are_refused(limits: dict[str, object]) -> None:
 # --- Outcomes, in process ----------------------------------------------------------------------
 
 
-def test_raised_records_the_class_and_only_a_contract_problem() -> None:
+def test_raised_records_the_class_never_the_text() -> None:
     assert Raised.of(RuntimeError("secret path /home/x")) == Raised("RuntimeError")
-    assert Raised.of(ContractError("id does not match")) == Raised(
-        "ContractError", contract=True, problem="id does not match"
-    )
+    assert Raised.of(ContractError("id does not match")) == Raised("ContractError", contract=True)
     assert Raised.of(SourceChangedError("x")) == Raised("SourceChangedError", changed=True)
     odd = type("not an identifier", (Exception,), {})
     assert Raised.of(odd()).error == "Exception"
     with pytest.raises(ValueError, match="class name"):
         Raised("two words")
+
+
+def test_a_wrong_result_is_a_contract_error_naming_its_type() -> None:
+    assert Raised.mistyped(None) == Raised(
+        "ContractError", contract=True, returned="builtins.NoneType"
+    )
+    with pytest.raises(ValueError, match="wrong result"):
+        Raised("RuntimeError", returned="builtins.int")  # only a contract error names one
+    with pytest.raises(ValueError, match="wrong result"):
+        Raised("ContractError", contract=True, returned="not a type name")
 
 
 def test_the_in_process_runner_returns_or_raises_and_never_isolates() -> None:
@@ -158,9 +166,7 @@ def test_what_the_call_raises_comes_back_as_its_class(box: Subprocess) -> None:
     def contract() -> str:
         raise ContractError("ingest returned a NoneType")
 
-    assert box.call(contract, TEXT) == Raised(
-        "ContractError", contract=True, problem="ingest returned a NoneType"
-    )
+    assert box.call(contract, TEXT) == Raised("ContractError", contract=True)
 
     def changed() -> str:
         raise SourceChangedError("chunk 3 changed")
@@ -171,6 +177,13 @@ def test_what_the_call_raises_comes_back_as_its_class(box: Subprocess) -> None:
         raise SystemExit(0)
 
     assert box.call(leave, TEXT) == Raised("SystemExit")
+
+
+def test_a_result_of_the_wrong_type_is_caught_in_either_isolation(box: Subprocess) -> None:
+    wrong = Raised("ContractError", contract=True, returned="builtins.int")
+    assert box.call(lambda: 42, TEXT) == wrong
+    assert InProcess().call(lambda: 42, TEXT) == wrong
+    assert box.call(lambda: None, TEXT) == Raised.mistyped(None)
 
 
 def test_a_process_that_dies_is_a_crash_with_its_signal_or_status(box: Subprocess) -> None:
@@ -187,7 +200,7 @@ def test_a_reply_that_does_not_decode_is_a_crash(box: Subprocess) -> None:
     def refuse(data: bytes) -> str:
         raise ValueError("not a valid reply")
 
-    assert box.call(lambda: "fine", Codec[str](str.encode, refuse)) == Crashed()
+    assert box.call(lambda: "fine", Codec(str, str.encode, refuse)) == Crashed()
     assert Crashed().cause() == {"reply": "malformed"}
 
 
@@ -348,7 +361,7 @@ def test_the_child_dies_when_the_job_does(tmp_path: Path) -> None:
         "import time\n"
         "from neptune.runtime.sandbox import Codec, Limits, Subprocess\n"
         "box = Subprocess(Limits(wall_seconds=600))\n"
-        "box.call(lambda: str(time.sleep(600)), Codec(str.encode, bytes.decode))\n"
+        "box.call(lambda: str(time.sleep(600)), Codec(str, str.encode, bytes.decode))\n"
     )
     job = subprocess.Popen([sys.executable, str(script)])
     try:
@@ -403,17 +416,22 @@ def test_a_control_that_fails_in_the_child_is_the_hosts_fault(
 
 
 def test_a_raised_reply_is_decoded_strictly() -> None:
-    raised = Raised("ContractError", contract=True, problem="law")
-    assert decode_raised(encode_raised(raised)) == raised
+    for raised in (
+        Raised("OSError"),
+        Raised("SourceChangedError", changed=True),
+        Raised("ContractError", contract=True, returned="builtins.NoneType"),
+    ):
+        assert decode_raised(encode_raised(raised)) == raised
     for data in (
         b"",
         b"[]",
         b'{"changed":false,"contract":false,"error":"E"}',
-        b'{"changed":false,"contract":false,"error":"E","problem":null,"extra":1}',
-        b'{"changed":0,"contract":false,"error":"E","problem":null}',
-        b'{"changed":false,"contract":false,"error":"two words","problem":null}',
-        b'{"changed":false,"contract":false,"error":"E","problem":"only contracts"}',
-        b'{"changed":false,"contract":"yes","error":"E","problem":null}',
+        b'{"changed":false,"contract":false,"error":"E","returned":null,"extra":1}',
+        b'{"changed":0,"contract":false,"error":"E","returned":null}',
+        b'{"changed":false,"contract":false,"error":"two words","returned":null}',
+        b'{"changed":false,"contract":false,"error":"E","returned":"builtins.int"}',
+        b'{"changed":false,"contract":true,"error":"E","returned":"x y"}',
+        b'{"changed":false,"contract":"yes","error":"E","returned":null}',
     ):
         with pytest.raises(ValueError):
             decode_raised(data)
