@@ -31,7 +31,6 @@ from neptune.adapters.contract import (
     Resources,
     SourceReader,
 )
-from neptune.adapters.mcap import McapAdapter
 from neptune.adapters.registry import AdapterRegistry, SelectionStatus
 from neptune.adapters.text import TextAdapter
 from neptune.discovery.containers import ProbePolicy
@@ -117,8 +116,7 @@ def claims(adapter_id: str, confidence: float, *formats: FormatSpec) -> Stub:
 
 
 def engine(*extra: object, policy: ProbePolicy | None = None) -> ProbeEngine:
-    adapters = [McapAdapter(), TextAdapter(), TALLY.TallyAdapter(), *extra]
-    return ProbeEngine(AdapterRegistry(adapters), policy)
+    return ProbeEngine(AdapterRegistry([TextAdapter(), TALLY.TallyAdapter(), *extra]), policy)  # type: ignore[list-item]
 
 
 def probe(
@@ -219,16 +217,12 @@ def test_an_unclaimed_source_is_a_finding_that_says_what_was_seen() -> None:
     )
     assert finding.message == "no adapter claims the source (pcap signature; binary)"
     assert finding.details == {
-        "declined": {"mcap": ["mcap.no_magic"], "tally": [], "text": ["text.nul"]},
+        "declined": {"tally": [], "text": ["text.nul"]},
         "signatures": [{"name": "pcap"}],
         "text": "binary",
     }
     assert finding.subject == EvidenceRef(probed.source, (ByteRange(0, len(data)),))
-    assert [(c.adapter, c.confidence) for c in probed.probes] == [
-        ("mcap", 0.0),
-        ("tally", 0.0),
-        ("text", 0.0),
-    ]
+    assert [(c.adapter, c.confidence) for c in probed.probes] == [("tally", 0.0), ("text", 0.0)]
 
 
 def test_an_unclaimed_source_whose_name_belongs_to_an_adapter_says_it_declined() -> None:
@@ -259,7 +253,7 @@ def test_a_crashing_probe_is_a_finding_and_the_others_still_choose() -> None:
     )
     assert finding.details == {"adapter": "broken", "error": "RuntimeError", "version": "1.0.0"}
     assert "0x7f3a" not in finding.message  # the exception's text never enters a record
-    assert [c.adapter for c in probed.probes] == ["mcap", "tally", "text"]
+    assert [c.adapter for c in probed.probes] == ["tally", "text"]
 
 
 def test_a_probe_returning_the_wrong_type_is_a_failure_too() -> None:
@@ -380,7 +374,7 @@ def test_the_explanation_holds_every_probe_the_selection_the_sniff_and_the_conta
         "source",
     }
     assert explanation["selection"] == {"candidates": [], "status": "unsupported"}
-    assert [obj(p)["adapter"] for p in arr(explanation["probes"])] == ["mcap", "tally", "text"]
+    assert [obj(p)["adapter"] for p in arr(explanation["probes"])] == ["tally", "text"]
     members = arr(obj(explanation["container"])["members"])
     assert obj(obj(obj(members[2])["probe"])["selection"])["adapter"] == "tally"
     assert obj(members[4])["name"] == "../escape.txt"

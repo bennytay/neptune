@@ -21,3 +21,15 @@ def load_generator(path: Path) -> ModuleType:
 def hostile() -> ModuleType:
     """The hostile fixture generator, ``tests/fixtures/hostile/make_hostile.py``."""
     return load_generator(FIXTURES / "hostile" / "make_hostile.py")
+
+
+@pytest.fixture(scope="session")
+def tabular_fixtures() -> ModuleType:
+    """The tabular fixture generator, ``tests/fixtures/tabular/make_tabular_fixtures.py``."""
+    return load_generator(FIXTURES / "tabular" / "make_tabular_fixtures.py")
+
+
+@pytest.fixture(scope="session")
+def tabular_golden() -> ModuleType:
+    """The tabular golden-file generator, ``tests/golden/tabular/make_tabular_golden.py``."""
+    return load_generator(Path(__file__).parent / "golden" / "tabular" / "make_tabular_golden.py")

@@ -4,7 +4,7 @@ The adapter declares 512 MiB. Each case builds a file the adapter would read (un
 or script cap) that makes a naive reader hold one object per byte: one draft per lockfile entry,
 one syntax-tree node per token, one finding per bad line. They run in a process of their own
 (``measure_peak_memory.py``) so the peak is the input's. Measured peaks, interpreter and imports
-included, are 60-230 MiB; the bound here leaves room for the machine, not for a regression.
+included, are 45-250 MiB; the bound here leaves room for the machine, not for a regression.
 """
 
 import json
@@ -19,6 +19,9 @@ SCRIPT: Final = Path(__file__).parents[1] / "fixtures" / "software" / "measure_p
 PEAK_MIB: Final = 320  # of the 512 declared
 CASES: Final = {
     "cargo": "too_many_items",
+    "cargo_empty_tables": "too_many_items",
+    "poetry_named_tables": "too_many_items",
+    "setup_nested_operators": "malformed",
     "uv": "too_many_items",
     "cmake": None,
     "cmake_arguments": None,

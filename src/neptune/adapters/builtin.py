@@ -8,12 +8,13 @@ from neptune.adapters.contract import Adapter
 from neptune.adapters.mcap import McapAdapter
 from neptune.adapters.registry import AdapterRegistry
 from neptune.adapters.software import SoftwareAdapter
+from neptune.adapters.tabular import TabularAdapter
 from neptune.adapters.text import TextAdapter
 
 
 def builtin_adapters() -> tuple[Adapter, ...]:
     """A fresh instance of every shipped adapter, in id order."""
-    return (McapAdapter(), SoftwareAdapter(), TextAdapter())
+    return (McapAdapter(), SoftwareAdapter(), TabularAdapter(), TextAdapter())
 
 
 def default_registry() -> AdapterRegistry:

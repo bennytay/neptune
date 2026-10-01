@@ -23,7 +23,14 @@ from neptune_memory.schema.claim import Claim, ClaimObject, LedgerRecordRef
 from neptune_memory.schema.interval import OPEN, LedgerTx, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES
-from neptune_memory.schema.supersede import LineageError, as_of, is_closure, lineage_of, resolve
+from neptune_memory.schema.supersede import (
+    LineageError,
+    Resolution,
+    as_of,
+    is_closure,
+    lineage_of,
+    resolve,
+)
 
 CLOCK = record_id("test.clock", {"name": "site"})
 AMR = NodeRef(NodeType.MACHINE, "serial:AMR-12")
@@ -88,16 +95,21 @@ def _build(
     return result.claims
 
 
+def _resolution(*builds: tuple[Claim, ...]) -> Resolution:
+    return resolve([c for b in builds for c in b], CORE_PREDICATES, PRIORITIES)
+
+
 def _history(*builds: tuple[Claim, ...]) -> tuple[Claim, ...]:
-    return resolve([c for b in builds for c in b], CORE_PREDICATES, PRIORITIES).claims
+    return _resolution(*builds).claims
 
 
 def test_upgrade_is_recorded_at_a_new_transaction_and_keeps_the_past() -> None:
     v1, v2 = _build("1", TX1), _build("2", TX2)
-    history = _history(v1, v2)
+    resolution = _resolution(v1, v2)
+    history = resolution.claims
     assert {c.id for c in history} == {c.id for c in v1} | {c.id for c in v2}  # nothing deleted
-    assert {c.id for c in as_of(history, TX1)} == {c.id for c in v1}
-    assert {c.id for c in as_of(history, TX2)} == {c.id for c in v2}
+    assert {c.id for c in as_of(resolution, TX1).claims} == {c.id for c in v1}
+    assert {c.id for c in as_of(resolution, TX2).claims} == {c.id for c in v2}
 
 
 def test_upgrade_retires_the_old_lineage_including_many_predicates() -> None:
@@ -110,8 +122,8 @@ def test_upgrade_retires_the_old_lineage_including_many_predicates() -> None:
 
 def test_upgrade_leaves_other_consolidators_alone() -> None:
     other = _build("1", TX1, "test.other")
-    history = _history(_build("1", TX1), other, _build("2", TX2))
-    current = {c.id for c in as_of(history, TX2)}
+    resolution = _resolution(_build("1", TX1), other, _build("2", TX2))
+    current = {c.id for c in as_of(resolution, TX2).claims}
     assert {c.id for c in other} <= current
 
 
@@ -122,9 +134,13 @@ def test_two_versions_at_one_transaction_are_refused() -> None:
 
 
 def test_a_lineage_is_never_reused_after_it_was_replaced() -> None:
+    v1 = _build("1", TX1)
     with pytest.raises(LineageError, match="reappears") as caught:
-        _history(_build("1", TX1), _build("2", TX2), _build("1", ledger_tx(3)))
+        _history(v1, _build("2", TX2), _build("1", ledger_tx(3)))
     assert caught.value.code == "lineage_reuse"
+    # The message names the whole lineage, not only the version string.
+    consolidator, version, config = lineage_of(v1[0])
+    assert all(part in str(caught.value) for part in (consolidator, repr(version), config))
 
 
 @pytest.mark.parametrize("priorities", [{"test.locator": 2, "test.other": 1}, PRIORITIES])
@@ -137,8 +153,9 @@ def test_old_lineage_closure_made_at_the_upgrade_transaction_is_retired(
         *_build("1", TX2, "test.other", dock=dock4, ticks=20),  # narrows x@v1 at TX2
         *_build("2", TX2, ticks=30),
     ]
-    history = resolve(claims, CORE_PREDICATES, priorities).claims
-    current = as_of(history, TX2)
+    resolution = resolve(claims, CORE_PREDICATES, priorities)
+    history = resolution.claims
+    current = as_of(resolution, TX2).claims
     assert not [c for c in current if lineage_of(c)[:2] == ("test.locator", "1")]
     assert all(
         c.provenance.consolidator_version == "2"
@@ -154,7 +171,7 @@ def test_old_lineage_closure_made_at_the_upgrade_transaction_is_retired(
 def test_a_config_change_is_a_new_lineage_and_retires_the_old_one() -> None:
     old = _build("1", TX1, config={"window": 1})
     new = _build("1", TX2, config={"window": 2})
-    current = {c.id for c in as_of(_history(old, new), TX2)}
+    current = {c.id for c in as_of(_resolution(old, new), TX2).claims}
     assert current == {c.id for c in new}
 
 
@@ -163,7 +180,7 @@ def test_a_model_swap_recorded_in_config_retires_the_old_model() -> None:
     old = _build("1", TX1, config={"model": m1.to_json()}, model=m1)
     new = _build("1", TX2, config={"model": m2.to_json()}, model=m2)
     assert old and new
-    current = {c.id for c in as_of(_history(old, new), TX2)}
+    current = {c.id for c in as_of(_resolution(old, new), TX2).claims}
     assert current == {c.id for c in new}
 
 
@@ -175,8 +192,8 @@ def test_re_running_the_same_version_retires_nothing() -> None:
 
 def test_upgrade_resolution_is_order_free_and_idempotent() -> None:
     claims = [*_build("1", TX1), *_build("2", TX2), *_build("3", ledger_tx(3))]
-    forward = resolve(claims, CORE_PREDICATES, PRIORITIES).claims
-    backward = resolve(list(reversed(claims)), CORE_PREDICATES, PRIORITIES).claims
+    forward = resolve(claims, CORE_PREDICATES, PRIORITIES)
+    backward = resolve(list(reversed(claims)), CORE_PREDICATES, PRIORITIES)
     assert forward == backward
-    assert resolve(forward, CORE_PREDICATES, PRIORITIES).claims == forward
-    assert len(as_of(forward, ledger_tx(3))) == 2
+    assert resolve(forward.claims, CORE_PREDICATES, PRIORITIES) == forward
+    assert len(as_of(forward, ledger_tx(3)).claims) == 2

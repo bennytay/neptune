@@ -157,17 +157,19 @@ def _read_package_xml(reading: Reading) -> list[Draft]:
     names = [
         reading.text(draft, "name", text, reading.span(s, e - s)) for text, s, e in found["name"]
     ]
-    draft.name = reading.choose(draft, "name", names, absent)
     if "name" in dropped:  # elements never read could disagree: no value is chosen from a part
         draft.name = absent
         draft.explained.add("name")
+    else:
+        draft.name = reading.choose(draft, "name", names, absent)
     releases = [
         reading.semver(draft, text, reading.span(s, e - s)) for text, s, e in found["version"]
     ]
-    draft.release = reading.choose(draft, "release", releases, absent)
     if "version" in dropped:
         draft.release = absent
         draft.explained.add("release")
+    else:
+        draft.release = reading.choose(draft, "release", releases, absent)
     return [draft]
 
 
@@ -509,7 +511,8 @@ def _read_setup_py(reading: Reading) -> list[Draft]:
         return []
     try:
         tree = ast.parse(text)
-    except (SyntaxError, ValueError, RecursionError):
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        # MemoryError is the parser's own stack overflow on deeply nested or chained operators.
         reading.malformed("does not parse as Python")
         return []
     starts = [base]

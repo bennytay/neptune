@@ -118,7 +118,11 @@ gigabyte checkpoint hashed twice, a URDF-style guess turned into a binding.
     Measured, by `tests/integration/test_software_memory.py` (a process per hostile file at its
     cap, interpreter included): peak 40-225 MiB before the script cap (a 512 KiB `setup.py`
     reached 293 MiB, an 8 MiB one 2.6 GB; 8 MiB CMake 1.4 GB; an 8 MiB uv.lock 600 MiB before
-    drafting stopped), 40-175 MiB after. The test bounds the peak at 320 of the 512 MiB declared.
+    drafting stopped), 45-176 MiB after for most shapes. TOML is the heaviest: tomllib alone holds
+    a dict per 3 bytes, so an 8 MiB `package = [{},{},...]` peaked at 534 MiB while the reader
+    collected every table, and 248 MiB (`{name="a"},` 230 MiB) once it stops at `max_items`+1; the
+    8 MiB cap is kept. The test bounds the peak at 320 of the 512 MiB declared. The Python
+    parser's own stack overflow (`MemoryError` on a 100 KB `-----1`) is `malformed`.
 12. **Not here.** Binding these records to runs, including a run-level "this run has no software
     identity", is MVL-38's; manifest overrides are MVL-14's; release notes and changelogs are
     documents (MVL-28): a source has one adapter, and a version in prose is interpretation.

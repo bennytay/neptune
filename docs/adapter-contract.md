@@ -112,6 +112,7 @@ Never decide from the name alone when the bytes can say: a renamed file must sti
 | Source shows | Emit | Never |
 |---|---|---|
 | missing key, empty or whitespace-only cell | `Unknown` | a default, `""`, `0`, "none" |
+| a typed source's (JSON, Parquet) empty string | `Unknown` (the model holds no empty text); other strings, whitespace-only included, are `Known` | `Known("")` |
 | a token the source or its format spec defines as "none" | `KnownAbsent(provenance=<that definition>)` | `KnownAbsent` without a citation |
 | a spec-defined sentinel (e.g. ROS covariance `[0] == -1`) | the state the spec gives it, e.g. `NotCovered` | the sentinel as a `Known` number |
 | any other value, however implausible | `Known(value)` | "fixing" it; plausibility is `validate/` |
@@ -189,6 +190,8 @@ For registers, geometry, photos, video files and documents:
 - Tables: one `StructuredTable` and one `StructuredRecord` per row, citing the row as `Row(r)` so each
   cell's place is its `RowCell`. Keep cells as the source types them; never infer a CSV cell's type.
   Blank is `Unknown`; only a token the source or its spec defines as none is `KnownAbsent`.
+  A row not cited as `Row(r)` (a JSON element, a table on a page) gives each cell its own
+  provenance. The `tabular` adapter (ADR 0042) is the worked example for CSV, JSON and Parquet.
 - A `Site` or `Asset` per row or feature that names one, with its ids and names each citing its cell or
   span. Don't copy the rest of the row into it.
 - Geometry: a `SpatialArtifact` per file, unit / CRS / frame as declared (`NotCovered` where the format

@@ -90,7 +90,10 @@ def _toml_packages(reading: Reading) -> tuple[Doc, list[tuple[int, dict[str, Any
         reading.malformed("has a package key that is not an array of tables")
         return None
     entries: list[tuple[int, dict[str, Any]]] = []
+    limit = reading.config.integer("max_items")
     for index, entry in enumerate(packages):
+        if len(entries) > limit:  # one past is enough for the readers to refuse the record
+            break
         if isinstance(entry, dict):
             entries.append((index, entry))
         else:
