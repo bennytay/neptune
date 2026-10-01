@@ -46,6 +46,7 @@ from neptune.adapters.config._tree import (
     Unreadable,
     Value,
     mark_repeats,
+    representable,
 )
 from neptune.model.configuration import (
     CollectionType,
@@ -222,7 +223,7 @@ class _Document:
             target = self.nodes[self.anchors[event.anchor]]
             if not isinstance(target.value, Collection | Alias):
                 key = target.text
-        if key is None or len(key) > self.limits.max_scalar:
+        if key is None or len(key) > self.limits.max_scalar or not representable(key):
             frame.key = None
             if isinstance(event, CollectionStartEvent):
                 self.skip_depth = 1
@@ -285,6 +286,9 @@ class _Document:
         if len(text) > self.limits.max_scalar:
             large = Unreadable(Issue.SCALAR_TOO_LARGE, "over max_scalar_length")
             return Node(path, order, parent, large, None, node_tag, span, False, (large.issue,))
+        if not representable(text):  # a "\ud800" escape
+            lone = Unreadable(Issue.UNREPRESENTABLE, "a string with an unpaired surrogate")
+            return Node(path, order, parent, lone, None, node_tag, span, False, (lone.issue,))
         reading: NodeValue
         if tag is None and not plain:
             reading = Value((ConfigScalar(ScalarType.STRING, text),))

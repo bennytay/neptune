@@ -116,10 +116,12 @@ def _cut(text: str, complete: bool) -> str:
 
 
 def _at_end(text: str, position: int, complete: bool) -> bool:
-    """Whether a parser failed only because the text stops: at its very end when it is whole
-    (a truncated file), near the cut when it is a head."""
+    """Whether a parser failed only because the text stops: on its last line when it is whole
+    (a truncated file; a string cut short fails where it starts), near the cut when it is a
+    head."""
     if complete:
-        return position >= len(text.rstrip())
+        content = text.rstrip()
+        return not any(br in content[position:] for br in "\n\r")
     return position >= len(text) - CUT_SLACK
 
 

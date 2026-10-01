@@ -71,6 +71,15 @@ class Alias:
 NodeValue: TypeAlias = Collection | Alias | Reading
 
 
+def representable(text: str) -> bool:
+    """Whether a record can hold the text: an escape can decode to an unpaired surrogate."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def issues_for(value: NodeValue, issues: tuple[Issue, ...] = ()) -> tuple[Issue, ...]:
     """A node's issues: those given, and why its reading cannot be held, if it cannot."""
     if isinstance(value, Unreadable) and value.issue not in issues:
