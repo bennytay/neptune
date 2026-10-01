@@ -102,8 +102,12 @@ The forces:
      chunk id covers (cache and resume would serve stale output), and its records would cite
      another source. The included file in the same ingest root is ingested as its own source.
    - Bounds: macro nesting 64, 500,000 expansion steps, the configured `max_elements`,
-     `max_depth` and `max_bytes` for the expansion. Past a bound the expansion is
-     `urdf.limit_exceeded` and nothing of it is recorded.
+     `max_depth` and `max_bytes` for the expansion, and a nesting budget: each nested element,
+     call or conditional and each property evaluated inside another is counted at the Python
+     frames it may take, against 640. So the expander never reaches Python's recursion limit,
+     and where a bound is met depends on the document alone, never on the stack it runs on.
+     Past a bound the expansion is `urdf.limit_exceeded` and nothing of it is recorded; a
+     property past the budget is `Unknown` with `urdf.xacro_invalid`.
    - **`description_expansion`** records what was expanded: `language` (`xacro`), the expanded
      document's `digest` (sha256) and `size`, and `arguments`: each declared argument with the text
      the expansion used, `NotCovered` without a default, citing its `xacro:arg`. It cites the
@@ -117,7 +121,7 @@ The forces:
    so no entity is ever declared, expanded or fetched; URDF never needs one. Nesting deeper than
    `max_depth` (64), more than `max_elements` (50,000) elements, a source over `max_bytes`
    (16 MiB) and an attribute or text run over 64 KiB are `urdf.limit_exceeded` or
-   `urdf.too_large`. No `defusedxml`: its protection is these same expat handlers, refusing a
+   `urdf.too_large`. `max_depth` is never more than 128, for the same reason as the budget. No `defusedxml`: its protection is these same expat handlers, refusing a
    DOCTYPE outright is stricter, and ADR 0001 §4 keeps dependencies to what a format needs. No
    expat text enters a finding, so output does not depend on expat's version and the transform
    declares no library.

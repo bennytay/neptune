@@ -142,9 +142,14 @@ def parse(data: bytes, *, max_depth: int, max_elements: int) -> Element:
     def characters(text: str) -> None:
         if not stack:
             return
+        children = stack[-1].children
+        last = children[-1] if children else None
+        if isinstance(last, str):  # expat delivers one run of text in pieces: join them
+            children.pop()
+            text = last + text
         if len(text) > MAX_VALUE_CHARS:
             refuse("limit_exceeded", "a text run is longer than the limit", limit=MAX_VALUE_CHARS)
-        stack[-1].children.append(text)
+        children.append(text)
 
     def entity(*_: object) -> None:
         refuse("doctype_refused", "the document declares an entity; it is not read")

@@ -47,8 +47,14 @@ NAMESPACE_ATTRIBUTE: Final = "xmlns:xacro"
 NOT_COVERED: Final = "not_covered"
 UNKNOWN: Final = "unknown"
 MAX_MACRO_DEPTH: Final = 64
-# Properties defined in terms of properties, evaluated one inside another.
-MAX_PROPERTY_DEPTH: Final = 32
+# The expander recurses: through elements, calls and conditionals (about NODE_COST Python frames
+# each) and through properties defined by other properties (at most PROPERTY_COST frames each,
+# an expression's own depth included). Counting them against MAX_NESTING keeps every expansion
+# inside Python's recursion limit, whatever the stack it starts from, so where a bound is met
+# depends on the document alone.
+NODE_COST: Final = 4
+PROPERTY_COST: Final = 72
+MAX_NESTING: Final = 640
 MAX_STEPS: Final = 500_000
 
 _TOKENS: Final = (
@@ -249,7 +255,7 @@ class _Expander:
         self.steps = 0
         self.chars = 0
         self.macro_depth = 0
-        self.property_depth = 0
+        self.nesting = 0
 
     # Reporting
 
@@ -295,16 +301,16 @@ class _Expander:
                 )
                 raise Unresolved(UNKNOWN)
             assert isinstance(entry.value, str)
-            if self.property_depth >= MAX_PROPERTY_DEPTH:
+            if self.nesting + PROPERTY_COST > MAX_NESTING:
                 self.invalid(
                     entry.element,
-                    f"the property {_short(name)!r} is defined through more than"
-                    f" {MAX_PROPERTY_DEPTH} other properties",
+                    f"the property {_short(name)!r} is defined through too many other"
+                    " properties here to evaluate",
                     Severity.WARNING,
                 )
                 raise Unresolved(UNKNOWN)
             entry.evaluating = True
-            self.property_depth += 1
+            self.nesting += PROPERTY_COST
             try:
                 entry.value = literal(self.text(entry.value, scope, entry.element))
                 entry.lazy = False
@@ -313,7 +319,7 @@ class _Expander:
                 raise
             finally:
                 entry.evaluating = False
-                self.property_depth -= 1
+                self.nesting -= PROPERTY_COST
         return entry.value
 
     def lookup(self, symbols: _Symbols) -> Callable[[str], Value]:
@@ -483,6 +489,19 @@ class _Expander:
         self, out: Element, node: Element, macros: _Macros, symbols: _Symbols, depth: int
     ) -> None:
         self.step(node)
+        if self.nesting + NODE_COST > MAX_NESTING:
+            raise ExpansionLimit(
+                "nests elements, calls and conditionals too deeply", MAX_NESTING, node
+            )
+        self.nesting += NODE_COST
+        try:
+            self.expand_node(out, node, macros, symbols, depth)
+        finally:
+            self.nesting -= NODE_COST
+
+    def expand_node(
+        self, out: Element, node: Element, macros: _Macros, symbols: _Symbols, depth: int
+    ) -> None:
         if not node.tag.startswith(PREFIX):
             if depth >= self.max_depth:
                 raise ExpansionLimit("nests deeper than max_depth", self.max_depth, node)

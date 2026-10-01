@@ -186,6 +186,8 @@ class _Evaluator:
                 a, b = self.evaluate(left), self.evaluate(right)
                 if isinstance(op, ast.Mult) and (isinstance(a, str) or isinstance(b, str)):
                     raise Unsupported("repeating a string")
+                if isinstance(op, ast.Mod) and isinstance(a, str):
+                    raise Unsupported("formatting a string with %")
                 return _check(_BINARY[type(op)](a, b))
             case ast.BoolOp(op=logic, values=operands):
                 result = self.evaluate(operands[0])
@@ -225,7 +227,7 @@ def evaluate(text: str, lookup: Callable[[str], Value]) -> Value:
         return _Evaluator(lookup).evaluate(tree)
     except ExpressionError:
         raise
-    except (ArithmeticError, TypeError, ValueError, RecursionError) as exc:
+    except (ArithmeticError, TypeError, ValueError, MemoryError) as exc:
         raise ExpressionError(f"evaluating it failed: {type(exc).__name__}") from exc
 
 

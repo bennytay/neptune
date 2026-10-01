@@ -5,6 +5,7 @@ The oracle for a whole expansion is real xacro's output, committed as
 element, attribute for attribute, text for text.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
@@ -268,25 +269,37 @@ def test_a_long_property_chain_is_a_finding_not_a_recursion_error() -> None:
     chain = '<xacro:property name="p0" value="1"/>' + "".join(
         f'<xacro:property name="p{n}" value="${{p{n - 1} + 1}}"/>' for n in range(1, 200)
     )
-    expansion = run(chain + '<link name="l" v="${p199}" w="${p20}"/>')
+    expansion = run(chain + '<link name="l" v="${p199}" w="${p5}"/>')
     link = first(expansion, "link")
     assert link.unresolved == {"v": UNKNOWN}
-    assert link.attribute("w") == "21"
+    assert link.attribute("w") == "6"
     assert problems(expansion) == ["xacro_invalid"]
 
 
-def test_every_bound_at_once_stays_inside_the_recursion_limit() -> None:
-    deep = "(" * 12 + "1" + ")" * 12
+def at_depth(frames: int, call: Callable[[], Any]) -> Any:
+    """``call()`` made ``frames`` Python frames deeper than here."""
+    return call() if frames == 0 else at_depth(frames - 1, call)
+
+
+def outcome(body: str) -> Any:
+    try:
+        expansion = run(body, max_depth=128)
+    except ExpansionLimit as limit:
+        return ("limit", limit.what)
+    return (serialize(expansion.root), sorted((p.name, p.message) for p in expansion.problems))
+
+
+@pytest.mark.parametrize("levels", [10, 30, 60])
+def test_where_a_bound_is_met_depends_on_the_document_not_the_stack(levels: int) -> None:
+    deep = "-" * 30 + "1"
     chain = '<xacro:property name="p0" value="1"/>' + "".join(
         f'<xacro:property name="p{n}" value="${{p{n - 1} + {deep}}}"/>' for n in range(1, 32)
     )
     nest = (
         '<xacro:macro name="nest" params="k"><a><xacro:if value="${k > 0}">'
         '<xacro:nest k="${k - 1}"/></xacro:if><xacro:unless value="${k > 0}">'
-        '<b v="${p31}"/></xacro:unless></a></xacro:macro>'
+        '<b v="${p31}" w="${p2}"/></xacro:unless></a></xacro:macro>'
     )
-    expansion = run(chain + nest + '<xacro:nest k="60"/>', max_depth=128)
-    leaf = expansion.root
-    while leaf.elements():
-        leaf = leaf.elements()[0]
-    assert leaf.tag == "b" and leaf.attribute("v") == "32"
+    body = chain + nest + f'<xacro:nest k="{levels}"/>'
+    outcomes = [at_depth(frames, lambda: outcome(body)) for frames in (0, 100, 200)]
+    assert outcomes[0] == outcomes[1] == outcomes[2]

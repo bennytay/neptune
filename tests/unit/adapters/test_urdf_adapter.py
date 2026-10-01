@@ -574,3 +574,14 @@ def test_max_depth_is_never_more_than_the_ceiling() -> None:
 
     assert not run(nested(MAX_DEPTH - 1), max_depth=10_000).findings()
     assert codes(run(nested(MAX_DEPTH), max_depth=10_000)) == ["urdf.limit_exceeded"]
+
+
+def test_a_long_text_run_is_refused_however_expat_cuts_it() -> None:
+    from neptune.adapters.urdf.xmltree import MAX_VALUE_CHARS
+
+    lines = ("y" * 99 + "\n") * (MAX_VALUE_CHARS // 100 + 1)
+    data = b'<robot name="r"><link name="l"/><note>' + lines.encode() + b"</note></robot>"
+    assert codes(run(data)) == ["urdf.limit_exceeded"]
+    fits = ("y" * 99 + "\n") * (MAX_VALUE_CHARS // 100 - 1)
+    data = b'<robot name="r"><link name="l"/><note>' + fits.encode() + b"</note></robot>"
+    assert not run(data).findings()
