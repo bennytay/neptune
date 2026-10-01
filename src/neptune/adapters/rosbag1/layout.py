@@ -404,7 +404,7 @@ def scan_layout(source: SourceReader, reporter: Reporter, head: Head, limits: Li
         if record.cut:
             break
     declarations.findings += _unusable_findings(reporter, limits, unusable)
-    ends = [pos for pos, _ in starts[1:]] + [source.size]
+    ends = [pos for pos, _ in starts[1:]] + [source.size] if starts else []
     layout.units = [
         Unit(pos, end, tuple(sorted(counts.items())))
         for (pos, counts), end in zip(starts, ends, strict=True)

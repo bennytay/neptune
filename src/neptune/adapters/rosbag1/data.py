@@ -210,13 +210,12 @@ class Data:
         planned = self._planned(unit[1]) if unit is not None else None
         if unit is not None:
             first = next(records, None)
-            if first is not None and first.cut and first.op != Op.CHUNK:
-                self._advance(planned.counts if planned else {})
-                self._cut(first, end)
-                return
             if first is None or first.op != Op.CHUNK or first.problem is not None:
                 self._advance(planned.counts if planned else {})
-                self._not_a_chunk(unit[0], planned)
+                if first is not None and first.cut and not self.indexed:
+                    self._cut(first, end)  # the file ends where a chunk should start
+                else:
+                    self._not_a_chunk(unit[0], planned)
                 return
             self._chunk(first, planned, end)
         for record in records:

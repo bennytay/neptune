@@ -104,6 +104,12 @@ def cites(data: bytes, evidence: EvidenceRef) -> bytes:
     return bytes(READING.resolve(data, evidence))
 
 
+def stated(state: Any) -> bool:
+    """Whether a value's own provenance says the source stated it."""
+    assert isinstance(state.provenance, Provenance)
+    return bool(state.provenance.assertion_kind is AssertionKind.STATED)
+
+
 def grounds(state: Known[Any]) -> EvidenceRef:
     """The evidence a value's own provenance cites."""
     assert isinstance(state.provenance, Provenance)
@@ -240,7 +246,7 @@ def test_the_run_cites_the_bag_header_and_its_extent_the_chunk_info_fields() -> 
     assert run_record.first.value == Timestamp(first, clock)
     assert run_record.last.value == Timestamp(last, clock)
     for state, value in ((run_record.first, first), (run_record.last, last)):
-        assert state.provenance.assertion_kind is AssertionKind.STATED
+        assert stated(state)
         sec, nsec = divmod(value, 10**9)
         assert cites(data, grounds(state)) == struct.pack("<II", sec, nsec)
 
@@ -266,11 +272,11 @@ def test_a_stream_holds_its_connection_as_the_publisher_stated_it() -> None:
         assert stream.provenance.assertion_kind is AssertionKind.STATED
         assert isinstance(stream.schema_name, Known)
         assert stream.schema_name.value == connection.type
-        assert stream.schema_name.provenance.assertion_kind is AssertionKind.STATED
+        assert stated(stream.schema_name)
         assert cites(data, grounds(stream.schema_name)) == connection.type.encode()
         assert isinstance(stream.schema_definition, Known)
         assert cites(data, stream.schema_definition.value) == connection.definition.encode()
-        assert stream.schema_definition.provenance.assertion_kind is AssertionKind.STATED
+        assert stated(stream.schema_definition)
         assert stream.metadata == tuple(
             sorted(
                 [
@@ -302,7 +308,7 @@ def test_message_counts_are_stated_and_cite_the_chunk_infos_that_state_them() ->
     }
     for knowledge in counts.values():
         assert isinstance(knowledge, Known)
-        assert knowledge.provenance.assertion_kind is AssertionKind.STATED
+        assert stated(knowledge)
         span = cites(data, grounds(knowledge))
         assert span.count(b"op=\x06") >= 1 and b"op=\x05" not in span  # chunk infos only
 
