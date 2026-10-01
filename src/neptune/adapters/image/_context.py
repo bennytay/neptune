@@ -1,5 +1,6 @@
 """What every parser of one source shares: the emitter, the budget and the configured limits."""
 
+import codecs
 import zlib
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -184,10 +185,12 @@ class Context:
         ``raw`` is at most ``max_value_bytes + 1`` bytes of it, ``more`` says bytes follow, and
         ``total`` is its size if known. A text in a different ``codec`` is ``Unknown``.
         """
-        if more or len(raw) > self.max_value_bytes:
-            return NotCopied(total)
+        over = more or len(raw) > self.max_value_bytes
         try:
+            if over:  # what is there is still checked: an oversize text may also be corrupt
+                codecs.getincrementaldecoder(codec)().decode(raw, final=False)
+                return NotCopied(total)
             return raw.decode(codec)
         except UnicodeDecodeError:
             self.out.finding(VALUE_UNREADABLE, locator, f"the text is not {codec}")
-            return Unknown()
+            return NotCopied(total) if over else Unknown()

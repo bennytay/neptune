@@ -97,8 +97,9 @@ FINDINGS: Final[Mapping[str, tuple[FindingCategory, Severity, str]]] = {
     VALUE_NOT_COPIED: (
         FindingCategory.SKIPPED,
         Severity.INFO,
-        "an IFD entry's value is not copied into its row (larger than max_value_bytes, a"
-        " MakerNote, an unknown type); the finding cites its bytes",
+        "a value is not copied: an IFD entry's (larger than max_value_bytes, a MakerNote, an"
+        " unknown type; the finding cites its bytes) or a text, XMP namespace, path or value over"
+        " max_value_bytes (its cell is NotCovered; the finding cites the first cells)",
     ),
     NOT_MODELLED: (
         FindingCategory.UNSUPPORTED,

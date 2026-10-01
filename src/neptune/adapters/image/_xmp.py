@@ -161,18 +161,21 @@ class _Rows:
         its cell is ``NotCovered`` and one finding for the packet names the first such cells."""
         self.ctx.budget.entry()
         cells: list[CellInput] = []
+        pending: list[tuple[int, NotCopied]] = []
         for column, text in enumerate((namespace, path, value)):
-            if text is None:
-                self.skipped.add(self.count, column, NotCopied(None))
-                cells.append(NotCovered())
-                continue
-            size = _bytes_over(text, self.keep)
-            if size is None:
-                cells.append(text)
+            if text is not None:
+                # A path is within the cap by construction (``_add``): no second look at its bytes.
+                size = None if column == 1 else _bytes_over(text, self.keep)
+                if size is None:
+                    cells.append(text)
+                    continue
+                pending.append((column, NotCopied(size)))
             else:
-                self.skipped.add(self.count, column, NotCopied(size))
-                cells.append(NotCovered())
-        self.ctx.out.row(self.table, self.locator, self.count, cells)
+                pending.append((column, NotCopied(None)))
+            cells.append(NotCovered())
+        self.ctx.out.row(self.table, self.locator, self.count, cells)  # may raise LimitHit
+        for column, note in pending:
+            self.skipped.add(self.count, column, note)
         self.count += 1
 
     def _add(self, path: str | None, piece: str) -> str | None:

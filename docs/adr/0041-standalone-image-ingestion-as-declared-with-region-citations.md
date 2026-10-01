@@ -78,8 +78,9 @@ offsets past the end, zlib bombs and XML bombs are routine.
    stopped by a limit does not judge its raster. Work is charged before it is done: an IFD is read
    one entry at a time, strip and tile arrays spend `max_entries` x 256 items, a PNG chunk or metadata
    block over `max_metadata_bytes` is cited and not read, and a text cell, XMP namespace, path or
-   value over `max_value_bytes` is not copied: its cell is `NotCovered` (citing the exact cell, like
-   an IFD value left out of its row), never a prefix in a `Known` cell, and one
+   value over `max_value_bytes` is not copied: its cell is `NotCovered` (citing the exact cell; an
+   IFD value is left out of its row with a finding citing its bytes), never a prefix in a `Known`
+   cell, and one
    `image.value_not_copied` per table cites the first 16 such cells with their lengths and counts
    the rest. An XMP path stops growing once it passes the cap, so deep trees of long names cost no
    more than the names. A text chunk inflates only that far; other streams

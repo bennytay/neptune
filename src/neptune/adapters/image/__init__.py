@@ -160,9 +160,10 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "max_value_bytes",
             DEFAULT_MAX_VALUE_BYTES,
             "the largest value copied into a row cell (an IFD value, a PNG or JPEG text, an XMP"
-            " namespace, path or value). A larger one is not copied: its cell is NotCovered (an"
-            " IFD value is left out of its row) and one image.value_not_copied per table cites"
-            " the first cells and counts the rest; the bytes hold the value",
+            " namespace, path or value). A larger one is not copied and the bytes hold it: a text or"
+            " XMP cell is NotCovered and one image.value_not_copied per table cites the first"
+            " cells and counts the rest; an IFD value is left out of its row, with a finding"
+            " citing its bytes",
         ),
     ),
     libraries=(),

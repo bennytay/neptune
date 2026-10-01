@@ -610,12 +610,13 @@ def test_xmp_paths_of_deep_long_names_are_cut_and_the_total_text_is_bounded() ->
         if isinstance(r, StructuredRecord)
         for c in r.cells
     )
-    (finding,) = [
-        f
+    counts: list[Any] = [
+        (f.details["count"], f.details["cells"])
         for f in output.findings()
-        if f.code == "image.value_not_copied" and f.details["count"] > 1
+        if f.code == "image.value_not_copied"
     ]
-    assert finding.details["count"] > 16 and len(finding.details["cells"]) == 16  # type: ignore[arg-type]
+    big = [(count, cells) for count, cells in counts if count > 1]
+    assert len(big) == 1 and big[0][0] > 16 and len(big[0][1]) == 16
 
 
 def test_a_tree_of_130_kb_ancestor_names_costs_about_its_names() -> None:
@@ -726,3 +727,47 @@ def test_an_xmp_value_over_the_cap_is_not_copied_whatever_its_characters() -> No
         and f.details["cells"] == [{"column": 2, "length": 3 * 4096, "row": row.row}]
     ]
     assert finding.subject.locator[-1].column == 2  # type: ignore[union-attr]
+
+
+def test_every_cell_a_not_copied_finding_names_is_in_a_row_that_exists() -> None:
+    names = [f"n{i:02d}".ljust(60, "x") for i in range(58)]  # a path of ~3.5 KB: copied
+    leaves = "".join(
+        f"<p:l{i:04d}>{'v' * (5000 if i % 50 == 0 else 1)}</p:l{i:04d}>" for i in range(3000)
+    )
+    body = (
+        "".join(f"<p:{n}>" for n in names) + leaves + "".join(f"</p:{n}>" for n in reversed(names))
+    )
+    packet = (
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF'
+        ' xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description'
+        f' xmlns:p="http://example.com/p/">{body}</rdf:Description></rdf:RDF></x:xmpmeta>'
+    ).encode()
+    text = b"XML:com.adobe.xmp\x00\x01\x00\x00\x00" + zlib.compress(packet, 9)
+    output = run(png_with_chunk(b"iTXt", text), max_metadata_bytes=1 << 20)
+    assert "image.limit_exceeded" in codes(output)  # the row text ran out part-way
+    records = output.records()
+    tables = [r for r in records if isinstance(r, StructuredTable) and known(r.name) == "XMP"]
+    count = {
+        t.id: sum(1 for r in records if isinstance(r, StructuredRecord) and r.table == t.id)
+        for t in tables
+    }
+    xmp = max(tables, key=lambda t: count[t.id])  # the fixture PNG has an XMP packet of its own
+    rows = {r.row for r in records if isinstance(r, StructuredRecord) and r.table == xmp.id}
+    named: list[Any] = [
+        f
+        for f in output.findings()
+        if f.code == "image.value_not_copied"
+        and f.subject.locator[:-1] == xmp.provenance.evidence.locator  # type: ignore[union-attr]
+    ]
+    assert named
+    for finding in named:
+        assert finding.subject.locator[-1].row in rows
+        assert {cell["row"] for cell in finding.details["cells"]} <= rows
+
+
+def test_an_oversize_text_that_is_also_corrupt_says_so() -> None:
+    data = bytearray(b"Comment\x00" + b"a" * 5000)
+    data[100] = 0xFF  # a latin-1 tEXt cannot be corrupt; use an iTXt (UTF-8)
+    itxt = b"Comment\x00\x00\x00\x00\x00" + b"a" * 100 + b"\xff" + b"a" * 5000
+    output = run(png_with_chunk(b"iTXt", itxt))
+    assert {"image.value_not_copied", "image.value_unreadable"} <= codes(output)
