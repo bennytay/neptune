@@ -130,6 +130,15 @@ def comments(text: str, covered: list[Spot], headers: list[int], end: int) -> li
     return sorted(set(found))
 
 
+@dataclass(frozen=True)
+class _KeyAnchor:
+    """An anchored key (``&k name: 1``): no node, so an alias to it refers to its entry's path."""
+
+    path: Path
+    text: str
+    key_type: tuple[str, ...] | None
+
+
 @dataclass
 class _Frame:
     """An open collection: its node, and for a mapping the entry being read."""
@@ -139,7 +148,7 @@ class _Frame:
     path: Path
     count: int = 0  # entries or items begun
     key: str | None = None  # a mapping's pending key, once read
-    key_type: str | None = None  # the pending key's type: its tag, resolved
+    key_type: tuple[str, ...] | None = None  # the pending key's type: its tags, resolved
     key_start: int = 0
     skip_value: bool = False  # the pending entry's key cannot be held: skip its value
     children: list[int] = field(default_factory=list)
@@ -167,7 +176,7 @@ class _Document:
         self.frames: list[_Frame] = []
         # Each anchor's node, or the key it marks: a key is no node, so an alias to one reads as
         # the key's scalar again.
-        self.anchors: dict[str, int | ScalarEvent] = {}
+        self.anchors: dict[str, int | _KeyAnchor] = {}
         self.skipped: list[SkippedEntry] = []
         self.skip_depth = 0  # events of an entry being skipped
         self.too_deep = False
@@ -222,39 +231,45 @@ class _Document:
     def _key(self, frame: _Frame, event: NodeEvent) -> None:
         frame.key_start = _start(event)
         key: str | None = None
-        key_type: str | None = None
+        key_type: tuple[str, ...] | None = None
+        anchored = getattr(event, "anchor", None) if not isinstance(event, AliasEvent) else None
         if isinstance(event, ScalarEvent):
             key, key_type = event.value, self._key_type(event.value, _tag(event))
-            if isinstance(event.anchor, str):
-                self.anchors[event.anchor] = event
         elif isinstance(event, AliasEvent) and event.anchor in self.anchors:
             target = self.anchors[event.anchor]
-            if isinstance(target, ScalarEvent):
-                key, key_type = target.value, self._key_type(target.value, _tag(target))
+            if isinstance(target, _KeyAnchor):
+                key, key_type = target.text, target.key_type
             else:
                 node = self.nodes[target]
                 if not isinstance(node.value, Collection | Alias) and node.text is not None:
                     key, key_type = node.text, self._key_type(node.text, node.tag or PLAIN)
         if key is None or len(key) > self.limits.max_scalar or not representable(key):
             frame.key = None
+            if isinstance(anchored, str):  # the anchor now marks a key no path can hold
+                self.anchors.pop(anchored, None)
             if isinstance(event, CollectionStartEvent):
                 self.skip_depth = 1
             else:
                 frame.skip_value = True
             return
         frame.key, frame.key_type = key, key_type
+        if isinstance(anchored, str):
+            self.anchors[anchored] = _KeyAnchor((*frame.path, key), key, key_type)
 
-    def _key_type(self, text: str, tag: str) -> str:
-        """A key's type, so that ``1`` and ``"1"`` are two keys and ``a`` and ``"a"`` one: a
-        quoted or ``!!str`` key is a string, a plain one the type each version reads it as."""
+    def _key_type(self, text: str, tag: str) -> tuple[str, ...] | None:
+        """A key's type where it is not a string, so that ``1`` and ``"1"`` are two keys and
+        ``a`` and ``"a"`` one: a quoted or ``!!str`` key is a string, a plain one the type each
+        version reads it as, any other tag its own."""
         if tag in (NON_PLAIN, _STR):
-            return _STR
+            return None
         if tag != PLAIN or len(text) > self.limits.max_scalar:
-            return tag
-        return "|".join(sorted({_reading_type(implicit(text, v)) for v in self.versions}))
+            return (tag,)
+        # One type per version that reads it differently, YAML 1.1 first.
+        types = tuple(dict.fromkeys(_reading_type(implicit(text, v)) for v in self.versions))
+        return None if types == (_STR,) else types
 
     def _value(self, frame: _Frame | None, event: NodeEvent) -> None:
-        key_type: str | None = None
+        key_type: tuple[str, ...] | None = None
         if frame is None:
             path: Path = ()
             order, parent = 0, -1
@@ -279,9 +294,9 @@ class _Document:
                 value: NodeValue = Unreadable(Issue.UNDEFINED_ALIAS, reason)
                 node = Node(path, order, parent, value, None, None, (start, end))
                 node.issues = (Issue.UNDEFINED_ALIAS,)
-            elif isinstance(target, ScalarEvent):  # a key's anchor: the key's scalar again
-                node = self._scalar(path, order, parent, target)
-                node.span = (start, end)  # written here, as the alias
+            elif isinstance(target, _KeyAnchor):  # a key's anchor: a reference to the key
+                alias = Alias(anchor, target.path, key=True)
+                node = Node(path, order, parent, alias, None, None, (start, end))
             else:
                 alias = Alias(anchor, self.nodes[target].path)
                 node = Node(path, order, parent, alias, None, None, (start, end))

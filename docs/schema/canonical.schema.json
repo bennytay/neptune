@@ -309,6 +309,9 @@
         "anchor": {
           "type": "string"
         },
+        "key": {
+          "type": "boolean"
+        },
         "target": {
           "items": {
             "type": [
@@ -324,6 +327,7 @@
       },
       "required": [
         "anchor",
+        "key",
         "target",
         "type"
       ],
@@ -453,6 +457,9 @@
         "id": {
           "$ref": "#/$defs/RecordId"
         },
+        "key_tag": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
         "kind": {
           "const": "configuration_value"
         },
@@ -499,6 +506,7 @@
       },
       "required": [
         "id",
+        "key_tag",
         "kind",
         "occurrence",
         "order",

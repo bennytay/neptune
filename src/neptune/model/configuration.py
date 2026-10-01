@@ -242,19 +242,31 @@ class ConfigAlias:
 
     An alias is the same node again in YAML's own model. It is recorded as a reference, so a
     document of nested aliases (a "billion laughs") costs one value per alias, never an expansion.
+    ``key``: the anchor marks the key of the entry at ``target`` (``&k name: 1``), not a node:
+    the alias is that key's scalar again, still a reference.
     """
 
     anchor: str
     target: Path
+    key: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.anchor, str):
             raise TypeError(f"anchor must be a str, got {type(self.anchor).__name__}")
         check_text("anchor", self.anchor)
         _check_path("target", self.target)
+        if not isinstance(self.key, bool):
+            raise TypeError(f"key must be a bool, got {self.key!r}")
+        if self.key and not (self.target and isinstance(self.target[-1], str)):
+            raise ValueError("an alias to a key targets the entry the key names")
 
     def to_json(self) -> JsonObject:
-        return {"anchor": self.anchor, "target": list(self.target), "type": "alias"}
+        return {
+            "anchor": self.anchor,
+            "key": self.key,
+            "target": list(self.target),
+            "type": "alias",
+        }
 
 
 ConfigNode: TypeAlias = ConfigScalar | ConfigCollection | ConfigAlias
@@ -269,9 +281,10 @@ def _node_from_json(data: JsonValue) -> ConfigNode:
         raise ValueError(f"a configuration value is a JSON object with a type, got {data!r}")
     kind = json_str(data["type"], "value type")
     if kind == "alias":
-        obj = exact_object(data, "alias", {"anchor", "target", "type"})
+        obj = exact_object(data, "alias", {"anchor", "key", "target", "type"})
         anchor = json_str(obj["anchor"], "anchor")
-        return ConfigAlias(anchor, _path_from_json(obj["target"], "target"))
+        target = _path_from_json(obj["target"], "target")
+        return ConfigAlias(anchor, target, json_bool(obj["key"]))
     if kind in CollectionType.__members__.values():
         obj = exact_object(data, "collection", {"length", "type"})
         return ConfigCollection(CollectionType(kind), json_int(obj["length"], "length"))
@@ -447,6 +460,11 @@ class ConfigurationValue:
       occurrence)`` is unique in a snapshot, so values sort, compare and hash in one order however
       a key repeats.
     - ``order``: its position among its parent's entries or items, in source order.
+    - ``key_tag``: the type of its key where that is not a string: the tag a YAML key resolves
+      to (``tag:yaml.org,2002:int`` for ``1``, ``...:bool`` for ``true``, an application's
+      ``!tag``), ``Ambiguous`` where the YAML versions disagree (``on``). ``NotApplicable`` for a
+      string key (every JSON and TOML key, a quoted or plain-text YAML key), the root and sequence
+      items, so ``1`` and ``"1"``, one path, still declare two keys.
     - ``tag``: a YAML node's tag: the explicit one, expanded, or the non-specific ``?`` (plain
       scalars and collections) or ``!`` (quoted and block scalars). ``NotCovered`` in JSON and
       TOML, which have none.
@@ -467,6 +485,7 @@ class ConfigurationValue:
     path: Path
     occurrence: tuple[int, ...]
     order: int
+    key_tag: Knowledge[str]
     tag: Knowledge[str]
     text: Knowledge[str]
     value: Knowledge[ConfigNode]
@@ -476,6 +495,10 @@ class ConfigurationValue:
         parse_record_id(self.snapshot)
         _check_path("path", self.path)
         _check_occurrence(self.path, self.occurrence)
+        check_text_values("key_tag", self.key_tag)
+        keyless = not self.path or isinstance(self.path[-1], int)
+        if keyless and not isinstance(self.key_tag, NotApplicable):
+            raise ValueError("key_tag is NotApplicable for the root and sequence items")
         if not is_int(self.order) or not 0 <= self.order <= INT64_MAX:
             raise ValueError(f"order must be a position, got {self.order!r}")
         if not self.path and self.order:
@@ -503,6 +526,7 @@ class ConfigurationValue:
             self.id,
             self.provenance,
             {
+                "key_tag": to_json(self.key_tag),
                 "occurrence": list(self.occurrence),
                 "order": self.order,
                 "path": list(self.path),
@@ -520,7 +544,7 @@ def configuration_value_from_json(data: JsonValue) -> ConfigurationValue:
     obj, record_id, provenance = evidence_record_object(
         data,
         ConfigurationValue.kind,
-        {"occurrence", "order", "path", "snapshot", "tag", "text", "value"},
+        {"key_tag", "occurrence", "order", "path", "snapshot", "tag", "text", "value"},
         ConfigurationValue.since,
     )
     return ConfigurationValue(
@@ -532,6 +556,7 @@ def configuration_value_from_json(data: JsonValue) -> ConfigurationValue:
             json_int(rank, "occurrence") for rank in json_array(obj["occurrence"], "occurrence")
         ),
         order=json_int(obj["order"], "order"),
+        key_tag=from_json(obj["key_tag"], text_decoder("key_tag"), provenance_from_json),
         tag=from_json(obj["tag"], text_decoder("tag"), provenance_from_json),
         text=from_json(obj["text"], _verbatim_decoder, provenance_from_json),
         value=from_json(obj["value"], _node_from_json, provenance_from_json),
@@ -562,14 +587,22 @@ def comparison_key(value: ConfigurationValue) -> JsonValue:
 
     A collection compares by its type (its entries are values of their own), an alias by the path
     it refers to, a scalar by its reading. A value with no reading compares by its text and tag,
-    which are then all the evidence says. Citations, spellings (``0x1F`` and ``31``, ``'a'`` and
+    which are then all the evidence says. A key that is not a string adds its type, so YAML's
+    ``1: x`` and ``'1': x`` differ. Citations, spellings (``0x1F`` and ``31``, ``'a'`` and
     ``a``), anchors' names and key order never count.
     """
+    declared = _declared_value(value)
+    if isinstance(value.key_tag, NotApplicable):  # a string key: what JSON and TOML have too
+        return declared
+    return {"key_tag": _stripped(value.key_tag), "value": declared}
+
+
+def _declared_value(value: ConfigurationValue) -> JsonValue:
     match value.value:
         case Known(value=ConfigCollection(type=kind)):
             return {"knowledge": "known", "type": str(kind)}
-        case Known(value=ConfigAlias(target=target)):
-            return {"knowledge": "known", "target": list(target), "type": "alias"}
+        case Known(value=ConfigAlias(target=target, key=key)):
+            return {"key": key, "knowledge": "known", "target": list(target), "type": "alias"}
         case Known(value=ConfigScalar() as scalar):
             return {"knowledge": "known", "value": scalar.to_json()}
         case Ambiguous(candidates=candidates):

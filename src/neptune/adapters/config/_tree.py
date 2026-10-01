@@ -67,6 +67,7 @@ class Collection:
 class Alias:
     anchor: str
     target: Path | None  # None: no node of this document carries the anchor
+    key: bool = False  # the anchor marks the key of the entry at target
 
 
 NodeValue: TypeAlias = Collection | Alias | Reading
@@ -95,8 +96,8 @@ class Node:
     ``text`` is a scalar's declared text (``None`` for collections and aliases, or where it
     cannot be held); ``tag`` a YAML tag (``None`` in JSON and TOML); ``span`` where the value is
     written, when the reader locates it; ``repeated`` that its key's text repeats in its mapping;
-    ``key_type`` what type its key is (YAML: ``1`` and ``"1"`` are two keys of one text), ``None``
-    where every key is a string (JSON, TOML).
+    ``key_type`` the tags its key resolves to, one per YAML version read, where that is not a
+    string (YAML: ``1`` and ``"1"`` are two keys of one text); ``None`` for a string key.
     """
 
     path: Path
@@ -108,7 +109,7 @@ class Node:
     span: Spot | None = None
     repeated: bool = False
     issues: tuple[Issue, ...] = ()
-    key_type: str | None = None
+    key_type: tuple[str, ...] | None = None  # the tags a key resolves to; None: a string key
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,16 @@ class TooDeep:
     extent: Spot
 
 
+@dataclass(frozen=True)
+class TooLong:
+    """A document whose values' paths together exceed the path budget: it is not read."""
+
+    document: int
+    extent: Spot
+    cost: int  # code points its values' paths and alias targets total
+    budget: int
+
+
 @dataclass
 class Parse:
     """What one reader made of a whole text."""
@@ -163,6 +174,7 @@ class Parse:
     documents: list[Document]
     problem: Problem | None = None
     too_deep: list[TooDeep] = field(default_factory=list)
+    too_long: list[TooLong] = field(default_factory=list)
     unsupported_version: list[tuple[int, str, Spot]] = field(default_factory=list)
 
 

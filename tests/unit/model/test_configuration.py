@@ -84,6 +84,7 @@ def value(
     *,
     order: int = 0,
     occurrence: tuple[int, ...] | None = None,
+    key_tag: Any = None,
     tag: Any = None,
     snapshot: RecordId = SNAPSHOT_ID,
     provenance: Provenance | None = None,
@@ -106,6 +107,7 @@ def value(
         path=path,
         occurrence=occurrence if occurrence is not None else (0,) * len(path),
         order=order if path else 0,
+        key_tag=key_tag if key_tag is not None else NotApplicable(),
         tag=tag if tag is not None else NotCovered(),
         text=text,
         value=state,
@@ -212,6 +214,8 @@ def test_every_value_shape_round_trips_and_validates() -> None:
         ({"occurrence": (-1,)}, "ranks"),
         ({"occurrence": [0]}, "must be a tuple"),
         ({"path": (0,), "occurrence": (1,)}, "occurs once"),
+        ({"path": (0,), "key_tag": Known("tag:yaml.org,2002:int")}, "root and sequence items"),
+        ({"key_tag": Known("")}, "non-empty"),
         ({"text": NotApplicable()}, "collections and aliases"),
         ({"value": NotApplicable()}, "every node has a value"),
         ({"tag": Known("")}, "non-empty"),
@@ -409,6 +413,52 @@ def test_values_under_repeated_keys_order_by_occurrence_whatever_order_they_come
     ]
     assert configuration_digest(flipped) != digest
     assert changes(document, [other(r) for r in flipped]) == [(("a", "x"), ChangeKind.CHANGED)]
+
+
+def test_a_key_that_is_not_a_string_is_part_of_what_is_declared() -> None:
+    # YAML 1.2 "m: {1: x, '1': y}" against "m: {'1': x, 1: y}": one path, two keys each.
+    int_key = Known("tag:yaml.org,2002:int")
+
+    def document(first: str, second: str) -> list[ConfigurationValue]:
+        return [
+            value((), mapping(1)),
+            value(("m",), mapping(2), provenance=at("/m")),
+            value(("m", "1"), scalar("string", first), key_tag=int_key, provenance=at("/m/0")),
+            value(
+                ("m", "1"),
+                scalar("string", second),
+                order=1,
+                occurrence=(0, 1),
+                provenance=at("/m/1"),
+            ),
+        ]
+
+    left, right = document("x", "y"), [other(r) for r in document("x", "y")]
+    assert configuration_digest(left) == configuration_digest(right)
+    assert changes(left, right) == []
+    swapped = [other(r) for r in document("x", "y")]
+    swapped[2], swapped[3] = (
+        replace(swapped[2], key_tag=NotApplicable()),
+        replace(swapped[3], key_tag=int_key),
+    )
+    assert configuration_digest(left) != configuration_digest(swapped)
+    assert changes(left, swapped) == [(("m", "1"), ChangeKind.CHANGED)]
+    # A string key adds nothing: JSON's keys and YAML's quoted ones compare alike.
+    assert comparison_key(DOCUMENT[1]) == comparison_key(replace(DOCUMENT[1], tag=Known("!")))
+
+
+def test_an_alias_to_a_key_is_a_reference_to_its_entry() -> None:
+    alias = ConfigAlias("k", ("defaults", "rate"), key=True)
+    record = value(("again",), alias)
+    data = canonical_json.loads(canonical_json.dumps(record.to_json()))
+    assert configuration_value_from_json(data) == record
+    assert list(VALIDATOR.iter_errors(data)) == []
+    node = value(("again",), ConfigAlias("k", ("defaults", "rate")))
+    assert changes([record], [other(node)]) == [(("again",), ChangeKind.CHANGED)]
+    with pytest.raises(ValueError, match="targets the entry"):
+        ConfigAlias("k", ("list", 0), key=True)
+    with pytest.raises(TypeError, match="key must be a bool"):
+        ConfigAlias("k", ("a",), key=1)  # type: ignore[arg-type]
 
 
 def test_two_values_at_one_address_are_refused() -> None:

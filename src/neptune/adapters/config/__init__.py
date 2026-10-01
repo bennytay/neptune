@@ -24,7 +24,8 @@ The rules, also in the descriptor's conventions:
   step in YAML. An entry whose key repeats in its mapping is addressed by its position instead
   (``config:entry``), so no two values share a citation.
 - **Hostile input** costs findings, never exceptions: undecodable bytes, a file over
-  ``max_bytes``, nesting past ``max_depth``, a scalar past ``max_scalar_length``, repeated keys,
+  ``max_bytes``, nesting past ``max_depth``, a scalar past ``max_scalar_length``, paths that
+  would repeat long keys past ``max_path_ratio`` times the document, repeated keys,
   aliases (never expanded), application tags, numbers beyond binary64.
 
 Planning reads and parses the whole file and plans one chunk per ``chunk_values`` values of a
@@ -58,6 +59,7 @@ from neptune.adapters.config._tree import (
     Null,
     Parse,
     Spot,
+    TooLong,
     Value,
     pointer_token,
 )
@@ -155,6 +157,12 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "max_depth", 200, "a document nested deeper than this is not read (config.too_deep)"
         ),
         ConfigOption(
+            "max_path_ratio",
+            64,
+            "a document whose values' paths (and alias targets) total more code points than this"
+            " many times its own (at least 4 KiB) is not read (config.paths_too_long)",
+        ),
+        ConfigOption(
             "max_scalar_length",
             MIB,
             "a scalar or key of more code points than this is not read (config.scalar_too_large)",
@@ -202,6 +210,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             _code("nonstandard_json"),
             "JSON values spelled NaN or Infinity, which RFC 8259 does not define; read as the"
             " non-finite numbers they name (inconsistent, info)",
+        ),
+        Documented(
+            _code("paths_too_long"),
+            "a document whose values' paths total more than max_path_ratio times its size: a"
+            " long key above many values is copied into each; it is not read (limit, error)",
         ),
         Documented(
             _code("scalar_too_large"),
@@ -323,9 +336,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "yaml",
             "PyYAML's events: tags as written (expanded) or the non-specific ? (plain scalars,"
             " collections) and ! (quoted and block scalars); quoted and block scalars are"
-            " strings; aliases are references to their anchor's node, never expanded; an alias"
-            " to an anchored key, which is no node, reads as that key's scalar; merge keys (<<)"
-            " are kept as keys",
+            " strings; aliases are references to their anchor's node, never expanded (an alias"
+            " to an anchored key refers to that key's entry, key true); a key that is not a"
+            " string keeps its tag in key_tag; merge keys (<<) are kept as keys",
         ),
     ),
     resources=Resources(max_memory=1024 * MIB, streaming=False),
@@ -364,7 +377,48 @@ def _load(source: SourceReader, config: AdapterConfig, only: ConfigFormat | None
         return _Loaded(source.size, invalid=decoded)
     limits = Limits(config.integer("max_depth"), config.integer("max_scalar_length"))
     parse = read_text(decoded.text, decoded.encoding, limits, config.text("yaml_version"), only)
+    if parse is not None:
+        _budget_paths(parse, config.integer("max_path_ratio"))
     return _Loaded(source.size, False, None, decoded.text, decoded.encoding, decoded.bom, parse)
+
+
+# The least path budget of a document, in code points: a small file may nest a little deeper.
+_PATH_FLOOR: Final = 4096
+
+
+def _segment(segment: str | int) -> int:
+    return len(segment) + 1 if isinstance(segment, str) else len(str(segment)) + 1
+
+
+def path_cost(document: Document) -> int:
+    """The code points every value's path and every alias's target total: what the records
+    repeat of the document's keys. Linear to compute: a node's path costs its parent's and one
+    more segment."""
+    costs: list[int] = []
+    total = 0
+    for node in document.nodes:
+        own = 0 if node.parent < 0 else costs[node.parent] + _segment(node.path[-1])
+        costs.append(own)
+        total += own
+        if isinstance(node.value, Alias) and node.value.target is not None:
+            total += sum(_segment(segment) for segment in node.value.target)
+    return total
+
+
+def _budget_paths(parse: Parse, ratio: int) -> None:
+    """Set aside every document whose records would repeat its keys more than ``ratio`` times
+    its own size: output stays linear in input (a 20,000-character key above 4,000 values is
+    80 million code points of paths)."""
+    kept: list[Document] = []
+    for document in parse.documents:
+        start, end = document.extent
+        budget = ratio * max(end - start, _PATH_FLOOR)
+        cost = path_cost(document)
+        if cost > budget:
+            parse.too_long.append(TooLong(document.index, document.extent, cost, budget))
+        else:
+            kept.append(document)
+    parse.documents = kept
 
 
 def _int(context: JsonObject, key: str) -> int:
@@ -447,7 +501,9 @@ def _source_findings(
             "the file mixes line breaks (LF, CR LF, CR); spans and text keep them as written",
             {},
         )
-    if parse is None or (not parse.documents and not parse.too_deep and parse.problem is None):
+    if parse is None or (
+        not parse.documents and not parse.too_deep and not parse.too_long and parse.problem is None
+    ):
         yield finding(
             "no_document",
             FindingCategory.MISSING,
@@ -498,6 +554,22 @@ def _source_findings(
             Span(*deep.extent),
             f"document {deep.document} nests deeper than max_depth ({limit}); it is not read",
             {"document": deep.document, "max_depth": limit},
+        )
+    ratio = config.integer("max_path_ratio")
+    for long in parse.too_long:
+        yield finding(
+            "paths_too_long",
+            FindingCategory.LIMIT,
+            Severity.ERROR,
+            Span(*long.extent),
+            f"document {long.document}'s values' paths total {long.cost} code points, over"
+            f" max_path_ratio ({ratio}) times its size ({long.budget}); it is not read",
+            {
+                "budget": long.budget,
+                "document": long.document,
+                "max_path_ratio": ratio,
+                "path_code_points": long.cost,
+            },
         )
     for document, version, spot in parse.unsupported_version:
         yield finding(
@@ -557,6 +629,14 @@ _ISSUES: Final[dict[Issue, tuple[FindingCategory, Severity, str]]] = {
         "{count} values are spelled NaN or Infinity, which RFC 8259 does not define",
     ),
 }
+
+
+def _key_tag(key_type: tuple[str, ...] | None) -> Knowledge[str]:
+    if key_type is None:
+        return NotApplicable()
+    if len(key_type) == 1:
+        return Known(key_type[0])
+    return Ambiguous(tuple(Candidate(tag) for tag in key_type))
 
 
 class _Records:
@@ -640,8 +720,8 @@ class _Records:
         match node.value:
             case Collection(type=kind, length=length):
                 value, text = Known(ConfigCollection(kind, length), cited), NotApplicable()
-            case Alias(anchor=anchor, target=target) if target is not None:
-                value, text = Known(ConfigAlias(anchor, target), cited), NotApplicable()
+            case Alias(anchor=anchor, target=target, key=key) if target is not None:
+                value, text = Known(ConfigAlias(anchor, target, key), cited), NotApplicable()
             case Null():
                 value = KnownAbsent(self.document_provenance)
             case Value(readings=(single,)):
@@ -657,6 +737,7 @@ class _Records:
             path=node.path,
             occurrence=self._occurrence[index],
             order=node.order,
+            key_tag=_key_tag(node.key_type),
             tag=Known(node.tag) if node.tag is not None else NotCovered(),
             text=text,
             value=value,

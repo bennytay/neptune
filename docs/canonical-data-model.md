@@ -213,9 +213,10 @@ a bug, not a value.
   `digest`.
 - `ConfigurationValue` (since version 2): one node, naming its `snapshot`: `path` (keys verbatim, positions as
   integers), `occurrence` (per step, which of the entries sharing that key it passes through; `(path,
-  occurrence)` is unique in a snapshot), `order` among its parent's entries, YAML `tag` (`NotCovered` in JSON and TOML), `text` (a
-  scalar as written) and `value`: a `ConfigCollection`, a `ConfigAlias` (a reference, never expanded) or a
-  `ConfigScalar` in the format's own type, citing its span. A format-defined null is `KnownAbsent` citing
+  occurrence)` is unique in a snapshot), `order` among its parent's entries, `key_tag` (a YAML key's type
+  where it is not a string, else `NotApplicable`), YAML `tag` (`NotCovered` in JSON and TOML), `text` (a
+  scalar as written) and `value`: a `ConfigCollection`, a `ConfigAlias` (a reference, never expanded, to a
+  node, or with `key` to an anchored key's entry) or a `ConfigScalar` in the format's own type, citing its span. A format-defined null is `KnownAbsent` citing
   the document; YAML 1.1 and 1.2 readings that differ in an undeclared document are `Ambiguous`.
 - A value's locator is a `JsonPointer` into the document as parsed, after a `config:document` step in YAML;
   each entry of a repeated key is addressed by position (`config:entry`) instead.
