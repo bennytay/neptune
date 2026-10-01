@@ -245,9 +245,20 @@ class Workspace:
             finally:
                 os.close(descriptor)
 
+    def _directory(self, path: Path) -> None:
+        """Make ``path``, a directory below the home's own, and flush its name into its parent.
+
+        A rename into a directory is only durable if the directory's own name is. The parent is
+        flushed even when ``path`` already exists: another process may have made it and not yet
+        flushed it.
+        """
+        path.mkdir(parents=True, exist_ok=True)
+        fsync_directory(path.parent)
+
     def _replace(self, path: Path, data: bytes) -> None:
         """Write ``path`` whole or not at all."""
-        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.parent != self.home:  # the home's own entries are flushed with workspace.json
+            self._directory(path.parent)
         with self._staging() as staging:
             staged = staging / path.name
             with staged.open("wb") as stream:
@@ -408,7 +419,7 @@ class Workspace:
             for stream, batches in sorted(by_stream.items()):
                 write_run(batches, staged / "runs" / f"{_hex(stream, 'rec')}.parquet")
             fsync_tree(staged)
-            final.parent.mkdir(parents=True, exist_ok=True)
+            self._directory(final.parent)  # chunks/<2 hex>/, whose name chunks/ must keep
             try:
                 staged.rename(final)
             except OSError:
