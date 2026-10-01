@@ -40,6 +40,7 @@ from neptune_ledger.api.types import (
 from neptune_ledger.catalog.check import Checked, check_package, open_root
 from neptune_ledger.catalog.index import PackageRows, package_rows
 from neptune_ledger.catalog.migrate import tenant_schema
+from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, check_sources
 
 Conn = psycopg.Connection[tuple[Any, ...]]
 T = TypeVar("T")
@@ -339,19 +340,10 @@ class PostgresCatalog:
 
     def verify(self, package_id: str, *, as_of: int | None = None) -> VerifyReport:
         """Re-hash a registered package at its stored root (ADR 0004 §1, ADR 0006 §1, §2)."""
-        if as_of is not None and (not isinstance(as_of, int) or as_of < 1):
-            finding = CatalogFinding("invalid_request", str(as_of), "as_of is a tx_seq, at least 1")
-            point, _, _ = self._run(lambda conn: self._lookup(conn, package_id, None))
-            return _report(package_id, "unknown_package", point, None, (finding,))
-        point, row, beyond = self._run(lambda conn: self._lookup(conn, package_id, as_of))
-        if beyond:
-            detail = "as_of is beyond the latest committed catalog point"
-            finding = CatalogFinding("as_of_out_of_range", str(as_of), detail)
-            return _report(package_id, "unknown_package", point, None, (finding,))
-        if row is None:
-            detail = "no package with this id is registered"
-            finding = CatalogFinding("unknown_package", package_id, detail)
-            return _report(package_id, "unknown_package", point, None, (finding,))
+        point, row, problem = self._registered(package_id, as_of)
+        if problem is not None or row is None:
+            assert problem is not None
+            return _report(package_id, "unknown_package", point, None, (problem,))
         root = row[1]
         # The stored locator is fully resolved; if it no longer resolves to itself, a link was
         # put somewhere on it, and following it could read another tree (ADR 0006 §2, §3).
@@ -367,6 +359,84 @@ class PostgresCatalog:
             os.close(root_fd)
         verdict: Verdict = "damaged" if checked.findings else "intact"
         return _report(package_id, verdict, point, row, checked.findings, checked.files_checked)
+
+    def _registered(
+        self, package_id: str, as_of: int | None
+    ) -> tuple[Knowledge[TransactionKey], tuple[TransactionKey, str] | None, CatalogFinding | None]:
+        """The catalog point, and the package's key and root at it, or the finding why not."""
+        if as_of is not None and (not isinstance(as_of, int) or as_of < 1):
+            point, _, _ = self._run(lambda conn: self._lookup(conn, package_id, None))
+            detail = "as_of is a tx_seq, at least 1"
+            return point, None, CatalogFinding("invalid_request", str(as_of), detail)
+        point, row, beyond = self._run(lambda conn: self._lookup(conn, package_id, as_of))
+        if beyond:
+            detail = "as_of is beyond the latest committed catalog point"
+            return point, None, CatalogFinding("as_of_out_of_range", str(as_of), detail)
+        if row is None:
+            detail = "no package with this id is registered"
+            return point, None, CatalogFinding("unknown_package", package_id, detail)
+        return point, row, None
+
+    def verify_sources(
+        self, package_id: str, stores: Sequence[SourceStore], *, as_of: int | None = None
+    ) -> SourceReport:
+        """Re-hash the package's referenced sources in ``stores`` (MVL-90; ADR 0007).
+
+        Not a catalog-API call: catalog-api 1.1.0 has no finding codes for source locations.
+        Every current location (ADR 0006 §5) of every referenced source is reported, and one
+        that is absent or changed never hides the others.
+        """
+        point, row, problem = self._registered(package_id, as_of)
+        if problem is not None or row is None:
+            assert problem is not None
+            return SourceReport(package_id, point, (), (problem,))
+        assert isinstance(point, Known)  # a package is registered, so the catalog has a point
+        limit = point.value.tx_seq
+        stated = self._run(lambda conn: self._stated(conn, package_id, limit))
+        return SourceReport(package_id, point, check_sources(stated, stores), ())
+
+    def _stated(self, conn: Conn, package_id: str, limit: int) -> list[Stated]:
+        """The package's referenced sources with its current locations, and the current
+        locations other packages registered by ``limit`` state for the same bytes."""
+        sources = conn.execute(
+            "SELECT ps.content_id, s.size FROM package_source ps"
+            " JOIN source s USING (tenant_id, content_id)"
+            " WHERE ps.tenant_id = %s AND ps.package_id = %s AND ps.storage = 'referenced'"
+            " ORDER BY ps.content_id",
+            (self._tenant, package_id),
+        ).fetchall()
+        contents = [str(content) for content, _ in sources]
+        rows = conn.execute(
+            "SELECT p.tx_seq, l.package_id, l.revision_id, l.content_id, l.location"
+            " FROM source_location l JOIN package p USING (tenant_id, package_id)"
+            " WHERE l.tenant_id = %s AND l.content_id = ANY(%s) AND p.tx_seq <= %s"
+            " ORDER BY p.tx_seq, l.revision_id",
+            (self._tenant, contents, limit),
+        ).fetchall()
+        packages = sorted({str(row[1]) for row in rows})
+        superseded = {
+            (str(pid), str(rid))
+            for pid, rid in conn.execute(
+                "SELECT package_id, unnest(supersedes)::text FROM source_location"
+                " WHERE tenant_id = %s AND package_id = ANY(%s)"
+                " UNION ALL SELECT package_id, unnest(supersedes)::text FROM location_absence"
+                " WHERE tenant_id = %s AND package_id = ANY(%s)",
+                (self._tenant, packages, self._tenant, packages),
+            ).fetchall()
+        }
+        current = [
+            (str(pid), str(content), str(location))
+            for _, pid, rid, content, location in rows
+            if (str(pid), str(rid)) not in superseded
+        ]
+        out = []
+        for content, size in sources:
+            mine = tuple(loc for pid, c, loc in current if c == content and pid == package_id)
+            others = tuple(
+                dict.fromkeys(loc for pid, c, loc in current if c == content and pid != package_id)
+            )
+            out.append(Stated(str(content), int(size), mine, others))
+        return out
 
     def _lookup(
         self, conn: Conn, package_id: str, as_of: int | None
