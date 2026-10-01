@@ -46,7 +46,7 @@ from neptune.store.package import (
 )
 from neptune.store.receipt import cited_sources
 from neptune.store.series import SERIES_SETTINGS, merge_runs
-from neptune.store.workspace import DerivativeKey, Held, Owner, Workspace
+from neptune.store.workspace import DerivativeKey, Held, Owner, Workspace, WorkspaceError
 
 if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonObject
@@ -99,6 +99,19 @@ def _copy_checked(source: Path, target: Path, expected: tuple[int, ContentId]) -
     return False
 
 
+@contextmanager
+def _workspace_io() -> Iterator[None]:
+    """An ``OSError`` reading or writing the workspace is the workspace's: ``WorkspaceError``.
+
+    So a caller tells a workspace that will not read or write from a package that cannot be
+    written (ADR 0035 §6); the ``OSError`` is the cause.
+    """
+    try:
+        yield
+    except OSError as exc:
+        raise WorkspaceError(f"the workspace cannot be read or written: {exc}") from exc
+
+
 def _series_file(
     workspace: Workspace, key: DerivativeKey, stream: Stream, runs: list[Path], target: Path
 ) -> Held:
@@ -110,12 +123,14 @@ def _series_file(
     def build(directory: Path) -> None:
         merge_runs(stream, runs, directory / SERIES_FILE)
 
-    derivative, held = workspace.materialise(key, build)
+    with _workspace_io():
+        derivative, held = workspace.materialise(key, build)
     kept = derivative.files.get(SERIES_FILE)
     if kept is not None and _copy_checked(derivative.file(SERIES_FILE), target, kept):
         return held
-    workspace.discard(key)
-    derivative, _ = workspace.materialise(key, build)
+    with _workspace_io():
+        workspace.discard(key)
+        derivative, _ = workspace.materialise(key, build)
     if not _copy_checked(derivative.file(SERIES_FILE), target, derivative.files[SERIES_FILE]):
         raise PackageError(f"the series file of {stream.id} changed while it was copied")
     return Held.REBUILT
@@ -293,13 +308,15 @@ def stage(
     for content, transform in sorted(set(ingested)):
         if ledger.artifact(content) is None:
             raise PackageError(f"source {content} was ingested but the ledger does not hold it")
-        plan = workspace.load_plan(content, transform)
+        with _workspace_io():
+            plan = workspace.load_plan(content, transform)
         if plan is None:
             raise PackageError(f"no plan of {content} under transform {transform}")
         found: list[Any] = [plan.transform, *plan.findings]
         for chunk in plan.chunks:
             chunk_id = str(chunk["id"])
-            output = workspace.load(chunk_id)
+            with _workspace_io():
+                output = workspace.load(chunk_id)
             found += [*output.records, *output.findings]
             for stream, run in output.runs.items():
                 runs[stream].append((chunk_id, run, (content, transform)))

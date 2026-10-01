@@ -319,6 +319,21 @@ def _errno_name(exc: BaseException) -> str | None:
     return None
 
 
+def _unusable(exc: Exception) -> Exception:
+    """``exc``, raised reading or writing the workspace, as the workspace's failure.
+
+    A ``JobError`` caused by a ``WorkspaceError`` or ``ScratchError`` is the workspace's, and
+    the SDK says ``workspace_unusable`` for it (ADR 0035 §6), so every workspace read and write
+    that fails the job raises its ``JobError`` from this: ``exc`` itself if it already is one,
+    else a ``WorkspaceError`` caused by it (an ``OSError``, a ledger or plan that does not read).
+    """
+    if isinstance(exc, WorkspaceError | ScratchError):
+        return exc
+    error = WorkspaceError(str(exc))
+    error.__cause__ = exc
+    return error
+
+
 def _chunk_series_failure(output: ChunkOutput) -> Failure | None:
     """A chunk's batches of one stream agree on their columns, and ``seq`` is unique among them.
 
@@ -400,7 +415,8 @@ def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[JsonObje
         try:
             checked.append((chunk_id, check_run(stream, run)))
         except (SeriesReadError, OSError) as exc:
-            raise JobError(f"the run of committed chunk {chunk_id} cannot be read: {exc}") from exc
+            message = f"the run of committed chunk {chunk_id} cannot be read: {exc}"
+            raise JobError(message) from _unusable(exc)
         except Exception as exc:
             problems.append(
                 {
@@ -586,7 +602,7 @@ class IngestJob:
         except ScratchError as exc:
             raise JobError(f"the workspace cannot hold scratch space: {exc}") from exc
         except OSError as exc:
-            raise JobError(f"the workspace cannot be swept: {exc}") from exc
+            raise JobError(f"the workspace cannot be swept: {exc}") from _unusable(exc)
         self._emit(events.WORKSPACE_SWEPT, {"scratch": scratch, "staging": staging})
 
     def _phases(self, started: str, *, dry: bool) -> ContentId | None:
@@ -703,7 +719,8 @@ class IngestJob:
                 directory = stack.enter_context(space) / "call"
                 directory.mkdir(mode=0o700)
             except (ScratchError, OSError) as exc:
-                raise JobError(f"the workspace cannot give a call scratch space: {exc}") from exc
+                message = f"the workspace cannot give a call scratch space: {exc}"
+                raise JobError(message) from _unusable(exc)
             return self._run(work, codec, (reader.fileno(),), directory)
 
     def _run(
@@ -873,12 +890,14 @@ class IngestJob:
             try:
                 ledger = self.workspace.load_ledger(self.root)
             except (WorkspaceError, ValueError, OSError) as exc:
-                raise JobError(f"the ledger of {self.root} cannot be loaded: {exc}") from exc
+                message = f"the ledger of {self.root} cannot be loaded: {exc}"
+                raise JobError(message) from _unusable(exc)
             result = fingerprint(source, ledger, entries)
             try:
                 self.workspace.save_ledger(self.root, ledger)
             except OSError as exc:
-                raise JobError(f"the ledger of {self.root} cannot be saved: {exc}") from exc
+                message = f"the ledger of {self.root} cannot be saved: {exc}"
+                raise JobError(message) from _unusable(exc)
             for finding in result.findings:  # what the walk saw and did not read (ADR 0029 §1)
                 self._record(finding, result.transform)
             walked = {
@@ -1050,7 +1069,7 @@ class IngestJob:
                 except (WorkspaceError, ContractError, ValueError, OSError) as exc:
                     raise JobError(
                         f"the stored plan of {item.content_id} cannot be read: {exc}"
-                    ) from exc
+                    ) from _unusable(exc)
                 reused = stored is not None
                 item.plan_cache = PlanCache(Rule.PLANNED) if reused else self._explain(item)
                 if stored is None:
@@ -1070,7 +1089,7 @@ class IngestJob:
                     except (WorkspaceError, OSError) as exc:
                         raise JobError(
                             f"the plan of {item.content_id} cannot be saved: {exc}"
-                        ) from exc
+                        ) from _unusable(exc)
                     chunks = plan.chunks
                 item.chunks, item.planned = chunks, True
                 held: set[str] = {c.id for c in chunks if self.workspace.committed(c.id)}
@@ -1386,7 +1405,8 @@ class IngestJob:
                         laws=lineage.RUNTIME_VERSION,
                     )
                 except OSError as exc:
-                    raise JobError(f"chunk {chunk.id} cannot be committed: {exc}") from exc
+                    message = f"chunk {chunk.id} cannot be committed: {exc}"
+                    raise JobError(message) from _unusable(exc)
                 except Exception as exc:
                     failure = Failure.raised(Step.COMMIT, exc)
             if failure is not None:
@@ -1475,7 +1495,8 @@ class IngestJob:
             series = tuple(read_run(run) for _, run in sorted(committed.runs.items()))
             return ChunkOutput(committed.records, series, committed.findings)
         except (ValueError, OSError) as exc:  # a WorkspaceError, SeriesError or ContractError too
-            raise JobError(f"committed chunk {chunk.id} cannot be read: {exc}") from exc
+            message = f"committed chunk {chunk.id} cannot be read: {exc}"
+            raise JobError(message) from _unusable(exc)
 
     def _kept(
         self,
@@ -1498,7 +1519,7 @@ class IngestJob:
                 derivative, _ = self.workspace.materialise(key, build)
                 held, value = Held.REBUILT, read(derivative)
         except (ValueError, OSError) as exc:
-            raise JobError(f"{what} cannot be kept: {exc}") from exc
+            raise JobError(f"{what} cannot be kept: {exc}") from _unusable(exc)
         self._derived(key, held)
         return value
 
@@ -1525,9 +1546,11 @@ class IngestJob:
         try:
             stored = self.workspace.load_plan(item.content_id, item.config.transform.id)
         except (WorkspaceError, ValueError, OSError) as exc:
-            raise JobError(f"the plan of {item.content_id} cannot be read: {exc}") from exc
+            message = f"the plan of {item.content_id} cannot be read: {exc}"
+            raise JobError(message) from _unusable(exc)
         if stored is None:
-            raise JobError(f"the plan of {item.content_id} vanished from the workspace")
+            message = f"the plan of {item.content_id} vanished from the workspace"
+            raise JobError(message) from WorkspaceError(message)
         said_something = bool(stored.findings)
         for finding in stored.findings:
             finding_ids.add(finding.id)
@@ -1535,7 +1558,8 @@ class IngestJob:
             try:
                 output = self.workspace.load(chunk.id)
             except (WorkspaceError, ValueError, OSError) as exc:
-                raise JobError(f"committed chunk {chunk.id} cannot be read: {exc}") from exc
+                message = f"committed chunk {chunk.id} cannot be read: {exc}"
+                raise JobError(message) from _unusable(exc)
             said_something = said_something or bool(output.records or output.findings)
             for record in output.records:
                 if record.id in record_ids:

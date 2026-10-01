@@ -6,6 +6,7 @@ holds still (``gated_adapter``), and through the sandbox otherwise.
 
 import errno
 import importlib.util
+import os
 import shutil
 import threading
 from pathlib import Path
@@ -39,7 +40,7 @@ from neptune.sdk import (
 )
 from neptune.store.assemble import NotDurableError
 from neptune.store.package import read_package as store_read_package
-from neptune.store.workspace import LocalOnlyError
+from neptune.store.workspace import LocalOnlyError, WorkspaceError
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures"
 IN_PROCESS: Final = JobOptions(isolation=Isolation.IN_PROCESS)
@@ -520,3 +521,36 @@ def test_a_package_renamed_into_place_whose_flush_fails_is_publish_incomplete(
     staged = next(e for e in seen if e.kind == "package_staged")
     assert package.id == staged.details["package"]
     assert [p.name for p in tmp_path.iterdir() if p.name.startswith(".package.")] == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores permissions")
+@pytest.mark.parametrize(
+    ("folder", "mode", "message"),
+    [
+        ("staging", 0o000, "cannot be swept"),
+        ("ledgers", 0o500, "ledger of .* cannot be saved"),
+        ("plans", 0o500, "plan of .* cannot be saved"),
+        ("chunks", 0o500, "cannot be committed"),
+    ],
+)
+def test_a_workspace_that_will_not_read_or_write_is_workspace_unusable(
+    root: Path, home: Path, tmp_path: Path, folder: str, mode: int, message: str
+) -> None:
+    """Every failure to read or write the workspace mid-job is ``workspace_unusable``, never
+    ``job_failed``: sweeping staging, saving the ledger, saving a plan, committing a chunk.
+    Each is a real ``OSError`` (a folder this user may not write), not a stand-in."""
+    client = Neptune(home)
+    locked = home / folder
+    locked.chmod(mode)
+    try:
+        with pytest.raises(WorkspaceUnusableError, match=message) as caught:
+            client.ingest(root, tmp_path / "package")
+    finally:
+        locked.chmod(0o755)
+    assert caught.value.code == "workspace_unusable"
+    job_error = caught.value.__cause__
+    assert isinstance(job_error, JobError)
+    assert isinstance(job_error.__cause__, WorkspaceError)
+    assert isinstance(job_error.__cause__.__cause__, PermissionError)
+    assert not (tmp_path / "package").exists()
+    assert client.ingest(root, tmp_path / "package").committed  # usable again: the job resumes

@@ -106,9 +106,9 @@ Every SDK call raises only `NeptuneError` subclasses; branch on `error.code`, ne
 | `network_refused` | `NetworkRefusedError` | a remote source or `remote=` while the workspace is local-only |
 | `unsupported` | `UnsupportedError` | a URI scheme with no connector; remote execution (MVL-46) |
 | `sandbox_unavailable` | `SandboxUnavailableError` | the host cannot confine adapters (ADR 0030 §3) |
-| `workspace_unusable` | `WorkspaceUnusableError` | cannot open, write, sweep or lock the workspace |
+| `workspace_unusable` | `WorkspaceUnusableError` | cannot open, lock or sweep the workspace, or read or write what a job keeps there (ledger, plans, chunks, runs, derivatives, scratch) |
 | `package_invalid` | `PackageInvalidError` | a package or receipt that does not verify |
-| `job_failed` | `JobFailedError` | the job itself could not proceed |
+| `job_failed` | `JobFailedError` | anything else that stops the job: an unreadable root; a package that cannot be assembled, verified or written beside its destination |
 | `publish_incomplete` | `PublishIncompleteError` | the job renamed its package into place but could not flush its directory: the package is there, whole, and may not survive a crash |
 
 `invalid_request` (`InvalidRequestError`) is the parent of the first four, `job_failed` of

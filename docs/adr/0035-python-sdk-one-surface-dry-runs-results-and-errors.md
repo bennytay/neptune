@@ -89,6 +89,13 @@ sandbox without parsing text.
    `__cause__`. A `JobError` is classified by its cause's type, never its text: `SandboxError` →
    `sandbox_unavailable`, `ConfigError` → `invalid_configuration`, `WorkspaceError` or
    `ScratchError` → `workspace_unusable`; the store's `NotDurableError` → `publish_incomplete`.
+   - Every failure to use the workspace is `workspace_unusable`: opening, locking or sweeping
+     it; reading or writing the ledger, a plan, a committed chunk, its runs or a derivative
+     (in the job, and in `stage`, which reads chunks and keeps series files there); scratch
+     space for a call. The runtime raises each from a `WorkspaceError` (one wrapping the
+     `OSError` or the unreadable record) or a `ScratchError`, so the class is in the type.
+     Reading the root, and assembling, verifying or writing the package beside its destination,
+     are the job's: `job_failed`. MVL-11 maps the codes to exit codes.
    That cause is how the job knows it renamed: the store raises it only when the rename into
    place succeeded and the flush of the directory holding the package failed, so the package at
    the destination is the job's, whole, and may not survive a crash. Any other failure happened

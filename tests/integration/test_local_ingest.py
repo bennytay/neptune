@@ -43,7 +43,7 @@ from neptune.store.assemble import (
 )
 from neptune.store.package import PackageError, copy_file, read_package
 from neptune.store.series import SERIES_SETTINGS, read_rows
-from neptune.store.workspace import Workspace
+from neptune.store.workspace import Workspace, WorkspaceError
 
 pytestmark = pytest.mark.integration
 
@@ -222,6 +222,28 @@ def test_a_staged_package_waits_beside_its_destination_until_published(
     assert list((tmp_path / "late").iterdir()) == []  # never replaced
     late.discard()
     assert not late.path.exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores permissions")
+def test_a_workspace_that_will_not_read_fails_staging_as_the_workspaces(
+    corpus: Path, tmp_path: Path
+) -> None:
+    """A committed chunk the store cannot read is the workspace's failure (``WorkspaceError``,
+    the ``OSError`` its cause), not the package's; nothing is left beside the destination."""
+    workspace = Workspace(tmp_path / "home")
+    ledger, ingested = ingest_into(corpus, workspace, registry())
+    content, transform = sorted(ingested)[0]
+    plan = workspace.load_plan(content, transform)
+    assert plan is not None
+    locked = workspace.chunk_path(str(plan.chunks[0]["id"]))
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(WorkspaceError, match="cannot be read or written") as caught:
+            stage(tmp_path / "package", workspace, ledger, ingested)
+    finally:
+        locked.chmod(0o755)
+    assert isinstance(caught.value.__cause__, PermissionError)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["home", corpus.name]
 
 
 def test_a_publish_whose_last_flush_fails_says_the_package_is_in_place(

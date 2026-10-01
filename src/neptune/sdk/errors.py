@@ -1,4 +1,4 @@
-"""The SDK's error taxonomy: one base class, a stable ``code`` per class (ADR 0035 §5).
+"""The SDK's error taxonomy: one base class, a stable ``code`` per class (ADR 0035 §6).
 
 Every error an SDK call raises is a ``NeptuneError``. Each class carries a ``code``, a token that
 never changes meaning, so a program (or the CLI's exit codes) can branch on it without parsing a
@@ -15,10 +15,25 @@ message. Where the runtime or the store raised first, that exception is the ``__
     ├── UnsupportedError                unsupported            a scheme or mode not in this version
     ├── NetworkRefusedError             network_refused        the workspace is local-only
     ├── SandboxUnavailableError         sandbox_unavailable    this host cannot confine adapters
-    ├── WorkspaceUnusableError          workspace_unusable     cannot open, write, sweep or lock it
+    ├── WorkspaceUnusableError          workspace_unusable     cannot open, lock, sweep, read, write
     ├── PackageInvalidError             package_invalid        a package that does not verify
     └── JobFailedError                  job_failed             the job itself could not proceed
         └── PublishIncompleteError      publish_incomplete     in place, but may not survive a crash
+
+A runtime ``JobError`` maps by its cause's type, never its text (``from_job_error``); the CLI
+(MVL-11) turns the codes into exit codes:
+
+- ``workspace_unusable``: the workspace cannot be opened, locked or swept; its ledger, a plan, a
+  committed chunk, a chunk's runs or a kept derivative cannot be read or written; a call gets no
+  scratch space, or scratch overlaps the source. The runtime raises each of these from a
+  ``WorkspaceError`` or ``ScratchError`` (an ``OSError`` behind it, if there was one).
+- ``sandbox_unavailable``: from a ``SandboxError``; ``invalid_configuration``: a ``ConfigError``.
+- ``publish_incomplete``: from the store's ``NotDurableError``, raised only after the job renamed
+  its package into place.
+- ``destination_exists``: anything else while something is at the destination: the job renames
+  last, so another writer put it there.
+- ``job_failed``: anything else: the root cannot be read; the package cannot be assembled,
+  verified or written beside its destination.
 
 A problem with one source is never an error: it is an ``IngestFinding`` in the result. Errors
 are reserved for the call and the job (ADR 0028 §10). ``JobOptions`` validates itself when it is
@@ -96,8 +111,9 @@ class SandboxUnavailableError(NeptuneError):
 
 
 class WorkspaceUnusableError(NeptuneError):
-    """The workspace cannot be opened, written, swept or locked, or its scratch overlaps the
-    source."""
+    """The workspace cannot be opened, locked or swept, what a job keeps there (its ledger,
+    plans, committed chunks and their runs, derivatives, scratch space) cannot be read or
+    written, or its scratch overlaps the source."""
 
     code: ClassVar[str] = "workspace_unusable"
 
@@ -109,8 +125,9 @@ class PackageInvalidError(NeptuneError):
 
 
 class JobFailedError(NeptuneError):
-    """The job itself could not proceed (an unreadable root, a disk that will not write, a
-    package that does not verify): the runtime's ``JobError``, never one source's problem."""
+    """The job itself could not proceed for a reason no other class names (an unreadable root, a
+    package that cannot be assembled, verified or written beside its destination): the
+    runtime's ``JobError``, never one source's problem."""
 
     code: ClassVar[str] = "job_failed"
 
