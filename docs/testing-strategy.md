@@ -13,6 +13,11 @@ Status: policy agreed 2026-09-30; suites grow with each milestone.
 
 `make test-fast` excludes `slow`. CI runs everything.
 
+Milestone gates run their scenarios as tests too: `tests/integration/test_m2_gate_stress.py` is the
+M2 gate's (`docs/reviews/m2-stress-test.md`), through the real job and sandbox. Scale is measured by
+scripts that generate sparse sources at test time (`tests/fixtures/runtime/stress_large_source.py`),
+run small in the suite and large by hand, with the numbers recorded in the gate's review.
+
 ## Mandatory per substantial component
 
 - **Malformed input**: truncated, corrupted, empty, wrong-magic, renamed/extensionless.

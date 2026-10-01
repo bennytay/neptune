@@ -426,7 +426,6 @@ def listing(root: Path) -> list[tuple[str, int, bytes]]:
     return rows
 
 
-@pytest.mark.slow
 def test_the_hostile_suite_through_a_real_job(hostile: ModuleType, tmp_path: Path) -> None:
     """Every hostile fixture (escaping and looping links, a FIFO, odd names, a deep tree, archive
     bombs, traversal names, truncated and corrupt archives) through the job with the sandbox: the
