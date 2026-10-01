@@ -15,8 +15,8 @@ import lz4.frame
 from neptune.model.provenance import ByteRange, EvidenceRef
 
 
-def fields(record: bytes) -> tuple[dict[str, bytes], bytes]:
-    """A whole record's header fields by name, and its data."""
+def fields(record: bytes, *, cut: bool = False) -> tuple[dict[str, bytes], bytes]:
+    """A record's header fields by name, and its data (all of it, unless ``cut`` allows less)."""
     (header_length,) = struct.unpack_from("<I", record)
     out: dict[str, bytes] = {}
     pos = 4
@@ -29,19 +29,19 @@ def fields(record: bytes) -> tuple[dict[str, bytes], bytes]:
     assert pos == 4 + header_length
     (data_length,) = struct.unpack_from("<I", record, pos)
     data = record[pos + 4 : pos + 4 + data_length]
-    assert len(data) == data_length and pos + 4 + data_length == len(record)
+    assert cut or (len(data) == data_length and pos + 4 + data_length == len(record))
     return out, data
 
 
 def _chunk_data(record: bytes) -> bytes:
-    header, stored = fields(record)
+    header, stored = fields(record, cut=True)  # a cut file's Chunk record is what is there
     assert header["op"] == b"\x05", "a nested citation's first step covers a Chunk record"
     (size,) = struct.unpack("<I", header["size"])
     compression = header["compression"]
     if compression == b"bz2":
-        return bz2.decompress(stored)[:size]
+        return bz2.BZ2Decompressor().decompress(stored)[:size]
     if compression == b"lz4":
-        return bytes(lz4.frame.decompress(stored))[:size]
+        return bytes(lz4.frame.LZ4FrameDecompressor().decompress(stored))[:size]
     assert compression == b"none", compression
     return stored[:size]
 
