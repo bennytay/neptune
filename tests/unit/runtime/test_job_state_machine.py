@@ -250,6 +250,43 @@ def test_an_unreadable_root_fails_the_job(root: Path, tmp_path: Path) -> None:
     assert not (tmp_path / "p").exists()
 
 
+def test_an_event_sink_that_raises_after_the_publish_leaves_the_job_committed(
+    root: Path, tmp_path: Path
+) -> None:
+    """Only ``on_event`` runs after the rename. What it raises propagates, but the package is in
+    place, so the job is committed, not failed, and ``committed`` holds its outcome."""
+    seen: list[JobEvent] = []
+
+    def sink(event: JobEvent) -> None:
+        seen.append(event)
+        if event.kind == "job_committed":
+            raise KeyError("the consumer gave up")
+
+    job = IngestJob(
+        root, tmp_path / "p", Workspace(tmp_path / "home"), default_registry(), on_event=sink
+    )
+    before = job.committed
+    assert before is None  # nothing is committed before the job runs
+    with pytest.raises(KeyError, match="gave up"):
+        job.run()
+    assert job.state is JobState.COMMITTED
+    outcome = job.committed
+    assert outcome is not None and outcome.state is JobState.COMMITTED
+    assert outcome.package == read_package(tmp_path / "p").id
+    assert [e.kind for e in seen][-1] == "job_committed"  # never followed by job_failed
+
+
+def test_a_job_that_ends_without_a_package_has_no_committed_outcome(
+    root: Path, tmp_path: Path
+) -> None:
+    cancel = threading.Event()
+    cancel.set()
+    job = IngestJob(
+        root, tmp_path / "p", Workspace(tmp_path / "home"), default_registry(), cancel=cancel
+    )
+    assert job.run().state is JobState.CANCELLED and job.committed is None
+
+
 # --- Cancellation ------------------------------------------------------------------------------
 
 
