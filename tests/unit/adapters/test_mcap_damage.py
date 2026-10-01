@@ -7,6 +7,8 @@ too: exact citations, one chunk per finding, typed series, output independent of
 import importlib.util
 import struct
 import sys
+import tracemalloc
+import zlib
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
@@ -330,3 +332,129 @@ def test_a_summary_without_declarations_is_planned_by_scanning_and_loses_nothing
     output = run(data)
     assert codes(output) == ["mcap.attachment_not_extracted"]
     assert row_keys(output) == FULL
+
+
+# --- Chunks walked lazily, and the index checked against the chunks ------------------------------
+
+
+def chunk_file(records: bytes, compression: str = "zstd", times: tuple[int, int] = (0, 0)) -> bytes:
+    """A chunked file of one chunk holding these records, without a summary (so it is scanned)."""
+    stored = MAKE._compress(compression, records)
+    fields = struct.pack("<QQQI", *times, len(records), zlib.crc32(records))
+    content = fields + _string(compression) + struct.pack("<Q", len(stored)) + stored
+    body = MAKE.MAGIC + _record(0x01, _string("ros2") + _string("test"))
+    body += _record(0x06, content) + _record(0x0F, bytes(4))
+    return bytes(body + struct.pack("<BQQQI", 0x02, 20, 0, 0, 0) + MAKE.MAGIC)
+
+
+def test_a_chunk_of_many_small_messages_is_walked_in_memory_proportional_to_its_bytes() -> None:
+    count = 120_000
+    records = channel(1, b"/dense") + b"".join(message(1, i) for i in range(count))
+    data = chunk_file(records, times=(0, count - 1))
+    # Nothing is selected, so no row is held: what is measured is the walk and the index kept
+    # for each message (16 bytes), not the output. An object per record would cost ten times that.
+    tracemalloc.start()
+    try:
+        output = run(data, topic_pattern="^nothing$")
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert row_keys(output) == set() and "mcap.not_selected" in {f.code for f in output.findings()}
+    assert peak < 4 * len(records), (peak, len(records))
+
+
+@pytest.mark.parametrize(
+    ("name", "compression"),
+    [("robot.mcap", "zstd"), ("robot_lz4.mcap", "lz4"), ("robot_plain.mcap", "")],
+)
+def test_a_file_cut_inside_its_last_chunk_keeps_a_strict_prefix_of_every_topic(
+    name: str, compression: str
+) -> None:
+    data = fixture(name)
+    full = row_keys(run(data))
+    _, at = MAKE.write(MAKE.Options(compression=compression))
+    start, length = at["chunk:2"]
+    kept: set[tuple[object, ...]] = set()
+    smallest = row_keys(run(data[: start + 1]))
+    for size in range(start, start + length, 3):
+        output = run(data[:size])
+        keys = row_keys(output)
+        assert keys <= full and kept <= keys, size  # more bytes never lose a row
+        kept = keys
+        for topic in {key[0] for key in keys}:  # no gap: what is kept is the first k messages
+            seqs = sorted(int(str(key[1])) for key in keys if key[0] == topic)
+            assert seqs == list(range(len(seqs))), (size, topic)
+        assert {"mcap.truncated", "mcap.corrupt_record"} & set(codes(output)), size
+    assert 0 < len(smallest) < len(full)  # the first two chunks land; the cut one is lost in part
+
+
+def test_a_chunk_cut_short_reports_what_its_stored_prefix_decodes_to() -> None:
+    data = fixture("robot_plain.mcap")  # a compressed chunk may decode to nothing before its block
+    _, at = MAKE.write(MAKE.Options(compression=""))
+    start, length = at["chunk:2"]
+    found = finding(run(data[: start + length // 2]), "chunk_truncated")
+    assert found.severity is Severity.WARNING
+    details = found.details
+    assert 0 < details["framed_bytes"] <= details["decoded_bytes"] < details["uncompressed_bytes"]  # type: ignore[operator]
+
+
+def _with_index_field(data: bytes, at: dict[str, tuple[int, int]], index: int, field: int) -> bytes:
+    """Chunk index ``index`` with its 8-byte field ``field`` (0 start time, 1 end time) changed."""
+    offset = at[f"summary:8:{index}"][0] + 9 + 8 * field
+    (value,) = struct.unpack_from("<Q", data, offset)
+    patched = MAKE._patch(data, offset, struct.pack("<Q", value + 1))
+    return MAKE._refresh_summary_crc(patched)  # type: ignore[no-any-return]
+
+
+def test_a_chunk_index_entry_that_disagrees_with_its_chunk_is_a_finding() -> None:
+    data, at = MAKE.write(MAKE.Options())
+    output = run(_with_index_field(data, at, 1, 1))
+    found = finding(output, "index_mismatch")
+    assert found.details["reason"] == "chunk_fields" and found.severity is Severity.WARNING
+    assert list(found.details["fields"]) == ["end_time"]
+    assert READING.resolve(data, found.subject) == data[slice(*_span(at["chunk:1"]))]
+    assert row_keys(output) == FULL  # the chunk's own fields are read, so nothing is lost
+
+
+def test_chunk_index_entries_that_agree_with_their_chunks_say_nothing() -> None:
+    output = run(fixture("robot.mcap"))
+    assert not [f for f in output.findings() if f.code == "mcap.index_mismatch"]
+
+
+def test_chunks_skipped_on_the_index_alone_are_one_finding_with_their_reasons() -> None:
+    data = fixture("robot.mcap")
+    late = run(data, log_time_start=MAKE.T0 + 10**12)
+    skipped = finding(late, "skipped_by_index")
+    assert skipped.details == {"chunks": 3, "reasons": {"time": 3}}
+    assert skipped.severity is Severity.INFO
+    _, at = MAKE.write(MAKE.Options())
+    assert READING.resolve(data, skipped.subject) == data[slice(*_span(at["chunk:0"]))]
+    assert row_keys(late) == set()
+    # By topic: only the middle chunk holds /battery, so the other two are skipped, not read.
+    messages = (
+        MAKE._imu(0, 10, 1, 0.1),
+        MAKE._imu(1, 20, 1, 0.1),
+        MAKE._battery(0, 30, 24.1, 0.8),
+        MAKE._imu(2, 40, 1, 0.1),
+        MAKE._imu(3, 50, 1, 0.1),
+        MAKE._imu(4, 60, 1, 0.1),
+    )
+    sparse, at = MAKE.write(MAKE.Options(messages=messages, chunks=((0, 2), (2, 4), (4, 6))))
+    battery = run(sparse, topic_pattern="^/battery$")
+    topic = finding(battery, "skipped_by_index")
+    assert topic.details == {"chunks": 2, "reasons": {"topics": 2}}
+    assert READING.resolve(sparse, topic.subject) == sparse[slice(*_span(at["chunk:0"]))]
+    assert {key[0] for key in row_keys(battery)} == {str(Known("/battery"))}
+    assert not [f for f in run(data).findings() if f.code == "mcap.skipped_by_index"]
+
+
+def test_a_chunk_of_more_records_than_its_size_can_hold_is_read_up_to_the_bound() -> None:
+    limit = 2_000
+    empty = _record(0x80, b"")  # 9 bytes: a private record, smaller than any message
+    data = chunk_file(channel(1, b"/t") + message(1, 1) + empty * 150, "")
+    output = run(data, max_chunk_bytes=limit)
+    found = finding(output, "too_many_records")
+    assert found.severity is Severity.ERROR
+    assert found.details == {"max_chunk_bytes": limit, "max_records": limit // 31}
+    assert len(row_keys(output)) == 1  # the message came before the bound
+    assert "mcap.too_many_records" not in codes(run(data))

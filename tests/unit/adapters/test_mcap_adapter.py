@@ -423,6 +423,28 @@ def test_another_version_or_config_is_another_lineage() -> None:
         assert original.isdisjoint(record.id for record in other.records())
 
 
+def test_the_decompressors_are_output_affecting_libraries_of_the_lineage() -> None:
+    data = fixture("robot.mcap")
+    assert {name for name, _ in DESCRIPTOR.libraries} == {"lz4", "zstandard"}
+    assert all(version for _, version in DESCRIPTOR.libraries)
+
+    class Upgraded(McapAdapter):
+        descriptor = replace(
+            DESCRIPTOR,
+            libraries=tuple((name, version + ".1") for name, version in DESCRIPTOR.libraries),
+        )
+
+    upgraded = ingest_source(Upgraded(), BytesReader(data))
+    assert upgraded.config.transform.id != ROBOT.config.transform.id
+    assert dict(upgraded.config.transform.libraries) == {
+        name: version + ".1" for name, version in DESCRIPTOR.libraries
+    }
+    (run_record,) = [r for r in upgraded.records() if isinstance(r, Run)]
+    (original,) = [r for r in ROBOT.records() if isinstance(r, Run)]
+    assert run_record.provenance.transform == upgraded.config.transform.id  # type: ignore[union-attr]
+    assert run_record.provenance.transform != original.provenance.transform  # type: ignore[union-attr]
+
+
 # --- Selecting topics and times ------------------------------------------------------------------
 
 
