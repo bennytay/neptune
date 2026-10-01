@@ -6,6 +6,7 @@ the harness, so every law of the contract is checked on it too.
 """
 
 import importlib.util
+import json
 import sys
 import time
 import tracemalloc
@@ -122,15 +123,16 @@ def test_a_table_of_images_has_no_cells_to_cite() -> None:
     assert len([r for r in output.records() if isinstance(r, StructuredTable)]) == 1
 
 
-def four_pages(box: Any = None, **catalog: Any) -> bytes:
+def four_pages(box: Any = None, count: int = 4, info: Any = None, **catalog: Any) -> bytes:
     pdf = MAKE.Pdf()
     tree = pdf.reserve()
     pages = []
-    for _ in range(4):
+    for _ in range(count):
         media_box = box if box is not None else [0, 0, 612, 792]
         pages.append(pdf.add({"Type": MAKE.Name("Page"), "Parent": tree, "MediaBox": media_box}))
     MAKE.page_tree(pdf, pages, tree)
-    return bytes(pdf.build(MAKE.catalog(pdf, tree, **catalog)))
+    root = MAKE.catalog(pdf, tree, **catalog)
+    return bytes(pdf.build(root, pdf.add(info) if info is not None else None))
 
 
 def pages(output: SourceOutput) -> list[tuple[Any, Any]]:
@@ -178,6 +180,43 @@ def test_malformed_page_labels_are_unknown_never_a_default() -> None:
         pass
     else:
         raise AssertionError("a roman numeral of a trillion is a memory bomb, not a label")
+
+
+def test_a_long_label_prefix_is_unknown_never_copied_to_every_page() -> None:
+    # The review's shape: one range whose prefix is copied into each of 200 labels.
+    huge = {"Nums": [0, {"S": MAKE.Name("D"), "P": MAKE.Lit(b"A" * 1_000_000)}]}
+    output = ingest(four_pages(count=200, PageLabels=huge), pages_per_chunk=64)
+    assert [label for label, _ in pages(output)] == ["Unknown"] * 200
+    assert [f.details for f in output.findings()] == [
+        {"field": "page_labels", "labels": 200, "limit": 256}
+    ]
+    # The bound is on the label: a 256-character one is kept, the one past it is not.
+    edge = {"Nums": [0, {"S": MAKE.Name("D"), "St": 9, "P": MAKE.Lit(b"P" * 255)}]}
+    output = ingest(four_pages(count=2, PageLabels=edge))
+    assert [label for label, _ in pages(output)] == ["P" * 255 + "9", "Unknown"]
+    assert [f.details["labels"] for f in output.findings()] == [1]
+
+
+def test_a_long_title_is_unknown_never_cut() -> None:
+    for size, expected in ((4096, "T" * 4096), (4097, "Unknown")):
+        output = ingest(four_pages(info={"Title": MAKE.Lit(b"T" * size)}))
+        (record,) = [r for r in output.records() if isinstance(r, DocumentRecord)]
+        assert state(record.title) == expected
+    assert [f.details for f in output.findings()] == [{"field": "title", "limit": 4096}]
+
+
+def test_the_document_record_always_fits_one_reply() -> None:
+    # Past 10,000 pages the record would outgrow a sandbox reply, the document chunk would die,
+    # and every block would cite a record never emitted: the pages past it are not read.
+    worst = {"Nums": [0, {"P": MAKE.Lit(b"\x01" * 256)}]}  # each label escapes to 1.5 KB
+    output = ingest(four_pages(count=10_001, PageLabels=worst), pages_per_chunk=10_001)
+    (record,) = [r for r in output.records() if isinstance(r, DocumentRecord)]
+    assert len(record.pages) == 10_000 and state(record.pages[0].label) == "\x01" * 256
+    assert len(output.plan.chunks) == 2
+    assert [(f.code, f.details) for f in output.findings()] == [
+        ("pdf.page_limit", {"limit": 10_000, "pages": 10_001})
+    ]
+    assert len(json.dumps(record.to_json())) < 32 * 1024 * 1024
 
 
 def test_a_media_box_that_is_not_four_numbers_is_unknown() -> None:

@@ -84,7 +84,7 @@ from neptune.model.world import (
 )
 
 from ._content import FormFailure, Interpreter, PageContent
-from ._labels import page_labels
+from ._labels import MAX_LABEL_CHARS, page_labels
 from ._objects import (
     array,
     dictionary,
@@ -113,6 +113,11 @@ STRIDE: Final = 1 << 24
 DEFAULT_PAGES_PER_CHUNK: Final = 8
 MiB: Final = 1024 * 1024
 MAX_ANNOTATIONS: Final = 100_000
+# The document record must always fit a sandbox reply (64 MiB by default), or every block would
+# cite a document never emitted: at most 3 KB a page (a 256-character label, escaped) and a
+# 4,096-character title keep 10,000 pages under half of it.
+MAX_PAGES: Final = 10_000
+MAX_TITLE_CHARS: Final = 4096
 MAX_NAME_TREE_VISITS: Final = 100_000
 OBSERVED: Final = AssertionKind.OBSERVED
 
@@ -194,6 +199,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "the document declares JavaScript; Neptune never runs it (skipped, info)",
         ),
         Documented(
+            "pdf.page_limit",
+            "the document has more than 10,000 pages; the document record describes and the"
+            " page chunks read the first 10,000 (limit, error)",
+        ),
+        Documented(
             "pdf.page_repaired",
             "pypdf repaired objects while reading a page (corrupt, warning)",
         ),
@@ -225,6 +235,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "pdf.unreadable",
             "the file cannot be opened as a PDF, even repaired, or its page tree cannot be"
             " walked (corrupt, error)",
+        ),
+        Documented(
+            "pdf.value_limit",
+            "a declared title over 4,096 characters or page labels over 256 are Unknown, never"
+            " cut: the document record always fits one reply (limit, warning)",
         ),
         Documented(
             "pdf.value_unreadable",
@@ -407,7 +422,7 @@ class PdfAdapter:
             try:
                 opened = open_document(source, captured)
                 if opened.encryption != "unreadable":
-                    count = len(page_list(opened))
+                    count = min(len(page_list(opened)), MAX_PAGES)
             except Unreadable:
                 count = 0
         for first in range(0, count, self._pages_per_chunk):
@@ -451,12 +466,23 @@ def _document(out: _Output, captured: Warnings) -> None:
     readable = opened.encryption != "unreadable"
     if not readable:
         _encrypted(out, opened)
+    if len(pages) > MAX_PAGES:
+        out.finding(
+            "pdf.page_limit",
+            FindingCategory.LIMIT,
+            Severity.ERROR,
+            out.whole,
+            f"the document has {len(pages)} pages; only the first {MAX_PAGES} are described"
+            " and read",
+            {"limit": MAX_PAGES, "pages": len(pages)},
+        )
+    kept = pages[:MAX_PAGES]
     title = _title(out, opened) if readable else Unknown()
-    labels = _labels(out, opened, len(pages)) if readable else [Unknown()] * len(pages)
+    labels = _labels(out, opened, len(kept)) if readable else [Unknown()] * len(kept)
     header = _header_evidence(out)
     described = [
         _page_record(out, page, index, label, header)
-        for index, (page, label) in enumerate(zip(pages, labels, strict=True))
+        for index, (page, label) in enumerate(zip(kept, labels, strict=True))
     ]
     out.records.append(
         DocumentRecord(
@@ -531,6 +557,16 @@ def _text_value(
         )
         return Unknown() if cited is None else Unknown(cited)
     text = str(value)
+    if len(text) > MAX_TITLE_CHARS:
+        out.finding(
+            "pdf.value_limit",
+            FindingCategory.LIMIT,
+            Severity.WARNING,
+            cited.evidence if cited is not None else out.whole,
+            f"the declared {field} is over {MAX_TITLE_CHARS} characters; it is unknown",
+            {"field": field, "limit": MAX_TITLE_CHARS},
+        )
+        return Unknown() if cited is None else Unknown(cited)
     try:
         text.encode("utf-8")
     except UnicodeEncodeError:
@@ -585,8 +621,18 @@ def _labels(out: _Output, opened: Opened, count: int) -> list[Knowledge[str]]:
             {"field": "page_labels"},
         )
         return [Unknown()] * count
+    if labels.too_long:
+        out.finding(
+            "pdf.value_limit",
+            FindingCategory.LIMIT,
+            Severity.WARNING,
+            cited.evidence if cited is not None else out.whole,
+            f"{labels.too_long} page label(s) are over {MAX_LABEL_CHARS} characters; they are"
+            " unknown",
+            {"field": "page_labels", "labels": labels.too_long, "limit": MAX_LABEL_CHARS},
+        )
     found: list[Knowledge[str]] = []
-    for label in labels:
+    for label in labels.values:
         if label:
             found.append(Known(label) if cited is None else Known(label, cited))
         else:
@@ -722,7 +768,7 @@ def _pages(out: _Output, captured: Warnings, first: int, count: int) -> None:
     if opened.encryption == "unreadable":
         return
     numbers = {ref: index for index, page in enumerate(pages) if (ref := reference(page))}
-    for index in range(first, min(first + count, len(pages))):
+    for index in range(first, min(first + count, len(pages), MAX_PAGES)):
         try:  # one per page: a page's tags never depend on which pages share its chunk
             structure: Structure | None = Structure(opened.catalog, numbers)
         except (MemoryError, ShortReadError):

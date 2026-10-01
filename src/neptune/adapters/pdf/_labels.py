@@ -5,8 +5,13 @@ a numbering style ``/S`` (``D`` decimal, ``R``/``r`` roman, ``A``/``a`` letters)
 and a first number ``/St`` (1 by default). pypdf's own reading falls back to ``1, 2, 3`` when the
 tree is malformed, which would turn a broken declaration into labels it never made, so the adapter
 reads the tree itself and refuses one it cannot read (``LabelsUnreadable``).
+
+A label is kept only up to ``MAX_LABEL_CHARS``: a prefix is copied into every page of its range,
+so a long one would multiply by the page count. A longer label is refused (``None``) and
+counted, never cut: a cut label would be one the file never declared.
 """
 
+from dataclasses import dataclass, field
 from typing import Final
 
 from pypdf.generic import TextStringObject
@@ -16,6 +21,7 @@ from ._objects import array, dictionary, entry, integer, name
 MAX_VISITS: Final = 100_000
 MAX_DEPTH: Final = 32
 MAX_WRITTEN: Final = 100_000  # past this, a roman or letter numeral is a memory bomb, not a label
+MAX_LABEL_CHARS: Final = 256
 _STYLES: Final = frozenset({"D", "R", "r", "A", "a"})
 _ROMAN: Final = (
     (1000, "M"),
@@ -87,7 +93,15 @@ def _entries(tree: object) -> list[tuple[int, object]]:
     return sorted(found, key=lambda pair: pair[0])
 
 
-def page_labels(tree: object, count: int) -> list[str | None]:
+@dataclass
+class Labels:
+    """Each page's label: ``None`` before the first range or past ``MAX_LABEL_CHARS``."""
+
+    values: list[str | None] = field(default_factory=list)
+    too_long: int = 0  # labels refused for their length
+
+
+def page_labels(tree: object, count: int) -> Labels:
     """Each page's declared label; ``None`` for a page before the first range."""
     ranges: list[tuple[int, str | None, str, int]] = []
     for key, value in _entries(tree):
@@ -109,14 +123,20 @@ def page_labels(tree: object, count: int) -> list[str | None]:
         ranges.append((key, style, str(prefix_raw or ""), start))
     if not ranges:
         raise LabelsUnreadable("the page label tree declares no range")
-    labels: list[str | None] = []
+    labels = Labels()
     current = -1
     for index in range(count):
         while current + 1 < len(ranges) and ranges[current + 1][0] <= index:
             current += 1
         if current < 0:
-            labels.append(None)
+            labels.values.append(None)
             continue
         first, style, prefix, start = ranges[current]
-        labels.append(prefix + numeral(style, start + index - first))
+        written: str | None = None
+        if len(prefix) <= MAX_LABEL_CHARS:
+            written = prefix + numeral(style, start + index - first)
+        if written is None or len(written) > MAX_LABEL_CHARS:
+            labels.too_long += 1
+            written = None
+        labels.values.append(written)
     return labels
