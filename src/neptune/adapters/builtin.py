@@ -10,6 +10,7 @@ from neptune.adapters.markdown import MarkdownAdapter
 from neptune.adapters.mcap import McapAdapter
 from neptune.adapters.pdf import PdfAdapter
 from neptune.adapters.registry import AdapterRegistry
+from neptune.adapters.software import SoftwareAdapter
 from neptune.adapters.tabular import TabularAdapter
 from neptune.adapters.text import TextAdapter
 
@@ -21,6 +22,7 @@ def builtin_adapters() -> tuple[Adapter, ...]:
         MarkdownAdapter(),
         McapAdapter(),
         PdfAdapter(),
+        SoftwareAdapter(),
         TabularAdapter(),
         TextAdapter(),
     )
