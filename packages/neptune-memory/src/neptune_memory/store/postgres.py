@@ -33,8 +33,8 @@ if TYPE_CHECKING:
 
 _IDENT = re.compile(r"[a-z_][a-z0-9_]{0,62}")
 MAX_HOPS: Final = 6
-#: Measured setting (ADR 0004); pgvector's own default is 40.
-DEFAULT_EF_SEARCH: Final = 100
+#: Measured setting (ADR 0007 §7, 200 queries at 10^6 embeddings); pgvector's own default is 40.
+DEFAULT_EF_SEARCH: Final = 200
 VALID_RANGE: Final = "int8range(valid_from, valid_to, '[)')"
 TX_RANGE: Final = "int8range(recorded_at, superseded_at, '[)')"
 
