@@ -169,7 +169,10 @@ def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> Non
 
     report = tool.check_packages(registry, registry.lock(), runner=runner)
     assert report.ok and len(calls) == 1
-    assert sum("54 goldens checked" in n for n in report.notes) == 1
+    versions = len(registry.versions("package-schema"))  # each published version, once
+    assert sum(
+        n.startswith("package-schema ") and "goldens checked" in n for n in report.notes
+    ) == (versions)
 
 
 def test_a_minor_version_must_accept_its_majors_goldens(registry: Any) -> None:

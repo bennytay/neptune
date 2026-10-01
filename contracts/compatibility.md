@@ -11,7 +11,7 @@ compatibility statement.
 
 | Contract | Owner package | Status | Latest stable | Latest draft | Consumers |
 |---|---|---|---|---|---|
-| `package-schema` | `neptune` | active | 1.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
+| `package-schema` | `neptune` | active | 2.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
 | `alignment-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-memory` |
 | `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `catalog-api` | `neptune-ledger` | active | — | 0.0.0 | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
@@ -27,7 +27,7 @@ consume the contract. Planned parts of `package-schema` ride on its version.
 
 | Consumer | `package-schema` | `catalog-api` | `graph-schema` | `query-packet` |
 |---|---|---|---|---|
-| `neptune-ledger` | 1.0.0 current | | | |
+| `neptune-ledger` | 2.0.0 current | | | |
 | `neptune-memory` | | no stable | | |
 | `neptune-context` | | no stable | no stable | |
 | `neptune-deploy` | not declared (no package yet) | no stable | no stable | no stable |
