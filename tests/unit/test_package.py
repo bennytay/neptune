@@ -25,3 +25,13 @@ def test_model_imports_nothing_outside_model() -> None:
             for name in names:
                 if name.startswith("neptune"):
                     assert name.startswith("neptune.model"), f"{path.name} imports {name}"
+
+
+def test_store_imports_only_model_and_identity() -> None:
+    """``store/`` writes and reads packages; it never depends on adapters, runtime or derived/."""
+    store = Path(neptune.__file__).parent / "store"
+    for path in store.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("neptune"):
+                allowed = ("neptune.model", "neptune.identity", "neptune.store")
+                assert (node.module or "").startswith(allowed), f"{path.name} imports {node.module}"
