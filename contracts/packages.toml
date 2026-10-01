@@ -1,0 +1,37 @@
+# Every package that owns or consumes a contract: its Linear project and the gate issue that
+# `scripts/contracts.py bump` announces a new contract version on. A package's coordinator moves
+# `gate_issue` to the next gate when the current one is Done.
+
+[neptune]
+path = "."
+linear_project = "P-MVL-11"
+
+[neptune-ledger]
+path = "packages/neptune-ledger"
+linear_project = "P-MVL-12"
+gate_issue = "MVL-89"
+
+[neptune-memory]
+path = "packages/neptune-memory"
+linear_project = "P-MVL-13"
+gate_issue = "MVL-106"
+
+[neptune-context]
+path = "packages/neptune-context"
+linear_project = "P-MVL-14"
+gate_issue = "MVL-111"
+
+[neptune-deploy]
+path = "packages/neptune-deploy"
+linear_project = "P-MVL-15"
+gate_issue = "MVL-116"
+
+[neptune-learn]
+path = "packages/neptune-learn"
+linear_project = "P-MVL-16"
+gate_issue = "MVL-120"
+
+[neptune-platform]
+path = "packages/neptune-platform"
+linear_project = "P-MVL-17"
+gate_issue = "MVL-125"

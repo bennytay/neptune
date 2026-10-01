@@ -25,7 +25,8 @@ EACH = set -ef; for p in $(SELECTED); do \
   else cd "$(CURDIR)/packages/$$p"; x=""; fi; echo "--- $$p" >&2;
 ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 
-.PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check
+.PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
+  contracts-check
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -38,7 +39,8 @@ fmt: ## Format code and auto-fix lint findings
 > $(UV) run ruff check --fix .
 
 lint: adr-index-check ## Formatting, lint and ADR-index check without modifying files
-> @$(EACH) $(RUN) ruff format --check $$x . && $(RUN) ruff check $$x .; done
+# `set -e` ignores a failure on the left of `&&`, so each step exits explicitly.
+> @$(EACH) $(RUN) ruff format --check $$x . || exit 1; $(RUN) ruff check $$x . || exit 1; done
 
 type: ## Static type check (mypy --strict)
 > @$(EACH) $(RUN) mypy; done
@@ -64,3 +66,10 @@ examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/fixtures/model/make_examples.py
 > $(UV) run python tests/golden/packages/make_packages.py
 > $(UV) run python tests/golden/mcap/make_mcap_golden.py
+
+contracts-check: ## Owner rule, then lock + upstream contract tests per package (PKG=<name> for one)
+> @set -e; for p in $(SELECTED); do echo "--- contracts $$p" >&2; \
+  $(RUN) python scripts/contracts.py check-owner --package "$$p"; \
+  if [ "$$p" != $(COMPILER) ]; then $(RUN) python scripts/contracts.py check --package "$$p"; fi; \
+  done
+> $(if $(PKG),@true,$(RUN) python scripts/contracts.py check --all)
