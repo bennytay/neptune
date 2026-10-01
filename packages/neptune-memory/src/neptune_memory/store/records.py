@@ -2,8 +2,8 @@
 
 These mirror the Memory claim model's fields (subject, predicate, object, valid interval on a named
 clock, transaction interval, assertion kind, provenance, supersedes) as flat persistence rows. The
-claim model itself lives in ``neptune_memory.schema`` (MVL-102); the store maps to it, never the
-other way round, so a schema change touches one mapping function, not the database layout.
+claim model itself is ``neptune_memory.schema`` (ADR 0002); the store maps to it, never the other way
+round. Known gaps until that mapping lands (ADR 0004): integer claim ids and a single ``supersedes``.
 """
 
 from __future__ import annotations

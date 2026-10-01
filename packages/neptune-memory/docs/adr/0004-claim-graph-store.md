@@ -151,9 +151,14 @@ Not measured, and why:
   (`pg_dump`/base backup, online), one transaction boundary for supersession.
 - Postgres needs `shared_preload_libraries = 'age'` and the `vector` extension; AGE must be built for the
   server's major version (1.6.0 for PG16, 1.7.0 for PG17). Pin both in deployment docs when G2 deploys.
-- The as-of thread relies on predicates being functional (visible intervals of one subject and predicate
-  never overlap); multi-valued relations are split per slot. A non-functional predicate needs a GiST range
-  index instead; adding one is a schema decision for MVL-102's successors, not a store change.
+- The as-of thread's fast path relies on `one`-cardinality predicates (visible intervals of one subject
+  and predicate never overlap, which ADR 0002's superseding guarantees). ADR 0002's `many` predicates can
+  overlap and need a second path (a GiST index over the two intervals) before the adapter serves them.
+- `ClaimRecord` is the store's row shape, benchmarked with integer claim ids and one `supersedes` id. ADR 0002
+  (merged during this work) fixes the claim model: `claim:<sha256>` ids, a sorted `supersedes` tuple,
+  `confidence`, typed literals and `LedgerTx` transaction times. Mapping `schema.Claim` onto these tables
+  (text ids, a `supersedes` array) is the next store issue; text ids enlarge the primary key and thread
+  index by roughly 2×, which the 10^8 latency margin absorbs.
 - HNSW recall@10 was 0.845 unfiltered / 0.9 filtered at 10^6 embeddings with `ef_search = 100`, `m = 16`,
   `ef_construction = 64` (defaults); tuning against the recall budget, and building pgvector with native
   SIMD flags, are follow-ups once real embeddings exist.

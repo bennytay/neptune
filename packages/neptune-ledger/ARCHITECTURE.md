@@ -46,8 +46,8 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1 built
-  class K2 partial
-  class CAT,THR,LIN,LAKE,QRY,ACC,CLI,K3 todo
+  class CAT,K2 partial
+  class THR,LIN,LAKE,QRY,ACC,CLI,K3 todo
   class PKG,CON,MEM,CTX,DEP,LRN ext
   style L fill:#8b949e0f,stroke:#8b949e
   style UP fill:none,stroke:#8b949e

@@ -45,4 +45,6 @@ mv "$scratch" "$target"
 trap - EXIT
 
 (cd "$root" && ${UV:-uv} lock --quiet)
+# Register with the contracts registry (empty lock section) so `make contracts-check PKG=<name>` is green.
+(cd "$root" && ${UV:-uv} run --no-project --quiet python scripts/contracts.py register "$name")
 echo "created packages/$name (import $module); next: make setup && make check PKG=$name" >&2
