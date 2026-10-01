@@ -122,8 +122,19 @@ Forces:
    YAML, since `["base_link"]` is both; `key =`: TOML; otherwise YAML), and the first that
    accepts the whole text reads it. If none does, the error reported is that of the reader that
    got furthest by lines. The probe claims `STRUCTURE` (0.7) only for a document whose grammar
-   holds to its end (or to its cut, for a truncated file or a 64 KiB head) and whose every
-   document root is a mapping or sequence. YAML's grammar also holds for many notes
+   holds to its end (or to its cut, for a truncated file or a 64 KiB head), whose every
+   document root is a mapping or sequence, and whose shape is settings, not data:
+   - A sequence at the root (JSON's `[{"t": 0.0}, ...]`, YAML's `- 1`) is rows of data, never
+     named settings: 0.0 with `config.shape_not_configuration`.
+   - A JSON object is data when a root key is not a setting's name (`[$@]?[A-Za-z_]` then
+     letters, digits and `_-.:/`: keys such as `2024-01-01` or `max speed` are content), when it
+     is GeoJSON (a root `"type"` naming an RFC 7946 type), or when every root member is a list
+     of objects (`{"rows": [...]}`). Those score `NAME_ONLY` (0.1) with the same reason: the
+     text adapter reads them, the probe engine reports a `.json` read as text as
+     `name_mismatch`, and a dialect adapter (GeoJSON, tables) claims them when it lands. A
+     manifest naming this adapter still ingests them. One table among settings
+     (`{"joints": [{...}], "base": "base_link"}`, PX4's `parameters`) is configuration.
+   YAML's grammar also holds for many notes
    (`Robot: spot-12` lines, a Markdown list), so a YAML head must also show configuration: a
    `%YAML` directive or explicit `---`, a tag, a closed nested or flow collection, or a plain
    scalar both versions read as a boolean or a number. A flat file of text values is left to the

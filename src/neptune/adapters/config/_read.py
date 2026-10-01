@@ -20,10 +20,17 @@ is a TOML syntax error, never a YAML string that happens to hold its text.
 import json
 import re
 import tomllib
+from dataclasses import dataclass
 from typing import Any, Final
 
 import yaml
-from yaml.events import CollectionEndEvent, CollectionStartEvent, DocumentStartEvent, ScalarEvent
+from yaml.events import (
+    CollectionEndEvent,
+    CollectionStartEvent,
+    DocumentStartEvent,
+    ScalarEvent,
+    SequenceStartEvent,
+)
 
 from neptune.adapters.config._json import read_json
 from neptune.adapters.config._scalars import implicit
@@ -43,6 +50,26 @@ _KEY: Final = r"""(?:[A-Za-z0-9_\-]+|"(?:[^"\\\n]|\\.)*"|'[^'\n]*')"""
 _DOTTED: Final = rf"{_KEY}(?:[ \t]*\.[ \t]*{_KEY})*"
 _TOML_HEADER: Final = re.compile(rf"[ \t]*\[\[?[ \t]*{_DOTTED}[ \t]*\]\]?[ \t]*(?:#.*)?")
 _TOML_PAIR: Final = re.compile(rf"[ \t]*{_DOTTED}[ \t]*=")
+
+_JSON_SPACE: Final = " \t\r\n"
+_TABLE_START: Final = re.compile(r"\[[ \t\r\n]*\{")
+# A setting's name: a letter or underscore first, then what names use as separators.
+_IDENTIFIER: Final = re.compile(r"[$@]?[A-Za-z_][A-Za-z0-9_\-.:/]*")
+# RFC 7946 §1.4: a GeoJSON object's "type".
+_GEOJSON_TYPES: Final = frozenset(
+    (
+        "Feature",
+        "FeatureCollection",
+        "GeometryCollection",
+        "LineString",
+        "MultiLineString",
+        "MultiPoint",
+        "MultiPolygon",
+        "Point",
+        "Polygon",
+    )
+)
+SEQUENCE_ROOT: Final = "a sequence at the root holds rows of data, not named settings"
 
 
 def _first_line(text: str) -> str:
@@ -135,7 +162,7 @@ def _keep(token: str) -> str:
 
 def _json_root(text: str, complete: bool) -> bool | None:
     """True for an object or array, False for a scalar, None if not JSON."""
-    start = text.lstrip(" \t\r\n")[:1]
+    start = text.lstrip(_JSON_SPACE)[:1]
     try:  # numbers are kept as text: a probe converts nothing
         json.loads(text, parse_int=_keep, parse_float=_keep, parse_constant=_keep)
     except RecursionError:
@@ -145,6 +172,76 @@ def _json_root(text: str, complete: bool) -> bool | None:
         if start not in ("{", "[") or position is None or not _at_end(text, position, complete):
             return None
     return start in ("{", "[")
+
+
+def _skip(text: str, position: int) -> int:
+    while text[position : position + 1] in (" ", "\t", "\r", "\n"):
+        position += 1
+    return position
+
+
+@dataclass(frozen=True)
+class _Cut:
+    """A member whose value the head does not hold whole: whether it opens a list of objects."""
+
+    table: bool
+
+
+def _root_members(text: str) -> list[tuple[str, object]]:
+    """A JSON object's members as far as the head holds them whole, in order; the member the
+    head cuts last is a ``_Cut``. Only called on text ``_json_root`` accepted as an object."""
+    decoder = json.JSONDecoder(parse_int=_keep, parse_float=_keep, parse_constant=_keep)
+    members: list[tuple[str, object]] = []
+    position = _skip(text, 0) + 1  # past the {
+    while True:
+        position = _skip(text, position)
+        if text[position : position + 1] != '"':
+            return members
+        try:
+            key, position = decoder.raw_decode(text, position)
+        except ValueError:
+            return members
+        position = _skip(text, position)
+        if text[position : position + 1] != ":":
+            return members
+        position = _skip(text, position + 1)
+        try:
+            value, position = decoder.raw_decode(text, position)
+        except (ValueError, RecursionError):
+            members.append((key, _Cut(bool(_TABLE_START.match(text, position)))))
+            return members
+        members.append((key, value))
+        position = _skip(text, position)
+        if text[position : position + 1] != ",":
+            return members
+        position += 1
+
+
+def _table(value: object) -> bool:
+    if isinstance(value, _Cut):
+        return value.table
+    return isinstance(value, list) and bool(value) and all(isinstance(v, dict) for v in value)
+
+
+def json_data_shape(text: str) -> str | None:
+    """Why a JSON object reads as data rather than settings, or ``None`` if it reads as settings.
+
+    Settings are named: every root key is an identifier (``max_speed``, ``$schema``,
+    ``ros.namespace``), and the root is not one of the data formats written in JSON. Data is
+    keyed by its content (timestamps, sentences, numbers), is GeoJSON (``"type":
+    "FeatureCollection"``), or wraps tables: every root member a list of objects
+    (``{"rows": [{...}, ...]}``). A dialect adapter claims those; this one leaves them.
+    """
+    members = _root_members(text)
+    for key, value in members:
+        if key == "type" and isinstance(value, str) and value in _GEOJSON_TYPES:
+            return f"GeoJSON (a {value}): geometry, not settings"
+    for key, _ in members:
+        if not _IDENTIFIER.fullmatch(key):
+            return f"the root key {key[:40]!r} is not a setting's name: the keys are data"
+    if members and all(_table(value) for _, value in members):
+        return "every root member is a list of objects: tables of data, not settings"
+    return None
 
 
 def _toml_root(text: str, complete: bool) -> bool | None:
@@ -174,9 +271,9 @@ def _typed(text: str) -> bool:
     )
 
 
-def _yaml_root(text: str, complete: bool) -> tuple[bool | None, str | None]:
-    """Whether the head is configuration in YAML (None: not YAML), and the YAML version the first
-    document declares.
+def _yaml_root(text: str, complete: bool) -> tuple[bool | None, str | None, bool]:
+    """Whether the head is configuration in YAML (None: not YAML), the YAML version the first
+    document declares, and whether every document's root is a sequence.
 
     YAML's grammar holds for much plain text: ``Robot: spot-12`` lines are a mapping, a Markdown
     list a sequence. So besides every document's root being a mapping or sequence, the head must
@@ -186,6 +283,7 @@ def _yaml_root(text: str, complete: bool) -> tuple[bool | None, str | None]:
     number.
     """
     collections, roots, version, events, evidence = True, 0, None, 0, False
+    sequences = True  # every root so far a sequence
     shaped: list[bool] = []  # the open collections: whether each is nested or in flow style
     loader: yaml.SafeLoader | None = None
     try:
@@ -204,6 +302,7 @@ def _yaml_root(text: str, complete: bool) -> tuple[bool | None, str | None]:
                 if not shaped:
                     roots += 1
                     collections = collections and isinstance(event, CollectionStartEvent)
+                    sequences = sequences and isinstance(event, SequenceStartEvent)
                 evidence = evidence or event.tag not in (None, "!")
             if isinstance(event, CollectionStartEvent):
                 shaped.append(bool(shaped) or bool(event.flow_style))
@@ -214,31 +313,47 @@ def _yaml_root(text: str, complete: bool) -> tuple[bool | None, str | None]:
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         if mark is None or not _at_end(text, mark.index, complete):
-            return None, None
+            return None, None, False
     finally:
         if loader is not None:
             loader.dispose()
-    return (collections and evidence if roots else None), version
+    return (collections and evidence if roots else None), version, sequences
 
 
-def sniff(
-    text: str, encoding: TextEncoding, complete: bool
-) -> tuple[ConfigFormat, str | None] | None:
+@dataclass(frozen=True)
+class Sniffed:
+    """What a head is: its format, the YAML version it declares, and why it holds data rather
+    than settings (``None``: it holds settings). ``sequence``: its root is a sequence."""
+
+    format: ConfigFormat
+    version: str | None = None
+    data: str | None = None
+    sequence: bool = False
+
+
+def sniff(text: str, encoding: TextEncoding, complete: bool) -> Sniffed | None:
     """The format a head is in, if it is a valid (or cut short) document with a mapping or
-    sequence at its root, and the YAML version it declares."""
+    sequence at its root, the YAML version it declares, and whether its shape is data."""
     text = _cut(text, complete)
     if is_blank(text):
         return None
     for fmt in candidates(text, encoding):
         if fmt is ConfigFormat.JSON:
             root = _json_root(text, complete)
-        elif fmt is ConfigFormat.TOML:
+            if root is None:
+                continue
+            if not root:
+                return None
+            if text.lstrip(_JSON_SPACE).startswith("["):
+                return Sniffed(fmt, data=SEQUENCE_ROOT, sequence=True)
+            return Sniffed(fmt, data=json_data_shape(text))
+        if fmt is ConfigFormat.TOML:
             root = _toml_root(text, complete)
-        else:
-            found, version = _yaml_root(text, complete)
-            if found:
-                return fmt, version
-            continue
-        if root is not None:
-            return (fmt, None) if root else None
+            if root is None:
+                continue
+            return Sniffed(fmt) if root else None
+        found, version, sequences = _yaml_root(text, complete)
+        if found:
+            data = SEQUENCE_ROOT if sequences else None
+            return Sniffed(fmt, version, data, sequences)
     return None

@@ -202,6 +202,9 @@ For parameter files and other configuration documents (the `config` adapter read
   names its anchor's path, and an `!include` tag is the application's to read (`Unknown` plus a finding).
 - A value's meaning is not yours: a key named `wheel_radius` is a number, with a unit only where the
   document states one.
+- Probe for settings, not for a grammar: JSON and YAML hold data too. A root sequence, GeoJSON, an object
+  keyed by content or made only of tables is `config.shape_not_configuration`, left to the text adapter or a
+  dialect adapter, which claims it above `STRUCTURE`.
 
 ## World and record context (ADR 0020)
 

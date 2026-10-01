@@ -21,8 +21,10 @@ import yaml
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+from neptune.adapters.builtin import default_registry
 from neptune.adapters.config import DESCRIPTOR, ConfigAdapter
 from neptune.adapters.contract import (
+    NAME_ONLY,
     PROBE_HEAD_SIZE,
     STRUCTURE,
     ChunkOutput,
@@ -30,6 +32,7 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.harness import SourceOutput, ingest_source
+from neptune.discovery.probe import ProbeEngine
 from neptune.discovery.reader import BytesReader
 from neptune.identity import canonical_json
 from neptune.identity.configuration import configuration_digest
@@ -375,13 +378,71 @@ def test_text_that_is_not_configuration_is_not_claimed(data: bytes, code: str) -
         (b"robot:\n  name: spot-12\n", "config.yaml"),  # a nested mapping
         (b"frames: [map, odom]\n", "config.yaml"),  # a flow collection
         (b"---\nname: spot-12\n", "config.yaml"),  # an explicit document
-        (b'["base_link", "odom"]\n', "config.json"),  # also a TOML header: JSON first
-        (b'["base_link"]\n', "config.json"),
         (b"[tool]\nmass = 0.5\n", "config.toml"),
+        (b'{"$schema": "s.json", "ros.namespace": "/r1", "max_speed": 1.5}', "config.json"),
+        (b'{"joints": [{"name": "j1"}], "base": "base_link"}', "config.json"),  # one table
+        (b'{"type": "lidar", "rate": 10}', "config.json"),  # a type, but not GeoJSON's
     ],
 )
 def test_configuration_shows_itself_beyond_the_grammar(data: bytes, code: str) -> None:
     assert probe(data)[:2] == (STRUCTURE, [code])
+
+
+SITE_JSON: Final = (
+    b'{"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type":'
+    b' "Point", "coordinates": [103.8, 1.3]}, "properties": {"name": "dock"}}]}'
+)
+
+
+@pytest.mark.parametrize(
+    ("data", "confidence"),
+    [
+        (SITE_JSON, NAME_ONLY),  # GeoJSON, found by review: geometry, not settings
+        (b'{"type": "FeatureCollection", "features": []}', NAME_ONLY),  # site.geojson
+        (b'{"type": "Point", "coordinates": [1, 2]}', NAME_ONLY),
+        (b'{"rows": [{"t": 0.0, "x": 1.0}, {"t": 0.1, "x": 1.1}]}', NAME_ONLY),  # a table wrapper
+        (b'{"train": [{"a": 1}], "test": [{"a": 2}]}', NAME_ONLY),
+        (b'{"2024-01-01": 3, "2024-01-02": 4}', NAME_ONLY),  # keyed by data
+        (b'{"max speed": 1.5}', NAME_ONLY),
+        (b'{"1": "a", "2": "b"}', NAME_ONLY),
+        (b'[{"t": 0.0, "x": 1.0}, {"t": 0.1, "x": 1.1}]', 0.0),  # rows.json: rows are data
+        (b'["base_link", "odom"]\n', 0.0),  # also a TOML header: JSON first, then its shape
+        (b'["base_link"]\n', 0.0),
+        (b"[]", 0.0),
+        (b"- 1\n- 2\n- 3\n", 0.0),  # notes.md, found by review: a YAML sequence of numbers
+        (b"---\n- {a: 1}\n- {a: 2}\n", 0.0),
+    ],
+)
+def test_data_shaped_as_json_or_yaml_is_not_claimed_as_configuration(
+    data: bytes, confidence: float
+) -> None:
+    assert probe(data)[:2] == (confidence, ["config.shape_not_configuration"])
+
+
+def test_a_cut_head_is_judged_by_the_members_it_holds() -> None:
+    rows = b'{"rows": [' + b'{"t": 0.0, "x": 1.0}, ' * 5_000 + b'{"t": 1}]}'
+    assert len(rows) > PROBE_HEAD_SIZE
+    assert probe(rows)[:2] == (NAME_ONLY, ["config.shape_not_configuration"])
+    settings_ = b'{"rate": 10, "rows": [' + b'{"t": 0.0}, ' * 8_000 + b'{"t": 1}]}'
+    assert probe(settings_)[:2] == (STRUCTURE, ["config.json"])
+    geo = b'{"type": "FeatureCollection", "features": [' + b'{"a": 1}, ' * 8_000 + b"{}]}"
+    assert probe(geo)[:2] == (NAME_ONLY, ["config.shape_not_configuration"])
+
+
+def test_data_shaped_files_are_left_to_the_text_adapter_with_a_name_mismatch() -> None:
+    engine = ProbeEngine(default_registry())
+    for name, data in (("site.json", SITE_JSON), ("rows.json", b'[{"t": 0.0}, {"t": 0.1}]')):
+        result = engine.probe(BytesReader(data), name)
+        assert result.adapter == "text"
+        assert [f.code for f in result.findings] == ["neptune.probe.name_mismatch"]
+    assert engine.probe(BytesReader(fixture("px4_params.json")), "px4.json").adapter == "config"
+
+
+def test_a_data_shaped_file_still_ingests_when_a_manifest_names_this_adapter() -> None:
+    output = run(SITE_JSON)
+    (snapshot,) = snapshots(output)
+    assert snapshot.format is ConfigFormat.JSON and output.findings() == ()
+    assert reading(by_path(output)[("type",)]) == ("string", "FeatureCollection")
 
 
 def test_a_one_line_json_array_is_json_not_a_toml_table() -> None:

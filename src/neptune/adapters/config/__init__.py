@@ -63,6 +63,7 @@ from neptune.adapters.config._tree import (
 )
 from neptune.adapters.contract import (
     ABI_VERSION,
+    NAME_ONLY,
     PROBE_HEAD_SIZE,
     STRUCTURE,
     AdapterConfig,
@@ -298,6 +299,12 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "paths",
             "keys verbatim (a string's decoded content; a YAML key's scalar text) and sequence"
             " positions as integers; () is the root. The pointer escapes them per RFC 6901",
+        ),
+        Documented(
+            "probing",
+            "claims valid (or cut-short) settings: a mapping at every root, named by identifier"
+            " keys. A root sequence (0.0), GeoJSON, content keys or tables only (NAME_ONLY) are"
+            " data: config.shape_not_configuration, left to the text or a dialect adapter",
         ),
         Documented(
             "spans",
@@ -754,10 +761,15 @@ class ConfigAdapter:
         if found is None:
             message = "no JSON, TOML or YAML document with a mapping or sequence at its root"
             return ProbeResult(0.0, (ProbeReason(_code("not_config"), message),))
-        fmt, version = found
         read = "the source" if complete else f"the first {len(head)} bytes"
-        message = f"{read} read as {fmt} with a mapping or sequence at the root"
-        return ProbeResult(STRUCTURE, (ProbeReason(_code(str(fmt)), message),), version)
+        if found.data is not None:
+            # Valid, but shaped as data: left to the text adapter or a dialect adapter. Rows are
+            # never settings; an object might be, so the name may still suggest this adapter.
+            reason = ProbeReason(_code("shape_not_configuration"), f"{read}: {found.data}")
+            return ProbeResult(0.0 if found.sequence else NAME_ONLY, (reason,), found.version)
+        message = f"{read} read as {found.format} with a mapping at the root"
+        reason = ProbeReason(_code(str(found.format)), message)
+        return ProbeResult(STRUCTURE, (reason,), found.version)
 
     def inspect(self, source: SourceReader, config: AdapterConfig) -> InspectResult:
         head = source.read(0, min(source.size, PROBE_HEAD_SIZE))
@@ -772,7 +784,7 @@ class ConfigAdapter:
             {
                 "bom": bom > 0,
                 "encoding": str(encoding),
-                "format": str(found[0]) if found else "unknown",
+                "format": str(found.format) if found else "unknown",
                 "size": source.size,
             }
         )
