@@ -27,7 +27,7 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0020](0020-world-and-record-context-records.md) | World and record context: sites, assets, geometry, media, documents and tables | Accepted |
 | [0021](0021-schema-export-and-worked-examples.md) | The canonical JSON Schema and the worked examples | Accepted |
 | [0022](0022-ingest-package-and-receipt.md) | The ingest package and its receipt | Accepted; §1 amended by 0023, 0031 and 0037 |
-| [0023](0023-m1-gate-freeze-and-growth.md) | The M1 gate: the model freezes, grows only by addition, and fixes four gaps | Accepted; §1 amended by 0037 |
+| [0023](0023-m1-gate-freeze-and-growth.md) | The M1 gate: the model freezes, grows only by addition, and fixes four gaps | Accepted; §1 amended by 0037, §5 by 0036 |
 | [0024](0024-adapter-abi-types-selection-and-reference-adapter.md) | The adapter ABI's exact types, adapter selection, and the reference adapter | Accepted |
 | [0025](0025-series-files-sorted-merged-and-pinned.md) | Series files: one sorted Parquet file per stream, merged from runs, pinned settings | Accepted |
 | [0026](0026-local-workspace-in-place-reads-and-assembly.md) | The local workspace, reading sources in place, and assembling packages | Accepted; §1 amended by 0031 (format 2) |
@@ -39,4 +39,5 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0032](0032-probe-listing-and-archive-inspection-stay-two-passes.md) | The probe's container listing and the archive inspector stay two passes | Accepted |
 | [0033](0033-m2-gate-probing-scratch-short-reads-and-reuse.md) | The M2 gate: the job probes in the sandbox, calls get scratch, short reads are the source's | Accepted |
 | [0035](0035-python-sdk-one-surface-dry-runs-results-and-errors.md) | The Python SDK: one sync and async surface over the job, dry runs, results and a stable error taxonomy | Accepted |
+| [0036](0036-session-grouping-v0-observed-layout-and-derived-proposals.md) | Session grouping v0: an observed layout, inferred proposals, derived tables in the package | Accepted |
 | [0037](0037-configuration-snapshots-and-additive-schema-versions.md) | Configuration snapshots, the config adapter, and schema versions that add without rewriting | Accepted |

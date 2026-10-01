@@ -152,7 +152,8 @@ a bug, not a value.
 
 - `Run`: a session one piece of evidence declares (a recording, a rosbag2 `metadata.yaml`, a manifest entry).
   `logical_id` and `machine` are declared ids; `first` / `last` are inclusive and separate, because a source
-  may state only one. Heuristic groupings are derived (MVL-13 / MVL-34).
+  may state only one. Heuristic groupings are derived: `session_proposal` records in the package's `derived/`
+  tables (MVL-13, ADR 0036; MVL-34 next), never `Run`s.
 - `Stream`: one channel as declared. It holds `run`, `topic`, `schema_name` / `schema_encoding` /
   `schema_definition`, `message_encoding`, `metadata`, `clocks`, and the source's declared `message_count` /
   `first` / `last`, plus `series`. A topic split across files is several streams of one run.
@@ -248,9 +249,9 @@ a bug, not a value.
 ## The package and its receipt (ADR 0022; `model/package.py`, `store/`)
 
 - A package is a directory: `manifest.json`, `receipt.json`, `receipt.md`, `records/<kind>.jsonl` (every kind of
-  the package's schema version; empty file = none), `series/<stream hex>.parquet`, `blobs/sha256/<2>/<64>`, and
-  `volatile/receipt-envelope.json`. The manifest and receipt carry the package's version: the lowest that holds
-  its records (ADR 0037 §1).
+  the package's schema version; empty file = none), `derived/<kind>.jsonl` (inferred tables, below),
+  `series/<stream hex>.parquet`, `blobs/sha256/<2>/<64>`, and `volatile/receipt-envelope.json`. The manifest and
+  receipt carry the package's version: the lowest that holds its records (ADR 0037 §1).
 - `PackageManifest`: the receipt's id, record counts per kind, a handle per source (content id, size, referenced
   or materialised), every file's size and sha256, and the store's settings. The package id is the manifest's
   sha256.
@@ -261,8 +262,11 @@ a bug, not a value.
   time.
 - `ReceiptEnvelope` holds the job id, wall clock, host, ingest root and durations, outside the manifest, so it
   never changes the package id. Sources are referenced by default; materialising is opt-in.
-- `derived/` is reserved for derived records, apart from `records/`; readers refuse it until the derived
-  layer's schema lands (ADR 0023 §5).
+- `derived/<kind>.jsonl` holds derived (inferred) tables apart from `records/` (ADR 0036, amending ADR 0023 §5):
+  canonical lines sorted by id, each `assertion_kind` `inferred` (`stated` for a session the user declared) and
+  naming a transform in the package, listed in the manifest. The store checks their structure; `neptune.derived`
+  reads their meaning and refuses kinds it does not define. The first kinds are `session_proposal` and `session_unassigned` (run/session grouping); present
+  and empty means the producer ran and inferred nothing, absent means it did not run.
 
 ## Serialization (ADR 0002)
 
