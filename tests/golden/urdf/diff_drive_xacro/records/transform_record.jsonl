@@ -1,0 +1,1 @@
+{"adapter_id":"urdf","adapter_version":"0.1.0","config":{"max_bytes":16777216,"max_depth":64,"max_elements":50000},"config_hash":"sha256:1973ff076078bb784f92b76071834ecdc44b116a2af4528ed8809ab98211b2d9","id":"rec:sha256:f287dc5eb907ee8696a22f7d5fa9f9659b18ab64e7ec685174440e02b0907416","kind":"transform_record","libraries":{},"schema_version":2,"upstream":[]}
