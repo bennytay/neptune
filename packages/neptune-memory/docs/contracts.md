@@ -10,8 +10,10 @@ Pins live in `src/neptune_memory/pins.py`; `tests/test_pins_memory.py` keeps the
   Context, Deploy and Learn. [ADR 0001](adr/0001-place-in-the-programme-and-contract-pins.md).
   - Contract stub (unversioned until MVL-105): `neptune_memory.schema` — `NodeRef`/`NodeType`/`Tier`, `Claim`
     and its objects and provenance, `Interval`/`CivilClock`/`LedgerTx`, the predicate registry
-    (`CORE_PREDICATES`, `VOCABULARY_VERSION = 1`) and the superseding resolver (`resolve`, `as_of`).
-    [ADR 0002](adr/0002-graph-tiers-and-the-bi-temporal-claim-model.md).
+    (`CORE_PREDICATES`, `VOCABULARY_VERSION = 1`) and the superseding resolver (`resolve`, `as_of` over a
+    `Resolution` of claims and findings, `resolver_config_hash`).
+    [ADR 0002](adr/0002-graph-tiers-and-the-bi-temporal-claim-model.md), superseding by
+    [ADR 0005](adr/0005-split-closures-bi-temporal-findings-and-the-resolver-config.md).
 
 ## Consumes
 
