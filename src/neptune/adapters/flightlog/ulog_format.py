@@ -158,13 +158,13 @@ def layout_of(name: str, formats: dict[str, MessageFormat]) -> Layout:
                     continue
                 before = state.size - total
                 state.data_end = state.size
-                if prefix == "" and field.name == "timestamp" and field.type == "uint64_t":
-                    if field.count is None:
-                        state.time = state.values
-                        state.time_offset = before
-                        state.values += 1
-                        codes.append(code)
-                        continue
+                top_timestamp = prefix == "" and field.name == "timestamp"
+                if top_timestamp and field.type == "uint64_t" and field.count is None:
+                    state.time = state.values
+                    state.time_offset = before
+                    state.values += 1
+                    codes.append(code)
+                    continue
                 string = field.type == "char"
                 if string:
                     codes.append(f"{field.count or 1}s")

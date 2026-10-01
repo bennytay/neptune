@@ -248,7 +248,9 @@ class TableSlot:
 class Tables:
     """Table records for one chunk: the table is emitted by the chunk that holds its first row."""
 
-    def __init__(self, cite: Cite, declared: Mapping[str, JsonValue], starts: Mapping[str, int]):
+    def __init__(
+        self, cite: Cite, declared: Mapping[str, JsonValue], starts: Mapping[str, int]
+    ) -> None:
         self.cite = cite
         self.slots: dict[str, TableSlot] = {}
         for name, first in declared.items():

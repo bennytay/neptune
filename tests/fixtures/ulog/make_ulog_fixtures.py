@@ -192,8 +192,14 @@ THROTTLE: Final = (
 STEERING: Final = (
     "rover_steering_setpoint:uint64_t timestamp;float normalized_steering_angle;float yaw_rate;"
 )
-WHEELS: Final = "wheel_encoders:uint64_t timestamp;int32_t[2] encoder_position;float[2] speed;uint8_t[4] _padding0;"
-RATES: Final = "rover_rate_status:uint64_t timestamp;char[8] source;float measured_yaw_rate;uint8_t[4] _padding0;"
+WHEELS: Final = (
+    "wheel_encoders:uint64_t timestamp;int32_t[2] encoder_position;float[2] speed;"
+    "uint8_t[4] _padding0;"
+)
+RATES: Final = (
+    "rover_rate_status:uint64_t timestamp;char[8] source;float measured_yaw_rate;"
+    "uint8_t[4] _padding0;"
+)
 
 
 def rover() -> bytes:
@@ -265,7 +271,8 @@ for path in sorted(Path({str(HERE)!r}).glob("*.ulg")):
     out[path.name] = {{
         "start_timestamp": log.start_timestamp,
         "file_version": log.file_version if hasattr(log, "file_version") else None,
-        "info": {{k: (v if not isinstance(v, bytes) else v.decode("latin1")) for k, v in log.msg_info_dict.items()}},
+        "info": {{k: v.decode("latin1") if isinstance(v, bytes) else v
+                  for k, v in log.msg_info_dict.items()}},
         "initial_parameters": log.initial_parameters,
         "changed_parameters": [[t, k, v] for t, k, v in log.changed_parameters],
         "logged": [[m.timestamp, m.log_level, m.message] for m in log.logged_messages],

@@ -1,5 +1,5 @@
-"""The flight-log adapter on PX4 ULog: the fixtures against the official ``pyulog`` reader, citations,
-determinism, chunking independence, probing, and hostile logs.
+"""The flight-log adapter on PX4 ULog: the fixtures against the official ``pyulog`` reader,
+citations, determinism, chunking independence, probing, and hostile logs.
 
 ``tests/fixtures/ulog/oracle.json`` is what ``pyulog`` reads from each fixture (regenerate it with
 ``make_ulog_fixtures.py --oracle``). Every case runs through ``ingest_source``, so every contract
@@ -100,7 +100,7 @@ def as_bytes(output: SourceOutput) -> bytes:
     lines = [canonical_json.dumps(record.to_json()) for record in output.package_records()]
     series = []
     for stream, batches in output.series().items():
-        found = sorted((row for batch in batches for row in batch.rows()), key=lambda r: r[SEQ])
+        found = sorted((row for batch in batches for row in batch.rows()), key=lambda r: r[SEQ])  # type: ignore[arg-type,return-value]
         series.append(f"{stream} {[sorted(row.items()) for row in found]!r}".encode())
         series.append(repr(sorted({batch.schema() for batch in batches})).encode())
     return b"\n".join(sorted(lines) + series)
@@ -160,10 +160,10 @@ def test_the_run_the_clock_and_the_machine_are_what_the_header_and_info_state() 
     machine = run_record.machine
     assert isinstance(machine, Known)
     assert (machine.value.namespace, machine.value.value) == ("px4.sys_uuid", "0123456789abcdef")
-    assert clock.field == "timestamp" and clock.scope == ()  # type: ignore[attr-defined]
-    assert clock.resolution.value.denominator == 10**6  # type: ignore[attr-defined]
-    assert clock.epoch.value == "boot" and clock.timescale.value == "monotonic"  # type: ignore[attr-defined]
-    assert clock.role.value == "sample"  # type: ignore[attr-defined]
+    assert clock.field == "timestamp" and clock.scope == ()
+    assert clock.resolution.value.denominator == 10**6
+    assert clock.epoch.value == "boot" and clock.timescale.value == "monotonic"
+    assert clock.role.value == "sample"
 
 
 def test_the_rover_log_is_a_ground_vehicle_with_no_aerial_topic() -> None:
@@ -263,8 +263,8 @@ def test_every_row_and_cell_resolves_to_the_bytes_it_was_read_from(name: str) ->
                 if isinstance(cell, Known):
                     assert cell.provenance.assertion_kind is AssertionKind.STATED  # type: ignore[union-attr]
                     (inner,) = cell.provenance.evidence.locator  # type: ignore[union-attr]
-                    assert step.offset <= inner.offset  # type: ignore[union-attr]
-                    assert inner.offset + inner.length <= step.offset + step.length  # type: ignore[union-attr]
+                    assert step.offset <= inner.offset
+                    assert inner.offset + inner.length <= step.offset + step.length
 
 
 def test_a_table_cell_cites_exactly_its_value_bytes() -> None:
@@ -275,10 +275,10 @@ def test_a_table_cell_cites_exactly_its_value_bytes() -> None:
         name_cell = record.cells[0]
         if isinstance(name_cell, Known) and name_cell.value == "SYS_AUTOSTART":
             (inner,) = name_cell.provenance.evidence.locator  # type: ignore[union-attr]
-            assert data[inner.offset : inner.offset + inner.length] == b"SYS_AUTOSTART"  # type: ignore[union-attr]
+            assert data[inner.offset : inner.offset + inner.length] == b"SYS_AUTOSTART"
             value = record.cells[2]
             (where,) = value.provenance.evidence.locator  # type: ignore[union-attr]
-            assert data[where.offset : where.offset + where.length] == struct.pack("<i", 4001)  # type: ignore[union-attr]
+            assert data[where.offset : where.offset + where.length] == struct.pack("<i", 4001)
             return
     pytest.fail("no SYS_AUTOSTART row")
 
@@ -303,7 +303,7 @@ def test_plan_cuts_the_log_into_pieces_that_start_at_messages() -> None:
         BytesReader(data), configure(DESCRIPTOR)
     )
     starts = [c.context["start"] for c in plan.chunks]
-    assert starts == sorted(set(starts)) and starts[0] == 16
+    assert starts == sorted(set(starts)) and starts[0] == 16  # type: ignore[type-var]
     for start in starts[1:]:
         size, kind = struct.unpack_from("<HB", data, start)  # type: ignore[arg-type]
         assert kind in b"FIMPQABDLCSO" and start + 3 + size <= len(data)  # type: ignore[operator]
@@ -341,7 +341,7 @@ def test_probe_verifies_a_header_and_signs_a_bare_magic_and_ignores_the_name() -
 
 
 def build(*parts: bytes, flags: bytes | None = None, start: int = MAKE.BOOT) -> bytes:
-    return (
+    return (  # type: ignore[no-any-return]
         MAKE.header(1, start) + (flags if flags is not None else MAKE.flag_bits()) + b"".join(parts)
     )
 
@@ -350,7 +350,7 @@ ATT_SUB: Final = (MAKE.fmt(MAKE.UNUSED), MAKE.subscribe(0, 0, "airspeed"))
 
 
 def airspeed(ts: int) -> bytes:
-    return MAKE.data(0, struct.pack("<Qf", ts, 1.5))
+    return MAKE.data(0, struct.pack("<Qf", ts, 1.5))  # type: ignore[no-any-return]
 
 
 def test_every_cut_of_a_log_is_a_strict_prefix_of_its_rows_and_never_an_exception() -> None:
@@ -473,9 +473,11 @@ def test_a_subscription_to_an_undefined_format_is_an_error_not_a_crash() -> None
 
 def test_a_message_id_subscribed_twice_keeps_the_first() -> None:
     log = build(
-        *ATT_SUB, MAKE.fmt("other:uint64_t timestamp;"), MAKE.subscribe(0, 0, "other"),
+        *ATT_SUB,
+        MAKE.fmt("other:uint64_t timestamp;"),
+        MAKE.subscribe(0, 0, "other"),
         airspeed(MAKE.BOOT),
-    )  # fmt: skip
+    )
     output = run(log)
     assert finding(output, "duplicate_subscription").details["msg_id"] == 0
     assert list(rows_of(output)) == ["airspeed:0"]
@@ -491,7 +493,7 @@ def test_flag_bits_that_are_not_first_and_formats_in_the_data_section_are_mispla
     log = build(*ATT_SUB, MAKE.flag_bits(), MAKE.fmt("late:uint64_t timestamp;"), airspeed(1))
     output = run(log)
     found = [f for f in output.findings() if f.code == "flightlog.misplaced_message"]
-    assert sorted(f.details["type"] for f in found) == ["B", "F"]
+    assert sorted(f.details["type"] for f in found) == ["B", "F"]  # type: ignore[type-var]
 
 
 def test_incompatible_flag_bits_this_adapter_does_not_know_refuse_the_messages() -> None:
@@ -571,7 +573,7 @@ def test_messages_too_short_for_their_type_are_malformed_not_a_crash() -> None:
     )
     output = run(log)
     found = [f for f in output.findings() if f.code == "flightlog.malformed_message"]
-    assert sorted(f.details["type"] for f in found) == ["A", "I", "O", "P"]
+    assert sorted(f.details["type"] for f in found) == ["A", "I", "O", "P"]  # type: ignore[type-var]
 
 
 def test_dropouts_are_rows_and_one_warning_with_the_total_milliseconds() -> None:

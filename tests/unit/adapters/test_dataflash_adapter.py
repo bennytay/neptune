@@ -94,7 +94,7 @@ def as_bytes(output: SourceOutput) -> bytes:
     lines = [canonical_json.dumps(record.to_json()) for record in output.package_records()]
     series = []
     for stream, batches in output.series().items():
-        found = sorted((row for batch in batches for row in batch.rows()), key=lambda r: r[SEQ])
+        found = sorted((row for batch in batches for row in batch.rows()), key=lambda r: r[SEQ])  # type: ignore[arg-type,return-value]
         series.append(f"{stream} {[sorted(row.items()) for row in found]!r}".encode())
         series.append(repr(sorted({batch.schema() for batch in batches})).encode())
     return b"\n".join(sorted(lines) + series)
@@ -105,7 +105,7 @@ def oracle_messages(name: str, kind: str) -> list[dict[str, Any]]:
 
 
 def formats(name: str) -> dict[str, list[Any]]:
-    return ORACLE[name]["formats"]
+    return ORACLE[name]["formats"]  # type: ignore[no-any-return]
 
 
 # --- The fixtures against pymavlink ------------------------------------------------------------
@@ -125,7 +125,9 @@ def test_every_message_type_reads_the_values_the_official_reader_reads(name: str
         for label, char in zip(labels, chars, strict=True):
             for row, official in zip(mine, expected, strict=True):
                 if label in ("TimeUS", "TimeMS"):
-                    if official[label] > 2**63 - 1:  # not a signed tick count: unknown, never wrapped
+                    if (
+                        official[label] > 2**63 - 1
+                    ):  # not a signed tick count: unknown, never wrapped
                         assert row["time/0"] is None and row["state/time/0"] == "unknown"
                     else:
                         assert row["time/0"] == official[label], (kind, label)
@@ -192,13 +194,18 @@ def test_a_units_cell_cites_the_bytes_that_state_it() -> None:
     for record in (r for r in output.records() if isinstance(r, StructuredRecord)):
         if len(record.cells) == 7 and record.cells[1] == Known("Lat", record.cells[1].provenance):  # type: ignore[union-attr]
             by_name = {
-                "message": 0, "field": 1, "format": 2, "unit_id": 3, "unit": 4,
-                "mult_id": 5, "mult": 6,
-            }  # fmt: skip
+                "message": 0,
+                "field": 1,
+                "format": 2,
+                "unit_id": 3,
+                "unit": 4,
+                "mult_id": 5,
+                "mult": 6,
+            }
 
-            def cited(cell: int) -> bytes:
+            def cited(cell: int, record: StructuredRecord = record) -> bytes:
                 (step,) = record.cells[cell].provenance.evidence.locator  # type: ignore[union-attr]
-                return data[step.offset : step.offset + step.length]  # type: ignore[union-attr]
+                return data[step.offset : step.offset + step.length]
 
             assert cited(by_name["message"]).rstrip(b"\0") == b"GPS"
             assert cited(by_name["field"]) == b"Lat"
@@ -233,7 +240,7 @@ def test_the_fmt_record_is_the_streams_schema_definition_and_the_array_is_repeat
     arr = next(s for s in streams(output).values() if s.topic == Known("ARR"))
     assert isinstance(arr.schema_definition, Known)
     (step,) = arr.schema_definition.value.locator
-    record = data[step.offset : step.offset + step.length]
+    record = data[step.offset : step.offset + step.length]  # type: ignore[union-attr]
     assert record[:3] == b"\xa3\x95\x80" and b"ARR" in record and b"TimeUS,Samples" in record
     row = rows_of(output)["ARR"][0]
     assert row["value/Samples"] == tuple(range(3, 35))
@@ -245,11 +252,11 @@ def test_the_boot_clock_is_declared_in_microseconds_or_milliseconds_as_the_log_n
         ("legacy_timems.bin", "TimeMS", 1000),
     ):
         output = run(fixture(name))
-        clocks = {r.field: r for r in output.records() if r.kind == "timestamp_domain"}  # type: ignore[attr-defined]
+        clocks = {r.field: r for r in output.records() if r.kind == "timestamp_domain"}
         clock = clocks[field]
-        assert clock.resolution.value.denominator == denominator  # type: ignore[attr-defined]
-        assert clock.epoch.value == "boot" and clock.timescale.value == "monotonic"  # type: ignore[attr-defined]
-        assert clock.role.value == "sample" and clock.scope == ()  # type: ignore[attr-defined]
+        assert clock.resolution.value.denominator == denominator
+        assert clock.epoch.value == "boot" and clock.timescale.value == "monotonic"
+        assert clock.role.value == "sample" and clock.scope == ()
     (run_record,) = [r for r in run(fixture("copter.bin")).records() if isinstance(r, Run)]
     assert isinstance(run_record.first, Unknown) and isinstance(run_record.machine, Unknown)
 
@@ -257,7 +264,7 @@ def test_the_boot_clock_is_declared_in_microseconds_or_milliseconds_as_the_log_n
 def test_gps_time_is_a_plain_value_never_merged_into_the_boot_clock() -> None:
     output = run(fixture("copter.bin"))
     rows = rows_of(output)["GPS"]
-    assert [r["time/0"] for r in rows][0] == 1_000_010  # the boot clock, not GPS week time
+    assert rows[0]["time/0"] == 1_000_010  # the boot clock, not GPS week time
     assert rows[0]["value/GWk"] == 2310 and rows[0]["value/GMS"] == 400_000
 
 
@@ -308,7 +315,7 @@ def test_plan_cuts_at_record_boundaries() -> None:
         BytesReader(data), configure(DESCRIPTOR)
     )
     for chunk in plan.chunks:
-        assert data[chunk.context["start"] : chunk.context["start"] + 2] == b"\xa3\x95"  # type: ignore[index]
+        assert data[chunk.context["start"] : chunk.context["start"] + 2] == b"\xa3\x95"  # type: ignore[index,operator]
 
 
 # --- Probe -------------------------------------------------------------------------------------
@@ -334,11 +341,11 @@ def log_with(*extra: bytes) -> bytes:
     log = MAKE.Log()
     log.declare("NOTE", "QN", "TimeUS,Tag")
     log.out.extend(extra)
-    return log.bytes()
+    return log.bytes()  # type: ignore[no-any-return]
 
 
 def note(ts: int, tag: bytes = b"hi") -> bytes:
-    return MAKE.Log.record(129, struct.pack("<Q16s", ts, tag))
+    return MAKE.Log.record(129, struct.pack("<Q16s", ts, tag))  # type: ignore[no-any-return]
 
 
 def test_every_cut_of_a_log_is_a_strict_prefix_of_its_rows_and_never_an_exception() -> None:

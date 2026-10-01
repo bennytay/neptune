@@ -12,7 +12,6 @@ record per message type, then FMTU, UNIT and MULT records for the declared units
 never by ArduPilot, so no flight, name or identifier is real. ``TimeUS`` is microseconds since boot.
 """
 
-import json
 import struct
 import subprocess
 import sys
@@ -22,14 +21,49 @@ from typing import Final
 HERE: Final = Path(__file__).parent
 HEAD: Final = b"\xa3\x95"
 SIZES: Final = {
-    "a": 64, "b": 1, "B": 1, "h": 2, "H": 2, "i": 4, "I": 4, "f": 4, "d": 8, "n": 4, "N": 16,
-    "Z": 64, "c": 2, "C": 2, "e": 4, "E": 4, "L": 4, "M": 1, "q": 8, "Q": 8,
-}  # fmt: skip
+    "a": 64,
+    "b": 1,
+    "B": 1,
+    "h": 2,
+    "H": 2,
+    "i": 4,
+    "I": 4,
+    "f": 4,
+    "d": 8,
+    "n": 4,
+    "N": 16,
+    "Z": 64,
+    "c": 2,
+    "C": 2,
+    "e": 4,
+    "E": 4,
+    "L": 4,
+    "M": 1,
+    "q": 8,
+    "Q": 8,
+}
 CODES: Final = {
-    "a": "32h", "b": "b", "B": "B", "h": "h", "H": "H", "i": "i", "I": "I", "f": "f", "d": "d",
-    "n": "4s", "N": "16s", "Z": "64s", "c": "h", "C": "H", "e": "i", "E": "I", "L": "i", "M": "B",
-    "q": "q", "Q": "Q",
-}  # fmt: skip
+    "a": "32h",
+    "b": "b",
+    "B": "B",
+    "h": "h",
+    "H": "H",
+    "i": "i",
+    "I": "I",
+    "f": "f",
+    "d": "d",
+    "n": "4s",
+    "N": "16s",
+    "Z": "64s",
+    "c": "h",
+    "C": "H",
+    "e": "i",
+    "E": "I",
+    "L": "i",
+    "M": "B",
+    "q": "q",
+    "Q": "Q",
+}
 
 
 class Log:
@@ -55,13 +89,24 @@ class Log:
 
     def add(self, name: str, *values: object) -> None:
         number, chars = self.types[name]
-        self.out.append(self.record(number, struct.pack("<" + "".join(CODES[c] for c in chars), *values)))
+        self.out.append(
+            self.record(number, struct.pack("<" + "".join(CODES[c] for c in chars), *values))
+        )
 
     def bytes(self) -> bytes:
         return b"".join(self.out)
 
 
-UNITS: Final = {"-": "", "s": "s", "d": "deg", "m": "m", "n": "m/s", "i": "ms", "w": "week", "z": "Hz"}
+UNITS: Final = {
+    "-": "",
+    "s": "s",
+    "d": "deg",
+    "m": "m",
+    "n": "m/s",
+    "i": "ms",
+    "w": "week",
+    "z": "Hz",
+}
 MULTS: Final = {"-": 0.0, "0": 1.0, "B": 1e-2, "F": 1e-6, "G": 1e-7}
 
 
@@ -115,9 +160,21 @@ def copter() -> bytes:
         log.add("ATT", t, 100 * k, 98 * k, -50 * k, -49 * k, 9000 + k, 9001 + k)
         if k % 2 == 0:
             log.add(
-                "GPS", t + 10, 3, 400_000 + 200 * k, 2310 + k, 12, 85, 473_977_420 + k,
-                85_255_000 - k, 52_050 + 10 * k, 0.5 + k, 90.0 + k, -0.25, 1,
-            )  # fmt: skip
+                "GPS",
+                t + 10,
+                3,
+                400_000 + 200 * k,
+                2310 + k,
+                12,
+                85,
+                473_977_420 + k,
+                85_255_000 - k,
+                52_050 + 10 * k,
+                0.5 + k,
+                90.0 + k,
+                -0.25,
+                1,
+            )
         if k == 1:
             log.add("MODE", t + 20, 5, 5, 1)
             log.add("RCOU", t + 30, 1500, 1501, 1502, 1503)
@@ -155,9 +212,21 @@ def rover() -> bytes:
         log.add("WENC", t + 5, 0.4 * k, 0.8 * k, 0.39 * k, 0.78 * k)
         if k % 2 == 1:
             log.add(
-                "GPS", t + 10, 3, 500_000 + 100 * k, 2310, 9, 90, -337_000_000 + k, 1_510_000_000,
-                1000 + k, 1.5, 270.0, 0.0, 1,
-            )  # fmt: skip
+                "GPS",
+                t + 10,
+                3,
+                500_000 + 100 * k,
+                2310,
+                9,
+                90,
+                -337_000_000 + k,
+                1_510_000_000,
+                1000 + k,
+                1.5,
+                270.0,
+                0.0,
+                1,
+            )
     log.add("MODE", 2_300_000, 4, 4, 1)
     log.add("MSG", 2_400_000, b"bad \xff\xfe bytes")
     log.add("NOTE", 2**63 + 5, b"late")
@@ -214,7 +283,8 @@ for path in sorted(Path({str(HERE)!r}).glob("*.bin")):
         "messages": messages,
         "unit_lookup": getattr(log, "unit_lookup", {{}}),
         "mult_lookup": {{k: v for k, v in getattr(log, "mult_lookup", {{}}).items()}},
-        "formats": {{f.name: [f.type, f.len, f.format, list(f.columns)] for f in log.formats.values()}},
+        "formats": {{f.name: [f.type, f.len, f.format, list(f.columns)]
+                     for f in log.formats.values()}},
     }}
 print(json.dumps(out, indent=1, sort_keys=True))
 """

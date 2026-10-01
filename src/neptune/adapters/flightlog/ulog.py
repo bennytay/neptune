@@ -9,6 +9,7 @@ builds the records and rows.
 
 import struct
 from dataclasses import dataclass, field
+from itertools import pairwise
 from typing import Final
 
 from neptune.adapters.contract import (
@@ -125,7 +126,7 @@ def probe(head: bytes) -> ProbeResult:
             ProbeReason("flightlog.ulog_header", f"a complete header, file version {head[7]}")
         )
         if len(head) >= HEADER_SIZE + 3:
-            size, kind = struct.unpack_from("<HB", head, HEADER_SIZE)
+            kind = head[HEADER_SIZE + 2]
             if kind in DEFINED_TYPES or kind in PLAUSIBLE_TYPES:
                 reasons.append(
                     ProbeReason("flightlog.ulog_message", "a plausible message follows the header")
@@ -179,10 +180,14 @@ class Shared:
             except FormatError as exc:
                 if findings is not None:
                     findings.tally(
-                        "bad_format", name, FindingCategory.CORRUPT, Severity.ERROR, found.place,
+                        "bad_format",
+                        name,
+                        FindingCategory.CORRUPT,
+                        Severity.ERROR,
+                        found.place,
                         "a message format cannot be laid out; its subscriptions get no rows",
                         {"reason": str(exc), "format": name},
-                    )  # fmt: skip
+                    )
         self.layouts[name] = layout
         return layout
 
@@ -255,7 +260,6 @@ class Walk:
 
     def run(self, start: int, end: int) -> None:
         window = Window(self.source, start, end)
-        findings = self.findings
         shared = self.shared
         pos = start
         self._begin(pos)
@@ -313,29 +317,39 @@ class Walk:
         found = window.find(SYNC_MESSAGE, pos + 1)
         stop = found if found >= 0 else end
         self.findings.tally(
-            "corrupt_bytes", why, FindingCategory.CORRUPT, Severity.ERROR, (pos, stop - pos),
+            "corrupt_bytes",
+            why,
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            (pos, stop - pos),
             "bytes that are not a message were skipped to the next sync message or the end",
             {"resynced": found >= 0},
             amount=stop - pos,
-        )  # fmt: skip
+        )
         return stop
 
     def _leftover(self, pos: int, end: int, total: int) -> None:
         eof = end >= self.source.size
         if eof:
             self.findings.add(
-                "truncated", FindingCategory.CORRUPT, Severity.ERROR, (pos, end - pos),
+                "truncated",
+                FindingCategory.CORRUPT,
+                Severity.ERROR,
+                (pos, end - pos),
                 "the log ends inside a message: every message before it is read",
                 {"declared": total, "present": end - pos},
-            )  # fmt: skip
+            )
         else:
             self.findings.tally(
-                "appended_misaligned", "end", FindingCategory.INCONSISTENT, Severity.WARNING,
+                "appended_misaligned",
+                "end",
+                FindingCategory.INCONSISTENT,
+                Severity.WARNING,
                 (pos, end - pos),
                 "bytes before an appended-data offset are not a whole message; they are skipped",
                 {"declared": total},
                 amount=end - pos,
-            )  # fmt: skip
+            )
 
     # -- one message -----------------------------------------------------------------------
 
@@ -361,30 +375,49 @@ class Walk:
             self.syncs += 1
             if payload != SYNC_MAGIC:
                 self.findings.tally(
-                    "bad_sync", "", FindingCategory.CORRUPT, Severity.WARNING, place,
-                    "a sync message does not hold the sync magic", {},
-                )  # fmt: skip
+                    "bad_sync",
+                    "",
+                    FindingCategory.CORRUPT,
+                    Severity.WARNING,
+                    place,
+                    "a sync message does not hold the sync magic",
+                    {},
+                )
         elif kind == ord("R"):
             pass  # an unsubscription: ids are never reused, so nothing changes
         else:
             self.findings.tally(
-                "unknown_message_type", chr(kind), FindingCategory.UNSUPPORTED, Severity.INFO,
-                place, "messages of a type the format does not define were skipped by size",
-                {}, amount=total,
-            )  # fmt: skip
+                "unknown_message_type",
+                chr(kind),
+                FindingCategory.UNSUPPORTED,
+                Severity.INFO,
+                place,
+                "messages of a type the format does not define were skipped by size",
+                {},
+                amount=total,
+            )
 
     def _misplaced(self, key: str, place: Place) -> None:
         self.findings.tally(
-            "misplaced_message", key, FindingCategory.INCONSISTENT, Severity.WARNING, place,
-            "a message in a place the format does not allow was skipped", {"type": key},
-        )  # fmt: skip
+            "misplaced_message",
+            key,
+            FindingCategory.INCONSISTENT,
+            Severity.WARNING,
+            place,
+            "a message in a place the format does not allow was skipped",
+            {"type": key},
+        )
 
     def _malformed(self, key: str, place: Place, why: str) -> None:
         self.findings.tally(
-            "malformed_message", key, FindingCategory.CORRUPT, Severity.ERROR, place,
+            "malformed_message",
+            key,
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            place,
             "a message is too short or not laid out as its type requires; it is skipped",
             {"type": key, "reason": why},
-        )  # fmt: skip
+        )
 
     def _format(self, place: Place, payload: bytes) -> None:
         shared = self.shared
@@ -398,26 +431,38 @@ class Walk:
             parsed = parse_format(text)
         except (UnicodeDecodeError, FormatError) as exc:
             self.findings.tally(
-                "bad_format", "parse", FindingCategory.CORRUPT, Severity.ERROR, place,
+                "bad_format",
+                "parse",
+                FindingCategory.CORRUPT,
+                Severity.ERROR,
+                place,
                 "a format message does not parse; it defines no type",
                 {"reason": str(exc)},
-            )  # fmt: skip
+            )
             return
         known = shared.formats.get(parsed.name)
         if known is not None:
             if known.text != text:
                 self.findings.tally(
-                    "conflicting_format", parsed.name, FindingCategory.INCONSISTENT,
-                    Severity.WARNING, place,
+                    "conflicting_format",
+                    parsed.name,
+                    FindingCategory.INCONSISTENT,
+                    Severity.WARNING,
+                    place,
                     "a format name is defined again with other fields; the first is used",
                     {"format": parsed.name},
-                )  # fmt: skip
+                )
             return
         if len(shared.formats) >= MAX_FORMATS:
             self.findings.tally(
-                "limit_exceeded", "formats", FindingCategory.LIMIT, Severity.ERROR, place,
-                f"more than {MAX_FORMATS} formats; the rest are not read", {"limit": MAX_FORMATS},
-            )  # fmt: skip
+                "limit_exceeded",
+                "formats",
+                FindingCategory.LIMIT,
+                Severity.ERROR,
+                place,
+                f"more than {MAX_FORMATS} formats; the rest are not read",
+                {"limit": MAX_FORMATS},
+            )
             return
         shared.formats[parsed.name] = Format(parsed.name, parsed, place, text)
 
@@ -436,26 +481,37 @@ class Walk:
             return
         if msg_id in shared.subs:
             self.findings.tally(
-                "duplicate_subscription", str(msg_id), FindingCategory.INCONSISTENT,
-                Severity.WARNING, place,
+                "duplicate_subscription",
+                str(msg_id),
+                FindingCategory.INCONSISTENT,
+                Severity.WARNING,
+                place,
                 "a message id is subscribed again; the first subscription is used",
                 {"msg_id": msg_id},
-            )  # fmt: skip
+            )
             return
         if len(shared.subs) >= MAX_STREAMS:
             self.findings.tally(
-                "limit_exceeded", "streams", FindingCategory.LIMIT, Severity.ERROR, place,
+                "limit_exceeded",
+                "streams",
+                FindingCategory.LIMIT,
+                Severity.ERROR,
+                place,
                 f"more than {MAX_STREAMS} subscriptions; the rest get no streams",
                 {"limit": MAX_STREAMS},
-            )  # fmt: skip
+            )
             return
         layout = shared.layout(name, self.findings, place)
         if name not in shared.formats:
             self.findings.tally(
-                "unknown_format", name, FindingCategory.CORRUPT, Severity.ERROR, place,
+                "unknown_format",
+                name,
+                FindingCategory.CORRUPT,
+                Severity.ERROR,
+                place,
                 "a subscription names a format no format message defines; it gets no stream",
                 {"format": name},
-            )  # fmt: skip
+            )
         shared.subs[msg_id] = Sub(msg_id, multi_id, name, place, layout)
 
     def _data(self, place: Place, payload: bytes) -> None:
@@ -466,37 +522,53 @@ class Walk:
         sub = self.shared.subs.get(msg_id)
         if sub is None or sub.layout is None or place[0] < sub.place[0]:
             self.findings.tally(
-                "unknown_message_id", str(msg_id), FindingCategory.CORRUPT, Severity.WARNING,
-                place, "data messages name an id with no usable subscription; they get no rows",
-                {"msg_id": msg_id}, amount=place[1],
-            )  # fmt: skip
+                "unknown_message_id",
+                str(msg_id),
+                FindingCategory.CORRUPT,
+                Severity.WARNING,
+                place,
+                "data messages name an id with no usable subscription; they get no rows",
+                {"msg_id": msg_id},
+                amount=place[1],
+            )
             return
         layout = sub.layout
         have = len(payload) - 2
         if have < layout.min_size:
             self.findings.tally(
-                "size_mismatch", f"short:{sub.name}", FindingCategory.INCONSISTENT, Severity.ERROR,
-                place, "data messages are shorter than their format; they get no rows",
+                "size_mismatch",
+                f"short:{sub.name}",
+                FindingCategory.INCONSISTENT,
+                Severity.ERROR,
+                place,
+                "data messages are shorter than their format; they get no rows",
                 {"format": sub.name, "expected": layout.min_size, "found": have},
-            )  # fmt: skip
+            )
             return
         if have > layout.size:
             self.findings.tally(
-                "size_mismatch", f"long:{sub.name}", FindingCategory.INCONSISTENT,
-                Severity.WARNING, place,
+                "size_mismatch",
+                f"long:{sub.name}",
+                FindingCategory.INCONSISTENT,
+                Severity.WARNING,
+                place,
                 "data messages are longer than their format; the format's fields are read",
                 {"format": sub.name, "expected": layout.size, "found": have},
-            )  # fmt: skip
+            )
         key = str(msg_id)
         if self.plan:
             self.seq[key] = self.seq.get(key, 0) + 1
             self.piece_weight += 1
             if layout.time_offset is None:
                 self.findings.tally(
-                    "no_time_field", sub.name, FindingCategory.MISSING, Severity.WARNING,
-                    sub.place, "a format has no top-level uint64 timestamp; its rows have no time",
+                    "no_time_field",
+                    sub.name,
+                    FindingCategory.MISSING,
+                    Severity.WARNING,
+                    sub.place,
+                    "a format has no top-level uint64 timestamp; its rows have no time",
                     {"format": sub.name},
-                )  # fmt: skip
+                )
             else:
                 (ts,) = struct.unpack_from("<Q", payload, 2 + layout.time_offset)
                 if ts > INT64_MAX:
@@ -524,16 +596,25 @@ class Walk:
 
     def _time_range(self, what: str, place: Place) -> None:
         self.findings.tally(
-            "time_out_of_range", what, FindingCategory.UNREPRESENTABLE, Severity.WARNING, place,
+            "time_out_of_range",
+            what,
+            FindingCategory.UNREPRESENTABLE,
+            Severity.WARNING,
+            place,
             "a timestamp past 2^63-1 does not fit a signed tick count; the row's time is unknown",
             {"stream": what},
-        )  # fmt: skip
+        )
 
     def _utf8(self, what: str, place: Place) -> None:
         self.findings.tally(
-            "invalid_utf8", what, FindingCategory.UNREPRESENTABLE, Severity.WARNING, place,
-            "text that is not UTF-8 is unknown in its row, never replaced", {"where": what},
-        )  # fmt: skip
+            "invalid_utf8",
+            what,
+            FindingCategory.UNREPRESENTABLE,
+            Severity.WARNING,
+            place,
+            "text that is not UTF-8 is unknown in its row, never replaced",
+            {"where": what},
+        )
 
     def _logged(self, kind: int, place: Place, payload: bytes) -> None:
         tagged = kind == ord("C")
@@ -575,10 +656,15 @@ class Walk:
             self.seq[DROPOUT] = self.seq.get(DROPOUT, 0) + 1
             self.piece_weight += 1
             self.findings.tally(
-                "dropout", "", FindingCategory.MISSING, Severity.WARNING, place,
+                "dropout",
+                "",
+                FindingCategory.MISSING,
+                Severity.WARNING,
+                place,
                 "the logger dropped data here; its dropouts are rows of the dropout stream",
-                {}, amount=duration,
-            )  # fmt: skip
+                {},
+                amount=duration,
+            )
             return
         self.slots[DROPOUT].row(
             place, None, {value_column("duration"): duration}, time_state=NOT_COVERED
@@ -594,9 +680,9 @@ class Walk:
             self.shared.tables.setdefault(name, place)
             self.table_rows[name] = self.table_rows.get(name, 0) + 1
             self.piece_weight += TABLE_ROW_WEIGHT
-            if name in ("info", "info_data") and self.shared.uuid is None:
-                if _key_name(payload, kind) == "sys_uuid":
-                    self.shared.uuid = place
+            is_info = name in ("info", "info_data")
+            if is_info and self.shared.uuid is None and _key_name(payload, kind) == "sys_uuid":
+                self.shared.uuid = place
         else:
             assert self.tables is not None
             self.tables.add(name, place, cells)
@@ -664,10 +750,14 @@ class Walk:
 
     def _unreadable(self, table: str, place: Place, why: str) -> None:
         self.findings.tally(
-            "unreadable_value", f"{table}:{why}", FindingCategory.UNREPRESENTABLE,
-            Severity.WARNING, place, "a value does not match its declared type; it is unknown",
+            "unreadable_value",
+            f"{table}:{why}",
+            FindingCategory.UNREPRESENTABLE,
+            Severity.WARNING,
+            place,
+            "a value does not match its declared type; it is unknown",
             {"table": table, "reason": why},
-        )  # fmt: skip
+        )
 
     def _flag_cells(self, place: Place, payload: bytes) -> tuple[Knowledge[CellValue], ...] | None:
         if len(payload) < FLAG_BITS_SIZE:
@@ -709,30 +799,38 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
     head = b"".join(_read(source, 0, min(size, HEADER_SIZE + 3 + FLAG_BITS_SIZE)))
     if not head.startswith(MAGIC) or size < HEADER_SIZE:
         findings.add(
-            "bad_magic", FindingCategory.CORRUPT, Severity.ERROR, (0, min(size, HEADER_SIZE)),
+            "bad_magic",
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            (0, min(size, HEADER_SIZE)),
             "the source does not start with a complete ULog header; nothing of it is read",
             {"size": size},
-        )  # fmt: skip
+        )
         return _unreadable_plan(source, config, findings)
     if head[7] > 1:
         findings.add(
-            "unknown_version", FindingCategory.UNSUPPORTED, Severity.WARNING, (7, 1),
+            "unknown_version",
+            FindingCategory.UNSUPPORTED,
+            Severity.WARNING,
+            (7, 1),
             "the file version is newer than the format this adapter knows; it is read as version 1",
             {"version": head[7]},
-        )  # fmt: skip
+        )
     flags = _flags(head)
     appended: list[int] = []
     if flags is not None:
-        compat, incompat, offsets = flags
+        _, incompat, offsets = flags
         unknown = incompat[0] & ~DATA_APPENDED or any(incompat[1:])
         if unknown:
             findings.add(
-                "unknown_flags", FindingCategory.UNSUPPORTED, Severity.ERROR,
+                "unknown_flags",
+                FindingCategory.UNSUPPORTED,
+                Severity.ERROR,
                 (HEADER_SIZE + 3 + 8, 8),
                 "incompatible flag bits this adapter does not know are set; the format requires"
                 " refusing to parse the messages, so only the header is read",
                 {"incompat_flags": incompat},
-            )  # fmt: skip
+            )
             only_header: JsonObject = {"format": FORMAT, "part": "header", "size": size}
             return Plan((make_chunk(source, config, only_header, HEADER_SIZE),), findings.flush())
         if incompat[0] & DATA_APPENDED:
@@ -742,12 +840,15 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
                     continue
                 if offset <= last or offset >= size:
                     findings.tally(
-                        "appended_misaligned", "offset", FindingCategory.INCONSISTENT,
-                        Severity.WARNING, (HEADER_SIZE + 3 + 16, 24),
+                        "appended_misaligned",
+                        "offset",
+                        FindingCategory.INCONSISTENT,
+                        Severity.WARNING,
+                        (HEADER_SIZE + 3 + 16, 24),
                         "an appended-data offset is not inside the file after the previous"
                         " one; it is ignored",
                         {},
-                    )  # fmt: skip
+                    )
                     continue
                 appended.append(offset)
                 last = offset
@@ -756,7 +857,7 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
         source, cite, shared, findings, plan=True, chunk_bytes=chunk_bytes, max_rows=max_rows
     )
     bounds = [HEADER_SIZE, *appended, size]
-    for start, end in zip(bounds, bounds[1:], strict=False):
+    for start, end in pairwise(bounds):
         walk.run(start, end)
     if shared.defs_end is None:
         shared.defs_end = bounds[1]
@@ -895,8 +996,11 @@ def ingest(source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOu
 
 
 def _keyed(shared: Shared) -> list[tuple[str, Sub]]:
-    return [(str(s.msg_id), s) for s in sorted(shared.subs.values(), key=lambda s: s.msg_id)
-            if s.layout is not None]  # fmt: skip
+    return [
+        (str(s.msg_id), s)
+        for s in sorted(shared.subs.values(), key=lambda s: s.msg_id)
+        if s.layout is not None
+    ]
 
 
 def _declarations(
@@ -991,7 +1095,7 @@ def _machine(source: SourceReader, cite: Cite, shared: Shared) -> Knowledge[Logi
     payload = raw[3:]
     key_len = payload[0]
     try:
-        key_type, _, name_at = parse_key(payload[1 : 1 + key_len])
+        key_type, _, _ = parse_key(payload[1 : 1 + key_len])
         value = decode_value(key_type, payload[1 + key_len :])
     except FormatError:
         return Unknown()
@@ -1014,9 +1118,13 @@ def inspect(source: SourceReader, config: AdapterConfig) -> InspectResult:
     head = b"".join(_read(source, 0, min(size, HEADER_SIZE + 3 + FLAG_BITS_SIZE)))
     if not head.startswith(MAGIC) or size < HEADER_SIZE:
         findings.add(
-            "bad_magic", FindingCategory.CORRUPT, Severity.ERROR, (0, min(size, HEADER_SIZE)),
-            "the source does not start with a complete ULog header", {"size": size},
-        )  # fmt: skip
+            "bad_magic",
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            (0, min(size, HEADER_SIZE)),
+            "the source does not start with a complete ULog header",
+            {"size": size},
+        )
         return InspectResult(summary, findings.flush())
     summary["version"] = head[7]
     summary["start_timestamp"] = struct.unpack_from("<Q", head, 8)[0]
@@ -1028,9 +1136,15 @@ def inspect(source: SourceReader, config: AdapterConfig) -> InspectResult:
     shared = Shared()
     limit = min(size, 8 * 1024 * 1024)
     walk = Walk(
-        source, Cite(source, config), shared, findings, plan=True,
-        chunk_bytes=limit, max_rows=1 << 30, stop_at_data=True,
-    )  # fmt: skip
+        source,
+        Cite(source, config),
+        shared,
+        findings,
+        plan=True,
+        chunk_bytes=limit,
+        max_rows=1 << 30,
+        stop_at_data=True,
+    )
     walk.run(HEADER_SIZE, limit)
     summary["formats"] = sorted(shared.formats)[:1000]
     summary["parameters"] = walk.table_rows.get("parameters", 0)

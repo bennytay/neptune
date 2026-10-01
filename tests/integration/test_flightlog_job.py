@@ -63,14 +63,14 @@ def package_files(package: Path) -> dict[str, bytes]:
 def test_every_log_lands_read_by_flightlog_inside_the_sandbox(
     ingested: tuple[Path, Path, object],
 ) -> None:
-    _, work, result = ingested
+    _, _, result = ingested
     assert result.committed  # type: ignore[attr-defined]
     package = result.read_package()  # type: ignore[attr-defined]
     transforms = {t.id: t.adapter_id for t in package.receipt.transforms}
     readers = {
         source.location.path: [
             transforms[t] for t in source.read_by if transforms[t] != "neptune.grouping"
-        ]  # type: ignore[union-attr]
+        ]
         for source in package.receipt.sources
     }
     assert len(readers) == len(LOGS) + 1
@@ -90,14 +90,14 @@ def test_every_row_in_the_package_resolves_to_its_message(
 ) -> None:
     root, _, result = ingested
     package = result.read_package()  # type: ignore[attr-defined]
-    location = {s.content_id: s.location.path for s in package.receipt.sources}  # type: ignore[union-attr]
+    location = {s.content_id: s.location.path for s in package.receipt.sources}
     rows = 0
     for stream in (r for r in package.records if isinstance(r, Stream)):
         data = (root / location[stream.series.source]).read_bytes()
         for row in read_rows(package.series[stream.id]):
             stream.check_row(row)
             (step,) = stream.row_evidence(row).locator
-            offset, length = step.offset, step.length  # type: ignore[attr-defined]
+            offset, length = step.offset, step.length  # type: ignore[union-attr]
             if data.startswith(b"ULog"):
                 size, _ = struct.unpack_from("<HB", data, offset)
                 assert length == 3 + size

@@ -24,7 +24,7 @@ Planning reads the whole log once, without building rows, and is where every fin
 findings do not depend on where chunks are cut. Chunks are byte ranges cut at message boundaries.
 """
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from neptune.adapters.contract import (
     ABI_VERSION,
@@ -50,7 +50,9 @@ from neptune.adapters.flightlog.common import Findings
 from neptune.adapters.flightlog.dataflash_format import HEAD as DATAFLASH_HEAD
 from neptune.adapters.flightlog.ulog_format import MAGIC as ULOG_MAGIC
 from neptune.model.finding import FindingCategory, Severity
-from neptune.model.jsonvalue import JsonObject
+
+if TYPE_CHECKING:
+    from neptune.model.jsonvalue import JsonObject
 
 DEFAULT_CHUNK_BYTES: Final = 8 * 1024 * 1024
 DEFAULT_MAX_ROWS: Final = 100_000
@@ -305,10 +307,13 @@ class FlightLogAdapter:
             return dataflash.make_plan(source, config, self._chunk_bytes, self._max_rows)
         findings = Findings(source, config, "flightlog.")
         findings.add(
-            "bad_magic", FindingCategory.CORRUPT, Severity.ERROR, (0, len(head)),
+            "bad_magic",
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            (0, len(head)),
             "the source is neither a ULog nor a DataFlash log; nothing of it is read",
             {"size": source.size},
-        )  # fmt: skip
+        )
         context: JsonObject = {"format": "none", "part": "unreadable"}
         return Plan((make_chunk(source, config, context, 0),), findings.flush())
 

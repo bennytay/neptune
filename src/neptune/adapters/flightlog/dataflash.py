@@ -264,20 +264,27 @@ class Walk:
         found = self._candidate(window, pos + 1, end)
         stop = found if found >= 0 else end
         self.findings.tally(
-            "corrupt_bytes", why, FindingCategory.CORRUPT, Severity.ERROR, (pos, stop - pos),
+            "corrupt_bytes",
+            why,
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            (pos, stop - pos),
             "bytes that are not a record were skipped to the next record of a declared type"
             " or the end",
             {"resynced": found >= 0},
             amount=stop - pos,
-        )  # fmt: skip
+        )
         return stop
 
     def _leftover(self, pos: int, end: int, total: int) -> None:
         self.findings.add(
-            "truncated", FindingCategory.CORRUPT, Severity.ERROR, (pos, end - pos),
+            "truncated",
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            (pos, end - pos),
             "the log ends inside a record: every record before it is read",
             {"declared": total, "present": end - pos},
-        )  # fmt: skip
+        )
 
     # -- one record ----------------------------------------------------------------------------
 
@@ -290,10 +297,15 @@ class Walk:
         layout = fmt.layout
         if layout is None:
             self.findings.tally(
-                "unreadable_records", str(fmt.type), FindingCategory.CORRUPT, Severity.ERROR,
-                place, "records of a type whose format cannot be laid out get no rows",
-                {"type": fmt.type}, amount=place[1],
-            )  # fmt: skip
+                "unreadable_records",
+                str(fmt.type),
+                FindingCategory.CORRUPT,
+                Severity.ERROR,
+                place,
+                "records of a type whose format cannot be laid out get no rows",
+                {"type": fmt.type},
+                amount=place[1],
+            )
             return
         name = fmt.name or ""
         if name in DEFINITIONS:
@@ -303,10 +315,14 @@ class Walk:
                     kept.append((place, payload))
                 else:
                     self.findings.tally(
-                        "limit_exceeded", name, FindingCategory.LIMIT, Severity.ERROR, place,
+                        "limit_exceeded",
+                        name,
+                        FindingCategory.LIMIT,
+                        Severity.ERROR,
+                        place,
                         f"more than {MAX_UNIT_RECORDS} {name} records; the rest are not read",
                         {"limit": MAX_UNIT_RECORDS},
-                    )  # fmt: skip
+                    )
             return
         if name == PARAMETERS:
             self._parameter(fmt, layout, place, payload)
@@ -317,16 +333,24 @@ class Walk:
             self.piece_weight += 1
             if layout.time_label is None:
                 self.findings.tally(
-                    "no_time_field", name, FindingCategory.MISSING, Severity.WARNING, fmt.place,
+                    "no_time_field",
+                    name,
+                    FindingCategory.MISSING,
+                    Severity.WARNING,
+                    fmt.place,
                     "a message type has no TimeUS or TimeMS first column; its rows have no time",
                     {"type": name},
-                )  # fmt: skip
+                )
             elif layout.time_char == "Q" and int.from_bytes(payload[:8], "little") > INT64_MAX:
                 self.findings.tally(
-                    "time_out_of_range", name, FindingCategory.UNREPRESENTABLE, Severity.WARNING,
-                    place, "a timestamp past 2^63-1 does not fit a signed tick count; it is unknown",
+                    "time_out_of_range",
+                    name,
+                    FindingCategory.UNREPRESENTABLE,
+                    Severity.WARNING,
+                    place,
+                    "a timestamp past 2^63-1 does not fit a signed tick count; it is unknown",
                     {"stream": name},
-                )  # fmt: skip
+                )
             for start, width in layout.strings:
                 if text_value(payload[start : start + width]) is None:
                     self._utf8(name, place)
@@ -350,9 +374,14 @@ class Walk:
 
     def _utf8(self, what: str, place: Place) -> None:
         self.findings.tally(
-            "invalid_utf8", what, FindingCategory.UNREPRESENTABLE, Severity.WARNING, place,
-            "text that is not UTF-8 is unknown in its row, never replaced", {"where": what},
-        )  # fmt: skip
+            "invalid_utf8",
+            what,
+            FindingCategory.UNREPRESENTABLE,
+            Severity.WARNING,
+            place,
+            "text that is not UTF-8 is unknown in its row, never replaced",
+            {"where": what},
+        )
 
     def _declare(self, place: Place, payload: bytes) -> None:
         fmts = self.shared.fmts
@@ -361,27 +390,38 @@ class Walk:
         if known is not None:
             if known.payload != payload:
                 self.findings.tally(
-                    "conflicting_format", str(kind), FindingCategory.INCONSISTENT,
-                    Severity.WARNING, place,
+                    "conflicting_format",
+                    str(kind),
+                    FindingCategory.INCONSISTENT,
+                    Severity.WARNING,
+                    place,
                     "a message type is declared again with another format; the first is used",
                     {"type": kind},
-                )  # fmt: skip
+                )
             return
         fmt, why = _make_fmt(payload, place, place[0])
         if fmt is None:
             self.findings.tally(
-                "bad_format", "length", FindingCategory.CORRUPT, Severity.ERROR, place,
+                "bad_format",
+                "length",
+                FindingCategory.CORRUPT,
+                Severity.ERROR,
+                place,
                 "a FMT record declares a record shorter than its header; the type is not declared",
                 {"type": kind},
-            )  # fmt: skip
+            )
             return
         fmts[kind] = fmt
         if why is not None:
             self.findings.tally(
-                "bad_format", why, FindingCategory.CORRUPT, Severity.ERROR, place,
+                "bad_format",
+                why,
+                FindingCategory.CORRUPT,
+                Severity.ERROR,
+                place,
                 "a FMT record cannot be laid out; its records are skipped by their declared length",
                 {"type": kind, "reason": why},
-            )  # fmt: skip
+            )
         elif fmt.layout is not None and fmt.layout.time_label is not None:
             self.shared.time_fmt.setdefault(fmt.layout.time_label, place)
 
@@ -493,16 +533,24 @@ def unit_rows(shared: Shared, cite: Cite, findings: Findings) -> list[UnitRow]:
             number, mult_where = mults.get(mult_char, (None, place))
             if unit_char not in units:
                 findings.tally(
-                    "unit_undeclared", unit_char, FindingCategory.MISSING, Severity.WARNING, place,
-                    "a unit id has no UNIT record; the unit is unknown", {"unit_id": unit_char},
-                )  # fmt: skip
+                    "unit_undeclared",
+                    unit_char,
+                    FindingCategory.MISSING,
+                    Severity.WARNING,
+                    place,
+                    "a unit id has no UNIT record; the unit is unknown",
+                    {"unit_id": unit_char},
+                )
             if mult_char not in mults:
                 findings.tally(
-                    "unit_undeclared", "multiplier:" + mult_char, FindingCategory.MISSING,
-                    Severity.WARNING, place,
+                    "unit_undeclared",
+                    "multiplier:" + mult_char,
+                    FindingCategory.MISSING,
+                    Severity.WARNING,
+                    place,
                     "a multiplier id has no MULT record; the multiplier is unknown",
                     {"multiplier_id": mult_char},
-                )  # fmt: skip
+                )
             unit_id_at = (ids_at + column, 1)
             mult_id_at = (mult_at + column, 1)
             name_at = (target.place[0] + HEADER + _NAME_AT, 4)
@@ -519,14 +567,24 @@ def unit_rows(shared: Shared, cite: Cite, findings: Findings) -> list[UnitRow]:
                 Known(unit_char, stated(unit_id_at)),
                 Known(unit_text, stated(unit_where)) if unit_text else Unknown(stated(unit_where)),
                 Known(mult_char, stated(mult_id_at)),
-                real_cell(number, stated(mult_where)) if number is not None else Unknown(stated(mult_where)),
-            )  # fmt: skip
+                real_cell(number, stated(mult_where))
+                if number is not None
+                else Unknown(stated(mult_where)),
+            )
             rows.append(
                 UnitRow(
-                    target.name, kind, label, column, place, cells, unit_text, unit_char,
-                    mult_char, number,
+                    target.name,
+                    kind,
+                    label,
+                    column,
+                    place,
+                    cells,
+                    unit_text,
+                    unit_char,
+                    mult_char,
+                    number,
                 )
-            )  # fmt: skip
+            )
     return rows
 
 
@@ -540,10 +598,13 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
     head = b"".join(read_pieces(source, 0, min(size, 3))) if size else b""
     if not head.startswith(HEAD):
         findings.add(
-            "bad_magic", FindingCategory.CORRUPT, Severity.ERROR, (0, min(size, 3)),
+            "bad_magic",
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            (0, min(size, 3)),
             "the source does not start with a DataFlash record header; nothing of it is read",
             {"size": size},
-        )  # fmt: skip
+        )
         context: JsonObject = {"format": FORMAT, "part": "unreadable"}
         return Plan((make_chunk(source, config, context, 0),), findings.flush())
     shared = Shared()
@@ -554,10 +615,13 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
     rows = unit_rows(shared, cite, findings)
     if not rows and any(f.stream for f in shared.fmts.values()):
         findings.add(
-            "units_not_declared", FindingCategory.MISSING, Severity.INFO, (0, min(size, 3)),
+            "units_not_declared",
+            FindingCategory.MISSING,
+            Severity.INFO,
+            (0, min(size, 3)),
             "the log declares no units (no usable FMTU record): every unit is unknown",
             {},
-        )  # fmt: skip
+        )
     if rows:
         shared.tables[FIELD_UNITS] = rows[0].fmtu
     base = _base_context(shared)
@@ -694,8 +758,10 @@ def _declarations(
     )
     domains = {label: _domain(cite, shared, label) for label in TIME_LABELS}
     used = {"TimeUS"} | {
-        f.layout.time_label for f in shared.fmts.values() if f.stream and f.layout and f.layout.time_label
-    }  # fmt: skip
+        f.layout.time_label
+        for f in shared.fmts.values()
+        if f.stream and f.layout and f.layout.time_label
+    }
     records: list[EvidenceRecord] = [run]
     records.extend(domains[label] for label in sorted(used) if label in domains)
     unit_rows_ = unit_rows(shared, cite, findings)
@@ -757,16 +823,25 @@ def inspect(source: SourceReader, config: AdapterConfig) -> InspectResult:
     head = b"".join(read_pieces(source, 0, min(size, 3))) if size else b""
     if not head.startswith(HEAD):
         findings.add(
-            "bad_magic", FindingCategory.CORRUPT, Severity.ERROR, (0, min(size, 3)),
-            "the source does not start with a DataFlash record header", {"size": size},
-        )  # fmt: skip
+            "bad_magic",
+            FindingCategory.CORRUPT,
+            Severity.ERROR,
+            (0, min(size, 3)),
+            "the source does not start with a DataFlash record header",
+            {"size": size},
+        )
         return InspectResult(summary, findings.flush())
     shared = Shared()
     limit = min(size, 1024 * 1024)
     walk = Walk(
-        source, Cite(source, config), shared, findings, plan=True,
-        chunk_bytes=limit, max_rows=1 << 30,
-    )  # fmt: skip
+        source,
+        Cite(source, config),
+        shared,
+        findings,
+        plan=True,
+        chunk_bytes=limit,
+        max_rows=1 << 30,
+    )
     walk.run(0, limit)
     summary["types"] = sorted(f.name for f in shared.fmts.values() if f.name and not f.builtin)[
         :1000
