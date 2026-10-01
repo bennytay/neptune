@@ -5,8 +5,11 @@ interface under `contracts/`, its version, and the ADR that fixed it. Nothing el
 
 ## Publishes
 
-_None yet._ The catalog API, entity-thread, lakehouse and lineage current-view contracts will be listed
-here, each with its version constant and goldens under `contracts/`, as they land.
+| Contract | Version | Version constant | Registry | Reference | Fixed by |
+|---|---|---|---|---|---|
+| `catalog-api` (register, verify, resolve, thread, threads_of, lineage, query) | **1.0.0** (draft until MVL-89) | `neptune_ledger.api.CATALOG_API_VERSION` | `contracts/catalog-api/v1.0.0/` | [catalog-api.md](catalog-api.md) | [ADR 0004](adr/0004-catalog-api-error-model-and-versioning.md), [0002](adr/0002-catalog-data-model.md), [0003](adr/0003-entity-threads-and-the-lineage-current-view.md) |
+
+Lakehouse table contracts are listed here when they land.
 
 ## Consumes
 
