@@ -18,7 +18,7 @@ from neptune.identity import canonical_json
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.package import IngestReceipt, ingest_receipt_from_json
-from neptune.runtime import CacheReport, JobOutcome, JobState
+from neptune.runtime import CacheReport, Explanation, JobOutcome, JobState
 from neptune.sdk.errors import InvalidRequestError, PackageInvalidError
 from neptune.store.package import RECEIPT, IngestPackage, open_file
 from neptune.store.package import read_package as _read_package
@@ -89,6 +89,12 @@ class IngestResult:
     def cache(self) -> CacheReport:
         """What the job reused and recomputed, and why; a dry run's says what is left to do."""
         return self.outcome.cache
+
+    @property
+    def explanation(self) -> Explanation | None:
+        """A planned dry run's explanation of what an ingest would do, and why (ADR 0044):
+        ``to_json``/``dumps`` for programs, ``render`` for people. ``None`` for any other job."""
+        return self.outcome.explanation
 
     @property
     def durations(self) -> tuple[tuple[str, float], ...]:

@@ -34,13 +34,16 @@ another layer's storage and never becomes a memory learner, retriever or reasone
 ### Repo map (`src/neptune_ledger/`; subpackages appear as their issues land)
 
 ```
-catalog/   package registry, immutable catalog records, the catalog API
-threads/   entity threads: ordered, provenance-linked views of one entity across packages
-lineage/   parser/adapter lineage and the current-view over superseded packages
-lake/      lakehouse tables derived from package records, rebuildable from packages alone
-query/     read-only query planning over catalog, threads, lineage and lake
-access/    the surface other layers call: catalog API, auth boundary, exports
-cli/       thin command-line front end over access/
+api/             the catalog API contract: protocol, request/response records, JSON Schema, Arrow
+                 query schema, StubCatalog (published as contracts/catalog-api)
+contract_tests/  the catalog contract as pytest tests any implementation subclasses
+catalog/         package registry and immutable catalog records: migrations, the schema
+threads/         entity threads: ordered, provenance-linked views of one entity across packages
+lineage/         parser/adapter lineage and the current-view over superseded packages
+lake/            lakehouse tables derived from package records, rebuildable from packages alone
+query/           read-only query planning over catalog, threads, lineage and lake
+access/          the surface other layers call: catalog API, auth boundary, exports
+cli/             thin command-line front end over access/
 ```
 
 ### Things not to do

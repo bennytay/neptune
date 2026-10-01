@@ -1,8 +1,9 @@
 """MVL-21's acceptance: downstream code asks what a run contains without decoding a message.
 
-A job over the MCAP and rosbag2 fixtures (an IMU and a JSON Schema battery on a robot; a mobile
-base's velocity command, battery voltage and status, in sqlite3 and in MCAP storage), plus an MCAP
-whose schemas are hostile, is read back through the SDK only.
+A job over the MCAP, rosbag2 and rosbag1 fixtures (an IMU and a JSON Schema battery on a robot; a
+mobile base's velocity command, battery voltage and status, in sqlite3 and in MCAP storage; an
+arm-and-base bag's joint states, odometry and transforms), plus an MCAP whose schemas are hostile,
+is read back through the SDK only.
 """
 
 import importlib.util
@@ -72,6 +73,7 @@ def corpus(root: Path) -> Path:
     root.mkdir()
     shutil.copyfile(FIXTURES / "mcap" / "robot.mcap", root / "robot.mcap")
     shutil.copyfile(FIXTURES / "mcap" / "unknown_encoding.mcap", root / "unknown_encoding.mcap")
+    shutil.copyfile(FIXTURES / "rosbag1" / "robot_none.bag", root / "robot.bag")
     for bag in ("mobile_base_sqlite3", "mobile_base_mcap"):
         shutil.copytree(FIXTURES / "rosbag2" / bag, root / bag)
     (root / "hostile.mcap").write_bytes(hostile_mcap())
@@ -269,3 +271,20 @@ def test_asking_for_an_unknown_semantic_is_an_invalid_request(
         runs[0].carrying("lidar")
     with pytest.raises(InvalidRequestError):
         streams(runs)[0].may_carry("IMU")
+
+
+def test_a_ros1_bag_reads_its_joints_odometry_and_transforms(
+    ingested: tuple[Path, tuple[RunContents, ...]],
+) -> None:
+    _, runs = ingested
+    bag = next(run for run in runs if run.topic("/joint_states"))
+    assert {str(k): [s.topic for s in v] for k, v in bag.semantics().items()} == {
+        "joint_state": ["/joint_states"],
+        "odometry": ["/odom"],
+        "transform": ["/tf", "/tf_static"],
+    }
+    (odom,) = bag.topic("/odom")
+    assert odom.schema_encoding == "ros1msg"
+    assert "pose.pose.position.x" in [f.path for f in odom.fields]
+    (joints,) = bag.topic("/joint_states")
+    assert joints.semantic is not None and joints.semantic.candidates[0].units == ()

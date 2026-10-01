@@ -232,6 +232,7 @@ class Options:
     statistics: bool = True
     summary_declarations: bool = True  # the summary repeats the Schema and Channel records
     unindexed: tuple[int, ...] = ()  # chunks the summary's chunk index leaves out
+    profile: str = "ros2"  # the Header record's profile
 
 
 def _compress(compression: str, data: bytes) -> bytes:
@@ -259,7 +260,7 @@ class Writer:
 def write(options: Options) -> tuple[bytes, dict[str, tuple[int, int]]]:
     """The recording's bytes, and where each labelled record is."""
     writer = Writer()
-    writer.add("header", _record(0x01, _string("ros2") + _string("neptune-fixture/1")))
+    writer.add("header", _record(0x01, _string(options.profile) + _string("neptune-fixture/1")))
     declared: set[tuple[str, int]] = set()
     chunk_indexes: list[bytes] = []
     counts: dict[int, int] = {}

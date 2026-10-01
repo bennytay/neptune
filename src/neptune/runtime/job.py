@@ -66,6 +66,7 @@ from neptune.adapters.contract import (
     ChunkOutput,
     ConfigError,
     ContractError,
+    InspectResult,
     Plan,
     ProbeHints,
     ProbeResult,
@@ -108,7 +109,7 @@ from neptune.model.source import (
     SourceArtifact,
     local_location,
 )
-from neptune.runtime import events, lineage, sandbox, wire
+from neptune.runtime import events, explain, lineage, sandbox, wire
 from neptune.runtime.cache import (
     VERDICT_FILE,
     CacheReport,
@@ -240,7 +241,8 @@ class JobOutcome:
     """How a job ended: committed with a package, cancelled at a checkpoint without one, or
     planned (a dry run, ADR 0035): stopped after ``plan``, without one.
 
-    ``cache`` says what the job reused and recomputed, and why (ADR 0031 §5).
+    ``cache`` says what the job reused and recomputed, and why (ADR 0031 §5). ``explanation`` is
+    what a planned dry run found a run would do, and why (ADR 0044); ``None`` otherwise.
     """
 
     state: JobState
@@ -251,6 +253,7 @@ class JobOutcome:
     findings: tuple[IngestFinding, ...]
     durations: tuple[tuple[str, float], ...]
     cache: CacheReport = field(default_factory=CacheReport)
+    explanation: explain.Explanation | None = None
 
 
 @dataclass
@@ -268,6 +271,9 @@ class _Source:
     plan_cache: PlanCache | None = None  # set once the job decides to plan or reuse
     hits: set[str] = field(default_factory=set)  # chunks the workspace had committed
     intact: tuple[int, ...] | None = None  # the file's state when last verified intact
+    locations: list[LocalPath | RawLocalPath] = field(default_factory=list)  # every one, walk order
+    probe: SourceProbe | None = None  # what the probe engine found, once probed
+    inspection: explain.Inspection | None = None  # the adapter's ``inspect``, in a dry run
 
     @property
     def content_id(self) -> ContentId:
@@ -537,7 +543,10 @@ class IngestJob:
         self._grouper = LayoutGrouper(self.options.grouping)
         self._layout = Layout(())
         self._grouping: Grouping | None = None
-        self._dry = False  # a dry run: stops after plan (ADR 0035)
+        self._dry = False  # a dry run: stops after plan and explains (ADR 0035, 0044)
+        self._inventory = explain.Inventory.of((), (), ())
+        self._inspected = 0  # adapter ``inspect`` calls, in a dry run
+        self._explanation: explain.Explanation | None = None
         self._published: ContentId | None = None  # the package, once renamed into place
 
     @staticmethod
@@ -565,13 +574,15 @@ class IngestJob:
         return self._execute(dry=False)
 
     def dry_run(self) -> JobOutcome:
-        """Run ``discover``, ``fingerprint``, ``inspect`` and ``plan``, then stop (ADR 0035).
+        """Run ``discover``, ``fingerprint``, ``inspect`` and ``plan``, then stop (ADR 0035, 0044).
 
         What ``run`` would ingest: every source's selection, its plan and which of its chunks
-        the workspace already holds (``JobOutcome.cache``), and the findings so far. No chunk is
-        parsed, nothing is assembled and no package is written, so the outcome is ``planned``
-        (or ``cancelled``) with no package. The ledger and plans it saves are the ones ``run``
-        saves, so a later ``run`` reuses them. MVL-15 adds adapters' ``inspect`` and grouping.
+        the workspace already holds (``JobOutcome.cache``), the findings so far, and the
+        ``Explanation`` of all of it (``JobOutcome.explanation``). Each selected source is also
+        given to its adapter's ``inspect``. No chunk is parsed, nothing is assembled and no
+        package is written, so the outcome is ``planned`` (or ``cancelled``) with no package.
+        The ledger and plans it saves are the ones ``run`` saves, so a later ``run`` reuses them;
+        the sources are only read, and no package id depends on the workspace (ADR 0035 §9).
         """
         return self._execute(dry=True)
 
@@ -646,6 +657,7 @@ class IngestJob:
         self._inspect(source)
         self._plan(source)
         if dry:
+            self._explanation = self._explain_job()
             return None
         self._ingest(source)
         self._assemble(scanned)
@@ -662,6 +674,7 @@ class IngestJob:
             findings=tuple(sorted(self._findings.values(), key=lambda f: f.id)),
             durations=self._durations_pairs(),
             cache=self._cache_report(),
+            explanation=self._explanation,
         )
 
     def _cache_report(self) -> CacheReport:
@@ -692,6 +705,79 @@ class IngestJob:
             calls=Calls(**self._calls),
             receipt=self._receipt,
         )
+
+    def _explain_job(self) -> explain.Explanation:
+        """What a run would do, from what this dry run saw (ADR 0044): no clock, no job id."""
+        assert self._grouping is not None  # inspect, which groups, ran
+        descriptors = self.registry.descriptors()
+        limits = None if self.options.isolation is Isolation.IN_PROCESS else self.options.limits
+        sources = []
+        selected: dict[str, list[ContentId]] = {adapter_id: [] for adapter_id in descriptors}
+        for item in self._sources:
+            plan: explain.PlanEstimate | None = None
+            heavy: tuple[explain.Heavy, ...] = ()
+            if item.planned and not item.quarantined:
+                assert item.config is not None and item.plan_cache is not None
+                left = [chunk for chunk in item.chunks if chunk.id not in item.hits]
+                plan = explain.PlanEstimate(
+                    item.config.transform.id,
+                    item.plan_cache.rule,
+                    len(item.chunks),
+                    len(item.chunks) - len(left),
+                    sum(chunk.cost for chunk in item.chunks),
+                    sum(chunk.cost for chunk in left),
+                )
+                descriptor = descriptors[item.config.transform.adapter_id]
+                heavy = explain.heavy_reasons(item.artifact.size, plan, descriptor, limits)
+            if item.probe is None:  # quarantined before it could be probed
+                status = explain.SourceStatus.UNREADABLE
+            elif item.quarantined:
+                status = explain.SourceStatus.QUARANTINED
+            elif plan is not None:
+                status = explain.SourceStatus.PLANNED
+            elif item.probe.selection.status is SelectionStatus.AMBIGUOUS:
+                status = explain.SourceStatus.AMBIGUOUS
+            else:
+                status = explain.SourceStatus.UNSUPPORTED
+            adapter = item.adapter.descriptor.id if item.adapter is not None else None
+            if adapter is not None and status is explain.SourceStatus.PLANNED:
+                selected[adapter].append(item.content_id)
+            sources.append(
+                explain.SourceExplanation(
+                    source=item.content_id,
+                    size=item.artifact.size,
+                    locations=tuple(sorted(item.locations, key=lambda loc: loc.raw)),
+                    status=status,
+                    probe=item.probe,
+                    adapter=adapter,
+                    verdicts=(
+                        explain.adapter_verdicts(item.probe, descriptors) if item.probe else ()
+                    ),
+                    inspection=item.inspection,
+                    plan=plan,
+                    heavy=heavy,
+                    quarantined=tuple(item.quarantined),
+                )
+            )
+        sources.sort(key=lambda s: (s.locations[0].raw, s.source))
+        calls: JsonObject = {
+            "inspect": self._inspected,
+            "plan": self._calls["plan"],
+            "probe": self._calls["probe"],
+        }
+        whole = explain.Explanation(
+            inventory=self._inventory,
+            sources=tuple(sources),
+            adapters=tuple(
+                explain.AdapterUse(descriptors[adapter_id], tuple(sorted(selected[adapter_id])))
+                for adapter_id in sorted(descriptors)
+            ),
+            grouping=explain.GroupingExplanation.of(self._grouping),
+            work=explain.work_estimate(sources, calls),
+            left_out=explain.left_out(sources, self._inventory),
+            findings=tuple(sorted(self._findings.values(), key=lambda f: f.id)),
+        )
+        return explain.bounded(whole)  # ADR 0044 §8
 
     # --- Phases, events, checkpoints -----------------------------------------------------------
 
@@ -850,7 +936,7 @@ class IngestJob:
         for finding in self._differences(item) or ():
             self._record(finding, DISCOVERY_TRANSFORM)
 
-    def _read_short(self, item: _Source, raised: Raised, step: Step, chunk: Chunk | None) -> bool:
+    def _read_short(self, item: _Source, raised: Raised, step: str, chunk: Chunk | None) -> bool:
         """Whether a call that raised is the source's short read; if so, it is recorded.
 
         ``LocalReader`` cannot serve a short read: a piece that is not all there fails its hash
@@ -963,6 +1049,7 @@ class IngestJob:
             by_content: dict[ContentId, _Source] = {}
             scanned = SourceLedger()
             listed: list[Observation] = []
+            files: list[explain.InventoryFile] = []
             new_artifacts = new_revisions = 0
             replaced = _replaced(ledger, result.observations)
             for observation in result.observations:
@@ -976,6 +1063,7 @@ class IngestJob:
                 if artifact is None:
                     raise JobError(f"the ledger lost artifact {revision.content_id}")
                 listed.append(scanned.observe(location, artifact))
+                files.append(explain.InventoryFile(location, revision.content_id, artifact.size))
                 self._emit(
                     events.SOURCE_HASHED,
                     {
@@ -990,11 +1078,24 @@ class IngestJob:
                     by_content[revision.content_id] = _Source(
                         artifact, location, replaced=replaced.get(revision.content_id)
                     )
+                by_content[revision.content_id].locations.append(location)
             for absence in result.absences:
                 self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
             self._sources = list(by_content.values())
             # Grouping reads the revisions the package lists, so it recomputes from the package.
             self._layout = layout_from_scan(listed, result.symlinks)
+            skipped = {
+                (entry.raw_path, entry.reason): explain.InventorySkipped(
+                    local_location(entry.raw_path), entry.reason
+                )
+                for entry in result.skipped
+                if entry.raw_path != b"."
+            }
+            self._inventory = explain.Inventory.of(
+                files,
+                (explain.InventoryLink(link.location, link.target) for link in result.symlinks),
+                skipped.values(),
+            )
             self._finish(
                 Phase.FINGERPRINT,
                 {
@@ -1069,34 +1170,69 @@ class IngestJob:
                         counts["unreadable"] += 1
                         continue
                     probed = self._probe(item, reader, head)
+                    if probed is not None:
+                        self._select(item, probed, counts)
+                        if self._dry and item.adapter is not None:
+                            self._inspect_source(item, reader)
                 if probed is None:
                     counts["unreadable"] += 1
-                    continue
-                selection = probed.selection
-                details: dict[str, JsonValue] = {
-                    "location": item.location.to_json(),
-                    "source": item.content_id,
-                }
-                if selection.status is SelectionStatus.SELECTED:
-                    best = selection.candidates[0]
-                    item.adapter = self.registry.get(best.adapter)
-                    item.config = self._configs[best.adapter]
-                    counts["selected"] += 1
-                    details |= {
-                        "adapter": best.adapter,
-                        "confidence": best.confidence,
-                        "version": best.version,
-                    }
-                    self._emit(events.SOURCE_SELECTED, details)
-                elif selection.status is SelectionStatus.AMBIGUOUS:
-                    counts["ambiguous"] += 1
-                    details["adapters"] = [c.adapter for c in selection.tied]
-                    self._emit(events.SOURCE_AMBIGUOUS, details)
-                else:
-                    counts["unsupported"] += 1
-                    self._emit(events.SOURCE_UNSUPPORTED, details)
             self._group()
             self._finish(Phase.INSPECT, dict(counts))
+
+    def _select(self, item: _Source, probed: SourceProbe, counts: dict[str, int]) -> None:
+        """Apply the probe engine's selection to ``item``: its adapter and config, if one won."""
+        item.probe = probed
+        selection = probed.selection
+        details: dict[str, JsonValue] = {
+            "location": item.location.to_json(),
+            "source": item.content_id,
+        }
+        if selection.status is SelectionStatus.SELECTED:
+            best = selection.candidates[0]
+            item.adapter = self.registry.get(best.adapter)
+            item.config = self._configs[best.adapter]
+            counts["selected"] += 1
+            details |= {
+                "adapter": best.adapter,
+                "confidence": best.confidence,
+                "version": best.version,
+            }
+            self._emit(events.SOURCE_SELECTED, details)
+        elif selection.status is SelectionStatus.AMBIGUOUS:
+            counts["ambiguous"] += 1
+            details["adapters"] = [c.adapter for c in selection.tied]
+            self._emit(events.SOURCE_AMBIGUOUS, details)
+        else:
+            counts["unsupported"] += 1
+            self._emit(events.SOURCE_UNSUPPORTED, details)
+
+    def _inspect_source(self, item: _Source, reader: LocalReader) -> None:
+        """A dry run's ``inspect`` of a selected source, through the runner (ADR 0044 §3).
+
+        What it says is the explanation's alone: a summary, or why there is none. Its findings
+        are shown, never recorded, and a failure never quarantines the source, since a run never
+        calls ``inspect``; only a source that changed under it is the source's problem, as for
+        any call.
+        """
+        assert item.adapter is not None and item.config is not None
+        adapter, config = item.adapter, item.config
+        self._inspected += 1
+        outcome = self._call(partial(adapter.inspect, reader, config), wire.INSPECT, reader)
+        if isinstance(outcome, Returned):
+            result: InspectResult = outcome.value
+            item.inspection = explain.Inspection(result.summary, result.findings)
+        elif isinstance(outcome, Raised):
+            # As for ``plan``: a source that changed, or whose bytes are no longer all there, is
+            # the source's problem; any other raise is the adapter's, shown (ADR 0033 §3).
+            if outcome.changed:
+                self._unreadable(item, SourceChangedError(item.content_id))
+                return
+            if self._read_short(item, outcome, "inspect", None):  # the event's step only
+                return
+            failure: JsonObject = {"error": outcome.error}
+            item.inspection = explain.Inspection(None, (), failure)
+        else:
+            item.inspection = explain.Inspection(None, (), outcome.cause())
 
     def _group(self) -> None:
         """Stage 5, at the end of inspect so a dry run sees it too: propose sessions from this

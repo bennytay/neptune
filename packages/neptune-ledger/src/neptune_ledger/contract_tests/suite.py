@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import jsonschema
 import pytest
 
+from neptune.identity import canonical_json
 from neptune.model.knowledge import Ambiguous, Candidate, Known, NotApplicable, NotCovered, Unknown
 from neptune_ledger.api import arrow, codec
 from neptune_ledger.api.protocol import CatalogApi
@@ -31,6 +32,7 @@ from neptune_ledger.api.types import (
     History,
     LatestTransform,
     Pinned,
+    QueryCursor,
     QueryRow,
     QuerySpec,
     RecordRef,
@@ -49,7 +51,11 @@ from neptune_ledger.contract_tests.examples import (
     query_row,
     record_key,
     reparse,
+    timed,
     transform_of,
+    with_changed_body,
+    with_chunk_size,
+    with_moved_source,
     with_source_size,
     world_time,
     write,
@@ -94,10 +100,11 @@ class CatalogContract:
     def make_catalog(self, workdir: Path) -> CatalogApi:
         raise NotImplementedError("subclass CatalogContract and return a fresh catalog")
 
-    # --- fixtures ------------------------------------------------------------------------------
+    def make_tenant_catalog(self, workdir: Path, package_roots: tuple[Path, ...]) -> CatalogApi:
+        """A fresh catalog for one tenant with these package roots (ADR 0006 §3)."""
+        raise NotImplementedError("override make_tenant_catalog to configure tenant package roots")
 
-    @pytest.fixture
-    def catalog(self, request: pytest.FixtureRequest, tmp_path: Path) -> CatalogApi:
+    def _mark_incomplete(self, request: pytest.FixtureRequest) -> None:
         if self.expected_failure is not None:
             request.applymarker(
                 pytest.mark.xfail(
@@ -106,6 +113,12 @@ class CatalogContract:
                     reason="the implementation is declared incomplete (expected_failure)",
                 )
             )
+
+    # --- fixtures ------------------------------------------------------------------------------
+
+    @pytest.fixture
+    def catalog(self, request: pytest.FixtureRequest, tmp_path: Path) -> CatalogApi:
+        self._mark_incomplete(request)
         workdir = tmp_path / "catalog"
         workdir.mkdir()
         return self.make_catalog(workdir)
@@ -188,7 +201,178 @@ class CatalogContract:
         assert result.registration_key == NotApplicable()
         assert _codes(result.findings) == {"package_unreadable"}
 
+    # --- hostile packages (L1 gate, ADR 0006 §1) -----------------------------------------------
+
+    @pytest.mark.parametrize("entry", ["records/run.jsonl", "records"])
+    def test_a_symlink_in_a_package_is_refused_and_never_followed(
+        self, catalog: CatalogApi, tmp_path: Path, entry: str
+    ) -> None:
+        package = materialise("drone", tmp_path / "drone")
+        target = package.root / entry
+        outside = tmp_path / "outside" / entry  # the same bytes: following it would pass
+        outside.parent.mkdir(parents=True)
+        target.rename(outside)
+        target.symlink_to(outside, target_is_directory=outside.is_dir())
+        result = catalog.register(package.root)
+        _validate(result)
+        assert result.outcome == "refused"
+        assert result.registration_key == NotApplicable()
+        assert ("unsafe_entry", entry) in {(f.code, f.subject) for f in result.findings}
+        assert catalog.verify(package.package_id).verdict == "unknown_package"
+
+    def test_a_package_missing_a_table_is_refused(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        package = materialise("drone", tmp_path / "drone")
+        (package.root / "records" / "video.jsonl").unlink()  # empty, but every kind has a table
+        result = catalog.register(package.root)
+        assert result.outcome == "refused"
+        assert ("file_missing", "records/video.jsonl") in {
+            (f.code, f.subject) for f in result.findings
+        }
+
+    def test_a_manifest_that_omits_a_table_is_refused(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        package = materialise("drone", tmp_path / "drone")
+        manifest = dict(package.manifest)
+        manifest["tables"] = {k: v for k, v in manifest["tables"].items() if k != "video"}
+        manifest["files"] = [f for f in manifest["files"] if f["path"] != "records/video.jsonl"]
+        (package.root / "records" / "video.jsonl").unlink()
+        (package.root / "manifest.json").write_bytes(canonical_json.dumps(manifest))
+        result = catalog.register(package.root)
+        assert result.outcome == "refused"
+        assert "manifest_invalid" in _codes(result.findings)
+
+    def test_a_damaged_copy_of_a_registered_package_is_refused(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage], tmp_path: Path
+    ) -> None:
+        drone = packages["drone"]
+        first = catalog.register(drone.root)
+        copy = tmp_path / "copy"
+        shutil.copytree(drone.root, copy)
+        table = _first_table(drone)
+        _tamper(copy / table)
+        result = catalog.register(copy)
+        assert result.outcome == "refused", "already_registered vouches for the bytes it was given"
+        assert ("file_digest_mismatch", table) in {(f.code, f.subject) for f in result.findings}
+        assert catalog.verify(drone.package_id).registration_key == first.registration_key
+
+    def test_an_existing_record_id_with_another_body_is_refused(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        original = materialise("drone", tmp_path / "drone")
+        (run,) = original.records("run")
+
+        def later(record: Any) -> Any:
+            first = record["first"]
+            ticks = first["value"]["ticks"] + 1
+            return {**record, "first": {**first, "value": {**first["value"], "ticks": ticks}}}
+
+        liar = write("liar", tmp_path / "liar", with_changed_body("drone", "run", later))
+        assert liar.records("run")[0]["id"] == run["id"], "same tier-2 id, another body"
+        assert catalog.register(original.root).outcome == "registered"
+        result = catalog.register(liar.root)
+        _validate(result)
+        assert result.outcome == "refused"
+        assert ("conflicting_id", run["id"]) in {(f.code, f.subject) for f in result.findings}
+        assert catalog.verify(liar.package_id).verdict == "unknown_package"
+
+    def test_the_same_bytes_at_two_chunk_sizes_register_as_two_packages(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        """Chunking is verification metadata, not identity (ADR 0005 §2)."""
+        original = materialise("drone", tmp_path / "drone")
+        rechunked = write("rechunked", tmp_path / "rechunked", with_chunk_size("drone", 256))
+        (source,) = original.records("source_artifact")
+        (other,) = rechunked.records("source_artifact")
+        assert (other["content_id"], other["size"]) == (source["content_id"], source["size"])
+        assert other["chunk_size"] != source["chunk_size"]
+        first, second = catalog.register(original.root), catalog.register(rechunked.root)
+        assert (first.outcome, second.outcome) == ("registered", "registered")
+        assert second.findings == ()
+        liar = write("liar", tmp_path / "liar", with_source_size("drone", source["size"] + 1))
+        refused = catalog.register(liar.root)
+        assert refused.outcome == "refused"
+        assert ("conflicting_id", source["content_id"]) in {
+            (f.code, f.subject) for f in refused.findings
+        }
+
+    def test_a_moved_source_registers_as_another_package(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        original = materialise("drone", tmp_path / "drone")
+        moved = write("moved", tmp_path / "moved", with_moved_source("drone", "moved/flight.ulg"))
+        first, second = catalog.register(original.root), catalog.register(moved.root)
+        assert (first.outcome, second.outcome) == ("registered", "registered")
+        run = original.records("run")[0]
+        anchor = evidence_anchor(run)
+        assert anchor is not None
+        result = catalog.resolve(anchor)
+        _validate(result)
+        assert [route.package_id for route in result.fetch] == [
+            original.package_id,
+            moved.package_id,
+        ]
+        assert result.fetch[0].locations == ({"kind": "local", "path": "flight.ulg"},)
+        assert result.fetch[1].locations == ({"kind": "local", "path": "moved/flight.ulg"},)
+        assert {ref.package_id for ref in result.cited_by} == {
+            original.package_id,
+            moved.package_id,
+        }
+
+    @pytest.mark.parametrize("escape", ["symlink", "dotdot"])
+    def test_register_stays_inside_the_tenants_package_roots(
+        self, request: pytest.FixtureRequest, tmp_path: Path, escape: str
+    ) -> None:
+        """ADR 0006 §3: containment is decided on the fully resolved root, by path components.
+
+        Tenant B's root holds a symlink to tenant A's tree; neither ``B/link/drone`` nor
+        ``B/../A/drone`` is a symlinked root or holds a symlink, so only resolving the whole path
+        refuses them. The refusal reads exactly like a root that does not exist.
+        """
+        self._mark_incomplete(request)
+        tenant_a, tenant_b = tmp_path / "tenant_a", tmp_path / "tenant_b"
+        theirs = materialise("drone", tenant_a / "drone")
+        ours = materialise("quadruped", tenant_b / "quadruped")
+        (tenant_b / "link").symlink_to(tenant_a, target_is_directory=True)
+        workdir = tmp_path / "catalog"
+        workdir.mkdir()
+        catalog = self.make_tenant_catalog(workdir, (tenant_b,))
+        probe = {
+            "symlink": tenant_b / "link" / "drone",
+            "dotdot": tenant_b / ".." / "tenant_a" / "drone",
+        }[escape]
+        assert (probe / "manifest.json").is_file(), "the probe reaches tenant A's package"
+        missing = catalog.register(tenant_b / "no-such-package")
+        result = catalog.register(probe)
+        _validate(result)
+        assert result.outcome == "refused"
+        assert isinstance(result.package_id, Unknown), "the refusal must not reveal the id"
+        assert [f.code for f in result.findings] == [f.code for f in missing.findings]
+        assert _codes(result.findings) == {"package_unreadable"}
+        assert catalog.verify(theirs.package_id).verdict == "unknown_package"
+        assert catalog.register(ours.root).outcome == "registered"
+
     # --- verify --------------------------------------------------------------------------------
+
+    def test_verify_reports_a_moved_package_unreachable(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage], tmp_path: Path
+    ) -> None:
+        drone = packages["drone"]
+        first = catalog.register(drone.root)
+        elsewhere = tmp_path / "moved-package"
+        drone.root.rename(elsewhere)
+        report = catalog.verify(drone.package_id)
+        _validate(report)
+        assert report.verdict == "unreachable"
+        assert report.files_checked == 0
+        assert [(f.code, f.subject) for f in report.findings] == [
+            ("package_unreadable", first.root_locator)
+        ]
+        again = catalog.register(elsewhere)
+        assert again.outcome == "already_registered", "intact at the new root"
+        assert again.root_locator == first.root_locator, "the stored locator stands"
 
     def test_verify_intact_packages(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
@@ -400,6 +584,91 @@ class CatalogContract:
                         )
                     )
                 assert sort_keys == sorted(sort_keys)
+
+    @staticmethod
+    def _assert_unmerged(thread: Any) -> None:
+        """No mapping was named, so nothing is merged and no entry carries a mapped interval."""
+        assert thread.merge is None
+        assert {p.kind for p in thread.partitions} <= {"clock", "untimed"}
+        assert all(e.mapped is None for p in thread.partitions for e in p.entries)
+
+    def test_two_clocks_across_packages_stay_apart_in_registration_order(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        """Case 10 of the L1 review: one machine thread, two timed clocks, no mapping.
+
+        The drone and its 2.0.0 re-parse give the same machine thread two runs on two clocks
+        (each transform has its own domains, ADR 0003 §3). Partitions are ordered by their
+        smallest registration key, not by clock key bytes: the package whose run clock sorts
+        later as bytes is registered first, so the two rules disagree and only the right one
+        passes.
+        """
+        pair = [
+            materialise("drone", tmp_path / "v1"),
+            write("v2", tmp_path / "v2", reparse("drone", "2.0.0", {})),
+        ]
+        clocks = {}
+        for package in pair:
+            world = timed(package.records("run")[0])
+            assert world is not None
+            clocks[package.package_id] = world.clock
+        first, second = sorted(pair, key=lambda p: clocks[p.package_id].encode(), reverse=True)
+        assert catalog.register(first.root).outcome == "registered"
+        assert catalog.register(second.root).outcome == "registered"
+        (key,) = machine_threads([first])
+        thread = catalog.thread(key, "world", History())
+        _validate(thread)
+        self._assert_unmerged(thread)
+        assert [p.kind for p in thread.partitions] == ["clock", "clock", "untimed"]
+        expected = [clocks[first.package_id], clocks[second.package_id]]
+        assert [p.clock_key for p in thread.partitions[:2]] == expected
+        for partition, package in zip(thread.partitions[:2], (first, second), strict=True):
+            assert [e.packages for e in partition.entries] == [(package.package_id,)]
+            assert [e.record_id for e in partition.entries] == [package.records("run")[0]["id"]]
+        assert codec.dumps(thread) == codec.dumps(catalog.thread(key, "world", History()))
+
+    def test_two_clocks_in_one_package_order_by_clock_key_bytes(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        """Case 10, same registration key: partitions fall back to clock key bytes (ADR 0003 §3).
+
+        The drone's run starts on its ``timestamp`` clock. Its first stream is given a Known
+        start on another clock the stream carries, so the anchored run thread holds two timed
+        clocks from one package, and the second stream stays untimed.
+        """
+        original = materialise("drone", tmp_path / "drone")
+        run = original.records("run")[0]
+        world = timed(run)
+        assert world is not None
+
+        def second_clock(stream: Any) -> Any:
+            other = sorted(c for c in stream["clocks"] if c != world.clock)[0]
+            return {
+                **stream,
+                "first": {"knowledge": "known", "value": {"domain_id": other, "ticks": 5}},
+            }
+
+        package = write(
+            "two-clocks", tmp_path / "two", with_changed_body("drone", "stream", second_clock)
+        )
+        timed_stream = package.records("stream")[0]
+        stream_world = timed(timed_stream)
+        assert stream_world is not None and stream_world.clock != world.clock
+        assert catalog.register(package.root).outcome == "registered"
+        anchor = evidence_anchor(run)
+        assert anchor is not None
+        thread = catalog.thread(ThreadKey("run", anchor), "world", History())
+        _validate(thread)
+        self._assert_unmerged(thread)
+        assert [p.kind for p in thread.partitions] == ["clock", "clock", "untimed"]
+        by_clock = {world.clock: run["id"], stream_world.clock: timed_stream["id"]}
+        ordered = sorted(by_clock, key=str.encode)
+        assert [p.clock_key for p in thread.partitions[:2]] == ordered
+        assert [[e.record_id for e in p.entries] for p in thread.partitions[:2]] == [
+            [by_clock[clock]] for clock in ordered
+        ]
+        untimed = {e.record_id for e in thread.partitions[2].entries}
+        assert untimed == {package.records("stream")[1]["id"]}
 
     def test_current_view_is_within_history(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
@@ -638,6 +907,22 @@ class CatalogContract:
         assert all(r.world_clock == target.world_clock for r in hits)
         elsewhere = TimeWindow("rec:" + UNKNOWN_ID, -(2**62), 2**62)
         assert arrow.query_rows(catalog.query(QuerySpec(kinds=("run",), window=elsewhere))) == ()
+
+    def test_query_pages_by_cursor(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        registered = self.register_all(catalog, packages)
+        expected = self._expected_rows(packages, registered, "stream")
+        pages: list[QueryRow] = []
+        after: QueryCursor | None = None
+        while True:
+            table = catalog.query(QuerySpec(kinds=("stream",), limit=3, after=after))
+            rows = list(arrow.query_rows(table))
+            if not rows:
+                break
+            pages += rows
+            after = QueryCursor(rows[-1].kind, rows[-1].record_id, rows[-1].package_id)
+        assert pages == expected
 
     def test_query_rejects_an_inverted_window(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]

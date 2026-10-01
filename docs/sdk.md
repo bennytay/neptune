@@ -32,7 +32,7 @@ print(result.package, result.receipt)
 | `Neptune` | `AsyncNeptune` | Does |
 |---|---|---|
 | `ingest(source, destination, *, on_event, cancel, resume)` | `await ingest(...)` | the whole job → `IngestResult` |
-| `dry_run(source, *, on_event, cancel, resume)` | `await dry_run(...)` | discover → plan, nothing parsed → `planned` |
+| `dry_run(source, *, on_event, cancel, resume)` | `await dry_run(...)` | discover → plan + `inspect`, nothing parsed → `planned`, with `explanation` |
 | `start(source, destination, *, cancel, resume)` | `start(...)` | the job on its own thread → `Ingestion` / `AsyncIngestion` |
 | `start_dry_run(source, *, cancel, resume)` | `start_dry_run(...)` | the dry run on its own thread |
 
@@ -86,6 +86,7 @@ async def ingest_with_progress() -> IngestResult:
 | `read_package()` | the whole package, read and verified |
 | `contents()` | per run, its streams: topic, type, declared field paths and inferred semantic (ADR 0049) |
 | `cache` | per source: adapter, plan and chunks with hit/miss rules; calls per adapter method |
+| `explanation` | a planned dry run's `Explanation` (ADR 0044); `None` otherwise |
 | `ingested`, `job`, `destination`, `durations` | as in `JobOutcome` |
 
 Same sources + adapters + config ⇒ same `receipt` and `package`, sync or async, cold or warm workspace,
@@ -96,6 +97,29 @@ A dry run's `cache` says what is left: chunks with rule `committed` are done, th
 `run.carrying("imu")`, `run.semantics()`, `run.topic("/cmd_vel")`, and per stream `fields` (declared
 paths and types), `layout_state`, `semantic` (candidates, confidence, rules, evidence) and `carries` /
 `may_carry` (ties included). It reads the package's records and derived tables only.
+
+## Explain before ingesting
+
+```python
+from pathlib import Path
+from neptune.sdk import Neptune
+
+plan = Neptune().dry_run("runs/2026-09-30")
+print(plan.explanation.render())            # for people
+Path("plan.json").write_bytes(plan.explanation.dumps())  # canonical JSON, neptune.explanation/1
+```
+
+- What it holds: the inventory; per source its detected format, every adapter's verdict with probe
+  confidence, reasons and why it won or lost, the adapter's `inspect` summary and the plan; the
+  session grouping with reasons and contested readings; work left and heavy sources; everything left
+  out (unsupported, ambiguous, quarantined, unreadable, skipped, links) with why. ADR 0044.
+- It parses nothing (`ingest` is never called) and only reads the sources. Like any dry run it warms
+  the workspace (ledger and plans), so the ingest after it plans nothing again; no package depends on
+  what the workspace held.
+- Byte-identical for the same folder, adapters, config and workspace contents; no job id, clock or
+  absolute path inside. Bounded: long lists end in `*_omitted` counts and a
+  `neptune.explain.truncated` finding (ADR 0044 §8).
+- From the shell: `neptune ingest SOURCE --explain [--json]` (`cli.md`).
 
 ## Adapters and options
 
