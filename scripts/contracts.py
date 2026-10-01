@@ -448,9 +448,9 @@ def check_registry(registry: Registry) -> Report:
 
 
 def _installed(module: str) -> bool:
-    top = module.split(".", 1)[0]
+    """Whether the owner module itself is importable (its package may exist without it yet)."""
     try:
-        return importlib.util.find_spec(top) is not None
+        return importlib.util.find_spec(module) is not None
     except (ImportError, ValueError):
         return False
 
@@ -593,7 +593,9 @@ def check_owner(registry: Registry, package: str) -> Report:
         report.notes.append(f"{package} exports no registered schema")
     for contract in owned:
         if not _installed(contract.owner.module):
-            report.notes.append(f"{contract.id}: SKIPPED, {package} is not installed")
+            report.notes.append(
+                f"{contract.id}: SKIPPED, {contract.owner.module} is not importable yet"
+            )
             continue
         schema, constant = owner_export(contract)
         latest = registry.latest(contract.id)

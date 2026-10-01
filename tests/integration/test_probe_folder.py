@@ -200,7 +200,7 @@ def test_without_the_rival_the_renamed_tally_is_read_and_the_zip_members_are_rep
         b"logs/lift.tally": "tally",
         b"logs/renamed": "tally",
         b"notes.txt": "text",
-        b"recording.mcap": None,
+        b"recording.mcap": "mcap",  # claimed by its magic
     }
     # The tar's members, and the same tar's inside a gzip, are probed by their bytes alike.
     in_tar = {b"drive.bag": None, b"logs/lift.tally": "tally", b"notes.txt": "text"}

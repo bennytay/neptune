@@ -64,6 +64,7 @@ schema: ## Regenerate docs/schema/canonical.schema.json from the model's types
 examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/fixtures/model/make_examples.py
 > $(UV) run python tests/golden/packages/make_packages.py
+> $(UV) run python tests/golden/mcap/make_mcap_golden.py
 
 contracts-check: ## Owner rule, then lock + upstream contract tests per package (PKG=<name> for one)
 > @set -e; for p in $(SELECTED); do echo "--- contracts $$p" >&2; \
