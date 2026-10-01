@@ -130,7 +130,7 @@ class TiffLayout:
                 entries += head + field_bytes
             following = offsets[directory.next] if directory.next else 0
             entries += struct.pack(order + ("Q" if self.big else "I"), following)
-            assert len(out) == start
+            assert len(out) == start, (name, len(out), start)
             out += entries + values
         for name, blob in self.blobs.items():
             assert len(out) == offsets[name]
@@ -522,7 +522,7 @@ def rover_dng() -> bytes:
                 Tag(258, SHORT, [16]),
                 Tag(259, SHORT, [1]),
                 Tag(262, SHORT, [32803]),
-                Tag(273, LONG, ("blob", "raw")),
+                Tag(273, LONG, ("blob", "pixels")),
                 Tag(277, SHORT, [1]),
                 Tag(278, SHORT, [24]),
                 Tag(279, LONG, [len(raw)]),
@@ -532,7 +532,7 @@ def rover_dng() -> bytes:
         ),
     }
     return TiffLayout(
-        directories, "ifd0", little=False, blobs={"preview": preview, "raw": raw}
+        directories, "ifd0", little=False, blobs={"preview": preview, "pixels": raw}
     ).build()
 
 
@@ -784,6 +784,9 @@ VALID: Final = (
     "gripper.pam",
 )
 
+# Pillow reads Netpbm P1-P6 and no P7; the PAM header is checked against the specification by hand.
+NOT_IN_PILLOW: Final = ("gripper.pam",)
+
 # --- The oracle ------------------------------------------------------------------------------------
 
 
@@ -806,6 +809,8 @@ def oracle() -> dict[str, Any]:
 
     found: dict[str, Any] = {}
     for name in VALID:
+        if name in NOT_IN_PILLOW:
+            continue
         with Image.open(HERE / name) as image:
             frames = []
             for index in range(getattr(image, "n_frames", 1)):
