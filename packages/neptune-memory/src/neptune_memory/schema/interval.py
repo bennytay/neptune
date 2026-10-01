@@ -19,6 +19,8 @@ from neptune.identity.ids import record_id
 from neptune.model.time import INT64_MAX, DomainMismatchError, Epoch, Timescale, Timestamp
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from neptune.model.ids import RecordId
     from neptune.model.jsonvalue import JsonObject, JsonValue
 
@@ -84,6 +86,30 @@ class Interval:
         starts_before_other_ends = isinstance(other.end, Open) or self.start < other.end
         other_starts_before_self_ends = isinstance(self.end, Open) or other.start < self.end
         return starts_before_other_ends and other_starts_before_self_ends
+
+    def minus(self, others: Iterable[Interval]) -> tuple[Interval, ...]:
+        """The parts of this interval no interval in ``others`` covers, in valid-time order.
+
+        Empty when ``others`` cover it entirely. Every interval in ``others`` must be on this
+        interval's clock (else ``DomainMismatchError``).
+        """
+        pieces = [self]
+        for cut in sorted(others, key=lambda i: i.start.ticks):
+            if cut.domain_id != self.domain_id:
+                raise DomainMismatchError(self.domain_id, cut.domain_id)
+            kept: list[Interval] = []
+            for piece in pieces:
+                if not piece.overlaps(cut):
+                    kept.append(piece)
+                    continue
+                if piece.start < cut.start:
+                    kept.append(Interval(piece.start, cut.start))
+                if not isinstance(cut.end, Open) and (
+                    isinstance(piece.end, Open) or cut.end < piece.end
+                ):
+                    kept.append(Interval(cut.end, piece.end))
+            pieces = kept
+        return tuple(pieces)
 
     def to_json(self) -> JsonObject:
         return {"end": self.end.to_json(), "start": self.start.to_json()}
