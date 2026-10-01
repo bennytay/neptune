@@ -365,7 +365,9 @@ def _descriptors(keep: frozenset[int]) -> None:
     """Standard streams to ``/dev/null`` (unless kept); close every other descriptor not kept.
 
     The open descriptors are listed from ``/proc/self/fd``: closing every number up to
-    ``RLIMIT_NOFILE`` one by one costs tens of milliseconds where that limit is large.
+    ``RLIMIT_NOFILE`` one by one costs tens of milliseconds where that limit is large. Python's
+    own ``sys`` streams are rebound to the standard descriptors, since the objects inherited
+    may write to a descriptor now closed (a test runner's capture file, a log).
     """
     null = os.open(os.devnull, os.O_RDWR)
     for fd in (0, 1, 2):
@@ -377,6 +379,9 @@ def _descriptors(keep: frozenset[int]) -> None:
         if fd not in still_open:
             with contextlib.suppress(OSError):  # the listing's own descriptor, closed already
                 os.close(fd)
+    sys.stdin = os.fdopen(0, "r", closefd=False)
+    sys.stdout = os.fdopen(1, "w", closefd=False)
+    sys.stderr = os.fdopen(2, "w", closefd=False)
 
 
 def confine(

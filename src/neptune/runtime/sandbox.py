@@ -361,17 +361,21 @@ class Subprocess:
                 _send(reply, _UNCONFINED + exc.control.encode("ascii", "replace"))
                 os._exit(0)
             _send(reply, _CONFINED)
-            out_of_memory = _OUT_OF_MEMORY  # held before the call, so it needs no allocation
+            # The tag and the payload are sent apart, so the reply is never copied to prefix it.
+            tag, payload = _OUT_OF_MEMORY, b""  # held before the call: needs no allocation
             try:
                 try:
-                    data = _RETURNED + codec.encode(work())
+                    payload = codec.encode(work())
+                    tag = _RETURNED
                 except MemoryError:
-                    data = out_of_memory
+                    pass
                 except BaseException as exc:
-                    data = _RAISED + encode_raised(Raised.of(exc))
+                    payload = encode_raised(Raised.of(exc))
+                    tag = _RAISED
             except MemoryError:
-                data = out_of_memory
-            _send(reply, data)
+                tag, payload = _OUT_OF_MEMORY, b""
+            _send(reply, tag)
+            _send(reply, payload)
             os._exit(0)
         except BaseException:
             os._exit(_UNREPORTED)
