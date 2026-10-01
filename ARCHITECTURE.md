@@ -16,7 +16,7 @@ flowchart LR
     CAN["Canonical model<br/>records + provenance"]
     PKG[("Ingest package")]
     VAL["Validation &amp; alignment"]
-    DER["Derived annotations<br/>session proposals"]
+    DER["Derived annotations<br/>session proposals<br/>stream layouts · semantics"]
   end
 
   subgraph D["Downstream, not Neptune"]
@@ -35,6 +35,7 @@ flowchart LR
   WS --> PKG
   PKG <--> VAL
   DISC -->|layout| DER
+  RT -->|streams · definitions| DER
   DER <-->|derived tables| PKG
   PKG ==> MEM --> RET --> USE
   DER -.-> MEM

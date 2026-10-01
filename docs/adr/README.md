@@ -47,3 +47,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0042](0042-tabular-adapter-csv-json-parquet-as-cited-cells.md) | The tabular adapter: CSV, JSON and Parquet as tables of cited cells | Accepted |
 | [0043](0043-neptune-ingest-cli-exit-codes-ignore-rules-and-file-sources.md) | `neptune ingest`: a thin CLI over the SDK, fixed exit codes, declared ignore rules and single-file sources | Accepted |
 | [0045](0045-rosbag2-adapter-metadata-sqlite3-reader-and-mcap-delegation.md) | rosbag2: one adapter for `metadata.yaml` and sqlite3 storage, MCAP left to the MCAP adapter, a SQLite reader over bytes | Accepted |
+| [0049](0049-stream-introspection-declared-layouts-and-inferred-semantics.md) | Stream introspection: declared layouts and inferred semantics as derived tables | Accepted |
