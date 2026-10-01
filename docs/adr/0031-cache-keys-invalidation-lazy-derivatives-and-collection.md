@@ -66,6 +66,10 @@ it applies to; "only affected" means nothing outside that transform's chunks and
      them), from the ledger's revision chain;
    - `source_new`: nothing is known of these bytes.
 
+   Only the explanation reads the source's other plans, so one that cannot be read is passed
+   over (the rule is made from what remains) and never fails the job, which plans the source
+   either way.
+
    A chunk is `committed` (hit) if its output is kept; otherwise it misses with `not_committed`
    if its plan was kept (a job was interrupted, cancelled or failed on it) or with its plan's
    rule. A derivative is `held` (hit), `absent` (built now) or `corrupt` (kept but damaged:
@@ -96,8 +100,10 @@ it applies to; "only affected" means nothing outside that transform's chunks and
    registry, options)` keeps each plan whose transform is one the registry and options define
    and whose source some saved ledger holds at the head of a location, the chunks those plans
    list, and the derivatives all of whose owners are kept plans. Everything else goes:
-   superseded versions and configs, sources gone from every root, orphans, damaged derivatives,
-   staging debris. Ledgers are history and are never collected. Each removal is one rename into
+   superseded versions and configs, sources gone from every root, orphans, damaged plans and
+   derivatives (no job could reuse them), staging debris. Ledgers are history and are never
+   collected; one that cannot be read stops collection, since without it nothing can be judged
+   unreachable (`JobError` from `runtime.collect`). Each removal is one rename into
    `staging/` before deletion, so a reader never sees half an entry. Jobs hold a shared `flock`
    on the workspace's `lock` for their whole run; collection takes it exclusively without
    waiting and is refused while any job runs, so it can never remove what a job is using.
@@ -105,7 +111,8 @@ it applies to; "only affected" means nothing outside that transform's chunks and
    (`plans/<2 hex>/<62 hex>/<transform hex>.json`), so a miss can list the transforms a source
    was planned under; `derivatives/` and `lock` are added. Opening a format-1 workspace moves
    each plan under its source (one rename each) and then records format 2, so an upgrade killed
-   midway finishes on the next open and ledger history is kept.
+   midway finishes on the next open and ledger history is kept; a plan another opener moved
+   first is passed over.
 
 ## Alternatives considered
 
