@@ -67,11 +67,13 @@ from neptune.adapters.contract import (
     ContractError,
     Plan,
     ProbeHints,
+    ProbeResult,
     chunk_from_json,
     configure,
 )
-from neptune.adapters.registry import AdapterRegistry, Candidate, Selection, SelectionStatus, select
+from neptune.adapters.registry import AdapterRegistry, SelectionStatus
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
+from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe
 from neptune.discovery.reader import LocalReader, SourceChangedError
 from neptune.discovery.scan import fingerprint
 from neptune.discovery.scratch import ScratchError, clear_scratch, scratch_space
@@ -91,7 +93,7 @@ from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.package import ReceiptEnvelope
-from neptune.model.provenance import TransformRecord
+from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
 from neptune.model.run import Stream
 from neptune.model.series import SEQ, SeriesBatch
 from neptune.model.source import (
@@ -144,6 +146,7 @@ from neptune.store.workspace import (
 )
 
 DEFAULT_ATTEMPTS: Final = 2
+ADAPTER_FAILED: Final = f"{PROBE_ID}.adapter_failed"
 # What the runtime's own reads of a source raise: opening it, its size, its head. An adapter's
 # reads are the adapter's: anything but ``SourceChangedError`` from ``plan`` or ``ingest`` is its
 # failure (``plan_failed``, ``chunk_failed``).
@@ -490,6 +493,7 @@ class IngestJob:
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
         self._calls: dict[str, int] = {"ingest": 0, "plan": 0, "probe": 0}
+        self._engine = ProbeEngine(registry)
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
 
@@ -862,29 +866,45 @@ class IngestJob:
 
     # --- inspect -------------------------------------------------------------------------------
 
-    def _select(self, head: bytes, source: _Source) -> Selection:
-        """Every adapter's probe, each its own call to the runner, under the registry's rule
-        (ADR 0024 §7).
+    def _probe(self, item: _Source, reader: LocalReader, head: bytes) -> SourceProbe | None:
+        """The probe engine over one source, in one sandboxed call (ADR 0027, ADR 0033 §1).
 
-        A probe that raises, returns the wrong type, crashes or hits a limit is reported and takes
-        that adapter out of this source's candidates. The probe engine (MVL-8) replaces this
-        method.
+        Every adapter's probe and the container inspection run in the child; its reply is read
+        back strictly (``ProbeEngine.source_probe_from_json``). If the call dies, hits a limit,
+        raises or replies with anything but what the engine writes, each adapter is asked again
+        in a call of its own, so the one that fails is named, and a container is left unopened
+        (``inspection_failed``). ``None`` once the source is quarantined: it changed under the
+        probe. The engine's findings are recorded under its transform.
         """
-        hints = ProbeHints(_hint_name(source.location), source.artifact.size)
-        candidates: list[Candidate] = []
-        for adapter in self.registry.adapters():
-            descriptor = adapter.descriptor
-            self._calls["probe"] += 1
-            outcome = self._call(partial(adapter.probe, head, hints), wire.PROBE)
-            if not isinstance(outcome, Returned):
-                details: dict[str, JsonValue] = {
-                    "adapter": descriptor.id,
-                    "source": source.content_id,
-                }
-                self._emit(events.PROBE_FAILED, details | outcome.cause())
-                continue
-            candidates.append(Candidate(descriptor.id, descriptor.version, outcome.value))
-        return select(candidates)
+        name = _hint_name(item.location)
+        size = item.artifact.size
+        adapters = self.registry.adapters()
+        self._calls["probe"] += len(adapters)
+        codec = wire.source_probe(self._engine, item.content_id, size, name, head)
+        work = partial(self._engine.probe, reader, name, head)
+        outcome = self._run(work, codec, (reader.fileno(),), None)
+        if isinstance(outcome, Raised) and outcome.changed:
+            self._unreadable(item, SourceChangedError(item.content_id))
+            return None
+        if isinstance(outcome, Returned):
+            probed = outcome.value
+        else:
+            failed = outcome.cause()
+            self._emit(events.PROBE_FAILED, {"source": item.content_id, **failed})
+
+            def ask(adapter: Adapter, head: bytes, hints: ProbeHints) -> ProbeResult | JsonObject:
+                self._calls["probe"] += 1
+                asked = self._run(partial(adapter.probe, head, hints), wire.PROBE, (), None)
+                return asked.value if isinstance(asked, Returned) else asked.cause()
+
+            probed = self._engine.probe_head(item.content_id, size, name, head, ask, failed)
+        whole = EvidenceRef(item.content_id, (ByteRange(0, size),))
+        for finding in probed.findings:
+            self._record(finding, self._engine.transform)
+            if finding.code == ADAPTER_FAILED and finding.subject == whole:
+                cause = {k: v for k, v in finding.details.items() if k != "version"}
+                self._emit(events.PROBE_FAILED, {"source": item.content_id, **cause})
+        return probed
 
     def _inspect(self, source: LocalSource) -> None:
         with self._enter(Phase.INSPECT):
@@ -893,13 +913,23 @@ class IngestJob:
             for item in self._sources:
                 self._check_cancel()
                 try:
-                    with LocalReader(source, item.location, item.artifact) as reader:
-                        head = reader.read(0, min(reader.size, PROBE_HEAD_SIZE))
+                    reader = LocalReader(source, item.location, item.artifact)
                 except _UNREADABLE as exc:
                     self._unreadable(item, exc)
                     counts["unreadable"] += 1
                     continue
-                selection = self._select(head, item)
+                with reader:
+                    try:
+                        head = reader.read(0, min(reader.size, PROBE_HEAD_SIZE))
+                    except _UNREADABLE as exc:
+                        self._unreadable(item, exc)
+                        counts["unreadable"] += 1
+                        continue
+                    probed = self._probe(item, reader, head)
+                if probed is None:
+                    counts["unreadable"] += 1
+                    continue
+                selection = probed.selection
                 details: dict[str, JsonValue] = {
                     "location": item.location.to_json(),
                     "source": item.content_id,

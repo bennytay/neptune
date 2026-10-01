@@ -205,3 +205,30 @@ def sniff(head: bytes, size: int, extra: Iterable[Signature] = ()) -> Sniff:
     matched = [s for s in (*SIGNATURES, *extra) if s.matches(head)]
     matched.sort(key=lambda s: (-s.weight, s.name, s.adapter or ""))
     return Sniff(tuple(matched), classify_text(head, size))
+
+
+def sniff_from_json(data: JsonValue, extra: Iterable[Signature] = ()) -> Sniff:
+    """A ``Sniff`` from its JSON, each signature found in the built-in table or ``extra`` (the
+    adapters' declared magic). Strict: an unknown signature or text class is a ``ValueError``.
+
+    The JSON names a signature, not its bytes, and a few formats have two (pcap's byte orders,
+    PLY's line endings); the first with that name, container and adapter stands for both, and
+    reads back as the same JSON.
+    """
+    if not isinstance(data, dict) or data.keys() != {"signatures", "text"}:
+        raise ValueError("a sniff is exactly signatures and text")
+    found, text = data["signatures"], data["text"]
+    if not isinstance(found, list) or not isinstance(text, str):
+        raise ValueError("a sniff's signatures are a list and its text a class")
+    by_json: dict[str, Signature] = {}
+    for signature in (*SIGNATURES, *extra):
+        by_json.setdefault(repr(sorted(signature.to_json().items())), signature)
+    signatures = []
+    for item in found:
+        if not isinstance(item, dict):
+            raise ValueError("a signature is an object")
+        known = by_json.get(repr(sorted(item.items())))
+        if known is None:
+            raise ValueError(f"not a known signature: {item!r}")
+        signatures.append(known)
+    return Sniff(tuple(signatures), TextClass(text))

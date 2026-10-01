@@ -558,6 +558,28 @@ class ProbeResult:
         return out
 
 
+def probe_result_from_json(data: JsonValue) -> ProbeResult:
+    """Parse strictly: a ``confidence`` float, ``reasons`` and an optional ``version``."""
+    if not isinstance(data, Mapping) or not {"confidence", "reasons"} <= data.keys():
+        raise ContractError("a probe result has a confidence and reasons")
+    if not data.keys() <= {"confidence", "reasons", "version"}:
+        raise ContractError("a probe result has a confidence, reasons and a version")
+    reasons, confidence, version = data["reasons"], data["confidence"], data.get("version")
+    if not isinstance(reasons, list | tuple):
+        raise ContractError("a probe result's reasons are a list")
+    parsed = []
+    for reason in reasons:
+        if not isinstance(reason, Mapping) or reason.keys() != {"code", "message"}:
+            raise ContractError("a probe reason is exactly a code and a message")
+        code, message = reason["code"], reason["message"]
+        if not isinstance(code, str) or not isinstance(message, str):
+            raise ContractError("a probe reason's code and message are strings")
+        parsed.append(ProbeReason(code, message))
+    if not isinstance(confidence, float) or not (version is None or isinstance(version, str)):
+        raise ContractError("a probe's confidence is a float and its version a string")
+    return ProbeResult(confidence, tuple(parsed), version)
+
+
 @dataclass(frozen=True)
 class InspectResult:
     """A cheap summary of one source, for dry runs and explanations (MVL-15).

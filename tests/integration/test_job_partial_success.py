@@ -128,13 +128,14 @@ def corpus(tmp_path: Path) -> Path:
 def test_one_crashing_source_does_not_invalidate_the_others(corpus: Path, tmp_path: Path) -> None:
     outcome, package, seen = run(corpus, tmp_path)
     assert codes(package) == [
+        "neptune.probe.unsupported",
         "neptune.runtime.chunk_failed",
         "neptune.runtime.plan_failed",
         "tally.bad_row",
         "text.invalid_utf8",
     ]
     assert read_by(package) == {
-        "blob.bin": 0,
+        "blob.bin": 1,  # by the probe engine, which says no adapter claims it
         "corrupted.txt": 1,
         "crash.brittle": 1,  # read by the runtime, which says why nothing came of it
         "lift.tally": 1,

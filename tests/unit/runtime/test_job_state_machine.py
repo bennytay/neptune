@@ -161,7 +161,8 @@ def test_the_envelope_names_the_job_and_times_every_phase(root: Path, tmp_path: 
     assert envelope.started <= envelope.finished
     assert dict(outcome.durations).keys() == dict(envelope.durations).keys()
     assert outcome.package == read_package(tmp_path / "p").id
-    assert len(outcome.ingested) == 2 and outcome.findings == ()
+    assert len(outcome.ingested) == 2  # the blob is unread: the probe engine says so
+    assert [f.code for f in outcome.findings] == ["neptune.probe.unsupported"]
 
 
 def test_a_job_name_is_random_unless_given(root: Path, tmp_path: Path) -> None:
@@ -423,4 +424,7 @@ def test_a_registry_with_no_adapters_reads_nothing_and_still_packages(
     assert outcome.state is JobState.COMMITTED and outcome.ingested == ()
     assert len([e for e in seen if e.kind == "source_unsupported"]) == 3
     package = read_package(tmp_path / "p")
-    assert all(s.read_by == () for s in package.receipt.sources)
+    # Nothing read them: only the probe engine, which looked and says no adapter claims them.
+    (engine,) = [t for t in package.receipt.transforms if t.adapter_id == "neptune.probe"]
+    assert all(s.read_by == (engine.id,) for s in package.receipt.sources)
+    assert sorted(f.code for f in outcome.findings) == ["neptune.probe.unsupported"] * 3

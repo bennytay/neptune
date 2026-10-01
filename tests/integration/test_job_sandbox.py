@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -337,11 +338,34 @@ def test_a_probe_that_crashes_takes_only_its_adapter_out(tmp_path: Path) -> None
     root.mkdir()
     (root / "odd.hostile").write_bytes(HOSTILE.hostile("probe-segfault", "words"))
     run = Run(root, tmp_path, sandboxed())
-    (failed,) = run.of("probe_failed")
-    assert failed.details["adapter"] == "hostile" and failed.details["signal"] == "SIGSEGV"
+    # The engine's one call for the source dies; each adapter is asked again on its own, and
+    # only the one that crashes is out (ADR 0033 §1).
+    whole, one = run.of("probe_failed")
+    assert "adapter" not in whole.details and whole.details["signal"] == "SIGSEGV"
+    assert one.details["adapter"] == "hostile" and one.details["signal"] == "SIGSEGV"
     (selected,) = run.of("source_selected")
     assert selected.details["adapter"] == "text"  # the file is ASCII: the text adapter reads it
-    assert run.codes() == [] and len(run.outcome.ingested) == 1
+    assert run.codes() == ["neptune.probe.adapter_failed", "neptune.probe.name_mismatch"]
+    assert len(run.outcome.ingested) == 1
+    failed = run.finding("neptune.probe.adapter_failed")
+    assert failed.details == {"adapter": "hostile", "signal": "SIGSEGV", "version": "1.0.0"}
+
+
+def test_a_container_whose_member_crashes_a_probe_is_left_closed(tmp_path: Path) -> None:
+    """The engine inspects containers in the sandbox: a member whose head crashes an adapter's
+    probe kills that call, not the job; the container is reported unopened (ADR 0033 §1)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    with zipfile.ZipFile(root / "bundle.zip", "w") as bundle:
+        bundle.writestr("inner.hostile", HOSTILE.hostile("probe-segfault", "x"))
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    run = Run(root, tmp_path, sandboxed())
+    assert run.codes() == ["neptune.probe.inspection_failed", "neptune.probe.unsupported"]
+    failed = run.finding("neptune.probe.inspection_failed")
+    assert failed.details == {"container": "zip", "signal": "SIGSEGV"}
+    (whole,) = run.of("probe_failed")  # the engine's call; every adapter alone was fine
+    assert whole.details == {"signal": "SIGSEGV", "source": run.source("bundle.zip")}
+    assert len(run.outcome.ingested) == 1  # the notes
 
 
 def test_the_sandbox_changes_nothing_in_the_package(tmp_path: Path) -> None:
