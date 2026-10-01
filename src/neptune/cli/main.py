@@ -28,11 +28,14 @@ import threading
 import traceback
 from collections import Counter
 from collections.abc import Sequence
+from pathlib import Path
 from types import FrameType
-from typing import Final, TextIO
+from typing import Final, Literal, TextIO
 
 import neptune
 from neptune.cli import exit_codes
+from neptune.manifest import MANIFEST_NAMES, ManifestError, parse_bytes
+from neptune.manifest.generate import generate
 from neptune.model.finding import IngestFinding
 from neptune.model.package import ReceiptFinding
 from neptune.sdk import (
@@ -139,6 +142,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="do not apply the source's .neptune-ignore",
     )
     ingest.add_argument(
+        "--manifest",
+        metavar="FILE",
+        help="the manifest to apply: a file inside the source (default: its neptune.yaml, "
+        "neptune.yml or neptune.json, if there is one)",
+    )
+    ingest.add_argument(
+        "--no-manifest", action="store_true", help="apply no manifest, even if the source has one"
+    )
+    ingest.add_argument(
         "--isolation",
         choices=[str(i) for i in Isolation],
         default=str(Isolation.SUBPROCESS),
@@ -160,7 +172,41 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument(
         "-v", "--verbose", action="store_true", help="one progress line per job event on stderr"
     )
+    _init_manifest_parser(commands)
     return parser
+
+
+def _init_manifest_parser(commands: "argparse._SubParsersAction[argparse.ArgumentParser]") -> None:
+    init = commands.add_parser(
+        "init-manifest",
+        help="write a commented neptune.yaml for a folder from what discovery finds",
+        description=_INIT_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    init.add_argument("folder", help="the folder to describe")
+    init.add_argument(
+        "-o",
+        "--output",
+        metavar="FILE",
+        help="where to write it; '-' for stdout (default: FOLDER/neptune.yaml)",
+    )
+    init.add_argument("--force", action="store_true", help="overwrite an existing file")
+    init.add_argument("-w", "--workspace", metavar="DIR", help="the workspace, as for ingest")
+    init.add_argument(
+        "--isolation",
+        choices=[str(i) for i in Isolation],
+        default=str(Isolation.SUBPROCESS),
+        help="where adapter probes run, as for ingest",
+    )
+    init.add_argument("--allow-degraded-sandbox", action="store_true", help="as for ingest")
+
+
+_INIT_DESCRIPTION: Final = """\
+Write a manifest for a folder from one dry run of it: the probe's ties, the session readings
+grouping contests, the proposals and the probe's winners, each as a commented choice, and
+templates for the machines, sites, tasks and software no file states. As written it declares
+nothing; uncomment the lines that are true. The same folder gives the same text. An existing
+file is never overwritten without --force."""
 
 
 def _positive(text: str) -> int:
@@ -207,6 +253,10 @@ def run(
     if args.command is None:
         parser.print_usage(stderr)
         return exit_codes.USAGE
+    if args.command == "init-manifest":
+        return _InitManifest(args, stdout, stderr).run()
+    if args.manifest is not None and args.no_manifest:
+        return _usage(stderr, "--manifest and --no-manifest contradict each other")
     if args.dry_run and args.out is not None:
         return _usage(stderr, "--dry-run writes no package; drop --out")
     if not args.dry_run and args.out is None:
@@ -238,9 +288,14 @@ class _Ingest:
         args = self.args
         try:
             client = Neptune(args.workspace, options=self._options())
+            manifest: str | Literal[False] | None = False if args.no_manifest else args.manifest
             if args.dry_run:
                 result = client.dry_run(
-                    args.source, on_event=self._event, cancel=self.cancel, resume=args.resume
+                    args.source,
+                    on_event=self._event,
+                    cancel=self.cancel,
+                    resume=args.resume,
+                    manifest=manifest,
                 )
             else:
                 result = client.ingest(
@@ -249,6 +304,7 @@ class _Ingest:
                     on_event=self._event,
                     cancel=self.cancel,
                     resume=args.resume,
+                    manifest=manifest,
                 )
             return self._done(result)
         except NeptuneError as exc:
@@ -422,3 +478,55 @@ def _json(value: object) -> str:
 def _text(value: str) -> str:
     """A command-line or path string as printable text: undecodable bytes as ``\\x..`` escapes."""
     return value.encode("utf-8", "surrogateescape").decode("utf-8", "backslashreplace")
+
+
+class _InitManifest:
+    """One ``neptune init-manifest`` invocation (ADR 0047 §7)."""
+
+    def __init__(self, args: argparse.Namespace, stdout: TextIO, stderr: TextIO) -> None:
+        self.args, self.stdout, self.stderr = args, stdout, stderr
+
+    def _fail(self, code: str, message: str) -> int:
+        self.stderr.write(f"neptune: {code}: {message}\n")
+        return exit_codes.for_code(code)
+
+    def run(self) -> int:
+        args = self.args
+        folder = Path(args.folder)
+        if not folder.is_dir():
+            return self._fail("invalid_source", f"{_text(args.folder)} is not a folder")
+        target = None if args.output == "-" else Path(args.output or folder / MANIFEST_NAMES[0])
+        if target is not None and (target.exists() or target.is_symlink()) and not args.force:
+            return self._fail(
+                "destination_exists", f"{_text(os.fspath(target))} exists; --force overwrites it"
+            )
+        try:
+            options = JobOptions(
+                isolation=Isolation(args.isolation),
+                allow_degraded_sandbox=args.allow_degraded_sandbox,
+            )
+            text = generate(folder, Neptune(args.workspace, options=options))
+            parse_bytes(text.encode("utf-8"), MANIFEST_NAMES[0])  # what it writes, it reads
+        except JobError as exc:
+            return self._fail("invalid_configuration", str(exc))
+        except NeptuneError as exc:
+            return self._fail(exc.code, str(exc))
+        except ManifestError as exc:
+            return self._fail("invalid_configuration", str(exc))
+        except Exception as exc:  # a bug: say so, with the traceback, and a stable code
+            traceback.print_exception(exc, file=self.stderr)
+            return self._fail("internal", f"{type(exc).__name__}: {exc}")
+        if target is None:
+            self.stdout.write(text)
+            self.stdout.flush()
+            return exit_codes.OK
+        staging = target.with_name(f".{target.name}.neptune-tmp")
+        try:
+            staging.write_text(text, encoding="utf-8")
+            staging.replace(target)
+        except OSError as exc:
+            with contextlib.suppress(OSError):
+                staging.unlink()
+            return self._fail("invalid_destination", f"{_text(os.fspath(target))}: {exc.strerror}")
+        self.stdout.write(f"wrote {_text(os.fspath(target))}\n")
+        return exit_codes.OK

@@ -1,0 +1,368 @@
+{
+  "$defs": {
+    "aliases": {
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "items": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        ]
+      },
+      "description": "Other identifiers the evidence uses for this entity, by namespace.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$"
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://neptune.dev/schema/manifest/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "An optional neptune.yaml (or .json) at the root of a folder: declarations the evidence does not make. Everything it declares is stated, with the manifest as its source (docs/manifest.md).",
+  "properties": {
+    "adapters": {
+      "oneOf": [
+        {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "options": {
+                "description": "An adapter's options by name (see the adapter's descriptor).",
+                "propertyNames": {
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "options"
+            ],
+            "type": "object"
+          },
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "grouping": {
+      "additionalProperties": false,
+      "properties": {
+        "gap_seconds": {
+          "maximum": 86400,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "machines": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "A robot or vehicle.",
+            "properties": {
+              "aliases": {
+                "$ref": "#/$defs/aliases"
+              },
+              "description": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "embodiment": {
+                "examples": [
+                  "manipulator",
+                  "mobile_base",
+                  "mobile_manipulator",
+                  "legged",
+                  "humanoid",
+                  "aerial",
+                  "marine",
+                  "ground_vehicle",
+                  "fleet",
+                  "other"
+                ],
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "id": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "neptune": {
+      "const": 1,
+      "description": "The manifest schema version."
+    },
+    "runs": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "A declared session (ADR 0036 §6).",
+            "properties": {
+              "description": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "machine": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "paths": {
+                "items": {
+                  "description": "Root-relative, '/'-separated: a file, or a directory and all below it.",
+                  "minLength": 1,
+                  "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$",
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "site": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                "type": "string"
+              },
+              "software": {
+                "items": {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "task": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "paths"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sites": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "A place where runs happened.",
+            "properties": {
+              "aliases": {
+                "$ref": "#/$defs/aliases"
+              },
+              "description": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "id": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "software": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "Software a run used.",
+            "properties": {
+              "aliases": {
+                "$ref": "#/$defs/aliases"
+              },
+              "description": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "id": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "version": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sources": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "Which adapter reads the files a path or glob matches.",
+            "oneOf": [
+              {
+                "required": [
+                  "path"
+                ]
+              },
+              {
+                "required": [
+                  "glob"
+                ]
+              }
+            ],
+            "properties": {
+              "adapter": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                "type": "string"
+              },
+              "glob": {
+                "description": "Ignore-rule glob syntax, anchored at the root.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "options": {
+                "description": "An adapter's options by name (see the adapter's descriptor).",
+                "propertyNames": {
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                },
+                "type": "object"
+              },
+              "path": {
+                "description": "Root-relative, '/'-separated: a file, or a directory and all below it.",
+                "minLength": 1,
+                "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "adapter"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tasks": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "What a run was for.",
+            "properties": {
+              "aliases": {
+                "$ref": "#/$defs/aliases"
+              },
+              "description": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "id": {
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                "type": "string"
+              },
+              "name": {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "neptune"
+  ],
+  "title": "Neptune manifest",
+  "type": "object"
+}
