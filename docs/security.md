@@ -44,7 +44,7 @@ Not in place yet (MVL-10): subprocess isolation, CPU/memory/time limits, crash c
 | M2 (MVL-8) | done: containers are inspected, never extracted: member names listed verbatim and never resolved; decoding bounded by `ProbePolicy` (members, decoded bytes, depth, declared ratio); a crashing probe is a finding (ADR 0027) |
 | M2 (MVL-75) | done: walk findings, archive-bomb limits, truncation detection, scratch-space policy, hostile fixture suite (ADR 0029) |
 | M2 (MVL-10) | subprocess isolation, CPU/memory/time limits, crash capture (file handling and the adversarial seed landed with MVL-75) |
-| M2 (MVL-16) | local-only mode |
+| M2 (MVL-16) | done: local-only mode on by default, network use refused until allowed; sources read in place and verified chunk by chunk; materialised and exported sources read through `LocalSource`, and package files opened with `O_NOFOLLOW`, regular files only (ADR 0026) |
 | M6 (MVL-28/29) | malformed PDF/image safeguards; no active content execution |
 | M9 | auth/profile handling for connectors; presigned uploads; idempotency keys |
 | M10 (MVL-50) | consolidated adversarial suite; sandbox escape and exhaustion tests as acceptance |
