@@ -193,7 +193,10 @@ def test_a_package_never_depends_on_what_earlier_jobs_saw(
     assert all(not r.supersedes for r in listed)  # one revision per file, each its chain's first
     kept = Workspace(home).load_ledger(corpus)
     history = len(kept.revisions()) + len(kept.absences())
-    assert history == len(listed) if change == "unchanged" else history > len(listed)
+    if change == "unchanged" or kind == "dry_run":  # a dry run saves no ledger (ADR 0044 §2)
+        assert history == len(listed)
+    else:
+        assert history > len(listed)
 
 
 def test_a_dry_run_through_the_sandbox_predicts_the_ingest(corpus: Path, tmp_path: Path) -> None:
@@ -205,7 +208,7 @@ def test_a_dry_run_through_the_sandbox_predicts_the_ingest(corpus: Path, tmp_pat
 
     seen: list[JobEvent] = []
     result = client.ingest(corpus, tmp_path / "package", on_event=seen.append)
-    assert result.cache.calls.plan == 0  # the dry run's plans
+    assert result.cache.calls.plan == TEXT_FILES  # a dry run keeps no plan (ADR 0044 §2)
     assert chunks_of(seen, "chunk_committed") == predicted
 
 

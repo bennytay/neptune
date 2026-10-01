@@ -79,14 +79,19 @@ def test_a_dry_run_after_an_ingest_finds_every_chunk_committed(root: Path, tmp_p
     assert outcome.cache.calls.plan == 0 and outcome.cache.calls.ingest == 0
 
 
-def test_the_plans_a_dry_run_saves_are_the_ones_a_run_reuses(root: Path, tmp_path: Path) -> None:
+def test_a_dry_run_keeps_nothing_so_the_run_after_it_plans_afresh(
+    root: Path, tmp_path: Path
+) -> None:
+    """ADR 0044 §2 (amending ADR 0035 §4): the ledger and plans are read, never saved."""
     home = tmp_path / "home"
     IngestJob(root, None, Workspace(home), default_registry()).dry_run()
+    assert not any((home / "ledgers").iterdir()) and not any((home / "plans").iterdir())
     seen: list[JobEvent] = []
     outcome = IngestJob(
         root, tmp_path / "package", Workspace(home), default_registry(), on_event=seen.append
     ).run()
-    assert outcome.state is JobState.COMMITTED and outcome.cache.calls.plan == 0
-    assert all(e.details["reused"] for e in seen if e.kind == "source_planned")
+    assert outcome.state is JobState.COMMITTED and outcome.cache.calls.plan == 1
+    assert not any(e.details["reused"] for e in seen if e.kind == "source_planned")
+    assert all(e.details["new_revision"] for e in seen if e.kind == "source_hashed")
     fresh = IngestJob(root, tmp_path / "fresh", Workspace(tmp_path / "w2"), default_registry())
     assert fresh.run().package == outcome.package

@@ -175,17 +175,17 @@ def test_a_dry_run_plans_every_source_and_parses_nothing(
     with pytest.raises(InvalidRequestError):
         plan.read_package()
 
-    # The plans it saved are the ones ingest uses: no adapter plans twice.
+    # It kept nothing (ADR 0044 §2): the ingest after it plans every source itself.
     result = Neptune(home).ingest(root, tmp_path / "package")
-    assert result.cache.calls.plan == 0 and result.cache.calls.ingest > 0
-    assert all(source.plan.rule == "planned" for source in result.cache.sources)
+    assert result.cache.calls.plan == 2 and result.cache.calls.ingest > 0
+    assert all(source.plan.rule == "source_new" for source in result.cache.sources)
 
 
 def test_the_one_call_dry_run_is_the_client_call(root: Path, home: Path, tmp_path: Path) -> None:
     plan = dry_run(root, workspace=home)
     assert plan.planned and plan.cache == Neptune(tmp_path / "other").dry_run(root).cache
-    again = Neptune(home).dry_run(root)  # the plans the first saved are reused
-    assert again.cache.calls.plan == 0 and again.cache.calls.ingest == 0
+    again = Neptune(home).dry_run(root)  # the first kept nothing to reuse (ADR 0044 §2)
+    assert again.cache == plan.cache and again.cache.calls.ingest == 0
 
 
 def test_a_dry_run_of_a_folder_whose_package_exists_is_still_a_dry_run(
