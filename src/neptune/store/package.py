@@ -227,13 +227,27 @@ def package_contents(
 
 
 def _derived_table(kind: str, lines: Iterable[JsonObject], transforms: set[str]) -> bytes:
-    """A derived table's bytes, sorted by id, checked as the reader checks them."""
-    if not _DERIVED.fullmatch(derived_path(kind)):
+    """A derived table's bytes, sorted by id, each line checked as the reader checks it.
+
+    ``lines`` may be lazy: each is encoded and checked as it arrives, so only the table's bytes
+    are held, never its JSON objects. Lines given in id order (as a grouping gives them) are
+    joined as they come; any other order is sorted once, by id.
+    """
+    path = derived_path(kind)
+    if not _DERIVED.fullmatch(path):
         raise PackageError(f"not a derived table kind: {kind!r}")
-    encoded = sorted((_derived_key(kind, line), canonical_json.dumps(line)) for line in lines)
-    data = b"".join(line + b"\n" for _, line in encoded)
-    _check_derived(kind, data, transforms)
-    return data
+    encoded: list[tuple[str, bytes]] = []
+    ordered = True
+    for line in lines:
+        key = _derived_line(kind, line, transforms)
+        ordered = ordered and (not encoded or encoded[-1][0] < key)
+        encoded.append((key, canonical_json.dumps(line) + b"\n"))
+    if not ordered:
+        encoded.sort(key=lambda entry: entry[0])
+        keys = [key for key, _ in encoded]
+        if len(set(keys)) != len(keys):
+            raise PackageError(f"{path} must name each id once")
+    return b"".join(line for _, line in encoded)
 
 
 def _derived_key(kind: str, line: JsonValue) -> str:
@@ -242,32 +256,42 @@ def _derived_key(kind: str, line: JsonValue) -> str:
     return str(line["id"])
 
 
+def _derived_line(kind: str, line: JsonValue, transforms: set[str]) -> str:
+    """One derived line's structure (``_check_derived``); its id."""
+    path = derived_path(kind)
+    if not isinstance(line, Mapping) or line.get("kind") != kind:
+        raise PackageError(f"{path} holds a line that is not a {kind}")
+    version = line.get("schema_version")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise PackageError(f"{path} holds a line without a derived schema_version")
+    key = _derived_key(kind, line)
+    try:
+        parse_record_id(key)
+    except ValueError as exc:
+        raise PackageError(f"{path}: {exc}") from exc
+    transform = line.get("transform")
+    if not isinstance(transform, str) or transform not in transforms:
+        raise PackageError(f"{path} holds a line whose transform is not in the package")
+    return key
+
+
 def _check_derived(kind: str, data: bytes, transforms: set[str]) -> tuple[JsonObject, ...]:
     """The structure of one derived table: canonical lines, each a ``kind`` object with an
     integer ``schema_version``, a record ``id`` and a ``transform`` the package holds, sorted by
     id, each id once. Its meaning is ``neptune.derived``'s to check."""
     path = derived_path(kind)
     lines: list[JsonObject] = []
+    previous: str | None = None
     for raw in data.splitlines(keepends=True):
         line = _load(raw.removesuffix(b"\n"), path)
         if not raw.endswith(b"\n") or canonical_json.dumps(line) + b"\n" != raw:
             raise PackageError(f"{path} is not one canonical line per record")
-        if not isinstance(line, Mapping) or line.get("kind") != kind:
-            raise PackageError(f"{path} holds a line that is not a {kind}")
-        version = line.get("schema_version")
-        if isinstance(version, bool) or not isinstance(version, int) or version < 1:
-            raise PackageError(f"{path} holds a line without a derived schema_version")
-        try:
-            parse_record_id(_derived_key(kind, line))
-        except ValueError as exc:
-            raise PackageError(f"{path}: {exc}") from exc
-        transform = line.get("transform")
-        if not isinstance(transform, str) or transform not in transforms:
-            raise PackageError(f"{path} holds a line whose transform is not in the package")
+        key = _derived_line(kind, line, transforms)
+        if previous is not None and key <= previous:
+            raise PackageError(f"{path} must be sorted by id, each id once")
+        previous = key
+        assert isinstance(line, Mapping)  # _derived_line refuses anything else
         lines.append(line)
-    keys = [str(line["id"]) for line in lines]
-    if keys != sorted(set(keys)):
-        raise PackageError(f"{path} must be sorted by id, each id once")
     return tuple(lines)
 
 

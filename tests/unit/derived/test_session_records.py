@@ -62,12 +62,14 @@ def proposal(**changes: Any) -> SessionProposal:
 
 
 def test_every_record_of_a_real_grouping_reads_back_as_itself() -> None:
+    paths = (b"x_0.mcap", b"x_1.mcap", b"notes.txt", b"run_1/\xffa.bag", b"b.ulg")
+    nested = (b"drive_1/a.mcap", b"drive_1/camera_2024-05-01_12-30-00/f.png")
     layout = layout_of(
-        [file(p) for p in (b"x_0.mcap", b"x_1.mcap", b"notes.txt", b"run_1/\xffa.bag", b"b.ulg")],
-        [LayoutLink(LocalPath("latest"), b"run_1")],
+        [file(p) for p in (*paths, *nested)], [LayoutLink(LocalPath("latest"), b"run_1")]
     )
     grouping = GROUPER.propose(layout)
     assert grouping.proposals and grouping.unassigned
+    assert any(p.includes for p in grouping.proposals)
     for record in grouping.proposals:
         data = record.to_json()
         assert data["kind"] == "session_proposal" and data["assertion_kind"] == "inferred"
@@ -121,6 +123,8 @@ def edit(data: dict[str, Any], **changes: Any) -> dict[str, Any]:
         (lambda d: edit(d, rule="recording_file", id="rec:sha256:" + "0" * 64), "id does not"),
         (lambda d: edit(d, status="contested"), "contested exactly when"),
         (lambda d: edit(d, members=[]), "at least one file"),
+        (lambda d: edit(d, includes=[d["id"]]), "includes must be other"),
+        (lambda d: edit(d, includes=["rec:sha256:" + "0" * 64]), "contests every proposal"),
         (lambda d: edit(d, members=d["members"] * 2), "each path once"),
         (lambda d: edit(d, directory={"kind": "external"}), "external"),
         (lambda d: edit(d, reasons=[{"rule": "x", "message": "a\nb", "details": {}}]), "one line"),
@@ -132,6 +136,13 @@ def test_a_proposal_reader_refuses_what_a_grouper_never_writes(
     data = dict(proposal().to_json())
     with pytest.raises((ValueError, TypeError, KeyError), match=error):
         session_proposal_from_json(change(data))
+
+
+def test_an_include_is_part_of_what_the_proposal_is() -> None:
+    inner = proposal(members=[member(b"run_1/a.mcap")])
+    outer = proposal(includes=[inner.id], contested=[inner.id])
+    assert outer.includes == (inner.id,) and outer.id != proposal(contested=[inner.id]).id
+    assert session_proposal_from_json(outer.to_json()) == outer
 
 
 def test_contested_names_others_never_itself() -> None:

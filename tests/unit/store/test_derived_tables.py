@@ -62,7 +62,7 @@ def test_derived_tables_land_apart_from_the_evidence_and_read_back(tmp_path: Pat
 def test_the_order_lines_are_given_in_never_shows() -> None:
     records, grouping = ledger_and_grouping()
     tables = grouping.tables()
-    reversed_tables = {kind: list(reversed(lines)) for kind, lines in tables.items()}
+    reversed_tables = {kind: list(lines)[::-1] for kind, lines in grouping.tables().items()}
     assert package_files(records, derived=tables) == package_files(records, derived=reversed_tables)
 
 
@@ -76,7 +76,7 @@ def test_absent_and_empty_are_different_packages() -> None:
 
 
 def first_line(grouping: Grouping) -> dict[str, Any]:
-    return dict(grouping.tables()["session_proposal"][0])
+    return dict(next(grouping.tables()["session_proposal"]))
 
 
 @pytest.mark.parametrize(

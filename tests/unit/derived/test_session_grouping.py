@@ -6,7 +6,9 @@ import os
 import subprocess
 import sys
 import time
+import tracemalloc
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Final
@@ -20,6 +22,8 @@ from neptune.derived.grouping import (
     CONFIDENCE,
     CONTESTED,
     DECLARATION_UNMATCHED,
+    DEPTH_LIMIT,
+    OUTER_NESTING_LIMIT,
     DeclaredSession,
     Grouping,
     GroupingConfig,
@@ -35,6 +39,7 @@ from neptune.derived.sessions import (
     Role,
     SessionProposal,
     Status,
+    session_proposal,
 )
 from neptune.discovery.layout import Layout, LayoutFile, layout_from_scan, layout_of
 from neptune.discovery.scan import scan
@@ -78,6 +83,11 @@ def text(location: LocalPath | RawLocalPath) -> str:
     return location.raw.decode("utf-8", "backslashreplace")
 
 
+def where(proposal: SessionProposal) -> str:
+    place = proposal.directory
+    return text(place) if isinstance(place, (LocalPath, RawLocalPath)) else ""
+
+
 def members(proposal: SessionProposal) -> set[str]:
     return {text(member.location) for member in proposal.members}
 
@@ -86,8 +96,14 @@ def recordings(proposal: SessionProposal) -> set[str]:
     return {text(m.location) for m in proposal.members if m.role is Role.RECORDING}
 
 
+def extent(grouping: Grouping, proposal: SessionProposal) -> set[str]:
+    """Every file the proposal reads as one session: its members and its includes'."""
+    return {text(member.location) for member in grouping.extent(proposal)}
+
+
 def by_members(grouping: Grouping) -> dict[frozenset[str], SessionProposal]:
-    return {frozenset(members(p)): p for p in grouping.proposals}
+    """Each proposal by the files it groups: its extent."""
+    return {frozenset(extent(grouping, p)): p for p in grouping.proposals}
 
 
 def unassigned(grouping: Grouping) -> dict[str, tuple[Placement, str, int]]:
@@ -313,6 +329,8 @@ def test_a_session_directory_holding_one_more_is_contested_with_the_readings_ins
     inner = found[frozenset({camera + "frame_0001.png", camera + "frame_0002.png"})]
     robot = found[frozenset({"drive_07/robot.mcap"})]
     assert outer.directory == LocalPath("drive_07") and inner.directory == LocalPath(camera[:-1])
+    # The outer reading holds its own file and includes the inner reading, never its files.
+    assert members(outer) == {"drive_07/robot.mcap"} and outer.includes == (inner.id,)
     assert set(outer.contested) == {inner.id, robot.id}
     assert outer.reasons[0].details["inner"] == "camera_2024-05-01_12-30-00"
     assert codes(grouping) == [CONTESTED]
@@ -567,7 +585,10 @@ def synthetic(*paths: bytes) -> Layout:
 def test_an_empty_layout_proposes_nothing() -> None:
     grouping = LayoutGrouper().propose(Layout(()))
     assert grouping.proposals == () and grouping.unassigned == () and grouping.findings == ()
-    assert grouping.tables() == {"session_proposal": [], "session_unassigned": []}
+    assert {kind: list(lines) for kind, lines in grouping.tables().items()} == {
+        "session_proposal": [],
+        "session_unassigned": [],
+    }
 
 
 def test_one_recording_at_the_root_is_one_session_at_the_root() -> None:
@@ -604,7 +625,7 @@ def as_json(grouping: Grouping) -> bytes:
     return canonical_json.dumps(
         {
             "findings": [f.to_json() for f in grouping.findings],
-            "tables": grouping.tables(),
+            "tables": {kind: list(lines) for kind, lines in grouping.tables().items()},
             "transform": grouping.transform.to_json(),
         }
     )
@@ -634,7 +655,10 @@ from neptune.identity.revisions import SourceLedger
 
 result = scan(LocalSource(Path(sys.argv[1])), SourceLedger())
 grouping = LayoutGrouper().propose(layout_from_scan(result.observations, result.symlinks))
-tables = {"f": [f.to_json() for f in grouping.findings], "t": grouping.tables()}
+tables = {
+    "f": [f.to_json() for f in grouping.findings],
+    "t": {kind: list(lines) for kind, lines in grouping.tables().items()},
+}
 sys.stdout.buffer.write(canonical_json.dumps(tables))
 """
 
@@ -760,3 +784,119 @@ def test_wide_directories_group_in_near_linear_time_with_bounded_candidates() ->
     assert len(outer.contested) == n + 1  # every recording beside the camera, and the camera
     inner = [p for p in grouping.proposals if outer.id in p.contested]
     assert all(p.contested == (outer.id,) for p in inner)
+
+
+def chain(depth: int, name: bytes = b"notes.txt") -> Layout:
+    """``run_1/`` nested ``depth`` deep, with a file of its own at every level."""
+    return synthetic(*(b"run_1/" * level + name for level in range(1, depth + 1)))
+
+
+def table_bytes(grouping: Grouping) -> int:
+    lines = (line for table in grouping.tables().values() for line in table)
+    return sum(len(canonical_json.dumps(line)) + 1 for line in lines)
+
+
+def test_a_reading_of_nested_session_directories_includes_the_inner_one_by_id() -> None:
+    depth = 400
+    layout = chain(depth)
+    started = time.perf_counter()
+    grouping = LayoutGrouper().propose(layout)
+    size = table_bytes(grouping)
+    assert time.perf_counter() - started < 1  # about 0.02 s; a reading of every file below
+    assert size < 1_000_000  # each level took minutes and ~depth^3 bytes
+    outers = [p for p in grouping.proposals if p.includes]
+    assert (
+        len(outers) == OUTER_NESTING_LIMIT - 1
+    )  # the leaf spans one directory, each outer one more
+    by_id = {p.id: p for p in grouping.proposals}
+    for outer in outers:
+        [own] = outer.members
+        assert text(own.location) == where(outer) + "/notes.txt"
+        [inner] = outer.includes
+        assert inner in outer.contested and outer.id in by_id[inner].contested
+    deepest = max(outers, key=lambda p: len(p.members[0].location.raw))
+    assert len(grouping.extent(deepest)) == 2
+    [limit] = [f for f in grouping.findings if f.code == DEPTH_LIMIT]
+    above = depth - OUTER_NESTING_LIMIT
+    assert limit.subject == local_location(b"/".join([b"run_1"] * above))
+    assert limit.category == "limit" and limit.details["limit"] == OUTER_NESTING_LIMIT
+    # Above the limit, each level's note stays where the rules leave it: unassigned.
+    assert len(grouping.unassigned) == above
+
+
+def test_a_chain_far_past_the_limit_costs_its_files_not_its_depth_squared() -> None:
+    layout = chain(2000)
+    paths = sum(len(file.path) for file in layout.files)
+    tracemalloc.start()
+    try:
+        grouping = LayoutGrouper().propose(layout)
+        size = table_bytes(grouping)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    # About 40 MB for 12 MB of path bytes; a reading of every file below every level would be
+    # two million members of up to 12 KB each.
+    assert peak < 200_000_000
+    assert size < 2 * paths
+    assert [f.code for f in grouping.findings].count(DEPTH_LIMIT) == 1
+    assert len(grouping.proposals) == OUTER_NESTING_LIMIT
+
+
+def test_a_directory_whose_inner_one_is_a_collection_is_a_collection_too() -> None:
+    grouping = LayoutGrouper().propose(
+        synthetic(
+            b"drive_1/plan.pdf",
+            b"drive_1/day_run_1/run_1/a.mcap",
+            b"drive_1/day_run_1/run_2/b.mcap",
+        )
+    )
+    assert sorted(where(p) for p in grouping.proposals) == [
+        "drive_1/day_run_1/run_1",
+        "drive_1/day_run_1/run_2",
+    ]
+    assert unassigned(grouping) == {"drive_1/plan.pdf": (Placement.UNKNOWN, "no_session", 0)}
+
+
+def test_an_outer_reading_keeps_a_note_ambiguous_among_the_sessions_beside_it() -> None:
+    grouping = LayoutGrouper().propose(
+        synthetic(
+            b"drive_1/a.mcap",
+            b"drive_1/b.mcap",
+            b"drive_1/notes.txt",
+            b"drive_1/camera_2024-05-01_12-30-00/f.png",
+        )
+    )
+    found = by_members(grouping)
+    outer = next(p for p in grouping.proposals if p.includes)
+    assert members(outer) == {"drive_1/a.mcap", "drive_1/b.mcap", "drive_1/notes.txt"}
+    a, b = found[frozenset({"drive_1/a.mcap"})], found[frozenset({"drive_1/b.mcap"})]
+    # The outer reading holds the note; the readings inside leave it ambiguous between a and b.
+    # Both records stand, so a consumer choosing either reading knows where the note is.
+    [note] = grouping.unassigned
+    assert text(note.location) == "drive_1/notes.txt"
+    assert note.placement is Placement.AMBIGUOUS and set(note.candidates) == {a.id, b.id}
+    assert AMBIGUOUS_MEMBER in codes(grouping)
+    assert {a.id, b.id} <= set(outer.contested)
+
+
+def test_a_broken_include_or_contest_is_caught() -> None:
+    layout = synthetic(b"drive_1/a.mcap", b"drive_1/camera_2024-05-01_12-30-00/f.png")
+    grouping = LayoutGrouper().propose(layout)
+    outer = next(p for p in grouping.proposals if p.includes)
+    others = tuple(p for p in grouping.proposals if p is not outer)
+    nowhere = others[0].members[0].revision  # a record id, but no proposal's
+    ghost = session_proposal(
+        transform=grouping.transform.id,
+        rule=outer.rule,
+        confidence=outer.confidence,
+        directory=outer.directory,
+        members=outer.members,
+        includes=[nowhere],
+        contested=[nowhere],
+    )
+    with pytest.raises(ValueError, match="no proposal of this grouping"):
+        check_grouping(replace(grouping, proposals=(*others, ghost)), layout)
+    parts = LayoutGrouper().propose(synthetic(b"x_0.bag", b"x_1.bag"))
+    lonely = tuple(replace(p, contested=(), status=Status.PROPOSED) for p in parts.proposals)
+    with pytest.raises(ValueError, match="contest exactly"):
+        check_grouping(replace(parts, proposals=lonely), synthetic(b"x_0.bag", b"x_1.bag"))

@@ -15,9 +15,10 @@ and reaches a package as derived tables beside the evidence, never as ``Run`` re
 3. **Session directories.** A directory whose name states a date-time or a session keyword with a
    number (``run_007``, ``episode-3``) is one session holding everything below it, unless it holds
    such directories itself: with two or more it is a collection, with exactly one (and files of its
-   own) its reading as one session is contested with the readings inside it. A session directory
-   whose recordings' names state times more than ``gap_seconds`` apart is contested with a reading
-   split at those gaps.
+   own) its reading as one session is contested with the readings inside it. That reading holds
+   its own files and includes the inner directory's reading by id, and spans at most
+   ``OUTER_NESTING_LIMIT`` nested directories. A session directory whose recordings' names state
+   times more than ``gap_seconds`` apart is contested with a reading split at those gaps.
 4. **Loose recordings** (in no session directory) are each a session, except that recordings in
    one directory whose names state the same time are one session, and times within
    ``gap_seconds`` but not equal are contested between one session and several.
@@ -33,8 +34,8 @@ contents, modification times or probe verdicts are read, so the same tree gives 
 wherever and whenever it is walked, in any walk order.
 """
 
-from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections import Counter, defaultdict
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Final, Protocol
@@ -64,7 +65,6 @@ from neptune.discovery.layout import (
     NameSignals,
     ancestors,
     basename,
-    inside,
     name_signals,
     parent,
 )
@@ -81,6 +81,8 @@ from neptune.model.source import LocalPath, local_location
 GROUPING_ID: Final = "neptune.grouping"
 GROUPING_VERSION: Final = "0.1.0"
 DEFAULT_GAP_SECONDS: Final = 60
+# The most nested session-named directories one reading as a single session spans (ADR 0036 §3).
+OUTER_NESTING_LIMIT: Final = 16
 
 # Recording formats by extension: each file is one recording. v0 reads names only; MVL-34 reads
 # the ``Run`` records adapters emit instead.
@@ -92,7 +94,8 @@ BAG_METADATA: Final = b"metadata.yaml"
 CONTESTED: Final = f"{GROUPING_ID}.contested"
 AMBIGUOUS_MEMBER: Final = f"{GROUPING_ID}.ambiguous_member"
 DECLARATION_UNMATCHED: Final = f"{GROUPING_ID}.declaration_unmatched"
-FINDING_CODES: Final = (AMBIGUOUS_MEMBER, CONTESTED, DECLARATION_UNMATCHED)
+DEPTH_LIMIT: Final = f"{GROUPING_ID}.grouping_depth_limit"
+FINDING_CODES: Final = (AMBIGUOUS_MEMBER, CONTESTED, DECLARATION_UNMATCHED, DEPTH_LIMIT)
 
 # Unassigned reasons.
 NO_SESSION: Final = "no_session"
@@ -244,12 +247,29 @@ class Grouping:
             )
         )
 
-    def tables(self) -> dict[str, list[JsonObject]]:
-        """The package's derived tables, by kind (ADR 0036 §7)."""
+    def tables(self) -> dict[str, Iterator[JsonObject]]:
+        """The package's derived tables, by kind (ADR 0036 §7): each line made as it is read,
+        in id order, so a table is never held whole as JSON objects."""
         return {
-            PROPOSAL_KIND: [proposal.to_json() for proposal in self.proposals],
-            UNASSIGNED_KIND: [entry.to_json() for entry in self.unassigned],
+            PROPOSAL_KIND: (proposal.to_json() for proposal in self.proposals),
+            UNASSIGNED_KIND: (entry.to_json() for entry in self.unassigned),
         }
+
+    def extent(self, proposal: SessionProposal) -> tuple[SessionMember, ...]:
+        """Every file ``proposal`` groups: its members and, transitively, those of the
+        proposals it includes, by location."""
+        by_id = {p.id: p for p in self.proposals}
+        found: dict[bytes, SessionMember] = {}
+        seen: set[RecordId] = set()
+        pending = [proposal]
+        while pending:
+            current = pending.pop()
+            if current.id in seen:
+                continue
+            seen.add(current.id)
+            found.update((member.location.raw, member) for member in current.members)
+            pending.extend(by_id[inner] for inner in current.includes)
+        return tuple(found[path] for path in sorted(found))
 
     def summary(self) -> JsonObject:
         return {
@@ -274,46 +294,101 @@ class Grouper(Protocol):
 def check_grouping(grouping: Grouping, layout: Layout) -> None:
     """The laws every grouping keeps (ADR 0036 §4); ``ValueError`` names the first one broken.
 
-    - Every file of the layout is a member of some proposal or unassigned, never both, and
-      unassigned once; nothing else is.
-    - A file in two proposals is only ever in contested ones: no silent cross-session merge.
-    - ``contested`` is symmetric, and names and candidates are proposals of this grouping.
+    - A proposal's extent is its members and the extents of the proposals it includes; includes
+      name proposals of this grouping and never loop.
+    - Every file of the layout lies in some extent or is unassigned, and is unassigned at most
+      once; nothing else is either.
+    - ``contested`` names exactly the proposals whose extents share a file with its own: no
+      silent cross-session merge, and a file in two extents is only ever in contested ones.
+    - A file both in an extent and unassigned is held only by contested proposals, and is
+      ambiguous among others that could each hold it (or among too many to name): its
+      placement in the readings that do not hold it.
     - Everything names the grouping's transform.
     """
     files = {file.revision: file.path for file in layout.files}
     proposals = {proposal.id: proposal for proposal in grouping.proposals}
     if len(proposals) != len(grouping.proposals):
         raise ValueError("two proposals share an id")
-    holders: dict[RecordId, list[SessionProposal]] = defaultdict(list)
-    for proposal in grouping.proposals:
+    extents: dict[RecordId, frozenset[RecordId]] = {}
+    for pid in _include_order(proposals):
+        proposal = proposals[pid]
         if proposal.transform != grouping.transform.id:
-            raise ValueError(f"proposal {proposal.id} names another transform")
+            raise ValueError(f"proposal {pid} names another transform")
+        own: set[RecordId] = set()
         for member in proposal.members:
             if files.get(member.revision) != member.location.raw:
-                raise ValueError(f"proposal {proposal.id} holds a file the layout does not")
-            holders[member.revision].append(proposal)
-        for other in proposal.contested:
-            if other not in proposals or proposal.id not in proposals[other].contested:
-                raise ValueError(f"proposal {proposal.id} contests {other} one-sidedly")
-    for revision, held in holders.items():
-        if len(held) > 1 and any(p.status is not Status.CONTESTED for p in held):
-            raise ValueError(f"{files[revision]!r} is in two proposals, not all contested")
+                raise ValueError(f"proposal {pid} holds a file the layout does not")
+            own.add(member.revision)
+        for inner in proposal.includes:
+            own |= extents[inner]
+        extents[pid] = frozenset(own)
+    holders: dict[RecordId, list[RecordId]] = defaultdict(list)
+    for pid in sorted(proposals):
+        for revision in extents[pid]:
+            holders[revision].append(pid)
+    expected: dict[RecordId, set[RecordId]] = defaultdict(set)
+    for held in {tuple(held) for held in holders.values() if len(held) > 1}:
+        for pid in held:
+            expected[pid].update(held)
+    for pid, proposal in proposals.items():
+        if set(proposal.contested) != expected[pid] - {pid}:
+            raise ValueError(
+                f"proposal {pid} must contest exactly the proposals it shares a file with"
+            )
     unassigned: set[RecordId] = set()
     for entry in grouping.unassigned:
         if entry.transform != grouping.transform.id:
             raise ValueError(f"unassigned file {entry.id} names another transform")
         if files.get(entry.revision) != entry.location.raw:
             raise ValueError(f"unassigned file {entry.id} is not a file of the layout")
-        if entry.revision in unassigned or entry.revision in holders:
-            raise ValueError(f"{files[entry.revision]!r} is placed twice")
+        if entry.revision in unassigned:
+            raise ValueError(f"{files[entry.revision]!r} is unassigned twice")
         if any(candidate not in proposals for candidate in entry.candidates):
             raise ValueError(f"unassigned file {entry.id} names a proposal that does not exist")
+        holding = holders.get(entry.revision, [])
+        if holding and (
+            not (entry.candidates or entry.reason == TOO_MANY_SESSIONS)
+            or set(entry.candidates) & set(holding)
+            or any(proposals[pid].status is not Status.CONTESTED for pid in holding)
+        ):
+            raise ValueError(
+                f"{files[entry.revision]!r} is placed twice: held, and not ambiguous among"
+                " other readings beside contested ones"
+            )
         unassigned.add(entry.revision)
     if missing := set(files) - unassigned - set(holders):
         raise ValueError(f"{len(missing)} files are neither proposed nor unassigned")
     for finding in grouping.findings:
         if finding.transform != grouping.transform.id:
             raise ValueError(f"finding {finding.id} names another transform")
+
+
+def _include_order(proposals: Mapping[RecordId, SessionProposal]) -> list[RecordId]:
+    """Every proposal after those it includes; ``ValueError`` for an include that names no
+    proposal or loops back to itself."""
+    order: list[RecordId] = []
+    done: set[RecordId] = set()
+    for root in sorted(proposals):
+        if root in done:
+            continue
+        stack: list[tuple[RecordId, Iterator[RecordId]]] = [(root, iter(proposals[root].includes))]
+        active = {root}
+        while stack:
+            pid, pending = stack[-1]
+            inner = next(pending, None)
+            if inner is None:
+                stack.pop()
+                active.discard(pid)
+                done.add(pid)
+                order.append(pid)
+            elif inner not in proposals:
+                raise ValueError(f"proposal {pid} includes {inner}, no proposal of this grouping")
+            elif inner in active:
+                raise ValueError(f"proposal {pid} includes itself, through {inner}")
+            elif inner not in done:
+                stack.append((inner, iter(proposals[inner].includes)))
+                active.add(inner)
+    return order
 
 
 # --- v0 ----------------------------------------------------------------------------------------
@@ -360,11 +435,13 @@ class _Unit:
 
 @dataclass
 class _Draft:
-    """A proposal being built: members by path, with their role and the rule that placed them."""
+    """A proposal being built: members by path, with their role and the rule that placed them,
+    and the drafts it includes whole (always drafts made before it)."""
 
     rule: Rule
     directory: bytes
     members: dict[bytes, tuple[Role, Rule]] = field(default_factory=dict)
+    includes: list[int] = field(default_factory=list)
     reasons: list[Reason] = field(default_factory=list)
     times: dict[int, str] = field(default_factory=dict)
     stems: set[bytes] = field(default_factory=set)
@@ -436,29 +513,24 @@ class _Proposer:
         self.unassigned: dict[bytes, tuple[str, list[int]]] = {}
         self.findings: list[IngestFinding] = []
         self._signals: dict[bytes, NameSignals] = {}
+        self._near: dict[bytes, bytes] = {ROOT: ROOT}
+        self._extents: dict[int, set[bytes]] = {}
 
     def run(self) -> Grouping:
         remaining = self._declared()
         bags = self._bag_directories(remaining)
         leaves, singles = self._session_directories(remaining, bags)
-        owned: set[bytes] = set()
-        under_leaf: dict[bytes, list[bytes]] = defaultdict(list)
+        # Each file under the nearest session-named directory above it (ROOT for none): a leaf
+        # holds it as its session; any other leaves it loose, and a single's reading holds it.
+        under: dict[bytes, list[bytes]] = defaultdict(list)
         for path in remaining:
-            for directory in ancestors(path):
-                if directory in leaves:
-                    under_leaf[directory].append(path)
-                    break
-        for leaf in sorted(under_leaf):
-            self._session(leaf, under_leaf[leaf], bags)
-            owned.update(under_leaf[leaf])
-        self._loose([path for path in remaining if path not in owned], bags)
-        under_single: dict[bytes, list[bytes]] = defaultdict(list)
-        for path in remaining:
-            for directory in ancestors(path):
-                if directory in singles:
-                    under_single[directory].append(path)
-        for node in sorted(singles):
-            self._outer(node, singles[node], under_single[node], bags)
+            under[self._nearest(parent(path), bags)].append(path)
+        whole: dict[bytes, tuple[int, int]] = {}
+        for leaf in sorted(leaves):
+            whole[leaf] = (self._session(leaf, under[leaf], bags), 1)
+        loose = (path for node, held in under.items() if node not in leaves for path in held)
+        self._loose(sorted(loose), bags)
+        self._outers(singles, under, whole, bags)
         self._links()
         self._same_bytes()
         return self._build()
@@ -664,21 +736,36 @@ class _Proposer:
         self, paths: Sequence[bytes], bags: Mapping[bytes, list[bytes]]
     ) -> tuple[set[bytes], dict[bytes, bytes]]:
         """Leaf session directories, and those holding exactly one (with that one)."""
-        directories = {directory for path in paths for directory in ancestors(path)}
-        candidates = {
-            d
-            for d in directories
-            if d != ROOT and d not in bags and (self._sig(d).time or self._sig(d).keyword)
-        }
+        for path in paths:
+            self._nearest(parent(path), bags)
+        candidates = sorted(d for d, near in self._near.items() if d == near and d != ROOT)
         children: dict[bytes, list[bytes]] = defaultdict(list)
-        for candidate in sorted(candidates):
-            for directory in ancestors(candidate):
-                if directory in candidates:
-                    children[directory].append(candidate)
-                    break
+        for candidate in candidates:
+            above = self._nearest(parent(candidate), bags)
+            if above != ROOT:
+                children[above].append(candidate)
         leaves = {c for c in candidates if not children[c]}
-        singles = {c: children[c][0] for c in sorted(candidates) if len(children[c]) == 1}
+        singles = {c: children[c][0] for c in candidates if len(children[c]) == 1}
         return leaves, singles
+
+    def _nearest(self, directory: bytes, bags: Mapping[bytes, list[bytes]]) -> bytes:
+        """The nearest session-named directory at or above ``directory``; ``ROOT`` for none.
+
+        Each directory is named and climbed from once, so a tree costs its directories, never
+        its depth once per file. A rosbag2 directory is a recording, never a session.
+        """
+        climb: list[bytes] = []
+        step = directory
+        while step not in self._near:
+            climb.append(step)
+            step = parent(step)
+        found = self._near[step]
+        for step in reversed(climb):
+            signals = self._sig(step)
+            if step not in bags and (signals.time is not None or signals.keyword):
+                found = step
+            self._near[step] = found
+        return self._near[directory]
 
     def _signal_details(self, directory: bytes) -> tuple[str, dict[str, JsonValue]]:
         signals = self._sig(directory)
@@ -689,7 +776,8 @@ class _Proposer:
             "keyword": True
         }
 
-    def _session(self, leaf: bytes, paths: list[bytes], bags: Mapping[bytes, list[bytes]]) -> None:
+    def _session(self, leaf: bytes, paths: list[bytes], bags: Mapping[bytes, list[bytes]]) -> int:
+        """The leaf's reading as one session, by draft index; and its time clusters, if any."""
         units = self._units(paths, bags)
         recordings = {path for unit in units for path in unit.recordings}
         index = self._draft(Rule.SESSION_DIRECTORY, leaf)
@@ -705,7 +793,7 @@ class _Proposer:
         moments = sorted({seconds for seconds, _, _ in timed})
         chains = _chains(moments, self.config.gap_seconds)
         if len(chains) < 2:
-            return
+            return index
         # Each cluster shares its recordings with the whole directory, so they contest (_build).
         chain_of = {moment: number for number, chain in enumerate(chains) for moment in chain}
         clusters: list[list[_Unit]] = [[] for _ in chains]
@@ -726,29 +814,83 @@ class _Proposer:
                     },
                 )
             )
+        return index
 
-    def _outer(
-        self, node: bytes, child: bytes, paths: list[bytes], bags: Mapping[bytes, list[bytes]]
+    def _outers(
+        self,
+        singles: Mapping[bytes, bytes],
+        under: Mapping[bytes, list[bytes]],
+        whole: dict[bytes, tuple[int, int]],
+        bags: Mapping[bytes, list[bytes]],
     ) -> None:
-        """A session directory holding exactly one other: if it has files of its own, its
-        reading as one session holds every file below it, so it contests every reading there."""
-        if all(inside(path, child) for path in paths):
-            return  # it adds nothing to the one inside it
-        recordings = {path for unit in self._units(paths, bags) for path in unit.recordings}
-        index = self._draft(Rule.SESSION_DIRECTORY, node)
-        draft = self.drafts[index]
-        for path in sorted(paths):
-            role = Role.RECORDING if path in recordings else Role.CONTEXT
-            draft.add(path, role, Rule.SESSION_DIRECTORY)
-            self.unassigned.pop(path, None)
-        message, details = self._signal_details(node)
-        draft.reasons.append(
-            Reason(
-                Rule.SESSION_DIRECTORY,
-                f"{message}; it also holds one session-named directory",
-                details | _name("inner", child),
+        """Each session directory holding exactly one other, deepest first: its reading as one
+        session, contested with the readings inside it.
+
+        The reading holds the directory's own files (those not below the one inside it) and
+        includes the inner directory's reading by id, never its files again, so each file is a
+        member of one such reading and a chain of them costs its length. ``whole`` maps each
+        directory to its reading as one session and how many nested directories that spans; a
+        reading spans at most ``OUTER_NESTING_LIMIT``, and where one would span more, a finding
+        says so and none is formed there or above. A directory whose inner one is a collection
+        holds two sessions or more: it is a collection too, with no reading as one session.
+        A file left unassigned beside loose sessions keeps that record (``_build``): it is its
+        placement in the readings inside.
+        """
+        for node in sorted(singles, key=lambda directory: (-directory.count(b"/"), directory)):
+            child = singles[node]
+            if child not in whole:
+                continue  # a collection inside, or a chain past the limit: no reading of it
+            inner, height = whole[child]
+            own = under.get(node, [])
+            if not own:
+                whole[node] = (inner, height)  # it adds nothing to the reading inside it
+                continue
+            if height >= OUTER_NESTING_LIMIT:
+                self.findings.append(self._depth_finding(node, child))
+                continue
+            recordings = {path for unit in self._units(own, bags) for path in unit.recordings}
+            index = self._draft(Rule.SESSION_DIRECTORY, node)
+            draft = self.drafts[index]
+            for path in own:
+                role = Role.RECORDING if path in recordings else Role.CONTEXT
+                draft.add(path, role, Rule.SESSION_DIRECTORY)
+            draft.includes.append(inner)
+            message, details = self._signal_details(node)
+            draft.reasons.append(
+                Reason(
+                    Rule.SESSION_DIRECTORY,
+                    f"{message}; it also holds one session-named directory, whose reading it"
+                    " includes",
+                    details | _name("inner", child),
+                )
             )
+            whole[node] = (index, height + 1)
+
+    def _depth_finding(self, node: bytes, child: bytes) -> IngestFinding:
+        return ingest_finding(
+            code=DEPTH_LIMIT,
+            category=FindingCategory.LIMIT,
+            severity=Severity.WARNING,
+            subject=local_location(node),
+            transform=self.transform,
+            message=f"session-named directories nest more than {OUTER_NESTING_LIMIT} deep"
+            " below here; no reading of this directory, or of one above it, as one session"
+            " was formed",
+            details={"limit": OUTER_NESTING_LIMIT, **_name("inner", child)},
         )
+
+    def _extent(self, index: int) -> Collection[bytes]:
+        """Every file draft ``index`` groups: its members, and its includes' extents."""
+        draft = self.drafts[index]
+        if not draft.includes:
+            return draft.members.keys()
+        extent = self._extents.get(index)
+        if extent is None:
+            extent = set(draft.members)
+            for inner in draft.includes:
+                extent.update(self._extent(inner))
+            self._extents[index] = extent
+        return extent
 
     # --- 4 and 5. loose recordings and their context -------------------------------------------
 
@@ -928,27 +1070,33 @@ class _Proposer:
                     self.drafts[index].links.add((link, LinkRelation.INSIDE))
 
     def _same_bytes(self) -> None:
-        """One reason per proposal per content it shares with files outside it. Empty files
-        are all equal and say nothing, so they are left out. Work is one pass over the files
-        and, per proposal, its members plus a bounded listing."""
+        """One reason per proposal per content its members share with files outside its
+        extent (an included proposal says so of its own members). Empty files are all equal
+        and say nothing, so they are left out. Work is one pass over the files and, per
+        proposal, its extent plus a bounded listing."""
         by_content: dict[str, list[bytes]] = defaultdict(list)
         for path, file in sorted(self.files.items()):
             if file.content_id != _EMPTY:
                 by_content[file.content_id].append(path)
-        for draft in self.drafts:
+        for index, draft in enumerate(self.drafts):
+            extent = self._extent(index)
+            within: Counter[str] | None = None
+            if draft.includes:  # files of the proposals it includes are inside it too
+                within = Counter(self.files[path].content_id for path in extent)
             held: dict[str, list[bytes]] = defaultdict(list)
             for path in sorted(draft.members):
                 held[self.files[path].content_id].append(path)
             for content, inside_draft in sorted(held.items()):
                 everywhere = by_content.get(content, [])
-                outside = len(everywhere) - len(inside_draft)
+                held_here = within[content] if within is not None else len(inside_draft)
+                outside = len(everywhere) - held_here
                 if outside <= 0:
                     continue
                 listed: list[JsonValue] = []
                 for other in everywhere:
                     if len(listed) == _SAME_LISTED:
                         break
-                    if other not in draft.members:
+                    if other not in extent:
                         listed.append(_location_json(other))
                 draft.reasons.append(
                     Reason(
@@ -970,9 +1118,9 @@ class _Proposer:
         ids: list[RecordId] = []
         for draft in self.drafts:
             revisions = [self.files[path].revision for path in draft.members]
-            ids.append(
-                proposal_id(transform, draft.rule, directory_location(draft.directory), revisions)
-            )
+            includes = [ids[inner] for inner in draft.includes]  # each made before it
+            where = directory_location(draft.directory)
+            ids.append(proposal_id(transform, draft.rule, where, revisions, includes))
         first: dict[RecordId, int] = {}
         for index, record in enumerate(ids):
             kept = first.setdefault(record, index)
@@ -982,13 +1130,14 @@ class _Proposer:
                 keep, again = self.drafts[kept], self.drafts[index]
                 keep.reasons.extend(r for r in again.reasons if r not in keep.reasons)
                 keep.links |= again.links
-        # Two proposals contest each other exactly when they share a file: each reading that
-        # holds a file another reading also holds was offered beside it, and none was chosen.
-        # A finding names each connected set of such readings once.
+        # Two proposals contest each other exactly when their extents share a file: each
+        # reading that holds a file another reading also holds was offered beside it, and none
+        # was chosen. A finding names each connected set of such readings once. Files held by
+        # the same readings are one case, so the work is per distinct set of holders.
         holders: dict[bytes, list[int]] = defaultdict(list)
-        for index, draft in enumerate(self.drafts):
+        for index in range(len(self.drafts)):
             if first[ids[index]] == index:
-                for path in draft.members:
+                for path in self._extent(index):
                     holders[path].append(index)
         contested: dict[RecordId, set[RecordId]] = defaultdict(set)
         joined = list(range(len(self.drafts)))
@@ -1000,9 +1149,7 @@ class _Proposer:
             return index
 
         shared: set[int] = set()
-        for held in holders.values():
-            if len(held) < 2:
-                continue
+        for held in {tuple(held) for held in holders.values() if len(held) > 1}:
             shared.update(held)
             for index in held:
                 contested[ids[index]].update(ids[other] for other in held if other != index)
@@ -1030,6 +1177,7 @@ class _Proposer:
                     )
                     for path, (role, rule) in draft.members.items()
                 ],
+                includes=[ids[inner] for inner in draft.includes],
                 links=[
                     SessionLink(link.location, link.target, relation)
                     for link, relation in draft.links
@@ -1040,7 +1188,14 @@ class _Proposer:
         unassigned = []
         ambiguous: dict[bytes, list[bytes]] = defaultdict(list)
         for path, (reason, candidates) in sorted(self.unassigned.items()):
-            named = {ids[first[ids[i]]] for i in candidates}
+            holding = {ids[index] for index in holders.get(path, ())}
+            if holding and not all(contested[pid] for pid in holding):
+                continue  # an uncontested reading holds it: that is its placement
+            named = {ids[first[ids[i]]] for i in candidates} - holding
+            if holding and len(named) < 2 and reason != TOO_MANY_SESSIONS:
+                continue  # only contested readings hold it, and no other leaves it in doubt
+            # Otherwise the record stays, beside any contested reading that holds the file: it
+            # is the file's placement in the readings that do not (ADR 0036 §4).
             file = self.files[path]
             unassigned.append(
                 unassigned_file(
@@ -1065,16 +1220,24 @@ class _Proposer:
         )
 
     def _contested_finding(self, group: list[int]) -> IngestFinding:
+        """One finding per connected set of contesting readings, listing up to ``_LISTED``."""
         drafts = [self.drafts[i] for i in group]
         subject = min(path for draft in drafts for path in draft.members)
-        ordered = sorted(drafts, key=lambda d: (str(d.rule), d.directory, min(d.members)))
+        ordered = sorted(
+            group,
+            key=lambda i: (
+                str(self.drafts[i].rule),
+                self.drafts[i].directory,
+                min(self.drafts[i].members),
+            ),
+        )
         readings: list[JsonValue] = [
             {
-                "directory": directory_location(draft.directory).to_json(),
-                "files": len(draft.members),
-                "rule": str(draft.rule),
+                "directory": directory_location(self.drafts[i].directory).to_json(),
+                "files": len(self._extent(i)),
+                "rule": str(self.drafts[i].rule),
             }
-            for draft in ordered
+            for i in ordered[:_LISTED]
         ]
         rules = sorted({str(draft.rule) for draft in drafts})
         return ingest_finding(
@@ -1087,6 +1250,7 @@ class _Proposer:
             " none was chosen",
             details={
                 "files": len({path for draft in drafts for path in draft.members}),
+                "proposals": len(group),
                 "readings": readings,
                 "rules": rules,
             },

@@ -59,17 +59,28 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
    - A recording outside any session directory is its own session unless a rule above joins it.
      Nothing joins two recordings by default: without a positive signal they stay apart.
    - A session-named directory holding two or more session-named directories is a collection,
-     not a session. A rosbag2 directory is a recording, never a session directory, and sits in
-     its parent like a file. A date alone (`2024-05-01/`) names a day, not a session.
+     not a session; so is one whose only session-named directory is a collection. A rosbag2
+     directory is a recording, never a session directory, and sits in its parent like a file. A
+     date alone (`2024-05-01/`) names a day, not a session.
+   - A session-named directory holding exactly one other, and files of its own, is read as one
+     session by a proposal whose members are its own files (those not below the inner one) and
+     which **includes** the inner directory's reading by id, never listing those files again. So
+     each file is a member of one such reading and nested directories cost their count, not its
+     square. One reading spans at most `OUTER_NESTING_LIMIT` (16) nested session-named
+     directories; where one would span more, a `neptune.grouping.grouping_depth_limit` finding
+     (limit, warning) names the directory and no reading of it, or of any directory above it, as
+     one session is formed. Their files keep the readings the other rules give them.
    - Context files above session directories, or in a directory with no loose session, are
      unassigned: a directory boundary is never crossed by a guess.
    - Parts numbered by a session keyword (`episode_1`, `episode_2`) are separate recordings. Only
      the part number counts: a keyword earlier in the name (`run_3_0.bag`, `run_3_1.bag` from
      rosbag1 `-O run_3 --split`) numbers no session, so those parts are contested like any others.
 4. **Conflicts are contested, never resolved by precedence.** Where two rules read the same files
-   differently, every reading becomes a proposal and none is chosen. Two proposals contest each
-   other exactly when they share a file (status `contested`, each naming the other), so the parts
-   of one reading never contest each other, and the relation costs one pass over the members.
+   differently, every reading becomes a proposal and none is chosen. A proposal's **extent** is
+   its members and the extents of the proposals it includes. Two proposals contest each other
+   exactly when their extents share a file (status `contested`, each naming the other), so the
+   parts of one reading never contest each other, and the relation costs one pass over the
+   extents, which the nesting limit keeps within 16 times the files.
    One `neptune.grouping.contested` finding (ambiguous, warning) per connected set of contesting
    proposals names their rules. The cases:
    - numbered parts with no start time: one recording split, or several numbered recordings;
@@ -78,7 +89,7 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
    - loose recordings whose name times are within `gap_seconds` but not equal: one session
      started in steps, or several;
    - a session directory holding exactly one session-named directory and files of its own: the
-     outer directory, or the readings inside it;
+     outer reading (which includes the inner one), or the readings inside it;
    - two declared sessions claiming one file (two claiming exactly the same files are one
      proposal whose reasons name both).
 
@@ -86,13 +97,20 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
    `ambiguous`, naming them as candidates, with one `neptune.grouping.ambiguous_member` finding per
    directory; with more than 64 candidates it is `unknown` (`too_many_sessions`) instead, since no
    one resolves a choice that wide by hand. A file no rule places is `session_unassigned`,
-   `unknown`. Every file of the layout is
-   a member of some proposal or unassigned, exactly once; a file sits in two proposals only when
-   all of them are contested (`check_grouping`, run on every grouping). Identical bytes at two
-   locations stay two members; each proposal holding one says so (`same_bytes`, one reason per
-   shared content, empty files excepted since all of them are equal).
+   `unknown`. Every file of the layout lies in some proposal's extent or is unassigned, and is
+   unassigned at most once; a file lies in two extents only when all of those proposals are
+   contested (`check_grouping`, run on every grouping). A file may be both: an outer reading
+   holds a note that the loose sessions inside leave ambiguous, and both records stand, since the
+   `ambiguous` record (and its finding) is the note's placement in the readings that do not hold
+   it. Only contested proposals then hold the file, and no candidate does. Identical bytes at
+   two locations stay two members; each proposal holding one says so (`same_bytes`, one reason
+   per content its members share with files outside its extent, empty files excepted since all
+   of them are equal).
    - Names choose numbers, so nothing grouping does is proportional to a number a name states:
      missing part indices are counted and listed only up to 64.
+   - Names choose depth too: each directory is climbed from once, so a tree costs its files and
+     directories, never its depth once per file; a contested finding lists up to 64 readings and
+     counts the rest.
 5. **Links are recorded, never followed or made members.** A link's target is read lexically
    against its own directory (an absolute target, or one leaving the root, resolves to nothing).
    A proposal lists a link as `alias` when the target is its own directory or a member, and as
@@ -108,9 +126,10 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
    line, so nothing reads one as evidence:
    - `session_proposal`: `id`, `transform`, `rule`, `confidence`, `status`, `directory` (a
      location, or `{"kind": "root"}`), `members` (revision id, location, role `recording` or
-     `context`, the rule that placed it and its band), `links`, `reasons` (rule, one line, facts)
-     and `contested`. The id is a record id over the transform, rule, directory and member
-     revisions only, so it never depends on the rest of the grouping.
+     `context`, the rule that placed it and its band), `includes` (proposal ids it holds whole,
+     each also in `contested`), `links`, `reasons` (rule, one line, facts) and `contested`. The
+     id is a record id over the transform, rule, directory, member revisions and includes only,
+     so it never depends on what is said of the rest of the grouping.
    - `session_unassigned`: `id` (over transform and revision), `transform`, `revision`,
      `location`, `placement` (`ambiguous` or `unknown`), `reason` and `candidates`.
    - Derived records point at evidence (revision ids); evidence never points at them. Grouping
@@ -120,7 +139,9 @@ package must stay byte-identical for the same bytes, adapters and config (non-ne
    `derived/<kind>.jsonl`, listed in the manifest and so in the package id. The store checks
    structure only, since it never imports `neptune.derived`: canonical lines, each an object of the
    table's kind with an integer `schema_version`, a record id (sorted, each once) and a
-   `transform` in the package's transform table. `neptune.derived.sessions.read_derived` reads
+   `transform` in the package's transform table. A producer hands its tables over as lazy lines
+   in id order (`Grouping.tables`), and the store encodes and checks each as it arrives, so only
+   the table's bytes are ever held. `neptune.derived.sessions.read_derived` reads
    meaning and refuses kinds it does not define. A present, empty table means its producer ran and
    inferred nothing; an absent table means it did not run. Interpretation still never enters
    `records/`. Imports: `derived/` may import `model`, `identity` and `discovery`; `model`,

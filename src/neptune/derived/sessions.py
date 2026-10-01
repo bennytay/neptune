@@ -5,13 +5,17 @@ A proposal says "these files are one session, because …". A grouper infers it 
 it lives in the package's ``derived/`` tables, never beside the evidence in ``records/``.
 
 - ``SessionProposal``: one candidate session. ``members`` are the files it groups, each with
-  the rule that placed it and that rule's confidence; ``rule`` and ``confidence`` are the rule
-  that formed it. ``reasons`` explain it. ``contested`` names the proposals offering another
-  reading of some of the same files; a contested proposal was not chosen over them, and a file
-  belongs to two proposals only when both are contested.
-- ``UnassignedFile``: a file of the layout no proposal holds, and why: ``ambiguous`` with the
-  proposals that could each hold it, or ``unknown`` when none could. Every file of a layout is a
-  member of some proposal or unassigned, exactly once, so a missing placement is never a blank.
+  the rule that placed it and that rule's confidence; ``includes`` are proposals it holds whole,
+  by id, never by listing their files again. Its *extent* is its members and the extents of what
+  it includes. ``rule`` and ``confidence`` are the rule that formed it; ``reasons`` explain it.
+  ``contested`` names exactly the proposals whose extents share a file with its own: each offers
+  another reading of those files, none was chosen, and a file lies in two extents only when both
+  proposals are contested.
+- ``UnassignedFile``: a file no proposal places in every reading, and why: ``ambiguous`` with
+  the proposals that could each hold it, or ``unknown`` when none could. Every file of a layout
+  lies in some proposal's extent or is unassigned, and is unassigned at most once; a file both
+  held and unassigned is held only by contested proposals and ambiguous among others (the
+  readings that do not hold it), so a missing placement is never a blank.
 
 Derived records carry their own envelope: ``kind``, ``schema_version`` (``DERIVED_SCHEMA_VERSION``,
 not the canonical model's) and ``assertion_kind`` ``"inferred"``, so no reader can take one for
@@ -232,9 +236,14 @@ def reason_from_json(data: JsonValue) -> Reason:
 
 
 def proposal_id(
-    transform: RecordId, rule: str, directory: Directory, revisions: Iterable[RecordId]
+    transform: RecordId,
+    rule: str,
+    directory: Directory,
+    revisions: Iterable[RecordId],
+    includes: Iterable[RecordId] = (),
 ) -> RecordId:
-    """The id of the proposal ``transform`` makes of these files, under ``rule``, at ``directory``.
+    """The id of the proposal ``transform`` makes of these files and the proposals it includes,
+    under ``rule``, at ``directory``.
 
     It covers what the proposal is, not what is said about it (confidence, reasons, links, and
     which proposals contest it), so the id never depends on the rest of the grouping.
@@ -243,6 +252,7 @@ def proposal_id(
         PROPOSAL_KIND,
         {
             "directory": directory.to_json(),
+            "includes": sorted(set(includes)),
             "members": sorted(set(revisions)),
             "rule": rule,
             "transform": transform,
@@ -262,6 +272,7 @@ class SessionProposal:
     status: Status
     directory: Directory
     members: tuple[SessionMember, ...]
+    includes: tuple[RecordId, ...]
     links: tuple[SessionLink, ...]
     reasons: tuple[Reason, ...]
     contested: tuple[RecordId, ...]
@@ -285,6 +296,12 @@ class SessionProposal:
             raise ValueError("members must be sorted by path, each path once")
         if len({member.revision for member in self.members}) != len(self.members):
             raise ValueError("members must name each revision once")
+        for inner in self.includes:
+            parse_record_id(inner)
+        if list(self.includes) != sorted(set(self.includes)) or self.id in self.includes:
+            raise ValueError("includes must be other proposals' ids, sorted, each once")
+        if not set(self.includes) <= set(self.contested):
+            raise ValueError("a proposal contests every proposal it includes")
         links = [link.key() for link in self.links]
         if links != sorted(set(links)):
             raise ValueError("links must be sorted by path and relation, each once")
@@ -297,7 +314,9 @@ class SessionProposal:
             raise ValueError("contested must be other proposals' ids, sorted, each once")
         if (self.status is Status.CONTESTED) != bool(self.contested):
             raise ValueError("a proposal is contested exactly when another proposal contests it")
-        expected = proposal_id(self.transform, self.rule, self.directory, self.revisions())
+        expected = proposal_id(
+            self.transform, self.rule, self.directory, self.revisions(), self.includes
+        )
         if self.id != expected:
             raise ValueError(f"proposal {self.id}: id does not match its content")
 
@@ -311,6 +330,7 @@ class SessionProposal:
             "contested": list(self.contested),
             "directory": self.directory.to_json(),
             "id": self.id,
+            "includes": list(self.includes),
             "kind": self.kind,
             "links": [link.to_json() for link in self.links],
             "members": [member.to_json() for member in self.members],
@@ -329,21 +349,24 @@ def session_proposal(
     confidence: float,
     directory: Directory,
     members: Iterable[SessionMember],
+    includes: Iterable[RecordId] = (),
     links: Iterable[SessionLink] = (),
     reasons: Iterable[Reason] = (),
     contested: Iterable[RecordId] = (),
 ) -> SessionProposal:
-    """A proposal with its id derived, its members and links in canonical order."""
+    """A proposal with its id derived, its members, includes and links in canonical order."""
     ordered = tuple(sorted(members, key=lambda member: member.location.raw))
+    held = tuple(sorted(set(includes)))
     others = tuple(sorted(set(contested)))
     return SessionProposal(
-        id=proposal_id(transform, rule, directory, (member.revision for member in ordered)),
+        id=proposal_id(transform, rule, directory, (member.revision for member in ordered), held),
         transform=transform,
         rule=rule,
         confidence=confidence,
         status=Status.CONTESTED if others else Status.PROPOSED,
         directory=directory,
         members=ordered,
+        includes=held,
         links=tuple(sorted(set(links), key=SessionLink.key)),
         reasons=tuple(reasons),
         contested=others,
@@ -376,6 +399,7 @@ def session_proposal_from_json(data: JsonValue) -> SessionProposal:
             "contested",
             "directory",
             "id",
+            "includes",
             "links",
             "members",
             "reasons",
@@ -392,6 +416,10 @@ def session_proposal_from_json(data: JsonValue) -> SessionProposal:
         status=Status(json_str(obj["status"], "status")),
         directory=directory_from_json(obj["directory"]),
         members=tuple(session_member_from_json(m) for m in json_array(obj["members"], "members")),
+        includes=tuple(
+            parse_record_id(json_str(inner, "includes"))
+            for inner in json_array(obj["includes"], "includes")
+        ),
         links=tuple(session_link_from_json(link) for link in json_array(obj["links"], "links")),
         reasons=tuple(reason_from_json(r) for r in json_array(obj["reasons"], "reasons")),
         contested=tuple(

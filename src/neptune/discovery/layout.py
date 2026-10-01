@@ -294,17 +294,25 @@ class Layout:
         files = {file.path for file in self.files}
         if clash := sorted(files.intersection(link.path for link in self.links)):
             raise ValueError(f"a path cannot be both a file and a link: {clash[0]!r}")
-        for path in files:
-            for directory in ancestors(path)[:-1]:
-                if directory in files:
-                    raise ValueError(f"{path!r} lies below {directory!r}, which is a file")
+        if clash := sorted(files.intersection(_above(files))):
+            raise ValueError(f"a file lies below {clash[0]!r}, which is a file")
 
     def directories(self) -> tuple[bytes, ...]:
         """Every directory holding a file or a link, with its ancestors, the root included."""
-        found = {ROOT}
-        for path in [*(file.path for file in self.files), *(link.path for link in self.links)]:
-            found.update(ancestors(path))
-        return tuple(sorted(found))
+        paths = [*(file.path for file in self.files), *(link.path for link in self.links)]
+        return tuple(sorted(_above(paths)))
+
+
+def _above(paths: Iterable[bytes]) -> set[bytes]:
+    """Every directory above any of ``paths``, the root included. Each climb stops at a
+    directory already found, so a tree costs its directories, never its depth once per path."""
+    found = {ROOT}
+    for path in paths:
+        directory = parent(path)
+        while directory not in found:
+            found.add(directory)
+            directory = parent(directory)
+    return found
 
 
 def layout_of(files: Iterable[LayoutFile], links: Iterable[LayoutLink] = ()) -> Layout:
