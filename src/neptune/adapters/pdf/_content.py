@@ -370,7 +370,10 @@ class Interpreter:
             if len(cache.fonts) >= cache.LIMIT:
                 cache.fonts.clear()
             cache.fonts[key] = (loaded, found)
-            if caught is not None:
+            if caught is not None and key in self._used:
+                # Evicted and loaded again within one page: it was reported at its first use.
+                caught.streams, caught.other = before
+            elif caught is not None:
                 real = (caught.streams - before[0], caught.other - before[1])
                 known = cache.warned.setdefault(key, (real, found))[0]
                 caught.streams += known[0] - real[0]  # a reload may warn less: report the first

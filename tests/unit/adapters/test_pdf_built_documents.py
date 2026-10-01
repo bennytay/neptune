@@ -21,6 +21,7 @@ from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.pdf import PdfAdapter
 from neptune.adapters.pdf._labels import LabelsUnreadable, numeral
 from neptune.discovery.reader import BytesReader
+from neptune.identity import canonical_json
 from neptune.model.knowledge import Known
 from neptune.model.world import (
     BlockRole,
@@ -444,6 +445,37 @@ def test_a_shared_fonts_warnings_are_reported_on_every_page_that_uses_it() -> No
         for size in (3, 1)
     ]
     assert found[0] == found[1] == [("pdf.content_unreadable", page) for page in range(3)]
+
+
+def test_a_font_evicted_and_loaded_again_on_one_page_is_reported_once() -> None:
+    # F1 warns when loaded; 17 other fonts fill the 16-font cache and evict it; F1 is used again.
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    broken = pdf.add(MAKE.Stream({"Filter": MAKE.Name("FlateDecode")}, b"not deflate data at all"))
+    warning = pdf.add(
+        {
+            "Type": MAKE.Name("Font"),
+            "Subtype": MAKE.Name("Type1"),
+            "BaseFont": MAKE.Name("Helvetica"),
+            "ToUnicode": broken,
+        }
+    )
+    fonts = {"F1": warning} | {f"F{n}": pdf.add(MAKE.HELVETICA) for n in range(2, 19)}
+    order = ["F1", *(f"F{n}" for n in range(2, 19)), "F1"]
+    shown = (
+        b"BT 72 700 Td " + b"".join(b"/%s 12 Tf (x) Tj " % name.encode() for name in order) + b"ET"
+    )
+    refs = [MAKE.page(pdf, tree, shown, {"Font": fonts}) for _ in range(3)]
+    MAKE.page_tree(pdf, refs, tree)
+    data = bytes(pdf.build(MAKE.catalog(pdf, tree)))
+    outputs = [ingest(data, pages_per_chunk=size) for size in (1, 2, 8)]
+    packed = [
+        b"".join(canonical_json.dumps(r.to_json()) + b"\n" for r in o.package_records())
+        for o in outputs
+    ]
+    assert packed[0] == packed[1] == packed[2]
+    found = sorted((f.code, f.details["page"], f.details["streams"]) for f in outputs[1].findings())
+    assert found == [("pdf.content_unreadable", page, 1) for page in range(3)]
 
 
 def test_pages_sharing_a_big_cmap_parse_it_once_per_chunk() -> None:

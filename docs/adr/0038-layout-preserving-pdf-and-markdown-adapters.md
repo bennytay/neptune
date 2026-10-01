@@ -98,7 +98,8 @@ give byte-identical output on every host.
      entries) are shared by the pages of a chunk, so N pages naming one element of K kids cost K,
      not N x K; each page is still charged what building them would have cost, so the limit
      never depends on which pages share its chunk. Only the MCIDs a page's content uses are
-     placed. A font's ToUnicode CMap, codespace and `W` ranges are indexed once into disjoint
+     placed, so a page whose parent-tree entry is oversized but unused is read as tagged, where
+     it used to hit `pdf.structure_limit`. A font's ToUnicode CMap, codespace and `W` ranges are indexed once into disjoint
      segments (the first declared wins) and binary-searched, with a per-font glyph cache; the
      chunk's pages share one font cache, so a CMap many pages use is parsed once. A table past
      131,072 entries or 4 MiB is cut there and reported (`pdf.font_limit`). A content stream is

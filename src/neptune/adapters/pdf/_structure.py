@@ -623,8 +623,11 @@ class Structure:
             value = self._numbers(current).get(key)
             if value is not None:
                 return value.get_object() if isinstance(value, IndirectObject) else value
-            kids, looked = self._tree_kids(current).holding(key)
-            self._charge(looked)  # a lookup's steps, not the index's: it is built once, uncharged
+            tree = self._tree_kids(current)
+            # A lookup's steps, not the index's (built once, uncharged); charged before the copy.
+            self._charge(len(tree.unlimited))
+            kids, looked = tree.holding(key)
+            self._charge(looked - len(tree.unlimited))
             stack.extend((kid, depth + 1) for kid in reversed(kids))
         return None
 
