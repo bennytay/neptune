@@ -275,13 +275,13 @@ def vector_top_k_sql(schema: str, *, filtered: bool) -> str:
     an **exact** scan of the scope's embeddings through the subject index when the scope holds
     at most ``exact_limit`` of them, else the HNSW index filtered by the scope. A 2-hop scope is
     a tiny fraction of all embeddings, and a filtered HNSW scan exhausts its tuple budget before
-    it finds them (recall@10 0.87, some queries 0), while the exact scan costs about the same (8 ms against 6); a wide scope
-    (many hops, a hub) makes the filter unselective, where HNSW is accurate and exact is not
-    affordable (ADR 0007 §7). Both branches are gated on the scope size, computed once, so only
-    one runs; the exact distances live in a materialized CTE the vector index cannot serve, and
-    a ``LATERAL`` lookup per scope entity, fenced with ``OFFSET 0`` so it is not flattened into a
-    join, keeps the subject index in the plan (a join was planned as a hash join over every
-    embedding: 75 ms instead of 6).
+    it finds them (recall@10 0.88, some queries 0), while the exact scan costs about the same
+    (8 ms against 6). A wide scope (many hops, a hub) makes the filter unselective, where HNSW
+    is accurate and exact is not affordable (ADR 0007 §7). Both branches are gated on the scope
+    size, computed once, so only one runs. The exact distances live in a materialized CTE the
+    vector index cannot serve, and a ``LATERAL`` lookup per scope entity, fenced with
+    ``OFFSET 0`` so it is not flattened into a join, keeps the subject index in the plan (a join
+    was planned as a hash join over every embedding: 75 ms instead of 8).
     """
     s = _ident(schema)
     if not filtered:
