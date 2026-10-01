@@ -111,6 +111,7 @@ def recall(n: int, k: int = 10) -> None:
             "k": k,
             "start": rng.choice(sites),
             "hops": 2,
+            "exact_limit": pg.DEFAULT_EXACT_SCOPE_LIMIT,
             **samples[i],
         }
         for i, q in enumerate(queries)
@@ -202,16 +203,24 @@ def cold(n: int, reps: int = 200) -> None:
 # --- walk ----------------------------------------------------------------------------------------
 
 #: The pre-gate walk: a ``text[]`` visited set checked with ``<> ALL`` on every edge.
-OLD_WALK = (
-    pg.neighbours_sql(S)
-    .replace(
-        "jsonb_build_object(%(start)s::text, 0)",
-        "ARRAY[%(start)s::text]",
-    )
-    .replace("b.seen || n.added", "b.seen || n.ents")
-    .replace(",\n      jsonb_object_agg(x.other, b.depth + 1) AS added", "")
-    .replace("NOT jsonb_exists(b.seen, e.other)", "e.other <> ALL (b.seen)")
+_SWAPS = (
+    ("jsonb_build_object(%(start)s::text, 0)", "ARRAY[%(start)s::text]"),
+    ("b.seen || n.added", "b.seen || n.ents"),
+    (",\n      jsonb_object_agg(x.other, b.depth + 1) AS added", ""),
+    ("NOT jsonb_exists(b.seen, e.other)", "e.other <> ALL (b.seen)"),
 )
+
+
+def _old_walk() -> str:
+    sql = pg.neighbours_sql(S)
+    for new, old in _SWAPS:
+        if sql.count(new) != 1:  # never time the new walk under the old label
+            raise RuntimeError(f"the shipped walk changed; update _SWAPS: {new!r}")
+        sql = sql.replace(new, old)
+    return sql
+
+
+OLD_WALK = _old_walk()
 HUB = "g1hub"
 TIMEOUT_S = 300
 

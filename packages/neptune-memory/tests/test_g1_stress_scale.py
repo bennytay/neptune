@@ -14,7 +14,6 @@ owner MVL-132).
 from __future__ import annotations
 
 import json
-import time
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
@@ -58,7 +57,10 @@ def test_the_shipped_vector_settings_are_the_measured_ones(results: dict[str, An
     recall = results["recall"]
     assert recall["queries"] >= 200
     assert recall["chosen"] == {"ef_search": pg.DEFAULT_EF_SEARCH, "graph_filtered": "exact"}
-    assert "candidates AS MATERIALIZED" in pg.vector_top_k_sql("memory", filtered=True)
+    assert (
+        8 * results["raw"]["g1_10000000_recall"]["scope_embeddings"]["max"]
+        <= pg.DEFAULT_EXACT_SCOPE_LIMIT
+    )  # the measured 2-hop scopes, 10x deeper at 10^8, still take the exact branch
 
 
 def test_the_walk_checks_a_keyed_visited_set_never_a_scan() -> None:
@@ -130,13 +132,10 @@ def test_live_walk_through_a_hub_of_ten_thousand_entities(live: tuple[Any, Postg
     store.write_claims(claims)
     store.rebuild()
     at = AsOf("fleet_utc", 1, 1)
-    started = time.perf_counter()
     got = store.neighbours("site:hub", 3, at)
-    elapsed = time.perf_counter() - started
     assert {n.entity: n.depth for n in got} == _bfs(claims, "site:hub", 3)
     assert len(got) == 2 * HUB_SIZE + 1  # every machine and sensor once, and the rig
     assert all(len(n.via) == n.depth for n in got)
-    # The text[] walk took tens of seconds here (docs/benchmarks/g1-results.json); a keyed set
-    # takes well under one. The bound is loose so a busy CI host does not flake.
-    assert elapsed < 10.0
+    # Timing is the benchmark's job (docs/benchmarks/g1-results.json: 379 ms against 2.09 s for
+    # the text[] walk); here the hub must only be walked correctly, each entity once.
     assert conn.info.transaction_status == 0

@@ -27,7 +27,7 @@
 | 5 | A consolidator upgrade that changes a claim's object | v2 is a new lineage at a new transaction; its first claim retires v1 at that transaction; no contradiction between versions; earlier `as_of` unchanged; reruns idempotent; rollback refused (0003 §3, 0005 §6, 0006 §7) | `test_g1_stress_upgrade.py` | ROV "thruster fault" → "thruster 3 (port vertical) fault": sibling id, v1 superseded at tx 2 with its interval intact, no closure and no finding, `as_of(1)` unchanged. A fact v2 no longer derives is retired with v1. A rerun keeps ids and first `recorded_at`; v1 → v2 → v1 raises `lineage_reuse`. An upgrade emitting nothing retires nothing (strict `xfail`). | HOLDS; empty upgrade (MVL-132) |
 | 6 | An operator assertion later retracted | Retraction is a new record, hence a new claim or a closure; nothing deleted; `as_of` before it shows what was said (0002 §4, 0005 §1, 0007 §5) | `test_g1_stress_retraction.py` | An AMR "parked in bay 4" corrected to bay 2: the correction supersedes, lists the mistake in `supersedes`, `as_of(1)` still says bay 4, bay 4 is `NotCovered` now. An operator `same_as` between two humanoid threads cannot be retracted: `many` never contradicts and a consolidator that stops emitting a claim does not end it (strict `xfail`). ADR 0003 §1.4 promised "undoing an identity is superseding a claim"; the resolver could not. | GAP: withdrawal (MVL-132), retraction record (MVL-126) |
 | 7 | A claim whose evidence package expired under retention | Claims survive with their refs and ids; availability is a signal beside the claim (0002 §2, 0003 §4, 0007 §6) | `test_g1_stress_retention.py` | A drone flight log and an AUV dive log expire at tx 4: claims rebuilt at tx 5 are byte-identical, ids and first `recorded_at` kept, both snapshots return them with their `EvidenceRef`s. `LedgerReader` (and catalog-api v1) has no retention state, so nothing can mark a ref unavailable. | GAP: evidence status (MVL-132) |
-| 8 | 10^8 claims under the store budgets | Budgets met, measured where possible, labelled upper bounds where not (0004, 0007 §7) | `test_g1_stress_scale.py`, `bench/g1_bench.py` | See Measurements. The filtered HNSW query reaches only 0.867 recall@10 on 200 queries, and no tuning reaches 0.9, so filtered search is now an exact scan of the scope: 1.0, at 6.5 ms p50. Cold as-of measured at 10^7: 3.4 / 6.5 ms. A 10^4 hub walks in 379 ms, against 2.09 s before. Rebuild of 10^8 is still only an extrapolation. | HOLDS; rebuild unproven (MVL-132) |
+| 8 | 10^8 claims under the store budgets | Budgets met, measured where possible, labelled upper bounds where not (0004, 0007 §7) | `test_g1_stress_scale.py`, `bench/g1_bench.py` | See Measurements. The filtered HNSW query reaches only 0.877 recall@10 on 200 queries, and no tuning reaches 0.9, so filtered search is now an exact scan of the scope: 1.0, at 8.0 ms p50. Cold as-of measured at 10^7: 3.4 / 6.5 ms. A 10^4 hub walks in 379 ms, against 2.09 s before. Rebuild of 10^8 is still only an extrapolation. | HOLDS; rebuild unproven (MVL-132) |
 
 ## Fixed in this gate
 
@@ -41,8 +41,9 @@
 - **F4, the live-test teardown.** It dropped an AGE graph unconditionally, so it failed without AGE. It now
   drops the graph only when the extension exists, and the snapshot check skips without it.
 - **F5, graph-filtered vector search.** It was an HNSW scan filtered by the walk's scope, with recall@10 of
-  0.867 on 200 queries, and some queries got none of the true ten. It is now an exact scan of the scope's
-  embeddings: recall 1.0 at the same latency. Unfiltered search keeps HNSW, now at `ef_search = 400`
+  0.877 on 200 queries, and some queries got none of the true ten. It is now an exact scan of the scope's
+  embeddings: recall 1.0 at 8.0 ms p50. Scopes wider than 500,000 embeddings keep the filtered HNSW scan, so
+  a 6-hop or hub query cannot become a full scan. Unfiltered search keeps HNSW, now at `ef_search = 400`
   (recall@10 0.93). See ADR 0007 §7.
 - **F6, the ADRs.** ADR 0007 supersedes ADR 0003 §1.4's undo sentence and §3's known gap (withdrawal), and
   ADR 0004 Decision 4 (budgets). Status lines are updated; all seven ADRs are Accepted.
@@ -72,9 +73,9 @@ across six embodiments), 10^6 embeddings. Raw results: [`../benchmarks/g1-result
 | 3-hop traversal p50, ordinary site | 0.43 ms m | 0.89 ms m | 1.88 ms x | < 300 ms |
 | 3-hop walk, hub of 10^4 machines (2·10^4 + 1 entities) | — | 379 ms m (text[]: 2.09 s) | — | none |
 | 3-hop walk, hub of 10^5 machines | — | 0.79 s m (text[]: 173 s) | — | none |
-| Graph-filtered top-10, exact: recall@10, p50 / p99 | — | 1.0, 6.5 / 7.4 ms m | 65 ms p50 x | ≥ 0.9, < 300 ms |
-| Graph-filtered top-10, HNSW at `ef_search` 40 / 100 / 200 / 400 (replaced) | — | 0.855 / 0.867 / 0.881 / 0.887 m | — | ≥ 0.9 |
-| Unfiltered top-10 recall@10 at `ef_search` 40 / 100 / 200 / 400 | — | 0.66 / 0.82 / 0.89 / 0.93 m | — | none |
+| Graph-filtered top-10, exact: recall@10, p50 / p99 | — | 1.0, 8.0 / 10.8 ms m | 80 ms p50 x | ≥ 0.9, < 300 ms |
+| Graph-filtered top-10, HNSW at `ef_search` 40 / 100 / 200 / 400 (replaced) | — | 0.867 / 0.877 / 0.890 / 0.899 m | — | ≥ 0.9 |
+| Unfiltered top-10 recall@10 at `ef_search` 40 / 100 / 200 / 400 | — | 0.67 / 0.81 / 0.89 / 0.93 m | — | none |
 | Rebuild from CSV | 28.5 s m | 404 s m | 5,384 s x, unproven | < 2 h |
 
 - m = measured, x = extrapolated upper bound. ADR 0004's numbers: warm thread rows, the 10^6 traversal,

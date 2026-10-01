@@ -187,7 +187,7 @@ def test_query_parameters_are_exactly_what_the_adapter_binds() -> None:
     assert _placeholders(pg.vector_top_k_sql("memory", filtered=False)) == {"query", "k"}
     assert (
         _placeholders(pg.vector_top_k_sql("memory", filtered=True))
-        == {"query", "k", "start", "hops"} | at
+        == {"query", "k", "start", "hops", "exact_limit"} | at
     )
     assert _placeholders(pg.insert_claim_sql("memory")) == set(CLAIM_COLUMNS)
     assert _placeholders(pg.close_claim_sql("memory")) == {"old", "at"}
@@ -280,6 +280,8 @@ def test_adapter_bounds_are_checked_before_any_query() -> None:
         store.write_embeddings([ClaimEmbedding(1, "robot:arm-001", (0.0,))])
     with pytest.raises(ValueError, match="ef_search"):
         PostgresStore(conn, ef_search=0)
+    with pytest.raises(ValueError, match="exact_scope_limit"):
+        PostgresStore(conn, exact_scope_limit=-1)
     assert conn.log == []
 
 
@@ -341,14 +343,24 @@ def test_failed_read_rolls_back() -> None:
     assert (conn.commits, conn.rollbacks) == (0, 1)
 
 
-def test_graph_filtered_search_is_exact_over_the_scope_never_the_hnsw_index() -> None:
-    """A filtered HNSW scan misses most of a tiny scope (ADR 0007 §7): distances are computed in
-    a materialized CTE joined on subject, so no ORDER BY can be served by the vector index."""
+def test_graph_filtered_search_is_exact_for_a_small_scope_and_hnsw_for_a_wide_one() -> None:
+    """A filtered HNSW scan misses most of a small scope (ADR 0007 §7), so a scope of at most
+    ``exact_limit`` embeddings is scanned exactly, in a materialized CTE the vector index cannot
+    serve; a wider one uses the index. Both branches are gated on one count, so one runs."""
     sql = pg.vector_top_k_sql("memory", filtered=True)
-    assert "candidates AS MATERIALIZED" in sql
-    assert "JOIN memory.claim_embedding e ON e.subject = scope.entity" in sql
-    assert sql.rstrip().endswith("FROM candidates ORDER BY distance, claim_id LIMIT %(k)s")
-    assert "ORDER BY e.embedding" not in sql
+    assert "size AS MATERIALIZED" in sql and "candidates AS MATERIALIZED" in sql
+    assert "WHERE (SELECT n FROM size) <= %(exact_limit)s" in sql
+    assert "WHERE (SELECT n FROM size) > %(exact_limit)s" in sql
+    exact = sql.split("candidates AS MATERIALIZED", 1)[1].split("UNION ALL", 1)[0]
+    assert "ORDER BY e.embedding" not in exact  # only the wide branch orders by the index
+    assert "CROSS JOIN LATERAL" in exact and "WHERE e.subject = scope.entity OFFSET 0" in exact
+    assert sql.rstrip().endswith(") hits ORDER BY distance, claim_id")
+    conn = RecordingConnection()
+    PostgresStore(conn, dimensions=2, exact_scope_limit=7).vector_top_k(
+        [0.0, 1.0], 3, within=("site:01", 2, AT)
+    )
+    (params,) = [p for q, p in conn.log if not q.startswith("SET")]
+    assert params["exact_limit"] == 7
 
 
 def test_vector_search_sets_ef_search_locally_from_the_constructor() -> None:
@@ -540,8 +552,14 @@ def test_live_thread_neighbours_and_vectors_match_the_reference(
         return float(sum((a - b) ** 2 for a, b in zip(e.vector, query, strict=True)) ** 0.5)
 
     exact = sorted((e for e in vectors if e.subject in scope), key=lambda e: (dist(e), e.claim_id))
+    nearest = [round(dist(e), 4) for e in exact[:5]]
     hits = store.vector_top_k(query, 5, within=("site:00", 2, at))
-    assert [round(h.distance, 4) for h in hits] == [round(dist(e), 4) for e in exact[:5]]
+    assert [round(h.distance, 4) for h in hits] == nearest
+    # The wide-scope branch (the HNSW index, filtered) on the same scope: a small index is exact.
+    wide = PostgresStore(conn, schema="memory_test", dimensions=3, exact_scope_limit=0)
+    assert [
+        round(h.distance, 4) for h in wide.vector_top_k(query, 5, within=("site:00", 2, at))
+    ] == nearest
     assert conn.info.transaction_status == 0  # no read left a transaction open
 
 
@@ -567,7 +585,13 @@ def test_live_corroboration_and_supersede_across_known_at(live: tuple[Any, Postg
     with pytest.raises(LookupError):
         store.supersede(3, replace(fix, claim_id=5))
     assert conn.info.transaction_status == 0
-    # The optional AGE snapshot is a rebuild-time copy of the edges.
+
+
+@pytest.mark.slow
+def test_live_age_snapshot_is_a_rebuild_time_copy_of_the_edges(
+    live: tuple[Any, PostgresStore],
+) -> None:
+    conn, store = live
     if not has_age(conn):
         pytest.skip("Apache AGE not installed: the optional snapshot is not checked")
     snap = PostgresStore(conn, schema="memory_test", dimensions=3, graph="memory_test_graph")

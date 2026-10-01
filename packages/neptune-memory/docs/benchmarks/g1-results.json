@@ -78,7 +78,7 @@
    "label": "measured",
    "name": "graph_filtered_1e7_p50_ms",
    "note": "exact over 25003 scope embeddings",
-   "value": 6.525
+   "value": 7.998
   },
   {
    "budget": 300,
@@ -86,7 +86,7 @@
    "label": "extrapolated",
    "name": "graph_filtered_1e8_p50_ms",
    "note": "10x: linear in scope embeddings, which grow with history depth",
-   "value": 65.25
+   "value": 79.98
   },
   {
    "budget": 200,
@@ -137,46 +137,46 @@
   },
   "g1_10000000_recall": {
    "graph_filtered_hnsw_ef100": {
-    "mean_ms": 6.421,
+    "mean_ms": 6.178,
     "n": 200,
-    "p50_ms": 6.244,
-    "p99_ms": 9.005,
-    "queries_below_0_9": 61,
-    "recall_at_10": 0.867,
+    "p50_ms": 6.096,
+    "p99_ms": 8.922,
+    "queries_below_0_9": 55,
+    "recall_at_10": 0.8765,
     "recall_min": 0.0
    },
    "graph_filtered_hnsw_ef200": {
-    "mean_ms": 6.646,
+    "mean_ms": 6.563,
     "n": 200,
-    "p50_ms": 6.196,
-    "p99_ms": 9.1,
-    "queries_below_0_9": 51,
-    "recall_at_10": 0.8805,
+    "p50_ms": 6.34,
+    "p99_ms": 9.391,
+    "queries_below_0_9": 43,
+    "recall_at_10": 0.8895,
     "recall_min": 0.0
    },
    "graph_filtered_hnsw_ef40": {
-    "mean_ms": 6.34,
+    "mean_ms": 6.235,
     "n": 200,
-    "p50_ms": 6.23,
-    "p99_ms": 8.814,
-    "queries_below_0_9": 73,
-    "recall_at_10": 0.8545,
+    "p50_ms": 6.16,
+    "p99_ms": 9.358,
+    "queries_below_0_9": 66,
+    "recall_at_10": 0.8665,
     "recall_min": 0.0
    },
    "graph_filtered_hnsw_ef400": {
-    "mean_ms": 7.048,
+    "mean_ms": 6.677,
     "n": 200,
-    "p50_ms": 6.318,
-    "p99_ms": 9.281,
-    "queries_below_0_9": 47,
-    "recall_at_10": 0.887,
+    "p50_ms": 6.022,
+    "p99_ms": 9.261,
+    "queries_below_0_9": 37,
+    "recall_at_10": 0.899,
     "recall_min": 0.0
    },
    "graph_filtered_shipped": {
-    "mean_ms": 6.579,
+    "mean_ms": 8.081,
     "n": 200,
-    "p50_ms": 6.525,
-    "p99_ms": 7.371,
+    "p50_ms": 7.998,
+    "p99_ms": 10.786,
     "queries_below_0_9": 0,
     "recall_at_10": 1.0,
     "recall_min": 1.0
@@ -188,39 +188,39 @@
     "mean": 25002.65
    },
    "unfiltered_ef100": {
-    "mean_ms": 1.678,
+    "mean_ms": 1.604,
     "n": 200,
-    "p50_ms": 1.678,
-    "p99_ms": 2.01,
+    "p50_ms": 1.617,
+    "p99_ms": 1.926,
     "queries_below_0_9": 102,
-    "recall_at_10": 0.815,
+    "recall_at_10": 0.8125,
     "recall_min": 0.0
    },
    "unfiltered_ef200": {
-    "mean_ms": 2.732,
+    "mean_ms": 2.661,
     "n": 200,
-    "p50_ms": 2.727,
-    "p99_ms": 3.277,
-    "queries_below_0_9": 42,
-    "recall_at_10": 0.891,
+    "p50_ms": 2.679,
+    "p99_ms": 3.313,
+    "queries_below_0_9": 41,
+    "recall_at_10": 0.885,
     "recall_min": 0.0
    },
    "unfiltered_ef40": {
-    "mean_ms": 1.007,
+    "mean_ms": 0.958,
     "n": 200,
-    "p50_ms": 0.919,
-    "p99_ms": 2.5,
-    "queries_below_0_9": 179,
-    "recall_at_10": 0.6555,
+    "p50_ms": 0.876,
+    "p99_ms": 2.178,
+    "queries_below_0_9": 174,
+    "recall_at_10": 0.668,
     "recall_min": 0.0
    },
    "unfiltered_ef400": {
-    "mean_ms": 4.336,
+    "mean_ms": 4.09,
     "n": 200,
-    "p50_ms": 4.307,
-    "p99_ms": 4.974,
-    "queries_below_0_9": 20,
-    "recall_at_10": 0.9255,
+    "p50_ms": 4.077,
+    "p99_ms": 5.198,
+    "queries_below_0_9": 16,
+    "recall_at_10": 0.9285,
     "recall_min": 0.0
    }
   },
@@ -268,16 +268,16 @@
    "shared_buffers": "16MB"
   },
   "pg_10000000_rebuild": {
-   "ANALYZE claim_embedding_ms": 119.6,
-   "ANALYZE claim_ms": 1230.4,
-   "claim_bitemporal_ix_ms": 314442.5,
-   "claim_edge_in_ix_ms": 197.2,
-   "claim_edge_out_ix_ms": 258.9,
-   "claim_embedding_hnsw_ix_ms": 65235.2,
-   "claim_embedding_subject_ix_ms": 183.0,
-   "copy_claims_ms": 12136.4,
-   "copy_embeddings_ms": 8359.8,
-   "total_ms": 404110.8
+   "ANALYZE claim_embedding_ms": 109.3,
+   "ANALYZE claim_ms": 261.5,
+   "claim_bitemporal_ix_ms": 317109.3,
+   "claim_edge_in_ix_ms": 198.2,
+   "claim_edge_out_ix_ms": 205.2,
+   "claim_embedding_hnsw_ix_ms": 64872.2,
+   "claim_embedding_subject_ix_ms": 253.7,
+   "copy_claims_ms": 12196.6,
+   "copy_embeddings_ms": 8445.9,
+   "total_ms": 404285.1
   },
   "pg_10000000_write": {
    "readers": 8,
@@ -304,6 +304,6 @@
    "graph_filtered": "exact"
   },
   "queries": 200,
-  "unfiltered_recall_at_10": 0.9255
+  "unfiltered_recall_at_10": 0.9285
  }
 }

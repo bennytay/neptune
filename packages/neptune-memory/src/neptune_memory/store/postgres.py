@@ -36,6 +36,10 @@ MAX_HOPS: Final = 6
 #: Unfiltered HNSW search only (ADR 0007 §7: recall@10 0.93 on 200 queries at 10^6 embeddings);
 #: pgvector's own default is 40. Graph-filtered search is exact and never uses the index.
 DEFAULT_EF_SEARCH: Final = 400
+#: Largest graph scope, in embeddings, searched exactly (ADR 0007 §7): 25k took 8 ms at 10^7
+#: claims and cost is linear, so this bounds the exact branch near 160 ms, and the same 2-hop
+#: scopes at 10^8 claims (about 250k) still take it.
+DEFAULT_EXACT_SCOPE_LIMIT: Final = 500_000
 VALID_RANGE: Final = "int8range(valid_from, valid_to, '[)')"
 TX_RANGE: Final = "int8range(recorded_at, superseded_at, '[)')"
 
@@ -49,7 +53,16 @@ class Cursor(Protocol):
     def rowcount(self) -> int: ...
 
 
+class ConnectionInfo(Protocol):
+    @property
+    def transaction_status(self) -> int: ...
+
+
 class Connection(Protocol):
+    """What the store needs: psycopg 3 (and psycopg2 >= 2.8) connections have all of it."""
+
+    @property
+    def info(self) -> ConnectionInfo: ...
     def cursor(self) -> Cursor: ...
     def commit(self) -> None: ...
     def rollback(self) -> None: ...
@@ -259,10 +272,16 @@ def vector_top_k_sql(schema: str, *, filtered: bool) -> str:
 
     Unfiltered: the HNSW index, re-sorted, since an iterative ``relaxed_order`` scan may return
     hits slightly out of order. Filtered (only subjects the walk reaches, the anchor included):
-    an **exact** scan of the scope's embeddings through the subject index. A graph scope is a
-    tiny fraction of all embeddings, so a filtered HNSW scan exhausts its tuple budget before it
-    finds them (recall@10 0.87, some queries 0) while the exact scan is as fast (ADR 0007 §7).
-    The distances are computed in a materialized CTE, so the planner cannot order by the index.
+    an **exact** scan of the scope's embeddings through the subject index when the scope holds
+    at most ``exact_limit`` of them, else the HNSW index filtered by the scope. A 2-hop scope is
+    a tiny fraction of all embeddings, and a filtered HNSW scan exhausts its tuple budget before
+    it finds them (recall@10 0.87, some queries 0), while the exact scan costs about the same (8 ms against 6); a wide scope
+    (many hops, a hub) makes the filter unselective, where HNSW is accurate and exact is not
+    affordable (ADR 0007 §7). Both branches are gated on the scope size, computed once, so only
+    one runs; the exact distances live in a materialized CTE the vector index cannot serve, and
+    a ``LATERAL`` lookup per scope entity, fenced with ``OFFSET 0`` so it is not flattened into a
+    join, keeps the subject index in the plan (a join was planned as a hash join over every
+    embedding: 75 ms instead of 6).
     """
     s = _ident(schema)
     if not filtered:
@@ -273,12 +292,26 @@ def vector_top_k_sql(schema: str, *, filtered: bool) -> str:
     return (
         _walk_cte(schema)
         + f""", scope AS (
-  SELECT DISTINCT u.entity FROM bfs b CROSS JOIN LATERAL unnest(b.ents) AS u(entity)
+  SELECT u.entity FROM bfs b CROSS JOIN LATERAL unnest(b.ents) AS u(entity)
+), size AS MATERIALIZED (
+  SELECT count(*) AS n FROM scope CROSS JOIN LATERAL (
+    SELECT 1 FROM {s}.claim_embedding e WHERE e.subject = scope.entity
+  ) x
 ), candidates AS MATERIALIZED (
-  SELECT e.claim_id, e.embedding <-> %(query)s::vector AS distance
-  FROM scope JOIN {s}.claim_embedding e ON e.subject = scope.entity
+  SELECT x.claim_id, x.distance FROM scope CROSS JOIN LATERAL (
+    SELECT e.claim_id, e.embedding <-> %(query)s::vector AS distance
+    FROM {s}.claim_embedding e WHERE e.subject = scope.entity OFFSET 0
+  ) x
+  WHERE (SELECT n FROM size) <= %(exact_limit)s
 )
-SELECT claim_id, distance FROM candidates ORDER BY distance, claim_id LIMIT %(k)s"""
+SELECT claim_id, distance FROM (
+  (SELECT claim_id, distance FROM candidates ORDER BY distance, claim_id LIMIT %(k)s)
+  UNION ALL
+  (SELECT e.claim_id, e.embedding <-> %(query)s::vector AS distance
+   FROM {s}.claim_embedding e
+   WHERE (SELECT n FROM size) > %(exact_limit)s AND e.subject IN (SELECT entity FROM scope)
+   ORDER BY e.embedding <-> %(query)s::vector LIMIT %(k)s)
+) hits ORDER BY distance, claim_id"""
     )
 
 
@@ -344,8 +377,9 @@ class PostgresStore:
     """:class:`MemoryStore` over one PostgreSQL schema. Call :meth:`create` once per schema.
 
     ``graph`` names an optional AGE snapshot that only :meth:`rebuild` refreshes (default: none).
-    ``ef_search`` is set per query with ``SET LOCAL`` for unfiltered search; the default is ADR 0007
-    §7's measurement.
+    ``ef_search`` is set per query with ``SET LOCAL`` for HNSW search; ``exact_scope_limit`` is the
+    largest graph scope, in embeddings, that filtered search scans exactly. Both defaults are
+    ADR 0007 §7's.
     """
 
     def __init__(
@@ -356,6 +390,7 @@ class PostgresStore:
         dimensions: int = 128,
         graph: str | None = None,
         ef_search: int = DEFAULT_EF_SEARCH,
+        exact_scope_limit: int = DEFAULT_EXACT_SCOPE_LIMIT,
     ) -> None:
         if getattr(conn, "autocommit", False):
             raise ValueError("PostgresStore needs a connection with autocommit off")
@@ -367,11 +402,14 @@ class PostgresStore:
             )
         if not 1 <= ef_search <= 1000:
             raise ValueError("ef_search must be in [1, 1000] (pgvector's range)")
+        if exact_scope_limit < 0:
+            raise ValueError("exact_scope_limit must be >= 0")
         self.conn = conn
         self.schema = _ident(schema)
         self.dimensions = dimensions
         self.graph = None if graph is None else _ident(graph)
         self.ef_search = ef_search
+        self.exact_scope_limit = exact_scope_limit
 
     def _require_idle(self) -> None:
         """Refuse to run inside a transaction the caller opened: committing or rolling back here
@@ -483,9 +521,15 @@ class PostgresStore:
         if within is not None:
             anchor, hops, at = within
             _check_hops(hops)
-            params |= {"start": anchor, "hops": hops, **as_of_params(at)}
-        # SET LOCAL lasts until the read's rollback. Iterative scans (pgvector >= 0.8) keep a
-        # filtered HNSW scan going until k rows pass the filter.
+            params |= {
+                "start": anchor,
+                "hops": hops,
+                "exact_limit": self.exact_scope_limit,
+                **as_of_params(at),
+            }
+        # SET LOCAL lasts until the read's rollback. It steers unfiltered search and the wide-
+        # scope branch of filtered search; iterative scans (pgvector >= 0.8) keep a filtered HNSW
+        # scan going until k rows pass the filter. A small scope is searched exactly.
         setup = (
             f"SET LOCAL hnsw.ef_search = {int(self.ef_search)}",
             "SET LOCAL hnsw.iterative_scan = relaxed_order",

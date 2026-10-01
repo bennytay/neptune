@@ -109,7 +109,9 @@ Two changes to the adapter come with it:
 
 - **Graph-filtered search is exact over the scope.** `vector_top_k(within=...)` computes distances for every
   embedding of the walk's scope, through the subject index, in a materialized CTE that the HNSW index cannot
-  serve. Unfiltered search keeps HNSW.
+  serve. This applies to scopes of up to `exact_scope_limit` embeddings (default 500,000, about 160 ms). A
+  wider scope (many hops, a hub) makes the filter unselective, so it keeps the HNSW scan: one count gates
+  the two branches, and only one runs. Unfiltered search keeps HNSW.
 - **`ef_search` defaults to 400** for unfiltered search.
 
 The C2 budgets stand as ADR 0004 set them. The G1 numbers are below; raw data is in
@@ -123,18 +125,20 @@ every row to its budget. m = measured; x = extrapolated upper bound at 10^8 clai
 | The same, cold | 6.75 / 13.1 ms at 10^8 | x: 2× 10^7 (10^6 → 10^7 grew ×1.71 at p50, ×1.32 at p99) |
 | 3-hop traversal p50 < 300 ms | 0.89 ms at 10^7; 1.88 ms at 10^8 | m; x (ADR 0004) |
 | Graph-filtered top-10 recall@10 ≥ 0.9 | 1.0 at 10^6 embeddings, 200 queries | m |
-| Graph-filtered top-10 p50 < 300 ms | 6.5 ms at 10^7 (25,000 embeddings per scope); 65 ms at 10^8 | m; x (linear in scope) |
+| Graph-filtered top-10 p50 < 300 ms | 8.0 ms at 10^7 (25,000 embeddings per scope); 80 ms at 10^8 | m; x (linear in scope) |
 | Superseding writes ≥ 200/s, thread p99 < 1 s under them | 1,064/s, 1.68 ms at 10^7 | m (ADR 0004) |
 | Full rebuild of 10^8 claims < 2 h | 404 s at 10^7; 5,384 s at 10^8 | m; x, **unproven** (GAP, MVL-132) |
 
 - **Recall.** The filtered HNSW query was re-measured on all 200 seeded queries, unprepared, against a top-10
-  computed in numpy from the scope's embeddings. Recall@10 is 0.855 / 0.867 / 0.881 / 0.887 at `ef_search`
-  40 / 100 / 200 / 400. Between 47 and 73 queries fall below 0.9, and some return none of the true ten:
+  computed in numpy from the scope's embeddings. Recall@10 is 0.867 / 0.877 / 0.890 / 0.899 at `ef_search`
+  40 / 100 / 200 / 400. Between 37 and 66 queries fall below 0.9, and some return none of the true ten:
   a 2-hop scope holds about 2.5% of the embeddings, and the iterative scan gives up before it finds them.
-  Tuning does not reach the budget. The exact scan does by construction, at about the same latency (6.5 ms
-  against 6.2 ms p50). Its cost is linear in the scope's embeddings, so the 10^8 figure is 10× the 10^7 one.
-  Unfiltered recall@10 is 0.66 / 0.82 / 0.89 / 0.93 at the same settings; it has no budget, and 400 is the
-  first setting above 0.9, at 4.3 ms p50.
+  Tuning does not reach the budget. The exact scan does by construction, at 8.0 ms p50 against 6.1 ms. Its
+  cost is linear in the scope's embeddings, so the 10^8 figure is 10× the 10^7 one, and those scopes (about
+  250,000 embeddings) stay under the exact limit. The wide-scope HNSW branch is not measured for recall here;
+  a wide scope is an unselective filter, which is where HNSW is accurate. Unfiltered recall@10 is
+  0.67 / 0.81 / 0.89 / 0.93 at the same settings. It has no budget, and 400 is the first setting above 0.9,
+  at 4.1 ms p50.
 - **A measurement trap.** psycopg prepares a statement after five executions, and a prepared plan survives
   a later change to `enable_indexscan`. A first grid, run with the index off for ground truth, therefore
   read 1.0 for every setting. `bench/g1_bench.py` now never prepares a vector query.
@@ -157,7 +161,7 @@ every row to its budget. m = measured; x = extrapolated upper bound at 10^8 clai
   re-id history for an operational fact.
 - **Add `has_name` in this gate**: it is a vocabulary change and a new generation with republished goldens.
   G2 adds predicates for every consolidator anyway, so it rides with MVL-126.
-- **Tune HNSW for the filtered query** (`ef_search`, strict ordering, over-fetching): it plateaus at 0.887,
+- **Tune HNSW for the filtered query** (`ef_search`, strict ordering, over-fetching): it plateaus at 0.899,
   because the scan stops before it reaches a scope that small. A larger tuple budget makes it slower than
   the exact scan it approximates.
 - **Supersede the recall budget**: the exact scan meets it at the same latency, so the budget stands.
