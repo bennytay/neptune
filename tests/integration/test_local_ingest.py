@@ -6,8 +6,10 @@ each chunk not yet committed, commit it, and assemble the package from the works
 """
 
 import importlib.util
+import os
 import shutil
 import socket
+import stat
 import struct
 import tracemalloc
 from collections.abc import Callable
@@ -15,6 +17,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
 
+import pyarrow as pa
 import pytest
 
 from neptune.adapters.builtin import builtin_adapters
@@ -24,6 +27,7 @@ from neptune.adapters.registry import AdapterRegistry
 from neptune.discovery.reader import LocalReader, SourceChangedError
 from neptune.discovery.scan import scan
 from neptune.discovery.source import LocalSource, SourceAccessError
+from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.package import Storage
 from neptune.model.source import LocalPath, SourceRevision
@@ -56,19 +60,22 @@ def registry() -> AdapterRegistry:
     )
 
 
-def ingest_local(
+Ingested = set[tuple[ContentId, RecordId]]
+
+
+def ingest_into(
     root: Path,
     workspace: Workspace,
     adapters: AdapterRegistry,
-    destination: Path,
     *,
     on_chunk: Callable[[str], None] = lambda _: None,
-) -> ContentId:
+) -> tuple[SourceLedger, Ingested]:
+    """Scan, plan, ingest and commit; return what assembling needs."""
     source = LocalSource(root)
     ledger = workspace.load_ledger(root)
     observations = scan(source, ledger).observations
     workspace.save_ledger(root, ledger)
-    ingested: set[tuple[ContentId, RecordId]] = set()
+    ingested: Ingested = set()
     for observation in observations:
         location = observation.revision.location
         assert isinstance(location, LocalPath)
@@ -95,6 +102,18 @@ def ingest_local(
                 check_chunk_output(adapter.descriptor, reader, config, chunk, output)
                 workspace.commit(chunk, output.records, output.findings, output.series)
             ingested.add(key)
+    return ledger, ingested
+
+
+def ingest_local(
+    root: Path,
+    workspace: Workspace,
+    adapters: AdapterRegistry,
+    destination: Path,
+    *,
+    on_chunk: Callable[[str], None] = lambda _: None,
+) -> ContentId:
+    ledger, ingested = ingest_into(root, workspace, adapters, on_chunk=on_chunk)
     return assemble(destination, workspace, ledger, ingested)
 
 
@@ -220,14 +239,152 @@ def test_a_symlink_at_a_sources_location_is_not_that_source(corpus: Path, tmp_pa
     assert _nothing_at(tmp_path / "portable")
 
 
-def test_a_source_seen_absent_has_no_location_to_export_from(corpus: Path, tmp_path: Path) -> None:
+def test_an_uncited_source_seen_absent_stays_referenced(corpus: Path, tmp_path: Path) -> None:
+    """Nothing in the second package was read from the deleted file: the export goes ahead."""
     workspace = Workspace(tmp_path / "home")
     ingest_local(corpus, workspace, registry(), tmp_path / "first")
+    notes = read_package(tmp_path / "first").receipt.sources
+    (gone,) = (s.content_id for s in notes if s.location == LocalPath("notes.txt"))
     (corpus / "notes.txt").unlink()
     ingest_local(corpus, workspace, registry(), tmp_path / "second")  # the ledger gains an absence
-    with pytest.raises(PackageError, match="no local location holds"):
-        export(tmp_path / "second", tmp_path / "portable", LocalSource(corpus))
+    export(tmp_path / "second", tmp_path / "portable", LocalSource(corpus))
+    storage = {
+        h.content_id: h.storage for h in read_package(tmp_path / "portable").manifest.sources
+    }
+    assert storage.pop(gone) is Storage.REFERENCED
+    assert set(storage.values()) == {Storage.MATERIALISED}
+
+
+def test_a_cited_source_seen_absent_fails_the_export(corpus: Path, tmp_path: Path) -> None:
+    """The package's records were read from a file whose last known state is absence."""
+    workspace = Workspace(tmp_path / "home")
+    ledger, ingested = ingest_into(corpus, workspace, registry())
+    (corpus / "notes.txt").unlink()
+    scan(LocalSource(corpus), ledger)  # the ledger gains an absence; the plans still cite it
+    assemble(tmp_path / "package", workspace, ledger, ingested)
+    with pytest.raises(PackageError, match="no local location holds sources the package cites"):
+        export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
     assert _nothing_at(tmp_path / "portable")
+
+
+def test_a_package_never_cites_a_source_its_ledger_lacks(corpus: Path, tmp_path: Path) -> None:
+    workspace = Workspace(tmp_path / "home")
+    _, ingested = ingest_into(corpus, workspace, registry())
+    with pytest.raises(PackageError, match="the ledger does not hold it"):
+        assemble(tmp_path / "package", workspace, SourceLedger(), ingested)
+    assert _nothing_at(tmp_path / "package")
+
+
+def _content_at(ledger: SourceLedger, path: str) -> ContentId:
+    revision = ledger.head(LocalPath(path))
+    assert isinstance(revision, SourceRevision)
+    return revision.content_id
+
+
+def test_a_materialised_source_is_copied_into_the_package(corpus: Path, tmp_path: Path) -> None:
+    workspace = Workspace(tmp_path / "home")
+    ledger, ingested = ingest_into(corpus, workspace, registry())
+    lift = _content_at(ledger, "lift.tally")
+    assemble(
+        tmp_path / "package", workspace, ledger, ingested, materialise={lift: corpus / "lift.tally"}
+    )
+    package = read_package(tmp_path / "package")
+    assert set(package.blobs) == {lift}
+    storage = {h.content_id: h.storage for h in package.manifest.sources}
+    assert storage.pop(lift) is Storage.MATERIALISED
+    assert set(storage.values()) == {Storage.REFERENCED}
+
+
+def test_a_source_that_changes_while_it_is_copied_fails_the_package(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = Workspace(tmp_path / "home")
+    ledger, ingested = ingest_into(corpus, workspace, registry())
+    lift = _content_at(ledger, "lift.tally")
+    copy = shutil.copyfile
+
+    def copy_then_change(source: Path, target: Path) -> None:
+        copy(source, target)
+        data = target.read_bytes()
+        target.write_bytes(data[:-1] + b"6")  # the same size, other bytes: as if written mid-copy
+
+    monkeypatch.setattr(shutil, "copyfile", copy_then_change)
+    with pytest.raises(PackageError, match="changed while it was copied"):
+        assemble(
+            tmp_path / "package",
+            workspace,
+            ledger,
+            ingested,
+            materialise={lift: corpus / "lift.tally"},
+        )
+    assert _nothing_at(tmp_path / "package")
+
+
+def test_only_copied_files_are_read_back(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The export hashes each source once, where it lands, and never re-reads the whole export."""
+    ingest_local(corpus, Workspace(tmp_path / "home"), registry(), tmp_path / "package")
+    opened: list[Path] = []
+    read = read_package
+
+    def recording(root: Path) -> Any:
+        opened.append(root)
+        return read(root)
+
+    monkeypatch.setattr("neptune.store.assemble.read_package", recording)
+    export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
+    assert opened == [tmp_path / "package"]
+    assert read_package(tmp_path / "portable").receipt == read_package(tmp_path / "package").receipt
+
+
+def test_packages_and_exports_are_flushed_before_they_appear(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every file and directory is fsynced, and so is the directory each one is renamed into."""
+    workspace = Workspace(tmp_path / "home")
+    ledger, ingested = ingest_into(corpus, workspace, registry())
+    flushed: set[tuple[int, int]] = set()
+    fsync = os.fsync
+
+    def recording(descriptor: int) -> None:
+        held = os.fstat(descriptor)
+        flushed.add((held.st_dev, held.st_ino))
+        fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", recording)
+    out = tmp_path / "out"
+    out.mkdir()
+    assemble(out / "package", workspace, ledger, ingested)
+    export(out / "package", out / "portable", LocalSource(corpus))
+    written = [out, *out.rglob("*")]
+    assert len(written) > 20
+    for path in written:
+        named = path.stat()
+        assert (named.st_dev, named.st_ino) in flushed, path
+
+
+def test_a_package_is_made_under_the_umask_without_touching_it(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The umask is process state; reading it means setting it, which races other threads."""
+    workspace = Workspace(tmp_path / "home")
+    ledger, ingested = ingest_into(corpus, workspace, registry())
+    umask = os.umask
+
+    def refuse(_: int) -> int:
+        raise AssertionError("the umask was changed")
+
+    previous = umask(0o027)
+    try:
+        monkeypatch.setattr(os, "umask", refuse)
+        assemble(tmp_path / "package", workspace, ledger, ingested)
+        export(tmp_path / "package", tmp_path / "portable", LocalSource(corpus))
+    finally:
+        umask(previous)
+    for package in (tmp_path / "package", tmp_path / "portable"):
+        assert stat.S_IMODE(package.stat().st_mode) == 0o750
+        assert stat.S_IMODE((package / "manifest.json").stat().st_mode) == 0o640
 
 
 def test_an_export_is_written_once(corpus: Path, tmp_path: Path) -> None:
@@ -266,11 +423,11 @@ def test_a_multi_gb_run_ingests_locally_with_no_copy_and_bounded_memory(tmp_path
             stream.seek(offset)
             stream.write(struct.pack("<QI", 1_000_000 * index, frame))
         stream.truncate(len(FRAMELOG.MAGIC) + frames * (12 + frame))
-    size = recording.stat().st_size
-    assert size > 2 * 1024**3
     before = recording.stat()
+    assert before.st_size > 2 * 1024**3
 
     workspace = Workspace(tmp_path / "home")
+    arrow = pa.default_memory_pool()
     tracemalloc.start()
     try:
         package_id = ingest_local(root, workspace, registry(), tmp_path / "package")
@@ -287,8 +444,11 @@ def test_a_multi_gb_run_ingests_locally_with_no_copy_and_bounded_memory(tmp_path
     assert disk(tmp_path / "home") < 4 * 1024**2
     assert {h.storage for h in package.manifest.sources} == {Storage.REFERENCED}
     assert peak < 96 * 1024**2  # Python memory: bounded by chunks and pieces, not the source
+    # Arrow's memory, outside the Python heap: the pool's peak over the whole process, so this
+    # run's peak included, bounded by row groups and merge batches, not the source.
+    assert arrow.max_memory() < 128 * 1024**2
     ((_, series),) = package.series.items()
     assert sum(1 for _ in read_rows(series)) == frames
     after = recording.stat()
     assert (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns)
-    assert recording.stat().st_blocks * 512 < size  # still sparse: nothing wrote the payloads
+    assert after.st_blocks == before.st_blocks  # still as sparse: nothing wrote the payloads
