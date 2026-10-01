@@ -24,11 +24,12 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Final
 
-from neptune.adapters.pdf._content import Box, Item
-from neptune.adapters.pdf._structure import Key, Owner, PageStructure, Placement, Table
 from neptune.model.world import BlockRole
 
-PLACEHOLDER: Final = "￼"
+from ._content import Box, Item
+from ._structure import Key, Owner, PageStructure, Placement, Table
+
+PLACEHOLDER: Final = "\ufffc"
 _HEADER_FOOTER: Final = {"Header": BlockRole.HEADER, "Footer": BlockRole.FOOTER}
 
 

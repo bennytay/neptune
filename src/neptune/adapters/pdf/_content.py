@@ -33,8 +33,9 @@ from pypdf import PdfReader
 from pypdf.generic import ContentStream, DictionaryObject
 
 from neptune.adapters.contract import ShortReadError
-from neptune.adapters.pdf._fonts import Font, load_font
-from neptune.adapters.pdf._objects import (
+
+from ._fonts import Font, load_font
+from ._objects import (
     array,
     dictionary,
     entry,
@@ -50,7 +51,7 @@ from neptune.adapters.pdf._objects import (
 MAX_FORM_DEPTH: Final = 8
 MAX_STATE_DEPTH: Final = 1024
 MAX_MARKED_DEPTH: Final = 1024
-REPLACEMENT: Final = "�"
+REPLACEMENT: Final = "\ufffd"
 
 Matrix = tuple[float, float, float, float, float, float]
 Point = tuple[float, float]

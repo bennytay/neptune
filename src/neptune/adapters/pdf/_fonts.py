@@ -35,7 +35,7 @@ from pypdf._codecs import (
 from pypdf._codecs.core_font_metrics import CORE_FONT_METRICS
 from pypdf.generic import DictionaryObject
 
-from neptune.adapters.pdf._objects import (
+from ._objects import (
     array,
     dictionary,
     entry,

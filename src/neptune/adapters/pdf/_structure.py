@@ -24,7 +24,9 @@ from typing import Final
 
 from pypdf.generic import DictionaryObject, IndirectObject
 
-from neptune.adapters.pdf._objects import (
+from neptune.model.world import BlockRole
+
+from ._objects import (
     array,
     dictionary,
     entry,
@@ -33,7 +35,6 @@ from neptune.adapters.pdf._objects import (
     reference,
     resolve,
 )
-from neptune.model.world import BlockRole
 
 MAX_DEPTH: Final = 128
 MAX_VISITS: Final = 200_000

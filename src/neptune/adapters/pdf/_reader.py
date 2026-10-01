@@ -31,7 +31,8 @@ from pypdf import PdfReader, apply_configuration, get_configuration
 from pypdf.generic import DictionaryObject
 
 from neptune.adapters.contract import ShortReadError, SourceReader, read_pieces
-from neptune.adapters.pdf._objects import array, dictionary, entry, integer, name
+
+from ._objects import array, dictionary, entry, integer, name
 
 BUFFER_SIZE: Final = 64 * 1024
 _OBJECT: Final = re.compile(

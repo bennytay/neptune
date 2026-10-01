@@ -58,7 +58,7 @@ class Stream:
 
 
 Obj: TypeAlias = (
-    "None | bool | int | float | Name | Ref | Lit | Hex | Raw | list[Obj] | dict[str, Obj] | Stream"
+    "bool | int | float | Name | Ref | Lit | Hex | Raw | list[Obj] | dict[str, Obj] | Stream | None"
 )
 Cipher: TypeAlias = Callable[[bytes], bytes]
 
@@ -277,9 +277,7 @@ class Pdf:
         plain = {encrypt.number} if encrypt is not None else set()
         out, offsets = bytearray(head), {}
         for number in numbers:
-            chunk, found = self.body(
-                [number], len(out), None if number in plain else security
-            )
+            chunk, found = self.body([number], len(out), None if number in plain else security)
             out += chunk
             offsets.update(found)
         xref = len(out)
@@ -504,7 +502,7 @@ def pump_sop(security: Rc4Security | None = None) -> bytes:
     _element(pdf, cap, "Caption", document, [5], page_one)
     _element(pdf, h2, "H2", document, [0], page_two)
     # Row 2's middle cell is empty: a TD with no content.
-    layout = [[1, 2, 3], [4, 5, 6], [7, None, 8]]
+    layout: list[list[int | None]] = [[1, 2, 3], [4, 5, 6], [7, None, 8]]
     for row_index, row in enumerate(layout):
         kids: list[Obj] = []
         for column, mcid in enumerate(row):
@@ -572,7 +570,11 @@ def cid_font(pdf: Pdf, glyphs: str) -> Ref:
             "Type": Name("Font"),
             "Subtype": Name("CIDFontType2"),
             "BaseFont": Name("GripperCID"),
-            "CIDSystemInfo": {"Registry": Lit(b"Adobe"), "Ordering": Lit(b"Identity"), "Supplement": 0},
+            "CIDSystemInfo": {
+                "Registry": Lit(b"Adobe"),
+                "Ordering": Lit(b"Identity"),
+                "Supplement": 0,
+            },
             "FontDescriptor": descriptor,
             "DW": 1000,
             "W": [1, [600] * len(glyphs)],
@@ -639,7 +641,9 @@ def gripper_datasheet(*, corrupt_first_page: bool = False) -> bytes:
         }
     )
     second = (
-        b"BT /F4 12 Tf 56 500 Td <" + cid_text("Payload 2 kg").hex().upper().encode() + b"> Tj ET\n"
+        b"BT /F4 12 Tf 56 500 Td <"
+        + cid_text("Payload 2 kg").hex().upper().encode()
+        + b"> Tj ET\n"
         + text("F5", 11, 56, 470, b"\x01 Safe zone")
         + text("F5", 11, 56, 450, b"Marker \x02")
     )
@@ -647,9 +651,7 @@ def gripper_datasheet(*, corrupt_first_page: bool = False) -> bytes:
         "Font": {"F1": f1, "F2": f2},
         "XObject": {"Fm1": form, "Im1": image},
     }
-    resources_two: dict[str, Obj] = {
-        "Font": {"F4": cid_font(pdf, CID_GLYPHS), "F5": differences}
-    }
+    resources_two: dict[str, Obj] = {"Font": {"F4": cid_font(pdf, CID_GLYPHS), "F5": differences}}
 
     def broken(data: bytes) -> bytes:
         stored = bytearray(stored_deflate(data))
@@ -679,9 +681,13 @@ def site_manifest() -> bytes:
         b"Asset P-2  centrifugal pump  bay 3",
         b"Asset V-12  gate valve  bay 3",
     ]
-    content = b"BT /F1 11 Tf 14 TL 72 720 Td " + b" ".join(
-        _literal(line) + (b" Tj" if index == 0 else b" '") for index, line in enumerate(lines)
-    ) + b" ET\n"
+    content = (
+        b"BT /F1 11 Tf 14 TL 72 720 Td "
+        + b" ".join(
+            _literal(line) + (b" Tj" if index == 0 else b" '") for index, line in enumerate(lines)
+        )
+        + b" ET\n"
+    )
     contents = pdf.add(Stream({"Filter": Name("FlateDecode")}, stored_deflate(content)))
     pdf.set(
         page_ref,
@@ -704,7 +710,12 @@ def site_manifest() -> bytes:
         bodies += serialize(pdf.objects[number]) + b"\n"
     objstm_number = max(pdf.objects) + 1
     objstm = Stream(
-        {"Type": Name("ObjStm"), "N": len(packed), "First": len(header), "Filter": Name("FlateDecode")},
+        {
+            "Type": Name("ObjStm"),
+            "N": len(packed),
+            "First": len(header),
+            "Filter": Name("FlateDecode"),
+        },
         stored_deflate(bytes(header) + bytes(bodies)),
     )
     out = bytearray(pdf.header())
@@ -743,7 +754,9 @@ def site_manifest() -> bytes:
     retitled = len(out)
     new_info = size
     out += f"{new_info} 0 obj\n".encode()
-    out += serialize({"Title": Lit(b"Site manifest"), "Producer": Lit(b"neptune fixture generator")})
+    out += serialize(
+        {"Title": Lit(b"Site manifest"), "Producer": Lit(b"neptune fixture generator")}
+    )
     out += b"\nendobj\n"
     update = len(out)
     out += f"xref\n{new_info} 1\n{retitled:010d} 00000 n \n".encode()
@@ -800,7 +813,9 @@ def hostile_nesting() -> bytes:
     deep = Raw(b"[" * 50_000 + b"]" * 50_000)
     content = b"BT /F1 11 Tf 72 720 Td (Before the nesting) Tj ET\n" + deep.value + b" pop\n"
     first = page(pdf, tree, content, {"Font": {"F1": HELVETICA}})
-    second = page(pdf, tree, text("F1", 11, 72, 720, b"After the nesting"), {"Font": {"F1": HELVETICA}})
+    second = page(
+        pdf, tree, text("F1", 11, 72, 720, b"After the nesting"), {"Font": {"F1": HELVETICA}}
+    )
     page_tree(pdf, [first, second], tree)
     info = pdf.add({"Title": deep})
     return pdf.build(catalog(pdf, tree), info)
@@ -828,7 +843,12 @@ def hostile_active() -> bytes:
     script = pdf.add({"S": Name("JavaScript"), "JS": Lit(b"app.alert('opened');")})
     payload = pdf.add(Stream({"Type": Name("EmbeddedFile")}, b"#!/bin/sh\necho payload\n"))
     spec = pdf.add(
-        {"Type": Name("Filespec"), "F": Lit(b"payload.sh"), "UF": Lit(b"payload.sh"), "EF": {"F": payload}}
+        {
+            "Type": Name("Filespec"),
+            "F": Lit(b"payload.sh"),
+            "UF": Lit(b"payload.sh"),
+            "EF": {"F": payload},
+        }
     )
     only = page(
         pdf,
@@ -838,7 +858,7 @@ def hostile_active() -> bytes:
         AA={"O": script},
     )
     page_tree(pdf, [only], tree)
-    names = {
+    names: dict[str, Obj] = {
         "EmbeddedFiles": {"Names": [Lit(b"payload.sh"), spec]},
         "JavaScript": {"Names": [Lit(b"init"), script]},
     }

@@ -51,27 +51,6 @@ from neptune.adapters.contract import (
     SourceReader,
     make_chunk,
 )
-from neptune.adapters.pdf._content import Interpreter, PageContent
-from neptune.adapters.pdf._objects import (
-    array,
-    dictionary,
-    entry,
-    integer,
-    name,
-    number,
-    reference,
-    resolve,
-)
-from neptune.adapters.pdf._page import Block, blocks
-from neptune.adapters.pdf._reader import (
-    Opened,
-    Unreadable,
-    Warnings,
-    open_document,
-    page_list,
-    pypdf_session,
-)
-from neptune.adapters.pdf._structure import Key, PageStructure, Structure
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import EvidenceRecord, evidence_record_id
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
@@ -104,6 +83,28 @@ from neptune.model.world import (
     StructuredRecord,
     StructuredTable,
 )
+
+from ._content import Interpreter, PageContent
+from ._objects import (
+    array,
+    dictionary,
+    entry,
+    integer,
+    name,
+    number,
+    reference,
+    resolve,
+)
+from ._page import Block, blocks
+from ._reader import (
+    Opened,
+    Unreadable,
+    Warnings,
+    open_document,
+    page_list,
+    pypdf_session,
+)
+from ._structure import Key, PageStructure, Structure
 
 HEADER: Final = b"%PDF-"
 HEADER_WINDOW: Final = 1024
