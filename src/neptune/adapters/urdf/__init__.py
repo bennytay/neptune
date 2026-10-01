@@ -82,6 +82,9 @@ ADAPTER_ID: Final = "urdf"
 BOM: Final = b"\xef\xbb\xbf"
 XACRO_NAMESPACE: Final = b"ros.org/wiki/xacro"
 MAX_FINDINGS: Final = 1000
+# The deepest nesting read, whatever max_depth says: the reader, expander and writer recurse once
+# a level, and stay well inside Python's recursion limit.
+MAX_DEPTH: Final = 128
 EXPANSION_STEP: Final[AdapterLocator] = adapter_locator("urdf:expansion", {"language": "xacro"})
 
 _ERRORS: Final[dict[str, tuple[FindingCategory, Severity]]] = {
@@ -121,7 +124,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             16 * 1024 * 1024,
             "a source, or a Xacro expansion, larger than this many bytes is reported, not read",
         ),
-        ConfigOption("max_depth", 64, "elements nested deeper than this stop the read"),
+        ConfigOption(
+            "max_depth",
+            64,
+            f"elements nested deeper than this, and never more than {MAX_DEPTH}, stop the read",
+        ),
         ConfigOption(
             "max_elements", 50_000, "a document or expansion with more elements is not read"
         ),
@@ -375,7 +382,7 @@ class UrdfAdapter:
                 )
             )
         data = b"".join(read_pieces(source, 0, source.size))
-        limits = {"max_depth": config.integer("max_depth")}
+        limits = {"max_depth": min(config.integer("max_depth"), MAX_DEPTH)}
         limits["max_elements"] = config.integer("max_elements")
         try:
             root = parse(data, **limits)
@@ -412,8 +419,11 @@ class UrdfAdapter:
     ) -> ChunkOutput:
         max_bytes = config.integer("max_bytes")
         try:
-            expansion = xacro.expand(root, max_chars=max_bytes, **limits)
-            expanded = serialize(expansion.root)
+            try:
+                expansion = xacro.expand(root, max_chars=max_bytes, **limits)
+                expanded = serialize(expansion.root)
+            except RecursionError:  # a safety net: the bounds keep well inside the limit
+                raise xacro.ExpansionLimit("nests deeper than Python can follow", 0, root) from None
             if len(expanded) > max_bytes:
                 raise xacro.ExpansionLimit("is larger than max_bytes", max_bytes, root)
         except xacro.ExpansionLimit as limit:

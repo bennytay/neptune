@@ -262,3 +262,31 @@ def test_a_hostile_document_is_refused_before_expansion() -> None:
     with pytest.raises(XmlError) as refused:
         tree((FIXTURES / "hostile" / "billion_laughs.urdf").read_bytes())
     assert refused.value.code == "doctype_refused"
+
+
+def test_a_long_property_chain_is_a_finding_not_a_recursion_error() -> None:
+    chain = '<xacro:property name="p0" value="1"/>' + "".join(
+        f'<xacro:property name="p{n}" value="${{p{n - 1} + 1}}"/>' for n in range(1, 200)
+    )
+    expansion = run(chain + '<link name="l" v="${p199}" w="${p20}"/>')
+    link = first(expansion, "link")
+    assert link.unresolved == {"v": UNKNOWN}
+    assert link.attribute("w") == "21"
+    assert problems(expansion) == ["xacro_invalid"]
+
+
+def test_every_bound_at_once_stays_inside_the_recursion_limit() -> None:
+    deep = "(" * 12 + "1" + ")" * 12
+    chain = '<xacro:property name="p0" value="1"/>' + "".join(
+        f'<xacro:property name="p{n}" value="${{p{n - 1} + {deep}}}"/>' for n in range(1, 32)
+    )
+    nest = (
+        '<xacro:macro name="nest" params="k"><a><xacro:if value="${k > 0}">'
+        '<xacro:nest k="${k - 1}"/></xacro:if><xacro:unless value="${k > 0}">'
+        '<b v="${p31}"/></xacro:unless></a></xacro:macro>'
+    )
+    expansion = run(chain + nest + '<xacro:nest k="60"/>', max_depth=128)
+    leaf = expansion.root
+    while leaf.elements():
+        leaf = leaf.elements()[0]
+    assert leaf.tag == "b" and leaf.attribute("v") == "32"

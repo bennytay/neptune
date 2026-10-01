@@ -47,6 +47,8 @@ NAMESPACE_ATTRIBUTE: Final = "xmlns:xacro"
 NOT_COVERED: Final = "not_covered"
 UNKNOWN: Final = "unknown"
 MAX_MACRO_DEPTH: Final = 64
+# Properties defined in terms of properties, evaluated one inside another.
+MAX_PROPERTY_DEPTH: Final = 32
 MAX_STEPS: Final = 500_000
 
 _TOKENS: Final = (
@@ -247,6 +249,7 @@ class _Expander:
         self.steps = 0
         self.chars = 0
         self.macro_depth = 0
+        self.property_depth = 0
 
     # Reporting
 
@@ -292,7 +295,16 @@ class _Expander:
                 )
                 raise Unresolved(UNKNOWN)
             assert isinstance(entry.value, str)
+            if self.property_depth >= MAX_PROPERTY_DEPTH:
+                self.invalid(
+                    entry.element,
+                    f"the property {_short(name)!r} is defined through more than"
+                    f" {MAX_PROPERTY_DEPTH} other properties",
+                    Severity.WARNING,
+                )
+                raise Unresolved(UNKNOWN)
             entry.evaluating = True
+            self.property_depth += 1
             try:
                 entry.value = literal(self.text(entry.value, scope, entry.element))
                 entry.lazy = False
@@ -301,6 +313,7 @@ class _Expander:
                 raise
             finally:
                 entry.evaluating = False
+                self.property_depth -= 1
         return entry.value
 
     def lookup(self, symbols: _Symbols) -> Callable[[str], Value]:

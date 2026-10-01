@@ -567,3 +567,10 @@ def test_every_record_reads_back_from_its_json() -> None:
     for name in ("robots/arm6.urdf", "xacro/diff_drive.urdf.xacro"):
         for record in run(fixture(name)).records():
             assert RECORD_KINDS[record.kind][1](record.to_json()) == record
+
+
+def test_max_depth_is_never_more_than_the_ceiling() -> None:
+    from neptune.adapters.urdf import MAX_DEPTH
+
+    assert not run(nested(MAX_DEPTH - 1), max_depth=10_000).findings()
+    assert codes(run(nested(MAX_DEPTH), max_depth=10_000)) == ["urdf.limit_exceeded"]
