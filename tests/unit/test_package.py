@@ -54,7 +54,8 @@ def test_format_adapters_are_leaves() -> None:
                     continue
                 for name in names:
                     if name.startswith("neptune"):
-                        assert name.startswith(allowed), (
+                        own = f"neptune.adapters.{package.name}"
+                        assert name.startswith((*allowed, own)), (
                             f"{package.name}/{path.name} imports {name}"
                         )
 
