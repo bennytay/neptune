@@ -17,6 +17,11 @@ LLM agents · VLAs / policies · simulators · eval · training · engineers
 The ingestion layer answers one question: **what exactly exists in this evidence?** It does not decide what the
 evidence *means*. Failures, capabilities, causes, patterns and operating envelopes are later-layer inferences.
 
+**Robot scope.** Neptune is for every type of robot, not drones: manipulators, mobile bases, legged platforms,
+humanoids, aerial, marine and underwater vehicles, autonomous cars and trucks, industrial automation and
+multi-robot fleets. Nothing in the model, adapters or alignment may assume a flight controller, a single vehicle
+or one morphology. Flight logs are two formats in the adapter catalogue.
+
 ## Two kinds of output, kept apart
 
 | | Evidence layer (`model/`) | Derived layer (`derived/`) |
