@@ -269,6 +269,18 @@ def test_a_commit_is_flushed_down_to_the_chunks_directory(
     assert flushed_holding(flushed, tmp_path / "chunks", final.parent.name)
 
 
+def test_opening_a_workspace_flushes_its_home_and_folders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flushed = record_flushes(monkeypatch, [])
+    Workspace(tmp_path / "home")
+    assert flushed_holding(flushed, tmp_path, "home")
+    (tmp_path / "home" / "plans").rmdir()
+    flushed.clear()
+    Workspace(tmp_path / "home")  # workspace.json exists: the remade folder is flushed anyway
+    assert flushed_holding(flushed, tmp_path / "home", "plans")
+
+
 def test_a_new_plan_or_ledger_directory_is_flushed_into_its_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

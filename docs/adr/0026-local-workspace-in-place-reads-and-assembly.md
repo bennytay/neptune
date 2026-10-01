@@ -29,7 +29,8 @@ package is built from committed work, how it becomes portable, and what "local-o
 2. **Commits are atomic, durable and idempotent.** A chunk is written into its own directory in
    `staging/`, every file and directory flushed (`fsync`), and renamed into `chunks/` in one step.
    Every directory a commit, plan or ledger lands in is flushed after it is made (its name in its
-   parent, even if another process made it) and after the rename (the new name in it).
+   parent, even if another process made it) and after the rename (the new name in it); opening
+   a workspace flushes the home's name and its folders' names.
    A process killed before the rename leaves only staging debris; one killed after it leaves a
    whole chunk. The writer holds an `flock` on its staging directory from creation until it is
    renamed or removed, and `clear_staging` removes only entries whose lock it can take, so it

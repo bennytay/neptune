@@ -169,11 +169,13 @@ class Workspace:
     def __init__(self, home: Path | None = None) -> None:
         self.home = Path(home) if home is not None else default_home()
         self.home.mkdir(parents=True, exist_ok=True)
+        fsync_directory(self.home.parent)  # the home's own name, whoever made it
         settings = self.home / "workspace.json"
         if settings.exists():
             self._check(settings)
         for directory in ("ledgers", "plans", "chunks", "staging"):
             (self.home / directory).mkdir(exist_ok=True)
+        fsync_directory(self.home)  # its folders' names, every time: one may have been remade
         if not settings.exists():
             self._save_settings({"local_only": True})
         self._settings = self._check(settings)
@@ -246,13 +248,13 @@ class Workspace:
                 os.close(descriptor)
 
     def _directory(self, path: Path) -> None:
-        """Make ``path``, a directory below the home's own, and flush its name into its parent.
+        """Make ``path``, a directory in one of the home's folders, and flush its name into it.
 
-        A rename into a directory is only durable if the directory's own name is. The parent is
+        A rename into a directory is only durable if the directory's own name is. The folder is
         flushed even when ``path`` already exists: another process may have made it and not yet
-        flushed it.
+        flushed it. The folders themselves are made, and flushed, when the workspace is opened.
         """
-        path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(exist_ok=True)
         fsync_directory(path.parent)
 
     def _replace(self, path: Path, data: bytes) -> None:
