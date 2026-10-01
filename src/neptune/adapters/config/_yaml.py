@@ -281,6 +281,7 @@ class _Document:
                 node.issues = (Issue.UNDEFINED_ALIAS,)
             elif isinstance(target, ScalarEvent):  # a key's anchor: the key's scalar again
                 node = self._scalar(path, order, parent, target)
+                node.span = (start, end)  # written here, as the alias
             else:
                 alias = Alias(anchor, self.nodes[target].path)
                 node = Node(path, order, parent, alias, None, None, (start, end))

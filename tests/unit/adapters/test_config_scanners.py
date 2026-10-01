@@ -233,6 +233,14 @@ def test_a_base_60_number_beyond_what_a_record_holds_is_unrepresentable() -> Non
     for places in (2372, 2373, 2374):  # computed and over 14,000 bits; then not computed
         over = implicit("1" + ":00" * (places - 1), "1.1")
         assert isinstance(over, Unreadable) and over.issue is Issue.UNREPRESENTABLE
+    # Leading zero places add nothing, and a long first place is held while under 14,000 bits.
+    zeros = "0" + ":0" * 3_000 + ":30.5"
+    assert implicit(zeros, "1.1") == Value((ConfigScalar(ScalarType.FLOAT, 30.5),))
+    assert implicit("0" * 5_000 + "1:00.5", "1.1") == Value((ConfigScalar(ScalarType.FLOAT, 60.5),))
+    wide = "1" + "0" * 4_100 + ":00"
+    assert implicit(wide, "1.1") == Value((ConfigScalar(ScalarType.INT, 10**4_100 * 60),))
+    too_wide = implicit("1" + "0" * 4_300 + ":00", "1.1")
+    assert isinstance(too_wide, Unreadable) and too_wide.issue is Issue.UNREPRESENTABLE
 
 
 def test_a_base_60_number_of_many_places_costs_linear_time() -> None:

@@ -28,6 +28,8 @@ INT_BITS: Final = 14_000
 # A base 60 number's places beyond which it is over INT_BITS bits: 60 ** (places - 1) > 2 ** 14,000
 # from 2,372 places on; any fewer are summed in linear time.
 SEXAGESIMAL_PLACES: Final = 2_372
+# Python's int() reads at most 4,300 decimal digits; 10 ** 4,300 is over INT_BITS bits anyway.
+_MAX_DIGITS: Final = 4_300
 
 _CORE: Final = "tag:yaml.org,2002:"
 
@@ -113,16 +115,22 @@ def _sign(text: str) -> tuple[int, str]:
 
 
 def _sexagesimal(text: str) -> float | int | Unreadable:
-    """A base 60 number (``1:30:00``), or why it cannot be held. Its first place is at least 1,
-    so past ``SEXAGESIMAL_PLACES`` places it is over ``INT_BITS`` bits, and beyond binary64 too,
-    without being computed: a long one costs nothing, never quadratic time."""
+    """A base 60 number (``1:30:00``), or why it cannot be held. Leading zero places add
+    nothing; past them the first place is at least 1, so beyond ``SEXAGESIMAL_PLACES`` places,
+    or a first place of more than 4,300 digits, it is over ``INT_BITS`` bits (and beyond
+    binary64) without being computed: a long one costs linear time, never quadratic."""
     sign, body = _sign(text)
     parts = body.split(":")
-    if len(parts) > SEXAGESIMAL_PLACES or len(parts[0]) > 4_000:
+    first = 0
+    while first < len(parts) - 1 and not parts[first].strip("0"):
+        first += 1
+    parts = parts[first:]
+    head = parts[0].lstrip("0") if len(parts) > 1 else ""
+    if len(parts) > SEXAGESIMAL_PLACES or len(head) > _MAX_DIGITS:
         return Unreadable(Issue.UNREPRESENTABLE, f"a base 60 number of {len(parts)} places")
     total: float | int = 0
     for part in parts:
-        total = total * 60 + (float(part) if "." in part else int(part))
+        total = total * 60 + (float(part) if "." in part else int(part.lstrip("0") or "0"))
     return sign * total
 
 

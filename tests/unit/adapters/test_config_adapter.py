@@ -270,6 +270,8 @@ def check_yaml_citations(
         if spot is not None and isinstance(value.tag, Known) and value.tag.value == "?":
             if isinstance(value.value, Known) and isinstance(value.value.value, ConfigCollection):
                 continue  # a block collection's lines need its indentation to parse alone
+            if text[spot[0]] == "*":
+                continue  # an alias to a key's anchor reads as that key; alone it parses to nothing
             again = yaml.compose(text[spot[0] : spot[1]], Loader=yaml.BaseLoader)
             assert again is not None and again.value == node.value
 
@@ -794,7 +796,11 @@ def test_an_alias_to_a_key_reads_as_that_key_again() -> None:
         Known("frame"),
         Known("?"),
     )
-    assert text_of(data)[slice(*(span_of(parent) or (0, 0)))] == "&f frame"
+    assert text_of(data)[slice(*(span_of(parent) or (0, 0)))] == "*f"
+    nested = b"a:\n  &k name: 1\n  other: *k\nb: 2\n"  # found by review: the parent's span
+    spans = {v.path: span_of(v) for v in values(run(nested))}
+    assert text_of(nested)[slice(*(spans[("a",)] or (0, 0)))] == "&k name: 1\n  other: *k"
+    assert text_of(nested)[slice(*(spans[("a", "other")] or (0, 0)))] == "*k"
     assert codes(output) == []
     check_yaml_citations(data, output)
     # Boundary: an anchor marks the last node or key that carries it, and a key on a collection
