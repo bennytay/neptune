@@ -6,6 +6,7 @@ A package is a directory::
     receipt.json                     IngestReceipt: the receipt's deterministic core
     receipt.md                       the same core, rendered for people
     records/<kind>.jsonl             one table per record kind, sorted by id; empty file = none
+    derived/<kind>.jsonl             a derived (inferred) table, sorted by id; absent = not made
     series/<64 hex>.parquet          one per stream, named by the stream's id (MVL-16 writes them)
     blobs/sha256/<2 hex>/<64 hex>    a materialised source's bytes
     volatile/receipt-envelope.json   ReceiptEnvelope: job, wall clock, host, root; not listed
@@ -16,6 +17,13 @@ series and blobs always give the same bytes and so the same package id. ``packag
 same for a package held wholly in memory. ``read_package`` checks all of
 it: the manifest, every file's size and hash, no stray files, every table's order and records,
 lineage ids, every series against its stream, and a receipt that recomputes from the tables.
+
+Derived tables (ADR 0036, amending ADR 0023 §5) hold what a producer inferred, such as session
+proposals, apart from the evidence in ``records/``. The store checks their structure only, since
+it never imports ``neptune.derived``: canonical lines, each an object of the table's ``kind`` with
+an integer ``schema_version``, a record ``id`` (sorted, each once) and a ``transform`` the package
+holds. ``neptune.derived`` reads their meaning. A table present and empty means its producer ran
+and inferred nothing; a table absent means it did not run.
 
 A file's content is bytes or a path on disk. Series and blobs can be gigabytes, so they stay
 paths: hashed, checked and copied as streams, never held in memory (ADR 0025). Every path is
@@ -30,7 +38,7 @@ import shutil
 import stat
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, BinaryIO, Final, TypeAlias
 
@@ -65,6 +73,7 @@ CACHE_REPORT: Final = f"{VOLATILE}/cache-report.json"
 _SERIES: Final = re.compile(r"series/([0-9a-f]{64})\.parquet")
 _BLOB: Final = re.compile(r"blobs/sha256/([0-9a-f]{2})/([0-9a-f]{64})")
 _TABLE: Final = re.compile(r"records/([a-z][a-z0-9_]*)\.jsonl")
+_DERIVED: Final = re.compile(r"derived/([a-z][a-z0-9_]*)\.jsonl")
 
 
 # A package file's content: bytes in memory, or a file on disk read as a stream.
@@ -78,6 +87,10 @@ class PackageError(ValueError):
 
 def table_path(kind: str) -> str:
     return f"records/{kind}.jsonl"
+
+
+def derived_path(kind: str) -> str:
+    return f"derived/{kind}.jsonl"
 
 
 def series_path(stream: RecordId) -> str:
@@ -149,6 +162,7 @@ def package_contents(
     series: Mapping[RecordId, Content] | None = None,
     blobs: Mapping[ContentId, Content] | None = None,
     store: JsonObject | None = None,
+    derived: Mapping[str, Iterable[JsonObject]] | None = None,
 ) -> dict[str, Content]:
     """Every file of the package holding ``records``, by path: deterministic, manifest included.
 
@@ -157,6 +171,7 @@ def package_contents(
     stream may have none, as in a records-only package. ``blobs`` are the sources to materialise,
     by content id; every other source stays referenced (ADR 0022 §5). ``store`` holds the settings
     the store wrote them with. Series and blobs may be paths, which are never loaded.
+    ``derived`` are derived tables by kind, each its lines as JSON objects, in any order.
     """
     series, blobs, store = dict(series or {}), dict(blobs or {}), dict(store or {})
     tables: dict[str, list[Any]] = {kind: [] for kind in RECORD_KINDS}
@@ -186,6 +201,9 @@ def package_contents(
         if _digest(data) != (artifacts[content].size, content):
             raise PackageError(f"blob bytes do not hash to {content}")
         files[blob_path(content)] = data
+    transforms = {transform.id for transform in tables["transform_record"]}
+    for kind, lines in sorted((derived or {}).items()):
+        files[derived_path(kind)] = _derived_table(kind, lines, transforms)
     receipt = build_receipt(record for members in tables.values() for record in members)
     files[RECEIPT] = _document(receipt)
     files[RECEIPT_TEXT] = render_receipt(receipt).encode("utf-8")
@@ -208,6 +226,75 @@ def package_contents(
     return files
 
 
+def _derived_table(kind: str, lines: Iterable[JsonObject], transforms: set[str]) -> bytes:
+    """A derived table's bytes, sorted by id, each line checked as the reader checks it.
+
+    ``lines`` may be lazy: each is encoded and checked as it arrives, so only the table's bytes
+    are held, never its JSON objects. Lines given in id order (as a grouping gives them) are
+    joined as they come; any other order is sorted once, by id.
+    """
+    path = derived_path(kind)
+    if not _DERIVED.fullmatch(path):
+        raise PackageError(f"not a derived table kind: {kind!r}")
+    encoded: list[tuple[str, bytes]] = []
+    ordered = True
+    for line in lines:
+        key = _derived_line(kind, line, transforms)
+        ordered = ordered and (not encoded or encoded[-1][0] < key)
+        encoded.append((key, canonical_json.dumps(line) + b"\n"))
+    if not ordered:
+        encoded.sort(key=lambda entry: entry[0])
+        keys = [key for key, _ in encoded]
+        if len(set(keys)) != len(keys):
+            raise PackageError(f"{path} must name each id once")
+    return b"".join(line for _, line in encoded)
+
+
+def _derived_key(kind: str, line: JsonValue) -> str:
+    if not isinstance(line, Mapping) or not isinstance(line.get("id"), str):
+        raise PackageError(f"a {kind} line must be a JSON object with a record id")
+    return str(line["id"])
+
+
+def _derived_line(kind: str, line: JsonValue, transforms: set[str]) -> str:
+    """One derived line's structure (``_check_derived``); its id."""
+    path = derived_path(kind)
+    if not isinstance(line, Mapping) or line.get("kind") != kind:
+        raise PackageError(f"{path} holds a line that is not a {kind}")
+    version = line.get("schema_version")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise PackageError(f"{path} holds a line without a derived schema_version")
+    key = _derived_key(kind, line)
+    try:
+        parse_record_id(key)
+    except ValueError as exc:
+        raise PackageError(f"{path}: {exc}") from exc
+    transform = line.get("transform")
+    if not isinstance(transform, str) or transform not in transforms:
+        raise PackageError(f"{path} holds a line whose transform is not in the package")
+    return key
+
+
+def _check_derived(kind: str, data: bytes, transforms: set[str]) -> tuple[JsonObject, ...]:
+    """The structure of one derived table: canonical lines, each a ``kind`` object with an
+    integer ``schema_version``, a record ``id`` and a ``transform`` the package holds, sorted by
+    id, each id once. Its meaning is ``neptune.derived``'s to check."""
+    path = derived_path(kind)
+    lines: list[JsonObject] = []
+    previous: str | None = None
+    for raw in data.splitlines(keepends=True):
+        line = _load(raw.removesuffix(b"\n"), path)
+        if not raw.endswith(b"\n") or canonical_json.dumps(line) + b"\n" != raw:
+            raise PackageError(f"{path} is not one canonical line per record")
+        key = _derived_line(kind, line, transforms)
+        if previous is not None and key <= previous:
+            raise PackageError(f"{path} must be sorted by id, each id once")
+        previous = key
+        assert isinstance(line, Mapping)  # _derived_line refuses anything else
+        lines.append(line)
+    return tuple(lines)
+
+
 def _series_settings(store: JsonObject) -> JsonObject:
     """The settings the package's series were written with, as ``store.series`` records them."""
     try:
@@ -224,9 +311,10 @@ def package_files(
     series: Mapping[RecordId, bytes] | None = None,
     blobs: Mapping[ContentId, bytes] | None = None,
     store: JsonObject | None = None,
+    derived: Mapping[str, Iterable[JsonObject]] | None = None,
 ) -> dict[str, bytes]:
     """``package_contents`` for a package held in memory: every file as bytes."""
-    contents = package_contents(records, series=series, blobs=blobs, store=store)
+    contents = package_contents(records, series=series, blobs=blobs, store=store, derived=derived)
     return {path: _bytes(data) for path, data in contents.items()}
 
 
@@ -292,7 +380,8 @@ def read_cache_report(root: Path) -> JsonObject:
 
 @dataclass(frozen=True)
 class IngestPackage:
-    """A package read and verified: its id, manifest, receipt, records, series and blobs."""
+    """A package read and verified: its id, manifest, receipt, records, series and blobs, and its
+    derived tables by kind, each line as JSON (``neptune.derived`` reads them)."""
 
     id: ContentId
     manifest: PackageManifest
@@ -300,11 +389,16 @@ class IngestPackage:
     records: tuple[Any, ...]
     series: Mapping[RecordId, Content]
     blobs: Mapping[ContentId, Content]
+    derived: Mapping[str, tuple[JsonObject, ...]] = field(default_factory=dict)
 
     def files(self) -> dict[str, Content]:
         """The package's deterministic files, rebuilt from what was read."""
         return package_contents(
-            self.records, series=self.series, blobs=self.blobs, store=self.manifest.store
+            self.records,
+            series=self.series,
+            blobs=self.blobs,
+            store=self.manifest.store,
+            derived=self.derived,
         )
 
 
@@ -379,6 +473,8 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
 
     series: dict[RecordId, Content] = {}
     blobs: dict[ContentId, Content] = {}
+    derived: dict[str, tuple[JsonObject, ...]] = {}
+    transforms = {record.id for record in records if record.kind == "transform_record"}
     streams = {record.id: record for record in records if record.kind == "stream"}
     handles = {handle.content_id: handle for handle in manifest.sources}
     artifacts = {record.content_id for record in records if record.kind == "source_artifact"}
@@ -388,7 +484,9 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
     for path, data in files.items():
         if path in (MANIFEST, RECEIPT, RECEIPT_TEXT) or _TABLE.fullmatch(path):
             continue
-        if match := _SERIES.fullmatch(path):
+        if match := _DERIVED.fullmatch(path):
+            derived[match[1]] = _check_derived(match[1], small[path], transforms)
+        elif match := _SERIES.fullmatch(path):
             stream = parse_record_id(f"rec:sha256:{match[1]}")
             if stream not in streams:
                 raise PackageError(f"{path} names no stream of this package")
@@ -426,6 +524,7 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
         records=tuple(records),
         series=series,
         blobs=blobs,
+        derived=derived,
     )
 
 
