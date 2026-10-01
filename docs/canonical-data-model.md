@@ -166,6 +166,9 @@ a bug, not a value.
   stream's transform applies. The row's `locator/` columns fill the template. `Stream.row_provenance(row)`
   rebuilds it, and the file's metadata holds the `Stream` line under `neptune.stream`.
 - Rows are sorted by their clock-0 ticks (unknown last), then `seq`.
+- The store writes each stream's file from per-chunk sorted runs with a bounded-memory merge, in
+  65,536-row groups with pinned settings, so the bytes depend only on the rows (ADR 0025). A
+  records-only package may hold a stream without its file; an ingest writes one for every stream.
 - `SeriesBatch` carries rows from an adapter to the store column by column (ADR 0024 §5). Each
   `SeriesColumn` has a `ColumnType` as the source encodes it (bool, int8–64, uint8–64, float32, float64,
   string, binary), `repeated` for arrays; Neptune's own columns keep the types above.
