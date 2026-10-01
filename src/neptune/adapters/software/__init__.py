@@ -167,8 +167,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         _finding(
             "too_many_entries",
-            "more than max_items entries are malformed or are ELF notes; the rest are not read"
-            " or reported (limit, error)",
+            "more than max_items entries are malformed, or are ELF notes or XML elements; the rest"
+            " are not read or reported, and a value they could change is Unknown (limit, error)",
         ),
         _finding(
             "too_many_items",
@@ -198,9 +198,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
     conventions=(
         Documented(
             "assertion",
-            "observed where the bytes describe themselves (git refs, firmware and checkpoint"
-            " headers); stated where a file declares other software (manifests, lockfiles, SBOMs,"
-            " image indexes)",
+            "observed where the bytes describe themselves (git refs, ELF, ESP-IDF and MCUboot"
+            " images, checkpoint headers); stated where a file declares software (manifests,"
+            " lockfiles, SBOMs, image indexes, PX4/ArduPilot files written by a build script)",
         ),
         Documented(
             "chunks",

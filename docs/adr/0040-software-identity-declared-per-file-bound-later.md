@@ -42,7 +42,8 @@ gigabyte checkpoint hashed twice, a URDF-style guess turned into a binding.
    checkpoint headers), `stated` where a file declares software (manifests, lockfiles, SBOMs,
    image indexes, and PX4/ArduPilot firmware files, whose JSON a build script wrote). A
    checkpoint that states no version (ONNX without `model_version`) has `release`
-   `NotCovered`, not `Unknown`: its identity is its content id (§8), so nothing is missing.
+   `KnownAbsent` when the whole file was walked, not `Unknown`: its identity is its content id
+   (§8), so nothing is missing; a cut file stays `Unknown`, the field may be in the unread part.
 3. **The identifier contract** (what each format fills; everything else per §4):
 
    | Format | `name` | `device` | `commit` | `release` | `build` | `digest` |
@@ -110,7 +111,9 @@ gigabyte checkpoint hashed twice, a URDF-style guess turned into a binding.
     `max_script_bytes` (256 KiB, CMake and Python, whose trees are many times the source),
     `max_header_bytes` (8 MiB) and `max_items` (20,000). A reader stops drafting one past
     `max_items` (`too_many_items`, no record) and per-entry findings, XML name/version elements
-    and ELF notes stop at `max_items` too (`too_many_entries`, the rest unread); conflicting
+    and ELF notes stop at `max_items` too (`too_many_entries`, the rest unread, so a field they
+    could change is `Unknown`, never a value chosen from a prefix); packed-refs lines are split on
+    LF only, as git does, lazily; conflicting
     values keep their first 32 candidates (`Ambiguous` checks pairs) and the finding counts all.
     Measured, by `tests/integration/test_software_memory.py` (a process per hostile file at its
     cap, interpreter included): peak 40-225 MiB before the script cap (a 512 KiB `setup.py`

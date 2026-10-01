@@ -122,11 +122,11 @@ def _document(reading: Reading) -> tuple[Doc, dict[str, Any]] | None:
     return Doc(reading, (ByteRange(0, reading.source.size),)), data
 
 
-def _limited(items: Iterator[Draft], limit: int) -> list[Draft]:
+def _limited(reading: Reading, items: Iterator[Draft]) -> list[Draft]:
     drafts: list[Draft] = []
     for draft in items:
         drafts.append(draft)
-        if len(drafts) > limit:
+        if reading.full(drafts):
             break
     return drafts
 
@@ -193,7 +193,7 @@ def _read_spdx(reading: Reading) -> list[Draft]:
     if found is None:
         return []
     doc, data = found
-    return _limited(_spdx_items(reading, doc, data), reading.config.integer("max_items"))
+    return _limited(reading, _spdx_items(reading, doc, data))
 
 
 # --- CycloneDX ---------------------------------------------------------------------------------
@@ -293,7 +293,7 @@ def _read_cyclonedx(reading: Reading) -> list[Draft]:
     if found is None:
         return []
     doc, data = found
-    return _limited(_cyclonedx_items(reading, doc, data), reading.config.integer("max_items"))
+    return _limited(reading, _cyclonedx_items(reading, doc, data))
 
 
 # --- OCI image index ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ def _read_oci_index(reading: Reading) -> list[Draft]:
     if found is None:
         return []
     doc, data = found
-    return _limited(_oci_items(reading, doc, data), reading.config.integer("max_items"))
+    return _limited(reading, _oci_items(reading, doc, data))
 
 
 SPDX: Final = Format(

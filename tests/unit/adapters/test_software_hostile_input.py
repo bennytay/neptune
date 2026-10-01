@@ -17,7 +17,7 @@ import pytest
 
 from neptune.adapters.software._common import describe
 from neptune.adapters.software._manifests import ROS_PACKAGE_XML
-from neptune.model.knowledge import Known, Unknown
+from neptune.model.knowledge import Ambiguous, Known, Unknown
 
 
 def _load(name: str) -> ModuleType:
@@ -154,3 +154,72 @@ def test_a_tag_made_of_hex_digits_is_not_a_commit(text: str) -> None:
 def test_describe_still_reads_a_real_abbreviation_and_a_tag_with_one() -> None:
     assert describe("abc1234") == (False, (0, 7))
     assert describe("v1.2-3-gabc1234-dirty")[0] is True
+
+
+# --- The bounds themselves ---------------------------------------------------------------------
+
+
+def _code_list(data: bytes, **config: int) -> list[str]:
+    codes: list[str] = ORACLE.codes(ORACLE.run(data, **config))
+    return codes
+
+
+def test_max_script_bytes_bounds_python_and_cmake_exactly() -> None:
+    cmake = ORACLE.fixture("manifests/CMakeLists.txt")
+    for data in (SETUP, cmake):
+        assert "too_large" not in _code_list(data, max_script_bytes=len(data))
+        assert "too_large" in _code_list(data, max_script_bytes=len(data) - 1)
+    # A data document is bounded by its own option, not the script one.
+    toml = ORACLE.fixture("manifests/pyproject.toml")
+    assert _code_list(toml, max_script_bytes=1) == _code_list(toml)
+
+
+def test_a_lockfile_with_more_items_than_max_items_stops_drafting_and_makes_no_record() -> None:
+    head = b'version = 1\nrequires-python = ">=3.11"\n\n'
+    data = head + b'[[package]]\nname = "a"\nversion = "1"\n' * 50
+    output = ORACLE.run(data, max_items=5)
+    assert output.records() == () and ORACLE.codes(output) == ["too_many_items"]
+    assert len(ORACLE.items(ORACLE.run(data, max_items=50))) == 50
+
+
+def test_many_nameless_cmake_projects_are_refused_not_truncated() -> None:
+    data = b"cmake_minimum_required(VERSION 3.16)\n" + b"project()\n" * 30
+    output = ORACLE.run(data, max_items=5)
+    assert output.records() == () and ORACLE.codes(output) == ["too_many_items"]
+
+
+def _package_xml(names: list[str]) -> bytes:
+    body = "".join(f"<name>{name}</name>" for name in names)
+    return f'<package format="3">{body}<version>1.0.0</version></package>'.encode()
+
+
+def test_conflicting_values_keep_a_bounded_candidate_list_and_the_finding_counts_all() -> None:
+    output = ORACLE.run(_package_xml([f"n{i}" for i in range(40)]))
+    (item,) = ORACLE.items(output)
+    assert isinstance(item.name, Ambiguous) and len(item.name.candidates) == 32
+    (finding,) = [f for f in output.findings() if f.code == "software.conflicting_identity"]
+    assert finding.details["distinct"] == 40 and finding.details["kept"] == 32
+
+
+def test_xml_elements_past_max_items_leave_the_field_unknown_not_a_prefix_of_it() -> None:
+    data = _package_xml(["a", "a", "a", "b"])
+    assert isinstance(ORACLE.items(ORACLE.run(data))[0].name, Ambiguous)
+    capped = ORACLE.run(data, max_items=3)  # the 4th, differing name is never read
+    (item,) = ORACLE.items(capped)
+    assert isinstance(item.name, Unknown) and "too_many_entries" in ORACLE.codes(capped)
+    assert ORACLE.known(item.release) == "1.0.0"  # a field with nothing dropped is unaffected
+
+
+def test_elf_notes_past_max_items_leave_the_identity_unknown() -> None:
+    notes = b"".join(MAKE._note(b"GNU\x00", 3, bytes([i]) * 20) for i in range(5))
+    capped = ORACLE.run(_elf_with_notes(notes), max_items=3)
+    (item,) = ORACLE.items(capped)
+    assert isinstance(item.build, Unknown) and "too_many_entries" in ORACLE.codes(capped)
+
+
+def test_packed_refs_split_lines_on_line_feed_only_as_git_does() -> None:
+    sha = "a" * 40
+    data = f"{sha} refs/heads/a\n{sha} refs/heads/b\r{sha} refs/heads/c\n".encode()
+    output = ORACLE.run(data)
+    assert ORACLE.codes(output) == ["malformed_entry"]
+    assert [ORACLE.known(item.name) for item in ORACLE.items(output)] == ["refs/heads/a"]

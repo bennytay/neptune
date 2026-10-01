@@ -14,7 +14,7 @@ from typing import Any, Final
 from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.software import SoftwareAdapter
 from neptune.discovery.reader import BytesReader
-from neptune.model.knowledge import Ambiguous, Known, Unknown
+from neptune.model.knowledge import Ambiguous, Known, KnownAbsent, Unknown
 from neptune.model.machine import SoftwareConfiguration, SoftwareItem
 from neptune.model.provenance import ByteRange, EvidenceRef, JsonPointer, Provenance, Span
 from neptune.model.versions import ContainerImageDigest, GitCommit, ModelCheckpointHash
@@ -136,7 +136,7 @@ def check_citations(data: bytes, output: SourceOutput) -> int:
                     if not isinstance(provenance, Provenance):
                         continue
                     cited = resolve(data, provenance.evidence)
-                    if isinstance(candidate, Unknown):
+                    if isinstance(candidate, Unknown | KnownAbsent):
                         continue
                     value = text_of(candidate.value)
                     assert _holds(cited, value, provenance.evidence), (name, value, cited)

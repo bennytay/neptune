@@ -269,14 +269,26 @@ class Reading:
             f"an entry of the {self.label} {problem}; it is skipped",
         )
 
+    def too_many_items(self, limit: int) -> None:
+        self.report(
+            "too_many_items",
+            FindingCategory.LIMIT,
+            Severity.ERROR,
+            self.whole,
+            f"the {self.label} declares more than max_items ({limit}) software items;"
+            " no record is made",
+            {"max_items": limit},
+        )
+
     def too_many_entries(self, subject: EvidenceRef, limit: int) -> None:
         self.report(
             "too_many_entries",
             FindingCategory.LIMIT,
             Severity.ERROR,
             subject,
-            f"the {self.label} holds more than max_items ({limit}) malformed entries or notes;"
-            " the rest are not read or reported",
+            f"the {self.label} holds more than max_items ({limit}) malformed entries, notes or"
+            " elements; the rest are not read or reported, and a value they could change is"
+            " unknown",
             {"max_items": limit},
         )
 
@@ -501,15 +513,7 @@ class Reading:
                     f"the {self.label} declares no software item",
                 )
         elif len(drafts) > limit:
-            self.report(
-                "too_many_items",
-                FindingCategory.LIMIT,
-                Severity.ERROR,
-                self.whole,
-                f"the {self.label} declares more than max_items ({limit}) software items;"
-                " no record is made",
-                {"max_items": limit},
-            )
+            self.too_many_items(limit)
         else:
             for draft in drafts:
                 self._identity_check(draft)

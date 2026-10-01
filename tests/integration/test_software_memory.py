@@ -38,9 +38,10 @@ CASES: Final = {
 @pytest.mark.slow
 @pytest.mark.parametrize("case", sorted(CASES))
 def test_a_hostile_file_at_the_size_limit_stays_inside_the_declared_memory(case: str) -> None:
-    done = subprocess.run(
-        [sys.executable, str(SCRIPT), case], check=True, capture_output=True, timeout=300
-    )
+    if not Path("/proc/self/status").exists():
+        pytest.skip("the measurement reads VmHWM from /proc")
+    done = subprocess.run([sys.executable, str(SCRIPT), case], capture_output=True, timeout=300)
+    assert done.returncode == 0, done.stderr.decode()
     measured = json.loads(done.stdout)
     assert measured["peak_mib"] < PEAK_MIB, measured
     if CASES[case] is not None:

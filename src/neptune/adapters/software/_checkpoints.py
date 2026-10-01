@@ -40,7 +40,7 @@ from neptune.adapters.software._common import (
     loads_json,
     reason,
 )
-from neptune.model.knowledge import AssertionKind, NotCovered
+from neptune.model.knowledge import AssertionKind, KnownAbsent, NotCovered, Unknown
 from neptune.model.provenance import ByteRange, EvidenceRef
 from neptune.model.versions import DeclaredVersion
 
@@ -241,6 +241,7 @@ def _read_onnx(reading: Reading) -> list[Draft]:
     size, reader = reading.source.size, _Reader(reading)
     model_version: tuple[int, int, int] | None = None
     at = fields = field_at = 0
+    complete = True  # the walk reached the end of the file through whole fields
     while at < size:
         fields += 1
         if fields > _ONNX_MAX_FIELDS:
@@ -249,6 +250,7 @@ def _read_onnx(reading: Reading) -> list[Draft]:
         data, local = reader.window(at)
         tag = _varint(data, local)
         if tag is None:
+            complete = False
             break
         number, wire = tag[0] >> 3, tag[0] & 7
         field_at = at
@@ -257,6 +259,7 @@ def _read_onnx(reading: Reading) -> list[Draft]:
             data, local = reader.window(at)
             value = _varint(data, local)
             if value is None:
+                complete = False
                 break
             if number == 5:
                 model_version = (value[0], at, value[1] - local)
@@ -265,6 +268,7 @@ def _read_onnx(reading: Reading) -> list[Draft]:
             data, local = reader.window(at)
             value = _varint(data, local)
             if value is None:
+                complete = False
                 break
             at += value[1] - local + value[0]
         elif wire in (1, 5):
@@ -275,6 +279,7 @@ def _read_onnx(reading: Reading) -> list[Draft]:
             )
             return []
     if at != size:
+        complete = False
         reading.truncated(
             reading.span(field_at, size - field_at),
             "an ONNX field runs past the end of the file",
@@ -282,9 +287,11 @@ def _read_onnx(reading: Reading) -> list[Draft]:
         )
     draft = _checkpoint_draft(reading.whole)
     if model_version is None:
-        # An unversioned model is normal: a checkpoint's identity is its content id (ADR 0040 §8),
-        # so no release is not a gap in identity, and nothing is said to be missing.
-        draft.release = NotCovered()
+        # A model that states no version is normal: its identity is its content id (ADR 0040 §8),
+        # so a complete walk that finds none is KnownAbsent and nothing is missing. A damaged
+        # file may hold the field in the part never read, so that stays Unknown.
+        where = reading.provenance(reading.whole)
+        draft.release = KnownAbsent(where) if complete else Unknown(where)
     else:
         number, start, length = model_version
         signed = number - (1 << 64) if number >= 1 << 63 else number

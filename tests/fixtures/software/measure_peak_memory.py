@@ -7,9 +7,9 @@ the size where the adapter would read it (the script cap or the document cap).
 """
 
 import json
-import resource
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Final
 
 from neptune.adapters.harness import ingest_source
@@ -94,7 +94,6 @@ def safetensors_junk() -> bytes:
 
 def elf_notes() -> bytes:
     from importlib.util import module_from_spec, spec_from_file_location
-    from pathlib import Path
 
     path = Path(__file__).parent / "make_software_fixtures.py"
     spec = spec_from_file_location("make_software_fixtures", path)
@@ -124,10 +123,19 @@ CASES: Final[dict[str, Callable[[], bytes]]] = {
 }
 
 
+def peak_mib() -> int:
+    """This process's peak resident set (``VmHWM``). ``ru_maxrss`` is not used: a child inherits
+    its parent's peak across the fork, so it would measure the test runner, not the input."""
+    for line in Path("/proc/self/status").read_text().splitlines():
+        if line.startswith("VmHWM:"):
+            return int(line.split()[1]) // 1024  # kB
+    raise OSError("VmHWM is not available: this measurement needs Linux")
+
+
 def main(name: str) -> None:
     data = CASES[name]()
     output = ingest_source(SoftwareAdapter(), BytesReader(data), {})
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024  # KiB on Linux
+    peak = peak_mib()
     codes = sorted({finding.code.removeprefix("software.") for finding in output.findings()})
     sys.stdout.write(json.dumps({"bytes": len(data), "codes": codes, "peak_mib": peak}) + "\n")
 

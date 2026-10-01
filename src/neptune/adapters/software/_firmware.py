@@ -1,6 +1,7 @@
 """Firmware images and binaries: the identity their own headers record (ADR 0040).
 
-Each image is one item, ``observed`` (the bytes describe themselves). Binary fields are rendered
+Each image is one item, ``observed`` (the bytes describe themselves); a PX4/ArduPilot file is
+``stated``, its JSON written by a build script. Binary fields are rendered
 as their tools print them, and nothing is guessed from a file name or a string found elsewhere.
 
 - **ELF** executables and shared objects: the GNU build-id note (``NT_GNU_BUILD_ID``) is
@@ -221,6 +222,7 @@ def _read_elf(reading: Reading) -> list[Draft]:
             reading.too_large(
                 reading.span(region.offset, region.size), spent, read_limit, "max_header_bytes"
             )
+            capped = True
             break
         for note in _notes(reading, header, region):
             notes += 1
@@ -250,9 +252,14 @@ def _read_elf(reading: Reading) -> list[Draft]:
                     releases.append(
                         reading.declared(draft, metadata["version"], doc.ref("version"))
                     )
-    draft.build = reading.choose(draft, "build", builds, Unknown(looked))
-    draft.name = reading.choose(draft, "name", names, Unknown(looked))
-    draft.release = reading.choose(draft, "release", releases, Unknown(looked))
+    if capped:
+        # The notes never read could differ: no value is chosen from a part of them.
+        draft.explained.update({"build", "name", "release"})
+        draft.build, draft.name, draft.release = Unknown(looked), Unknown(looked), Unknown(looked)
+    else:
+        draft.build = reading.choose(draft, "build", builds, Unknown(looked))
+        draft.name = reading.choose(draft, "name", names, Unknown(looked))
+        draft.release = reading.choose(draft, "release", releases, Unknown(looked))
     return [draft]
 
 

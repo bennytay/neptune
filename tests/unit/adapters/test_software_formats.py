@@ -344,7 +344,11 @@ def test_an_onnx_model_version_is_its_release_and_the_graph_is_skipped() -> None
     assert item.digest.state == "not_covered"
     unversioned = read("checkpoints/policy_noversion.onnx")
     (bare,) = items(unversioned)
-    assert bare.release.state == "not_covered" and codes(unversioned) == []
+    assert bare.release.state == "known_absent" and codes(unversioned) == []
+    # A cut file may hold the version in the part never read: that is unknown, and said.
+    cut_bare = ORACLE.run(ORACLE.fixture("checkpoints/policy_noversion.onnx")[:-1])
+    (damaged,) = items(cut_bare)
+    assert isinstance(damaged.release, Unknown)
     cut = read("checkpoints/policy_truncated.onnx")
     assert len(items(cut)) == 1 and "truncated" in codes(cut)
 

@@ -223,7 +223,7 @@ def _read_npm(reading: Reading) -> list[Draft]:
     top_name_at = doc.ref("name") if "name" in data else doc.ref()
     if isinstance(packages, dict):
         for key, entry in packages.items():
-            if len(drafts) > limit:
+            if reading.full(drafts):
                 break
             if not isinstance(entry, dict):
                 reading.malformed_entry(doc.ref("packages", key), "is not an object")

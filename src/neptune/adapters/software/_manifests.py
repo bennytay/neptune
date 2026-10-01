@@ -105,7 +105,7 @@ def _read_package_xml(reading: Reading) -> list[Draft]:
     found: dict[str, list[tuple[str, int, int]]] = {"name": [], "version": []}
     capture: tuple[str, int, list[str]] | None = None
     limit = reading.config.integer("max_items")
-    dropped: list[int] = []  # byte offset of the first element past max_items
+    dropped: dict[str, int] = {}  # per field: byte offset of its first element past max_items
 
     def start(name: str, attributes: dict[str, str]) -> None:
         nonlocal depth, capture
@@ -113,7 +113,7 @@ def _read_package_xml(reading: Reading) -> list[Draft]:
         if depth == 1:
             root.append(name)
         elif depth == 2 and name in found and len(found[name]) >= limit:
-            dropped.append(parser.CurrentByteIndex)
+            dropped.setdefault(name, parser.CurrentByteIndex)
         elif depth == 2 and name in found:
             capture = (name, parser.CurrentByteIndex, [])
 
@@ -151,17 +151,23 @@ def _read_package_xml(reading: Reading) -> list[Draft]:
         reading.malformed("has no <package> root element")
         return []
     if dropped:
-        reading.too_many_entries(reading.span(dropped[0], 0), limit)
+        reading.too_many_entries(reading.span(min(dropped.values()), 0), limit)
     draft = Draft(entry=reading.whole)
     absent = Unknown(reading.provenance(reading.whole))
     names = [
         reading.text(draft, "name", text, reading.span(s, e - s)) for text, s, e in found["name"]
     ]
     draft.name = reading.choose(draft, "name", names, absent)
+    if "name" in dropped:  # elements never read could disagree: no value is chosen from a part
+        draft.name = absent
+        draft.explained.add("name")
     releases = [
         reading.semver(draft, text, reading.span(s, e - s)) for text, s, e in found["version"]
     ]
     draft.release = reading.choose(draft, "release", releases, absent)
+    if "version" in dropped:
+        draft.release = absent
+        draft.explained.add("release")
     return [draft]
 
 
@@ -400,11 +406,13 @@ def _read_cmake(reading: Reading) -> list[Draft]:
     drafts: list[Draft] = []
     try:
         projects = []
+        limit = reading.config.integer("max_items")
         for command in _commands(data):
             if command.name == b"project":
                 projects.append(command)
-                if len(projects) > reading.config.integer("max_items"):
-                    break  # past the limit: the record is refused, the rest is not scanned
+                if len(projects) > limit:  # the record is refused, the rest is not scanned
+                    reading.too_many_items(limit)
+                    return []
     except _Unterminated as exc:
         reading.malformed(
             f"has an argument or comment left open at byte {exc.offset}", {"byte": exc.offset}
