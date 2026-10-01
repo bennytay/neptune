@@ -27,8 +27,14 @@ from neptune.model.ids import (
 )
 from neptune.model.knowledge import Knowledge, NotApplicable
 from neptune_memory.schema.claim import Claim, ClaimProvenance, is_inferred
+from neptune_memory.schema.claim import ModelRef as ModelRef  # moved to schema (ADR 0006 §3)
 from neptune_memory.schema.interval import OPEN, LedgerTx, Open
-from neptune_memory.schema.predicates import CORE_PREDICATES, PredicateRegistry, violations
+from neptune_memory.schema.predicates import (
+    CORE_PREDICATES,
+    PredicateRegistry,
+    violations,
+)
+from neptune_memory.schema.predicates import SAME_AS as SAME_AS
 from neptune_memory.schema.supersede import RESOLVER_ID
 
 if TYPE_CHECKING:
@@ -42,27 +48,11 @@ if TYPE_CHECKING:
     from neptune_memory.schema.nodes import NodeRef
 
 # ADR 0003 §1.2: only the identity consolidator grounds ``same_as``, and never by inference.
-SAME_AS: Final = "same_as"
 IDENTITY_CONSOLIDATOR_ID: Final = "memory.identity"
 
 # Record kind hashed into finding ids. Changing it re-lineages every finding: new ADR.
 FINDING_KIND: Final = "memory.finding"
 MAX_MESSAGE: Final = 1000
-
-
-@dataclass(frozen=True)
-class ModelRef:
-    """The model a ``derived/`` consolidator runs. Deterministic consolidators have none."""
-
-    model_id: str
-    model_version: str
-
-    def __post_init__(self) -> None:
-        check_text("model_id", self.model_id)
-        check_text("model_version", self.model_version)
-
-    def to_json(self) -> JsonObject:
-        return {"model_id": self.model_id, "model_version": self.model_version}
 
 
 @dataclass(frozen=True)
@@ -177,7 +167,8 @@ class Consolidator(Protocol):
 
     ``config`` is resolved: defaults already filled in, so an explicit default and an omitted one
     hash the same. A model-based consolidator's config holds ``"model": model.to_json()`` so the
-    model is in every claim's ``config_hash``. Implementations must not read the clock,
+    model is in its lineage's ``config_hash``; the runner also stamps it into each claim's
+    ``provenance.model`` (ADR 0006 §3). Implementations must not read the clock,
     randomness, the network or files.
     """
 
@@ -275,6 +266,7 @@ def _stamp(
                 consolidator_id=transform.consolidator_id,
                 consolidator_version=transform.version,
                 config_hash=transform.config_hash,
+                model=transform.model,
             ),
         )
     except (TypeError, ValueError) as exc:

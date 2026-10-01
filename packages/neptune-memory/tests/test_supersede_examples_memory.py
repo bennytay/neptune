@@ -87,7 +87,9 @@ def test_example_1_an_arm_camera_calibration_is_replaced() -> None:
     assert closure.provenance.consolidator_id == RESOLVER_ID
     assert closure.provenance.evidence == (*march.provenance.evidence, *july.provenance.evidence)
     # As of tx 1, March's calibration is current and open-ended; as of tx 2, it ended on 14 July.
-    assert claims_as_of(resolution, 1) == (ids[march.id],)
+    # The snapshot shows tx 1 as it was known then: the tx 2 supersession is masked (ADR 0006 §6).
+    assert claims_as_of(resolution, 1) == (replace(ids[march.id], superseded_at=OPEN),)
+    assert claims_as_of(resolution, 1) == (march,)
     assert set(claims_as_of(resolution, 2)) == {closure, ids[july.id]}
 
 
@@ -153,7 +155,7 @@ def test_example_3_an_operator_overrides_an_inferred_quadruped_identity(
         assert (finding.claim, finding.others) == (guess.id, (operator.id,))
     else:
         assert ids[operator.id].supersedes == (guess.id,)
-        assert claims_as_of(result, 3) == (ids[guess.id],)
+        assert claims_as_of(result, 3) == (replace(ids[guess.id], superseded_at=OPEN),)
 
 
 def test_example_4_a_marine_inspection_fact_is_superseded_by_maintenance() -> None:

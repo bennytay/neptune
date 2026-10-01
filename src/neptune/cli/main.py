@@ -14,6 +14,10 @@ Output:
   ``{"type": "result", ...}`` line, always last, always with the same keys. No wall-clock time,
   job token, host or workspace path appears, so the same input gives byte-identical lines.
 
+``--explain`` (a dry run) adds the plan's ``Explanation`` (ADR 0044): rendered after the planned
+lines, or, with ``--json``, one ``{"explanation": ..., "type": "explanation"}`` line (its canonical
+``dumps()``) just before the result line.
+
 Ctrl-C stops the job at its next checkpoint (exit 130); the workspace keeps the work, and
 ``--resume`` continues it. A second Ctrl-C aborts at once.
 """
@@ -65,6 +69,7 @@ _EPILOG: Final = """\
 examples:
   neptune ingest runs/2026-09-30 --out packages/2026-09-30
   neptune ingest runs/2026-09-30 --dry-run
+  neptune ingest runs/2026-09-30 --explain --json > plan.jsonl
   neptune ingest arm-cell/episode-7.mcap --out packages/episode-7 --json
 
 exit codes:
@@ -100,6 +105,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="discover, fingerprint, probe and plan only: say what would be ingested, write no "
         "package",
+    )
+    ingest.add_argument(
+        "--explain",
+        action="store_true",
+        help="a dry run that also explains the plan: every file, each adapter's verdict and why, "
+        "the proposed sessions, the work left and what would be left out (implies --dry-run)",
     )
     ingest.add_argument(
         "--resume",
@@ -207,6 +218,9 @@ def run(
     if args.command is None:
         parser.print_usage(stderr)
         return exit_codes.USAGE
+    if args.explain and args.out is not None:
+        return _usage(stderr, "--explain is a dry run and writes no package; drop --out")
+    args.dry_run = args.dry_run or args.explain
     if args.dry_run and args.out is not None:
         return _usage(stderr, "--dry-run writes no package; drop --out")
     if not args.dry_run and args.out is None:
@@ -310,7 +324,16 @@ class _Ingest:
             records = dict(receipt.records)
             findings = list(receipt.findings)
         summary = _summary(result, records=records, findings=findings)
-        return self._end(str(result.state), exit_codes.OK, result, summary, None)
+        explanation = result.explanation if self.args.explain else None
+        if explanation is not None and self.args.json:  # its canonical bytes, before the result
+            self.stdout.write(
+                f'{{"explanation":{explanation.dumps().decode()},"type":"explanation"}}\n'
+            )
+        status = self._end(str(result.state), exit_codes.OK, result, summary, None)
+        if explanation is not None and not self.args.json:
+            self.stdout.write("\n" + explanation.render())
+            self.stdout.flush()
+        return status
 
     def _failed(self, code: str, message: str, error: NeptuneError | None) -> int:
         status = exit_codes.for_code(code) if error is not None else exit_codes.INTERNAL
