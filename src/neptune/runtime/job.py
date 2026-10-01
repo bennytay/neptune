@@ -1,0 +1,902 @@
+"""The ingest job: nine phases, resume from the workspace, quarantine, cancellation (ADR 0028).
+
+::
+
+    discover     walk the root: regular files, symlinks, entries that could not be read
+    fingerprint  hash every file into the root's ledger; reconcile absences; save the ledger
+    inspect      probe each distinct source's head; select and configure an adapter
+    plan         plan each selected source, or reuse the plan the workspace holds; save it
+    parse        run the adapter over one chunk the workspace has not committed
+    normalize    check that chunk's output against the contract; commit it, whole or not at all
+    assemble     admit each source whose chunks all committed and pass the cross-chunk laws;
+                 build the package beside its destination
+    validate     read the staged package back and verify it
+    commit       write the envelope into it and rename it into place
+
+Parse and normalize alternate per chunk; every other phase runs once. The workspace is the
+checkpoint: a job killed at any point leaves a saved ledger, saved plans and committed chunks,
+each written whole or not at all, and the next job over the same root and workspace reuses them
+and skips committed chunk ids. There is no job file to repair.
+
+A source's problems are findings, never a failed job: an adapter that raises on a chunk is
+retried and then quarantined with the source it was reading, a file that changes under the job
+is reported and left alone, and every other source still reaches the package. The job itself
+fails (``JobError``) only when it cannot proceed at all: an unreadable root, a destination that
+exists, a config naming an option no adapter has, a workspace or disk that will not write.
+
+Cancellation is checked between units of work (sources and chunks) and between phases. A chunk
+in progress finishes and commits; nothing in the workspace is left half-written.
+"""
+
+import platform
+import threading
+import time
+import uuid
+from collections import defaultdict
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from itertools import pairwise
+from pathlib import Path
+from typing import Final
+
+from neptune.adapters.check import check_chunk_output, check_plan
+from neptune.adapters.contract import (
+    PROBE_HEAD_SIZE,
+    Adapter,
+    AdapterConfig,
+    Chunk,
+    ChunkOutput,
+    ConfigError,
+    ContractError,
+    ProbeHints,
+    ProbeResult,
+    chunk_from_json,
+    configure,
+)
+from neptune.adapters.registry import AdapterRegistry, Candidate, Selection, SelectionStatus, select
+from neptune.discovery.reader import LocalReader, SourceChangedError
+from neptune.discovery.scan import fingerprint
+from neptune.discovery.source import (
+    LocalSource,
+    SkippedEntry,
+    SkipReason,
+    SourceAccessError,
+    SourceEntry,
+    SymlinkEntry,
+    WalkEntry,
+)
+from neptune.identity.revisions import SourceLedger
+from neptune.model.finding import IngestFinding
+from neptune.model.ids import ContentId, RecordId
+from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.model.package import ReceiptEnvelope
+from neptune.model.run import Stream
+from neptune.model.series import SEQ
+from neptune.model.source import LocalPath, RawLocalPath, SourceArtifact, local_location
+from neptune.runtime import events, lineage
+from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
+from neptune.store.assemble import StagedPackage, publish, stage
+from neptune.store.package import PackageError, read_package, write_envelope
+from neptune.store.series import SeriesError, run_seq_range
+from neptune.store.workspace import Workspace, WorkspaceError
+
+DEFAULT_ATTEMPTS: Final = 2
+_UNREADABLE: Final = (SourceChangedError, SourceAccessError, OSError)
+
+
+class JobError(Exception):
+    """The job cannot proceed. Never about one source: a source's problems are findings."""
+
+
+class _Cancelled(Exception):
+    """Raised at a checkpoint when cancellation was requested; caught by ``run``."""
+
+
+@dataclass(frozen=True)
+class JobOptions:
+    """What a job may be told besides its root, destination, workspace and adapters.
+
+    ``attempts`` is how many times a chunk is tried before it fails; it is the runtime
+    transform's config, so a package's runtime findings name the policy they were made under.
+    ``config`` gives each adapter, by id, the option values to configure it with. ``job`` names
+    the job in its envelope; by default a fresh random token.
+    """
+
+    attempts: int = DEFAULT_ATTEMPTS
+    config: Mapping[str, Mapping[str, JsonValue]] = field(default_factory=dict)
+    job: str | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.attempts, bool) or not isinstance(self.attempts, int):
+            raise JobError(f"attempts must be an integer, got {self.attempts!r}")
+        if self.attempts < 1:
+            raise JobError(f"attempts must be at least 1, got {self.attempts}")
+        if self.job is not None and (not isinstance(self.job, str) or not self.job):
+            raise JobError(f"a job name is non-empty text, got {self.job!r}")
+
+
+@dataclass(frozen=True)
+class JobOutcome:
+    """How a job ended: committed with a package, or cancelled at a checkpoint without one."""
+
+    state: JobState
+    job: str
+    destination: Path
+    package: ContentId | None
+    ingested: tuple[tuple[ContentId, RecordId], ...]
+    findings: tuple[IngestFinding, ...]
+    durations: tuple[tuple[str, float], ...]
+
+
+@dataclass
+class _Source:
+    """One distinct artifact seen by this job, and what became of it."""
+
+    artifact: SourceArtifact
+    location: LocalPath | RawLocalPath  # the first location holding it, in walk order
+    adapter: Adapter | None = None
+    config: AdapterConfig | None = None
+    chunks: tuple[Chunk, ...] = ()
+    planned: bool = False
+    quarantined: list[str] = field(default_factory=list)  # the codes of its runtime findings
+
+    @property
+    def content_id(self) -> ContentId:
+        return self.artifact.content_id
+
+    @property
+    def key(self) -> tuple[ContentId, RecordId]:
+        assert self.config is not None  # only selected sources have a key
+        return (self.content_id, self.config.transform.id)
+
+
+def _now() -> str:
+    moment = datetime.now(UTC)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S") + f".{moment.microsecond // 1000:03d}Z"
+
+
+def _hint_name(location: LocalPath | RawLocalPath) -> str:
+    if isinstance(location, LocalPath):
+        return location.parts[-1]
+    return location.raw.rsplit(b"/", 1)[-1].decode("utf-8", "replace")
+
+
+def _check_chunk_seqs(output: ChunkOutput) -> None:
+    """``seq`` is unique within the chunk, per stream; across chunks, ``_cross_chunk_problems``."""
+    seen: dict[RecordId, set[int]] = defaultdict(set)
+    for batch in output.series:
+        for column in batch.columns:
+            if column.name != SEQ:
+                continue
+            for value in column.values:
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ContractError(f"stream {batch.stream}: seq {value!r} is not an integer")
+                if value in seen[batch.stream]:
+                    raise ContractError(
+                        f"stream {batch.stream}: seq {value} appears twice in one chunk"
+                    )
+                seen[batch.stream].add(value)
+
+
+class IngestJob:
+    """One ingest of ``root`` into a package at ``destination``, through ``workspace``.
+
+    Build it, then ``run`` it once. ``on_event`` receives every ``JobEvent`` as it happens;
+    ``cancel`` is checked at every checkpoint. Problems with one source become findings in the
+    package; problems with the job raise ``JobError``.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        destination: Path,
+        workspace: Workspace,
+        registry: AdapterRegistry,
+        options: JobOptions | None = None,
+        *,
+        on_event: EventSink | None = None,
+        cancel: threading.Event | None = None,
+    ) -> None:
+        self.root = Path(root)
+        self.destination = Path(destination)
+        if not self.root.is_dir():
+            raise JobError(f"{self.root} is not a directory")
+        if self.destination.exists():
+            raise JobError(f"{self.destination} exists; a package is written once")
+        self.workspace = workspace
+        self.registry = registry
+        self.options = options if options is not None else JobOptions()
+        self._configs = self._configure(registry, self.options.config)
+        self._on_event: EventSink = on_event if on_event is not None else (lambda event: None)
+        self._cancel = cancel
+        self.job = self.options.job if self.options.job is not None else uuid.uuid4().hex
+        self.transform = lineage.runtime_transform(self.options.attempts)
+        self.state = JobState.PENDING
+        self._phase = Phase.DISCOVER
+        self._started: set[Phase] = set()
+        self._entered_at: float | None = None
+        self._durations: dict[Phase, float] = dict.fromkeys(PHASES, 0.0)
+        self._findings: dict[RecordId, IngestFinding] = {}
+        self._sources: list[_Source] = []
+        self._ingested: list[tuple[ContentId, RecordId]] = []
+        self._staged: StagedPackage | None = None
+
+    @staticmethod
+    def _configure(
+        registry: AdapterRegistry, config: Mapping[str, Mapping[str, JsonValue]]
+    ) -> dict[str, AdapterConfig]:
+        """Every registered adapter's config, resolved up front so a bad one fails before work."""
+        descriptors = registry.descriptors()
+        if unknown := sorted(set(config) - set(descriptors)):
+            raise JobError(f"config names adapters that are not registered: {unknown}")
+        try:
+            return {
+                adapter_id: configure(descriptor, config.get(adapter_id))
+                for adapter_id, descriptor in descriptors.items()
+            }
+        except ConfigError as exc:
+            raise JobError(str(exc)) from exc
+
+    # --- Running -------------------------------------------------------------------------------
+
+    def run(self) -> JobOutcome:
+        """Run every phase. Returns when the package is in place or the job was cancelled."""
+        if self.state is not JobState.PENDING:
+            raise JobError("a job runs once")
+        self.state = JobState.RUNNING
+        started = _now()
+        try:
+            source = LocalSource(self.root)
+            entries = self._discover(source)
+            ledger = self._fingerprint(source, entries)
+            self._inspect(source)
+            self._plan(source)
+            self._ingest(source)
+            self._assemble(ledger)
+            receipt = self._validate()
+            package = self._commit(receipt, started)
+        except _Cancelled:
+            self._discard()
+            self.state = JobState.CANCELLED
+            self._emit(events.JOB_CANCELLED, {})
+            return self._outcome(None)
+        except Exception as exc:
+            self._discard()
+            self.state = JobState.FAILED
+            self._emit(events.JOB_FAILED, {"error": type(exc).__name__})
+            raise
+        except BaseException:
+            self._discard()  # the process is going down: leave nothing half-staged
+            self.state = JobState.FAILED
+            raise
+        self.state = JobState.COMMITTED
+        return self._outcome(package)
+
+    def _outcome(self, package: ContentId | None) -> JobOutcome:
+        return JobOutcome(
+            state=self.state,
+            job=self.job,
+            destination=self.destination,
+            package=package,
+            ingested=tuple(sorted(self._ingested)),
+            findings=tuple(sorted(self._findings.values(), key=lambda f: f.id)),
+            durations=self._durations_pairs(),
+        )
+
+    # --- Phases, events, checkpoints -----------------------------------------------------------
+
+    @contextmanager
+    def _enter(self, phase: Phase) -> Iterator[None]:
+        """Time work in ``phase``; its first entry emits ``phase_started``."""
+        self._phase = phase
+        if phase not in self._started:
+            self._started.add(phase)
+            self._emit(events.PHASE_STARTED, {})
+        self._entered_at = time.perf_counter()
+        try:
+            yield
+        finally:
+            self._durations[phase] += time.perf_counter() - self._entered_at
+            self._entered_at = None
+
+    def _finish(self, phase: Phase, details: JsonObject) -> None:
+        """The job moves past ``phase``: emit its summary (starting it first if it had no work)."""
+        if phase not in self._started:
+            self._started.add(phase)
+            self._emit(events.PHASE_STARTED, {}, phase)
+        self._emit(events.PHASE_FINISHED, details, phase)
+
+    def _emit(self, kind: str, details: JsonObject, phase: Phase | None = None) -> None:
+        self._on_event(JobEvent(kind, phase if phase is not None else self._phase, details))
+
+    def _check_cancel(self) -> None:
+        if self._cancel is not None and self._cancel.is_set():
+            raise _Cancelled()
+
+    def _durations_pairs(self) -> tuple[tuple[str, float], ...]:
+        current = dict(self._durations)
+        if self._entered_at is not None:  # the phase in progress counts up to now
+            current[self._phase] += time.perf_counter() - self._entered_at
+        return tuple(sorted((str(phase), seconds) for phase, seconds in current.items()))
+
+    def _discard(self) -> None:
+        if self._staged is not None:
+            self._staged.discard()
+            self._staged = None
+
+    # --- Findings ------------------------------------------------------------------------------
+
+    def _record(self, finding: IngestFinding) -> None:
+        self._findings[finding.id] = finding
+
+    def _quarantine(self, source: _Source, finding: IngestFinding) -> None:
+        """A runtime finding about ``source``: it leaves this package."""
+        self._record(finding)
+        source.quarantined.append(finding.code)
+
+    def _skip(self, entry: SkippedEntry) -> None:
+        location = local_location(entry.raw_path)
+        self._record(lineage.entry_skipped(self.transform, location, entry.reason, entry.detail))
+        self._emit(
+            events.ENTRY_SKIPPED, {"location": location.to_json(), "reason": str(entry.reason)}
+        )
+
+    def _unreadable(self, source: _Source, exc: Exception) -> None:
+        """A source could not be read when the job came to it: changed, refused, or an I/O error."""
+        location = source.location.to_json()
+        if isinstance(exc, SourceChangedError):
+            finding = lineage.source_changed(self.transform, source.location, source.content_id)
+            self._emit(events.SOURCE_CHANGED, {"location": location, "source": source.content_id})
+        else:
+            if isinstance(exc, SourceAccessError):
+                reason, detail = exc.reason, exc.detail
+            else:
+                reason, detail = SkipReason.UNREADABLE, str(getattr(exc, "strerror", None) or exc)
+            finding = lineage.source_unreadable(self.transform, source.location, reason, detail)
+            self._emit(
+                events.SOURCE_UNREADABLE,
+                {"location": location, "reason": str(reason), "source": source.content_id},
+            )
+        self._quarantine(source, finding)
+
+    # --- discover ------------------------------------------------------------------------------
+
+    def _discover(self, source: LocalSource) -> tuple[WalkEntry, ...]:
+        with self._enter(Phase.DISCOVER):
+            entries = tuple(source.walk())
+            files = symlinks = skipped = 0
+            for entry in entries:
+                if isinstance(entry, SourceEntry):
+                    files += 1
+                elif isinstance(entry, SymlinkEntry):
+                    symlinks += 1
+                    self._emit(
+                        events.SYMLINK_RECORDED,
+                        {"location": entry.location.to_json(), "target_hex": entry.target.hex()},
+                    )
+                else:
+                    if entry.raw_path == b".":
+                        raise JobError(f"{self.root} cannot be read: {entry.detail}")
+                    skipped += 1
+                    self._skip(entry)
+            self._finish(Phase.DISCOVER, {"files": files, "skipped": skipped, "symlinks": symlinks})
+        return entries
+
+    # --- fingerprint ---------------------------------------------------------------------------
+
+    def _fingerprint(self, source: LocalSource, entries: tuple[WalkEntry, ...]) -> SourceLedger:
+        with self._enter(Phase.FINGERPRINT):
+            try:
+                ledger = self.workspace.load_ledger(self.root)
+            except (WorkspaceError, ValueError, OSError) as exc:
+                raise JobError(f"the ledger of {self.root} cannot be loaded: {exc}") from exc
+            result = fingerprint(source, ledger, entries)
+            try:
+                self.workspace.save_ledger(self.root, ledger)
+            except OSError as exc:
+                raise JobError(f"the ledger of {self.root} cannot be saved: {exc}") from exc
+            walked = {
+                (e.raw_path, e.reason, e.detail) for e in entries if isinstance(e, SkippedEntry)
+            }
+            for entry in result.skipped:  # skipped at open, after the walk listed them
+                if (entry.raw_path, entry.reason, entry.detail) not in walked:
+                    self._skip(entry)
+            by_content: dict[ContentId, _Source] = {}
+            new_artifacts = new_revisions = 0
+            for observation in result.observations:
+                revision = observation.revision
+                location = revision.location
+                if not isinstance(location, LocalPath | RawLocalPath):
+                    raise JobError(f"a local scan yielded a non-local location: {location!r}")
+                new_artifacts += observation.new_artifact
+                new_revisions += observation.new_revision
+                artifact = ledger.artifact(revision.content_id)
+                if artifact is None:
+                    raise JobError(f"the ledger lost artifact {revision.content_id}")
+                self._emit(
+                    events.SOURCE_HASHED,
+                    {
+                        "location": location.to_json(),
+                        "new_artifact": observation.new_artifact,
+                        "new_revision": observation.new_revision,
+                        "size": artifact.size,
+                        "source": revision.content_id,
+                    },
+                )
+                if revision.content_id not in by_content:
+                    by_content[revision.content_id] = _Source(artifact, location)
+            for absence in result.absences:
+                self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
+            self._sources = list(by_content.values())
+            self._finish(
+                Phase.FINGERPRINT,
+                {
+                    "absences": len(result.absences),
+                    "locations": len(result.observations),
+                    "new_artifacts": new_artifacts,
+                    "new_revisions": new_revisions,
+                    "sources": len(self._sources),
+                },
+            )
+        return ledger
+
+    # --- inspect -------------------------------------------------------------------------------
+
+    def _select(self, head: bytes, source: _Source) -> Selection:
+        """Every adapter's probe, each isolated, under the registry's rule (ADR 0024 §7).
+
+        A probe that raises or returns the wrong type is reported and takes that adapter out of
+        this source's candidates. The probe engine (MVL-8) replaces this method.
+        """
+        hints = ProbeHints(_hint_name(source.location), source.artifact.size)
+        candidates: list[Candidate] = []
+        for adapter in self.registry.adapters():
+            descriptor = adapter.descriptor
+            try:
+                result = adapter.probe(head, hints)
+                if not isinstance(result, ProbeResult):
+                    raise ContractError(f"probe returned {result!r}")
+            except Exception as exc:
+                self._emit(
+                    events.PROBE_FAILED,
+                    {
+                        "adapter": descriptor.id,
+                        "error": type(exc).__name__,
+                        "source": source.content_id,
+                    },
+                )
+                continue
+            candidates.append(Candidate(descriptor.id, descriptor.version, result))
+        return select(candidates)
+
+    def _inspect(self, source: LocalSource) -> None:
+        with self._enter(Phase.INSPECT):
+            counts = dict.fromkeys(("ambiguous", "selected", "unreadable", "unsupported"), 0)
+            for item in self._sources:
+                self._check_cancel()
+                try:
+                    with LocalReader(source, item.location, item.artifact) as reader:
+                        head = reader.read(0, min(reader.size, PROBE_HEAD_SIZE))
+                except _UNREADABLE as exc:
+                    self._unreadable(item, exc)
+                    counts["unreadable"] += 1
+                    continue
+                selection = self._select(head, item)
+                details: dict[str, JsonValue] = {
+                    "location": item.location.to_json(),
+                    "source": item.content_id,
+                }
+                if selection.status is SelectionStatus.SELECTED:
+                    best = selection.candidates[0]
+                    item.adapter = self.registry.get(best.adapter)
+                    item.config = self._configs[best.adapter]
+                    counts["selected"] += 1
+                    details |= {
+                        "adapter": best.adapter,
+                        "confidence": best.confidence,
+                        "version": best.version,
+                    }
+                    self._emit(events.SOURCE_SELECTED, details)
+                elif selection.status is SelectionStatus.AMBIGUOUS:
+                    counts["ambiguous"] += 1
+                    details["adapters"] = [c.adapter for c in selection.tied]
+                    self._emit(events.SOURCE_AMBIGUOUS, details)
+                else:
+                    counts["unsupported"] += 1
+                    self._emit(events.SOURCE_UNSUPPORTED, details)
+            self._finish(Phase.INSPECT, dict(counts))
+
+    # --- plan ----------------------------------------------------------------------------------
+
+    def _plan(self, source: LocalSource) -> None:
+        with self._enter(Phase.PLAN):
+            planned = chunks_total = committed_total = failed = 0
+            for item in self._sources:
+                if item.adapter is None or item.config is None or item.quarantined:
+                    continue
+                self._check_cancel()
+                adapter, config = item.adapter, item.config
+                try:
+                    stored = self.workspace.load_plan(item.content_id, config.transform.id)
+                    chunks = tuple(chunk_from_json(c) for c in stored.chunks) if stored else ()
+                except (WorkspaceError, ContractError, ValueError) as exc:
+                    raise JobError(
+                        f"the stored plan of {item.content_id} is corrupt: {exc}"
+                    ) from exc
+                reused = stored is not None
+                if stored is None:
+                    try:
+                        with LocalReader(source, item.location, item.artifact) as reader:
+                            plan = adapter.plan(reader, config)
+                            check_plan(adapter.descriptor, reader, config, plan)
+                    except _UNREADABLE as exc:
+                        self._unreadable(item, exc)
+                        failed += 1
+                        continue
+                    except Exception as exc:
+                        problem = str(exc) if isinstance(exc, ContractError) else None
+                        self._quarantine(
+                            item,
+                            lineage.plan_failed(
+                                self.transform,
+                                item.content_id,
+                                item.artifact.size,
+                                adapter.descriptor.id,
+                                type(exc).__name__,
+                                problem,
+                            ),
+                        )
+                        self._emit(
+                            events.PLAN_FAILED,
+                            {
+                                "adapter": adapter.descriptor.id,
+                                "error": type(exc).__name__,
+                                "source": item.content_id,
+                            },
+                        )
+                        failed += 1
+                        continue
+                    try:
+                        self.workspace.save_plan(config.transform, plan.chunks, plan.findings)
+                    except (WorkspaceError, OSError) as exc:
+                        raise JobError(
+                            f"the plan of {item.content_id} cannot be saved: {exc}"
+                        ) from exc
+                    chunks = plan.chunks
+                item.chunks, item.planned = chunks, True
+                done = sum(1 for chunk in chunks if self.workspace.committed(chunk.id))
+                planned += 1
+                chunks_total += len(chunks)
+                committed_total += done
+                self._emit(
+                    events.SOURCE_PLANNED,
+                    {
+                        "adapter": adapter.descriptor.id,
+                        "chunks": len(chunks),
+                        "committed": done,
+                        "cost": sum(chunk.cost for chunk in chunks),
+                        "reused": reused,
+                        "source": item.content_id,
+                        "transform": config.transform.id,
+                    },
+                )
+            self._finish(
+                Phase.PLAN,
+                {
+                    "chunks": chunks_total,
+                    "committed": committed_total,
+                    "failed": failed,
+                    "sources": planned,
+                },
+            )
+
+    # --- parse and normalize, per chunk --------------------------------------------------------
+
+    def _ingest(self, source: LocalSource) -> None:
+        if Phase.PARSE not in self._started:
+            self._started.add(Phase.PARSE)
+            self._emit(events.PHASE_STARTED, {}, Phase.PARSE)
+        committed = failed = skipped = 0
+        for item in self._sources:
+            if not item.planned or item.quarantined:
+                continue
+            reader: LocalReader | None = None
+            try:
+                for chunk in item.chunks:
+                    self._check_cancel()
+                    if self.workspace.committed(chunk.id):
+                        skipped += 1
+                        self._emit(
+                            events.CHUNK_SKIPPED,
+                            {"chunk": chunk.id, "source": item.content_id},
+                            Phase.PARSE,
+                        )
+                        continue
+                    if reader is None:
+                        try:
+                            reader = LocalReader(source, item.location, item.artifact)
+                        except _UNREADABLE as exc:
+                            self._unreadable(item, exc)
+                            break
+                    parsed = self._parse(item, reader, chunk)
+                    if parsed is None:
+                        failed += 1
+                        if item.quarantined and item.quarantined[-1] in (
+                            lineage.SOURCE_CHANGED,
+                            lineage.SOURCE_UNREADABLE,
+                        ):
+                            break  # nothing more of this source can be read
+                        continue
+                    output, attempt = parsed
+                    if self._normalize(item, reader, chunk, output, attempt):
+                        committed += 1
+                    else:
+                        failed += 1
+            finally:
+                if reader is not None:
+                    reader.close()
+        self._finish(
+            Phase.PARSE, {"chunks": committed + failed, "failed": failed, "skipped": skipped}
+        )
+        self._finish(Phase.NORMALIZE, {"committed": committed})
+
+    def _parse(
+        self, item: _Source, reader: LocalReader, chunk: Chunk
+    ) -> tuple[ChunkOutput, int] | None:
+        """``ingest`` one chunk, up to ``attempts`` times; ``None`` once it has failed for good.
+
+        A ``ContractError`` is a bug, not a fault, so it is not retried; a source that changed is
+        reported and never retried. Any other exception gets the remaining attempts.
+        """
+        assert item.adapter is not None and item.config is not None
+        adapter, config = item.adapter, item.config
+        attempts = self.options.attempts
+        for attempt in range(1, attempts + 1):
+            with self._enter(Phase.PARSE):
+                try:
+                    output = adapter.ingest(reader, chunk, config)
+                except SourceChangedError as exc:
+                    self._unreadable(item, exc)
+                    return None
+                except Exception as exc:
+                    error = type(exc).__name__
+                    if attempt < attempts and not isinstance(exc, ContractError):
+                        self._emit(
+                            events.CHUNK_RETRIED,
+                            {"attempt": attempt, "chunk": chunk.id, "error": error},
+                        )
+                        continue
+                    problem = str(exc) if isinstance(exc, ContractError) else None
+                    self._fail_chunk(item, chunk, error, attempt, problem)
+                    return None
+            self._emit(
+                events.CHUNK_PARSED,
+                {
+                    "attempt": attempt,
+                    "chunk": chunk.id,
+                    "findings": len(output.findings),
+                    "records": len(output.records),
+                    "series": len(output.series),
+                    "source": item.content_id,
+                },
+            )
+            return output, attempt
+        return None
+
+    def _fail_chunk(
+        self, item: _Source, chunk: Chunk, error: str, attempts: int, problem: str | None
+    ) -> None:
+        assert item.adapter is not None
+        adapter_id = item.adapter.descriptor.id
+        self._quarantine(
+            item,
+            lineage.chunk_failed(
+                self.transform,
+                item.content_id,
+                item.artifact.size,
+                adapter_id,
+                chunk.id,
+                error,
+                attempts,
+                problem,
+            ),
+        )
+        self._emit(
+            events.CHUNK_FAILED,
+            {
+                "adapter": adapter_id,
+                "attempts": attempts,
+                "chunk": chunk.id,
+                "error": error,
+                "source": item.content_id,
+            },
+        )
+
+    def _normalize(
+        self, item: _Source, reader: LocalReader, chunk: Chunk, output: ChunkOutput, attempt: int
+    ) -> bool:
+        """Check one chunk's output against the contract and commit it, whole or not at all."""
+        assert item.adapter is not None and item.config is not None
+        with self._enter(Phase.NORMALIZE):
+            try:
+                check_chunk_output(item.adapter.descriptor, reader, item.config, chunk, output)
+                _check_chunk_seqs(output)
+            except ContractError as exc:
+                self._fail_chunk(item, chunk, type(exc).__name__, attempt, str(exc))
+                return False
+            try:
+                new = self.workspace.commit(chunk, output.records, output.findings, output.series)
+            except (WorkspaceError, SeriesError, ValueError, OSError) as exc:
+                raise JobError(f"chunk {chunk.id} cannot be committed: {exc}") from exc
+            self._emit(
+                events.CHUNK_COMMITTED,
+                {
+                    "chunk": chunk.id,
+                    "findings": len(output.findings),
+                    "new": new,
+                    "records": len(output.records),
+                    "rows": sum(batch.length for batch in output.series),
+                    "source": item.content_id,
+                },
+            )
+        return True
+
+    # --- assemble ------------------------------------------------------------------------------
+
+    def _cross_chunk_problems(self, item: _Source) -> list[str]:
+        """The contract's cross-chunk laws over a source's committed outputs, in bounded memory.
+
+        Ids are held in a set (the package holds every record in memory anyway, ADR 0022).
+        ``seq`` uniqueness across chunks is proven from each run's ``seq`` range, read from its
+        Parquet statistics: ranges that do not overlap, with ``seq`` unique inside each chunk
+        (checked at normalize), are unique overall. Memory is one pair per chunk, never per row.
+        """
+        assert item.config is not None
+        problems: list[str] = []
+        record_ids: set[RecordId] = set()
+        finding_ids: set[RecordId] = set()
+        streams: set[RecordId] = set()
+        runs: dict[RecordId, list[tuple[str, Path]]] = defaultdict(list)
+        stored = self.workspace.load_plan(item.content_id, item.config.transform.id)
+        if stored is None:
+            raise JobError(f"the plan of {item.content_id} vanished from the workspace")
+        said_something = bool(stored.findings)
+        for finding in stored.findings:
+            finding_ids.add(finding.id)
+        for chunk in item.chunks:
+            output = self.workspace.load(chunk.id)
+            said_something = said_something or bool(output.records or output.findings)
+            for record in output.records:
+                if record.id in record_ids:
+                    problems.append(f"{record.kind} {record.id} is emitted by two chunks")
+                record_ids.add(record.id)
+                if isinstance(record, Stream):
+                    streams.add(record.id)
+            for finding in output.findings:
+                if finding.id in finding_ids:
+                    problems.append(f"finding {finding.id} is emitted by two chunks")
+                finding_ids.add(finding.id)
+            for stream, run in output.runs.items():
+                runs[stream].append((chunk.id, run))
+        if not said_something:
+            problems.append("the output says nothing about its source: no record, no finding")
+        for stream in sorted(set(runs) - streams):
+            problems.append(f"series rows name {stream}, which no chunk declares as a stream")
+        for stream in sorted(streams - set(runs)):
+            problems.append(f"stream {stream} has no series run")
+        for stream, found in sorted(runs.items()):
+            ranges: list[tuple[int, int, str]] = []
+            for chunk_id, run in found:
+                try:
+                    bounds = run_seq_range(run)
+                except SeriesError as exc:
+                    problems.append(f"stream {stream}: the run of chunk {chunk_id}: {exc}")
+                    continue
+                if bounds is not None:
+                    ranges.append((bounds[0], bounds[1], chunk_id))
+            ranges.sort()
+            for (_, high, first), (low, _, second) in pairwise(ranges):
+                if low <= high:
+                    problems.append(
+                        f"stream {stream}: the seq ranges of chunks {first} and {second} overlap"
+                        f" (seq {low} is in both)"
+                    )
+        return problems
+
+    def _assemble(self, ledger: SourceLedger) -> None:
+        with self._enter(Phase.ASSEMBLE):
+            self._check_cancel()
+            quarantined = 0
+            for item in self._sources:
+                if item.adapter is None or item.config is None:
+                    continue  # never selected: nothing to admit, nothing to quarantine
+                if (
+                    item.planned
+                    and not item.quarantined
+                    and (problems := self._cross_chunk_problems(item))
+                ):
+                    self._quarantine(
+                        item,
+                        lineage.output_invalid(
+                            self.transform,
+                            item.content_id,
+                            item.artifact.size,
+                            item.adapter.descriptor.id,
+                            problems,
+                        ),
+                    )
+                details: dict[str, JsonValue] = {
+                    "source": item.content_id,
+                    "transform": item.key[1],
+                }
+                if item.quarantined:
+                    quarantined += 1
+                    details["codes"] = sorted(set(item.quarantined))
+                    self._emit(events.SOURCE_QUARANTINED, details)
+                else:
+                    self._ingested.append(item.key)
+                    self._emit(events.SOURCE_ADMITTED, details)
+            extra = [self.transform, *self._findings.values()] if self._findings else []
+            try:
+                self._staged = stage(
+                    self.destination, self.workspace, ledger, self._ingested, extra=extra
+                )
+            except (PackageError, WorkspaceError, SeriesError, ValueError, OSError) as exc:
+                raise JobError(f"the package cannot be assembled: {exc}") from exc
+            self._emit(
+                events.PACKAGE_STAGED,
+                {"package": self._staged.id, "sources": len(self._ingested)},
+            )
+            self._finish(
+                Phase.ASSEMBLE, {"quarantined": quarantined, "sources": len(self._ingested)}
+            )
+
+    # --- validate ------------------------------------------------------------------------------
+
+    def _validate(self) -> RecordId:
+        """Read the staged package back and verify every file, id, series and the receipt."""
+        with self._enter(Phase.VALIDATE):
+            self._check_cancel()
+            assert self._staged is not None
+            try:
+                package = read_package(self._staged.path)
+            except (PackageError, SeriesError, ValueError, OSError) as exc:
+                raise JobError(f"the assembled package does not verify: {exc}") from exc
+            summary: dict[str, JsonValue] = {
+                "findings": len(package.receipt.findings),
+                "package": package.id,
+                "records": len(package.records),
+                "series": len(package.series),
+            }
+            self._emit(events.PACKAGE_VERIFIED, summary)
+            self._finish(Phase.VALIDATE, summary)
+        return package.manifest.receipt
+
+    # --- commit --------------------------------------------------------------------------------
+
+    def _commit(self, receipt: RecordId, started: str) -> ContentId:
+        """Write the envelope into the staged package and rename it into place."""
+        with self._enter(Phase.COMMIT):
+            self._check_cancel()
+            staged = self._staged
+            assert staged is not None
+            envelope = ReceiptEnvelope(
+                receipt=receipt,
+                job=self.job,
+                started=started,
+                finished=_now(),
+                host=platform.node() or "unknown",
+                root=str(self.root.absolute()),
+                durations=self._durations_pairs(),
+            )
+            try:
+                write_envelope(staged.path, envelope)
+                package = publish(staged)
+            except (PackageError, OSError) as exc:
+                raise JobError(f"the package cannot be committed: {exc}") from exc
+            self._staged = None
+            self._emit(events.JOB_COMMITTED, {"package": package, "sources": len(self._ingested)})
+            self._finish(Phase.COMMIT, {"package": package})
+        return package
