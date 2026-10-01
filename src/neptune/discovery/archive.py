@@ -529,6 +529,9 @@ def _read_up_to(fileobj: _Readable, count: int) -> bytes:
 _CENTRAL_ENTRY: Final = b"PK\x01\x02"
 _CENTRAL_ENTRY_SIZE: Final = 46  # the fixed part; name, extra field and comment follow
 _DIRECTORY_BYTES_PER_MEMBER: Final = 1 << 10  # what one directory entry may average
+# "Version made by" hosts whose external attributes carry a ``st_mode`` in the high 16 bits.
+_UNIX_HOSTS: Final = frozenset({3, 19})  # Unix, OS X (APPNOTE 4.4.2)
+_DOS_DIRECTORY: Final = 0x10  # the MS-DOS directory attribute, in the low byte
 
 
 @dataclass(frozen=True)
@@ -724,15 +727,7 @@ def _zip_member(
     depth: int,
 ) -> ArchiveMember:
     name = info.orig_filename  # ``filename`` is cut at the first NUL; the declared name is not
-    mode = info.external_attr >> 16
-    if info.is_dir():
-        kind = MemberKind.DIRECTORY
-    elif stat.S_ISLNK(mode):
-        kind = MemberKind.SYMLINK
-    elif mode == 0 or stat.S_ISREG(mode):
-        kind = MemberKind.FILE
-    else:
-        kind = MemberKind.SPECIAL
+    kind, mode = _zip_kind(info)
 
     def member(read: int, nested: ArchiveReport | None = None) -> ArchiveMember:
         return ArchiveMember(name, kind, info.file_size, locator, read, nested)
@@ -785,6 +780,30 @@ def _zip_member(
             return member(_zip_link(state, fileobj, name, locator, info.file_size))
         pumped = _pump(state, fileobj, name, locator, info.file_size, depth)
     return member(pumped.read, pumped.nested)
+
+
+def _zip_kind(info: zipfile.ZipInfo) -> tuple[MemberKind, int | None]:
+    """A member is a regular file unless its attributes positively say otherwise.
+
+    The high 16 bits are a ``st_mode`` only from a Unix host and only when they hold a file type:
+    CPython's ``ZipFile.writestr`` stores ``0o600 << 16``, permissions with no type. Otherwise the
+    name and MS-DOS conventions apply: a trailing ``/`` or the directory attribute. The mode is
+    returned when it was used, for the finding's details.
+    """
+    if info.is_dir():
+        return MemberKind.DIRECTORY, None
+    mode = info.external_attr >> 16
+    if info.create_system in _UNIX_HOSTS and stat.S_IFMT(mode):
+        if stat.S_ISDIR(mode):
+            return MemberKind.DIRECTORY, mode
+        if stat.S_ISLNK(mode):
+            return MemberKind.SYMLINK, mode
+        if stat.S_ISREG(mode):
+            return MemberKind.FILE, mode
+        return MemberKind.SPECIAL, mode
+    if info.external_attr & _DOS_DIRECTORY:
+        return MemberKind.DIRECTORY, None
+    return MemberKind.FILE, None
 
 
 def _zip_link(

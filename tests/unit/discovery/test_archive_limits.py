@@ -389,6 +389,48 @@ def test_unsafe_member_names_are_recorded_and_not_read(tmp_path: Path) -> None:
     assert report.complete
 
 
+def test_members_cpython_writes_are_files_and_directories(tmp_path: Path) -> None:
+    """``ZipFile.writestr`` stores ``0o600 << 16``: permissions and no file type, a regular file."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("plain.txt", b"hello")
+        archive.writestr("sub/", b"")
+        archive.mkdir("made")
+        archive.writestr("sub/data.bin", bytes(10))
+    report = inspect(buffer.getvalue(), tmp_path)
+    assert (codes(report), report.complete) == ([], True)
+    assert [(m.name, m.kind, m.read_bytes) for m in report.members] == [
+        ("plain.txt", MemberKind.FILE, 5),
+        ("sub/", MemberKind.DIRECTORY, 0),
+        ("made/", MemberKind.DIRECTORY, 0),
+        ("sub/data.bin", MemberKind.FILE, 10),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("system", "attributes", "kind"),
+    [
+        (0, 0o010644 << 16, MemberKind.FILE),  # a DOS host's high bits are not a mode
+        (0, 0x10, MemberKind.DIRECTORY),  # the MS-DOS directory attribute
+        (3, 0x20, MemberKind.FILE),  # a Unix host, no file type: the archive attribute only
+        (3, 0o010644 << 16, MemberKind.SPECIAL),  # a FIFO
+        (3, 0o040755 << 16, MemberKind.DIRECTORY),  # a directory by its mode, not its name
+        (19, 0o120777 << 16, MemberKind.SYMLINK),  # OS X stores a mode too
+    ],
+)
+def test_zip_member_kinds_follow_the_host_conventions(
+    tmp_path: Path, system: int, attributes: int, kind: MemberKind
+) -> None:
+    info = zipfile.ZipInfo("entry", (1980, 1, 1, 0, 0, 0))
+    info.create_system = system
+    info.external_attr = attributes
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(info, b"x")
+    [member] = inspect(buffer.getvalue(), tmp_path).members
+    assert member.kind is kind
+
+
 def test_tar_links_specials_and_escapes(tmp_path: Path) -> None:
     report = inspect(fixture("links.tar"), tmp_path)
     assert codes(report) == [
