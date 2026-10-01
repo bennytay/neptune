@@ -223,8 +223,11 @@ class Entity:
             out["name"] = self.name
         if self.description is not None:
             out["description"] = self.description
-        if self.aliases:
-            out["aliases"] = [{"namespace": ns, "value": v} for ns, v in self.aliases]
+        if self.aliases:  # as written: a namespace to its identifiers, sorted
+            grouped: dict[str, list[JsonValue]] = {}
+            for namespace, value in self.aliases:
+                grouped.setdefault(namespace, []).append(value)
+            out["aliases"] = dict(grouped)
         out.update(dict(self.extra))
         return out
 
@@ -316,7 +319,8 @@ class Manifest:
         return dict(self.adapters)
 
     def to_json(self) -> JsonObject:
-        """The declarations as canonical JSON: what the manifest transform's config records."""
+        """The declarations as canonical JSON: what the manifest transform's config records.
+        It is itself a valid manifest, which reads back to the same declarations."""
         out: dict[str, JsonValue] = {"neptune": self.version}
         for section in _ENTITY_KEYS:
             if entries := self.section(section):
