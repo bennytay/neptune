@@ -83,9 +83,22 @@ def test_denied_syscalls_are_refused_and_others_allowed(arch: Arch) -> None:
 
 def test_both_architectures_deny_the_same_syscalls() -> None:
     x86, arm = (set(dict(ARCHES[name].denied)) for name in ("x86_64", "aarch64"))
-    assert x86 - arm == {"fork", "vfork"}  # aarch64 has only clone
+    # aarch64 has only clone, and only the modern *at/utimensat metadata forms; x86_64 also
+    # carries the legacy chmod/chown/lchown/utime/utimes/futimesat numbers.
+    assert x86 - arm == {
+        "fork",
+        "vfork",
+        "chmod",
+        "chown",
+        "lchown",
+        "utime",
+        "utimes",
+        "futimesat",
+    }
     assert arm <= x86
     assert {"socket", "execve", "ptrace", "unshare", "bpf", "io_uring_setup"} <= arm
+    # The metadata floor both share: no mode, owner, time or xattr change, and no fallocate.
+    assert {"fchmod", "fchownat", "utimensat", "setxattr", "fremovexattr", "fallocate"} <= arm
 
 
 @pytest.mark.parametrize("arch", ARCH_LIST, ids=lambda arch: arch.name)

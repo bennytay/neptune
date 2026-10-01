@@ -47,24 +47,25 @@ _ERROR_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,99}")
 _TYPE_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.<>]{0,299}")
 
 # The Landlock ABI below which a source is not safe from a compromised parser, so the sandbox
-# fails closed: ABI 3 completes file-system immutability (ABI 1 blocks creation, writes and
-# removal, ABI 2 rename and relink, ABI 3 truncation — and below ABI 1 procfs plus Yama
-# ptrace_scope 0 can reach the parent's memory, which seccomp does not cover). The signal path
-# Landlock scopes only at ABI 6 is already closed by seccomp on every ABI (``confine``), so that
-# is not part of the floor. ``allow_degraded`` runs below it and records what is lost.
+# fails closed: ABI 3 completes file-system immutability. ABI 1 already blocks a file being
+# created, written, removed, renamed or relinked (reparenting is denied whenever the REFER right
+# is not handled, which it is not below ABI 2; a same-directory rename or link needs the MAKE and
+# REMOVE rights, which the ruleset handles and grants to nothing). ABI 3 adds truncation. Below
+# ABI 1 there is no Landlock at all, and procfs plus Yama ptrace_scope 0 can even reach the
+# parent's memory, which seccomp does not cover. The signal path Landlock scopes only at ABI 6 is
+# already closed by seccomp on every ABI (``confine``), so it is not part of the floor.
+# ``allow_degraded`` runs below the floor and records what is lost.
 REQUIRED_LANDLOCK_ABI: Final = 3
 
 
 def landlock_guarantees_lost(abi: int) -> tuple[str, ...]:
     """What a child could still do to a user-writable file, the source included, at ``abi``; empty
     at or above the required floor. ``RLIMIT_FSIZE`` 0 still bars appending bytes, but not an empty
-    file, a deletion, a rename or a truncation."""
+    file, a deletion, a rename or a truncation, and Landlock gives none of those below ABI 1."""
     lost: list[str] = []
-    if abi < 1:
-        lost.append("create or remove a file or directory")
-    if abi < 2:
-        lost.append("rename or hard-link a file")
-    if abi < REQUIRED_LANDLOCK_ABI:
+    if abi < 1:  # no Landlock: nothing structural is blocked
+        lost.append("create, remove, rename or hard-link a file or directory")
+    if abi < REQUIRED_LANDLOCK_ABI:  # the truncate right arrived at ABI 3
         lost.append("truncate a file, the source included")
     return tuple(lost)
 
@@ -82,7 +83,7 @@ class Limit(StrEnum):
     CPU = "cpu_seconds"
     WALL = "wall_seconds"
     MEMORY = "memory_bytes"
-    REPLY = "reply_bytes"  # the reply may not exceed what the call was allowed to hold
+    REPLY = "reply_bytes"  # the reply's size, and the count of values it decodes to, are capped
 
 
 @dataclass(frozen=True)
@@ -310,6 +311,9 @@ _UNREPORTED: Final = 70  # the child's exit status when it could not even write 
 
 
 _RAISED_KEYS: Final = frozenset({"changed", "contract", "error", "returned", "unencodable"})
+# A sound raised reply is five short fields; anything larger is a forged reply a compromised child
+# wrote, so it is refused before ``json.loads`` builds anything, never decoded unbounded.
+_MAX_RAISED_REPLY: Final = 4096
 
 
 def encode_raised(raised: Raised) -> bytes:
@@ -326,7 +330,11 @@ def encode_raised(raised: Raised) -> bytes:
 
 
 def decode_raised(data: bytes) -> Raised:
-    """A ``Raised`` reply, strictly: exactly its five fields, each of its type."""
+    """A ``Raised`` reply, strictly: exactly its five fields, each of its type. Refused unread if
+    it is larger than any sound raised reply, so the ``E`` tag cannot smuggle a giant payload
+    past the value-count bound the returned reply gets."""
+    if len(data) > _MAX_RAISED_REPLY:
+        raise ValueError(f"a raised reply is at most {_MAX_RAISED_REPLY} bytes")
     value = json.loads(data)
     if not isinstance(value, dict) or value.keys() != _RAISED_KEYS:
         raise ValueError(f"a raised reply is exactly {sorted(_RAISED_KEYS)}")
@@ -402,7 +410,6 @@ class Subprocess:
                 f"could {'; '.join(self._lost)}. Pass allow_degraded_sandbox to run anyway and "
                 f"record what is lost"
             )
-        self._allow_degraded = allow_degraded
         self.limits = limits
         if not isinstance(self.call(lambda: None, _NOTHING), Returned):
             raise SandboxError("this host cannot run the sandbox: an empty call failed")

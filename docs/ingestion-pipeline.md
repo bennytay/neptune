@@ -28,7 +28,7 @@ records with their own provenance and never rewrites what stages 1–10 produced
 | Resume after crash | runtime | deterministic chunk ids + the workspace's committed chunks and saved plans (ADR 0026; ADR 0028 §2) |
 | Cache | runtime | key = chunk id, which covers (source id, adapter id, adapter version, config hash, libraries, context) (ADR 0024 §4); derivatives by `DerivativeKey`; each miss names its rule (ADR 0031) |
 | Partial failure | runtime | per-chunk isolation and retries; adapter crash → finding, the source is quarantined, the job continues (ADR 0028 §3) |
-| Sandboxing | runtime | done: every probe, plan and `ingest` in a forked child confined by limits, seccomp and Landlock; its reply decoded as JSON; only the job writes the workspace; in-process only when chosen (ADR 0030) |
+| Sandboxing | runtime | done: every probe, plan and `ingest` in a forked child confined by limits (CPU, wall, memory, a separate 64 MiB `reply_bytes` cap), seccomp and Landlock; its reply decoded as bounded JSON; only the job writes the workspace; fails closed below Landlock ABI 3 unless `allow_degraded_sandbox`; in-process only when chosen (ADR 0030) |
 | Adapter-local problems | adapter | `IngestFinding`s in the chunk output |
 | Cross-source validation | validate | runs over the store after all chunks |
 | Explanation | runtime | assembles `probe`/`plan` results + descriptors into the receipt |
@@ -70,11 +70,15 @@ state machine over the stages above, in nine phases (ADR 0028):
   package is discarded; the outcome is `cancelled` with no package.
 - **Events.** `on_event(JobEvent(kind, phase, details))` for every phase start and finish, every source
   (hashed, selected, unsupported, ambiguous, planned, admitted, quarantined, …) and chunk (skipped,
-  parsed, retried, committed, failed), and `sandbox_ready` (the isolation, the limits and the host's
-  Landlock ABI) as `inspect` starts. Canonical JSON, no clock: the consumer adds one.
+  parsed, retried, committed, failed), and `sandbox_ready` (the isolation, the limits, the host's
+  Landlock ABI, and on a degraded host a `degraded` list of the guarantees it could not give) as
+  `inspect` starts. A sandboxed chunk stopped by a limit is a `limit_exceeded` finding naming the
+  limit (`cpu_seconds`, `wall_seconds`, `memory_bytes` or `reply_bytes`). Canonical JSON, no clock:
+  the consumer adds one.
 - **Job failure** (`JobError`) is reserved for the job itself: an unreadable root, a destination that
   exists, options naming an unknown adapter or option, a workspace or disk that will not write, a
-  host that cannot run the sandbox.
+  host that cannot run the sandbox or whose Landlock ABI is below the floor (unless
+  `allow_degraded_sandbox`).
 
 ## The cache (MVL-9)
 

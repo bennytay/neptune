@@ -69,7 +69,8 @@ _BACKSLASH: Final = 0x5C
 
 def _refuse_overlong(data: bytes) -> None:
     """Raise ``ReplyTooLarge`` if ``data`` encodes more than ``_MAX_REPLY_NODES`` values, counting
-    outside strings so commas and brackets in text never inflate the count."""
+    outside strings so commas and brackets in text never inflate the count. ASCII only (the caller
+    has checked), so one byte is one character and ``0x22`` is always a real quote."""
     count = 1
     in_string = escaped = False
     for byte in data:
@@ -89,10 +90,17 @@ def _refuse_overlong(data: bytes) -> None:
 
 
 def _loads(data: bytes) -> object:
-    """``json.loads``, bounded: a reply over the byte cap is stopped before it ever reaches here,
-    and one that packs the cap with values is refused before the standard library builds them."""
-    if len(data) > _MAX_REPLY_NODES:  # smaller than this can never hold too many values
-        _refuse_overlong(data)
+    """``json.loads``, bounded. A sound child encodes every reply as ASCII (``ensure_ascii``), so a
+    non-ASCII reply is malformed and refused before ``json.loads`` can auto-detect UTF-16 or UTF-32
+    and slip past the ASCII value-count scan. Over the byte cap, a fast C-level upper bound
+    (commas and brackets anywhere, strings included) decides whether the exact string-aware scan
+    even has to run, so a large but legitimate reply pays only the count, not a per-byte loop."""
+    if not data.isascii():
+        raise ValueError("a sandbox reply is ASCII; non-ASCII bytes are a malformed reply")
+    if len(data) > _MAX_REPLY_NODES:  # a smaller reply can never hold too many values
+        upper_bound = data.count(b",") + data.count(b"[") + data.count(b"{")
+        if upper_bound > _MAX_REPLY_NODES:  # might be over: the string-aware scan is exact
+            _refuse_overlong(data)
     return json.loads(data)
 
 

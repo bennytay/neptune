@@ -448,11 +448,12 @@ class IngestJob:
             ) from exc
         # Built after the runner, so a degraded host's lost guarantees enter the lineage: a job
         # run under weaker isolation never shares a transform id with a fully sandboxed one.
+        self._lost_guarantees = self._runner.lost_guarantees()
         self.transform = lineage.runtime_transform(
             self.options.attempts,
             self.options.isolation,
             self.options.limits,
-            self._runner.lost_guarantees(),
+            self._lost_guarantees,
         )
         self.state = JobState.PENDING
         self._phase = Phase.DISCOVER
@@ -1417,7 +1418,14 @@ class IngestJob:
                 else:
                     self._ingested.append(item.key)
                     self._emit(events.SOURCE_ADMITTED, details)
-            extra = [self.transform, *self._findings.values()] if self._findings else []
+            # A degraded run records its runtime transform even with no findings, so the receipt
+            # always names the guarantees it could not give; a sound run adds it only to carry a
+            # finding, keeping its lineage unchanged (ADR 0030).
+            extra = (
+                [self.transform, *self._findings.values()]
+                if self._findings or self._lost_guarantees
+                else []
+            )
             try:
                 self._staged = stage(
                     self.destination, self.workspace, ledger, self._ingested, extra=extra

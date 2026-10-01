@@ -2,7 +2,8 @@
 
 ``confine`` runs in the forked child before any adapter code, and applies, in order:
 
-1. ``PR_SET_PDEATHSIG``: the child is killed if the job's process dies first.
+1. ``PR_SET_PDEATHSIG``: the child is killed if the job's process dies first; then ``setsid`` so
+   it has no controlling terminal to reach the job through (``/dev/tty`` SIGIO, ``TIOCSTI``).
 2. Descriptors: standard input and output go to ``/dev/null`` and every other descriptor is
    closed except the ones the call keeps (the reply pipe, the source).
 3. Resource limits: ``RLIMIT_CPU`` (SIGXCPU at the limit, SIGKILL a second later),
@@ -15,7 +16,11 @@
 5. A seccomp filter: no socket, no new process or program (``fork``, ``vfork``, ``clone``
    without ``CLONE_THREAD``, ``clone3``, ``execve``, ``execveat``), no signal to another
    process, no ``ptrace`` or cross-process memory or descriptor access, no namespaces, no
-   ``bpf``, no ``io_uring``. Threads stay allowed. The filter also denies the async-I/O path
+   ``bpf``, no ``io_uring``. No file-metadata change either (``chmod``, ``chown``, ``utimensat``
+   and the ``*xattr`` family) and no ``fallocate``: Landlock covers none of those, so without
+   the filter a parser could make the source unreadable, world-write another file, or defeat
+   change detection even above the Landlock floor. Threads stay allowed. The filter also denies
+   the async-I/O path
    to a signal the kernel delivers through descriptor ownership, which only Landlock ABI 6
    scopes: ``fcntl`` ``F_SETOWN``/``F_SETOWN_EX``/``F_SETSIG`` and ``ioctl``
    ``FIOSETOWN``/``SIOCSPGRP``/``FIOASYNC`` (EPERM), and ``prctl`` ``PR_SET_PDEATHSIG`` and
@@ -99,6 +104,47 @@ _UNIFIED: Final = {
     "pidfd_send_signal": 424,
 }
 
+# A file's metadata is not covered by any Landlock ABI, and ``fallocate`` punches or zeroes bytes
+# without growing a file, so ``RLIMIT_FSIZE`` 0 does not stop it. An adapter only reads its source,
+# so these are refused outright: without them "the source is immutable" would be false even on a
+# host above the Landlock floor (a parser could ``chmod`` the source unreadable, or world-write a
+# user's ``.bashrc``, or ``utimensat`` it to defeat change detection). aarch64 has only the modern
+# ``*at`` and ``utimensat`` forms; x86_64 also carries the legacy numbers.
+_METADATA_X86_64: Final = {
+    "chmod": 90,
+    "chown": 92,
+    "fallocate": 285,
+    "fchmod": 91,
+    "fchmodat": 268,
+    "fchown": 93,
+    "fchownat": 260,
+    "fremovexattr": 199,
+    "fsetxattr": 190,
+    "futimesat": 261,
+    "lchown": 94,
+    "lremovexattr": 198,
+    "lsetxattr": 189,
+    "removexattr": 197,
+    "setxattr": 188,
+    "utime": 132,
+    "utimensat": 280,
+    "utimes": 235,
+}
+_METADATA_AARCH64: Final = {
+    "fallocate": 47,
+    "fchmod": 52,
+    "fchmodat": 53,
+    "fchown": 55,
+    "fchownat": 54,
+    "fremovexattr": 16,
+    "fsetxattr": 7,
+    "lremovexattr": 15,
+    "lsetxattr": 6,
+    "removexattr": 14,
+    "setxattr": 5,
+    "utimensat": 88,
+}
+
 
 @dataclass(frozen=True)
 class Arch:
@@ -123,6 +169,7 @@ ARCHES: Final = {
             sorted(
                 (
                     _UNIFIED
+                    | _METADATA_X86_64
                     | {
                         "bpf": 321,
                         "execve": 59,
@@ -158,6 +205,7 @@ ARCHES: Final = {
             sorted(
                 (
                     _UNIFIED
+                    | _METADATA_AARCH64
                     | {
                         "bpf": 280,
                         "execve": 221,
@@ -434,6 +482,11 @@ def confine(
         _prctl("pdeathsig", _PR_SET_PDEATHSIG, signal.SIGKILL)
         if os.getppid() != parent:  # the job died before the line above took effect
             os._exit(1)
+        # A new session, with no controlling terminal: a forked child inherits the job's, and
+        # reads stay open, so it could otherwise open ``/dev/tty`` and reach the job through it
+        # (SIGIO via ``O_ASYNC`` on the terminal, ``TIOCSTI`` input injection, ``TIOCSPGRP``),
+        # a path seccomp's descriptor-owner filters do not cover. ``setsid`` severs it.
+        os.setsid()
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGXCPU):
             signal.signal(signum, signal.SIG_DFL)
         signal.signal(signal.SIGXFSZ, signal.SIG_IGN)  # a write past RLIMIT_FSIZE raises

@@ -41,8 +41,10 @@ partial chunk in the workspace.
    would end at the wall limit as a finding. The test suite filters that one warning.
 3. **The child is confined before any adapter code runs** (`neptune.runtime.confine`, Linux,
    x86_64 and aarch64):
-   - killed if the job dies (`PR_SET_PDEATHSIG`); standard streams to `/dev/null`; every other
-     descriptor closed except the reply pipe and the source's read-only descriptor;
+   - killed if the job dies (`PR_SET_PDEATHSIG`), and `setsid` so it has no controlling terminal
+     to reach the job through (`/dev/tty` SIGIO, `TIOCSTI` input injection); standard streams to
+     `/dev/null`; every other descriptor closed except the reply pipe and the source's read-only
+     descriptor;
    - `RLIMIT_CPU`, `RLIMIT_AS` (the address space at fork plus the memory budget),
      `RLIMIT_CORE` 0 and not dumpable (no core dump, even through a piped `core_pattern`, holds
      source data), `RLIMIT_FSIZE` 0 (no byte is written to any file);
@@ -57,18 +59,25 @@ partial chunk in the workspace.
      `F_SETOWN`/`F_SETOWN_EX`/`F_SETSIG` and `ioctl` `FIOSETOWN`/`SIOCSPGRP`/`FIOASYNC` get
      EPERM, as do `prctl` `PR_SET_PDEATHSIG` (so a child cannot shed its parent-death signal and
      outlive a killed job) and `PR_SET_DUMPABLE` (so it cannot re-enable a core dump after
-     confinement). No `ptrace`, `process_vm_*`, `pidfd_getfd`; no `unshare` or `setns`; no `bpf`;
-     no `io_uring` (ENOSYS). Another ABI's syscalls kill the process. Threads work.
+     confinement). No file-metadata change (`chmod`, `chown`, `utimensat` and the `*xattr`
+     family) and no `fallocate` either: Landlock covers none of those, so without the filter a
+     parser could make the source unreadable, world-write a user's file, punch its bytes, or
+     retime it to defeat change detection even above the Landlock floor. No `ptrace`,
+     `process_vm_*`, `pidfd_getfd`; no `unshare` or `setns`; no `bpf`; no `io_uring` (ENOSYS).
+     Another ABI's syscalls kill the process. Threads work.
 
    Reads stay open: lazy imports, codecs, time zone data and shared libraries keep working, and
    nothing the child reads can leave but through its reply. Seccomp and `RLIMIT_FSIZE` are the
    floor on every Linux. **The sandbox fails closed below Landlock ABI 3**: below it a source is
-   not immutable (ABI 1 blocks a file being created, written or removed, ABI 2 a rename or
-   relink, ABI 3 a truncation; and below ABI 1 procfs with Yama `ptrace_scope` 0 reaches the
-   parent's memory, which seccomp does not cover), so `JobOptions.isolation = subprocess` on
-   such a host raises `JobError`. `allow_degraded_sandbox` runs on it by explicit choice and
-   records the exact guarantees lost in the `sandbox_ready` event and, hashed into the runtime
-   transform, in the receipt, so degraded output never shares a lineage with a sound run. ABI 5
+   not immutable. ABI 1 already blocks a file being created, written, removed, renamed or
+   relinked (reparenting is denied while the REFER right is not handled, below ABI 2; a
+   same-directory rename or link needs the MAKE and REMOVE rights, handled and granted to
+   nothing); ABI 3 adds truncation; and below ABI 1 there is no Landlock, and procfs with Yama
+   `ptrace_scope` 0 reaches the parent's memory, which seccomp does not cover. So
+   `JobOptions.isolation = subprocess` on such a host raises `JobError`. `allow_degraded_sandbox`
+   runs on it by explicit choice and records the exact guarantees lost in the `sandbox_ready`
+   event and, hashed into the runtime transform (even on a run with no findings), in the receipt,
+   so degraded output never shares a lineage with a sound run. ABI 5
    adds device-`ioctl` scoping and ABI 6 Landlock signal and abstract-socket scoping; neither is
    part of the floor, since the child holds no device descriptor and seccomp closes the signal
    path on every ABI. The `sandbox_ready` event says which ABI applied. The child writes one
@@ -149,10 +158,17 @@ partial chunk in the workspace.
 - Residual risks, recorded in `security.md`: a compromised parser can read files the user can
   read and put them in its own output (the contract checks citations, not every text); the
   parent holds a reply of up to `reply_bytes` (64 MiB) and its bounded decode.
+- A committed chunk's id (ADR 0024 §4, ADR 0031) covers the adapter, its version, config and the
+  source, not the isolation or the Landlock ABI it ran under, so a workspace shared between a
+  degraded and a sound run reuses chunk outputs across them — as it already does between
+  `in_process` and `subprocess`. Degraded is a rare, opt-in, below-floor mode; run it in its own
+  workspace if a later sound run must not inherit its chunks. Folding isolation into chunk
+  identity is a cache question for ADR 0031, not this ADR.
 - The sandbox is unavailable, not silently weaker, below Landlock ABI 3: a host there fails the
   job unless `allow_degraded_sandbox` is set, and a degraded run is a distinct lineage that
-  names what it could not guarantee. The common Linux the hosts Neptune targets run — Ubuntu
-  24.04 (ABI 4+), Debian 12, RHEL 9 — are at or above the floor.
+  names what it could not guarantee. Ubuntu 24.04 (kernel 6.8, ABI 4) is above the floor;
+  Debian 12 (kernel 6.1, ABI 2) and RHEL 9 are below it (truncation arrived at ABI 3, kernel
+  6.2), so they need a 6.2+ kernel — a backports kernel on Debian — or degraded mode by choice.
 - MVL-15 runs `inspect` through the runner with an `InspectResult` codec; MVL-8's engine runs
   probes through it when it replaces the job's selection; MVL-50 builds the escape and
   exhaustion suite on the `hostile` fixture adapter.

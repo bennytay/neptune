@@ -472,10 +472,7 @@ def test_a_host_below_the_landlock_floor_fails_closed_unless_degraded(
 ) -> None:
     root = tmp_path / "root"
     root.mkdir()
-    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
-    # A segfault is safe even without Landlock (seccomp is independent of it) and gives the job a
-    # runtime finding, so the receipt carries the runtime transform it was made under.
-    (root / "crash.hostile").write_bytes(HOSTILE.hostile("before", "segfault", "after"))
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")  # a clean corpus: no findings
     real = confine.host()
     monkeypatch.setattr(confine, "host", lambda: confine.Host(real.arch, 0))
 
@@ -484,8 +481,10 @@ def test_a_host_below_the_landlock_floor_fails_closed_unless_degraded(
         IngestJob(root, tmp_path / "p", Workspace(tmp_path / "closed"), registry())
     assert not (tmp_path / "p").exists()
 
-    # Degraded by explicit choice: the job runs and records exactly what was lost.
+    # Degraded by explicit choice: the job runs and records exactly what was lost, even with no
+    # findings at all, so the receipt never hides that it ran under a weaker sandbox.
     run = Run(root, tmp_path, JobOptions(allow_degraded_sandbox=True), home="deg-home")
+    assert run.codes() == [] and len(run.outcome.ingested) == 1
     (ready,) = run.of("sandbox_ready")
     assert ready.details["landlock"] == 0
     lost = ready.details["degraded"]
@@ -496,7 +495,6 @@ def test_a_host_below_the_landlock_floor_fails_closed_unless_degraded(
         if isinstance(r, TransformRecord) and r.adapter_id == "neptune.runtime"
     ]
     assert runtime.config["degraded"] == lost  # the receipt records the lost guarantees too
-    assert len(run.outcome.ingested) == 1  # the text landed; the crashing source is quarantined
 
 
 @pytest.mark.parametrize(

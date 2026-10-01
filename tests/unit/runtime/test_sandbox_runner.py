@@ -390,6 +390,22 @@ def test_nothing_is_written_to_any_file(box: Subprocess, tmp_path: Path) -> None
     assert not target.exists() or target.read_bytes() == b""  # RLIMIT_FSIZE: never a byte
 
 
+def test_a_confined_call_cannot_change_a_files_metadata(box: Subprocess, tmp_path: Path) -> None:
+    """Landlock covers no metadata syscall, so seccomp refuses them on every ABI: a parser cannot
+    chmod the source unreadable, retime it to defeat change detection, or set an xattr."""
+    source = tmp_path / "source"
+    source.write_bytes(b"source bytes")
+    before = source.stat()
+    chmod = box.call(doing(lambda: os.chmod(source, 0o600)), TEXT)  # noqa: PTH101 - the attack
+    assert chmod == Raised("PermissionError")
+    assert box.call(doing(lambda: os.utime(source, (0, 0))), TEXT) == Raised("PermissionError")
+    assert box.call(doing(lambda: os.setxattr(source, "user.x", b"1")), TEXT) == Raised(
+        "PermissionError"
+    )
+    after = source.stat()
+    assert (after.st_mode, after.st_mtime) == (before.st_mode, before.st_mtime)
+
+
 @pytest.mark.skipif(not confine.landlock_abi(), reason="this kernel has no Landlock")
 def test_with_landlock_nothing_is_created_changed_or_removed(
     box: Subprocess, tmp_path: Path
@@ -498,15 +514,13 @@ def test_a_host_without_the_controls_cannot_build_a_sandbox(
 
 def test_the_landlock_floor_names_what_each_abi_cannot_guarantee() -> None:
     assert landlock_guarantees_lost(0) == (
-        "create or remove a file or directory",
-        "rename or hard-link a file",
+        "create, remove, rename or hard-link a file or directory",
         "truncate a file, the source included",
     )
-    assert landlock_guarantees_lost(1) == (
-        "rename or hard-link a file",
-        "truncate a file, the source included",
-    )
-    assert landlock_guarantees_lost(2) == ("truncate a file, the source included",)
+    # ABI 1 already blocks creation, removal, rename and relink; only truncation (ABI 3) is lost,
+    # so ABI 1 and ABI 2 lose the same thing and share a degraded lineage.
+    assert landlock_guarantees_lost(1) == ("truncate a file, the source included",)
+    assert landlock_guarantees_lost(2) == landlock_guarantees_lost(1)
     assert landlock_guarantees_lost(REQUIRED_LANDLOCK_ABI) == ()
     assert landlock_guarantees_lost(8) == ()  # the floor met: nothing lost
 
