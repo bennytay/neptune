@@ -286,6 +286,30 @@ def read_rows(source: Source) -> Iterator[dict[str, object]]:
         yield from batch.to_pylist()
 
 
+def run_seq_range(run: Path) -> tuple[int, int] | None:
+    """The least and greatest ``seq`` a run holds, or ``None`` for a run with no rows.
+
+    Read from the row groups' statistics, so it costs nothing per row: the runtime proves ``seq``
+    unique across a source's chunks by checking that their runs' ranges are disjoint (ADR 0028),
+    which keeps the check's memory at one pair per chunk.
+    """
+    metadata = _open(run).metadata
+    ranges: list[tuple[int, int]] = []
+    for index in range(metadata.num_row_groups):
+        group = metadata.row_group(index)
+        columns = [group.column(position) for position in range(group.num_columns)]
+        found = [column for column in columns if column.path_in_schema == SEQ]
+        if len(found) != 1:
+            raise SeriesError(f"{run} has no {SEQ} column")
+        statistics = found[0].statistics
+        if statistics is None or not statistics.has_min_max:
+            raise SeriesError(f"{run} holds rows without {SEQ} statistics")
+        ranges.append((int(statistics.min), int(statistics.max)))
+    if not ranges:
+        return None
+    return min(low for low, _ in ranges), max(high for _, high in ranges)
+
+
 def _check_columns(stream: Stream, schema: Any) -> None:
     """The column contract by name and type (ADR 0018 §4)."""
     names = set(schema.names)
