@@ -38,7 +38,8 @@ the gate's review.
 - Fixtures **grow with the milestone that needs them**: security fixtures (path traversal, symlink loop,
   archive bomb, truncation) landed with MVL-75 in `tests/fixtures/hostile/` (generator plus committed
   archives; the symlink tree is built at test time); per-format corruption fixtures land with each
-  adapter; MVL-50 consolidates and audits coverage, it does not start from zero.
+  adapter (`tests/fixtures/text/`, `tests/fixtures/tabular/` with its generator, whose Parquet files are
+  validated by the official reader); MVL-50 consolidates and audits coverage, it does not start from zero.
 - Every adversarial fixture has an expected structured outcome: salvage, explicit ambiguity, unsupported,
   or safe rejection.
 
