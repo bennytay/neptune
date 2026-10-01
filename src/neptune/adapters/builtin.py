@@ -11,6 +11,7 @@ from neptune.adapters.mcap import McapAdapter
 from neptune.adapters.pdf import PdfAdapter
 from neptune.adapters.registry import AdapterRegistry
 from neptune.adapters.rosbag1 import Rosbag1Adapter
+from neptune.adapters.software import SoftwareAdapter
 from neptune.adapters.tabular import TabularAdapter
 from neptune.adapters.text import TextAdapter
 
@@ -23,6 +24,7 @@ def builtin_adapters() -> tuple[Adapter, ...]:
         McapAdapter(),
         PdfAdapter(),
         Rosbag1Adapter(),
+        SoftwareAdapter(),
         TabularAdapter(),
         TextAdapter(),
     )

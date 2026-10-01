@@ -1,0 +1,32 @@
+{
+  "name": "operator-console",
+  "version": "1.3.0", "version": "9",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "operator-console",
+      "version": "1.3.0",
+      "workspaces": [
+        "packages/map"
+      ]
+    },
+    "node_modules/@example/map": {
+      "resolved": "packages/map",
+      "link": true
+    },
+    "node_modules/roslib": {
+      "version": "1.4.1",
+      "resolved": "https://registry.npmjs.org/roslib/-/roslib-1.4.1.tgz",
+      "integrity": "sha512-uGvZVU5W7YtWj16KGR9lPKnlXxuKYR7cUu5bbQCj3fGEd0stTUsNbHfDxV8iVS82PsSCvhIhX3hvLYdSuIVwQg=="
+    },
+    "node_modules/teleop": {
+      "version": "0.5.0",
+      "resolved": "git+ssh://git@github.com/example/teleop.git#17d0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6"
+    },
+    "packages/map": {
+      "name": "@example/map",
+      "version": "0.1.0"
+    }
+  }
+}
