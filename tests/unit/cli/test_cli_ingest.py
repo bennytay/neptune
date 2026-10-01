@@ -224,6 +224,17 @@ def test_a_refused_ignore_pattern_is_invalid_configuration(run_folder: Path, at:
 
 
 @pytest.mark.parametrize(
+    "options",
+    [("--isolation", "in_process", "--allow-degraded-sandbox"), ("--job", "")],
+    ids=["degraded-without-sandbox", "empty-job"],
+)
+def test_contradictory_options_are_invalid_configuration(
+    options: tuple[str, ...], run_folder: Path, at: Path
+) -> None:
+    failed(("ingest", "run", "--out", "pkg", "-w", "ws", *options), "invalid_configuration")
+
+
+@pytest.mark.parametrize(
     "hostile",
     [
         lambda root: (root / ".neptune-ignore").write_bytes(b"*.tmp\n!*.mcap\n"),

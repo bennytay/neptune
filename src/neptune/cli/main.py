@@ -40,6 +40,7 @@ from neptune.sdk import (
     IgnorePolicy,
     IngestResult,
     Isolation,
+    JobError,
     JobEvent,
     JobOptions,
     Neptune,
@@ -271,13 +272,16 @@ class _Ingest:
         except ValueError as exc:  # IgnoreError: a refused --ignore pattern
             raise ConfigurationError(f"--ignore: {exc}") from exc
         named = {"job": args.job} if args.job is not None else {}
-        return JobOptions(
-            attempts=args.attempts,
-            isolation=Isolation(args.isolation),
-            allow_degraded_sandbox=args.allow_degraded_sandbox,
-            ignore=ignore,
-            **named,
-        )
+        try:
+            return JobOptions(
+                attempts=args.attempts,
+                isolation=Isolation(args.isolation),
+                allow_degraded_sandbox=args.allow_degraded_sandbox,
+                ignore=ignore,
+                **named,
+            )
+        except JobError as exc:  # options that contradict each other, or an empty --job
+            raise ConfigurationError(str(exc)) from exc
 
     # --- events --------------------------------------------------------------------------------
 

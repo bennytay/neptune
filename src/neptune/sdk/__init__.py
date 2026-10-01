@@ -24,7 +24,16 @@ Imports the runtime, the store and the adapters; the CLI (MVL-11) wraps this.
 
 from neptune.adapters.builtin import builtin_adapters
 from neptune.discovery.ignore import DEFAULT_PATTERNS, IgnorePolicy
-from neptune.runtime import EventSink, Isolation, JobEvent, JobOptions, JobState, Limits, Phase
+from neptune.runtime import (
+    EventSink,
+    Isolation,
+    JobError,
+    JobEvent,
+    JobOptions,
+    JobState,
+    Limits,
+    Phase,
+)
 from neptune.sdk.client import (
     AsyncIngestion,
     AsyncNeptune,
@@ -68,6 +77,7 @@ __all__ = [
     "InvalidRequestError",
     "InvalidSourceError",
     "Isolation",
+    "JobError",
     "JobEvent",
     "JobFailedError",
     "JobOptions",

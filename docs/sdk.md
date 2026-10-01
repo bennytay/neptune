@@ -127,7 +127,7 @@ Every SDK call raises only `NeptuneError` subclasses; branch on `error.code`, ne
 
 `invalid_request` (`InvalidRequestError`) is the parent of the first five, `job_failed` of
 `publish_incomplete`, and `error` (`NeptuneError`) of all. A corrupt or unsupported *file* is never an error: it is a finding.
-`JobOptions(...)` with a bad value raises the runtime's `JobError` when you build it.
+`JobOptions(...)` with a bad value raises the runtime's `JobError` (re-exported as `neptune.sdk.JobError`) when you build it.
 
 ## Local-only and remote
 
