@@ -5,8 +5,9 @@
   (`tests/fixtures/adapters/`)
 - Method: every scenario was run, not walked on paper: through the real job with the real sandbox
   (ADR 0030) on Linux 7.0, x86_64, Landlock ABI 8, 20 cores, sources on tmpfs. Each is a test in
-  `tests/integration/test_m2_gate_stress.py`; the scale scenarios are the script
-  `tests/fixtures/runtime/stress_large_source.py`, whose output is recorded below.
+  `tests/integration/test_m2_gate_stress.py`; the scale scenarios are the scripts
+  `tests/fixtures/runtime/stress_large_source.py` and `stress_archive_passes.py`, whose output is
+  recorded below.
 - Outcome: the runtime and the ABI hold for every scenario once eight defects were fixed here (ADR
   0033). The seams between the M2 pieces were where they failed: the job never ran the probe engine,
   never recorded discovery's findings, never wired scratch space, and treated a short read as the
@@ -56,8 +57,10 @@ frames, 16 per chunk, through the sandboxed job, then again) and `... WORKDIR ma
   1.5 minutes after.
 - A call costs about 3 to 4.4 ms of fork, confinement and JSON on this host, so many small files
   are bound by calls: 18 ms a file for probe, plan and two chunks. The job runs one call at a time.
-- The probe's container listing reads a fixed budget (1.2 MB, 2 ms) of a gzip-compressed tar of
-  64 MiB or 256 MiB; the hardening inspector inflates all of it (0.10 s and 0.44 s). ADR 0032.
+- The probe's container listing reads a fixed budget (1.2 MB, under 1 ms) of a gzip-compressed tar
+  of 64 MiB or 256 MiB; the hardening inspector inflates all of it (0.04 s and 0.15 s, about
+  1.8 GB/s). `python tests/fixtures/runtime/stress_archive_passes.py WORKDIR 64 256` generates
+  the archives and measures both (ADR 0032).
 
 ## Questions
 

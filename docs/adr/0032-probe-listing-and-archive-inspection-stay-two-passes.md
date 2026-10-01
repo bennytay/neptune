@@ -20,11 +20,12 @@ Neptune reads archives twice, with two modules written for two issues:
   through scratch space. It is the policy for whoever extracts or ingests an archive.
 
 The gate asked whether they become one pass. Measured on this host (an M2 stress scenario,
-`test_the_probe_lists_within_its_budget_while_the_inspector_reads_everything`, and the numbers in
-`docs/reviews/m2-stress-test.md`): on a gzip-compressed tar of incompressible members, the probe
-reads about 1.2 MB and takes 2 ms whether the archive inflates to 64 MiB or 256 MiB; the
-inspector inflates all of it, at about 600 MB/s, 0.1 s and 0.44 s. On a 100 GB archive the probe
-still costs milliseconds and the inspector minutes.
+`test_the_probe_lists_within_its_budget_while_the_inspector_reads_everything`, and the script
+`tests/fixtures/runtime/stress_archive_passes.py`, which generates the archives and whose numbers
+`docs/reviews/m2-stress-test.md` records): on a gzip-compressed tar of incompressible members,
+the probe reads about 1.2 MB and takes under 1 ms whether the archive inflates to 64 MiB or
+256 MiB; the inspector inflates all of it, at about 1.8 GB/s, 0.04 s and 0.15 s. On a 100 GB
+archive the probe still costs milliseconds and the inspector about a minute.
 
 ## Decision
 

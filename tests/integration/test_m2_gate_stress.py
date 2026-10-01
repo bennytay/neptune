@@ -532,6 +532,26 @@ def test_the_archive_inspector_runs_in_a_sandboxed_call_through_its_scratch(
     }
 
 
+def test_the_archive_measurement_script_runs_small(tmp_path: Path) -> None:
+    """``stress_archive_passes.py``, whose 64 and 256 MiB runs are the gate's recorded figures, at
+    4 and 8 MiB: the listing reads the same bytes at either size, the inspector inflates all."""
+    script = FIXTURES / "runtime" / "stress_archive_passes.py"
+    done = subprocess.run(
+        [sys.executable, str(script), str(tmp_path), "4", "8"],
+        check=True,
+        capture_output=True,
+        timeout=300,
+    )
+    measured = json.loads(done.stdout)
+    small, large = measured["4"], measured["8"]
+    assert (
+        small["listing_bytes"] == large["listing_bytes"] < 2 * 1024 * 1024 < small["archive_bytes"]
+    )
+    for mib, run in ((4, small), (8, large)):
+        assert run["inflated_bytes"] == mib * 1024 * 1024 and run["inspect_complete"]
+    assert list(tmp_path.iterdir()) == []  # the generated archives are removed
+
+
 # --- A large source, measured --------------------------------------------------------------------
 
 
