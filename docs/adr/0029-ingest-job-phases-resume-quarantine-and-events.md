@@ -86,9 +86,11 @@ what to do with the rest of its source's output.
    the merge or the package is quarantined here, and `validate` failing means a bug in Neptune,
    not in one source.
 6. **Cancellation** is a `threading.Event` checked before every source, every chunk and every
-   phase. The job finishes the chunk in hand, commits it, discards any staged package and returns
-   a `cancelled` outcome with no package; the workspace keeps the work and the next job resumes.
-   A signal that kills the process is the same from the workspace's point of view.
+   phase from `inspect` on; `discover` and `fingerprint` always finish, so the walk's ledger is
+   saved whatever happens next. The job finishes the chunk in hand, commits it, discards any
+   staged package and returns a `cancelled` outcome with no package; the workspace keeps the work
+   and the next job resumes. A signal that kills the process is the same from the workspace's
+   point of view.
 7. **Events** are plain data (`JobEvent(kind, phase, details)`), canonical JSON, with no clock,
    host or absolute path, delivered to a callback as they happen. Kinds cover phases, entries,
    sources (hashed, absent, selected, unsupported, ambiguous, unreadable, changed, planned,

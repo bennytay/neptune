@@ -24,8 +24,9 @@ is reported and left alone, and every other source still reaches the package. Th
 fails (``JobError``) only when it cannot proceed at all: an unreadable root, a destination that
 exists, a config naming an option no adapter has, a workspace or disk that will not write.
 
-Cancellation is checked between units of work (sources and chunks) and between phases. A chunk
-in progress finishes and commits; nothing in the workspace is left half-written.
+Cancellation is checked between units of work (sources and chunks) and between phases from
+inspect on; the walk and its saved ledger always finish. A chunk in progress finishes and commits;
+nothing in the workspace is left half-written.
 """
 
 import platform

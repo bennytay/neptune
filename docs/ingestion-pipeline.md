@@ -58,8 +58,9 @@ state machine over the stages above, in nine phases (ADR 0029):
   source: its output stays out of the package and a `neptune.runtime.*` finding citing it says why.
   Every other source lands. A `ContractError` is a bug and is never retried. Committed chunks of a
   quarantined source stay in the workspace, so the rerun after a fix redoes only what failed.
-- **Cancellation.** A `threading.Event`, checked before each source, chunk and phase. The chunk in
-  hand finishes and commits; a staged package is discarded; the outcome is `cancelled` with no package.
+- **Cancellation.** A `threading.Event`, checked before each source, chunk and phase from `inspect`
+  on (the walk and its ledger always finish). The chunk in hand finishes and commits; a staged
+  package is discarded; the outcome is `cancelled` with no package.
 - **Events.** `on_event(JobEvent(kind, phase, details))` for every phase start and finish, every source
   (hashed, selected, unsupported, ambiguous, planned, admitted, quarantined, …) and chunk (skipped,
   parsed, retried, committed, failed). Canonical JSON, no clock: the consumer adds one.
