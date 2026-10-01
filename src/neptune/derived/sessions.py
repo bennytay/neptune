@@ -32,10 +32,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, ClassVar, Final, TypeAlias
 
-from neptune.derived.provenance import (
-    DERIVED_SCHEMA_VERSION,
-    INFERRED,
-)
+from neptune.derived.provenance import DERIVED_SCHEMA_VERSION as DERIVED_SCHEMA_VERSION
+from neptune.derived.provenance import INFERRED
 from neptune.derived.provenance import derived_object as _derived_object
 from neptune.derived.schemas import LAYOUT_KIND, stream_layout_from_json
 from neptune.derived.semantics import SEMANTIC_KIND, stream_semantic_from_json
