@@ -1,0 +1,3 @@
+[{"stamp":{"sec":10,"nsec":500},"name":["j1","j2"],"position":[0.1,-0.2]},
+ {"stamp":{"sec":10,"nsec":600},"name":["j1","j2"],"position":[0.15,-0.25],"effort":[]},
+ {"stamp":{"sec":10,"nsec":700},"name":["j1"],"position":[0.2]}]
