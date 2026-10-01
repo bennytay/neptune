@@ -43,8 +43,10 @@ Forces:
      (`kinds_at`) and no other, and its receipt counts those kinds. A package with no
      configuration records is a version 1 package, byte for byte what a version 1 writer wrote.
    - Readers read every version from 1 to their own: a record must be at least its kind's `since`
-     (`record_object(..., since)`), a package's tables are those of its manifest's version, and
-     its receipt is recomputed at the version it says. A version 1 reader refuses a version 2
+     (`record_object(..., since)`), a package's tables are those of its manifest's version, that
+     version is exactly the one its non-empty tables need (a version 2 manifest over version 1
+     records is refused: the same records have one package), and its receipt is recomputed at
+     the version it says. A version 1 reader refuses a version 2
      package with "schema version 2 is newer", never a key error.
    - ADR 0017 §7's note that a bump regenerates every golden file no longer holds: an addition
      regenerates nothing that does not use it. The schema's `schema_version` is a constant per

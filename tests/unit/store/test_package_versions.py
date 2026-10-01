@@ -17,17 +17,19 @@ from neptune.identity.hashing import content_id, digest_stream
 from neptune.identity.revisions import SourceLedger
 from neptune.model import record as record_module
 from neptune.model.kinds import kinds_at
+from neptune.model.package import PackageFile
 from neptune.model.record import SchemaVersionError
 from neptune.model.source import LocalPath
 from neptune.store.package import (
     MANIFEST,
     RECEIPT,
+    RECEIPT_TEXT,
     PackageError,
     package_files,
     read_files,
     table_path,
 )
-from neptune.store.receipt import build_receipt
+from neptune.store.receipt import build_receipt, render_receipt
 
 CONFIG = b"rate: 20.0\nframe: base_link\n"
 NOTES = b"field notes\n"
@@ -104,6 +106,38 @@ def test_tables_must_be_exactly_the_kinds_of_the_package_version() -> None:
     claimed_2 = rewrite(old, MANIFEST, {**document(old, MANIFEST), "schema_version": 2})
     with pytest.raises(PackageError, match="schema version 2, and no other"):
         read_files(claimed_2)
+
+
+def test_a_package_claiming_a_version_above_its_records_is_refused() -> None:
+    # Every check but the version rule passes: the v2 tables are there and empty, the receipt is
+    # a version 2 receipt of the same records, and the manifest lists every file's hash.
+    files = package_files(ledger_records())
+    package = read_files(files)
+    receipt = build_receipt(package.records, version=2)
+    forged = {**files, RECEIPT: canonical_json.dumps(receipt.to_json())}
+    forged[RECEIPT_TEXT] = render_receipt(receipt).encode("utf-8")
+    for kind in set(kinds_at(2)) - set(kinds_at(1)):
+        forged[table_path(kind)] = b""
+    tables = tuple(
+        sorted((kind, dict(package.manifest.tables).get(kind, 0)) for kind in kinds_at(2))
+    )
+    listed = tuple(
+        sorted(
+            (
+                PackageFile(path, len(data), content_id(data))
+                for path, data in forged.items()
+                if path != MANIFEST
+            ),
+            key=lambda f: f.path,
+        )
+    )
+    manifest = replace(package.manifest, version=2, tables=tables, files=listed, receipt=receipt.id)
+    forged[MANIFEST] = canonical_json.dumps(manifest.to_json())
+    with pytest.raises(PackageError, match="records are of version 1"):
+        read_files(forged)
+    # The boundary: the same package at version 1, and a version 2 package holding a v2 record.
+    assert read_files(files).manifest.version == 1
+    assert read_files(package_files(with_config())).manifest.version == 2
 
 
 def test_a_receipt_of_another_version_is_refused() -> None:
