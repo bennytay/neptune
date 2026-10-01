@@ -98,6 +98,8 @@ jobs:
         run: make setup
       - name: Check the generated package
         run: make check PKG=ci-template-smoke
+      - name: Contracts check of the generated package
+        run: make contracts-check PKG=ci-template-smoke
 
   check:
     needs: [plan, neptune, package, template]

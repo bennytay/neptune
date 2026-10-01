@@ -6,4 +6,6 @@
 [neptune-ledger]
 package-schema = "1.0.0"
 
+[neptune-memory]
+
 [neptune-platform]

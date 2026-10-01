@@ -444,3 +444,15 @@ def test_post_comment_sends_one_graphql_mutation() -> None:
 
 def _files(root: Path) -> dict[str, bytes]:
     return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+def test_register_makes_a_new_package_green(registry: Any) -> None:
+    """What scripts/new-package.sh runs: an empty lock section in canonical form, idempotently."""
+    assert _check(registry, "demo").problems  # unregistered: no lock entry
+    assert tool.register(registry, "demo") == ["contracts/packages.toml", "contracts/lock.toml"]
+    assert tool.register(registry, "demo") == []
+    assert registry.lock()["demo"] == {}
+    assert registry.packages()["demo"] == {"path": "packages/demo"}
+    assert _check(registry, "demo").ok
+    with pytest.raises(tool.ContractError, match="not a package name"):
+        tool.register(registry, "Demo_Bad")

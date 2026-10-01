@@ -15,6 +15,8 @@ Subcommands:
   contract tests run once each (skipped, with a message, while an owner is not installed yet).
 - ``check-owner --package P``: every schema P exports equals the registry's latest version, and
   P's version constant matches it. A changed export needs ``bump``.
+- ``register PACKAGE``: add a new member's ``packages.toml`` entry and empty lock section
+  (stdlib only; ``scripts/new-package.sh`` runs it).
 - ``bump CONTRACT VERSION [--post]``: write ``v<VERSION>/`` from the owner's export and golden
   generator, refusing a minor/patch that rejects an earlier golden of its major; a major version
   raises every lock entry for the contract. Then print the announcement comments for the
@@ -41,10 +43,11 @@ import urllib.request
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
-from jsonschema import Draft202012Validator
-from jsonschema.exceptions import SchemaError
+if TYPE_CHECKING:
+    from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import SchemaError
 
 REPO: Final = Path(__file__).resolve().parents[1]
 DEFAULT_ROOT: Final = REPO / "contracts"
@@ -52,6 +55,7 @@ LINEAR_API: Final = "https://api.linear.app/graphql"
 CONTRACT_STATUSES: Final = frozenset({"active", "planned"})
 VERSION_STATUSES: Final = frozenset({"draft", "stable"})
 _SEMVER: Final = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+_PACKAGE: Final = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 LOCK_HEADER: Final = """\
 # The contract versions each package in this repository is built against (platform ADR 0002).
 # `scripts/contracts.py check --package <name>` warns while an entry lags the registry's latest
@@ -290,8 +294,15 @@ def _subschema(schema: Mapping[str, Any], pointer: str) -> dict[str, Any]:
     return {**wrapper, "$ref": pointer}
 
 
+def _validator() -> type[Draft202012Validator]:
+    """jsonschema, imported on first use so ``register`` runs on the stdlib alone."""
+    from jsonschema import Draft202012Validator
+
+    return Draft202012Validator
+
+
 def validate_golden(schema: Mapping[str, Any], pointer: str, value: Any) -> list[str]:
-    validator = Draft202012Validator(_subschema(schema, pointer))
+    validator = _validator()(_subschema(schema, pointer))
     errors = sorted(validator.iter_errors(value), key=lambda e: list(e.absolute_path))
     return [f"{'/'.join(map(str, e.absolute_path)) or '<root>'}: {e.message}" for e in errors]
 
@@ -321,8 +332,8 @@ def _check_version(contract: Contract, version: Version) -> list[str]:
     if sha256(text) != version.schema_sha256:
         problems.append(f"{where}: schema.json does not match version.json's schema_sha256")
     try:
-        Draft202012Validator.check_schema(schema)
-    except SchemaError as error:
+        _validator().check_schema(schema)
+    except _schema_error() as error:
         return [*problems, f"{where}/schema.json is not a valid JSON Schema: {error.message}"]
     golden_dir = version.path / "golden"
     present = sorted(p.name for p in golden_dir.glob("*.json")) if golden_dir.is_dir() else []
@@ -366,6 +377,12 @@ def compatibility_breaks(
             if errors:
                 breaks.append(f"v{show(prior.version)}/golden/{name}: {errors[0]}")
     return breaks
+
+
+def _schema_error() -> type[SchemaError]:
+    from jsonschema.exceptions import SchemaError
+
+    return SchemaError
 
 
 def check_registry(registry: Registry) -> Report:
@@ -431,9 +448,9 @@ def check_registry(registry: Registry) -> Report:
 
 
 def _installed(module: str) -> bool:
-    top = module.split(".", 1)[0]
+    """Whether the owner module itself is importable (its package may exist without it yet)."""
     try:
-        return importlib.util.find_spec(top) is not None
+        return importlib.util.find_spec(module) is not None
     except (ImportError, ValueError):
         return False
 
@@ -576,7 +593,9 @@ def check_owner(registry: Registry, package: str) -> Report:
         report.notes.append(f"{package} exports no registered schema")
     for contract in owned:
         if not _installed(contract.owner.module):
-            report.notes.append(f"{contract.id}: SKIPPED, {package} is not installed")
+            report.notes.append(
+                f"{contract.id}: SKIPPED, {contract.owner.module} is not importable yet"
+            )
             continue
         schema, constant = owner_export(contract)
         latest = registry.latest(contract.id)
@@ -603,6 +622,30 @@ def check_owner(registry: Registry, package: str) -> Report:
         else:
             report.notes.append(f"{contract.id}: {package} matches {show(latest.version)}")
     return report
+
+
+# --- Registering a new package -----------------------------------------------------------------
+
+
+def register(registry: Registry, package: str) -> list[str]:
+    """Give a new workspace member its packages.toml entry and an empty lock section.
+
+    Idempotent; returns the files it changed. ``scripts/new-package.sh`` calls it so a fresh
+    scaffold's ``make contracts-check PKG=<name>`` is green without hand edits.
+    """
+    if not _PACKAGE.match(package):
+        raise ContractError(f"not a package name: {package!r}")
+    changed: list[str] = []
+    if package not in registry.packages():
+        path = registry.root / "packages.toml"
+        text = path.read_text(encoding="utf-8").rstrip("\n")
+        path.write_text(f'{text}\n\n[{package}]\npath = "packages/{package}"\n', encoding="utf-8")
+        changed.append("contracts/packages.toml")
+    lock = registry.lock()
+    if package not in lock:
+        registry.write_lock({**lock, package: {}})
+        changed.append("contracts/lock.toml")
+    return changed
 
 
 # --- Bump and announce -------------------------------------------------------------------------
@@ -811,6 +854,8 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
     check.add_argument("--no-tests", action="store_true", help="skip owner contract tests")
     owner = commands.add_parser("check-owner", help="owner's export equals the registry")
     owner.add_argument("--package", required=True)
+    registrar = commands.add_parser("register", help="add a new package to the registry")
+    registrar.add_argument("package")
     bumper = commands.add_parser("bump", help="publish a new version of a contract")
     bumper.add_argument("contract")
     bumper.add_argument("version")
@@ -829,6 +874,10 @@ def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = 
             return _finish(check_package(registry, args.package, runner=runner))
         if args.command == "check-owner":
             return _finish(check_owner(registry, args.package))
+        if args.command == "register":
+            changed = register(registry, args.package)
+            _print([f"registered {args.package}: {', '.join(changed) or 'already registered'}"])
+            return 0
         key = environ.get("LINEAR_API_KEY")
         if args.post and not key:
             raise ContractError("--post needs LINEAR_API_KEY; nothing was written")

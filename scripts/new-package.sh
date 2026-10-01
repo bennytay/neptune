@@ -19,6 +19,10 @@ usage() {
 name=$1
 [[ $name =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]] || usage
 [[ $name != neptune ]] || { echo "'neptune' is the compiler (the root project)" >&2; exit 1; }
+# `check`, `plan` and `template` are CI job names; a package of that name would collide with them.
+case $name in
+  check | plan | template) echo "'$name' is reserved" >&2; exit 1 ;;
+esac
 module=${name//-/_}
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -41,4 +45,6 @@ mv "$scratch" "$target"
 trap - EXIT
 
 (cd "$root" && ${UV:-uv} lock --quiet)
+# Register with the contracts registry (empty lock section) so `make contracts-check PKG=<name>` is green.
+(cd "$root" && ${UV:-uv} run --no-project --quiet python scripts/contracts.py register "$name")
 echo "created packages/$name (import $module); next: make setup && make check PKG=$name" >&2
