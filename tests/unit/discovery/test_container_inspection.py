@@ -749,11 +749,12 @@ def test_bytes_after_the_last_stream_are_padding_if_null_and_a_finding_otherwise
     # bytes open no stream: they are cited as corrupt and the member keeps what was decoded.
     garbage = b"not a stream, nor a trailer"  # read as gzip's trailer, it would claim a bomb
     for kind, (compress, _) in STREAMS.items():
-        padded = probe(compress(NOTES) + bytes(64))
-        assert padded.container is not None
-        (member,) = padded.container.members
-        assert (member.size, selected(member)) == (len(NOTES), "text")
-        assert codes(padded) == [("unsupported", "")], kind
+        for padding in (64, 70_000):  # within one 64 KiB read, and past it
+            padded = probe(compress(NOTES) + bytes(padding))
+            assert padded.container is not None
+            (member,) = padded.container.members
+            assert (member.size, selected(member)) == (len(NOTES), "text")
+            assert codes(padded) == [("unsupported", "")], (kind, padding)
         data = compress(NOTES) + garbage
         probed = probe(data)
         assert probed.container is not None
@@ -768,6 +769,34 @@ def test_bytes_after_the_last_stream_are_padding_if_null_and_a_finding_otherwise
             "offset": len(data) - len(garbage),
         }
         assert f"open no {kind} stream" in finding.message
+
+
+def test_streams_laid_end_to_end_count_against_the_member_limit() -> None:
+    # A stream that decodes to nothing spends no budget: without a limit, a file of them would be
+    # walked to its end, with a finding for every gzip member whose stated size lies.
+    for kind, (compress, _) in STREAMS.items():
+        empty = bytearray(compress(b""))
+        if kind is ContainerKind.GZIP:
+            empty[-4:] = (1).to_bytes(4, "little")  # each states a byte it does not hold
+        for head in (b"", compress(NOTES * 300)):  # no head before the limit; a whole one
+            probed = probe(head + bytes(empty) * 50, policy=ProbePolicy(max_members=5))
+            assert probed.container is not None
+            (member,) = probed.container.members
+            assert member.size is None, kind
+            assert codes(probed)[0] == ("container_limit", "members"), kind
+            assert probed.findings[0].details == {
+                "limit": "members",
+                "max_members": 5,
+                "member": 0,
+                "streams": 5,
+            }
+            # Of the five streams decoded, every empty gzip member lies; a head states its size.
+            lies = (4 if head else 5) if kind is ContainerKind.GZIP else 0
+            assert codes(probed).count(("container_corrupt", "")) == lies, kind
+            if head:
+                assert selected(member) == "text"
+            else:
+                assert member.probe is None
 
 
 def test_a_stream_the_input_cuts_short_is_a_finding_and_its_head_is_still_probed() -> None:

@@ -55,12 +55,14 @@ a directory of a million entries, a stream that never ends.
    - Streams laid end to end (gzip members as `gzip -c >>` appends them, bzip2 streams as pbzip2
      writes them, xz streams) are one member whose content is their concatenation, as the formats'
      own tools decode them; one member per stream would cut a tar written across streams. They are
-     decoded to `scan_bytes` rather than to a head, since their boundaries lie beyond it. Each gzip
-     member's stated size is checked against its own stream; the content is complete only when
-     every stream was decoded whole; a gzip's `size` is the sum of its members' statements once all
-     were reached, the trailer's statement while the first member is still being decoded (the whole
-     for the usual single member), and withheld when more was seen but not the end. Null bytes
-     after a stream are padding; other bytes that open no stream are a `container_corrupt` finding.
+     decoded to `scan_bytes` rather than to a head, since their boundaries lie beyond it, and each
+     stream counts against `max_members`, since one that decodes to nothing spends no budget and a
+     file of them would otherwise be walked to its end. Each gzip member's stated size is checked
+     against its own stream; the content is complete only when every stream was decoded whole; a
+     gzip's `size` is the sum of its members' statements once all were reached, the trailer's
+     statement while the first member is still being decoded (the whole for the usual single
+     member), and withheld when more was seen but not the end. Null bytes after a stream are
+     padding, however many; other bytes that open no stream are a `container_corrupt` finding.
    - Citations follow ADR 0016: a member's stored bytes are a `ByteRange` in its container's
      scope (compressed if the member is compressed; a gzip member is its whole stream), and a member
      of a nested container adds a step inside what the engine decoded. Headers are metadata.
