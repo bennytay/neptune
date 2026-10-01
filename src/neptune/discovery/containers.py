@@ -22,8 +22,9 @@ Streams laid end to end (gzip members from ``gzip -c >>``, bzip2 streams from pb
 are one member whose content is their concatenation, as the formats' own tools decode them. They
 are decoded to the budget, since their boundaries lie beyond the head; each counts against
 ``max_members``, since a stream that decodes to nothing spends no budget; each gzip member's
-stated size is checked against its own stream; null padding between or after them is skipped
-however long; and the content counts as complete only when every stream was decoded whole.
+stated size is checked against its own stream; null padding between or after them is skipped,
+``scan_bytes`` of it in all; and the content counts as complete only when every stream was
+decoded whole.
 """
 
 import bz2
@@ -348,14 +349,15 @@ class _Decoded:
 
     Bytes are produced on demand and kept, so the head can be taken first and the rest only if
     the head turns out to be a container. Streams laid end to end are decoded as one, the way the
-    formats' own tools do, and each counts against ``max_members``: a stream that decodes to
-    nothing spends no budget, so without that limit a file of them would be walked to its end.
-    Afterwards exactly one of these holds, or the decode is paused at the budget: ``ended``
-    (every stream was decoded whole and the input is spent, bar padding or ``trailing`` bytes
-    that open no stream), ``cut`` (the input ran out inside a stream, a trailer or a header),
-    ``error`` (the exception a corrupt stream raised), ``limited`` (``max_members`` streams were
-    decoded whole and another follows, unread). For gzip, ``sizes`` pairs each whole member's
-    stated size with the length its stream held.
+    formats' own tools do. A stream that decodes to nothing, and the null padding between streams,
+    spend no decoded budget, so without limits of their own a file of them would be walked to its
+    end: each stream counts against ``max_members``, and at most ``scan_bytes`` of padding is
+    skipped in all. Afterwards exactly one of these holds, or the decode is paused at the budget:
+    ``ended`` (every stream was decoded whole and the input is spent, bar padding or ``trailing``
+    bytes that open no stream), ``cut`` (the input ran out inside a stream, a trailer or a
+    header), ``error`` (the exception a corrupt stream raised), ``limited`` (``"members"`` or
+    ``"bytes"``: that limit stopped the walk between streams, leaving ``unread`` bytes). For gzip,
+    ``sizes`` pairs each whole member's stated size with the length its stream held.
     """
 
     def __init__(
@@ -371,7 +373,9 @@ class _Decoded:
         self.streams = 1  # streams opened so far
         self.ended = False
         self.cut = False
-        self.limited = False
+        self.limited: str | None = None  # "members" or "bytes": the limit that stopped the walk
+        self.unread: tuple[int, int] | None = None  # (offset, length) in the view, once limited
+        self._padding = 0  # null bytes skipped between and after streams
         self.sizes: list[tuple[int, int]] = []  # gzip: (stated, decoded) per member decoded whole
         self.trailing: tuple[int, int] | None = None  # (offset, length) in the view
 
@@ -411,6 +415,11 @@ class _Decoded:
         self._stream = None
         self.cut, self.ended = cut, ended
 
+    def _limit(self, which: str, at: int) -> None:
+        """Stop at a limit with input left: neither ended nor cut, so the rest is unknown."""
+        self._stream = None
+        self.limited, self.unread = which, (at, self._end - at)
+
     def _advance(self) -> None:
         """A stream ended: take its trailer, then open the stream that follows or finish."""
         assert self._stream is not None
@@ -427,8 +436,13 @@ class _Decoded:
             self._stop(ended=True)
             return
         rest = self._view.read(at, min(_HEADER_LIMIT, self._end - at))
-        while rest[:1] == b"\x00":  # null padding, however long: skip it, as gzip does
-            at += len(rest) - len(rest.lstrip(b"\x00"))
+        while rest[:1] == b"\x00":  # null padding: skipped as gzip does, scan_bytes in all
+            skip = len(rest) - len(rest.lstrip(b"\x00"))
+            if self._padding + skip > self._budget:
+                self._limit("bytes", at)
+                return
+            self._padding += skip
+            at += skip
             rest = self._view.read(at, min(_HEADER_LIMIT, self._end - at))
         if not rest:
             self._stop(ended=True)
@@ -438,8 +452,7 @@ class _Decoded:
             self._stop(ended=True)
             return
         if self.streams >= self._max_streams:
-            self._stream = None  # another stream follows, unread: neither ended nor cut
-            self.limited = True
+            self._limit("members", at)
             return
         if codec.gzip:
             parsed = _gzip_header(rest)
@@ -630,7 +643,7 @@ def _decoded_head(
                 member=member.index,
             )
         return head, actual, view
-    # Paused at the budget, which is at least a head, or stopped at the stream limit, which
+    # Paused at the budget, which is at least a head, or stopped at a limit between streams, which
     # _stream_findings reported: the head is whole unless that limit came first.
     if len(head) < PROBE_HEAD_SIZE:
         return None, None, view
@@ -1238,7 +1251,7 @@ def _gzip_header(header: bytes) -> tuple[int, bytes] | str:
 def _stream_findings(scope: _Scope, member: Member, kind: ContainerKind, decoded: _Decoded) -> None:
     """What decoding a stream member's streams showed: sizes gzip members state, trailing bytes,
     and the stream limit."""
-    if decoded.limited:
+    if decoded.limited == "members":
         scope.limit(
             "members",
             member.entry,
@@ -1247,6 +1260,19 @@ def _stream_findings(scope: _Scope, member: Member, kind: ContainerKind, decoded
             max_members=scope.policy.max_members,
             member=member.index,
             streams=decoded.streams,
+        )
+    elif decoded.limited == "bytes" and decoded.unread is not None:
+        at, length = decoded.unread
+        scope.limit(
+            "bytes",
+            scope.cite(at, length),
+            f"member {member.index}: null padding after stream {decoded.streams - 1} runs past"
+            f" the {scope.policy.scan_bytes} bytes skipped (scan_bytes); the {length} bytes from"
+            f" {at} are not read",
+            length=length,
+            member=member.index,
+            offset=at,
+            scan_bytes=scope.policy.scan_bytes,
         )
     for stream, (stated, actual) in enumerate(decoded.sizes):
         if stated != actual % (1 << 32):  # gzip stores a member's size modulo 2^32
@@ -1277,7 +1303,8 @@ def _gzip(view: _View, scope: _Scope) -> ContainerReport:
     The member's ``size`` is what the stream states: the sum of every member's stated size once
     all were reached; the trailer's statement (the last member's, so the whole for the usual
     single member) while the first member is still being decoded; nothing when more than one
-    member was seen but not the end, or the input was cut, since the total is stated nowhere.
+    member was seen but not the end, a limit stopped the walk between members, or the input was
+    cut, since the total is stated nowhere.
     ``compressed_size`` is the bytes between the first header and the last trailer.
 
     The trailer is the file's last eight bytes only if the stream ends there; in a file cut short
@@ -1305,7 +1332,8 @@ def _gzip(view: _View, scope: _Scope) -> ContainerReport:
     _stream_findings(scope, member, kind, decoded)
     if decoded.ended:
         member = replace(member, size=sum(stated for stated, _ in decoded.sizes))
-    elif decoded.cut or decoded.streams > 1:
+    elif decoded.cut or decoded.limited or decoded.streams > 1:
+        # More was seen, or lies unread, than the one trailer at the end states.
         member = replace(member, size=None)
     paused = not (decoded.ended or decoded.cut or decoded.error is not None)
     if paused and stated > scope.policy.max_ratio * max(compressed, 1):

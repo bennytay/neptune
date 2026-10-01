@@ -797,6 +797,32 @@ def test_streams_laid_end_to_end_count_against_the_member_limit() -> None:
                 assert selected(member) == "text"
             else:
                 assert member.probe is None
+        # Stopped after the first of two streams: the last one's trailer states nothing whole.
+        probed = probe(compress(NOTES) + compress(b"ab"), policy=ProbePolicy(max_members=1))
+        assert probed.container is not None
+        (member,) = probed.container.members
+        assert member.size is None, kind
+        assert codes(probed)[0] == ("container_limit", "members"), kind
+
+
+def test_null_padding_past_the_budget_is_a_limit_not_a_walk_to_the_end() -> None:
+    # Padding decodes to nothing and opens no stream, so it is bounded by scan_bytes in all.
+    for kind, (compress, _) in STREAMS.items():
+        stream = compress(NOTES)
+        probed = probe(stream + bytes(70_000), policy=ProbePolicy(scan_bytes=PROBE_HEAD_SIZE))
+        assert probed.container is not None
+        (member,) = probed.container.members
+        assert (member.size, member.probe) == (None, None), kind  # a stream may follow, unread
+        assert codes(probed)[0] == ("container_limit", "bytes"), kind
+        at = len(stream) + PROBE_HEAD_SIZE  # one whole window of padding fits the budget
+        assert probed.findings[0].subject.locator == (ByteRange(at, 70_000 - PROBE_HEAD_SIZE),)  # type: ignore[union-attr]
+        assert probed.findings[0].details == {
+            "length": 70_000 - PROBE_HEAD_SIZE,
+            "limit": "bytes",
+            "member": 0,
+            "offset": at,
+            "scan_bytes": PROBE_HEAD_SIZE,
+        }
 
 
 def test_a_stream_the_input_cuts_short_is_a_finding_and_its_head_is_still_probed() -> None:

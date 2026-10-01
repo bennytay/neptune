@@ -62,7 +62,8 @@ a directory of a million entries, a stream that never ends.
      gzip's `size` is the sum of its members' statements once all were reached, the trailer's
      statement while the first member is still being decoded (the whole for the usual single
      member), and withheld when more was seen but not the end. Null bytes after a stream are
-     padding, however many; other bytes that open no stream are a `container_corrupt` finding.
+     padding, skipped up to `scan_bytes` in all (more is a `bytes` limit, since a stream may
+     follow); other bytes that open no stream are a `container_corrupt` finding.
    - Citations follow ADR 0016: a member's stored bytes are a `ByteRange` in its container's
      scope (compressed if the member is compressed; a gzip member is its whole stream), and a member
      of a nested container adds a step inside what the engine decoded. Headers are metadata.
