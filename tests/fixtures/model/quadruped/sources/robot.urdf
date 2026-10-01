@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<robot name="quadruped">
+  <link name="base">
+    <visual>
+      <geometry>
+        <mesh filename="package://quadruped/meshes/body.stl"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="fl_thigh"/>
+  <joint name="fl_hip" type="revolute">
+    <parent link="base"/>
+    <child link="fl_thigh"/>
+    <origin xyz="0.19 0.05 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-0.8" upper="0.8" effort="23.7" velocity="30.1"/>
+  </joint>
+  <link name="front_camera"/>
+  <joint name="front_camera_joint" type="fixed">
+    <parent link="base"/>
+    <child link="front_camera"/>
+    <origin xyz="0.28 0 0.05" rpy="0 0.25 0"/>
+  </joint>
+  <gazebo reference="front_camera">
+    <sensor name="front_camera" type="camera"/>
+  </gazebo>
+</robot>

@@ -1,8 +1,10 @@
 # Canonical data model
 
-Status: **draft**. Primitives are specified by MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66
-(ADR 0017), runs, streams and series by MVL-67 (ADR 0018), machine context by MVL-68 (ADR 0019) and world
-context by MVL-69 (ADR 0020). This page becomes authoritative when MVL-1 closes.
+Status: **authoritative** for `SCHEMA_VERSION` 0 (MVL-1, closed by MVL-70). Primitives are specified by
+MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66 (ADR 0017), runs, streams and series by MVL-67
+(ADR 0018), machine context by MVL-68 (ADR 0019) and world context by MVL-69 (ADR 0020). The JSON Schema
+(`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). From the M1 gate on,
+any change here needs an ADR and a schema-version bump (ADR 0017 §7).
 
 ## Record kinds (v0)
 
@@ -212,7 +214,21 @@ a bug, not a value.
 - NaN and ±Infinity never appear in JSON. A record field that may hold them is typed `Real`, and a non-finite
   value is written `{"non_finite":"inf"}` (`model/scalars.py`, ADR 0017 §8). Parquet keeps IEEE values.
 
-## Schema examples
+## JSON Schema (ADR 0021)
 
-MVL-1 ships worked examples for a drone (PX4), a quadruped (ROS 2), a manipulator (MCAP) and a mobile robot
-(ROS 1) under `tests/fixtures/model/`.
+- `docs/schema/canonical.schema.json` is generated from these types (`make schema`) and checked for drift by a
+  test. One line of any record table validates against it; `#/$defs/<Kind>` holds each kind.
+- It checks keys, types, tags, enums and id syntax. The Python readers check the rest (order, uniqueness,
+  ranges, non-empty text, cross-field rules, `1` versus `1.0`): what a reader accepts always passes the schema.
+
+## Worked examples (ADR 0021; `tests/fixtures/model/`)
+
+| Example | Sources | Records |
+|---|---|---|
+| drone | PX4 ULog | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings |
+| quadruped | ROS 2 bag, URDF, STL mesh | run from bag metadata, joint and trajectory streams with three clocks each, URDF frames, transforms and components, the mesh as geometry |
+| manipulator | MCAP, hand-eye YAML | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit |
+| mobile robot | ROS 1 bag, site register CSV, PNG photo | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture |
+
+Every source is a real file, and every record resolves back to it: citations land on real records, pointers,
+rows and cells resolve, and every id a record names is in the example.

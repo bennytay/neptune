@@ -4,7 +4,7 @@
 .DEFAULT_GOAL := help
 UV ?= uv
 
-.PHONY: help setup fmt lint type test test-fast check
+.PHONY: help setup fmt lint type test test-fast check schema examples
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -30,3 +30,9 @@ test-fast: ## Test suite excluding tests marked slow
 > $(UV) run pytest -m "not slow"
 
 check: lint type test ## Everything CI runs; must pass before opening a PR
+
+schema: ## Regenerate docs/schema/canonical.schema.json from the model's types
+> $(UV) run python -m neptune.model.schema docs/schema/canonical.schema.json
+
+examples: ## Regenerate the worked examples under tests/fixtures/model/
+> $(UV) run python tests/fixtures/model/make_examples.py
