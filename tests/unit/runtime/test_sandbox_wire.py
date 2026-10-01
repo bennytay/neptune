@@ -23,6 +23,7 @@ from neptune.adapters.contract import (
     VERIFIED,
     ChunkOutput,
     ContractError,
+    InspectResult,
     Plan,
     ProbeReason,
     ProbeResult,
@@ -94,6 +95,21 @@ def test_a_probe_result_crosses_unchanged() -> None:
         ProbeResult(VERIFIED, (ProbeReason("text.utf8", "decodes as UTF-8"),), "2.0"),
     ):
         assert wire.decode_probe(wire.encode_probe(result)) == result
+
+
+def test_an_inspect_result_crosses_unchanged() -> None:
+    """``inspect`` crosses the sandbox for dry runs (MVL-15), summary and findings exact."""
+    adapter, corrupted = TextAdapter(), (FIXTURES / "text" / "corrupted.txt").read_bytes()
+    result = adapter.inspect(BytesReader(corrupted), configure(adapter.descriptor))
+    assert wire.decode_inspect(wire.encode_inspect(result)) == result
+    _, chunks = outputs(adapter, corrupted)
+    found = tuple(finding for chunk in chunks for finding in chunk.findings)
+    assert found  # the fixture's invalid UTF-8
+    with_findings = InspectResult(result.summary, found)
+    assert wire.decode_inspect(wire.encode_inspect(with_findings)) == with_findings
+    for data in (b"{}", b'{"findings": [], "summary": []}', b'{"findings": {}, "summary": {}}'):
+        with pytest.raises((ValueError, TypeError, ContractError)):
+            wire.decode_inspect(data)
 
 
 def test_the_encoding_is_deterministic() -> None:

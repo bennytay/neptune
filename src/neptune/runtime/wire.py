@@ -11,6 +11,7 @@ execution in the job's process.
   strings, binary as hex, and every float as the hex of its eight IEEE-754 bytes, so NaN
   payloads, infinities and ``-0.0`` cross unchanged. A null cell is ``null``.
 - Plans travel as their chunks' ``to_json`` and findings; probe results as their ``to_json``;
+  ``inspect``'s result as its summary and findings (for dry runs, MVL-15);
   the probe engine's view of a source as ``SourceProbe.to_json``, read back by the engine.
 
 A decoder raises on anything it does not recognise; the sandbox reports that as a crash. The byte
@@ -27,6 +28,7 @@ from typing import Any, Final, cast
 from neptune.adapters.contract import (
     EVIDENCE_KINDS,
     ChunkOutput,
+    InspectResult,
     Plan,
     ProbeResult,
     chunk_from_json,
@@ -281,6 +283,23 @@ def decode_probe(data: bytes) -> ProbeResult:
     return probe_result_from_json(cast("JsonValue", _loads(data)))
 
 
+def encode_inspect(result: InspectResult) -> bytes:
+    return _dumps(
+        {
+            "findings": [finding.to_json() for finding in result.findings],
+            "summary": result.summary,
+        }
+    )
+
+
+def decode_inspect(data: bytes) -> InspectResult:
+    value = _object(_loads(data), {"findings", "summary"}, "an inspect result")
+    summary = value["summary"]
+    if not isinstance(summary, dict):
+        raise ValueError("an inspect result's summary is an object")
+    return InspectResult(summary, _findings_from_json(value["findings"]))
+
+
 def source_probe(
     engine: ProbeEngine, source: ContentId, size: int, name: str, head: bytes
 ) -> Codec[SourceProbe]:
@@ -301,3 +320,4 @@ def source_probe(
 OUTPUT: Final = Codec(ChunkOutput, encode_output, decode_output)
 PLAN: Final = Codec(Plan, encode_plan, decode_plan)
 PROBE: Final = Codec(ProbeResult, encode_probe, decode_probe)
+INSPECT: Final = Codec(InspectResult, encode_inspect, decode_inspect)
