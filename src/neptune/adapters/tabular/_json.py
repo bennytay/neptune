@@ -26,7 +26,7 @@ import re
 from collections.abc import Generator, Iterable, Iterator
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from neptune.adapters.contract import (
     PROBE_HEAD_SIZE,
@@ -44,7 +44,6 @@ from neptune.adapters.tabular._common import (
     Layout,
     Limits,
     bytes_at,
-    cite,
     context_flag,
     context_int,
     context_text,
@@ -55,7 +54,6 @@ from neptune.adapters.tabular._common import (
     table,
     whole,
 )
-from neptune.model.finding import IngestFinding
 from neptune.model.jsonvalue import JsonObject
 from neptune.model.knowledge import (
     Knowledge,
@@ -68,6 +66,9 @@ from neptune.model.knowledge import (
 from neptune.model.provenance import ByteRange, EvidenceRef, JsonPointer, Provenance
 from neptune.model.scalars import NonFinite
 from neptune.model.world import CellValue, StructuredRecord, StructuredTable
+
+if TYPE_CHECKING:
+    from neptune.model.finding import IngestFinding
 
 WHITESPACE: Final = b" \t\n\r"
 BLOCK_ROWS: Final = 4096

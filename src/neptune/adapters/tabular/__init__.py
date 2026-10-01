@@ -25,7 +25,7 @@ reads one block. Findings about rows are aggregated per block, whose bounds depe
 bytes and this version's constants.
 """
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from neptune.adapters.contract import (
     ABI_VERSION,
@@ -52,7 +52,9 @@ from neptune.adapters.contract import (
 )
 from neptune.adapters.tabular import _csv, _json, _parquet
 from neptune.adapters.tabular._common import ADAPTER_ID, BOM, CODES, Layout, Limits
-from neptune.model.jsonvalue import JsonObject
+
+if TYPE_CHECKING:
+    from neptune.model.jsonvalue import JsonObject
 
 _TABULAR_EXTENSIONS: Final = frozenset({".csv", ".tsv"})
 # C0 controls that text uses; any other control byte (or a NUL) means the head is not text.
@@ -61,7 +63,7 @@ _BINARY: Final = bytes(b for b in range(0x20) if b not in _TEXT_CONTROLS)
 
 
 def _pyarrow_version() -> str:
-    from importlib.metadata import version  # noqa: PLC0415
+    from importlib.metadata import version
 
     return version("pyarrow")
 

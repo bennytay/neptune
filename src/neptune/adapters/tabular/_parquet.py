@@ -26,7 +26,7 @@ import io
 import json
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from neptune.adapters.contract import (
     AdapterConfig,
@@ -151,8 +151,8 @@ class _Reader(io.RawIOBase):
 
 def _arrow() -> tuple[Any, Any]:
     """pyarrow, imported only when a Parquet source is read: CSV and JSON never pay for it."""
-    import pyarrow as pa  # noqa: PLC0415
-    import pyarrow.parquet as pq  # noqa: PLC0415
+    import pyarrow as pa
+    import pyarrow.parquet as pq
 
     return pa, pq
 
@@ -333,7 +333,7 @@ def _logical(column: Any) -> dict[str, Any]:
 
 
 def _declared(value: Any, kind: type) -> Knowledge[CellValue]:
-    return Known(value) if isinstance(value, kind) else NotApplicable()
+    return Known(cast("CellValue", value)) if isinstance(value, kind) else NotApplicable()
 
 
 def _schema_cells(column: Any) -> list[Knowledge[CellValue]]:
@@ -657,6 +657,8 @@ def _statistics(
         stats = chunk.statistics if chunk.is_stats_set else None
         declared = pf.schema.column(column)
         has_minmax = stats is not None and stats.has_min_max
+        minimum = _statistic(stats.min_raw, declared) if stats and has_minmax else Unknown()
+        maximum = _statistic(stats.max_raw, declared) if stats and has_minmax else Unknown()
         dictionary = chunk.dictionary_page_offset if chunk.has_dictionary_page else None
         cells: list[Knowledge[CellValue]] = [
             Known(index),
@@ -667,8 +669,8 @@ def _statistics(
             Known(stats.distinct_count)
             if stats is not None and stats.has_distinct_count
             else Unknown(),
-            _statistic(stats.min_raw, declared) if has_minmax else Unknown(),
-            _statistic(stats.max_raw, declared) if has_minmax else Unknown(),
+            minimum,
+            maximum,
             Known(chunk.compression),
             Known(",".join(chunk.encodings)) if chunk.encodings else Unknown(),
             Known(chunk.total_compressed_size),
@@ -696,9 +698,12 @@ def _arrays(pa: Any, batch: Any, found: list[Leaf]) -> list[list[Any] | None]:
         kind = array.type
         if types.is_date32(kind) or types.is_time32(kind):
             array = array.view(pa.int32())
-        elif types.is_date64(kind) or types.is_time64(kind) or types.is_timestamp(kind):
-            array = array.view(pa.int64())
-        elif types.is_duration(kind):
+        elif (
+            types.is_date64(kind)
+            or types.is_time64(kind)
+            or types.is_timestamp(kind)
+            or types.is_duration(kind)
+        ):
             array = array.view(pa.int64())
         elif types.is_float16(kind):
             array = array.cast(pa.float32())

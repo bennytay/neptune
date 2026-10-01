@@ -20,7 +20,7 @@ record is a header; a CSV cannot say so itself.
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from neptune.adapters.contract import (
     PROBE_HEAD_SIZE,
@@ -49,11 +49,13 @@ from neptune.adapters.tabular._common import (
     table,
     whole,
 )
-from neptune.model.finding import IngestFinding
-from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import Knowledge, Known, NotApplicable, NotCovered, Unknown
 from neptune.model.provenance import Row
 from neptune.model.world import CellValue, StructuredRecord, StructuredTable
+
+if TYPE_CHECKING:
+    from neptune.model.finding import IngestFinding
+    from neptune.model.jsonvalue import JsonObject, JsonValue
 
 QUOTE: Final = 0x22
 LF: Final = 0x0A
@@ -251,9 +253,9 @@ def sniff(sample: bytes, complete: bool) -> Dialect | None:
             found.append(record.fields)
             if len(found) == SNIFF_RECORDS:
                 break
-        if len(found) >= 2 and found[0] >= 2 and len(set(found)) == 1:
-            if best is None or found[0] > best.fields:
-                best = Dialect(delimiter, found[0], len(found))
+        agree = len(found) >= 2 and found[0] >= 2 and len(set(found)) == 1
+        if agree and (best is None or found[0] > best.fields):
+            best = Dialect(delimiter, found[0], len(found))
     return best
 
 
@@ -307,9 +309,8 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
             chunks.append(make_chunk(source, config, context, held[-1].end - held[0].start))
             held.clear()
 
-    row = 0
     pieces = read_pieces(source, begin, source.size)
-    for record in records(pieces, delimiter.encode(), begin):
+    for row, record in enumerate(records(pieces, delimiter.encode(), begin)):
         if record.end > record.stop:
             endings["crlf" if record.crlf else "lf"] += 1
         if row >= limits.max_rows:
@@ -361,7 +362,6 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
             if not held:
                 first_row = row
             held.append(record)
-        row += 1
     close()
     endings_json: dict[str, JsonValue] = dict(endings)
     context: JsonObject = {
