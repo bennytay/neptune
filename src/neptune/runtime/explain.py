@@ -40,6 +40,7 @@ HEAVY_BYTES: Final = 256 * 1024 * 1024
 # ... or takes at least this many ``ingest`` calls, each a sandboxed fork.
 HEAVY_CHUNKS: Final = 1024
 ADAPTER_FAILED: Final = f"{PROBE_ID}.adapter_failed"
+RENDER_WIDTH: Final = 160  # ``render`` abridges an inspect summary to this many characters
 
 Location = LocalPath | RawLocalPath
 
@@ -58,6 +59,10 @@ def _size(count: int) -> str:
             return f"{count} B" if unit == "B" else f"{value:.1f} {unit}"
         value /= 1024
     raise AssertionError("unreachable")
+
+
+def _abridge(text: str, width: int = RENDER_WIDTH) -> str:
+    return text if len(text) <= width else text[: width - 3] + "..."
 
 
 # --- The inventory -------------------------------------------------------------------------------
@@ -373,7 +378,7 @@ class SourceExplanation:
         container = self.probe.container
         line = self.probe.sniff.describe()
         if container is not None:
-            line += f"; a {container.kind} of {len(container.members)} listed members"
+            line += f"; a {container.kind} container, {len(container.members)} members listed"
         return line
 
     def to_json(self) -> JsonObject:
@@ -611,10 +616,10 @@ class Explanation:
                 lines.append(f"    {verdict.adapter:<12} {verdict.verdict:<9} {verdict.why}")
             if item.inspection is not None and item.inspection.summary is not None:
                 summary = canonical_json.dumps(item.inspection.summary).decode()
-                lines.append(f"    inspect: {summary}")
+                lines.append(f"    inspect: {_abridge(summary)}")
             elif item.inspection is not None and item.inspection.failure is not None:
                 failure = canonical_json.dumps(item.inspection.failure).decode()
-                lines.append(f"    inspect failed: {failure}")
+                lines.append(f"    inspect failed: {_abridge(failure)}")
             if item.plan is not None:
                 plan = item.plan
                 lines.append(
