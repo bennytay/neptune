@@ -8,3 +8,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-place-in-the-programme-and-contract-pins.md) | Memory's place in the programme, declared contract versions, and the stub Ledger | Accepted |
+| [0003](0003-identity-policy-consolidator-contract-and-lineage.md) | Identity policy, the consolidator contract, and consolidator lineage | Accepted |
