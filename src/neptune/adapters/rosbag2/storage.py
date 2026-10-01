@@ -288,7 +288,7 @@ def _page_range(source: SourceReader, db: Database, page: int) -> ByteRange:
     return clip(source, start, size)
 
 
-class _Tally:
+class _Problems:
     """What a walk met besides rows: damaged pages and refused rows, by reason, first first."""
 
     def __init__(self) -> None:
@@ -354,8 +354,8 @@ def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> 
                 {},
             )
         )
-    tally = _Tally()
-    tally.problems(walk.problems)
+    problems = _Problems()
+    problems.problems(walk.problems)
     if layout is None:
         findings.append(
             cite.finding(
@@ -368,11 +368,11 @@ def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> 
                 {"tables": sorted(entry.name for entry in schema)[:LISTED]},
             )
         )
-        _damage(cite, source, db, tally, findings)
+        _damage(cite, source, db, problems, findings)
         return unreadable()
     walk = Walk()
     topics, too_many = read_topics(db, layout, walk)
-    tally.problems(walk.problems)
+    problems.problems(walk.problems)
     if too_many:
         findings.append(
             cite.finding(
@@ -398,9 +398,9 @@ def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> 
     for cell in db.table(layout.messages.root, walk=walk):
         outcome = decode_message(cell, columns)
         if isinstance(outcome, str):
-            tally.counts[outcome] += 1
-            if not tally.rows[outcome]:
-                tally.rows[outcome].append(cell)
+            problems.counts[outcome] += 1
+            if not problems.rows[outcome]:
+                problems.rows[outcome].append(cell)
             continue
         if outcome.topic not in declared:
             unknown[outcome.topic] += 1
@@ -423,8 +423,8 @@ def plan_storage(source: SourceReader, config: AdapterConfig, max_rows: int) -> 
             rows = size = 0
     if rows:
         chunks.append((_data(current, starts), size))
-    tally.problems(walk.problems)
-    _damage(cite, source, db, tally, findings)
+    problems.problems(walk.problems)
+    _damage(cite, source, db, problems, findings)
     if unknown and first_unknown is not None:
         findings.append(
             cite.finding(
@@ -463,37 +463,41 @@ def _data(current: dict[str, JsonValue], starts: dict[int, int]) -> JsonObject:
 
 
 def _damage(
-    cite: Cite, source: SourceReader, db: Database, tally: _Tally, findings: list[IngestFinding]
+    cite: Cite,
+    source: SourceReader,
+    db: Database,
+    problems: _Problems,
+    findings: list[IngestFinding],
 ) -> None:
-    for reason in sorted(tally.pages):
-        pages = sorted(tally.pages[reason])
+    for reason in sorted(problems.pages):
+        pages = sorted(problems.pages[reason])
         findings.append(
             cite.finding(
                 "damaged_page",
                 FindingCategory.CORRUPT,
                 Severity.ERROR,
                 (_page_range(source, db, pages[0]),),
-                f"{PROBLEMS.get(reason, reason)}: {tally.counts[reason]} time(s) on"
+                f"{PROBLEMS.get(reason, reason)}: {problems.counts[reason]} time(s) on"
                 f" {len(pages)} page(s); the rows under them are not read",
                 {
                     "pages": pages[:LISTED],
                     "pages_omitted": max(0, len(pages) - LISTED),
-                    "problems": tally.counts[reason],
+                    "problems": problems.counts[reason],
                     "reason": reason,
                 },
             )
         )
-    for reason in sorted(tally.rows):
-        cell = tally.rows[reason][0]
+    for reason in sorted(problems.rows):
+        cell = problems.rows[reason][0]
         findings.append(
             cite.finding(
                 "bad_row",
                 FindingCategory.CORRUPT,
                 Severity.WARNING,
                 (ByteRange(cell.offset, cell.length),),
-                f"{tally.counts[reason]} message row(s) are unusable ({reason}: the record does not"
+                f"{problems.counts[reason]} message row(s) are unusable ({reason}: the record does not"
                 " parse or its topic or timestamp is not an integer); they get no rows",
-                {"first_rowid": cell.rowid, "reason": reason, "rows": tally.counts[reason]},
+                {"first_rowid": cell.rowid, "reason": reason, "rows": problems.counts[reason]},
             )
         )
 

@@ -20,7 +20,6 @@ from typing import Final
 
 from neptune.adapters.contract import (
     ABI_VERSION,
-    NAME_ONLY,
     SIGNATURE,
     VERIFIED,
     AdapterConfig,
@@ -284,13 +283,9 @@ class Rosbag2Adapter:
             reader = _Head(head, max(hints.size, len(head)))
             schema = read_schema(Database(reader), Walk())  # type: ignore[arg-type]
         except SqliteError:
-            return (
-                ProbeResult(0.0, (magic,))
-                if not hints.name.endswith(".db3")
-                else ProbeResult(
-                    NAME_ONLY,
-                    (magic, ProbeReason("rosbag2.schema_unreadable", "its schema is not readable")),
-                )
+            # Bytes decide, never the name: a header whose schema does not read is not claimed.
+            return ProbeResult(
+                0.0, (magic, ProbeReason("rosbag2.schema_unreadable", "its schema is not readable"))
             )
         if storage.find_layout(schema) is None:
             return ProbeResult(

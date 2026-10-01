@@ -1,7 +1,7 @@
 """Generates the rosbag2 fixtures: one mobile-base recording written to both storage backends.
 
     uv run --no-project --with mcap --with rosbags python tests/fixtures/rosbag2/make_rosbag2.py
-    uv run --no-project --with mcap --with rosbags python tests/fixtures/rosbag2/make_rosbag2.py --oracle
+    ... make_rosbag2.py --oracle
 
 The first form writes the bags next to this file; the second prints what the official readers
 (``rosbags``' rosbag2 reader and the ``mcap`` package) read from them, which is committed as
@@ -21,7 +21,8 @@ HERE = Path(__file__).parent
 START = 1_700_000_000_000_000_000
 STEP = 100_000_000  # 10 Hz
 QOS = (
-    "- history: 3\n  depth: 0\n  reliability: 1\n  durability: 2\n  deadline:\n    sec: 9223372036\n"
+    "- history: 3\n  depth: 0\n  reliability: 1\n  durability: 2\n"
+    "  deadline:\n    sec: 9223372036\n"
     "    nsec: 854775807\n  lifespan:\n    sec: 9223372036\n    nsec: 854775807\n  liveliness: 1\n"
     "  liveliness_lease_duration:\n    sec: 9223372036\n    nsec: 854775807\n"
     "  avoid_ros_namespace_conventions: false\n"

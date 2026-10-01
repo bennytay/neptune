@@ -105,6 +105,7 @@ def test_adapters_declared_magic_becomes_signatures_naming_the_adapter() -> None
     shipped = declared_signatures(default_registry().descriptors().values())
     assert [(s.name, s.adapter, s.magic) for s in shipped] == [
         ("MCAP", "mcap", (Magic(0, b"\x89MCAP0\r\n"),)),  # text declares none
+        ("rosbag2 sqlite3 storage", "rosbag2", (Magic(0, b"SQLite format 3\x00"),)),
         ("Parquet", "tabular", (Magic(0, b"PAR1"),)),
     ]
     spec = FormatSpec("Tally", magic=(Magic(0, b"TALLY1\n"),))

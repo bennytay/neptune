@@ -114,7 +114,7 @@ def test_adapters_are_kept_and_listed_in_id_order() -> None:
 
 
 def test_the_builtin_registry_holds_the_shipped_adapters() -> None:
-    assert list(default_registry().descriptors()) == ["mcap", "tabular", "text"]
+    assert list(default_registry().descriptors()) == ["mcap", "rosbag2", "tabular", "text"]
     assert builtin_adapters()[0] is not builtin_adapters()[0]
 
 
