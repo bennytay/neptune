@@ -10,6 +10,7 @@ has no place for capture metadata or orientation: both are ``NotCovered``.
 from dataclasses import dataclass
 from typing import Final
 
+from neptune.adapters.contract import PROBE_HEAD_SIZE
 from neptune.adapters.image._context import Context
 from neptune.adapters.image._emit import NOT_MODELLED, RASTER_TRUNCATED, UNREADABLE
 from neptune.adapters.image._space import Space
@@ -20,7 +21,7 @@ ENCODINGS: Final = {
     b"P7": "pam",
 }  # fmt: skip
 PLAIN: Final = frozenset({b"P1", b"P2", b"P3"})
-HEADER_LIMIT: Final = 64 * 1024
+HEADER_LIMIT: Final = PROBE_HEAD_SIZE  # what probe and detect see: one limit for all three
 MAX_DIGITS: Final = (
     10  # a width, height, depth or maxval: far past anything valid, so int() is cheap
 )

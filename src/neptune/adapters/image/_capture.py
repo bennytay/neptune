@@ -35,7 +35,7 @@ from neptune.adapters.image._context import Context
 from neptune.adapters.image._emit import VALUE_UNREADABLE
 from neptune.adapters.image._tiff import RATIONAL, Entry, Ifd
 from neptune.model.ids import LogicalId
-from neptune.model.knowledge import Knowledge, Known, NotCovered, Unknown
+from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotCovered, Unknown
 from neptune.model.provenance import Locator, Provenance
 from neptune.model.reference import TimestampDomain
 from neptune.model.spatial import CrsCode, GeodeticPosition, HeightReference
@@ -111,7 +111,7 @@ class CaptureReader:
         self.tags = tags
 
     def prov(self, locator: Sequence[Locator]) -> Provenance:
-        return self.ctx.out.provenance(locator)
+        return self.ctx.out.provenance(locator, AssertionKind.STATED)
 
     def unreadable(self, locator: Sequence[Locator], message: str, tag: int) -> None:
         self.ctx.out.finding(VALUE_UNREADABLE, locator, message, {"tag": tag})
@@ -256,8 +256,8 @@ class CaptureReader:
         if gps.get(GPS_LATITUDE) is None and gps.get(GPS_LONGITUDE) is None:
             return Unknown(prov)
         try:
-            latitude = _degrees(gps, GPS_LATITUDE, GPS_LATITUDE_REF, "N", "S")
-            longitude = _degrees(gps, GPS_LONGITUDE, GPS_LONGITUDE_REF, "E", "W")
+            latitude = _degrees(gps, GPS_LATITUDE, GPS_LATITUDE_REF, "N", "S", 90)
+            longitude = _degrees(gps, GPS_LONGITUDE, GPS_LONGITUDE_REF, "E", "W", 180)
         except _Unreadable as exc:
             self.unreadable(gps.locator, f"the GPS position is unreadable: {exc}", GPS_LATITUDE)
             return Unknown(prov)
@@ -309,14 +309,18 @@ def _reference(gps: Ifd, tag: int) -> str:
     return items[0]
 
 
-def _degrees(gps: Ifd, tag: int, ref_tag: int, positive: str, negative: str) -> float:
+def _degrees(gps: Ifd, tag: int, ref_tag: int, positive: str, negative: str, bound: int) -> float:
     entry = gps.get(tag)
     if entry is None:
         raise _Unreadable(f"tag {tag} is missing")
     parts = _rationals(entry)
     if not 1 <= len(parts) <= 3:
         raise _Unreadable(f"tag {tag} holds {len(parts)} rationals, not 1 to 3")
+    if any(part >= 60 for part in parts[1:]):
+        raise _Unreadable(f"tag {tag} has minutes or seconds of 60 or more")
     value = sum((part / 60**index for index, part in enumerate(parts)), Fraction(0))
+    if value > bound:
+        raise _Unreadable(f"tag {tag} is {float(value)} degrees, past {bound}")
     ref = _reference(gps, ref_tag)
     if ref not in (positive, negative):
         raise _Unreadable(f"tag {ref_tag} is {ref!r}, not {positive} or {negative}")

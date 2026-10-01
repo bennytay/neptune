@@ -10,6 +10,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Final
 
 from neptune.adapters.contract import AdapterConfig, SourceReader
+from neptune.adapters.image._space import LimitHit
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import evidence_record_id
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
@@ -159,6 +160,9 @@ class Emitter:
         self._records: dict[RecordId, Any] = {}
         self._findings: dict[RecordId, IngestFinding] = {}
         self._tried: set[tuple[str, tuple[Locator, ...]]] = set()
+        self._kinds: dict[RecordId, AssertionKind] = {}
+        self._cell_limit = config.integer("max_metadata_bytes")
+        self._cell_room = self._cell_limit
 
     @property
     def records(self) -> tuple[Any, ...]:
@@ -171,8 +175,13 @@ class Emitter:
     def evidence(self, locator: Sequence[Locator]) -> EvidenceRef:
         return EvidenceRef(self.source.content_id, tuple(locator))
 
-    def provenance(self, locator: Sequence[Locator]) -> Provenance:
-        return Provenance(self.evidence(locator), self.config.transform.id, AssertionKind.OBSERVED)
+    def provenance(
+        self, locator: Sequence[Locator], kind: AssertionKind = AssertionKind.OBSERVED
+    ) -> Provenance:
+        """``OBSERVED`` is what this adapter measured (a raster's declared size read from its
+        header structure); ``STATED`` is what the file's writer or camera declares (EXIF, XMP,
+        ICC, text): the adapter read it and does not vouch for it (non-negotiable 2)."""
+        return Provenance(self.evidence(locator), self.config.transform.id, kind)
 
     def record_id(self, kind: str, locator: Sequence[Locator]) -> RecordId:
         return evidence_record_id(kind, self.evidence(locator), self.config.transform)
@@ -207,8 +216,11 @@ class Emitter:
         name: Knowledge[str],
         header: tuple[str, ...],
         what: str,
+        kind: AssertionKind = AssertionKind.OBSERVED,
     ) -> RecordId | None:
-        """A ``StructuredTable`` citing ``locator``; ``None`` if those bytes are already a table."""
+        """A ``StructuredTable`` citing ``locator``; ``None`` if those bytes are already a table.
+
+        ``kind`` is the assertion kind of the table and of every row in it."""
         table_id = self.record_id(StructuredTable.kind, locator)
         if self.taken(table_id):
             self.finding(
@@ -218,7 +230,8 @@ class Emitter:
             )
             return None
         header_state: Knowledge[tuple[str, ...]] = Known(header) if header else NotApplicable()
-        self.add(StructuredTable(table_id, self.provenance(locator), name, header_state))
+        self._kinds[table_id] = kind
+        self.add(StructuredTable(table_id, self.provenance(locator, kind), name, header_state))
         return table_id
 
     def row(
@@ -228,11 +241,19 @@ class Emitter:
         row: int,
         cells: Iterable[CellInput],
     ) -> RecordId:
-        """Row ``row`` of ``table``, cited ``[*table_locator, Row(row)]``: its cells inherit."""
+        """Row ``row`` of ``table``, cited ``[*table_locator, Row(row)]``: its cells inherit.
+
+        The text of all rows of a source is bounded by ``max_metadata_bytes``: past it ``LimitHit``.
+        """
         locator = (*table_locator, Row(row))
         record_id = self.record_id(StructuredRecord.kind, locator)
+        built = tuple(cell(c) for c in cells)
+        used = sum(len(c) for c in cells if isinstance(c, str))
+        if used > self._cell_room:
+            raise LimitHit("max_metadata_bytes", self._cell_limit)
+        self._cell_room -= used
         record = StructuredRecord(
-            record_id, self.provenance(locator), table, row, tuple(cell(c) for c in cells)
+            record_id, self.provenance(locator, self._kinds[table]), table, row, built
         )
         self.add(record)
         return record_id

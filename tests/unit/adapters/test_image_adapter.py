@@ -18,7 +18,7 @@ from neptune.adapters.image import DESCRIPTOR, ImageAdapter
 from neptune.discovery.reader import BytesReader
 from neptune.identity.canonical_json import dumps
 from neptune.model.finding import Severity
-from neptune.model.knowledge import Known, NotCovered, Unknown
+from neptune.model.knowledge import AssertionKind, Known, NotCovered, Unknown
 from neptune.model.provenance import ByteRange, EvidenceRef, ImageRegion
 from neptune.model.reference import TimestampDomain
 from neptune.model.time import Timescale
@@ -279,3 +279,65 @@ def test_one_changed_byte_changes_the_source_and_every_citing_record() -> None:
     data[-1] ^= 0xFF  # a pixel: nothing the adapter reads
     first, second = run("wrist_depth.pgm"), run(bytes(data))
     assert {r.id for r in first.records()}.isdisjoint({r.id for r in second.records()})
+
+
+# --- Stated and observed ----------------------------------------------
+
+
+def kinds_of(name: str) -> dict[str, set[AssertionKind]]:
+    """Each table's name to the assertion kinds of the table and of all its rows."""
+    output = run(name)
+    records = output.records()
+    found: dict[str, set[AssertionKind]] = {}
+    for table in (r for r in records if isinstance(r, StructuredTable)):
+        rows = [r for r in records if isinstance(r, StructuredRecord) and r.table == table.id]
+        assert rows
+        kinds = {table.provenance.assertion_kind, *(r.provenance.assertion_kind for r in rows)}
+        found.setdefault(str(known(table.name)), set()).update(kinds)
+    return found
+
+
+STATED: Final = {AssertionKind.STATED}
+OBSERVED: Final = {AssertionKind.OBSERVED}
+
+
+def test_what_a_camera_or_writer_declares_is_stated_and_what_was_measured_is_observed() -> None:
+    jpeg = kinds_of("crawler_inspection.jpg")
+    for declared in ("IFD0", "IFD1", "Exif", "GPS", "Interop", "XMP", "ICC header", "ICC tags",
+                     "JFIF", "COM"):  # fmt: skip
+        assert jpeg[declared] == STATED, declared
+    for measured in ("SOF0", "SOF0 components"):
+        assert jpeg[measured] == OBSERVED, measured
+    png = kinds_of("amr_dock.png")
+    for declared in ("tEXt", "zTXt", "iTXt", "eXIf", "iCCP", "gAMA", "cHRM", "pHYs", "sRGB",
+                     "tIME", "IFD0"):  # fmt: skip
+        if declared in png:
+            assert png[declared] == STATED, declared
+    assert png["IHDR"] == OBSERVED
+    assert kinds_of("wrist_depth.pgm")["PNM header"] == OBSERVED
+    assert kinds_of("floor_map.bmp")["BITMAPV5HEADER"] == OBSERVED
+    assert kinds_of("floor_map.bmp")["ICC header"] == STATED
+    assert kinds_of("humanoid_headcam.webp")["VP8X"] == OBSERVED
+    assert kinds_of("rover_raw.dng")["IFD0"] == STATED
+
+
+def test_an_images_geometry_is_observed_and_its_capture_is_stated() -> None:
+    output = run("crawler_inspection.jpg")
+    (image,) = images(output)
+    assert image.provenance.assertion_kind is AssertionKind.OBSERVED
+    capture = image.capture
+    for state in (
+        capture.time,
+        capture.position,
+        capture.device_manufacturer,
+        capture.device_model,
+        image.orientation,
+        *capture.device_identifiers,
+    ):
+        assert isinstance(state, Known)
+        assert state.provenance.assertion_kind is AssertionKind.STATED  # type: ignore[union-attr]
+    position = known(capture.position)
+    for part in (position.height, position.angle_unit, position.height_unit):
+        assert part.provenance.assertion_kind is AssertionKind.STATED
+    (domain,) = [r for r in output.records() if isinstance(r, TimestampDomain)]
+    assert domain.provenance.assertion_kind is AssertionKind.STATED

@@ -5,12 +5,14 @@ Every case is a finding, never an exception, and the work done is bounded by the
 record or finding is repeated and that every citation is inside the source.
 """
 
+import importlib.util
 import random
 import struct
 import time
 import tracemalloc
 import zlib
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final
 
 import pytest
@@ -23,6 +25,17 @@ from neptune.model.knowledge import Known
 from neptune.model.world import Image, StructuredRecord, StructuredTable
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures" / "image"
+
+
+def _generator() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("make_images", FIXTURES / "make_images.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+GENERATOR: Final = _generator()
 VALID: Final = (
     "crawler_inspection.jpg", "amr_dock.png", "rov_survey.tif", "rover_raw.dng",
     "survey_tile.tif", "humanoid_headcam.webp", "floor_map.bmp", "legacy_cam.bmp",
@@ -66,7 +79,10 @@ CORPUS: Final = {
     "truncated.tif": ({"image.truncated", "image.bad_offset"}, 1),
     "bad_crc.png": ({"image.crc_mismatch"}, 1),
     "bomb.png": ({"image.pixel_limit", "image.raster_truncated"}, 1),
-    "zlib_bomb.png": ({"image.malformed"}, 1),
+    "zlib_bomb.png": (
+        {"image.value_not_copied"},
+        1,
+    ),  # a text cell inflates to max_value_bytes only
     "exif_loop.jpg": ({"image.ifd_loop", "image.bad_offset"}, 1),
     "bad_gps.jpg": ({"image.value_unreadable"}, 1),
     "xmp_bomb.jpg": ({"image.xmp_unreadable"}, 1),
@@ -199,7 +215,7 @@ def test_a_riff_size_that_lies_is_a_truncation_or_an_unreadable_file() -> None:
 # --- Decompression bombs ------------------------------------------
 
 
-def test_a_zlib_bomb_costs_at_most_max_metadata_bytes() -> None:
+def test_a_zlib_bomb_costs_at_most_a_text_cell() -> None:
     data = data_of("zlib_bomb.png")
     tracemalloc.start()
     try:
@@ -207,8 +223,8 @@ def test_a_zlib_bomb_costs_at_most_max_metadata_bytes() -> None:
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert "image.malformed" in codes(output)
-    assert peak < 64 * 1024 * 1024  # the default limit is 16 MiB; the bomb inflates far past it
+    assert "image.value_not_copied" in codes(output)  # the text is cut to max_value_bytes
+    assert peak < 16 * 1024 * 1024  # the bomb inflates to far more; only 4 KiB is produced
 
 
 def test_the_inflate_limit_is_the_configured_one() -> None:
@@ -435,15 +451,19 @@ def test_an_os2_bitmap_with_huffman_compression_is_not_judged_by_an_uncompressed
     assert "image.raster_truncated" in codes(run(bytes(plain)))
 
 
-def test_a_long_png_text_is_kept_as_declared_up_to_max_metadata_bytes() -> None:
+def test_a_long_png_text_is_cut_to_max_value_bytes_with_a_finding() -> None:
     output = run(png_with_chunk(b"tEXt", b"Comment\x00" + b"a" * 5000))
-    assert "image.value_not_copied" not in codes(output)
-    longest = max(
-        (len(c.value) for r in output.records() if isinstance(r, StructuredRecord)
-         for c in r.cells if isinstance(c, Known) and isinstance(c.value, str)),
-        default=0,
-    )  # fmt: skip
-    assert longest == 5000
+    assert "image.value_not_copied" in codes(output)
+    lengths = [
+        len(c.value)
+        for r in output.records()
+        if isinstance(r, StructuredRecord)
+        for c in r.cells
+        if isinstance(c, Known) and isinstance(c.value, str)
+    ]
+    assert max(lengths) == 4096
+    wide = run(png_with_chunk(b"tEXt", b"Comment\x00" + b"a" * 5000), max_value_bytes=8192)
+    assert "image.value_not_copied" not in codes(wide)
 
 
 def test_a_png_chunk_over_max_metadata_bytes_is_not_read_at_all() -> None:
@@ -510,3 +530,106 @@ def test_strip_arrays_past_the_offset_cap_are_not_charged_to_the_budget() -> Non
     entries = [(256, 3, 1, 8), (257, 3, 1, 8), (273, 4, 0xFFFFFFFF, 8), (279, 4, 0xFFFFFFFF, 8)]
     output = run(tiff_of(entries, bytes(64)), max_entries=10)
     assert "image.limit_exceeded" not in codes(output) and len(images(output)) == 1
+
+
+def many_ztxt(count: int, inflated: int) -> bytes:
+    text = b"Comment\x00\x00" + zlib.compress(b"a" * inflated, 9)
+    png = data_of("amr_dock.png")
+    return png[:33] + b"".join(chunk(b"zTXt", text) for _ in range(count)) + png[33:]
+
+
+def test_many_zlib_texts_each_inflating_a_thousandfold_cost_a_text_cell_each() -> None:
+    data = many_ztxt(24, 16 * 1024 * 1024)  # each: ~16 KB of zlib for 16 MiB of text
+    assert len(data) < 512 * 1024
+    tracemalloc.start()
+    try:
+        output = run(data)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert "image.value_not_copied" in codes(output) and len(images(output)) == 1
+    assert peak < 24 * 1024 * 1024  # not 24 x 16 MiB
+
+
+def xmp_png(depth: int, ancestor: int, leaf: int, leaves: int) -> bytes:
+    """A PNG whose zlib-compressed iTXt XMP nests ``depth`` properties of ``ancestor`` characters
+    and ends in ``leaves`` properties of ``leaf`` characters: paths of depth x ancestor."""
+    names = [f"n{i:04d}".ljust(ancestor, "x") for i in range(depth)]
+    body = "".join(f"<p:{n}>" for n in names)
+    body += "".join(f"<p:{f'l{i:05d}'.ljust(leaf, 'y')}>v</p:{f'l{i:05d}'.ljust(leaf, 'y')}>"
+                    for i in range(leaves))  # fmt: skip
+    body += "".join(f"</p:{n}>" for n in reversed(names))
+    packet = (
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF'
+        ' xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description'
+        f' xmlns:p="http://example.com/p/">{body}</rdf:Description></rdf:RDF></x:xmpmeta>'
+    ).encode()
+    text = b"XML:com.adobe.xmp\x00\x01\x00\x00\x00" + zlib.compress(packet, 9)
+    return png_with_chunk(b"iTXt", text)
+
+
+def test_xmp_paths_of_deep_long_names_are_cut_and_the_total_text_is_bounded() -> None:
+    data = xmp_png(depth=60, ancestor=1000, leaf=100, leaves=15_000)
+    assert len(data) < 512 * 1024
+    tracemalloc.start()
+    try:
+        output = run(data)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert {"image.value_not_copied", "image.limit_exceeded"} <= codes(output)
+    assert peak < 160 * 1024 * 1024  # un-capped, these paths alone were ~900 MB
+    paths = [
+        c.value
+        for r in output.records()
+        if isinstance(r, StructuredRecord) and len(r.cells) == 3
+        for c in r.cells[1:2]
+        if isinstance(c, Known) and isinstance(c.value, str)
+    ]
+    assert paths and max(map(len, paths)) <= 4096
+
+
+def test_total_text_of_a_source_is_bounded_by_max_metadata_bytes() -> None:
+    output = run(xmp_png(depth=2, ancestor=50, leaf=50, leaves=8000), max_metadata_bytes=1 << 20)
+    assert "image.limit_exceeded" in codes(output)
+
+
+def test_a_declared_position_outside_the_globe_is_not_a_valid_position() -> None:
+    maker = GENERATOR
+    for lat, lon, why in (
+        ((200, 1), (151, 1), "latitude 200"),
+        ((23, 1), (181, 1), "longitude 181"),
+        ((23, 1), (151, 1), "ok"),
+    ):
+        gps = [
+            maker.Tag(1, maker.ASCII, maker.ascii_value("N")),
+            maker.Tag(2, maker.RATIONAL, [lat, (0, 1), (0, 1)]),
+            maker.Tag(3, maker.ASCII, maker.ascii_value("E")),
+            maker.Tag(4, maker.RATIONAL, [lon, (0, 1), (0, 1)]),
+        ]
+        exif = maker.exif_block([maker.Tag(271, maker.ASCII, maker.ascii_value("X"))], None, gps)
+        data = maker.jpeg(8, 8, 1, [maker.segment(0xE1, b"Exif\x00\x00" + exif)])
+        (image,) = images(run(data))
+        valid = isinstance(image.capture.position, Known)
+        assert valid == (why == "ok"), why
+        if not valid:
+            assert "image.value_unreadable" in codes(run(data))  # the raw rows stay in the GPS IFD
+    minutes = maker.exif_block(
+        [maker.Tag(271, maker.ASCII, maker.ascii_value("X"))],
+        None,
+        [
+            maker.Tag(1, maker.ASCII, maker.ascii_value("N")),
+            maker.Tag(2, maker.RATIONAL, [(23, 1), (75, 1), (0, 1)]),
+            maker.Tag(3, maker.ASCII, maker.ascii_value("E")),
+            maker.Tag(4, maker.RATIONAL, [(151, 1), (0, 1), (0, 1)]),
+        ],
+    )
+    data = maker.jpeg(8, 8, 1, [maker.segment(0xE1, b"Exif\x00\x00" + minutes)])
+    assert not isinstance(images(run(data))[0].capture.position, Known)
+
+
+def test_a_netpbm_header_is_accepted_up_to_what_the_probe_sees_and_no_further() -> None:
+    fits = b"P5\n#" + b"x" * (65536 - 20) + b"\n2 1\n255\n"
+    assert len(fits) <= 65536 and images(run(fits + b"\0\0"))
+    too_long = b"P5\n#" + b"x" * 65536 + b"\n2 1\n255\n\0\0"
+    assert codes(run(too_long)) == {"image.unreadable"}

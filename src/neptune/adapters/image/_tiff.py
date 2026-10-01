@@ -39,7 +39,7 @@ from neptune.adapters.image._emit import (
 )
 from neptune.adapters.image._space import LimitHit, Space
 from neptune.model.ids import RecordId
-from neptune.model.knowledge import Known, Unknown
+from neptune.model.knowledge import AssertionKind, Known, Unknown
 from neptune.model.provenance import Locator, Row
 
 ASCII: Final = 2
@@ -232,7 +232,11 @@ class Tiff:
         length = count_size + held * entry_size + (tail if complete else 0)
         locator = space.cite(offset, length)
         table = out.table(
-            locator, Known(name, out.provenance(declared_by)), IFD_HEADER, f"IFD {name}"
+            locator,
+            Known(name, out.provenance(declared_by, AssertionKind.STATED)),
+            IFD_HEADER,
+            f"IFD {name}",
+            AssertionKind.STATED,
         )
         if table is None:
             return None

@@ -47,12 +47,13 @@ VALUES_PER_ENTRY: Final = 256  # array items (strip offsets) one emitted row may
 class Budget:
     """What one source may cost: structures walked and table rows emitted (``max_*`` options)."""
 
-    def __init__(self, structures: int, entries: int) -> None:
+    def __init__(self, structures: int, entries: int, inflate: int = 0) -> None:
         self.max_structures = structures
         self.max_entries = entries
         self._structures = structures
         self._entries = entries
         self._values = entries * VALUES_PER_ENTRY
+        self.inflate_room = inflate  # inflated bytes the source's streams may still produce
 
     def structure(self) -> None:
         if self._structures <= 0:
@@ -63,6 +64,10 @@ class Budget:
         if self._entries <= 0:
             raise LimitHit("max_entries", self.max_entries)
         self._entries -= 1
+
+    def inflated(self, count: int) -> None:
+        """Spend ``count`` inflated bytes of the source's total."""
+        self.inflate_room -= count
 
     def values(self, count: int) -> None:
         """Spend ``count`` array items checked but not emitted (strip offsets and byte counts)."""

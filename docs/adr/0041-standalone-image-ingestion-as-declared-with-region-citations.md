@@ -25,7 +25,7 @@ offsets past the end, zlib bombs and XML bombs are routine.
 1. **One adapter, `image`, standard library only, no pixel decoded.** It reads PNG (and APNG's first
    frame), JPEG, TIFF, BigTIFF and DNG, WebP, BMP and Netpbm (PBM, PGM, PPM, PAM) with `struct`,
    `zlib` and `expat`. Pixels are counted, scanned for markers or bounds-checked, never inflated or
-   decoded; a decoder is a later derivative (§7). The adapter plans one chunk per source: a
+   decoded; a decoder is a later derivative (§8). The adapter plans one chunk per source: a
    container's structures are small beside its pixels and are read in one sandboxed call.
 2. **Records, all existing kinds.** `Image` per stored raster, `TimestampDomain` per capture clock,
    and `StructuredTable`/`StructuredRecord` for the rest, each table citing the exact bytes it reads.
@@ -45,7 +45,11 @@ offsets past the end, zlib bombs and XML bombs are routine.
    x right, y down, EXIF orientation not applied (a bottom-up BMP still counts rows from the top).
    Any later layer (a detector, a site map, a run) relates to an image by its record id or by a region
    citation, without parsing the file again.
-4. **Capture is read as declared.** `Make` and `Model` verbatim; `BodySerialNumber` and DNG
+4. **Declared is `stated`, measured is `observed`** (non-negotiable 2). Everything a writer or camera
+   declares is `stated`: every IFD, XMP, ICC, text, JFIF and Adobe table and row, and the capture
+   (time, position, make, model, serials, orientation) with its `TimestampDomain`. Only the measured
+   raster structure is `observed`: IHDR, SOFn, VP8*, BMP and Netpbm headers, and the `Image`'s size.
+5. **Capture is read as declared.** `Make` and `Model` verbatim; `BodySerialNumber` and DNG
    `CameraSerialNumber` as device identifiers (namespaces `exif.body_serial`, `dng.camera_serial`);
    `Orientation` 1 to 8 kept and never applied.
    - Time follows ADR 0023 §2 and nothing more: `DateTimeOriginal` with no zone is seconds of its own
@@ -54,13 +58,15 @@ offsets past the end, zlib bombs and XML bombs are routine.
      and `DateTime` (file change time) and GPS time are never read as capture time.
    - GPS degrees, minutes and seconds are read exactly, with hemisphere and altitude reference, in
      degrees and metres above mean sea level as EXIF states; `crs` stays `Unknown` (`GPSMapDatum` is
-     text, not a registry code) and the datum stays in its row.
+     text, not a registry code) and the datum stays in its row. A position outside 90/180 degrees or
+     with minutes or seconds of 60 or more is not a valid position: `Unknown` plus
+     `image.value_unreadable`, the raw rows kept in the GPS table.
    - An absent tag is `Unknown`; a format with no place for metadata (BMP, Netpbm) is `NotCovered`;
      a value that does not parse (orientation 9, month 13) is `Unknown` plus `image.value_unreadable`.
-5. **Camera geometry is declared, not interpreted.** Focal length, focal-plane resolution, distortion
+6. **Camera geometry is declared, not interpreted.** Focal length, focal-plane resolution, distortion
    and an XMP camera model stay in their cited rows. Which of them form a calibration is MVL-26's
    reading; this adapter infers no intrinsics, field of view or scale.
-6. **Hostile input is bounded and reported.** Offsets and sizes are checked before every read, an IFD
+7. **Hostile input is bounded and reported.** Offsets and sizes are checked before every read, an IFD
    is read once (`image.ifd_loop`, `image.bad_offset`), a declared raster over `max_pixels` is
    recorded with `image.pixel_limit` and `image.raster_truncated` when the file is too short to hold
    it, zlib payloads inflate to at most `max_metadata_bytes`, XMP is parsed with expat refusing any
@@ -69,19 +75,22 @@ offsets past the end, zlib bombs and XML bombs are routine.
    metadata still looks for its frame header, within another `max_structures` segments, and a PNG
    stopped by a limit does not judge its raster. Work is charged before it is done: an IFD is read
    one entry at a time, strip and tile arrays spend `max_entries` x 256 items, a PNG chunk or metadata
-   block over `max_metadata_bytes` is cited and not read, a text over `max_value_bytes` is cited and
-   its cell `Unknown`, and an XMP packet or ICC profile at given bytes is parsed once however many
-   tags point at it. Netpbm headers are scanned in one pass with numbers of at most ten digits.
+   block over `max_metadata_bytes` is cited and not read, and a text cell, XMP path or XMP value
+   is cut to `max_value_bytes` with a finding. A text chunk inflates only that far; other streams
+   inflate to `max_metadata_bytes` each and four times that in all; all rows of a source hold at most
+   `max_metadata_bytes` of text. An XMP packet or ICC profile at given bytes is parsed once however many
+   tags point at it. Netpbm headers are scanned in one pass, in at most the probe head (64 KiB, one limit for probe,
+   detect and read), with numbers of at most ten significant digits.
    A BMP's linked profile is never opened. One damaged
    structure is a finding and the rest is read (non-negotiable 7); a file that is no readable image
    is `image.unreadable` and has no record. The default limits are config, so they are part of the
    transform.
-7. **Not in this adapter, filed separately.** Thumbnails and pyramids, perceptual hashes and the
+8. **Not in this adapter, filed separately.** Thumbnails and pyramids, perceptual hashes and the
    visual-embedding hook are derivatives over decoded pixels and need a decoder dependency (MVL-80;
    any such output is derived and lives outside `model/`). Standalone video (container and codec
    metadata, frame-to-time mapping, lazy frame handles) is MVL-81. ADR 0020 §3 still names MVL-29
    for a standalone video's frame series; that pointer is MVL-81's, and a dedicated PR amends it.
-8. **Leaf test.** `tests/unit/test_package.py` lets a format subpackage import its own modules
+9. **Leaf test.** `tests/unit/test_package.py` lets a format subpackage import its own modules
    (`neptune.adapters.image._png`), still nothing from another adapter, the runtime or the store.
 
 ## Alternatives considered

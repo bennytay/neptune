@@ -19,10 +19,10 @@ from typing import Final
 from xml.parsers import expat
 
 from neptune.adapters.image._context import Context
-from neptune.adapters.image._emit import XMP_UNREADABLE
+from neptune.adapters.image._emit import VALUE_NOT_COPIED, XMP_UNREADABLE
 from neptune.adapters.image._space import LimitHit, Space
 from neptune.model.ids import RecordId
-from neptune.model.knowledge import Known
+from neptune.model.knowledge import AssertionKind, Known
 from neptune.model.provenance import Locator
 
 RDF: Final = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -131,7 +131,9 @@ def read(ctx: Context, space: Space, what: str) -> RecordId | None:
     if rdf is None:
         out.finding(XMP_UNREADABLE, whole, f"the XMP packet in {what} has no rdf:RDF element")
         return None
-    table = out.table(whole, Known("XMP"), XMP_HEADER, f"the XMP packet in {what}")
+    table = out.table(
+        whole, Known("XMP"), XMP_HEADER, f"the XMP packet in {what}", AssertionKind.STATED
+    )
     if table is None:
         return None
     rows = _Rows(ctx, table, whole)
@@ -153,7 +155,17 @@ class _Rows:
 
     def emit(self, namespace: str, path: str, value: str) -> None:
         self.ctx.budget.entry()
-        self.ctx.out.row(self.table, self.locator, self.count, [namespace, path, value])
+        keep = self.ctx.max_value_bytes
+        if max(len(namespace), len(path), len(value)) > keep:
+            self.ctx.out.finding(
+                VALUE_NOT_COPIED,
+                self.locator,
+                f"XMP namespaces, paths or values over {keep} characters (max_value_bytes) are"
+                " cut to it; the packet's bytes hold them whole",
+                {"max_value_bytes": keep},
+            )
+        cells = [namespace[:keep], path[:keep], value[:keep]]
+        self.ctx.out.row(self.table, self.locator, self.count, cells)
         self.count += 1
 
     def fields(self, node: _Node, path: str) -> None:

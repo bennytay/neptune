@@ -70,6 +70,7 @@ DEFAULT_MAX_METADATA_BYTES: Final = 16 * 1024 * 1024
 DEFAULT_MAX_PIXELS: Final = 1 << 28
 DEFAULT_MAX_STRUCTURES: Final = 100_000
 DEFAULT_MAX_VALUE_BYTES: Final = 4096
+INFLATE_FACTOR: Final = 4  # a source's streams inflate to at most this many max_metadata_bytes
 
 _READERS: Final = {
     BMP: _bmp.read,
@@ -138,8 +139,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ConfigOption(
             "max_metadata_bytes",
             DEFAULT_MAX_METADATA_BYTES,
-            "the largest metadata block read or inflated (an XMP packet, an ICC profile, a zlib"
-            " text or profile payload)",
+            "the largest metadata block read or inflated (an XMP packet, an ICC profile, a PNG"
+            " chunk); also the text all of a source's rows may hold in total, and four times it"
+            " the zlib bytes all its streams may inflate to",
         ),
         ConfigOption(
             "max_pixels",
@@ -157,7 +159,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ConfigOption(
             "max_value_bytes",
             DEFAULT_MAX_VALUE_BYTES,
-            "the largest IFD value copied into its row; a larger one stays cited in the bytes",
+            "the largest value copied into a row cell (an IFD value, a PNG or JPEG text, an XMP"
+            " path or value): an IFD value over it stays cited in the bytes, a text or XMP string"
+            " is cut to it, each with image.value_not_copied",
         ),
     ),
     libraries=(),
@@ -181,6 +185,13 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " OffsetTimeOriginal, finer with SubSecTimeOriginal); GPS degrees, minutes and seconds"
             " read exactly, altitude in metres above mean sea level; crs Unknown (GPSMapDatum is"
             " text); NotCovered for BMP and Netpbm",
+        ),
+        Documented(
+            "assertion_kinds",
+            "stated: what the file's writer or camera declares (every IFD, XMP, ICC and text table"
+            " and row, JFIF, Adobe, capture time, position, device, orientation); observed: the"
+            " measured raster structure (IHDR, SOFn, VP8*, BMP and PNM headers) and the Image's"
+            " size",
         ),
         Documented(
             "chunks",
@@ -222,7 +233,10 @@ DESCRIPTOR: Final = AdapterDescriptor(
     security=(
         "Decodes no pixels: image data is counted, scanned for markers or bounds-checked.",
         "Checks every offset and size before reading; reads each IFD once (loops are findings).",
-        "Inflates zlib payloads to at most max_metadata_bytes.",
+        "Inflates zlib payloads to at most max_metadata_bytes each and four times that in all;"
+        " a text chunk inflates only to max_value_bytes.",
+        "Bounds the text all rows of a source hold (max_metadata_bytes) and every cell"
+        " (max_value_bytes).",
         "Parses XMP with expat, refusing any DTD (no entity expansion, no external entities),"
         " and nesting past 64 elements.",
         "Bounds structures walked and rows emitted per source (max_structures, max_entries).",
@@ -232,7 +246,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
 
 
 def _context(source: SourceReader, config: AdapterConfig) -> Context:
-    budget = Budget(config.integer("max_structures"), config.integer("max_entries"))
+    budget = Budget(
+        config.integer("max_structures"),
+        config.integer("max_entries"),
+        config.integer("max_metadata_bytes") * INFLATE_FACTOR,
+    )
     return Context(
         out=Emitter(source, config),
         budget=budget,

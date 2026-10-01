@@ -22,12 +22,10 @@ from neptune.adapters.image._emit import (
     REPEATED,
     TRUNCATED,
     UNREADABLE,
-    VALUE_UNREADABLE,
-    CellInput,
 )
 from neptune.adapters.image._space import LimitHit, Space, Truncated, payload_step
 from neptune.adapters.image._still import TAGS, Still
-from neptune.model.knowledge import Known, Unknown
+from neptune.model.knowledge import Known
 from neptune.model.provenance import Locator
 
 if TYPE_CHECKING:
@@ -241,12 +239,9 @@ class _Jpeg:
 
     def _comment(self, data_at: int, length: int) -> None:
         locator = self.space.cite(data_at, length)
-        cell: CellInput
-        try:
-            cell = self.space.read(data_at, length).decode("ascii")
-        except UnicodeDecodeError:
-            self.ctx.out.finding(VALUE_UNREADABLE, locator, "a COM comment is not ASCII")
-            cell = Unknown()
+        keep = self.ctx.max_value_bytes
+        raw = self.space.read(data_at, min(length, keep))
+        cell = self.ctx.text_cell(raw, length > keep, "ascii", locator)
         self.ctx.structure(locator, "COM", ("comment",), [cell])
 
     def _sof(self, marker: int, data_at: int, length: int) -> None:

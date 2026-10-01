@@ -16,7 +16,7 @@ from typing import Final
 from neptune.adapters.image._context import Context
 from neptune.adapters.image._emit import ICC_UNREADABLE, VALUE_UNREADABLE, CellInput
 from neptune.adapters.image._space import LimitHit, Space
-from neptune.model.knowledge import Known, KnownAbsent, Unknown
+from neptune.model.knowledge import AssertionKind, Known, KnownAbsent, Unknown
 from neptune.model.provenance import Provenance
 
 HEADER_COLUMNS: Final = (
@@ -60,9 +60,15 @@ def read(ctx: Context, space: Space, what: str) -> None:
         )
         return
     head = space.read(0, _HEADER)
-    spec = out.provenance(space.cite(36, 4))
+    spec = out.provenance(space.cite(36, 4), AssertionKind.STATED)
     header = space.cite(0, _HEADER)
-    table = out.table(header, Known("ICC header"), HEADER_COLUMNS, f"the ICC header in {what}")
+    table = out.table(
+        header,
+        Known("ICC header"),
+        HEADER_COLUMNS,
+        f"the ICC header in {what}",
+        AssertionKind.STATED,
+    )
     if table is None:
         return
     (size,) = struct.unpack(">I", head[0:4])
@@ -110,7 +116,13 @@ def _tags(ctx: Context, space: Space, what: str) -> None:
     room = (space.size - _HEADER - 4) // 12
     held = min(declared, room)
     locator = space.cite(_HEADER, 4 + held * 12)
-    table = out.table(locator, Known("ICC tags"), TAG_COLUMNS, f"the ICC tag table in {what}")
+    table = out.table(
+        locator,
+        Known("ICC tags"),
+        TAG_COLUMNS,
+        f"the ICC tag table in {what}",
+        AssertionKind.STATED,
+    )
     if table is None:
         return
     if held < declared:

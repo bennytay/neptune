@@ -24,8 +24,6 @@ from neptune.adapters.image._emit import (
     TRUNCATED,
     UNREADABLE,
     VALUE_NOT_COPIED,
-    VALUE_UNREADABLE,
-    CellInput,
 )
 from neptune.adapters.image._space import LimitHit, Space, Truncated, payload_step
 from neptune.adapters.image._still import TAGS, Still
@@ -244,14 +242,19 @@ class _Png:
             {"method": method},
         )
 
-    def _text_cell(self, text: Space, locator: tuple[Locator, ...], codec: str) -> CellInput:
-        """``text`` (at most ``max_metadata_bytes``) as a cell: ``Unknown`` if not ``codec``."""
-        out = self.ctx.out
+    def _prefix(
+        self, name: str, compressed_at: int, compressed: bytes
+    ) -> tuple[bytes, bool] | None:
+        """The first ``max_value_bytes`` of a compressed text, and whether more follow."""
         try:
-            return text.read(0, text.size).decode(codec)
-        except UnicodeDecodeError:
-            out.finding(VALUE_UNREADABLE, locator, f"the text is not {codec}")
-            return Unknown()
+            return self.ctx.inflate_prefix(compressed, self.ctx.max_value_bytes)
+        except zlib.error:
+            self.ctx.out.finding(
+                MALFORMED,
+                self.space.cite(compressed_at, len(compressed)),
+                f"the compressed data of chunk {name} is not a complete zlib stream",
+            )
+            return None
 
     def _iccp(self, data: bytes, data_at: int) -> None:
         keyword = self._keyword("iCCP", data, data_at)
@@ -278,9 +281,11 @@ class _Png:
             return
         key, at = keyword
         locator = self.space.cite(data_at, len(data))
+        keep = self.ctx.max_value_bytes
         if name == "tEXt":
-            plain = self.space.window(data_at + at, len(data) - at)
-            cell = self._text_cell(plain, locator, "latin-1")
+            cell = self.ctx.text_cell(
+                data[at : at + keep + 1], len(data) - at > keep, "latin-1", locator
+            )
             self.ctx.structure(locator, name, ("keyword", "text"), [key, cell])
             return
         if name == "zTXt":
@@ -290,14 +295,10 @@ class _Png:
             if data[at] != 0:
                 self._method(name, data[at], locator)
                 return
-            text = self._inflated(name, data_at + at + 1, data[at + 1 :])
-            if text is not None:
-                self.ctx.structure(
-                    locator,
-                    name,
-                    ("keyword", "text"),
-                    [key, self._text_cell(text, locator, "latin-1")],
-                )
+            found = self._prefix(name, data_at + at + 1, data[at + 1 :])
+            if found is not None:
+                cell = self.ctx.text_cell(*found, "latin-1", locator)
+                self.ctx.structure(locator, name, ("keyword", "text"), [key, cell])
             return
         self._itxt(key, data, data_at, at, locator)
 
@@ -311,29 +312,33 @@ class _Png:
             out.finding(MALFORMED, locator, "chunk iTXt is missing its language or translation")
             return
         compressed = data[at]
-        language = data[at + 2 : cut].decode("latin-1")
+        keep = self.ctx.max_value_bytes
         text_at = cut2 + 1
-        body: Space | None
+        is_xmp = key.encode("latin-1") == XMP_KEYWORD
+        body: Space | None = None  # the whole text, only for an XMP packet that is parsed
+        found: tuple[bytes, bool] | None = None  # the text's first max_value_bytes
         if compressed and data[at + 1] != 0:
             self._method("iTXt", data[at + 1], locator)
-            body = None
-        elif compressed:
+        elif compressed and is_xmp:
             body = self._inflated("iTXt", data_at + text_at, data[text_at:])
+            if body is not None:
+                found = body.read(0, min(body.size, keep)), body.size > keep
+        elif compressed:
+            found = self._prefix("iTXt", data_at + text_at, data[text_at:])
         else:
-            body = self.space.window(data_at + text_at, len(data) - text_at)
-        cells: list[CellInput] = [key, language]
-        try:
-            cells.append(data[cut + 1 : cut2].decode("utf-8"))
-        except UnicodeDecodeError:
-            out.finding(VALUE_UNREADABLE, locator, "the iTXt translated keyword is not UTF-8")
-            cells.append(Unknown())
-        if body is None:
-            cells.append(Unknown())
-        else:
-            cells.append(self._text_cell(body, locator, "utf-8"))
+            found = data[text_at : text_at + keep + 1], len(data) - text_at > keep
+            if is_xmp:
+                body = self.space.window(data_at + text_at, len(data) - text_at)
+        language = self.ctx.text_cell(
+            data[at + 2 : cut][: keep + 1], cut - at - 2 > keep, "latin-1", locator
+        )
+        translated = self.ctx.text_cell(
+            data[cut + 1 : cut2][: keep + 1], cut2 - cut - 1 > keep, "utf-8", locator
+        )
+        text = Unknown() if found is None else self.ctx.text_cell(*found, "utf-8", locator)
         columns = ("keyword", "language", "translated_keyword", "text")
-        self.ctx.structure(locator, "iTXt", columns, cells)
-        if body is not None and key.encode("latin-1") == XMP_KEYWORD:
+        self.ctx.structure(locator, "iTXt", columns, [key, language, translated, text])
+        if body is not None:
             _blocks.xmp(self.ctx, body, "the iTXt chunk")
 
     def _still(self) -> list[Still]:
