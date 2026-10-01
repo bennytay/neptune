@@ -76,12 +76,13 @@ class _Jpeg:
 
     def read(self) -> list[Still]:
         ctx, out, space = self.ctx, self.ctx.out, self.space
-        position, ended = 2, False
+        position, ended, limited = 2, False, False
         while True:
             try:
                 ctx.budget.structure()
             except LimitHit as hit:
                 ctx.stopped(hit)
+                limited = True
                 break
             if not space.fits(position, 2):
                 out.finding(
@@ -127,6 +128,7 @@ class _Jpeg:
                 self._segment(marker, position, position + 4, length - 2)
             except LimitHit as hit:
                 ctx.stopped(hit)
+                limited = True
                 break
             except Truncated as exc:
                 where = f"marker {marker:#04x} at byte {position}"
@@ -142,6 +144,8 @@ class _Jpeg:
                     )
                     break
                 position = found
+        if limited and self.size is None:
+            self._frame_only(position)
         try:
             self._join_icc()
         except LimitHit as hit:
@@ -155,6 +159,32 @@ class _Jpeg:
                 {"bytes": space.size - position},
             )
         return self._still()
+
+    def _frame_only(self, position: int) -> None:
+        """After a limit: the frame header alone, so the image is still recorded.
+
+        Walks segment headers only (no table, no row) up to the first SOS, at most
+        ``max_structures`` more of them, and takes the size of the first frame header.
+        """
+        space = self.space
+        for _ in range(self.ctx.budget.max_structures):
+            if not space.fits(position, 4):
+                return
+            fill, marker = space.read(position, 2)
+            if fill != 0xFF or marker in (EOI, SOS):
+                return
+            if marker == 0xFF or marker in _STANDALONE:
+                position += 1 if marker == 0xFF else 2
+                continue
+            (length,) = struct.unpack(">H", space.read(position + 2, 2))
+            if length < 2 or not space.fits(position + 2, length):
+                return
+            if marker in _SOF:
+                if length >= 8:
+                    _, height, width = struct.unpack(">BHH", space.read(position + 4, 5))
+                    self.size = (width, height)
+                return
+            position += 2 + length
 
     def _scan(self, position: int) -> int | None:
         """The offset of the first marker after entropy-coded data from ``position``."""

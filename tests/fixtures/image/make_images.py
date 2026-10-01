@@ -817,7 +817,9 @@ def oracle() -> dict[str, Any]:
                 image.seek(index)
                 frames.append(list(image.size))
             image.seek(0)
+            image.load()  # chunks after the pixels (PNG text, XMP) are read by decoding
             exif = image.getexif()
+            xmp = image.info.get("xmp") or image.info.get("XML:com.adobe.xmp") or b""
             entry = {
                 "format": image.format,
                 "frames": frames,
@@ -826,10 +828,9 @@ def oracle() -> dict[str, Any]:
                 "exif": _plain(dict(exif.get_ifd(0x8769))),
                 "gps": _plain(dict(exif.get_ifd(0x8825))),
                 "icc_bytes": len(image.info.get("icc_profile") or b""),
-                "xmp_bytes": len(image.info.get("xmp") or b""),
+                "xmp_bytes": len(xmp if isinstance(xmp, bytes) else xmp.encode("utf-8")),
+                "decoded_size": list(image.size),
             }
-            image.load()
-            entry["decoded_size"] = list(image.size)
         found[name] = entry
     return found
 

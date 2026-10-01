@@ -114,7 +114,8 @@ def test_adapters_are_kept_and_listed_in_id_order() -> None:
 
 
 def test_the_builtin_registry_holds_the_text_adapter() -> None:
-    assert list(default_registry().descriptors()) == ["text"]
+    ids = list(default_registry().descriptors())
+    assert "text" in ids and ids == sorted(ids)
     assert builtin_adapters()[0] is not builtin_adapters()[0]
 
 

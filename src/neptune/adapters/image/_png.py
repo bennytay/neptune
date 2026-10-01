@@ -70,6 +70,7 @@ class _Png:
         self.ihdr: tuple[int, ...] | None = None
         self.tags: Tags | None = None
         self.idat = 0
+        self.limited = False  # a limit stopped the walk: IDAT was not all counted
         self.seen: set[str] = set()
 
     def read(self) -> list[Still]:
@@ -80,7 +81,7 @@ class _Png:
                 ctx.budget.structure()
             except LimitHit as hit:
                 ctx.stopped(hit)
-                damaged = True
+                damaged = self.limited = True
                 break
             if not space.fits(position, 12):
                 out.finding(
@@ -119,7 +120,7 @@ class _Png:
                 self._chunk(name, position, length)
             except LimitHit as hit:
                 ctx.stopped(hit)
-                damaged = True
+                damaged = self.limited = True
                 break
             except Truncated as exc:
                 ctx.cut(exc, space.cite(position, length + 12), f"chunk {name} at byte {position}")
@@ -313,7 +314,9 @@ class _Png:
             )
             return []
         channels = _CHANNELS.get(colour)
-        if channels is None:
+        if self.limited:
+            pass  # IDAT after the limit was not counted: the raster's size is not judged
+        elif channels is None:
             out.finding(MALFORMED, space.whole(), f"IHDR declares colour type {colour}")
         else:
             raw = height * (1 + (width * channels * depth + 7) // 8)
