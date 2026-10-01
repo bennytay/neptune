@@ -5,7 +5,7 @@
     from neptune.sdk import Neptune
 
     result = Neptune().ingest("runs/2026-09-30", "packages/2026-09-30")
-    print(result.package, result.receipt, [f.code for f in result.errors])
+    print(result.package, [finding.code for finding in result.read_receipt().findings])
 
 A thin, typed facade over the runtime: it resolves the source, opens the workspace, builds the
 registry and the runtime's ``IngestJob``, runs it, and turns the job's errors into a stable

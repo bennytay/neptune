@@ -1,19 +1,22 @@
 """What an ingest or a dry run returns, and reading a package back (ADR 0035 §4).
 
 ``IngestResult`` wraps the runtime's ``JobOutcome`` without copying or reinterpreting it: every
-field is the runtime's, and the receipt id is the one the job wrote. Findings are the runtime's
-``IngestFinding`` objects and the cache report its ``CacheReport``.
+property reads the runtime's record, and the receipt is the one the job wrote into the package.
+Findings are the runtime's ``IngestFinding`` objects and the cache report its ``CacheReport``.
 """
 
 from dataclasses import dataclass
 from pathlib import Path
 
-from neptune.model.finding import IngestFinding, Severity
+from neptune.identity import canonical_json
+from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
+from neptune.model.package import IngestReceipt, ingest_receipt_from_json
 from neptune.runtime import CacheReport, JobOutcome, JobState
 from neptune.sdk.errors import InvalidRequestError, PackageInvalidError
-from neptune.store.package import IngestPackage, PackageError
+from neptune.store.package import RECEIPT, IngestPackage, open_file
 from neptune.store.package import read_package as _read_package
+from neptune.store.receipt import receipt_id
 
 
 @dataclass(frozen=True)
@@ -71,13 +74,10 @@ class IngestResult:
 
     @property
     def findings(self) -> tuple[IngestFinding, ...]:
-        """Every finding the job recorded, by id: adapters', discovery's, the probe's, its own."""
+        """The findings the job made itself, by id: discovery's, the probe engine's and the
+        runtime's (a quarantined source, a crash, a limit). They are known even when nothing was
+        committed. Adapters' findings are in the package: ``read_receipt().findings``."""
         return self.outcome.findings
-
-    @property
-    def errors(self) -> tuple[IngestFinding, ...]:
-        """The findings of severity ``error``: evidence that produced no canonical output."""
-        return tuple(f for f in self.outcome.findings if f.severity is Severity.ERROR)
 
     @property
     def cache(self) -> CacheReport:
@@ -89,16 +89,32 @@ class IngestResult:
         """Seconds per phase: volatile, never in the package's identity."""
         return self.outcome.durations
 
-    def read_package(self) -> IngestPackage:
-        """The committed package, read back and verified."""
+    def _committed(self) -> Path:
         if self.outcome.package is None or self.outcome.destination is None:
             raise InvalidRequestError(f"a {self.outcome.state} job wrote no package")
-        return read_package(self.outcome.destination)
+        return self.outcome.destination
+
+    def read_receipt(self) -> IngestReceipt:
+        """The committed package's receipt: every source, transform and finding, adapters'
+        included. Checked to hash to ``receipt``; ``read_package`` verifies everything else."""
+        path = self._committed() / RECEIPT
+        try:
+            with open_file(path) as handle:
+                receipt = ingest_receipt_from_json(canonical_json.loads(handle.read()))
+        except (ValueError, TypeError, KeyError, OSError) as exc:
+            raise PackageInvalidError(f"{path} cannot be read: {exc}") from exc
+        if receipt.id != self.receipt or receipt_id(receipt) != receipt.id:
+            raise PackageInvalidError(f"{path} is not the receipt this job wrote")
+        return receipt
+
+    def read_package(self) -> IngestPackage:
+        """The committed package, read back and verified."""
+        return read_package(self._committed())
 
 
 def read_package(path: Path) -> IngestPackage:
     """Read the package at ``path`` and verify it: every file, id, series and the receipt."""
     try:
         return _read_package(Path(path))
-    except (PackageError, ValueError, OSError) as exc:
+    except (ValueError, TypeError, KeyError, OSError) as exc:  # PackageError is a ValueError
         raise PackageInvalidError(f"{path} is not a valid package: {exc}") from exc
