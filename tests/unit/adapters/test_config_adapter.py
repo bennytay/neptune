@@ -357,10 +357,41 @@ def test_the_probe_reports_the_yaml_version_a_stream_declares() -> None:
         (b"# only a comment\n", "config.not_config"),
         (b"---\ntitle: Notes\n---\n# Heading\n\nSome *text* here.\n", "config.not_config"),
         (b"[INFO] 12:00 started\n[WARN] 12:01 low battery\n", "config.not_config"),
+        # YAML's grammar holds for these notes, but nothing in them looks like configuration.
+        (b"Robot: spot-12\nOperator: Ben\nNotes: arm was stiff\n", "config.not_config"),
+        (b"# Shopping\n\n- eggs\n- milk\n- yes, coffee\n", "config.not_config"),
+        (b"Shift: night\nStart: 14:05\nDone: yes\n", "config.not_config"),
+        (b"Robot: spot-12\nNotes: fine\nOops: [\n", "config.not_config"),  # broken at the end
     ],
 )
 def test_text_that_is_not_configuration_is_not_claimed(data: bytes, code: str) -> None:
     assert probe(data)[:2] == (0.0, [code])
+
+
+@pytest.mark.parametrize(
+    ("data", "code"),
+    [
+        (b"rate: 10\nframe: map\n", "config.yaml"),  # a number
+        (b"robot:\n  name: spot-12\n", "config.yaml"),  # a nested mapping
+        (b"frames: [map, odom]\n", "config.yaml"),  # a flow collection
+        (b"---\nname: spot-12\n", "config.yaml"),  # an explicit document
+        (b'["base_link", "odom"]\n', "config.json"),  # also a TOML header: JSON first
+        (b'["base_link"]\n', "config.json"),
+        (b"[tool]\nmass = 0.5\n", "config.toml"),
+    ],
+)
+def test_configuration_shows_itself_beyond_the_grammar(data: bytes, code: str) -> None:
+    assert probe(data)[:2] == (STRUCTURE, [code])
+
+
+def test_a_one_line_json_array_is_json_not_a_toml_table() -> None:
+    output = run(b'["base_link"]\n')
+    (snapshot,) = snapshots(output)
+    assert snapshot.format is ConfigFormat.JSON
+    assert {p: reading(v) for p, v in by_path(output).items()} == {
+        (): ("sequence", 1),
+        (0,): ("string", "base_link"),
+    }
 
 
 @pytest.mark.parametrize(

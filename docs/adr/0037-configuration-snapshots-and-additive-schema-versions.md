@@ -114,13 +114,17 @@ Forces:
    - A schema the document points at (`$schema`, an editor's modeline) is a community convention,
      not a declaration; validating values against another source's schema is `validate/`'s.
 7. **Probing and format detection.** The bytes decide, never the name. The first line that is not
-   blank or a comment picks the grammars to try (`{`: JSON then YAML; a TOML header: TOML, JSON,
-   YAML; `key =`: TOML; otherwise YAML), and the first that accepts the whole text reads it. If
-   none does, the error reported is that of the reader that got furthest by lines. The probe
-   claims `STRUCTURE` (0.7) only for a document whose grammar holds to its end (or to its cut, for
-   a truncated file or a 64 KiB head) and whose every document root is a mapping or sequence.
-   A scalar document, a blank or comment-only file, and a file whose grammar breaks mid-way are
-   left to the text adapter (the probe engine reports a `.toml` read as text as `name_mismatch`).
+   blank or a comment picks the grammars to try (`{`: JSON then YAML; a TOML header: JSON, TOML,
+   YAML, since `["base_link"]` is both; `key =`: TOML; otherwise YAML), and the first that
+   accepts the whole text reads it. If none does, the error reported is that of the reader that
+   got furthest by lines. The probe claims `STRUCTURE` (0.7) only for a document whose grammar
+   holds to its end (or to its cut, for a truncated file or a 64 KiB head) and whose every
+   document root is a mapping or sequence. YAML's grammar also holds for many notes
+   (`Robot: spot-12` lines, a Markdown list), so a YAML head must also show configuration: a
+   `%YAML` directive or explicit `---`, a tag, a closed nested or flow collection, or a plain
+   scalar both versions read as a boolean or a number. A flat file of text values is left to the
+   text adapter, as are a scalar document, a blank or comment-only file, and a file whose grammar
+   breaks mid-way (the probe engine reports a `.toml` read as text as `name_mismatch`).
 8. **Hostile input costs findings** (`config.*`, all documented in the descriptor): `too_large`
    (`max_bytes`, 8 MiB), `too_deep` (`max_depth`, 200), `scalar_too_large`
    (`max_scalar_length`, 1 Mi code points), `invalid_encoding`, `syntax_error`,

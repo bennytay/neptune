@@ -5,7 +5,8 @@ The bytes decide, never the name. The first line that is neither blank nor a ``#
 which grammars to try, in order (``candidates``):
 
 - ``{``: JSON, then YAML (a flow mapping such as ``{a: 1}`` is YAML, not JSON);
-- a TOML table header (``[tool]``, ``[[fingertips]]``): TOML, then JSON, then YAML;
+- a TOML table header (``[tool]``, ``[[fingertips]]``): JSON, then TOML, then YAML (a one-line
+  JSON array such as ``["base_link"]`` is also a header);
 - any other ``[``: JSON, then YAML;
 - ``key = ...``: TOML;
 - anything else: YAML.
@@ -25,11 +26,12 @@ import yaml
 from yaml.events import CollectionEndEvent, CollectionStartEvent, DocumentStartEvent, ScalarEvent
 
 from neptune.adapters.config._json import read_json
+from neptune.adapters.config._scalars import implicit
 from neptune.adapters.config._text import is_blank
 from neptune.adapters.config._toml import read_toml
-from neptune.adapters.config._tree import Limits, Parse
+from neptune.adapters.config._tree import Limits, Parse, Value
 from neptune.adapters.config._yaml import read_yaml
-from neptune.model.configuration import ConfigFormat, TextEncoding
+from neptune.model.configuration import ConfigFormat, ScalarType, TextEncoding
 
 # How near the end of a head cut short a parser may fail and the head still count as a valid
 # beginning: a cut inside a token or a flow collection fails there, not earlier.
@@ -59,8 +61,10 @@ def candidates(text: str, encoding: TextEncoding) -> tuple[ConfigFormat, ...]:
     if start == "{":
         return ConfigFormat.JSON, ConfigFormat.YAML
     if start == "[":
+        # JSON first: a one-line array (["base_link"]) is also a TOML header, and JSON is the
+        # stricter grammar. A TOML file fails JSON on its first line, a JSON array never TOML.
         if toml and _TOML_HEADER.fullmatch(line):
-            return ConfigFormat.TOML, ConfigFormat.JSON, ConfigFormat.YAML
+            return ConfigFormat.JSON, ConfigFormat.TOML, ConfigFormat.YAML
         return ConfigFormat.JSON, ConfigFormat.YAML
     if toml and _TOML_PAIR.match(line):
         return (ConfigFormat.TOML,)
@@ -158,10 +162,31 @@ def _toml_root(text: str, complete: bool) -> bool | None:
     return None
 
 
+_NUMBERS: Final = frozenset((ScalarType.BOOL, ScalarType.INT, ScalarType.FLOAT))
+
+
+def _typed(text: str) -> bool:
+    """A plain scalar both YAML versions read as a boolean or a number: what notes rarely hold."""
+    readings = [implicit(text, version) for version in ("1.1", "1.2")]
+    return all(
+        isinstance(r, Value) and len(r.readings) == 1 and r.readings[0].type in _NUMBERS
+        for r in readings
+    )
+
+
 def _yaml_root(text: str, complete: bool) -> tuple[bool | None, str | None]:
-    """Whether every document in the head is a mapping or sequence (None: not YAML), and the
-    YAML version the first one declares."""
-    collections, roots, version, events, depth = True, 0, None, 0, 0
+    """Whether the head is configuration in YAML (None: not YAML), and the YAML version the first
+    document declares.
+
+    YAML's grammar holds for much plain text: ``Robot: spot-12`` lines are a mapping, a Markdown
+    list a sequence. So besides every document's root being a mapping or sequence, the head must
+    show something notes rarely do: a ``%YAML`` directive or an explicit ``---``, a tag, a
+    collection inside a collection or in flow style (once it closes: a ``[`` left open on a
+    note's last line is not one), or a plain scalar both YAML versions read as a boolean or a
+    number.
+    """
+    collections, roots, version, events, evidence = True, 0, None, 0, False
+    shaped: list[bool] = []  # the open collections: whether each is nested or in flow style
     loader: yaml.SafeLoader | None = None
     try:
         loader = yaml.SafeLoader(text)  # refuses a non-printable character at once
@@ -170,16 +195,22 @@ def _yaml_root(text: str, complete: bool) -> tuple[bool | None, str | None]:
             event = fetch()
             events += 1
             if isinstance(event, DocumentStartEvent):
-                depth = 0
+                shaped.clear()
+                evidence = evidence or bool(event.explicit) or event.version is not None
                 if event.version is not None and version is None:
                     version = f"{event.version[0]}.{event.version[1]}"
-            elif isinstance(event, CollectionStartEvent | ScalarEvent) and depth == 0:
-                roots += 1
-                collections = collections and isinstance(event, CollectionStartEvent)
+                continue
+            if isinstance(event, CollectionStartEvent | ScalarEvent):
+                if not shaped:
+                    roots += 1
+                    collections = collections and isinstance(event, CollectionStartEvent)
+                evidence = evidence or event.tag not in (None, "!")
             if isinstance(event, CollectionStartEvent):
-                depth += 1
+                shaped.append(bool(shaped) or bool(event.flow_style))
             elif isinstance(event, CollectionEndEvent):
-                depth -= 1
+                evidence = evidence or shaped.pop()
+            elif isinstance(event, ScalarEvent) and not evidence and event.style is None:
+                evidence = _typed(event.value)
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         if mark is None or not _at_end(text, mark.index, complete):
@@ -187,7 +218,7 @@ def _yaml_root(text: str, complete: bool) -> tuple[bool | None, str | None]:
     finally:
         if loader is not None:
             loader.dispose()
-    return (collections if roots else None), version
+    return (collections and evidence if roots else None), version
 
 
 def sniff(
