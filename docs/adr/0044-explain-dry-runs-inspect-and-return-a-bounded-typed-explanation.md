@@ -92,7 +92,9 @@ warms it (ledger and plans), and ADR 0043 §5's `--resume` treats that as resuma
    no `null`: an absent value is an absent key. `dumps()` is its canonical bytes, under schema
    `neptune.explanation/1`. It carries no job id, clock, duration, host or absolute path, so the
    same root bytes and names, adapters, config and workspace contents give the same bytes from any
-   path. `render()` prints the same content for people, and abridges long `inspect` summaries.
+   path. `render()` prints the same content for people, one line per entry: control characters and
+   bytes that are not UTF-8 in names print as `\xNN` escapes, since names are hostile. It
+   abridges long `inspect` summaries.
    Nothing in an explanation enters a package.
 8. **Bounded.** `Bounds` (`DEFAULT_BOUNDS`) caps what one explanation holds. Every list keeps at
    most 10,000 entries: inventory files, links and skipped entries; sources; left-out locations;
@@ -104,6 +106,9 @@ warms it (ledger and plans), and ADR 0043 §5's `--resume` treats that as resuma
    - an `inspect` summary of 16 KiB of canonical JSON (a larger one is dropped, and its size kept
      as `summary_omitted_bytes`);
    - 64 `inspect` findings.
+
+   Each session proposal is cut to 64 members, links, contested peers, included proposals and
+   reasons; its record keeps its id, and the cuts are counted beside each list.
 
    Each cut is an explicit `*_omitted` count beside its list. Each bound that cut anything adds one
    `neptune.explain.truncated` finding (limit, info), whose producer is `neptune.explain` 0.1.0

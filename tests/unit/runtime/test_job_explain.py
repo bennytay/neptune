@@ -449,11 +449,49 @@ def test_a_large_inspect_summary_and_container_listing_are_cut(
     assert lists == {"container.members", "inspection.summary"}
 
 
+def test_a_session_proposal_s_lists_are_cut_and_copies_still_counted(
+    root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(explain_module, "DEFAULT_BOUNDS", Bounds(locations=1))
+    _, cut = explain(root, tmp_path / "home")
+    data = json.loads(cut.dumps())
+    episode = next(
+        p for p in data["grouping"]["proposals"]
+        if p["directory"].get("path") == "arm/episode_001"
+    )  # fmt: skip
+    assert len(episode["members"]) == 1 and episode["members_omitted"] == 1
+    assert all(p["reasons_omitted"] >= 0 for p in data["grouping"]["proposals"])
+    lists = {f.details["list"] for f in cut.findings if f.code == TRUNCATED}
+    assert {"grouping.proposal_lists", "source.locations"} <= lists
+    assert "notes/notes-copy.txt (+1 copies)" in cut.render()  # the omitted copy still counts
+
+
+@pytest.mark.parametrize(
+    "name", [b"a\n  fake.mcap  [planned]", b"\x1b]0;owned\x07.txt", b"\x7fdel"]
+)
+def test_hostile_names_render_on_one_line_escaped(tmp_path: Path, name: bytes) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    descriptor = os.open(os.fsencode(root) + b"/" + name, os.O_WRONLY | os.O_CREAT, 0o644)
+    os.write(descriptor, b"plain text\n")
+    os.close(descriptor)
+    _, explanation = explain(root, tmp_path / "home")
+    text = explanation.render()
+    assert not any(ch in text for ch in "\x1b\x07\x7f\r")
+    lines = text.splitlines()
+    assert not any(line.startswith("  fake.mcap") for line in lines)  # no injected line
+    (source,) = [line for line in lines if line.startswith("  ") and line.endswith("utf8")]
+    assert "\\x" in source
+
+
 def test_bounds_refuse_what_is_not_a_positive_count() -> None:
     with pytest.raises(ValueError, match="entries"):
         Bounds(entries=0)
     with pytest.raises(ValueError, match="summary_bytes"):
         Bounds(summary_bytes=True)
+    for wrong in (2.5, None, -1, True):
+        with pytest.raises(ValueError, match="inspect_findings"):
+            Bounds(inspect_findings=wrong)  # type: ignore[arg-type]
     assert Bounds(inspect_findings=0).inspect_findings == 0
     assert explain_transform(Bounds()).adapter_id == "neptune.explain"
 

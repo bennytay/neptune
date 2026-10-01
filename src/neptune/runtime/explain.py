@@ -62,7 +62,7 @@ class Bounds:
     files, findings, and each adapter's selected sources."""
 
     entries: int = 10_000
-    locations: int = 64
+    locations: int = 64  # per source, and per session proposal: members, links, peers, reasons
     reasons: int = 16
     members: int = 256
     summary_bytes: int = 16 * 1024
@@ -73,7 +73,8 @@ class Bounds:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} is a positive integer, got {value!r}")
-        if isinstance(self.inspect_findings, bool) or self.inspect_findings < 0:
+        found = self.inspect_findings
+        if isinstance(found, bool) or not isinstance(found, int) or found < 0:
             raise ValueError(f"inspect_findings is a count, got {self.inspect_findings!r}")
 
     def to_json(self) -> JsonObject:
@@ -101,10 +102,16 @@ Location = LocalPath | RawLocalPath
 
 
 def show(location: Location) -> str:
-    """A location for people: its path, with bytes that are not UTF-8 escaped."""
-    if isinstance(location, LocalPath):
-        return location.path
-    return location.path.decode("utf-8", errors="backslashreplace")
+    """A location for people, on one line: bytes that are not UTF-8, and control characters (a
+    newline, an escape sequence: names are hostile), as ``\\xNN`` escapes."""
+    text = (
+        location.path
+        if isinstance(location, LocalPath)
+        else location.path.decode("utf-8", errors="backslashreplace")
+    )
+    return "".join(
+        f"\\x{ord(ch):02x}" if ord(ch) < 0x20 or 0x7F <= ord(ch) < 0xA0 else ch for ch in text
+    )
 
 
 def _size(count: int) -> str:
@@ -577,6 +584,18 @@ class GroupingExplanation:
     summary: JsonObject  # over every proposal and file, listed or omitted
     proposals_omitted: int = 0
     unassigned_omitted: int = 0
+    per_proposal: int | None = None  # the bound on each proposal's lists, once bounded
+
+    def proposal_json(self, proposal: SessionProposal) -> JsonObject:
+        """A proposal's record, each of its lists cut to ``per_proposal`` with a count beside it."""
+        out = dict(proposal.to_json())
+        if self.per_proposal is not None:
+            for key in _PROPOSAL_LISTS:
+                listed = out[key]
+                assert isinstance(listed, Sequence)
+                out[key] = list(listed[: self.per_proposal])
+                out[f"{key}_omitted"] = max(0, len(listed) - self.per_proposal)
+        return out
 
     @classmethod
     def of(cls, grouping: Grouping) -> "GroupingExplanation":
@@ -586,7 +605,7 @@ class GroupingExplanation:
 
     def to_json(self) -> JsonObject:
         return {
-            "proposals": [proposal.to_json() for proposal in self.proposals],
+            "proposals": [self.proposal_json(proposal) for proposal in self.proposals],
             "proposals_omitted": self.proposals_omitted,
             "summary": self.summary,
             "transform": self.transform,
@@ -724,7 +743,9 @@ class Explanation:
         ]
         for item in self.sources:
             where = show(item.locations[0]) + (
-                f" (+{len(item.locations) - 1} copies)" if len(item.locations) > 1 else ""
+                f" (+{copies} copies)"
+                if (copies := len(item.locations) + item.locations_omitted - 1)
+                else ""
             )
             lines.append(f"  {where}  [{item.status}]  {item.format_line()}")
             for verdict in item.verdicts:
@@ -756,7 +777,7 @@ class Explanation:
                 f"  [{proposal.assertion_kind} {proposal.confidence} {proposal.rule}{contested}]"
                 f" {where}:"
                 f" {len(proposal.members)} files; "
-                + "; ".join(reason.message for reason in proposal.reasons)
+                + _abridge("; ".join(reason.message for reason in proposal.reasons))
             )
         for entry in self.grouping.unassigned:
             lines.append(f"  unplaced {show(entry.location)} ({entry.placement}): {entry.reason}")
@@ -803,12 +824,13 @@ class _Cuts:
         limit: int,
         unit: str,
         sources: int | None = None,
+        among: str = "sources",
     ) -> None:
         """``what`` kept ``kept`` and omitted ``omitted``; per-source bounds name how many
         ``sources`` they cut in, and ``kept`` is then the bound each was cut to."""
         if omitted <= 0:
             return
-        where = f" in {sources} sources" if sources is not None else ""
+        where = f" in {sources} {among}" if sources is not None else ""
         details: dict[str, JsonValue] = {
             "kept": kept,
             "limit": limit,
@@ -941,8 +963,29 @@ def bounded(explanation: Explanation, bounds: Bounds | None = None) -> Explanati
     if len(grouping.unassigned) > n:
         cuts.cut("grouping.unassigned", grouping.unassigned[n].location, n,
                  len(grouping.unassigned) - n, n, "files")  # fmt: skip
+    per = bounds.locations
+    longest = [
+        (proposal, max(len(getattr(proposal, key)) for key in _PROPOSAL_LISTS))
+        for proposal in grouping.proposals[:n]
+    ]
+    over = [(proposal, size) for proposal, size in longest if size > per]
+    first_cut = over[0][0] if over else None
+    named: FindingSubject | None = None
+    if first_cut is not None:
+        named = first_cut.members[0].location if first_cut.members else None
+        if named is None and inv.files:
+            named = inv.files[0].location
+    if named is not None:
+        omitted = sum(
+            max(0, len(getattr(proposal, key)) - per)
+            for proposal, _ in over
+            for key in _PROPOSAL_LISTS
+        )
+        cuts.cut("grouping.proposal_lists", named, per, omitted, per, "items",
+                 sources=len(over), among="proposals")  # fmt: skip
     grouping = replace(
         grouping,
+        per_proposal=per,
         proposals=grouping.proposals[:n],
         unassigned=grouping.unassigned[:n],
         proposals_omitted=max(0, len(grouping.proposals) - n),
@@ -967,6 +1010,7 @@ def bounded(explanation: Explanation, bounds: Bounds | None = None) -> Explanati
     )
 
 
+_PROPOSAL_LISTS: Final = ("contested", "includes", "links", "members", "reasons")
 _PER_SOURCE: Final = {
     "container.members": "members",
     "inspection.findings": "inspect_findings",
