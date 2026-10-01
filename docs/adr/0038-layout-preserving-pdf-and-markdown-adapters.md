@@ -93,6 +93,19 @@ give byte-identical output on every host.
      read never depends on which pages share its chunk. Recursion
      bombs end in `RecursionError`, a finding. `jbig2dec` is never started; images are never
      decoded.
+   - Every cost is bounded by work done, not by input size alone. The structure tree indexes each
+     element's kids by MCID once and counts every step; past 200,000 the page is read as untagged
+     (`pdf.structure_limit`). A font's ToUnicode CMap, codespace and `W` ranges are indexed once
+     into disjoint segments (the first declared wins) and binary-searched, with a per-font glyph
+     cache; a table past 131,072 entries or 4 MiB is cut there and reported (`pdf.font_limit`).
+     A content stream is parsed only up to the operators the page may still run
+     (`max_page_operations`), so a 16 MiB run of `q` costs 200 MiB, not 1.2 GiB.
+   - A fault keeps what was read before it: a parse fault ends that stream's operators, and a
+     form that cannot be parsed or run (or recurses past the stack) is skipped while the page's
+     own text stays (`pdf.content_unreadable`, naming the form).
+   - The document record always fits one reply: a page label over 256 characters or a title over
+     4,096 is `Unknown`, never cut (`pdf.value_limit`), and the record describes at most 10,000
+     pages (`pdf.page_limit`, the plan reads the same pages).
    - A file pypdf cannot open as written (truncated, broken cross-reference) is opened once more
      with an in-memory tail naming the last `/Type /Catalog` object, so pypdf rebuilds the table
      by scanning objects (`pdf.repaired`). The source is never changed. Otherwise `pdf.unreadable`.
@@ -114,7 +127,13 @@ give byte-identical output on every host.
    of its innermost container: `list_item` (level = list depth), `quote`, else `paragraph`. Block
    text is the cited source span verbatim, inline markup included. A GFM table is also a
    `StructuredTable` (name `NotCovered`, header row 0) and a `StructuredRecord` per body row,
-   cells split at unescaped pipes, trimmed, `\|` unescaped. Leading YAML front matter is not
+   cells split at unescaped pipes, trimmed, `\|` unescaped. Every row has the header's width, as
+   GFM says: a short row is padded with `Unknown` cells (zero-width span at its end), cells past
+   the width stay in the bytes, not the record, and `markdown.table_row_width` names the rows.
+   A link reference definition (`[label]: url "title"`) is a block with role `Unknown`, because
+   the text resolves `[text][label]` and is evidence, but CommonMark declares no role the model
+   has; `markdown.link_definitions` (info) lists them. Each wrapped leaf rule keeps the blocks it
+   may interrupt (a fence or ATX heading ends a paragraph). Leading YAML front matter is not
    parsed as blocks; a top-level `title:` with a plain or quoted one-line value is the title,
    anything else `Unknown` with `markdown.title_unreadable`. Containers nest 64 deep; deeper
    content is `markdown.nesting_limit`. Two chunks: the document, and every block, since
@@ -125,7 +144,9 @@ give byte-identical output on every host.
    emphasis, blockquote or code span, is `STRUCTURE` (0.7) whatever the name; UTF-8 text with a
    Markdown extension and no syntax is 0.5, just above `text`'s `GENERIC`; damaged or empty text
    with a Markdown extension is 0.2, just above `text`'s `NAME_ONLY`. List markers are never
-   counted: YAML and plain notes use them.
+   counted: YAML and plain notes use them. The probe reads hostile bytes, so it scans each line
+   once, left to right, up to 4,096 characters of it: no pattern backtracks, and a 64 KiB head
+   of `[` or `**x ` costs milliseconds, not seconds.
 10. **What schema version 1 cannot hold stays in the bytes, for now.** Per-run fonts, inline runs
    (links, emphasis) and document metadata beyond the title (author, dates, producer, XMP, other
    front matter keys) have no field (ADR 0020 §4 deferred them). Adding companion kinds bumps
