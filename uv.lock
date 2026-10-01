@@ -10,6 +10,7 @@ resolution-markers = [
 members = [
     "neptune",
     "neptune-ledger",
+    "neptune-memory",
     "neptune-platform",
 ]
 
@@ -531,6 +532,17 @@ dev = [
 name = "neptune-ledger"
 version = "0.0.1"
 source = { editable = "packages/neptune-ledger" }
+dependencies = [
+    { name = "neptune" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "neptune", editable = "." }]
+
+[[package]]
+name = "neptune-memory"
+version = "0.0.1"
+source = { editable = "packages/neptune-memory" }
 dependencies = [
     { name = "neptune" },
 ]
