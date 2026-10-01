@@ -1061,7 +1061,10 @@ class IngestJob:
                         ) from exc
                     chunks = plan.chunks
                 item.chunks, item.planned = chunks, True
-                done = sum(1 for chunk in chunks if self.workspace.committed(chunk.id))
+                # What the workspace holds already: the cache report says so even if the job
+                # stops before parsing (a dry run, a cancellation); ``_ingest`` judges them.
+                item.hits = {chunk.id for chunk in chunks if self.workspace.committed(chunk.id)}
+                done = len(item.hits)
                 planned += 1
                 chunks_total += len(chunks)
                 committed_total += done
