@@ -885,6 +885,18 @@ def test_a_yaml_escape_to_an_unpaired_surrogate_is_unrepresentable() -> None:
     assert codes(output) == ["config.unrepresentable_value", "config.unsupported_key"]
 
 
+def test_a_base_60_number_too_long_to_hold_is_a_finding_not_an_exception() -> None:
+    data = ("rate: 1" + ":00" * 180 + ".5\nother: 2\n").encode()  # found by review
+    assert ConfigAdapter().probe(data, ProbeHints("c.yaml", len(data))).confidence == STRUCTURE
+    output = run(data, yaml_version="1.1")
+    found = by_path(output)
+    assert reading(found[("rate",)]) == "unknown" and reading(found[("other",)]) == ("int", 2)
+    assert codes(output) == ["config.unrepresentable_value"]
+    declared = run(data)  # 1.2 reads it as text, so the readings disagree: no reading at all
+    assert reading(by_path(declared)[("rate",)]) == "unknown"
+    assert codes(declared) == ["config.unrepresentable_value"]
+
+
 def test_nonstandard_and_unrepresentable_json_numbers() -> None:
     data = fixture("nonfinite.json")
     output = run(data)

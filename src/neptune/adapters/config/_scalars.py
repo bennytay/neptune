@@ -25,6 +25,9 @@ YamlVersion: TypeAlias = Literal["1.1", "1.2"]
 # Canonical JSON writes an integer's decimal digits, and Python's int/str conversion stops at
 # 4,300 digits. 14,000 bits is about 4,215 digits: any integer below it can be written.
 INT_BITS: Final = 14_000
+# A base 60 number's places beyond which it is over INT_BITS bits: 60 ** (places - 1) > 2 ** 14,000
+# from 2,372 places on; any fewer are summed in linear time.
+SEXAGESIMAL_PLACES: Final = 2_372
 
 _CORE: Final = "tag:yaml.org,2002:"
 
@@ -109,10 +112,16 @@ def _sign(text: str) -> tuple[int, str]:
     return 1, text
 
 
-def _sexagesimal(text: str) -> float | int:
+def _sexagesimal(text: str) -> float | int | Unreadable:
+    """A base 60 number (``1:30:00``), or why it cannot be held. Its first place is at least 1,
+    so past ``SEXAGESIMAL_PLACES`` places it is over ``INT_BITS`` bits, and beyond binary64 too,
+    without being computed: a long one costs nothing, never quadratic time."""
     sign, body = _sign(text)
+    parts = body.split(":")
+    if len(parts) > SEXAGESIMAL_PLACES or len(parts[0]) > 4_000:
+        return Unreadable(Issue.UNREPRESENTABLE, f"a base 60 number of {len(parts)} places")
     total: float | int = 0
-    for part in body.split(":"):
+    for part in parts:
         total = total * 60 + (float(part) if "." in part else int(part))
     return sign * total
 
@@ -122,6 +131,8 @@ def _v11_int(text: str) -> Reading:
     sign, body = _sign(clean)
     if ":" in body:
         value = _sexagesimal(clean)
+        if isinstance(value, Unreadable):
+            return value
         assert isinstance(value, int)
         return integer(value)
     if body.startswith("0b"):
@@ -139,7 +150,8 @@ def _v11_float(text: str) -> Reading:
         return floating(special, text)
     clean = text.replace("_", "")
     if ":" in clean:
-        return floating(float(_sexagesimal(clean)), text)
+        value = _sexagesimal(clean)
+        return value if isinstance(value, Unreadable) else floating(float(value), text)
     return floating(float(clean), text)
 
 
@@ -218,9 +230,12 @@ def _boolean(value: bool) -> Reading:
 
 
 def _number(convert: Callable[[str], Reading], text: str) -> Reading:
-    """A number the type's pattern admits, which may still have no digits (``0x_``)."""
+    """A number the type's pattern admits, which may still have no digits (``0x_``) or be beyond
+    what binary64 holds (a base 60 float of many places overflows as it is summed)."""
     try:
         return convert(text)
+    except ArithmeticError:
+        return Unreadable(Issue.UNREPRESENTABLE, "a number beyond binary64's range")
     except ValueError:
         return Unreadable(Issue.INVALID_VALUE, "the pattern matches, but it has no digits")
 

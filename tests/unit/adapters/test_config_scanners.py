@@ -10,6 +10,7 @@
 
 import json
 import math
+import time as time_
 import tomllib
 from datetime import date, datetime, time
 from typing import Any, Final
@@ -23,7 +24,7 @@ from neptune.adapters.config import ConfigAdapter
 from neptune.adapters.config._json import spans as json_spans
 from neptune.adapters.config._scalars import implicit
 from neptune.adapters.config._toml import locate
-from neptune.adapters.config._tree import Null, Unreadable, Value
+from neptune.adapters.config._tree import Issue, Null, Unreadable, Value
 from neptune.adapters.harness import ingest_source
 from neptune.discovery.reader import BytesReader
 from neptune.model.configuration import ConfigScalar, ScalarType
@@ -216,6 +217,30 @@ def test_yaml_1_2_reads_leading_zeros_as_decimal_and_0o_as_octal() -> None:
     assert implicit("0755", "1.2") == Value((ConfigScalar(ScalarType.INT, 755),))
     assert implicit("0755", "1.1") == Value((ConfigScalar(ScalarType.INT, 493),))
     assert implicit("0o14", "1.2") == Value((ConfigScalar(ScalarType.INT, 12),))
+
+
+def test_a_base_60_number_beyond_what_a_record_holds_is_unrepresentable() -> None:
+    unrepresentable = Unreadable(Issue.UNREPRESENTABLE, "a number beyond binary64's range")
+    # 180 places: an int too large for a float, found by review; 1.2 reads it as text.
+    long_float = "1" + ":00" * 180 + ".5"
+    assert implicit(long_float, "1.1") == unrepresentable
+    assert implicit(long_float, "1.2") == Value((ConfigScalar(ScalarType.STRING, long_float),))
+    assert implicit("1" + ":00" * 170 + ".5", "1.1") == Value(
+        (ConfigScalar(ScalarType.FLOAT, float(60**170) + 0.5),)
+    )
+    # Integers: up to 14,000 bits are held, past them a finding; the boundary is computed.
+    assert implicit("1" + ":00" * 2370, "1.1") == Value((ConfigScalar(ScalarType.INT, 60**2370),))
+    for places in (2372, 2373, 2374):  # computed and over 14,000 bits; then not computed
+        over = implicit("1" + ":00" * (places - 1), "1.1")
+        assert isinstance(over, Unreadable) and over.issue is Issue.UNREPRESENTABLE
+
+
+def test_a_base_60_number_of_many_places_costs_linear_time() -> None:
+    started = time_.perf_counter()
+    for text in ("1" + ":59" * 80_000, "1" + ":59" * 80_000 + ".5", "9" * 5_000 + ":00"):
+        reading = implicit(text, "1.1")
+        assert isinstance(reading, Unreadable) and reading.issue is Issue.UNREPRESENTABLE
+    assert time_.perf_counter() - started < 1.0  # quadratic summing took seconds
 
 
 # --- TOML spans against tomllib ------------------------------------------------------------------
