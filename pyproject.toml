@@ -58,6 +58,11 @@ mypy_path = "src"
 module = ["pyarrow", "pyarrow.*"]
 ignore_missing_imports = true
 
+# lz4 ships no type information either; only neptune.adapters.mcap imports it (ADR 0034).
+[[tool.mypy.overrides]]
+module = ["lz4", "lz4.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers --strict-config"

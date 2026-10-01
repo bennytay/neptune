@@ -6,72 +6,54 @@ become series rows citing their exact bytes, metadata records become tables, att
 anything else are findings, and every chunk is decompressed and checked on the way.
 """
 
-import zlib
-from collections import Counter
-from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, field
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Final
 
-from neptune.adapters.contract import AdapterConfig, Chunk, ChunkOutput, SourceReader, read_pieces
+from neptune.adapters.contract import AdapterConfig, Chunk, ChunkOutput, SourceReader
 from neptune.adapters.mcap.records import (
     CHANNEL_COUNT_ENTRY,
     INT64_MAX,
     MAGIC,
     MESSAGE_ENCODINGS,
-    MESSAGE_FIELDS,
     RECORD_HEADER,
     SCHEMA_ENCODINGS,
-    STATISTICS_COUNTS,
     STATISTICS_END_TIME,
     STATISTICS_START_TIME,
     Channel,
-    FieldError,
-    Inner,
-    MessageHead,
     Opcode,
     Schema,
     Statistics,
     Text,
-    opcode_name,
-    parse_attachment_head,
     parse_channel,
-    parse_message_head,
-    parse_message_index,
-    parse_metadata,
     parse_schema,
     parse_statistics,
+    record_header,
 )
-from neptune.adapters.mcap.report import Reporter, Selection, selection
+from neptune.adapters.mcap.report import Reporter, selection
 from neptune.adapters.mcap.scan import (
-    WHOLE_RECORD,
-    ChunkProblem,
     OpenedChunk,
     Place,
     TopRecord,
-    content_of,
     open_chunk,
     place_from_json,
     read_exact,
-    scan,
 )
-from neptune.identity.provenance import evidence_record_id
+from neptune.identity.provenance import EvidenceRecord, evidence_record_id
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
-from neptune.model.ids import LogicalId, RecordId
-from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.model.ids import RecordId
+from neptune.model.jsonvalue import JsonValue
 from neptune.model.knowledge import (
     AssertionKind,
     Knowledge,
     Known,
     KnownAbsent,
-    NotApplicable,
     Unknown,
 )
 from neptune.model.provenance import (
-    ByteRange,
     EvidenceRef,
     Locator,
     Provenance,
-    Row,
     adapter_locator,
 )
 from neptune.model.reference import TimestampDomain
@@ -89,7 +71,6 @@ from neptune.model.series import (
     value_column,
 )
 from neptune.model.time import NANOSECOND, ClockRole, Timestamp
-from neptune.model.world import StructuredRecord, StructuredTable
 
 TIME_FIELD: Final = "mcap:time_field"
 MAGIC_PLACE: Final = Place(((0, len(MAGIC)),))
@@ -178,35 +159,40 @@ class Records:
         if not inner:
             return read_exact(self.source, offset + RECORD_HEADER, length - RECORD_HEADER)
         if self._chunk is None or self._chunk.place.steps[0] != (offset, length):
-            record = TopRecord(offset, Opcode.CHUNK, length - RECORD_HEADER, None)
+            # A place's chunk step covers what is there: less than declared if the file is cut.
+            _, declared = record_header(read_exact(self.source, offset, RECORD_HEADER))
+            cut = RECORD_HEADER + declared > length
+            record = TopRecord(
+                offset, Opcode.CHUNK, declared, None, cut=cut, present=length - RECORD_HEADER
+            )
             self._chunk = open_chunk(self.source, record, self.limit)
         start, size = inner[0]
         return self._chunk.data[start + RECORD_HEADER : start + size]
 
 
-def _place(data: JsonValue) -> Place:
+def as_place(data: JsonValue) -> Place:
     return place_from_json(data)
 
 
-def _int(data: JsonValue) -> int:
+def as_int(data: JsonValue) -> int:
     if isinstance(data, bool) or not isinstance(data, int):
         raise ValueError(f"expected an integer, got {data!r}")
     return data
 
 
-def _list(data: JsonValue) -> list[JsonValue]:
+def as_list(data: JsonValue) -> list[JsonValue]:
     if not isinstance(data, list):
         raise ValueError(f"expected a list, got {data!r}")
     return data
 
 
-def _text(value: Text) -> Knowledge[str]:
+def text_knowledge(value: Text) -> Knowledge[str]:
     """A declared string: ``Known``, or ``Unknown`` when blank or not UTF-8."""
     text = value.value
     return Known(text) if text else Unknown()
 
 
-def _ticks(value: int) -> int | None:
+def ticks(value: int) -> int | None:
     return value if value <= INT64_MAX else None
 
 
@@ -222,13 +208,13 @@ class Declarations:
         self.selection = selection(config)
         self.context = chunk.context
         self.chunked = self.context["layout"] == "chunked"
-        self.records: list[object] = []
+        self.records: list[EvidenceRecord] = []
         self.findings: list[IngestFinding] = []
         self.series: list[SeriesBatch] = []
         self.read = Records(source, config.integer("max_chunk_bytes"))
         self.schemas = {
-            _int(pair[0]): _place(pair[1])
-            for pair in (_list(item) for item in _list(self.context["schemas"]))
+            as_int(pair[0]): as_place(pair[1])
+            for pair in (as_list(item) for item in as_list(self.context["schemas"]))
         }
         self.reported_schemas: set[int] = set()
 
@@ -243,7 +229,9 @@ class Declarations:
         records: Iterable[RecordId] = (),
     ) -> None:
         self.findings.append(
-            self.reporter.finding(code, category, severity, subject, message, details, records=records)
+            self.reporter.finding(
+                code, category, severity, subject, message, details, records=records
+            )
         )
 
     def run(self) -> ChunkOutput:
@@ -262,7 +250,7 @@ class Declarations:
         )
         self.records.append(log_time)
         header = self.context.get("header")
-        run_place = _place(header) if header is not None else MAGIC_PLACE
+        run_place = as_place(header) if header is not None else MAGIC_PLACE
         statistics = self._statistics()
         first, last = self._extent(statistics)
         run = Run(
@@ -274,17 +262,17 @@ class Declarations:
             last=last,
         )
         self.records.append(run)
-        counts = {}
+        counts: dict[int, tuple[int, Place]] = {}
         if statistics is not None:
             place, stats = statistics
             for channel, count, at in stats.channel_message_counts:
                 entry = place.within(RECORD_HEADER + at, CHANNEL_COUNT_ENTRY)
                 counts.setdefault(channel, (count, entry))
-        for item in _list(self.context["channels"]):
-            channel_id, where = _list(item)
-            self._stream(_int(channel_id), _place(where), run.id, counts)
+        for item in as_list(self.context["channels"]):
+            channel_id, where = as_list(item)
+            self._stream(as_int(channel_id), as_place(where), run.id, counts)
         return ChunkOutput(
-            records=tuple(self.records),  # type: ignore[arg-type]
+            records=tuple(self.records),
             series=tuple(self.series),
             findings=tuple(self.findings),
         )
@@ -293,7 +281,7 @@ class Declarations:
         where = self.context.get("statistics")
         if where is None:
             return None
-        place = _place(where)
+        place = as_place(where)
         return place, parse_statistics(self.read.content(place))
 
     def _extent(
@@ -309,8 +297,8 @@ class Declarations:
             ("message_end_time", stats.message_end_time, STATISTICS_END_TIME),
         ):
             field_place = place.within(RECORD_HEADER + at, 8)
-            ticks = _ticks(value)
-            if ticks is None:
+            tick = ticks(value)
+            if tick is None:
                 found.append(Unknown(self.cite.provenance(field_place)))
                 self.finding(
                     "time_out_of_range",
@@ -323,7 +311,7 @@ class Declarations:
                 )
             else:
                 found.append(
-                    Known(Timestamp(ticks, self.cite.log_time), self.cite.provenance(field_place))
+                    Known(Timestamp(tick, self.cite.log_time), self.cite.provenance(field_place))
                 )
         return found[0], found[1]
 
@@ -339,8 +327,15 @@ class Declarations:
         if channel.id != channel_id:
             raise ValueError(f"the plan's channel {channel_id} is declared as {channel.id}")
         ids = cite.channel(place)
-        topic = _text(channel.topic)
-        bad = [name for name, text in (("topic", channel.topic), ("message_encoding", channel.message_encoding)) if text.value is None]
+        topic = text_knowledge(channel.topic)
+        bad = [
+            name
+            for name, text in (
+                ("topic", channel.topic),
+                ("message_encoding", channel.message_encoding),
+            )
+            if text.value is None
+        ]
         metadata = self._metadata(channel, place, bad)
         if bad:
             self.finding(
@@ -379,7 +374,7 @@ class Declarations:
             schema_name=name,
             schema_encoding=encoding,
             schema_definition=definition,
-            message_encoding=_text(channel.message_encoding),
+            message_encoding=text_knowledge(channel.message_encoding),
             metadata=metadata,
             clocks=(cite.log_time, ids.publish),
             message_count=count,
@@ -417,19 +412,21 @@ class Declarations:
                 {"encoding": encoding_text, "field": "message_encoding", "id": channel_id},
                 records=(stream.id,),
             )
-        if not self.selection.selects(channel.topic) or self.selection.windowed:
+        selected = self.selection.selects(channel.topic)
+        if not selected or self.selection.windowed:
+            share = "only those in its log_time window" if selected else "none"
             self.finding(
                 "not_selected",
                 FindingCategory.SKIPPED,
                 Severity.INFO,
                 place,
-                f"the config selects {'none' if not self.selection.selects(channel.topic) else 'only some'}"
-                f" of channel {channel_id}'s messages; the others have no rows",
+                f"the config selects {share} of channel {channel_id}'s messages; the others have"
+                " no rows",
                 {
                     "id": channel_id,
                     "log_time_end": self.selection.end,
                     "log_time_start": self.selection.start,
-                    "topic_selected": self.selection.selects(channel.topic),
+                    "topic_selected": selected,
                 },
                 records=(stream.id,),
             )
@@ -497,7 +494,9 @@ class Declarations:
         )
 
     def _schema_findings(self, schema: Schema, where: Place) -> None:
-        bad = [n for n, t in (("name", schema.name), ("encoding", schema.encoding)) if t.value is None]
+        bad = [
+            n for n, t in (("name", schema.name), ("encoding", schema.encoding)) if t.value is None
+        ]
         if bad:
             self.finding(
                 "invalid_utf8",

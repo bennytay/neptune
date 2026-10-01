@@ -349,7 +349,9 @@ class AttachmentIndex:
 def parse_attachment_index(content: bytes) -> AttachmentIndex:
     fields = Fields(content)
     offset, length, log_time, create_time, size = (fields.u64() for _ in range(5))
-    return AttachmentIndex(offset, length, log_time, create_time, size, fields.text(), fields.text())
+    return AttachmentIndex(
+        offset, length, log_time, create_time, size, fields.text(), fields.text()
+    )
 
 
 @dataclass(frozen=True)
