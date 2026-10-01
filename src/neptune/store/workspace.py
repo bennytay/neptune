@@ -18,6 +18,8 @@ Everything an ingest needs to remember between runs lives here, never beside the
         derivative.json                the key, and each file's size and sha256
         <name>                         its files
     staging/                           work in progress; anything here is incomplete
+    scratch/                           the private root of scratch space (ADR 0029 §4): a ``0700``
+                                       directory per sandboxed call while it runs, then removed
 
 A chunk is committed by renaming its finished, flushed directory into ``chunks/``: a commit is
 atomic, so a process killed midway leaves no partial chunk, and committing a chunk again changes
@@ -25,7 +27,8 @@ nothing. A derivative is kept the same way. Its sources are never copied here: t
 what was derived from them and where they are. Each directory in ``staging/`` is locked (``flock``)
 by the process writing it, so ``clear_staging`` removes what dead processes left and never what a
 live one is writing. An entry is removed by one rename into ``staging/`` first, so nothing is ever
-half there.
+half there. ``scratch/`` is where a sandboxed adapter call may write, and nowhere else; each job
+sweeps what killed calls left there, and staging debris, when it starts (ADR 0033 §2).
 
 The workspace is the cache (ADR 0031): a plan is kept by (source, transform), a chunk's output by
 its chunk id, and a derivative (a series file, a source's verdict) by a key covering everything it
@@ -71,6 +74,7 @@ UPGRADABLE: Final = (1,)  # older formats this version upgrades in place when it
 WORKSPACE_KIND: Final = "neptune_workspace"
 HOME_VARIABLE: Final = "NEPTUNE_HOME"
 LOCK: Final = "lock"
+SCRATCH: Final = "scratch"
 DERIVATIVE_FILE: Final = "derivative.json"
 ADMITTED_FILE: Final = "admitted.json"  # in a chunk's directory: the laws that admitted it
 DERIVATIVE_ID_SCHEME: Final = "neptune.derivative-id/1"
@@ -535,6 +539,11 @@ class Workspace:
                 return False
             fsync_directory(path.parent)
         return True  # the locked staging directory, and what it held, went on exit
+
+    @property
+    def scratch(self) -> Path:
+        """The private root of scratch space (``neptune.discovery.scratch``), made on first use."""
+        return self.home / SCRATCH
 
     @contextmanager
     def in_use(self) -> Iterator[None]:

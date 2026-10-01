@@ -48,6 +48,7 @@ class JobState(StrEnum):
 # Event kinds. A consumer matches on these; the details' keys are documented by the job.
 PHASE_STARTED: Final = "phase_started"
 PHASE_FINISHED: Final = "phase_finished"
+WORKSPACE_SWEPT: Final = "workspace_swept"  # scratch and staging debris removed at the start
 ENTRY_SKIPPED: Final = "entry_skipped"
 SYMLINK_RECORDED: Final = "symlink_recorded"
 SOURCE_HASHED: Final = "source_hashed"

@@ -202,6 +202,32 @@ def test_the_root_must_be_a_directory_and_the_destination_free(root: Path, tmp_p
         IngestJob(root, tmp_path / "taken", home, registry)
 
 
+def test_a_workspace_inside_the_root_fails_the_job_before_any_work(
+    root: Path, tmp_path: Path
+) -> None:
+    """Its scratch space would overlap the evidence, and the walk would read the workspace."""
+    job = IngestJob(root, tmp_path / "p", Workspace(root / ".neptune"), default_registry())
+    with pytest.raises(JobError, match="scratch space"):
+        job.run()
+    assert job.state is JobState.FAILED and not (tmp_path / "p").exists()
+    assert not (root / ".neptune" / "scratch").exists()  # nothing created inside the root
+
+
+def test_a_job_sweeps_what_killed_calls_and_writes_left(root: Path, tmp_path: Path) -> None:
+    home = Workspace(tmp_path / "home")
+    stale = home.scratch / "scratch-left-by-a-killed-call"
+    stale.mkdir(parents=True)
+    (stale / ".lock").write_bytes(b"")  # nobody holds it
+    (stale / "spool").write_bytes(b"x" * 100)
+    (home.home / "staging" / "half-written").mkdir()
+    seen: list[JobEvent] = []
+    IngestJob(root, tmp_path / "p", home, default_registry(), on_event=seen.append).run()
+    (swept,) = [e for e in seen if e.kind == "workspace_swept"]
+    assert swept.details == {"scratch": 1, "staging": 1} and swept.phase is Phase.DISCOVER
+    assert list(home.scratch.iterdir()) == [] and list((home.home / "staging").iterdir()) == []
+    assert oct(home.scratch.stat().st_mode & 0o777) == oct(0o700)
+
+
 def test_a_job_runs_once(root: Path, tmp_path: Path) -> None:
     job = IngestJob(root, tmp_path / "p", Workspace(tmp_path / "home"), default_registry())
     job.run()

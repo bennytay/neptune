@@ -74,6 +74,7 @@ from neptune.adapters.registry import AdapterRegistry, Candidate, Selection, Sel
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
 from neptune.discovery.reader import LocalReader, SourceChangedError
 from neptune.discovery.scan import fingerprint
+from neptune.discovery.scratch import ScratchError, clear_scratch
 from neptune.discovery.source import (
     LocalSource,
     SkippedEntry,
@@ -518,6 +519,7 @@ class IngestJob:
         started = _now()
         try:
             with self.workspace.in_use():  # collection waits until the job is done
+                self._sweep()
                 package = self._phases(started)
         except _Cancelled:
             self._discard()
@@ -537,6 +539,20 @@ class IngestJob:
             raise
         self.state = JobState.COMMITTED
         return self._outcome(package)
+
+    def _sweep(self) -> None:
+        """Remove what killed jobs and calls left: scratch directories and staging debris whose
+        lock no live process holds (ADR 0029 §4, ADR 0033 §2). The scratch root must not overlap
+        the ingest root, or the job would read its own scratch space as evidence: ``JobError``.
+        """
+        try:
+            scratch = clear_scratch(self.workspace.scratch, ingest_root=self.root)
+            staging = self.workspace.clear_staging()
+        except ScratchError as exc:
+            raise JobError(f"the workspace cannot hold scratch space: {exc}") from exc
+        except OSError as exc:
+            raise JobError(f"the workspace cannot be swept: {exc}") from exc
+        self._emit(events.WORKSPACE_SWEPT, {"scratch": scratch, "staging": staging})
 
     def _phases(self, started: str) -> ContentId:
         source = self._local = LocalSource(self.root)
