@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 dependencies = [
+    "lz4>=4.4.5",
     "pyarrow>=25.0.1",
+    "zstandard>=0.25.0",
 ]
 
 [dependency-groups]

@@ -1,0 +1,520 @@
+"""Ingesting one planned chunk of an MCAP source: its declarations, or one range of its data.
+
+The declarations chunk emits the clocks, the run and one stream per channel, each with the empty
+series batch that types its columns. A data chunk walks the records of its byte range: messages
+become series rows citing their exact bytes, metadata records become tables, attachments and
+anything else are findings, and every chunk is decompressed and checked on the way.
+"""
+
+import zlib
+from collections import Counter
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass, field
+from typing import Final
+
+from neptune.adapters.contract import AdapterConfig, Chunk, ChunkOutput, SourceReader, read_pieces
+from neptune.adapters.mcap.records import (
+    CHANNEL_COUNT_ENTRY,
+    INT64_MAX,
+    MAGIC,
+    MESSAGE_ENCODINGS,
+    MESSAGE_FIELDS,
+    RECORD_HEADER,
+    SCHEMA_ENCODINGS,
+    STATISTICS_COUNTS,
+    STATISTICS_END_TIME,
+    STATISTICS_START_TIME,
+    Channel,
+    FieldError,
+    Inner,
+    MessageHead,
+    Opcode,
+    Schema,
+    Statistics,
+    Text,
+    opcode_name,
+    parse_attachment_head,
+    parse_channel,
+    parse_message_head,
+    parse_message_index,
+    parse_metadata,
+    parse_schema,
+    parse_statistics,
+)
+from neptune.adapters.mcap.report import Reporter, Selection, selection
+from neptune.adapters.mcap.scan import (
+    WHOLE_RECORD,
+    ChunkProblem,
+    OpenedChunk,
+    Place,
+    TopRecord,
+    content_of,
+    open_chunk,
+    place_from_json,
+    read_exact,
+    scan,
+)
+from neptune.identity.provenance import evidence_record_id
+from neptune.model.finding import FindingCategory, IngestFinding, Severity
+from neptune.model.ids import LogicalId, RecordId
+from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.model.knowledge import (
+    AssertionKind,
+    Knowledge,
+    Known,
+    KnownAbsent,
+    NotApplicable,
+    Unknown,
+)
+from neptune.model.provenance import (
+    ByteRange,
+    EvidenceRef,
+    Locator,
+    Provenance,
+    Row,
+    adapter_locator,
+)
+from neptune.model.reference import TimestampDomain
+from neptune.model.run import Run, Stream
+from neptune.model.series import (
+    SEQ,
+    ColumnType,
+    SeriesBatch,
+    SeriesColumn,
+    SeriesProvenance,
+    locator_column,
+    state_column,
+    step_template,
+    time_column,
+    value_column,
+)
+from neptune.model.time import NANOSECOND, ClockRole, Timestamp
+from neptune.model.world import StructuredRecord, StructuredTable
+
+TIME_FIELD: Final = "mcap:time_field"
+MAGIC_PLACE: Final = Place(((0, len(MAGIC)),))
+LOG_TIME, PUBLISH_TIME = time_column(0), time_column(1)
+SEQUENCE: Final = value_column("sequence")
+KNOWN, UNKNOWN = "known", "unknown"
+
+
+def columns(chunked: bool) -> tuple[tuple[str, ColumnType], ...]:
+    """Every column of an MCAP stream's series, in name order, with its type."""
+    steps = (0, 1) if chunked else (0,)
+    found = [
+        (SEQ, ColumnType.INT64),
+        (LOG_TIME, ColumnType.INT64),
+        (PUBLISH_TIME, ColumnType.INT64),
+        (state_column(LOG_TIME), ColumnType.STRING),
+        (state_column(PUBLISH_TIME), ColumnType.STRING),
+        (SEQUENCE, ColumnType.UINT32),
+    ]
+    for step in steps:
+        found += [
+            (locator_column(step, "length"), ColumnType.INT64),
+            (locator_column(step, "offset"), ColumnType.INT64),
+        ]
+    return tuple(sorted(found))
+
+
+def series_template(source: SourceReader, chunked: bool) -> SeriesProvenance:
+    """A row cites its Message record: in the file, or in its chunk's uncompressed records."""
+    step = step_template("byte_range", per_row=("length", "offset"))
+    return SeriesProvenance(
+        source.content_id, (step, step) if chunked else (step,), AssertionKind.OBSERVED
+    )
+
+
+def time_field(name: str) -> Locator:
+    return adapter_locator(TIME_FIELD, {"name": name})
+
+
+@dataclass(frozen=True)
+class Ids:
+    """The ids a channel's records get, from where it is declared."""
+
+    stream: RecordId
+    publish: RecordId
+
+
+class Cite:
+    """Evidence, provenance and record ids for one source under one config."""
+
+    def __init__(self, source: SourceReader, config: AdapterConfig) -> None:
+        self.source = source
+        self.config = config
+        self.transform = config.transform
+
+    def evidence(self, place: Place, *more: Locator) -> EvidenceRef:
+        return EvidenceRef(self.source.content_id, (*place.locator(), *more))
+
+    def provenance(self, place: Place, *more: Locator) -> Provenance:
+        return Provenance(self.evidence(place, *more), self.transform.id, AssertionKind.OBSERVED)
+
+    def record_id(self, kind: str, place: Place, *more: Locator) -> RecordId:
+        return evidence_record_id(kind, self.evidence(place, *more), self.transform)
+
+    @property
+    def log_time(self) -> RecordId:
+        return self.record_id(TimestampDomain.kind, MAGIC_PLACE, time_field("log_time"))
+
+    def channel(self, place: Place) -> Ids:
+        return Ids(
+            self.record_id(Stream.kind, place),
+            self.record_id(TimestampDomain.kind, place, time_field("publish_time")),
+        )
+
+
+class Records:
+    """Reads records by place, decompressing each chunk that holds one at most once."""
+
+    def __init__(self, source: SourceReader, limit: int) -> None:
+        self.source = source
+        self.limit = limit
+        self._chunk: OpenedChunk | None = None
+
+    def content(self, place: Place) -> bytes:
+        (offset, length), *inner = place.steps
+        if not inner:
+            return read_exact(self.source, offset + RECORD_HEADER, length - RECORD_HEADER)
+        if self._chunk is None or self._chunk.place.steps[0] != (offset, length):
+            record = TopRecord(offset, Opcode.CHUNK, length - RECORD_HEADER, None)
+            self._chunk = open_chunk(self.source, record, self.limit)
+        start, size = inner[0]
+        return self._chunk.data[start + RECORD_HEADER : start + size]
+
+
+def _place(data: JsonValue) -> Place:
+    return place_from_json(data)
+
+
+def _int(data: JsonValue) -> int:
+    if isinstance(data, bool) or not isinstance(data, int):
+        raise ValueError(f"expected an integer, got {data!r}")
+    return data
+
+
+def _list(data: JsonValue) -> list[JsonValue]:
+    if not isinstance(data, list):
+        raise ValueError(f"expected a list, got {data!r}")
+    return data
+
+
+def _text(value: Text) -> Knowledge[str]:
+    """A declared string: ``Known``, or ``Unknown`` when blank or not UTF-8."""
+    text = value.value
+    return Known(text) if text else Unknown()
+
+
+def _ticks(value: int) -> int | None:
+    return value if value <= INT64_MAX else None
+
+
+# --- Declarations -------------------------------------------------------------------------------
+
+
+class Declarations:
+    """The chunk holding the clocks, the run, and a stream per channel."""
+
+    def __init__(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> None:
+        self.cite = Cite(source, config)
+        self.reporter = Reporter(source, config)
+        self.selection = selection(config)
+        self.context = chunk.context
+        self.chunked = self.context["layout"] == "chunked"
+        self.records: list[object] = []
+        self.findings: list[IngestFinding] = []
+        self.series: list[SeriesBatch] = []
+        self.read = Records(source, config.integer("max_chunk_bytes"))
+        self.schemas = {
+            _int(pair[0]): _place(pair[1])
+            for pair in (_list(item) for item in _list(self.context["schemas"]))
+        }
+        self.reported_schemas: set[int] = set()
+
+    def finding(
+        self,
+        code: str,
+        category: FindingCategory,
+        severity: Severity,
+        subject: Place,
+        message: str,
+        details: dict[str, JsonValue],
+        records: Iterable[RecordId] = (),
+    ) -> None:
+        self.findings.append(
+            self.reporter.finding(code, category, severity, subject, message, details, records=records)
+        )
+
+    def run(self) -> ChunkOutput:
+        cite = self.cite
+        log_place = (time_field("log_time"),)
+        log_time = TimestampDomain(
+            id=cite.log_time,
+            provenance=cite.provenance(MAGIC_PLACE, *log_place),
+            field="log_time",
+            scope=(),
+            role=Known(ClockRole.RECEIVE),
+            resolution=Known(NANOSECOND),
+            epoch=Unknown(),
+            timescale=Unknown(),
+            declared_monotonic=Unknown(),
+        )
+        self.records.append(log_time)
+        header = self.context.get("header")
+        run_place = _place(header) if header is not None else MAGIC_PLACE
+        statistics = self._statistics()
+        first, last = self._extent(statistics)
+        run = Run(
+            id=cite.record_id(Run.kind, run_place),
+            provenance=cite.provenance(run_place),
+            logical_id=Unknown(),
+            machine=Unknown(),
+            first=first,
+            last=last,
+        )
+        self.records.append(run)
+        counts = {}
+        if statistics is not None:
+            place, stats = statistics
+            for channel, count, at in stats.channel_message_counts:
+                entry = place.within(RECORD_HEADER + at, CHANNEL_COUNT_ENTRY)
+                counts.setdefault(channel, (count, entry))
+        for item in _list(self.context["channels"]):
+            channel_id, where = _list(item)
+            self._stream(_int(channel_id), _place(where), run.id, counts)
+        return ChunkOutput(
+            records=tuple(self.records),  # type: ignore[arg-type]
+            series=tuple(self.series),
+            findings=tuple(self.findings),
+        )
+
+    def _statistics(self) -> tuple[Place, Statistics] | None:
+        where = self.context.get("statistics")
+        if where is None:
+            return None
+        place = _place(where)
+        return place, parse_statistics(self.read.content(place))
+
+    def _extent(
+        self, statistics: tuple[Place, Statistics] | None
+    ) -> tuple[Knowledge[Timestamp], Knowledge[Timestamp]]:
+        """The run's first and last instants, as the statistics state them on ``log_time``."""
+        if statistics is None or statistics[1].message_count == 0:
+            return Unknown(), Unknown()
+        place, stats = statistics
+        found: list[Knowledge[Timestamp]] = []
+        for name, value, at in (
+            ("message_start_time", stats.message_start_time, STATISTICS_START_TIME),
+            ("message_end_time", stats.message_end_time, STATISTICS_END_TIME),
+        ):
+            field_place = place.within(RECORD_HEADER + at, 8)
+            ticks = _ticks(value)
+            if ticks is None:
+                found.append(Unknown(self.cite.provenance(field_place)))
+                self.finding(
+                    "time_out_of_range",
+                    FindingCategory.UNREPRESENTABLE,
+                    Severity.WARNING,
+                    field_place,
+                    f"the statistics' {name} {value} does not fit a signed 64-bit tick count;"
+                    " it is unknown",
+                    {"field": name, "value": value},
+                )
+            else:
+                found.append(
+                    Known(Timestamp(ticks, self.cite.log_time), self.cite.provenance(field_place))
+                )
+        return found[0], found[1]
+
+    def _stream(
+        self,
+        channel_id: int,
+        place: Place,
+        run: RecordId,
+        counts: dict[int, tuple[int, Place]],
+    ) -> None:
+        cite = self.cite
+        channel = parse_channel(self.read.content(place))
+        if channel.id != channel_id:
+            raise ValueError(f"the plan's channel {channel_id} is declared as {channel.id}")
+        ids = cite.channel(place)
+        topic = _text(channel.topic)
+        bad = [name for name, text in (("topic", channel.topic), ("message_encoding", channel.message_encoding)) if text.value is None]
+        metadata = self._metadata(channel, place, bad)
+        if bad:
+            self.finding(
+                "invalid_utf8",
+                FindingCategory.UNREPRESENTABLE,
+                Severity.WARNING,
+                place,
+                f"channel {channel_id} has text that is not UTF-8 ({', '.join(bad)}); it is unknown"
+                " or left out",
+                {"fields": bad, "id": channel_id},
+                records=(ids.stream,),
+            )
+        scope = (topic.value,) if isinstance(topic, Known) else ("channel", str(channel_id))
+        spec = cite.provenance(MAGIC_PLACE)
+        publish = TimestampDomain(
+            id=ids.publish,
+            provenance=cite.provenance(place, time_field("publish_time")),
+            field="publish_time",
+            scope=scope,
+            role=Known(ClockRole.PUBLISH, spec),
+            resolution=Known(NANOSECOND, spec),
+            epoch=Unknown(),
+            timescale=Unknown(),
+            declared_monotonic=Unknown(),
+        )
+        name, encoding, definition = self._schema(channel, place, ids.stream)
+        count: Knowledge[int] = Unknown()
+        if channel_id in counts:
+            value, entry = counts[channel_id]
+            count = Known(value, cite.provenance(entry))
+        stream = Stream(
+            id=ids.stream,
+            provenance=cite.provenance(place),
+            run=run,
+            topic=topic,
+            schema_name=name,
+            schema_encoding=encoding,
+            schema_definition=definition,
+            message_encoding=_text(channel.message_encoding),
+            metadata=metadata,
+            clocks=(cite.log_time, ids.publish),
+            message_count=count,
+            first=Unknown(),
+            last=Unknown(),
+            series=series_template(cite.source, self.chunked),
+        )
+        self.records += [publish, stream]
+        self.series.append(
+            SeriesBatch(
+                stream.id,
+                tuple(SeriesColumn(column, kind, ()) for column, kind in columns(self.chunked)),
+            )
+        )
+        shown = channel.message_encoding.shown
+        self.finding(
+            "payload_not_decoded",
+            FindingCategory.UNSUPPORTED,
+            Severity.INFO,
+            place,
+            f"channel {channel_id}'s message payloads ({shown or 'no encoding'}) are not decoded;"
+            " each row cites its message's bytes",
+            {"id": channel_id, "message_encoding": shown},
+            records=(stream.id,),
+        )
+        encoding_text = channel.message_encoding.value
+        if encoding_text and encoding_text not in MESSAGE_ENCODINGS:
+            self.finding(
+                "unknown_encoding",
+                FindingCategory.UNSUPPORTED,
+                Severity.INFO,
+                place,
+                f"channel {channel_id}'s message encoding {encoding_text!r} is not one the MCAP"
+                " specification registers",
+                {"encoding": encoding_text, "field": "message_encoding", "id": channel_id},
+                records=(stream.id,),
+            )
+        if not self.selection.selects(channel.topic) or self.selection.windowed:
+            self.finding(
+                "not_selected",
+                FindingCategory.SKIPPED,
+                Severity.INFO,
+                place,
+                f"the config selects {'none' if not self.selection.selects(channel.topic) else 'only some'}"
+                f" of channel {channel_id}'s messages; the others have no rows",
+                {
+                    "id": channel_id,
+                    "log_time_end": self.selection.end,
+                    "log_time_start": self.selection.start,
+                    "topic_selected": self.selection.selects(channel.topic),
+                },
+                records=(stream.id,),
+            )
+
+    def _metadata(
+        self, channel: Channel, place: Place, bad: list[str]
+    ) -> tuple[tuple[str, str], ...]:
+        pairs: dict[str, list[str]] = {}
+        for key, value in channel.metadata:
+            if key.value is None or value.value is None:
+                if "metadata" not in bad:
+                    bad.append("metadata")
+                continue
+            pairs.setdefault(key.value, []).append(value.value)
+        repeated = sorted(key for key, values in pairs.items() if len(values) > 1)
+        if repeated:
+            self.finding(
+                "duplicate_key",
+                FindingCategory.AMBIGUOUS,
+                Severity.WARNING,
+                place,
+                f"channel {channel.id}'s metadata repeats {len(repeated)} key(s); they are left"
+                " out of the stream's metadata",
+                {"id": channel.id, "keys": list(repeated)},
+                records=(self.cite.channel(place).stream,),
+            )
+        return tuple(sorted((key, values[0]) for key, values in pairs.items() if len(values) == 1))
+
+    def _schema(
+        self, channel: Channel, place: Place, stream: RecordId
+    ) -> tuple[Knowledge[str], Knowledge[str], Knowledge[EvidenceRef]]:
+        cite = self.cite
+        if channel.schema_id == 0:  # the specification: schema_id 0 means no schema
+            absent = KnownAbsent(cite.provenance(MAGIC_PLACE))
+            return absent, absent, absent
+        where = self.schemas.get(channel.schema_id)
+        if where is None:
+            self.finding(
+                "unknown_schema",
+                FindingCategory.CORRUPT,
+                Severity.WARNING,
+                place,
+                f"channel {channel.id} names schema {channel.schema_id}, which no Schema record"
+                " declares; its schema is unknown",
+                {"id": channel.id, "schema_id": channel.schema_id},
+                records=(stream,),
+            )
+            return Unknown(), Unknown(), Unknown()
+        schema = parse_schema(self.read.content(where))
+        provenance = cite.provenance(where)
+        start, length = schema.data
+        definition: Knowledge[EvidenceRef] = (
+            Known(cite.evidence(where.within(RECORD_HEADER + start, length)), provenance)
+            if length
+            else Unknown(provenance)
+        )
+        name, encoding = schema.name.value, schema.encoding.value
+        if schema.id not in self.reported_schemas:
+            self.reported_schemas.add(schema.id)
+            self._schema_findings(schema, where)
+        return (
+            Known(name, provenance) if name else Unknown(provenance),
+            Known(encoding, provenance) if encoding else Unknown(provenance),
+            definition,
+        )
+
+    def _schema_findings(self, schema: Schema, where: Place) -> None:
+        bad = [n for n, t in (("name", schema.name), ("encoding", schema.encoding)) if t.value is None]
+        if bad:
+            self.finding(
+                "invalid_utf8",
+                FindingCategory.UNREPRESENTABLE,
+                Severity.WARNING,
+                where,
+                f"schema {schema.id} has text that is not UTF-8 ({', '.join(bad)}); it is unknown",
+                {"fields": bad, "id": schema.id},
+            )
+        encoding = schema.encoding.value
+        if encoding and encoding not in SCHEMA_ENCODINGS:
+            self.finding(
+                "unknown_encoding",
+                FindingCategory.UNSUPPORTED,
+                Severity.INFO,
+                where,
+                f"schema {schema.id}'s encoding {encoding!r} is not one the MCAP specification"
+                " registers",
+                {"encoding": encoding, "field": "schema_encoding", "id": schema.id},
+            )
