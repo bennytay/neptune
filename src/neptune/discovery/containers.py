@@ -5,7 +5,7 @@ them, cites each member's stored bytes, hands each regular member's head to the 
 so the report says what the container holds, and opens a member that is itself a container down
 to a fixed depth. Nothing is extracted, no name is resolved against a filesystem, and every read
 is bounded by ``ProbePolicy``: members listed, decoded bytes per compressed stream, nesting depth,
-and the declared compression ratio above which a member is not decoded at all.
+and the declared compression ratio above which a member is not probed.
 
 What it does not do: ingest members. An archive adapter would (none exists yet); this report is
 for selection, explanation and the receipt. Problems are reported as findings, never raised: a
@@ -66,7 +66,9 @@ class ProbePolicy:
     - ``scan_bytes``: decoded bytes examined per compressed stream, and central-directory bytes
       read per zip. At least ``PROBE_HEAD_SIZE``, so every head can be decoded.
     - ``max_ratio``: a member declaring more than this many decoded bytes per compressed byte is
-      not decoded: it is reported instead.
+      reported instead of probed. A zip member is not decoded at all. A gzip states its size only
+      in a trailer that is one only if the stream ends there, so it is decoded to ``scan_bytes``
+      first and held to the ratio only if it is still going at the budget.
     """
 
     max_members: int = 1000
@@ -1251,6 +1253,11 @@ def _gzip(view: _View, scope: _Scope) -> ContainerReport:
     single member) while the first member is still being decoded; nothing when more than one
     member was seen but not the end, or the input was cut, since the total is stated nowhere.
     ``compressed_size`` is the bytes between the first header and the last trailer.
+
+    The trailer is the file's last eight bytes only if the stream ends there; in a file cut short
+    they are deflate data. So the stream is decoded to the budget before the trailer is believed:
+    an end, a cut or a corrupt stream settles what those bytes are, and only a stream still
+    going at the budget is held to ``max_ratio`` by what its trailer states.
     """
     kind, size = ContainerKind.GZIP, view.size
     if not view.complete:
@@ -1267,17 +1274,6 @@ def _gzip(view: _View, scope: _Scope) -> ContainerReport:
     compressed = size - at - _GZIP_TRAILER
     stated = _u32(view.read(size - _GZIP_TRAILER, _GZIP_TRAILER), 4)  # modulo 2^32, as stored
     member = Member(0, name, MemberKind.FILE, whole, stated, compressed, "deflate")
-    if stated > scope.policy.max_ratio * max(compressed, 1):
-        scope.limit(
-            "ratio",
-            whole,
-            f"gzip: the member declares {stated} bytes from {compressed} compressed, over"
-            f" max_ratio {scope.policy.max_ratio}; not decoded",
-            compressed_size=compressed,
-            max_ratio=scope.policy.max_ratio,
-            size=stated,
-        )
-        return ContainerReport(kind, (member,), 1, True)
     decoded = _Decoded(view, at, size - at, _CODECS[kind], scope.policy.scan_bytes)
     decoded.prefix(scope.policy.scan_bytes)  # to the budget: member boundaries lie beyond the head
     _stream_findings(scope, member, kind, decoded)
@@ -1285,6 +1281,20 @@ def _gzip(view: _View, scope: _Scope) -> ContainerReport:
         member = replace(member, size=sum(stated for stated, _ in decoded.sizes))
     elif decoded.cut or decoded.streams > 1:
         member = replace(member, size=None)
+    paused = not (decoded.ended or decoded.cut or decoded.error is not None)
+    if paused and stated > scope.policy.max_ratio * max(compressed, 1):
+        scope.limit(
+            "ratio",
+            whole,
+            f"gzip: the trailer declares {stated} bytes from {compressed} compressed, over"
+            f" max_ratio {scope.policy.max_ratio}, and the stream runs past the"
+            f" {decoded.size} decoded bytes examined; not probed",
+            compressed_size=compressed,
+            decoded=decoded.size,
+            max_ratio=scope.policy.max_ratio,
+            size=stated,
+        )
+        return ContainerReport(kind, (member,), 1, True)
     head, hint, nested = _decoded_head(scope, member, decoded, member.size, compare=False)
     return ContainerReport(kind, (_finish(scope, member, head, hint, nested),), 1, True)
 

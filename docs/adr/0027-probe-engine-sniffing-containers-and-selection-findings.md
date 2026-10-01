@@ -41,8 +41,13 @@ a directory of a million entries, a stream that never ends.
    - Every read is bounded by `ProbePolicy`: `max_members` listed per container, `scan_bytes`
      decoded per compressed stream (and read per central directory), `max_depth` containers along
      one path (default 2: a tar inside a gzip), and `max_ratio`: a member declaring more than that
-     many decoded bytes per compressed byte is reported and not decoded at all. Decoding stops at
-     the budget whatever the stream declares, so a bomb costs at most `scan_bytes` of memory.
+     many decoded bytes per compressed byte is reported and not probed. A zip member declares in
+     its directory and is not decoded at all. A gzip declares only in its trailer, and its last
+     eight bytes are a trailer only if the stream ends there (in a file cut short they are deflate
+     data), so it is decoded to the budget first: an end, a cut or a corrupt stream settles those
+     bytes, and only a stream still going at the budget is held to the ratio by its trailer.
+     Decoding stops at the budget whatever the stream declares, so a bomb costs at most
+     `scan_bytes` of memory.
    - Declared sizes are never trusted for reading: a member's head is decoded to a full head
      whatever the container states, adapters are hinted what the stream holds, and a declaration
      the stream contradicts is a `container_corrupt` finding. A stream container (gzip, bzip2, xz)

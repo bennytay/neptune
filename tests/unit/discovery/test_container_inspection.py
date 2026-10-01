@@ -455,14 +455,38 @@ def test_a_corrupt_deflate_stream_is_reported_and_not_probed() -> None:
     assert probed.findings[0].details == {"error": "zlib.error", "member": 0}
 
 
-def test_a_gzip_declaring_a_bomb_ratio_is_not_decoded() -> None:
-    data = bytearray(gzip.compress(bytes(100), mtime=0))
-    data[-4:] = (10**9).to_bytes(4, "little")  # claim a gigabyte from a few bytes
-    probed = probe(bytes(data))
+def test_a_gzip_declaring_a_bomb_ratio_is_not_probed_once_it_runs_past_the_budget() -> None:
+    # A gzip states its size only in a trailer, and its last bytes are one only if the stream
+    # ends there. So the stream is decoded to the budget first; one still going is held to
+    # max_ratio by what its trailer states.
+    bomb = bytearray(gzip.compress(bytes(2 * 1024 * 1024), mtime=0))  # past the 1 MiB budget
+    bomb[-4:] = (10**9).to_bytes(4, "little")  # claim a gigabyte from a few KiB
+    probed = probe(bytes(bomb))
     assert probed.container is not None
     (member,) = probed.container.members
     assert (member.size, member.probe) == (10**9, None)
     assert codes(probed)[0] == ("container_limit", "ratio")
+    assert probed.findings[0].details == {
+        "compressed_size": len(bomb) - 18,
+        "decoded": 1024 * 1024,
+        "limit": "ratio",
+        "max_ratio": 1000,
+        "size": 10**9,
+    }
+    # A stream that ends within the budget settles its trailer: the claim is a contradiction.
+    short = bytearray(gzip.compress(bytes(100), mtime=0))
+    short[-4:] = (10**9).to_bytes(4, "little")
+    probed = probe(bytes(short))
+    assert probed.container is not None
+    (member,) = probed.container.members
+    assert member.probe is not None
+    assert codes(probed)[0] == ("container_corrupt", "")
+    assert probed.findings[0].details == {
+        "declared": 10**9,
+        "decoded": 100,
+        "member": 0,
+        "stream": 0,
+    }
 
 
 def test_the_byte_budget_bounds_a_compressed_tar_listing() -> None:
@@ -723,7 +747,7 @@ def test_streams_the_budget_cuts_are_not_complete_and_state_no_total() -> None:
 def test_bytes_after_the_last_stream_are_padding_if_null_and_a_finding_otherwise() -> None:
     # Null padding follows gzip members written to block devices; gzip and Python skip it. Other
     # bytes open no stream: they are cited as corrupt and the member keeps what was decoded.
-    garbage = b"not a stream" + bytes(4)  # ends in nulls so gzip's trailer read is not a bomb
+    garbage = b"not a stream, nor a trailer"  # read as gzip's trailer, it would claim a bomb
     for kind, (compress, _) in STREAMS.items():
         padded = probe(compress(NOTES) + bytes(64))
         assert padded.container is not None
@@ -738,7 +762,11 @@ def test_bytes_after_the_last_stream_are_padding_if_null_and_a_finding_otherwise
         assert codes(probed) == [("container_corrupt", ""), ("unsupported", "")], kind
         finding = probed.findings[0]
         assert finding.subject.locator == (ByteRange(len(data) - len(garbage), len(garbage)),)  # type: ignore[union-attr]
-        assert finding.details == {"length": len(garbage), "member": 0, "offset": len(data) - 16}
+        assert finding.details == {
+            "length": len(garbage),
+            "member": 0,
+            "offset": len(data) - len(garbage),
+        }
         assert f"open no {kind} stream" in finding.message
 
 
@@ -760,7 +788,8 @@ def test_a_stream_the_input_cuts_short_is_a_finding_and_its_head_is_still_probed
             assert (
                 "before its end marker" in finding.message and "not probed" not in finding.message
             )
-            assert finding.details["decoded"] >= len(long)
+            decoded = finding.details["decoded"]
+            assert isinstance(decoded, int) and decoded >= len(long)
     short = compress(NOTES) + compress(NOTES)[:40]  # too little before the cut for a whole head
     probed = probe(short)
     assert probed.container is not None
