@@ -12,20 +12,25 @@ Everything an ingest needs to remember between runs lives here, never beside the
         runs/<64 hex>.parquet          its rows of each stream, sorted (``store.series``)
     staging/                           work in progress; anything here is incomplete
 
-A chunk is committed by renaming its finished directory into ``chunks/``: a commit is atomic, so a
-process killed midway leaves no partial chunk, and committing a chunk again changes nothing. Its
-sources are never copied here: the workspace holds what was derived from them and where they are.
+A chunk is committed by renaming its finished, flushed directory into ``chunks/``: a commit is
+atomic, so a process killed midway leaves no partial chunk, and committing a chunk again changes
+nothing. Its sources are never copied here: the workspace holds what was derived from them and
+where they are. Each directory in ``staging/`` is locked (``flock``) by the process writing it, so
+``clear_staging`` removes what dead processes left and never what a live one is writing.
 
 The workspace is local-first. It is local-only by default: anything that would use the network asks
 ``require_network`` first and is refused until the workspace allows it.
 """
 
+import fcntl
 import hashlib
 import os
 import shutil
+import stat
 import tempfile
 from collections import defaultdict
 from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Protocol
@@ -41,6 +46,7 @@ from neptune.model.kinds import RECORD_KINDS, record_key
 from neptune.model.provenance import TransformRecord, transform_record_from_json
 from neptune.model.series import SeriesBatch
 from neptune.model.source import SourceAbsence, SourceArtifact, SourceRevision
+from neptune.store.durable import fsync_directory, fsync_tree
 from neptune.store.series import write_run
 
 FORMAT: Final = 1
@@ -89,19 +95,14 @@ def _read_lines(data: bytes) -> list[Any]:
     return records
 
 
-def _fsync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+def _same_file(path: Path, descriptor: int) -> bool:
+    """Whether ``path`` still names the file or directory open at ``descriptor``."""
     try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
-def _write_durably(path: Path, data: bytes) -> None:
-    with path.open("wb") as stream:
-        stream.write(data)
-        stream.flush()
-        os.fsync(stream.fileno())
+        named = path.lstat()
+    except FileNotFoundError:
+        return False
+    held = os.fstat(descriptor)
+    return (named.st_dev, named.st_ino) == (held.st_dev, held.st_ino)
 
 
 class ChunkLike(Protocol):
@@ -192,24 +193,79 @@ class Workspace:
 
     # --- Atomic writes -------------------------------------------------------------------------
 
-    def _stage(self) -> Path:
-        return Path(tempfile.mkdtemp(dir=self.home / "staging"))
+    @contextmanager
+    def _staging(self) -> Iterator[Path]:
+        """A new directory in ``staging/``, locked while in use and removed after, if still there.
+
+        The lock is what tells ``clear_staging`` the directory is in use. It is taken without
+        waiting: if it is held, or the directory is gone by the time it is taken, a clearer got
+        there first and the directory is abandoned for a new one.
+        """
+        while True:
+            path = Path(tempfile.mkdtemp(dir=self.home / "staging"))
+            try:
+                descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+            except FileNotFoundError:
+                continue
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.close(descriptor)
+                continue
+            if not _same_file(path, descriptor):
+                os.close(descriptor)
+                continue
+            break
+        try:
+            yield path
+        finally:
+            try:
+                if _same_file(path, descriptor):  # not renamed into place
+                    shutil.rmtree(path)
+            finally:
+                os.close(descriptor)
 
     def _replace(self, path: Path, data: bytes) -> None:
         """Write ``path`` whole or not at all."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        staged = Path(tempfile.mkdtemp(dir=self.home / "staging")) / path.name
-        _write_durably(staged, data)
-        staged.replace(path)
-        _fsync_directory(path.parent)
-        staged.parent.rmdir()
+        with self._staging() as staging:
+            staged = staging / path.name
+            with staged.open("wb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            staged.replace(path)
+            fsync_directory(path.parent)
 
     def clear_staging(self) -> int:
-        """Remove what interrupted writes left behind; return how many entries were removed."""
+        """Remove what interrupted writes left behind; return how many entries were removed.
+
+        An entry still locked by the process writing it, this one or another, is left alone.
+        """
         removed = 0
-        for entry in (self.home / "staging").iterdir():
-            shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
-            removed += 1
+        for entry in sorted((self.home / "staging").iterdir()):
+            try:
+                mode = entry.lstat().st_mode
+            except FileNotFoundError:
+                continue  # finished meanwhile
+            if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+                entry.unlink()  # nothing Neptune stages; no process holds it
+                removed += 1
+                continue
+            try:
+                descriptor = os.open(entry, os.O_RDONLY | os.O_NOFOLLOW)
+            except FileNotFoundError:
+                continue  # finished meanwhile
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if not _same_file(entry, descriptor):
+                    continue  # renamed into place or removed while this waited
+                shutil.rmtree(entry) if stat.S_ISDIR(mode) else entry.unlink()
+                removed += 1
+            except BlockingIOError:
+                continue  # in use
+            finally:
+                os.close(descriptor)
         return removed
 
     # --- Ledgers -------------------------------------------------------------------------------
@@ -306,23 +362,17 @@ class Workspace:
         final = self.chunk_path(chunk.id)
         if final.is_dir():
             return False
-        staged = self._stage()
-        try:
-            _write_durably(staged / "chunk.json", canonical_json.dumps(chunk.to_json()))
-            _write_durably(staged / "records.jsonl", _lines(records))
-            _write_durably(staged / "findings.jsonl", _lines(findings))
+        with self._staging() as staged:
+            (staged / "chunk.json").write_bytes(canonical_json.dumps(chunk.to_json()))
+            (staged / "records.jsonl").write_bytes(_lines(records))
+            (staged / "findings.jsonl").write_bytes(_lines(findings))
             (staged / "runs").mkdir()
             by_stream: dict[RecordId, list[SeriesBatch]] = defaultdict(list)
             for batch in series:
                 by_stream[batch.stream].append(batch)
             for stream, batches in sorted(by_stream.items()):
                 write_run(batches, staged / "runs" / f"{_hex(stream)}.parquet")
-            for path in (*(staged / "runs").iterdir(), staged / "runs", staged):
-                if path.is_file():
-                    with path.open("rb") as written:
-                        os.fsync(written.fileno())
-                else:
-                    _fsync_directory(path)
+            fsync_tree(staged)
             final.parent.mkdir(parents=True, exist_ok=True)
             try:
                 staged.rename(final)
@@ -330,11 +380,8 @@ class Workspace:
                 if final.is_dir():  # another process committed it first: the same output
                     return False
                 raise
-            _fsync_directory(final.parent)
+            fsync_directory(final.parent)
             return True
-        finally:
-            if staged.exists():
-                shutil.rmtree(staged)
 
     def load(self, chunk: str) -> CommittedChunk:
         """A committed chunk's output."""

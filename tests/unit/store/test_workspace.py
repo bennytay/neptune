@@ -16,6 +16,7 @@ from neptune.discovery.reader import BytesReader
 from neptune.discovery.scan import scan
 from neptune.discovery.source import LocalSource
 from neptune.identity import canonical_json
+from neptune.store.series import write_run
 from neptune.store.workspace import (
     HOME_VARIABLE,
     LocalOnlyError,
@@ -214,6 +215,29 @@ def test_a_commit_killed_midway_leaves_no_partial_chunk(tmp_path: Path) -> None:
     assert workspace.clear_staging() == 1  # the dead process's staging directory
     assert workspace.commit(chunk, out.records, out.findings, out.series)
     assert workspace.load(chunk.id).findings == out.findings
+
+
+def test_clearing_staging_leaves_a_commit_in_flight_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Another process clears staging mid-commit: dead debris goes, the live one stays."""
+    workspace, output = Workspace(tmp_path), tally_output()
+    chunk, out = output.plan.chunks[1], output.outputs[1]
+    abandoned = tmp_path / "staging" / "tmp-dead-writer"
+    abandoned.mkdir()
+    (abandoned / "chunk.json").write_bytes(b"{}")
+    cleared: list[int] = []
+
+    def clear_then_write(*args: object) -> None:
+        cleared.append(Workspace(tmp_path).clear_staging())  # its own open file: its own lock
+        write_run(*args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("neptune.store.workspace.write_run", clear_then_write)
+    assert workspace.commit(chunk, out.records, out.findings, out.series)
+    assert cleared and sum(cleared) == 1  # the abandoned directory, never the commit in flight
+    assert not abandoned.exists()
+    assert workspace.load(chunk.id).findings == out.findings
+    assert not any((tmp_path / "staging").iterdir())
 
 
 def test_loading_an_uncommitted_chunk_is_an_error(tmp_path: Path) -> None:
