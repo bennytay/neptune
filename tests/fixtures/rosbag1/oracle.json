@@ -1,0 +1,735 @@
+{
+ "connection_collision.bag": {
+  "connections": [
+   {
+    "callerid": "/arm_driver",
+    "count": 5,
+    "id": 0,
+    "latching": 0,
+    "md5sum": "3066dcd76a6cfaef579bd0f34173e9fd",
+    "topic": "/joint_states",
+    "type": "sensor_msgs/msg/JointState"
+   },
+   {
+    "callerid": "/base_driver",
+    "count": 5,
+    "id": 1,
+    "latching": 0,
+    "md5sum": "cd5e73d190d741a2f92e81eda573aca7",
+    "topic": "/odom",
+    "type": "nav_msgs/msg/Odometry"
+   },
+   {
+    "callerid": "/robot_state_publisher",
+    "count": 5,
+    "id": 2,
+    "latching": 0,
+    "md5sum": "94810edda583a504dfda3829e70d7eec",
+    "topic": "/tf",
+    "type": "tf2_msgs/msg/TFMessage"
+   },
+   {
+    "callerid": "/robot_state_publisher",
+    "count": 1,
+    "id": 3,
+    "latching": 1,
+    "md5sum": "94810edda583a504dfda3829e70d7eec",
+    "topic": "/tf_static",
+    "type": "tf2_msgs/msg/TFMessage"
+   }
+  ],
+  "end": 1790000000440000001,
+  "error": null,
+  "messages": [
+   [
+    "/tf_static",
+    1790000000005000000,
+    94,
+    "c4be8e1f4e7cb96d55ed8ef841386fe4d4736050ec03dbd1fa50bdce52d6fd50"
+   ],
+   [
+    "/joint_states",
+    1790000000010000000,
+    296,
+    "be5c5bdaf3d3a39ae5b879ccf1b15faca554e65a233d1ee144f2f301fd8e90c8"
+   ],
+   [
+    "/odom",
+    1790000000030000000,
+    713,
+    "db289f97bdae3e7bbd2c20f88090d59fd3294f86b2712b94ae7ca49e22c5ae56"
+   ],
+   [
+    "/tf",
+    1790000000040000000,
+    186,
+    "53d5c050bb62a8d088df2c0286f2a8e86bff59b2746e3bb9fbde7d0541d933c7"
+   ],
+   [
+    "/joint_states",
+    1790000000110000000,
+    296,
+    "28905477156bd22bccb9307b458dfa134907111cf10e1ae7a86b5dc3a179e16d"
+   ],
+   [
+    "/odom",
+    1790000000130000000,
+    713,
+    "0ebc3a49b865e0f09e014c5f27ee13a90dc53725eba77eb88e6ea44affb3e0ee"
+   ],
+   [
+    "/tf",
+    1790000000140000000,
+    186,
+    "dc23941b9b6910d03ffec85de249052ee4337883866a202369b371c22eb7da35"
+   ],
+   [
+    "/joint_states",
+    1790000000210000000,
+    296,
+    "649c4c0420236bdcb889765955d967c05e5a63309910b1285bff8b0be3233c51"
+   ],
+   [
+    "/odom",
+    1790000000230000000,
+    713,
+    "75085cd7615d1d52081a7cfac4e4d7ce2c32c47757ddd3cd5a9d83a917b006a5"
+   ],
+   [
+    "/tf",
+    1790000000240000000,
+    186,
+    "0ef988952e815d1db2187fee1a7117ea15d86fc3eebb7470f142a6ff8eda4966"
+   ],
+   [
+    "/joint_states",
+    1790000000310000000,
+    296,
+    "d79b09c2e68f1f17cf0e3024b4774c92baaf174ebbe307149577342a3c0d7962"
+   ],
+   [
+    "/odom",
+    1790000000330000000,
+    713,
+    "7c008f37e0cb3d8b67fafb10b4eb069cdda341a7e90a20bbf499df033ea51624"
+   ],
+   [
+    "/tf",
+    1790000000340000000,
+    186,
+    "a967cdc9a209a46b44eb9d789cae4e563046e426c1a6e0d0b07c0306874705e3"
+   ],
+   [
+    "/joint_states",
+    1790000000410000000,
+    296,
+    "28ceb42046298ec1213401c4d7028fee80c64e9c34d0b2c4fc8bdeeda1912c55"
+   ],
+   [
+    "/odom",
+    1790000000430000000,
+    713,
+    "58dd09b10ecdb54acbd0e74a64f9505c61071ec2a0ad5b7a8eb7e5189158d4f4"
+   ],
+   [
+    "/tf",
+    1790000000440000000,
+    186,
+    "28f46c7d9c6dbe5f623443ef37992d1ed39303e1d9cdee28908a0f7663bd8665"
+   ]
+  ],
+  "start": 1790000000005000000
+ },
+ "empty.bag": {
+  "connections": [],
+  "end": 0,
+  "error": null,
+  "messages": [],
+  "start": 9223372036854775807
+ },
+ "lying_chunk_info.bag": {
+  "connections": [
+   {
+    "callerid": "/arm_driver",
+    "count": 5,
+    "id": 0,
+    "latching": 0,
+    "md5sum": "3066dcd76a6cfaef579bd0f34173e9fd",
+    "topic": "/joint_states",
+    "type": "sensor_msgs/msg/JointState"
+   },
+   {
+    "callerid": "/base_driver",
+    "count": 5,
+    "id": 1,
+    "latching": 0,
+    "md5sum": "cd5e73d190d741a2f92e81eda573aca7",
+    "topic": "/odom",
+    "type": "nav_msgs/msg/Odometry"
+   },
+   {
+    "callerid": "/robot_state_publisher",
+    "count": 5,
+    "id": 2,
+    "latching": 0,
+    "md5sum": "94810edda583a504dfda3829e70d7eec",
+    "topic": "/tf",
+    "type": "tf2_msgs/msg/TFMessage"
+   },
+   {
+    "callerid": "/robot_state_publisher",
+    "count": 1,
+    "id": 3,
+    "latching": 1,
+    "md5sum": "94810edda583a504dfda3829e70d7eec",
+    "topic": "/tf_static",
+    "type": "tf2_msgs/msg/TFMessage"
+   }
+  ],
+  "end": 1790000000440000001,
+  "error": null,
+  "messages": [
+   [
+    "/tf_static",
+    1790000000005000000,
+    94,
+    "c4be8e1f4e7cb96d55ed8ef841386fe4d4736050ec03dbd1fa50bdce52d6fd50"
+   ],
+   [
+    "/joint_states",
+    1790000000010000000,
+    296,
+    "be5c5bdaf3d3a39ae5b879ccf1b15faca554e65a233d1ee144f2f301fd8e90c8"
+   ],
+   [
+    "/odom",
+    1790000000030000000,
+    713,
+    "db289f97bdae3e7bbd2c20f88090d59fd3294f86b2712b94ae7ca49e22c5ae56"
+   ],
+   [
+    "/tf",
+    1790000000040000000,
+    186,
+    "53d5c050bb62a8d088df2c0286f2a8e86bff59b2746e3bb9fbde7d0541d933c7"
+   ],
+   [
+    "/joint_states",
+    1790000000110000000,
+    296,
+    "28905477156bd22bccb9307b458dfa134907111cf10e1ae7a86b5dc3a179e16d"
+   ],
+   [
+    "/odom",
+    1790000000130000000,
+    713,
+    "0ebc3a49b865e0f09e014c5f27ee13a90dc53725eba77eb88e6ea44affb3e0ee"
+   ],
+   [
+    "/tf",
+    1790000000140000000,
+    186,
+    "dc23941b9b6910d03ffec85de249052ee4337883866a202369b371c22eb7da35"
+   ],
+   [
+    "/joint_states",
+    1790000000210000000,
+    296,
+    "649c4c0420236bdcb889765955d967c05e5a63309910b1285bff8b0be3233c51"
+   ],
+   [
+    "/odom",
+    1790000000230000000,
+    713,
+    "75085cd7615d1d52081a7cfac4e4d7ce2c32c47757ddd3cd5a9d83a917b006a5"
+   ],
+   [
+    "/tf",
+    1790000000240000000,
+    186,
+    "0ef988952e815d1db2187fee1a7117ea15d86fc3eebb7470f142a6ff8eda4966"
+   ],
+   [
+    "/joint_states",
+    1790000000310000000,
+    296,
+    "d79b09c2e68f1f17cf0e3024b4774c92baaf174ebbe307149577342a3c0d7962"
+   ],
+   [
+    "/odom",
+    1790000000330000000,
+    713,
+    "7c008f37e0cb3d8b67fafb10b4eb069cdda341a7e90a20bbf499df033ea51624"
+   ],
+   [
+    "/tf",
+    1790000000340000000,
+    186,
+    "a967cdc9a209a46b44eb9d789cae4e563046e426c1a6e0d0b07c0306874705e3"
+   ],
+   [
+    "/joint_states",
+    1790000000410000000,
+    296,
+    "28ceb42046298ec1213401c4d7028fee80c64e9c34d0b2c4fc8bdeeda1912c55"
+   ],
+   [
+    "/odom",
+    1790000000430000000,
+    713,
+    "58dd09b10ecdb54acbd0e74a64f9505c61071ec2a0ad5b7a8eb7e5189158d4f4"
+   ],
+   [
+    "/tf",
+    1790000000440000000,
+    186,
+    "28f46c7d9c6dbe5f623443ef37992d1ed39303e1d9cdee28908a0f7663bd8665"
+   ]
+  ],
+  "start": 1790000000005000000
+ },
+ "robot_bz2.bag": {
+  "connections": [
+   {
+    "callerid": "/arm_driver",
+    "count": 5,
+    "id": 0,
+    "latching": 0,
+    "md5sum": "3066dcd76a6cfaef579bd0f34173e9fd",
+    "topic": "/joint_states",
+    "type": "sensor_msgs/msg/JointState"
+   },
+   {
+    "callerid": "/base_driver",
+    "count": 5,
+    "id": 1,
+    "latching": 0,
+    "md5sum": "cd5e73d190d741a2f92e81eda573aca7",
+    "topic": "/odom",
+    "type": "nav_msgs/msg/Odometry"
+   },
+   {
+    "callerid": "/robot_state_publisher",
+    "count": 5,
+    "id": 2,
+    "latching": 0,
+    "md5sum": "94810edda583a504dfda3829e70d7eec",
+    "topic": "/tf",
+    "type": "tf2_msgs/msg/TFMessage"
+   },
+   {
+    "callerid": "/robot_state_publisher",
+    "count": 1,
+    "id": 3,
+    "latching": 1,
+    "md5sum": "94810edda583a504dfda3829e70d7eec",
+    "topic": "/tf_static",
+    "type": "tf2_msgs/msg/TFMessage"
+   }
+  ],
+  "end": 1790000000440000001,
+  "error": null,
+  "messages": [
+   [
+    "/tf_static",
+    1790000000005000000,
+    94,
+    "c4be8e1f4e7cb96d55ed8ef841386fe4d4736050ec03dbd1fa50bdce52d6fd50"
+   ],
+   [
+    "/joint_states",
+    1790000000010000000,
+    296,
+    "be5c5bdaf3d3a39ae5b879ccf1b15faca554e65a233d1ee144f2f301fd8e90c8"
+   ],
+   [
+    "/odom",
+    1790000000030000000,
+    713,
+    "db289f97bdae3e7bbd2c20f88090d59fd3294f86b2712b94ae7ca49e22c5ae56"
+   ],
+   [
+    "/tf",
+    1790000000040000000,
+    186,
+    "53d5c050bb62a8d088df2c0286f2a8e86bff59b2746e3bb9fbde7d0541d933c7"
+   ],
+   [
+    "/joint_states",
+    1790000000110000000,
+    296,
+    "28905477156bd22bccb9307b458dfa134907111cf10e1ae7a86b5dc3a179e16d"
+   ],
+   [
+    "/odom",
+    1790000000130000000,
+    713,
+    "0ebc3a49b865e0f09e014c5f27ee13a90dc53725eba77eb88e6ea44affb3e0ee"
+   ],
+   [
+    "/tf",
+    1790000000140000000,
+    186,
+    "dc23941b9b6910d03ffec85de249052ee4337883866a202369b371c22eb7da35"
+   ],
+   [
+    "/joint_states",
+    1790000000210000000,
+    296,
+    "649c4c0420236bdcb889765955d967c05e5a63309910b1285bff8b0be3233c51"
+   ],
+   [
+    "/odom",
+    1790000000230000000,
+    713,
+    "75085cd7615d1d52081a7cfac4e4d7ce2c32c47757ddd3cd5a9d83a917b006a5"
+   ],
+   [
+    "/tf",
+    1790000000240000000,
+    186,
+    "0ef988952e815d1db2187fee1a7117ea15d86fc3eebb7470f142a6ff8eda4966"
+   ],
+   [
+    "/joint_states",
+    1790000000310000000,
+    296,
+    "d79b09c2e68f1f17cf0e3024b4774c92baaf174ebbe307149577342a3c0d7962"
+   ],
+   [
+    "/odom",
+    1790000000330000000,
+    713,
+    "7c008f37e0cb3d8b67fafb10b4eb069cdda341a7e90a20bbf499df033ea51624"
+   ],
+   [
+    "/tf",
+    1790000000340000000,
+    186,
+    "a967cdc9a209a46b44eb9d789cae4e563046e426c1a6e0d0b07c0306874705e3"
+   ],
+   [
+    "/joint_states",
+    1790000000410000000,
+    296,
+    "28ceb42046298ec1213401c4d7028fee80c64e9c34d0b2c4fc8bdeeda1912c55"
+   ],
+   [
+    "/odom",
+    1790000000430000000,
+    713,
+    "58dd09b10ecdb54acbd0e74a64f9505c61071ec2a0ad5b7a8eb7e5189158d4f4"
+   ],
+   [
+    "/tf",
+    1790000000440000000,
+    186,
+    "28f46c7d9c6dbe5f623443ef37992d1ed39303e1d9cdee28908a0f7663bd8665"
+   ]
+  ],
+  "start": 1790000000005000000
+ },
+ "robot_lz4.bag": {
+  "connections": [
+   {
+    "callerid": "/arm_driver",
+    "count": 5,
+    "id": 0,
+    "latching": 0,
+    "md5sum": "3066dcd76a6cfaef579bd0f34173e9fd",
+    "topic": "/joint_states",
+    "type": "sensor_msgs/msg/JointState"
+   },
+   {
+    "callerid": "/base_driver",
+    "count": 5,
+    "id": 1,
+    "latching": 0,
+    "md5sum": "cd5e73d190d741a2f92e81eda573aca7",
+    "topic": "/odom",
+    "type": "nav_msgs/msg/Odometry"
+   },
+   {
+    "callerid": "/robot_state_publisher",
+    "count": 5,
+    "id": 2,
+    "latching": 0,
+    "md5sum": "94810edda583a504dfda3829e70d7eec",
+    "topic": "/tf",
+    "type": "tf2_msgs/msg/TFMessage"
+   },
+   {
+    "callerid": "/robot_state_publisher",
+    "count": 1,
+    "id": 3,
+    "latching": 1,
+    "md5sum": "94810edda583a504dfda3829e70d7eec",
+    "topic": "/tf_static",
+    "type": "tf2_msgs/msg/TFMessage"
+   }
+  ],
+  "end": 1790000000440000001,
+  "error": null,
+  "messages": [
+   [
+    "/tf_static",
+    1790000000005000000,
+    94,
+    "c4be8e1f4e7cb96d55ed8ef841386fe4d4736050ec03dbd1fa50bdce52d6fd50"
+   ],
+   [
+    "/joint_states",
+    1790000000010000000,
+    296,
+    "be5c5bdaf3d3a39ae5b879ccf1b15faca554e65a233d1ee144f2f301fd8e90c8"
+   ],
+   [
+    "/odom",
+    1790000000030000000,
+    713,
+    "db289f97bdae3e7bbd2c20f88090d59fd3294f86b2712b94ae7ca49e22c5ae56"
+   ],
+   [
+    "/tf",
+    1790000000040000000,
+    186,
+    "53d5c050bb62a8d088df2c0286f2a8e86bff59b2746e3bb9fbde7d0541d933c7"
+   ],
+   [
+    "/joint_states",
+    1790000000110000000,
+    296,
+    "28905477156bd22bccb9307b458dfa134907111cf10e1ae7a86b5dc3a179e16d"
+   ],
+   [
+    "/odom",
+    1790000000130000000,
+    713,
+    "0ebc3a49b865e0f09e014c5f27ee13a90dc53725eba77eb88e6ea44affb3e0ee"
+   ],
+   [
+    "/tf",
+    1790000000140000000,
+    186,
+    "dc23941b9b6910d03ffec85de249052ee4337883866a202369b371c22eb7da35"
+   ],
+   [
+    "/joint_states",
+    1790000000210000000,
+    296,
+    "649c4c0420236bdcb889765955d967c05e5a63309910b1285bff8b0be3233c51"
+   ],
+   [
+    "/odom",
+    1790000000230000000,
+    713,
+    "75085cd7615d1d52081a7cfac4e4d7ce2c32c47757ddd3cd5a9d83a917b006a5"
+   ],
+   [
+    "/tf",
+    1790000000240000000,
+    186,
+    "0ef988952e815d1db2187fee1a7117ea15d86fc3eebb7470f142a6ff8eda4966"
+   ],
+   [
+    "/joint_states",
+    1790000000310000000,
+    296,
+    "d79b09c2e68f1f17cf0e3024b4774c92baaf174ebbe307149577342a3c0d7962"
+   ],
+   [
+    "/odom",
+    1790000000330000000,
+    713,
+    "7c008f37e0cb3d8b67fafb10b4eb069cdda341a7e90a20bbf499df033ea51624"
+   ],
+   [
+    "/tf",
+    1790000000340000000,
+    186,
+    "a967cdc9a209a46b44eb9d789cae4e563046e426c1a6e0d0b07c0306874705e3"
+   ],
+   [
+    "/joint_states",
+    1790000000410000000,
+    296,
+    "28ceb42046298ec1213401c4d7028fee80c64e9c34d0b2c4fc8bdeeda1912c55"
+   ],
+   [
+    "/odom",
+    1790000000430000000,
+    713,
+    "58dd09b10ecdb54acbd0e74a64f9505c61071ec2a0ad5b7a8eb7e5189158d4f4"
+   ],
+   [
+    "/tf",
+    1790000000440000000,
+    186,
+    "28f46c7d9c6dbe5f623443ef37992d1ed39303e1d9cdee28908a0f7663bd8665"
+   ]
+  ],
+  "start": 1790000000005000000
+ },
+ "robot_none.bag": {
+  "connections": [
+   {
+    "callerid": "/arm_driver",
+    "count": 5,
+    "id": 0,
+    "latching": 0,
+    "md5sum": "3066dcd76a6cfaef579bd0f34173e9fd",
+    "topic": "/joint_states",
+    "type": "sensor_msgs/msg/JointState"
+   },
+   {
+    "callerid": "/base_driver",
+    "count": 5,
+    "id": 1,
+    "latching": 0,
+    "md5sum": "cd5e73d190d741a2f92e81eda573aca7",
+    "topic": "/odom",
+    "type": "nav_msgs/msg/Odometry"
+   },
+   {
+    "callerid": "/robot_state_publisher",
+    "count": 5,
+    "id": 2,
+    "latching": 0,
+    "md5sum": "94810edda583a504dfda3829e70d7eec",
+    "topic": "/tf",
+    "type": "tf2_msgs/msg/TFMessage"
+   },
+   {
+    "callerid": "/robot_state_publisher",
+    "count": 1,
+    "id": 3,
+    "latching": 1,
+    "md5sum": "94810edda583a504dfda3829e70d7eec",
+    "topic": "/tf_static",
+    "type": "tf2_msgs/msg/TFMessage"
+   }
+  ],
+  "end": 1790000000440000001,
+  "error": null,
+  "messages": [
+   [
+    "/tf_static",
+    1790000000005000000,
+    94,
+    "c4be8e1f4e7cb96d55ed8ef841386fe4d4736050ec03dbd1fa50bdce52d6fd50"
+   ],
+   [
+    "/joint_states",
+    1790000000010000000,
+    296,
+    "be5c5bdaf3d3a39ae5b879ccf1b15faca554e65a233d1ee144f2f301fd8e90c8"
+   ],
+   [
+    "/odom",
+    1790000000030000000,
+    713,
+    "db289f97bdae3e7bbd2c20f88090d59fd3294f86b2712b94ae7ca49e22c5ae56"
+   ],
+   [
+    "/tf",
+    1790000000040000000,
+    186,
+    "53d5c050bb62a8d088df2c0286f2a8e86bff59b2746e3bb9fbde7d0541d933c7"
+   ],
+   [
+    "/joint_states",
+    1790000000110000000,
+    296,
+    "28905477156bd22bccb9307b458dfa134907111cf10e1ae7a86b5dc3a179e16d"
+   ],
+   [
+    "/odom",
+    1790000000130000000,
+    713,
+    "0ebc3a49b865e0f09e014c5f27ee13a90dc53725eba77eb88e6ea44affb3e0ee"
+   ],
+   [
+    "/tf",
+    1790000000140000000,
+    186,
+    "dc23941b9b6910d03ffec85de249052ee4337883866a202369b371c22eb7da35"
+   ],
+   [
+    "/joint_states",
+    1790000000210000000,
+    296,
+    "649c4c0420236bdcb889765955d967c05e5a63309910b1285bff8b0be3233c51"
+   ],
+   [
+    "/odom",
+    1790000000230000000,
+    713,
+    "75085cd7615d1d52081a7cfac4e4d7ce2c32c47757ddd3cd5a9d83a917b006a5"
+   ],
+   [
+    "/tf",
+    1790000000240000000,
+    186,
+    "0ef988952e815d1db2187fee1a7117ea15d86fc3eebb7470f142a6ff8eda4966"
+   ],
+   [
+    "/joint_states",
+    1790000000310000000,
+    296,
+    "d79b09c2e68f1f17cf0e3024b4774c92baaf174ebbe307149577342a3c0d7962"
+   ],
+   [
+    "/odom",
+    1790000000330000000,
+    713,
+    "7c008f37e0cb3d8b67fafb10b4eb069cdda341a7e90a20bbf499df033ea51624"
+   ],
+   [
+    "/tf",
+    1790000000340000000,
+    186,
+    "a967cdc9a209a46b44eb9d789cae4e563046e426c1a6e0d0b07c0306874705e3"
+   ],
+   [
+    "/joint_states",
+    1790000000410000000,
+    296,
+    "28ceb42046298ec1213401c4d7028fee80c64e9c34d0b2c4fc8bdeeda1912c55"
+   ],
+   [
+    "/odom",
+    1790000000430000000,
+    713,
+    "58dd09b10ecdb54acbd0e74a64f9505c61071ec2a0ad5b7a8eb7e5189158d4f4"
+   ],
+   [
+    "/tf",
+    1790000000440000000,
+    186,
+    "28f46c7d9c6dbe5f623443ef37992d1ed39303e1d9cdee28908a0f7663bd8665"
+   ]
+  ],
+  "start": 1790000000005000000
+ },
+ "truncated.bag": {
+  "connections": [],
+  "end": null,
+  "error": "ReaderError",
+  "messages": [],
+  "start": null
+ },
+ "unclosed.bag": {
+  "connections": [],
+  "end": null,
+  "error": "ReaderError",
+  "messages": [],
+  "start": null
+ },
+ "unknown_compression.bag": {
+  "connections": [],
+  "end": null,
+  "error": "ReaderError",
+  "messages": [],
+  "start": null
+ }
+}
