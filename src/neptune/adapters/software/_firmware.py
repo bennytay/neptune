@@ -205,8 +205,29 @@ def _read_elf(reading: Reading) -> list[Draft]:
     draft = Draft(entry=reading.at(table))
     looked = reading.provenance(draft.entry)
     builds, names, releases = [], [], []
+    read_limit = reading.config.integer("max_header_bytes")
+    note_limit = reading.config.integer("max_items")
+    seen: set[_Region] = set()
+    spent = notes = 0
+    capped = False
     for region in regions:
+        if capped:
+            break
+        if region in seen:  # the same bytes again add no note
+            continue
+        seen.add(region)
+        spent += region.size
+        if spent > read_limit:  # hostile tables point many regions at the same big range
+            reading.too_large(
+                reading.span(region.offset, region.size), spent, read_limit, "max_header_bytes"
+            )
+            break
         for note in _notes(reading, header, region):
+            notes += 1
+            if notes > note_limit:
+                reading.too_many_entries(reading.span(note.offset, len(note.desc)), note_limit)
+                capped = True
+                break
             at = reading.span(note.offset, len(note.desc))
             if note.name == b"GNU" and note.type == _NT_GNU_BUILD_ID:
                 builds.append(
@@ -292,8 +313,14 @@ def _read_esp(reading: Reading) -> list[Draft]:
         )
     )
     digest_at = reading.span(_ESP_DESC + 144, 32)
-    digest = data[_ESP_DESC + 144 : _ESP_DESC + 176].hex()
-    draft.build = reading.value(draft, "build", digest, digest_at, BuildId, "build id")
+    raw_digest = data[_ESP_DESC + 144 : _ESP_DESC + 176]
+    digest = raw_digest.hex()
+    if not any(raw_digest) or all(byte == 0xFF for byte in raw_digest):
+        # An unfinalised or erased image: all zero or all 0xff is no hash, and two such images
+        # must not look like one build.
+        draft.build = reading.invalid(draft, "build", digest_at, "is unset (all zero or all 0xff)")
+    else:
+        draft.build = reading.value(draft, "build", digest, digest_at, BuildId, "build id")
     return [draft]
 
 

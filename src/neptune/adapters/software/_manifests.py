@@ -50,9 +50,11 @@ def _is_text(head: bytes) -> bool:
 # --- package.xml -------------------------------------------------------------------------------
 
 # Leading XML declaration, processing instructions, comments, a doctype and whitespace, then
-# <package.
+# <package. Every step is unambiguous (one whitespace byte, no lazy ``.*?``, no nested ``+``), so a
+# hostile head cannot make the match backtrack.
 _PACKAGE_ROOT: Final = re.compile(
-    rb"(?:\xef\xbb\xbf)?(?:\s+|<\?.*?\?>|<!--.*?-->|<!DOCTYPE[^\[>]*(?:\[.*?\])?\s*>)*"
+    rb"(?:\xef\xbb\xbf)?(?:\s|<\?(?:[^?]|\?(?!>))*\?>|<!--(?:[^-]|-(?!->))*-->"
+    rb"|<!DOCTYPE[^\[>]*(?:\[[^\]]*\]\s*)?>)*"
     rb"<package[\s>/]",
     re.DOTALL,
 )
@@ -436,10 +438,45 @@ def _detect_setup_py(head: bytes, size: int) -> Detected | None:
     )
 
 
-def _is_setup(function: ast.expr) -> bool:
+def _setup_bindings(tree: ast.AST) -> tuple[frozenset[str], frozenset[str]]:
+    """The names the script binds to setuptools' ``setup`` and to its modules, from its imports.
+
+    A call is ``setup()`` only through one of these: ``app.setup(...)`` or a local ``setup`` of
+    the script's own is not a package declaration.
+    """
+    functions: set[str] = set()
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in ("setuptools", "distutils.core"):
+            functions.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "setup"
+            )
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in ("setuptools", "distutils.core"):
+                    modules.add(alias.asname or alias.name)
+    return frozenset(functions), frozenset(modules)
+
+
+def _dotted(node: ast.expr) -> str | None:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return None
+    return ".".join([node.id, *reversed(parts)])
+
+
+def _is_setup(function: ast.expr, bindings: tuple[frozenset[str], frozenset[str]]) -> bool:
+    functions, modules = bindings
     if isinstance(function, ast.Name):
-        return function.id == "setup"
-    return isinstance(function, ast.Attribute) and function.attr == "setup"
+        return function.id in functions
+    return (
+        isinstance(function, ast.Attribute)
+        and function.attr == "setup"
+        and _dotted(function.value) in modules
+    )
 
 
 def _read_setup_py(reading: Reading) -> list[Draft]:
@@ -460,8 +497,13 @@ def _read_setup_py(reading: Reading) -> list[Draft]:
     for line in body.splitlines(keepends=True):
         starts.append(starts[-1] + len(line))
     places = _Places(reading, starts)
+    bindings = _setup_bindings(tree)
     calls = sorted(
-        (node for node in ast.walk(tree) if isinstance(node, ast.Call) and _is_setup(node.func)),
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and _is_setup(node.func, bindings)
+        ),
         key=lambda call: (call.lineno, call.col_offset),
     )
     drafts: list[Draft] = []

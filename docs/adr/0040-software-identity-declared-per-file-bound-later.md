@@ -103,8 +103,10 @@ gigabyte checkpoint hashed twice, a URDF-style guess turned into a binding.
     Every source is one chunk.
 11. **Nothing is executed or expanded, everything is bounded.** `setup.py` becomes a syntax tree
     only; XML entity declarations are refused; JSON repeating a key or holding `NaN` is
-    malformed, never a silent last value. `max_document_bytes` (32 MiB), `max_header_bytes`
-    (16 MiB) and `max_items` (20,000) bound every read; past one is a `limit` finding.
+    malformed, never a silent last value. `max_document_bytes` (8 MiB), `max_header_bytes`
+    (8 MiB) and `max_items` (20,000) bound every read, and decoded documents stay far inside
+    the 512 MiB the adapter declares; past one is a `limit` finding. Per-entry findings and ELF
+    notes stop at `max_items` too (`too_many_entries`).
 12. **Not here.** Binding these records to runs, including a run-level "this run has no software
     identity", is MVL-38's; manifest overrides are MVL-14's; release notes and changelogs are
     documents (MVL-28): a source has one adapter, and a version in prose is interpretation.

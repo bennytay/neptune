@@ -124,7 +124,7 @@ def test_the_descriptor_documents_every_code_the_fixtures_produce() -> None:
     assert produced <= declared
     # Every code but the limits and an empty declaration shows up in a real fixture.
     untested = declared - produced
-    expected = {"too_large", "too_many_items", "no_software_declared"}
+    expected = {"too_large", "too_many_entries", "too_many_items", "no_software_declared"}
     assert untested == {f"software.{name}" for name in expected}
 
 

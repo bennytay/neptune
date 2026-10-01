@@ -119,7 +119,11 @@ def _no_constant(name: str) -> NoReturn:
 def loads_json(text: str) -> Any:
     """Strict JSON: a repeated key, ``NaN`` or an infinity raises ``ValueError``, never a silent
     last value. Nesting past the parser's guard raises ``RecursionError``."""
-    return json.loads(text, object_pairs_hook=_object_pairs, parse_constant=_no_constant)
+    # A leading byte-order mark is tolerated (Windows tools write one); citations are JSON pointers,
+    # so dropping it moves none.
+    return json.loads(
+        text.removeprefix("\ufeff"), object_pairs_hook=_object_pairs, parse_constant=_no_constant
+    )
 
 
 def json_head(head: bytes, size: int) -> Any:
@@ -153,7 +157,7 @@ def toml_head(head: bytes, size: int) -> dict[str, Any] | None:
     return None
 
 
-_DESCRIBE: Final = re.compile(r"(?:(?P<tag>.+)-[0-9]+-g)?(?P<sha>[0-9a-f]{4,64})(?:-dirty)?")
+_DESCRIBE: Final = re.compile(r"(?:(?P<tag>.+)-[0-9]+-g)?(?P<sha>[0-9a-f]{7,64})(?:-dirty)?")
 
 
 def describe(text: str) -> tuple[bool, tuple[int, int] | None]:
@@ -183,6 +187,7 @@ class Reading:
             SoftwareConfiguration.kind, self.whole, config.transform
         )
         self.findings: list[IngestFinding] = []
+        self._entries_reported = 0
         # Findings about a value of the record: they name it only if it is emitted.
         self._deferred: list[dict[str, Any]] = []
 
@@ -242,13 +247,34 @@ class Reading:
         )
 
     def malformed_entry(self, subject: EvidenceRef, problem: str) -> None:
-        """One entry breaks its format: that entry is skipped, the others are read."""
+        """One entry breaks its format: that entry is skipped, the others are read.
+
+        Bounded: past ``max_items`` entries the rest are skipped unreported, with one finding.
+        """
+        self._entries_reported += 1
+        limit = self.config.integer("max_items")
+        if self._entries_reported > limit + 1:
+            return
+        if self._entries_reported > limit:
+            self.too_many_entries(subject, limit)
+            return
         self.report(
             "malformed_entry",
             FindingCategory.CORRUPT,
             Severity.ERROR,
             subject,
             f"an entry of the {self.label} {problem}; it is skipped",
+        )
+
+    def too_many_entries(self, subject: EvidenceRef, limit: int) -> None:
+        self.report(
+            "too_many_entries",
+            FindingCategory.LIMIT,
+            Severity.ERROR,
+            subject,
+            f"the {self.label} holds more than max_items ({limit}) malformed entries or notes;"
+            " the rest are not read or reported",
+            {"max_items": limit},
         )
 
     def truncated(
@@ -348,10 +374,12 @@ class Reading:
         if not known:
             others = [state for state in found if not isinstance(state, Known)]
             return others[0] if others else absent
-        distinct: list[Known[V]] = []
+        # Values are frozen dataclasses or text: hashable, so this is linear; the first place of
+        # each value is kept, in the order found.
+        first: dict[Any, Known[V]] = {}
         for state in known:
-            if all(state.value != seen.value for seen in distinct):
-                distinct.append(state)
+            first.setdefault(state.value, state)
+        distinct = list(first.values())
         if len(distinct) == 1:
             return distinct[0]
         places = [state.provenance for state in distinct]

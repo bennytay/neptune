@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:afad0a407c4607c41f5b7332b6e965add0ecb5551aba1eada1c91bb2d250ae13`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:7ada75c9f0d821689c7bc5dca9aa2d6e852f504fda79cd16b476e00aa888c9e7`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -18,7 +18,7 @@ Receipt `rec:sha256:afad0a407c4607c41f5b7332b6e965add0ecb5551aba1eada1c91bb2d250
 
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
-| `software` | `0.1.0` | `sha256:9dc6f50d1c90` | none | `rec:0e9940dcdf87` |
+| `software` | `0.1.0` | `sha256:90af6add46b7` | none | `rec:ad6ba5e62b40` |
 
 ## Records
 
@@ -47,8 +47,8 @@ Receipt `rec:sha256:afad0a407c4607c41f5b7332b6e965add0ecb5551aba1eada1c91bb2d250
 
 ## Findings
 
-- **warning** `software.software_identity_missing` (missing): the CycloneDX BOM gives this item no identity: no release or digest, though the format has a place for it · `rec:3f097abb3660`
-- **warning** `software.software_identity_missing` (missing): the CycloneDX BOM gives this item no identity: no release, though the format has a place for it · `rec:95b22f09b828`
+- **warning** `software.software_identity_missing` (missing): the CycloneDX BOM gives this item no identity: no release, though the format has a place for it · `rec:711a3c896950`
+- **warning** `software.software_identity_missing` (missing): the CycloneDX BOM gives this item no identity: no release or digest, though the format has a place for it · `rec:8db05ceedacb`
 
 ## Ambiguous fields
 

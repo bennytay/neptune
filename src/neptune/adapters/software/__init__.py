@@ -103,12 +103,12 @@ DESCRIPTOR: Final = AdapterDescriptor(
     config=(
         ConfigOption(
             "max_document_bytes",
-            32 * 1024 * 1024,
+            8 * 1024 * 1024,
             "a text, TOML, JSON, XML or Python file larger than this is reported, not parsed",
         ),
         ConfigOption(
             "max_header_bytes",
-            16 * 1024 * 1024,
+            8 * 1024 * 1024,
             "a checkpoint header, ELF header table or note, or zip directory larger than this is"
             " reported, not read",
         ),
@@ -158,6 +158,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
         _finding(
             "too_large",
             "a document or header is over its size option; it is not read (limit, error)",
+        ),
+        _finding(
+            "too_many_entries",
+            "more than max_items entries are malformed or are ELF notes; the rest are not read"
+            " or reported (limit, error)",
         ),
         _finding(
             "too_many_items",
