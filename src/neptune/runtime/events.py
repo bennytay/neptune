@@ -1,4 +1,4 @@
-"""The phases of an ingest job, its states, and the structured events it emits (ADR 0029).
+"""The phases of an ingest job, its states, and the structured events it emits (ADR 0028).
 
 A job moves through nine phases in order. ``parse`` and ``normalize`` alternate once per chunk;
 every other phase runs once. Each phase starts when the job first enters it and finishes when the

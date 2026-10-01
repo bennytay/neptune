@@ -430,7 +430,7 @@ def test_every_row_is_checked_wherever_it_sits(
         check_series(STREAM, raw(tmp_path, seqs))
 
 
-# --- Checking one run (the runtime's cross-chunk check, ADR 0029 §5) ---------------------------
+# --- Checking one run (the runtime's cross-chunk check, ADR 0028 §5) ---------------------------
 
 
 def test_a_run_reports_its_rows_least_and_greatest_seq_and_columns(tmp_path: Path) -> None:

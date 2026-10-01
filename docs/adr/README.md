@@ -31,4 +31,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0024](0024-adapter-abi-types-selection-and-reference-adapter.md) | The adapter ABI's exact types, adapter selection, and the reference adapter | Accepted |
 | [0025](0025-series-files-sorted-merged-and-pinned.md) | Series files: one sorted Parquet file per stream, merged from runs, pinned settings | Accepted |
 | [0026](0026-local-workspace-in-place-reads-and-assembly.md) | The local workspace, reading sources in place, and assembling packages | Accepted |
-| [0029](0029-ingest-job-phases-resume-quarantine-and-events.md) | The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events | Accepted |
+| [0028](0028-ingest-job-phases-resume-quarantine-and-events.md) | The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events | Accepted |

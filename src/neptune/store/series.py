@@ -523,7 +523,7 @@ def check_run(stream: Stream, run: Path) -> RunCheck:
 
     The run names the stream, its columns keep the stream's contract, and its rows keep the
     order, the null rules, ``seq`` and the locator, read one batch at a time. The runtime checks
-    every run of a source this way before assembling (ADR 0029 §5), so one source's broken
+    every run of a source this way before assembling (ADR 0028 §5), so one source's broken
     series is a finding about that source and never a package that will not merge or verify.
     """
     opened = _open(run)

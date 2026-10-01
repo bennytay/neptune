@@ -1,4 +1,4 @@
-"""The ingest job: nine phases, resume from the workspace, quarantine, cancellation (ADR 0029).
+"""The ingest job: nine phases, resume from the workspace, quarantine, cancellation (ADR 0028).
 
 ::
 

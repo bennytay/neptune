@@ -1,4 +1,4 @@
-# 0029 — The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events
+# 0028 — The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events
 
 - Status: Accepted
 - Date: 2026-10-01
@@ -145,6 +145,11 @@ what to do with the rest of its source's output.
   MVL-10 wraps `_parse` in a subprocess; MVL-11 prints the events and the envelope; MVL-15's dry
   run is phases one to four plus `adapter.inspect`; MVL-41's validators run in `validate` over the
   staged package; MVL-8's engine replaces `IngestJob._select`.
+- Reads through `LocalReader` never come up short: a file that shrank fails its chunk hash and
+  raises `SourceChangedError`, which is `source_changed`. When MVL-75's `ShortReadError` lands
+  (a reader serving no bytes inside its declared size), `plan` and `parse` treat it the same way:
+  never retried, recorded with its `short_read_finding`, the source quarantined. Until then
+  such an error is a crash like any other: retried, then `chunk_failed` or `plan_failed`.
 - A restart hashes every source again and reads each committed chunk's records twice (once for
   the laws, once to stage), and every series is read three times (each run checked, the runs
   merged, the package verified). All are proportional to what the package holds, not to the

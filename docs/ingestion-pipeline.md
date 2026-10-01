@@ -13,7 +13,7 @@ the cache (MVL-9) and the sandbox (MVL-10) are the rest of M2.
 | 4 | inspect | cheap per-source summary (streams, extents, counts) without full parse | adapters | MVL-7 |
 | 5 | group | propose run/session groupings from filesystem signals (v0) and later from evidence (M7) | discovery | MVL-13, MVL-34 |
 | 6 | plan | adapters emit chunks with deterministic ids and cost estimates | adapters | MVL-7 |
-| 7 | ingest | done: per-chunk pure parse → canonical records + findings; the job (ADR 0029) skips committed chunks (resume), retries a chunk that raises and quarantines its source with a `neptune.runtime.*` finding; the cache across roots is MVL-9 | runtime + adapters | MVL-6, MVL-9 |
+| 7 | ingest | done: per-chunk pure parse → canonical records + findings; the job (ADR 0028) skips committed chunks (resume), retries a chunk that raises and quarantines its source with a `neptune.runtime.*` finding; the cache across roots is MVL-9 | runtime + adapters | MVL-6, MVL-9 |
 | 8 | store | done: each chunk's records, findings and sorted series runs are committed to the workspace atomically; `assemble` merges runs into one Parquet file per stream and builds the package (ADRs 0025, 0026) | store | MVL-5, MVL-16 |
 | 9 | validate | cross-source integrity checks over the store; findings, not exceptions | validate | MVL-41 |
 | 10 | receipt | done: core computed from the package's records (store); the job writes the volatile envelope (job id, clocks, host, root, seconds per phase) into the package before publishing it | store + runtime | MVL-5, MVL-6 |
@@ -25,9 +25,9 @@ records with their own provenance and never rewrites what stages 1–10 produced
 
 | Concern | Owner | Mechanism |
 |---|---|---|
-| Resume after crash | runtime | deterministic chunk ids + the workspace's committed chunks and saved plans (ADR 0026; ADR 0029 §2) |
+| Resume after crash | runtime | deterministic chunk ids + the workspace's committed chunks and saved plans (ADR 0026; ADR 0028 §2) |
 | Cache | runtime | key = chunk id, which covers (source id, adapter id, adapter version, config hash, context) (ADR 0024 §4) |
-| Partial failure | runtime | per-chunk isolation and retries; adapter crash → finding, the source is quarantined, the job continues (ADR 0029 §3) |
+| Partial failure | runtime | per-chunk isolation and retries; adapter crash → finding, the source is quarantined, the job continues (ADR 0028 §3) |
 | Sandboxing | runtime | subprocess with CPU/memory/time limits (MVL-10) |
 | Adapter-local problems | adapter | `IngestFinding`s in the chunk output |
 | Cross-source validation | validate | runs over the store after all chunks |
@@ -36,7 +36,7 @@ records with their own provenance and never rewrites what stages 1–10 produced
 ## The job (MVL-6)
 
 `neptune.runtime.IngestJob(root, destination, workspace, registry, options).run()` is the runtime: one
-state machine over the stages above, in nine phases (ADR 0029):
+state machine over the stages above, in nine phases (ADR 0028):
 
 | Phase | Stages above | Does |
 |---|---|---|
