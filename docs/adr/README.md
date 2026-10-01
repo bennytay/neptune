@@ -43,3 +43,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0036](0036-session-grouping-v0-observed-layout-and-derived-proposals.md) | Session grouping v0: an observed layout, inferred proposals, derived tables in the package | Accepted |
 | [0038](0038-layout-preserving-pdf-and-markdown-adapters.md) | Layout-preserving PDF and Markdown adapters: pypdf, markdown-it-py, declared order and exact spans | Accepted |
 | [0042](0042-tabular-adapter-csv-json-parquet-as-cited-cells.md) | The tabular adapter: CSV, JSON and Parquet as tables of cited cells | Accepted |
+| [0046](0046-ros1-bag-adapter-connections-as-streams-planning-from-the-index.md) | The ROS 1 bag adapter: connections as streams, planning from the index, the same Run and Stream as MCAP | Accepted |
