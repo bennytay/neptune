@@ -30,4 +30,5 @@ Closes MVL-
 </details>
 
 <!-- Rules: visible part ≤12 lines, no paragraphs. Depth lives in ADRs/docs, linked, not pasted.
-     Agents: do not merge. The maintainer merges every PR. -->
+     Implementers: do not merge. The coordinator merges after an independent reviewer returns MERGE
+     and CI is green (`scripts/factory-merge.sh`). -->

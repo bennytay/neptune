@@ -51,7 +51,7 @@ Working here? Read `AGENTS.md` first, then `docs/architecture.md`.
 | `docs/canonical-data-model.md` | Entities, epistemic states, time/frame/unit primitives |
 | `docs/provenance-and-identity.md` | Three-tier identity, provenance records, locators |
 | `docs/adapter-contract.md` | The four-method adapter ABI |
-| `docs/developer-workflow.md` | Git, Linear, PR, and parallel-agent workflow |
+| `docs/developer-workflow.md` | Git, Linear, PR and software-factory workflow |
 | `docs/testing-strategy.md` | Test categories, fixtures, determinism and golden tests |
 | `docs/security.md` | Threat model and per-milestone hardening |
 | `docs/adr/` | Architecture Decision Records |
