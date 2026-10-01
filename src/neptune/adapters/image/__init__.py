@@ -145,7 +145,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "max_structures",
             DEFAULT_MAX_STRUCTURES,
             "container structures one source may walk (chunks, segments, IFDs, XML elements);"
-            " past it parsing stops with image.limit_exceeded",
+            " past it parsing stops with image.limit_exceeded (a JPEG still looks for its frame"
+            " header within that many more segments, so the image is recorded)",
         ),
         ConfigOption(
             "max_value_bytes",
