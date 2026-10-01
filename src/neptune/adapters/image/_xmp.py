@@ -116,6 +116,8 @@ def read(ctx: Context, space: Space, what: str) -> RecordId | None:
     """The table of the XMP packet that is all of ``space``; ``None`` if it is unreadable."""
     out = ctx.out
     whole = space.whole()
+    if not out.first("XMP packet", whole):
+        return None
     try:
         root = _parse(ctx, space.read(0, space.size))
     except LimitHit as hit:

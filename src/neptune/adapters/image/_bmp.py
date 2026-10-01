@@ -42,7 +42,8 @@ HEADERS: Final[dict[int, tuple[str, str, tuple[str, ...], int]]] = {
     124: ("BITMAPV5HEADER", "<IiiHHIIiiIIIIIII9i3I4I", _V5, 124),
 }
 PROFILE_EMBEDDED: Final = 0x4D424544  # 'MBED'
-_UNCOMPRESSED: Final = frozenset({0, 3, 6})
+_UNCOMPRESSED: Final = frozenset({0, 3, 6})  # BI_RGB, BI_BITFIELDS, BI_ALPHABITFIELDS
+_OS2_UNCOMPRESSED: Final = frozenset({0})  # an OS/2 2.x header's 3 and 4 are Huffman and RLE24
 
 
 def header_size(head: bytes) -> int | None:
@@ -88,7 +89,8 @@ def read(ctx: Context, space: Space) -> list[Still]:
                 {"offset": at, "size": length},
             )
     compression = fields.get("compression", 0)
-    if compression in _UNCOMPRESSED and fields["bit_count"]:
+    stored_raw = _OS2_UNCOMPRESSED if size == 64 else _UNCOMPRESSED
+    if compression in stored_raw and fields["bit_count"]:
         row = (fields["bit_count"] * width + 31) // 32 * 4
         needed = file_values[4] + row * abs(height)
         if needed > space.size:

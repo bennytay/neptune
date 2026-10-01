@@ -49,6 +49,8 @@ def _signature(
 def read(ctx: Context, space: Space, what: str) -> None:
     """The ICC profile that is all of ``space``: its header and tag table, as far as they hold."""
     out = ctx.out
+    if not out.first("ICC profile", space.whole()):
+        return
     if space.size < _HEADER + 4 or space.read(36, 4) != b"acsp":
         out.finding(
             ICC_UNREADABLE,

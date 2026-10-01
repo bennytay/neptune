@@ -7,7 +7,6 @@ bytes, comments included. A binary raster the file is too short for is
 has no place for capture metadata or orientation: both are ``NotCovered``.
 """
 
-import re
 from dataclasses import dataclass
 from typing import Final
 
@@ -22,8 +21,10 @@ ENCODINGS: Final = {
 }  # fmt: skip
 PLAIN: Final = frozenset({b"P1", b"P2", b"P3"})
 HEADER_LIMIT: Final = 64 * 1024
-_TOKEN: Final = re.compile(rb"(?:\s|#[^\n\r]*)*(\d+)")
-_PAM_LINE: Final = re.compile(rb"[ \t]*([A-Z]+)(?:[ \t]+([^\n]*?))?[ \t]*\n")
+MAX_DIGITS: Final = (
+    10  # a width, height, depth or maxval: far past anything valid, so int() is cheap
+)
+_SPACE: Final = b" \t\n\r\x0b\x0c"
 _CHANNELS: Final = {b"P4": 1, b"P5": 1, b"P6": 3}
 
 
@@ -50,15 +51,38 @@ def parse_header(data: bytes) -> Header | None:
     if not data[2:3].isspace() and data[2:3] != b"#":
         return None
     for _ in names:
-        match = _TOKEN.match(data, position)
-        if match is None:
+        found = _token(data, position)
+        if found is None:
             return None
-        values.append(int(match[1]))
-        position = match.end()
+        value, position = found
+        values.append(value)
     if not data[position : position + 1].isspace():
         return None
     header = Header(magic, ("magic", *names), (magic.decode("ascii"), *values), position + 1)
     return header if _valid(header) else None
+
+
+def _token(data: bytes, position: int) -> tuple[int, int] | None:
+    """The decimal number after any whitespace and ``#`` comments from ``position``, and its end.
+
+    One pass, no backtracking: a hostile header costs time linear in its length.
+    """
+    size = len(data)
+    while position < size:
+        byte = data[position]
+        if byte in _SPACE:
+            position += 1
+        elif byte == 0x23:  # '#': a comment runs to the end of its line
+            while position < size and data[position] not in b"\r\n":
+                position += 1
+        else:
+            break
+    end = position
+    while end < size and 0x30 <= data[end] <= 0x39:
+        end += 1
+    if end == position or end - position > MAX_DIGITS:
+        return None
+    return int(data[position:end]), end
 
 
 def _pam(data: bytes) -> Header | None:
@@ -71,16 +95,23 @@ def _pam(data: bytes) -> Header | None:
             if newline < 0:
                 return None
             position = newline + 1
-        match = _PAM_LINE.match(data, position)
-        if match is None:
+        newline = data.find(b"\n", position)
+        if newline < 0:
             return None
-        position = match.end()
-        key, value = match[1], match[2] or b""
+        parts = data[position:newline].split(None, 1)
+        position = newline + 1
+        if not parts or not (parts[0].isalpha() and parts[0].isupper()):
+            return None
+        key, value = parts[0], parts[1].strip() if len(parts) > 1 else b""
         if key == b"ENDHDR":
             break
         if key == b"TUPLTYPE":
             tupltype.append(value.decode("ascii", errors="replace"))
-        elif key in (b"WIDTH", b"HEIGHT", b"DEPTH", b"MAXVAL") and value.isdigit():
+        elif (
+            key in (b"WIDTH", b"HEIGHT", b"DEPTH", b"MAXVAL")
+            and value.isdigit()
+            and len(value) <= MAX_DIGITS
+        ):
             fields[key.decode("ascii").lower()] = int(value)
         else:
             return None

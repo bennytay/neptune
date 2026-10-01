@@ -67,15 +67,20 @@ offsets past the end, zlib bombs and XML bombs are routine.
    DTD and nesting past 64, and `max_structures` and `max_entries` bound what one source walks and
    emits (`image.limit_exceeded`, once). A limit never loses the image: a JPEG that stops in its
    metadata still looks for its frame header, within another `max_structures` segments, and a PNG
-   stopped by a limit does not judge its raster. A BMP's linked profile is never opened. One damaged
+   stopped by a limit does not judge its raster. Work is charged before it is done: an IFD is read
+   one entry at a time, strip and tile arrays spend `max_entries` x 256 items, a PNG chunk or metadata
+   block over `max_metadata_bytes` is cited and not read, a text over `max_value_bytes` is cited and
+   its cell `Unknown`, and an XMP packet or ICC profile at given bytes is parsed once however many
+   tags point at it. Netpbm headers are scanned in one pass with numbers of at most ten digits.
+   A BMP's linked profile is never opened. One damaged
    structure is a finding and the rest is read (non-negotiable 7); a file that is no readable image
    is `image.unreadable` and has no record. The default limits are config, so they are part of the
    transform.
 7. **Not in this adapter, filed separately.** Thumbnails and pyramids, perceptual hashes and the
    visual-embedding hook are derivatives over decoded pixels and need a decoder dependency (MVL-80;
    any such output is derived and lives outside `model/`). Standalone video (container and codec
-   metadata, frame-to-time mapping, lazy frame handles) is MVL-81. ADR 0020 §3's pointer to MVL-29
-   for video frame series now reads MVL-81.
+   metadata, frame-to-time mapping, lazy frame handles) is MVL-81. ADR 0020 §3 still names MVL-29
+   for a standalone video's frame series; that pointer is MVL-81's, and a dedicated PR amends it.
 8. **Leaf test.** `tests/unit/test_package.py` lets a format subpackage import its own modules
    (`neptune.adapters.image._png`), still nothing from another adapter, the runtime or the store.
 

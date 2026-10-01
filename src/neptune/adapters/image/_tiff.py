@@ -243,20 +243,24 @@ class Tiff:
                 f" {held} of them and no next-IFD offset",
                 {"declared": declared, "held": held},
             )
-        raw = space.read(offset, length)
         next_at = offset + count_size + held * entry_size
         ifd = Ifd(name, offset, locator, table, [], 0, space.cite(next_at, tail))
         self.read[offset] = ifd
         try:
             for index in range(held):
                 ctx.budget.entry()
-                start = count_size + index * entry_size
-                ifd.entries.append(self._entry(ifd, index, offset + start, raw[start:]))
+                start = (
+                    count_size + index * entry_size
+                )  # one entry at a time: the budget bounds reads
+                raw = space.read(offset + start, entry_size)
+                ifd.entries.append(self._entry(ifd, index, offset + start, raw))
         except LimitHit as hit:
             ctx.stopped(hit)
             return ifd
         if complete:
-            (ifd.next,) = struct.unpack(order + ("Q" if self.big else "I"), raw[-tail:])
+            (ifd.next,) = struct.unpack(
+                order + ("Q" if self.big else "I"), space.read(next_at, tail)
+            )
         repeated = sorted(tag for tag, n in Counter(e.tag for e in ifd.entries).items() if n > 1)
         if repeated:
             out.finding(

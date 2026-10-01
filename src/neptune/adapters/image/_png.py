@@ -23,6 +23,7 @@ from neptune.adapters.image._emit import (
     REPEATED,
     TRUNCATED,
     UNREADABLE,
+    VALUE_NOT_COPIED,
     VALUE_UNREADABLE,
     CellInput,
 )
@@ -156,6 +157,20 @@ class _Png:
             )
             return
         self.seen.add(name)
+        if name in _STRUCTS:
+            wanted = struct.calcsize(_STRUCTS[name][0])
+            if length != wanted:
+                message = f"chunk {name} holds {length} bytes, not {wanted}"
+                out.finding(MALFORMED, space.cite(data_at, length), message)
+                return
+        elif length > self.ctx.max_metadata_bytes:
+            out.finding(
+                VALUE_NOT_COPIED,
+                space.cite(data_at, length),
+                f"chunk {name} holds {length} bytes, over max_metadata_bytes; it is not read",
+                {"bytes": length, "max_metadata_bytes": self.ctx.max_metadata_bytes},
+            )
+            return
         data = space.read(data_at, length)
         (crc,) = struct.unpack(">I", space.read(data_at + length, 4))
         if zlib.crc32(name.encode("ascii") + data) != crc:
@@ -167,13 +182,6 @@ class _Png:
         locator = space.cite(data_at, length)
         if name in _STRUCTS:
             layout, columns = _STRUCTS[name]
-            if length != struct.calcsize(layout):
-                out.finding(
-                    MALFORMED,
-                    locator,
-                    f"chunk {name} holds {length} bytes, not {struct.calcsize(layout)}",
-                )
-                return
             values = struct.unpack(layout, data)
             self.ctx.structure(locator, name, columns, list(values))
             if name == "IHDR":
@@ -228,15 +236,46 @@ class _Png:
             return None
         return Space.payload(self.space.source, inflated, prefix)
 
+    def _method(self, name: str, method: int, locator: tuple[Locator, ...]) -> None:
+        self.ctx.out.finding(
+            MALFORMED,
+            locator,
+            f"chunk {name} declares compression method {method}; only 0 (zlib) is defined",
+            {"method": method},
+        )
+
+    def _text_cell(self, text: Space, locator: tuple[Locator, ...], codec: str) -> CellInput:
+        """``text`` as a cell: ``Unknown`` with a finding if it is not ``codec`` or too long."""
+        out = self.ctx.out
+        if text.size > self.ctx.max_value_bytes:
+            out.finding(
+                VALUE_NOT_COPIED,
+                locator,
+                f"a text of {text.size} bytes is over max_value_bytes; it stays cited in the bytes",
+                {"bytes": text.size, "max_value_bytes": self.ctx.max_value_bytes},
+            )
+            return Unknown()
+        try:
+            return text.read(0, text.size).decode(codec)
+        except UnicodeDecodeError:
+            out.finding(VALUE_UNREADABLE, locator, f"the text is not {codec}")
+            return Unknown()
+
     def _iccp(self, data: bytes, data_at: int) -> None:
         keyword = self._keyword("iCCP", data, data_at)
-        if keyword is None or keyword[1] >= len(data):
+        if keyword is None:
             return
         name, at = keyword
         locator = self.space.cite(data_at, len(data))
+        if at >= len(data):
+            self.ctx.out.finding(MALFORMED, locator, "chunk iCCP has no compression method")
+            return
         self.ctx.structure(
             locator, "iCCP", ("profile_name", "compression_method"), [name, data[at]]
         )
+        if data[at] != 0:
+            self._method("iCCP", data[at], locator)
+            return
         profile = self._inflated("iCCP", data_at + at + 1, data[at + 1 :])
         if profile is not None:
             _blocks.icc(self.ctx, profile, "the iCCP chunk")
@@ -248,18 +287,25 @@ class _Png:
         key, at = keyword
         locator = self.space.cite(data_at, len(data))
         if name == "tEXt":
-            self.ctx.structure(
-                locator, name, ("keyword", "text"), [key, data[at:].decode("latin-1")]
-            )
+            plain = self.space.window(data_at + at, len(data) - at)
+            cell = self._text_cell(plain, locator, "latin-1")
+            self.ctx.structure(locator, name, ("keyword", "text"), [key, cell])
             return
         if name == "zTXt":
             if at >= len(data):
                 self.ctx.out.finding(MALFORMED, locator, "chunk zTXt has no compression method")
                 return
+            if data[at] != 0:
+                self._method(name, data[at], locator)
+                return
             text = self._inflated(name, data_at + at + 1, data[at + 1 :])
             if text is not None:
-                value = text.read(0, text.size).decode("latin-1")
-                self.ctx.structure(locator, name, ("keyword", "text"), [key, value])
+                self.ctx.structure(
+                    locator,
+                    name,
+                    ("keyword", "text"),
+                    [key, self._text_cell(text, locator, "latin-1")],
+                )
             return
         self._itxt(key, data, data_at, at, locator)
 
@@ -276,7 +322,10 @@ class _Png:
         language = data[at + 2 : cut].decode("latin-1")
         text_at = cut2 + 1
         body: Space | None
-        if compressed:
+        if compressed and data[at + 1] != 0:
+            self._method("iTXt", data[at + 1], locator)
+            body = None
+        elif compressed:
             body = self._inflated("iTXt", data_at + text_at, data[text_at:])
         else:
             body = self.space.window(data_at + text_at, len(data) - text_at)
@@ -289,11 +338,7 @@ class _Png:
         if body is None:
             cells.append(Unknown())
         else:
-            try:
-                cells.append(body.read(0, body.size).decode("utf-8"))
-            except UnicodeDecodeError:
-                out.finding(VALUE_UNREADABLE, locator, "the iTXt text is not UTF-8")
-                cells.append(Unknown())
+            cells.append(self._text_cell(body, locator, "utf-8"))
         columns = ("keyword", "language", "translated_keyword", "text")
         self.ctx.structure(locator, "iTXt", columns, cells)
         if body is not None and key.encode("latin-1") == XMP_KEYWORD:

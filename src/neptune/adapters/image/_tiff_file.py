@@ -14,7 +14,7 @@ import neptune.adapters.image._blocks as _blocks
 from neptune.adapters.image._capture import Tags
 from neptune.adapters.image._context import Context
 from neptune.adapters.image._emit import MALFORMED, RASTER_TRUNCATED, UNREADABLE
-from neptune.adapters.image._space import Space
+from neptune.adapters.image._space import LimitHit, Space
 from neptune.adapters.image._still import TAGS, Still
 from neptune.adapters.image._tiff import (
     DNG_VERSION,
@@ -29,6 +29,7 @@ from neptune.adapters.image._tiff import (
 )
 
 _MAX_OFFSETS: Final = 1_000_000
+_MAX_DIMENSION: Final = 1 << 63  # the model's bound on a raster side
 
 
 def read(ctx: Context, space: Space) -> list[Still]:
@@ -55,7 +56,10 @@ def read(ctx: Context, space: Space) -> list[Still]:
                         f"TIFF IFD {ifd.name} declares no ImageWidth and ImageLength of at least 1",
                     )
                 continue
-            _raster(ctx, tiff, ifd)
+            try:
+                _raster(ctx, tiff, ifd)
+            except LimitHit as hit:
+                ctx.stopped(hit)  # the image stays; its strips are not judged
             stills.append(Still(ifd.locator, size[0], size[1], encoding, tags, TAGS))
     return stills
 
@@ -71,7 +75,7 @@ def _images(ifd: Ifd, above: tuple[Ifd, ...]) -> list[tuple[Ifd, Tags]]:
 def _dimension(ifd: Ifd, tag: int) -> int | None:
     entry = ifd.get(tag)
     items = (entry.items or ()) if entry is not None else ()
-    if len(items) == 1 and isinstance(items[0], int) and items[0] >= 1:
+    if len(items) == 1 and isinstance(items[0], int) and 1 <= items[0] < _MAX_DIMENSION:
         return items[0]
     return None
 
@@ -84,6 +88,7 @@ def _raster(ctx: Context, tiff: Tiff, ifd: Ifd) -> None:
         offsets_entry, counts_entry = ifd.get(offsets_tag), ifd.get(counts_tag)
         if offsets_entry is None or counts_entry is None:
             continue
+        ctx.budget.values(offsets_entry.count + counts_entry.count)
         offsets = tiff.numbers(offsets_entry, _MAX_OFFSETS)
         counts = tiff.numbers(counts_entry, _MAX_OFFSETS)
         if offsets is None or counts is None:

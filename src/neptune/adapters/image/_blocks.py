@@ -50,4 +50,13 @@ def xmp(ctx: Context, space: Space, what: str) -> None:
 
 
 def icc(ctx: Context, space: Space, what: str) -> None:
+    """The ICC profile that is all of ``space``, unless it is larger than ``max_metadata_bytes``."""
+    if space.size > ctx.max_metadata_bytes:
+        ctx.out.finding(
+            LIMIT_EXCEEDED,
+            space.whole(),
+            f"the ICC profile in {what} is {space.size} bytes, over max_metadata_bytes; not read",
+            {"bytes": space.size, "max_metadata_bytes": ctx.max_metadata_bytes},
+        )
+        return
     _icc.read(ctx, space, what)

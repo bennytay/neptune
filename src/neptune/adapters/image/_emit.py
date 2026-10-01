@@ -158,6 +158,7 @@ class Emitter:
         self.config = config
         self._records: dict[RecordId, Any] = {}
         self._findings: dict[RecordId, IngestFinding] = {}
+        self._tried: set[tuple[str, tuple[Locator, ...]]] = set()
 
     @property
     def records(self) -> tuple[Any, ...]:
@@ -175,6 +176,19 @@ class Emitter:
 
     def record_id(self, kind: str, locator: Sequence[Locator]) -> RecordId:
         return evidence_record_id(kind, self.evidence(locator), self.config.transform)
+
+    def first(self, what: str, locator: Sequence[Locator]) -> bool:
+        """``True`` the first time ``what`` is read at ``locator``, ``False`` after.
+
+        A hostile file can point many tags at the same big block; it is parsed once, however
+        many point at it, and the repeats are ``image.overlap`` findings.
+        """
+        key = (what, tuple(locator))
+        if key in self._tried:
+            self.finding(OVERLAP, locator, f"the {what} at these bytes was already read")
+            return False
+        self._tried.add(key)
+        return True
 
     def taken(self, record_id: RecordId) -> bool:
         return record_id in self._records

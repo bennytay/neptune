@@ -7,6 +7,7 @@ record or finding is repeated and that every citation is inside the source.
 
 import random
 import struct
+import time
 import tracemalloc
 import zlib
 from pathlib import Path
@@ -18,7 +19,7 @@ from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.image import ImageAdapter
 from neptune.discovery.reader import BytesReader
 from neptune.model.finding import FindingCategory, Severity
-from neptune.model.world import Image
+from neptune.model.world import Image, StructuredTable
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures" / "image"
 VALID: Final = (
@@ -212,8 +213,10 @@ def test_a_zlib_bomb_costs_at_most_max_metadata_bytes() -> None:
 def test_the_inflate_limit_is_the_configured_one() -> None:
     quiet = run("amr_dock.png")
     assert "image.malformed" not in codes(quiet)
-    tight = run("amr_dock.png", max_metadata_bytes=64)
-    assert {"image.malformed"} <= codes(tight) and len(images(tight)) == 1
+    # iCCP holds 180 bytes and inflates to 352; the 1330-byte iTXt (XMP) is over the limit unread
+    tight = run("amr_dock.png", max_metadata_bytes=200)
+    assert {"image.malformed", "image.value_not_copied"} <= codes(tight)
+    assert len(images(tight)) == 1
 
 
 def test_an_xml_bomb_in_xmp_is_refused_without_expansion() -> None:
@@ -329,3 +332,142 @@ def test_max_value_bytes_cites_a_long_value_instead_of_copying_it() -> None:
     output = run("amr_dock.png", max_value_bytes=4)
     assert "image.value_not_copied" in codes(output)
     assert len(images(output)) == 1
+
+
+# --- Regressions from review: time, memory and exceptions on hostile headers --------------------
+
+
+def chunk(kind: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+
+def png_with_chunk(kind: bytes, data: bytes) -> bytes:
+    """``amr_dock.png`` with one more chunk right after IHDR."""
+    png = data_of("amr_dock.png")
+    return png[:33] + chunk(kind, data) + png[33:]
+
+
+def tiff_of(entries: list[tuple[int, int, int, int]], tail: bytes = b"") -> bytes:
+    """A little-endian TIFF with one IFD of ``(tag, type, count, value-or-offset)`` entries."""
+    ifd = struct.pack("<H", len(entries))
+    for tag, kind, count, value in entries:
+        ifd += struct.pack("<HHII", tag, kind, count, value)
+    return b"II*\x00" + struct.pack("<I", 8) + ifd + struct.pack("<I", 0) + tail
+
+
+def timed(data: bytes, seconds: float = 3.0, **config: Any) -> SourceOutput:
+    started = time.monotonic()
+    output = run(data, **config)
+    assert time.monotonic() - started < seconds
+    return output
+
+
+def test_a_netpbm_header_of_comment_marks_or_spaces_costs_time_linear_in_its_length() -> None:
+    assert codes(timed(b"P5 " + b"#" * 40)) == {"image.unreadable"}
+    assert codes(timed(b"P5 " + b"# \n" * 20_000 + b"1")) == {"image.unreadable"}
+    assert codes(timed(b"P7\nWIDTH" + b" " * 8000)) == {"image.unreadable"}
+    assert codes(timed(b"P7\n" + b"# x\n" * 20_000)) == {"image.unreadable"}
+
+
+def test_a_netpbm_number_of_thousands_of_digits_is_unreadable_not_an_exception() -> None:
+    assert codes(run(b"P5 " + b"9" * 5000 + b" 1 255\n")) == {"image.unreadable"}
+    assert codes(run(b"P7\nWIDTH " + b"9" * 5000 + b"\nENDHDR\n")) == {"image.unreadable"}
+
+
+def test_a_netpbm_side_of_ten_digits_is_an_image_with_a_pixel_limit_and_longer_is_refused() -> None:
+    output = run(b"P5\n9999999999 1\n255\nabc")
+    (image,) = images(output)
+    assert image.width == 9_999_999_999
+    assert {"image.pixel_limit", "image.raster_truncated"} <= codes(output)
+    assert codes(run(b"P5\n99999999999 1\n255\nabc")) == {"image.unreadable"}
+
+
+def test_a_bigtiff_side_of_two_to_the_64_minus_one_is_a_finding_not_an_exception() -> None:
+    # BigTIFF header, one IFD at 16 with ImageWidth (LONG8) = 2^64-1 and ImageLength = 1
+    entries = struct.pack("<HHQQ", 256, 16, 1, 2**64 - 1) + struct.pack("<HHQQ", 257, 4, 1, 1)
+    data = b"II+\x00" + struct.pack("<HHQ", 8, 0, 16) + struct.pack("<Q", 2) + entries
+    output = run(data + struct.pack("<Q", 0))
+    assert not images(output) and "image.malformed" in codes(output)
+
+
+def test_a_tiff_ifd_declaring_65535_entries_is_read_entry_by_entry_within_the_budget() -> None:
+    data = b"II*\x00" + struct.pack("<IH", 8, 65535) + bytes(12 * 65535 + 4)
+    output = timed(data, seconds=5.0)
+    assert "image.limit_exceeded" in codes(output)
+
+
+def test_strip_arrays_are_charged_to_the_budget_and_the_image_is_still_recorded() -> None:
+    count = 2000
+    base = 8 + 2 + 12 * 6 + 4
+    entries = [
+        (256, 3, 1, 8), (257, 3, 1, 8), (273, 4, count, base), (277, 3, 1, 1),
+        (278, 3, 1, 1), (279, 4, count, base + 4 * count),
+    ]  # fmt: skip
+    tail = struct.pack(f"<{count}I", *([8] * count)) + struct.pack(f"<{count}I", *([4] * count))
+    data = tiff_of(entries, tail)
+    assert "image.limit_exceeded" not in codes(run(data))  # 4000 items: within 20000 * 256
+    output = run(data, max_entries=10)  # 10 * 256 = 2560 < 4000
+    assert "image.limit_exceeded" in codes(output) and len(images(output)) == 1
+
+
+def test_one_xmp_packet_that_many_tags_point_at_is_parsed_once() -> None:
+    packet = (
+        b'<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF'
+        b' xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        b'<rdf:Description xmlns:tiff="http://ns.adobe.com/tiff/1.0/" tiff:Make="Acme"/>'
+        b"</rdf:RDF></x:xmpmeta>"
+    )
+    base = 8 + 2 + 12 * 5 + 4
+    entries = [(256, 3, 1, 1), (257, 3, 1, 1)] + [(700, 1, len(packet), base)] * 3
+    output = run(tiff_of(entries, packet))
+    xmp = [r for r in output.records() if isinstance(r, StructuredTable) and "XMP" in str(r.name)]
+    assert len(xmp) == 1 and "image.overlap" in codes(output)
+
+
+def test_an_os2_bitmap_with_huffman_compression_is_not_judged_by_an_uncompressed_size() -> None:
+    header = struct.pack("<IiiHHIIiiII", 64, 16, 16, 1, 1, 3, 0, 0, 0, 2, 2) + bytes(24)
+    file_header = b"BM" + struct.pack("<IHHI", 14 + 64 + 8, 0, 0, 14 + 64)
+    output = run(file_header + header + bytes(8))
+    assert len(images(output)) == 1 and "image.raster_truncated" not in codes(output)
+    plain = bytearray(file_header + header + bytes(8))
+    plain[14 + 16 : 14 + 20] = bytes(4)  # compression 0: 16 rows of 4 bytes cannot fit in 8
+    assert "image.raster_truncated" in codes(run(bytes(plain)))
+
+
+def test_a_png_text_over_max_value_bytes_is_cited_not_copied() -> None:
+    output = run(png_with_chunk(b"tEXt", b"Comment\x00" + b"a" * 5000))
+    assert "image.value_not_copied" in codes(output) and len(images(output)) == 1
+
+
+def test_a_png_chunk_over_max_metadata_bytes_is_not_read_at_all() -> None:
+    big = png_with_chunk(b"tEXt", b"Comment\x00" + b"a" * 5000)
+    output = run(big, max_metadata_bytes=1024)
+    (finding,) = [f for f in output.findings() if f.details.get("bytes") == 8 + 5000]
+    assert finding.code == "image.value_not_copied" and len(images(output)) == 1
+
+
+def test_a_png_giant_text_chunk_costs_bounded_memory() -> None:
+    data = png_with_chunk(b"tEXt", b"Comment\x00" + b"a" * (40 * 1024 * 1024))
+    tracemalloc.start()
+    try:
+        output = run(data, max_metadata_bytes=1024 * 1024)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert "image.value_not_copied" in codes(output)
+    assert peak < 8 * 1024 * 1024
+
+
+def test_a_png_profile_with_no_or_an_unknown_compression_method_is_a_finding() -> None:
+    assert "image.malformed" in codes(run(png_with_chunk(b"iCCP", b"profile\x00")))
+    odd = run(png_with_chunk(b"iCCP", b"profile\x00\x01" + zlib.compress(b"x")))
+    assert "image.malformed" in codes(odd)
+    ztxt = run(png_with_chunk(b"zTXt", b"Comment\x00\x07" + zlib.compress(b"hello")))
+    assert "image.malformed" in codes(ztxt)
+
+
+def test_a_chunk_with_the_wrong_size_for_its_structure_is_not_read_whole() -> None:
+    data = bytearray(data_of("amr_dock.png"))
+    data[8:12] = struct.pack(">I", 1 << 30)  # IHDR claims a gigabyte, the file holds 3 KiB
+    output = run(bytes(data))
+    assert codes(output) & {"image.truncated", "image.malformed", "image.unreadable"}
