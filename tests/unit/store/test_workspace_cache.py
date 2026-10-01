@@ -109,8 +109,10 @@ def test_a_plan_filed_under_another_transform_is_refused(tmp_path: Path) -> None
     (filed / "stray.txt").write_bytes(b"")
     with pytest.raises(WorkspaceError, match="is not a plan"):
         list(workspace.plans())
-    with pytest.raises(WorkspaceError, match=r"another transform|is not a plan"):
-        workspace.transforms_of(source)
+    # only a miss's explanation reads these: what is not a readable plan is passed over
+    assert workspace.transforms_of(source) == ()
+    with pytest.raises(WorkspaceError, match="different plan"):  # the misplaced one is in the way
+        keep(workspace, lines)
 
 
 def test_a_malformed_id_is_a_workspace_error(tmp_path: Path) -> None:
@@ -170,6 +172,30 @@ def test_an_upgrade_killed_midway_finishes_on_the_next_open(tmp_path: Path) -> N
     moved.rename(target)
     workspace = Workspace(tmp_path / "home")
     assert sorted(workspace.plans()) == sorted([owner(first), owner(second)])
+
+
+def test_a_plan_another_opener_moved_first_is_passed_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two processes opening one format-1 workspace: the second finds the plan already moved."""
+    first, second = text_output(), text_output(b"another file\n")
+    gone = format_1(tmp_path / "home", first)
+    format_1(tmp_path / "other", second)
+    moved = next((tmp_path / "other" / "plans").rglob("*.json"))
+    (tmp_path / "home" / "plans" / moved.parent.name).mkdir(exist_ok=True)
+    moved.rename(tmp_path / "home" / "plans" / moved.parent.name / moved.name)
+    read_bytes = Path.read_bytes
+
+    def raced(path: Path) -> bytes:
+        if path == gone:  # listed, then moved by the other process before this one read it
+            gone.unlink()
+            raise FileNotFoundError(path)
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", raced)
+    workspace = Workspace(tmp_path / "home")
+    monkeypatch.undo()
+    assert list(workspace.plans()) == [owner(second)]
 
 
 def test_a_format_1_plan_that_cannot_be_read_stops_the_upgrade(tmp_path: Path) -> None:
@@ -411,6 +437,23 @@ def test_collection_keeps_only_what_the_current_transforms_can_reuse(
                 assert any(directory.iterdir())
     again = workspace.collect({current.config.transform.id})
     assert (again.plans, again.chunks, again.derivatives, again.staging) == (0, 0, 0, 0)
+
+
+def test_a_damaged_plan_is_collected_and_a_damaged_ledger_stops_collection(
+    scanned: tuple[Workspace, Path],
+) -> None:
+    workspace, _ = scanned
+    output = text_output()
+    keep(workspace, output)
+    (plan,) = (workspace.home / "plans").rglob("*.json")
+    plan.write_bytes(b"{not json")
+    collected = workspace.collect({output.config.transform.id})
+    assert (collected.plans, collected.chunks) == (1, len(output.plan.chunks))
+    (ledger,) = (workspace.home / "ledgers").rglob("ledger.jsonl")
+    ledger.write_bytes(b"{not json")
+    with pytest.raises(WorkspaceError, match="cannot be read"):
+        workspace.collect({output.config.transform.id})
+    assert ledger.read_bytes() == b"{not json"  # history is never collected
 
 
 def test_a_damaged_derivative_is_collected(scanned: tuple[Workspace, Path]) -> None:

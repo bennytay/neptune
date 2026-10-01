@@ -698,12 +698,16 @@ class IngestJob:
     # --- plan ----------------------------------------------------------------------------------
 
     def _explain(self, item: _Source) -> PlanCache:
-        """Why ``item`` must be planned: the first invalidation rule that holds (ADR 0031 §3)."""
+        """Why ``item`` must be planned: the first invalidation rule that holds (ADR 0031 §3).
+
+        Only the explanation depends on the source's other plans, so if they cannot be listed it
+        is made from what is known without them; the job plans the source either way.
+        """
         assert item.config is not None
         try:
             kept = self.workspace.transforms_of(item.content_id)
-        except (WorkspaceError, ValueError, OSError) as exc:
-            raise JobError(f"the plans of {item.content_id} cannot be read: {exc}") from exc
+        except (WorkspaceError, ValueError, OSError):
+            kept = ()
         return explain_plan(item.config.transform, kept, item.replaced)
 
     def _plan(self, source: LocalSource) -> None:
@@ -1231,10 +1235,11 @@ def collect(
 
     Keeps what such a job could reuse: plans under the transforms these adapters and this config
     define, for sources some saved ledger still holds, with their chunks and derivatives.
-    Removes the rest. Refused (``JobError``) while a job holds the workspace.
+    Removes the rest. Refused (``JobError``) while a job holds the workspace, or when the
+    workspace cannot be read well enough to tell what is reachable.
     """
     configs = IngestJob._configure(registry, (options or JobOptions()).config)
     try:
         return workspace.collect({config.transform.id for config in configs.values()})
-    except (WorkspaceError, OSError) as exc:
+    except (WorkspaceError, ValueError, TypeError, OSError) as exc:
         raise JobError(f"the workspace cannot be collected: {exc}") from exc

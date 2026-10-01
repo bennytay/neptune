@@ -39,6 +39,7 @@ from neptune.model.jsonvalue import JsonValue
 from neptune.runtime import (
     CacheReport,
     IngestJob,
+    JobError,
     JobEvent,
     JobOptions,
     JobOutcome,
@@ -383,12 +384,26 @@ def test_collection_drops_superseded_lineages_and_keeps_the_current_one(
 
 
 def test_a_job_and_a_collection_never_overlap(corpus: Path, run: Runner) -> None:
-    from neptune.runtime import JobError
-
     run(corpus, adapters())
     workspace = Workspace(run.home)
     with workspace.in_use(), pytest.raises(JobError, match="in use"):
         collect(workspace, adapters().registry)
+    (ledger,) = (run.home / "ledgers").rglob("ledger.jsonl")
+    ledger.write_bytes(b"{damaged")
+    with pytest.raises(JobError, match="cannot be collected"):
+        collect(workspace, adapters().registry)
+
+
+def test_a_damaged_old_plan_never_stops_a_job_that_plans_again(corpus: Path, run: Runner) -> None:
+    """Only the explanation of a miss reads a source's other plans; damage there costs nothing."""
+    first, _ = run(corpus, adapters())
+    old = by_source(first.cache, corpus)["notes.txt"].transform.removeprefix("rec:sha256:")
+    for plan in (run.home / "plans").rglob(f"{old}.json"):
+        plan.write_bytes(b"{damaged")
+    outcome, _ = run(corpus, adapters(), {"text": {"block_rule": "line"}})
+    report = by_source(check_report(outcome), corpus)
+    assert report["notes.txt"].plan.rule == "source_new"  # nothing readable is known of it
+    assert rules(report["lift.tally"]) == {"committed"}
 
 
 # --- Scale -------------------------------------------------------------------------------------

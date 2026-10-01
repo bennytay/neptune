@@ -384,6 +384,11 @@ class Workspace:
                     continue  # a source's directory: already in format 2
                 try:
                     data = canonical_json.loads(entry.read_bytes())
+                except FileNotFoundError:
+                    continue  # another process opening the workspace moved it first
+                except ValueError as exc:
+                    raise WorkspaceError(f"{entry} is not a format-1 plan: {exc}") from exc
+                try:
                     if not isinstance(data, dict):
                         raise ValueError("not an object")
                     transform, chunks = data["transform"], data["chunks"]
@@ -402,7 +407,10 @@ class Workspace:
                 except (KeyError, ValueError) as exc:
                     raise WorkspaceError(f"{entry} is not a format-1 plan: {exc}") from exc
                 self._directories(target.parent)
-                entry.replace(target)
+                try:
+                    entry.replace(target)
+                except FileNotFoundError:
+                    continue  # moved by another process between the read and the rename
                 fsync_directory(target.parent)
             fsync_directory(prefix)
 
@@ -650,10 +658,12 @@ class Workspace:
                 yield ContentId(f"sha256:{source}"), RecordId(f"rec:sha256:{match[1]}")
 
     def transforms_of(self, source: ContentId) -> tuple[TransformRecord, ...]:
-        """Every transform the workspace holds a plan of ``source`` under, sorted by id.
+        """Every transform the workspace holds a readable plan of ``source`` under, sorted by id.
 
         What a cache miss is explained by (ADR 0031 §3): the adapters, versions and configs the
-        source was planned with before.
+        source was planned with before. Only an explanation hangs on it, so an entry that is not
+        a readable plan is passed over, never an error: a damaged old plan must not stop a job
+        that is about to plan the source again. ``plans`` and ``collect`` are the strict readers.
         """
         directory = self._plan_directory(source)
         if not directory.is_dir():
@@ -662,8 +672,11 @@ class Workspace:
         for entry in sorted(directory.iterdir()):
             match = _PLAN.fullmatch(entry.name)
             if match is None or not _is_file(entry):
-                raise WorkspaceError(f"{entry} is not a plan")
-            stored = self.load_plan(source, RecordId(f"rec:sha256:{match[1]}"))
+                continue
+            try:
+                stored = self.load_plan(source, RecordId(f"rec:sha256:{match[1]}"))
+            except (ValueError, TypeError, KeyError, OSError):
+                continue
             if stored is not None:  # None only if collected since it was listed
                 found.append(stored.transform)
         return tuple(found)
@@ -850,14 +863,28 @@ class Workspace:
     # --- Collection ----------------------------------------------------------------------------
 
     def _held_sources(self) -> set[ContentId]:
-        """The content ids at the head of some location in any ledger the workspace keeps."""
+        """The content ids at the head of some location in any ledger the workspace keeps.
+
+        A ledger that cannot be read stops collection: ledgers are history, and without one
+        there is no telling which sources are still held, so nothing may be judged unreachable.
+        """
         held: set[ContentId] = set()
         for directory in sorted((self.home / "ledgers").iterdir()):
             table = directory / "ledger.jsonl"
             if _is_file(table):
-                ledger = _ledger(table)
+                try:
+                    ledger = _ledger(table)
+                except (ValueError, TypeError, KeyError) as exc:
+                    raise WorkspaceError(f"{table} cannot be read: {exc}") from exc
                 held.update(h.content_id for h in ledger.heads() if isinstance(h, SourceRevision))
         return held
+
+    def _readable_plan(self, source: ContentId, transform: RecordId) -> StoredPlan | None:
+        """The plan, or ``None`` if it is damaged: no job can reuse it, so it is not kept."""
+        try:
+            return self.load_plan(source, transform)
+        except (ValueError, TypeError, KeyError, OSError):
+            return None
 
     def collect(self, transforms: Collection[RecordId]) -> Collected:
         """Remove everything no job with these transforms can reuse (ADR 0031 §6).
@@ -865,8 +892,9 @@ class Workspace:
         Kept: each plan whose transform is in ``transforms`` and whose source some ledger holds
         at the head of a location; the chunks those plans list; the derivatives whose owners are
         all kept plans. Removed: every other plan, chunk and derivative (superseded adapter
-        versions and configs, sources gone from every root, orphans of interrupted work), and
-        staging debris. Ledgers are history and are never collected. Refused with
+        versions and configs, sources gone from every root, orphans of interrupted work, plans
+        and derivatives that cannot be read), and staging debris. Ledgers are history and are
+        never collected; one that cannot be read stops collection (``WorkspaceError``). Refused with
         ``WorkspaceBusyError`` while a job holds the workspace (``in_use``). Each removal is one
         rename, so a collection killed midway leaves only debris the next one clears.
         """
@@ -883,12 +911,12 @@ class Workspace:
             kept_chunks: set[str] = set()
             plans = chunks = derivatives = 0
             for source, transform in list(self.plans()):
-                if source in held and transform in current:
-                    stored = self.load_plan(source, transform)
-                    assert stored is not None  # listed just now, and nothing else collects
+                live = source in held and transform in current
+                stored = self._readable_plan(source, transform) if live else None
+                if stored is not None:
                     kept.add((source, transform))
                     kept_chunks.update(str(chunk.get("id")) for chunk in stored.chunks)
-                else:
+                else:  # unreachable, or damaged (a job would fail on it): planned again if needed
                     plans += self._remove(self._plan_path(source, transform))
             for chunk in list(self.chunks()):
                 if chunk not in kept_chunks:
