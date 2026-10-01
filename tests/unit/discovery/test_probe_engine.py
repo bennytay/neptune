@@ -12,7 +12,6 @@ from typing import Final
 
 import pytest
 
-from neptune.adapters.builtin import builtin_adapters
 from neptune.adapters.contract import (
     ABI_VERSION,
     GENERIC,
@@ -117,7 +116,8 @@ def claims(adapter_id: str, confidence: float, *formats: FormatSpec) -> Stub:
 
 
 def engine(*extra: object, policy: ProbePolicy | None = None) -> ProbeEngine:
-    return ProbeEngine(AdapterRegistry([*builtin_adapters(), TALLY.TallyAdapter(), *extra]), policy)  # type: ignore[list-item]
+    # The text adapter, not the shipped set: these tests are about the engine, not the formats.
+    return ProbeEngine(AdapterRegistry([TextAdapter(), TALLY.TallyAdapter(), *extra]), policy)  # type: ignore[list-item]
 
 
 def probe(

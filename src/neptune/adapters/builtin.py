@@ -7,11 +7,12 @@ registry and the contract. A job may also build its own ``AdapterRegistry`` from
 from neptune.adapters.contract import Adapter
 from neptune.adapters.registry import AdapterRegistry
 from neptune.adapters.text import TextAdapter
+from neptune.adapters.urdf import UrdfAdapter
 
 
 def builtin_adapters() -> tuple[Adapter, ...]:
     """A fresh instance of every shipped adapter, in id order."""
-    return (TextAdapter(),)
+    return (TextAdapter(), UrdfAdapter())
 
 
 def default_registry() -> AdapterRegistry:
