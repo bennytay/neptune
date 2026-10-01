@@ -395,7 +395,7 @@ def test_a_chunk_cut_short_reports_what_its_stored_prefix_decodes_to() -> None:
     found = finding(run(data[: start + length // 2]), "chunk_truncated")
     assert found.severity is Severity.WARNING
     details = found.details
-    assert 0 < details["framed_bytes"] <= details["decoded_bytes"] < details["uncompressed_bytes"]  # type: ignore[operator]
+    assert 0 < details["framed_bytes"] <= details["decoded_bytes"] < details["uncompressed_bytes"]
 
 
 def _with_index_field(data: bytes, at: dict[str, tuple[int, int]], index: int, field: int) -> bytes:
