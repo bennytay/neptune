@@ -9,6 +9,7 @@ flowchart LR
     RT["Ingestion runtime"]
     WS[("Local workspace<br/>ledgers · chunks")]
     AD["Format adapters"]
+    SB["Parser sandbox<br/>confined process per call"]
     CAN["Canonical model<br/>records + provenance"]
     PKG[("Ingest package")]
     VAL["Validation &amp; alignment"]
@@ -22,7 +23,8 @@ flowchart LR
   end
 
   RAW --> DISC --> RT
-  RT <-->|chunks / records| AD
+  RT <-->|chunks / records| SB
+  SB <-->|one call, limits| AD
   AD -.->|conforms to| CAN
   RT --> WS --> PKG
   PKG <--> VAL
@@ -44,6 +46,7 @@ flowchart LR
   class CAN,K1 built
   class DISC,RT,AD,WS,PKG,K2 partial
   class VAL,DER,K3 todo
+  class SB built
   class RAW,MEM,RET,USE ext
   style N fill:#8b949e0f,stroke:#8b949e
   style D fill:none,stroke:#8b949e,stroke-dasharray:2 3

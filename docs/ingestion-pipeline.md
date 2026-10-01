@@ -1,7 +1,7 @@
 # Ingestion pipeline
 
-Status: stage contract agreed; the job runtime (MVL-6) and the local store (MVL-16) are implemented;
-the cache (MVL-9) and the sandbox (MVL-10) are the rest of M2.
+Status: stage contract agreed; the job runtime (MVL-6), the local store (MVL-16) and the parser
+sandbox (MVL-10) are implemented; the cache (MVL-9) is the rest of M2.
 
 ## Stages
 
@@ -28,7 +28,7 @@ records with their own provenance and never rewrites what stages 1–10 produced
 | Resume after crash | runtime | deterministic chunk ids + the workspace's committed chunks and saved plans (ADR 0026; ADR 0028 §2) |
 | Cache | runtime | key = chunk id, which covers (source id, adapter id, adapter version, config hash, context) (ADR 0024 §4) |
 | Partial failure | runtime | per-chunk isolation and retries; adapter crash → finding, the source is quarantined, the job continues (ADR 0028 §3) |
-| Sandboxing | runtime | subprocess with CPU/memory/time limits (MVL-10) |
+| Sandboxing | runtime | done: every probe, plan and `ingest` in a forked child confined by limits, seccomp and Landlock; its reply decoded as JSON; only the job writes the workspace; in-process only when chosen (ADR 0030) |
 | Adapter-local problems | adapter | `IngestFinding`s in the chunk output |
 | Cross-source validation | validate | runs over the store after all chunks |
 | Explanation | runtime | assembles `probe`/`plan` results + descriptors into the receipt |
@@ -60,14 +60,21 @@ state machine over the stages above, in nine phases (ADR 0028):
   quarantined source stay in the workspace, so the rerun after a fix redoes only what failed. The
   finding names the step, law, exception class and ids, never an exception's text or a repr, so
   the same failing job writes the same package (ADR 0028 §4).
+- **Sandbox.** Each adapter call runs in a confined child process (ADR 0030). One that dies is
+  `adapter_crashed` (its signal or exit status) and is retried like a raise; one stopped at
+  `cpu_seconds`, `wall_seconds` or `memory_bytes` is `limit_exceeded` and is not. Both name the
+  adapter, its version, the step and the chunk, and quarantine the source as any failure does.
+  `JobOptions(isolation=Isolation.IN_PROCESS)` runs adapters in the job's process instead.
 - **Cancellation.** A `threading.Event`, checked before each source, chunk and phase from `inspect`
   on (the walk and its ledger always finish). The chunk in hand finishes and commits; a staged
   package is discarded; the outcome is `cancelled` with no package.
 - **Events.** `on_event(JobEvent(kind, phase, details))` for every phase start and finish, every source
   (hashed, selected, unsupported, ambiguous, planned, admitted, quarantined, …) and chunk (skipped,
-  parsed, retried, committed, failed). Canonical JSON, no clock: the consumer adds one.
+  parsed, retried, committed, failed), and `sandbox_ready` (the isolation, the limits and the host's
+  Landlock ABI) as `inspect` starts. Canonical JSON, no clock: the consumer adds one.
 - **Job failure** (`JobError`) is reserved for the job itself: an unreadable root, a destination that
-  exists, options naming an unknown adapter or option, a workspace or disk that will not write.
+  exists, options naming an unknown adapter or option, a workspace or disk that will not write, a
+  host that cannot run the sandbox.
 
 ## Dry-run
 
