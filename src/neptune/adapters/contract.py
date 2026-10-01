@@ -16,12 +16,9 @@ the contract's laws into checks, and ``neptune.adapters.text`` is the reference 
 """
 
 import hashlib
-import math
 import re
-import struct
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Final, NewType, Protocol, TypeAlias
 
 from neptune.identity import canonical_json
@@ -39,6 +36,7 @@ from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.kinds import RECORD_KINDS
 from neptune.model.provenance import TransformRecord
 from neptune.model.record import Family
+from neptune.model.series import SeriesBatch
 from neptune.model.versions import SemanticVersion
 
 # The version of this contract. An adapter declares the version it implements, and a registry
@@ -645,162 +643,6 @@ class Plan:
             raise ContractError("a plan repeats a chunk")
         if not all(isinstance(finding, IngestFinding) for finding in self.findings):
             raise ContractError("findings must be IngestFindings")
-
-
-# --- Series batches (ADR 0018) -----------------------------------------------------------------
-
-
-class ColumnType(StrEnum):
-    """The type of a series column's cells, exactly as the source encodes the field."""
-
-    BOOL = "bool"
-    INT8 = "int8"
-    INT16 = "int16"
-    INT32 = "int32"
-    INT64 = "int64"
-    UINT8 = "uint8"
-    UINT16 = "uint16"
-    UINT32 = "uint32"
-    UINT64 = "uint64"
-    FLOAT32 = "float32"
-    FLOAT64 = "float64"
-    STRING = "string"
-    BINARY = "binary"
-
-
-_INTEGER_BITS: Final = {
-    ColumnType.INT8: (True, 8),
-    ColumnType.INT16: (True, 16),
-    ColumnType.INT32: (True, 32),
-    ColumnType.INT64: (True, 64),
-    ColumnType.UINT8: (False, 8),
-    ColumnType.UINT16: (False, 16),
-    ColumnType.UINT32: (False, 32),
-    ColumnType.UINT64: (False, 64),
-}
-
-ScalarCell: TypeAlias = bool | int | float | str | bytes
-# One cell: a scalar, a tuple of scalars in a repeated column, or None for null.
-Cell: TypeAlias = ScalarCell | tuple[ScalarCell, ...] | None
-
-_TIME: Final = re.compile(r"time/(0|[1-9][0-9]*)")
-_LOCATOR: Final = re.compile(r"locator/(0|[1-9][0-9]*)/[a-z][a-z0-9_.\-]*")
-
-
-def _check_scalar(column: str, kind: ColumnType, value: object) -> None:
-    if kind in _INTEGER_BITS:
-        signed, bits = _INTEGER_BITS[kind]
-        low, high = (-(2 ** (bits - 1)), 2 ** (bits - 1) - 1) if signed else (0, 2**bits - 1)
-        if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
-            raise ContractError(f"{column}: {value!r} is not a {kind}")
-    elif kind is ColumnType.BOOL:
-        if not isinstance(value, bool):
-            raise ContractError(f"{column}: {value!r} is not a bool")
-    elif kind in (ColumnType.FLOAT32, ColumnType.FLOAT64):
-        if not isinstance(value, float):
-            raise ContractError(f"{column}: {value!r} is not a {kind}")
-        if kind is ColumnType.FLOAT32 and math.isfinite(value):
-            try:
-                narrowed = struct.unpack("<f", struct.pack("<f", value))[0]
-            except OverflowError:
-                narrowed = None
-            if narrowed != value:
-                raise ContractError(f"{column}: {value!r} is not a float32 value")
-    elif kind is ColumnType.STRING:
-        if not isinstance(value, str):
-            raise ContractError(f"{column}: {value!r} is not a string")
-        try:
-            value.encode("utf-8")
-        except UnicodeEncodeError as exc:
-            raise ContractError(f"{column}: string is not valid Unicode") from exc
-    elif not isinstance(value, bytes):
-        raise ContractError(f"{column}: {value!r} is not binary")
-
-
-@dataclass(frozen=True)
-class SeriesColumn:
-    """One column of a series batch: its name, its cells' type, and one cell per row.
-
-    ``repeated`` makes every non-null cell a tuple of ``type`` values (a covariance array). The
-    name is in one of the series namespaces (``seq``, ``time/<i>``, ``locator/<i>/<field>``,
-    ``value/<name>``, ``state/<column>``), and Neptune's own columns have fixed types: ``seq`` and
-    ``time/<i>`` are int64, a locator field int64, float64 or string, a state string.
-    """
-
-    name: str
-    type: ColumnType
-    values: tuple[Cell, ...]
-    repeated: bool = False
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.type, ColumnType):
-            raise ContractError(f"{self.name}: type must be a ColumnType, got {self.type!r}")
-        if not isinstance(self.values, tuple):
-            raise ContractError(f"{self.name}: values must be a tuple")
-        allowed = _fixed_types(self.name)
-        if allowed is not None and (self.repeated or self.type not in allowed):
-            raise ContractError(f"{self.name} is one of {sorted(map(str, allowed))}, not a list")
-        for value in self.values:
-            if value is None:
-                continue
-            if self.repeated:
-                if not isinstance(value, tuple):
-                    raise ContractError(f"{self.name}: a repeated cell is a tuple, got {value!r}")
-                for item in value:
-                    _check_scalar(self.name, self.type, item)
-            else:
-                _check_scalar(self.name, self.type, value)
-
-
-def _fixed_types(name: str) -> frozenset[ColumnType] | None:
-    """The types Neptune's own column ``name`` may have; ``None`` for a value column."""
-    if name == "seq" or _TIME.fullmatch(name):
-        return frozenset({ColumnType.INT64})
-    if _LOCATOR.fullmatch(name):
-        return frozenset({ColumnType.INT64, ColumnType.FLOAT64, ColumnType.STRING})
-    if name.startswith("state/") and len(name) > len("state/"):
-        return frozenset({ColumnType.STRING})
-    if name.startswith("value/") and len(name) > len("value/"):
-        return None
-    raise ContractError(f"{name!r} is not a series column (ADR 0018)")
-
-
-@dataclass(frozen=True)
-class SeriesBatch:
-    """Rows of one stream's series from one chunk, column by column (ADR 0018).
-
-    ``stream`` is the id of a ``Stream`` the same source's output holds. The store writes the
-    batches of a stream into its Parquet file (MVL-16); ``rows`` yields them for
-    ``Stream.check_row``.
-    """
-
-    stream: RecordId
-    columns: tuple[SeriesColumn, ...]
-
-    def __post_init__(self) -> None:
-        parse_record_id(self.stream)
-        if not self.columns or not all(isinstance(c, SeriesColumn) for c in self.columns):
-            raise ContractError("a batch has at least one SeriesColumn")
-        names = [column.name for column in self.columns]
-        if len(set(names)) != len(names):
-            raise ContractError(f"a batch repeats a column: {names}")
-        if "seq" not in names:
-            raise ContractError("a batch has a seq column")
-        if len({len(column.values) for column in self.columns}) != 1 or not self.length:
-            raise ContractError("a batch's columns hold the same number of rows, at least one")
-
-    @property
-    def length(self) -> int:
-        return len(self.columns[0].values)
-
-    def schema(self) -> tuple[tuple[str, ColumnType, bool], ...]:
-        """Each column's name, type and repetition, sorted by name."""
-        return tuple(sorted((c.name, c.type, c.repeated) for c in self.columns))
-
-    def rows(self) -> Iterator[dict[str, object]]:
-        """Each row as column name to cell, as a Parquet reader yields it."""
-        for index in range(self.length):
-            yield {column.name: column.values[index] for column in self.columns}
 
 
 # --- Output ------------------------------------------------------------------------------------

@@ -17,13 +17,13 @@ from neptune.adapters.contract import (
     AdapterConfig,
     ChunkOutput,
     Plan,
-    SeriesBatch,
     SourceReader,
     configure,
 )
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonValue
+from neptune.model.series import SeriesBatch
 
 
 @dataclass(frozen=True)

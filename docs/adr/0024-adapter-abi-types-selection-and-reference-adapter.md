@@ -59,6 +59,8 @@ receipt a function of the package's records alone.
    8–64-bit integers, float32, float64, string, binary), a `repeated` flag for arrays, and one cell
    per row. Neptune's own columns have fixed types (`seq` and `time/<i>` int64, a locator field
    int64, float64 or string, a state string). The store maps the types to Parquet (MVL-16).
+   The batch types live in `neptune.model.series`, beside the column contract they type, so the
+   store writes them without importing adapters. They are not records: the schema is unchanged.
 6. **Laws added to ADR 0008's**, checked by `neptune.adapters.check` on every harness run:
    - every record's id derives from its record-level evidence and the config's transform, and it
      reads back from its JSON as itself;

@@ -23,7 +23,6 @@ from neptune.adapters.contract import (
     AdapterDescriptor,
     Chunk,
     ChunkOutput,
-    ColumnType,
     Documented,
     FormatSpec,
     InspectResult,
@@ -33,8 +32,6 @@ from neptune.adapters.contract import (
     ProbeReason,
     ProbeResult,
     Resources,
-    SeriesBatch,
-    SeriesColumn,
     SourceReader,
     make_chunk,
 )
@@ -47,7 +44,13 @@ from neptune.model.knowledge import AssertionKind, Knowledge, NotApplicable, Not
 from neptune.model.provenance import ByteRange, EvidenceRef, Provenance
 from neptune.model.reference import TimestampDomain
 from neptune.model.run import Run, Stream
-from neptune.model.series import SeriesProvenance, step_template
+from neptune.model.series import (
+    ColumnType,
+    SeriesBatch,
+    SeriesColumn,
+    SeriesProvenance,
+    step_template,
+)
 
 if TYPE_CHECKING:
     from neptune.model.time import Timestamp

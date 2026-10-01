@@ -62,8 +62,9 @@ class Adapter(Protocol):
 - **Chunks.** `make_chunk(source, config, context, cost)`. `context` is everything `ingest` needs
   besides the bytes (byte range, starting offsets, a schema table); document it in `conventions`. The
   id hashes transform, source and context; `cost` (bytes to read) is for scheduling only.
-- **Output.** `ChunkOutput(records, series, findings)`. A `SeriesBatch(stream, columns)` holds one
-  stream's rows from one chunk as typed `SeriesColumn`s (see "Streams and series" below for names).
+- **Output.** `ChunkOutput(records, series, findings)`. A `SeriesBatch(stream, columns)`
+  (`neptune.model.series`) holds one stream's rows from one chunk as typed `SeriesColumn`s (see
+  "Streams and series" below for names).
 
 ## Choosing an adapter (ADR 0024 §7)
 

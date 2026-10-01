@@ -26,7 +26,6 @@ from neptune.adapters.contract import (
     AdapterDescriptor,
     Chunk,
     ChunkOutput,
-    ColumnType,
     ContractError,
     Plan,
     SourceReader,
@@ -42,6 +41,7 @@ from neptune.model.run import Stream
 
 if TYPE_CHECKING:
     from neptune.model.ids import RecordId
+    from neptune.model.series import ColumnType
 
 
 def _dicts(value: JsonValue) -> Iterator[dict[str, JsonValue]]:

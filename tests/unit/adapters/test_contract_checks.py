@@ -16,11 +16,8 @@ from neptune.adapters.check import (
 )
 from neptune.adapters.contract import (
     ChunkOutput,
-    ColumnType,
     ContractError,
     Plan,
-    SeriesBatch,
-    SeriesColumn,
     configure,
     make_chunk,
 )
@@ -39,6 +36,7 @@ from neptune.model.provenance import (
     adapter_locator,
 )
 from neptune.model.run import Stream
+from neptune.model.series import ColumnType, SeriesBatch, SeriesColumn
 from neptune.model.source import LocalPath
 from neptune.model.world import DocumentBlock
 

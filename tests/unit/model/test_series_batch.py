@@ -1,11 +1,11 @@
-"""Series batches (ADR 0024 §4): typed columns, Neptune's fixed column types, rows."""
+"""Series batches (ADR 0024 §5): typed columns, Neptune's fixed column types, rows."""
 
 from typing import Any
 
 import pytest
 
-from neptune.adapters.contract import ColumnType, ContractError, SeriesBatch, SeriesColumn
 from neptune.model.ids import RecordId
+from neptune.model.series import ColumnType, SeriesBatch, SeriesColumn
 
 STREAM = RecordId("rec:sha256:" + "1" * 64)
 
@@ -37,18 +37,18 @@ def test_cells_are_exactly_their_column_type(
 ) -> None:
     assert column("value/x", kind, *good, None).values == (*good, None)
     for value in bad:
-        with pytest.raises(ContractError):
+        with pytest.raises((ValueError, TypeError)):
             column("value/x", kind, value)
 
 
 def test_a_repeated_column_holds_tuples_of_its_type() -> None:
     covariance = column("value/cov", ColumnType.FLOAT64, (0.0, 1.0), (), None, repeated=True)
     assert covariance.values == ((0.0, 1.0), (), None)
-    with pytest.raises(ContractError):
+    with pytest.raises((ValueError, TypeError)):
         column("value/cov", ColumnType.FLOAT64, [0.0, 1.0], repeated=True)
-    with pytest.raises(ContractError):
+    with pytest.raises((ValueError, TypeError)):
         column("value/cov", ColumnType.FLOAT64, (0.0, 1), repeated=True)
-    with pytest.raises(ContractError):
+    with pytest.raises((ValueError, TypeError)):
         column("value/cov", ColumnType.FLOAT64, 0.0, repeated=True)
 
 
@@ -64,12 +64,12 @@ def test_a_repeated_column_holds_tuples_of_its_type() -> None:
     ],
 )
 def test_neptunes_own_columns_have_fixed_types(name: str, kind: ColumnType) -> None:
-    with pytest.raises(ContractError):
+    with pytest.raises((ValueError, TypeError)):
         SeriesColumn(name, kind, ())
 
 
 def test_neptunes_own_columns_are_never_repeated() -> None:
-    with pytest.raises(ContractError):
+    with pytest.raises((ValueError, TypeError)):
         SeriesColumn("time/0", ColumnType.INT64, (), repeated=True)
 
 
@@ -77,7 +77,7 @@ def test_neptunes_own_columns_are_never_repeated() -> None:
     "name", ["value", "value/", "state/", "time/x", "time/01", "locator/0", "extra", "Seq"]
 )
 def test_a_column_lives_in_a_series_namespace(name: str) -> None:
-    with pytest.raises(ContractError):
+    with pytest.raises((ValueError, TypeError)):
         SeriesColumn(name, ColumnType.INT64, ())
 
 
@@ -91,13 +91,13 @@ def test_a_batch_has_seq_unique_names_and_equal_lengths() -> None:
         ("seq", ColumnType.INT64, False),
         ("value/v", ColumnType.STRING, False),
     )
-    with pytest.raises(ContractError):
+    with pytest.raises((ValueError, TypeError)):
         SeriesBatch(STREAM, (value,))
-    with pytest.raises(ContractError):
+    with pytest.raises((ValueError, TypeError)):
         SeriesBatch(STREAM, (seq, seq))
-    with pytest.raises(ContractError):
+    with pytest.raises((ValueError, TypeError)):
         SeriesBatch(STREAM, (seq, column("value/v", ColumnType.STRING, "a")))
-    with pytest.raises(ContractError):
+    with pytest.raises((ValueError, TypeError)):
         SeriesBatch(STREAM, (column("seq", ColumnType.INT64),))
     with pytest.raises(ValueError):
         SeriesBatch(RecordId("stream"), (seq,))
