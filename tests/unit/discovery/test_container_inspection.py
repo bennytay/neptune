@@ -38,7 +38,7 @@ from neptune.adapters.contract import (
     Resources,
     SourceReader,
 )
-from neptune.adapters.registry import AdapterRegistry, SelectionStatus
+from neptune.adapters.registry import AdapterRegistry
 from neptune.discovery.containers import (
     ContainerReport,
     Member,
@@ -201,9 +201,9 @@ def test_zip_members_are_probed_by_their_bytes_not_their_names() -> None:
     assert selected(members[b"logs/renamed"]) == "tally"  # deflated, extensionless
     assert selected(members[b"../escape.txt"]) == "text"  # listed verbatim, never resolved
     mcap = members[b"recording.mcap"]
+    assert selected(mcap) == "mcap"  # claimed by its magic, whatever its name
     assert mcap.probe is not None
-    assert mcap.probe.selection.status is SelectionStatus.UNSUPPORTED
-    assert [s.name for s in mcap.probe.sniff.signatures] == ["MCAP"]
+    assert {s.name for s in mcap.probe.sniff.signatures} == {"MCAP"}
     assert members[b"logs/"].probe is None
 
 
