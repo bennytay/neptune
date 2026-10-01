@@ -30,13 +30,16 @@ import re
 import threading
 import urllib.parse
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
-from typing import Final, TypeAlias
+from typing import Final, Literal, TypeAlias
 
 from neptune.adapters.builtin import default_registry
 from neptune.adapters.contract import Adapter, ConfigError, ContractError, configure
 from neptune.adapters.registry import AdapterRegistry
+from neptune.discovery.source import LocalSource
+from neptune.manifest import LoadedManifest, ManifestError, discover, locate, read
 from neptune.runtime import EventSink, IngestJob, JobError, JobEvent, JobOptions
 from neptune.sdk.errors import (
     ConfigurationError,
@@ -53,6 +56,9 @@ from neptune.sdk.result import IngestResult, attach_committed
 from neptune.store.workspace import LocalOnlyError, Workspace, WorkspaceError
 
 StrPath: TypeAlias = str | os.PathLike[str]
+# Which manifest a call uses (ADR 0047): ``None`` finds ``neptune.yaml`` (or ``.yml``, ``.json``)
+# at the root, a path names a manifest file inside the root, ``False`` uses none.
+ManifestChoice: TypeAlias = StrPath | Literal[False] | None
 Adapters: TypeAlias = AdapterRegistry | Iterable[Adapter]
 
 _URI: Final = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://")
@@ -110,6 +116,22 @@ def _destination(destination: StrPath, root: Path) -> Path:
             f"{path} is inside the source {root}; the next ingest would read it as evidence"
         )
     return path
+
+
+def _manifest(root: Path, manifest: ManifestChoice) -> LoadedManifest | None:
+    """The manifest a call uses, read and checked now, before anything is walked (ADR 0047)."""
+    if manifest is False:
+        return None
+    if isinstance(manifest, bool) or not (
+        manifest is None or isinstance(manifest, str | os.PathLike)
+    ):
+        raise ConfigurationError(f"manifest must be a path, None or False, got {manifest!r}")
+    source = LocalSource(root)
+    try:
+        location = discover(source) if manifest is None else locate(source, manifest)
+        return read(source, location) if location is not None else None
+    except ManifestError as exc:
+        raise ConfigurationError(f"the manifest cannot be used: {exc}") from exc
 
 
 def _workspace(workspace: Workspace | StrPath | None) -> Workspace:
@@ -367,9 +389,18 @@ class Neptune:
     def options(self) -> JobOptions:
         return self._options
 
-    def _builder(self, source: StrPath, destination: StrPath | None, resume: bool = False) -> Build:
+    def _builder(
+        self,
+        source: StrPath,
+        destination: StrPath | None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
+    ) -> Build:
         """Resolve and check the call now; return what builds its job around a sink and event."""
         root = _local_root(source, self._workspace)
+        options = self._options
+        if options.manifest is None and (loaded := _manifest(root, manifest)) is not None:
+            options = replace(options, manifest=loaded)
         target = _destination(destination, root) if destination is not None else None
         if resume and not self._workspace.has_ledger(root):
             raise NothingToResumeError(
@@ -384,7 +415,7 @@ class Neptune:
                     target,
                     self._workspace,
                     self._registry,
-                    self._options,
+                    options,
                     on_event=on_event,
                     cancel=cancel,
                 )
@@ -401,14 +432,18 @@ class Neptune:
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
         resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> IngestResult:
         """Ingest the folder or file ``source`` (a path or a ``file:`` URI) into a package at
         ``destination``, on this thread. ``on_event`` gets every ``JobEvent`` as it happens; an
         exception it raises stops the job and propagates. Setting ``cancel`` stops the job at its
         next checkpoint: the result is ``cancelled`` and the workspace keeps the work. Run it
         again to resume: committed chunks are reused, not redone. ``resume=True`` insists on it:
-        ``NothingToResumeError`` if the workspace holds no earlier work on ``source``."""
-        job = self._builder(source, destination, resume)(on_event, cancel)
+        ``NothingToResumeError`` if the workspace holds no earlier work on ``source``.
+        ``manifest``: ``None`` uses the root's ``neptune.yaml`` if it has one, a path names a
+        manifest file inside the root, ``False`` uses none (ADR 0047); one that cannot be used
+        is a ``ConfigurationError`` before anything runs."""
+        job = self._builder(source, destination, resume, manifest)(on_event, cancel)
         return _execute(job, dry=False)
 
     def dry_run(
@@ -418,12 +453,13 @@ class Neptune:
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
         resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> IngestResult:
         """What ``ingest`` would do with ``source``, without parsing anything or writing a
         package: the job's ``discover``, ``fingerprint``, ``inspect`` and ``plan`` phases. The
         result is ``planned``; its findings say what is unsupported or ambiguous and its cache
         report what each source's adapter planned and what the workspace already holds."""
-        job = self._builder(source, None, resume)(on_event, cancel)
+        job = self._builder(source, None, resume, manifest)(on_event, cancel)
         return _execute(job, dry=True)
 
     def start(
@@ -433,15 +469,22 @@ class Neptune:
         *,
         cancel: threading.Event | None = None,
         resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> Ingestion:
         """``ingest`` on a thread of its own: iterate the handle for events, then ``result()``."""
-        return Ingestion(self._builder(source, destination, resume), dry=False, cancel=cancel)
+        build = self._builder(source, destination, resume, manifest)
+        return Ingestion(build, dry=False, cancel=cancel)
 
     def start_dry_run(
-        self, source: StrPath, *, cancel: threading.Event | None = None, resume: bool = False
+        self,
+        source: StrPath,
+        *,
+        cancel: threading.Event | None = None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> Ingestion:
         """``dry_run`` on a thread of its own."""
-        return Ingestion(self._builder(source, None, resume), dry=True, cancel=cancel)
+        return Ingestion(self._builder(source, None, resume, manifest), dry=True, cancel=cancel)
 
 
 class AsyncNeptune:
@@ -484,9 +527,10 @@ class AsyncNeptune:
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
         resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> IngestResult:
         """``Neptune.ingest``, awaited."""
-        run = self.start(source, destination, cancel=cancel, resume=resume)
+        run = self.start(source, destination, cancel=cancel, resume=resume, manifest=manifest)
         return await _drive(run, on_event)
 
     async def dry_run(
@@ -496,9 +540,11 @@ class AsyncNeptune:
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
         resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> IngestResult:
         """``Neptune.dry_run``, awaited."""
-        return await _drive(self.start_dry_run(source, cancel=cancel, resume=resume), on_event)
+        run = self.start_dry_run(source, cancel=cancel, resume=resume, manifest=manifest)
+        return await _drive(run, on_event)
 
     def start(
         self,
@@ -507,16 +553,23 @@ class AsyncNeptune:
         *,
         cancel: threading.Event | None = None,
         resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> AsyncIngestion:
         """``ingest`` on a thread of its own: ``async for`` its events, ``await`` its result."""
-        builder = self._sync._builder(source, destination, resume)
+        builder = self._sync._builder(source, destination, resume, manifest)
         return AsyncIngestion(builder, dry=False, cancel=cancel)
 
     def start_dry_run(
-        self, source: StrPath, *, cancel: threading.Event | None = None, resume: bool = False
+        self,
+        source: StrPath,
+        *,
+        cancel: threading.Event | None = None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> AsyncIngestion:
         """``dry_run`` on a thread of its own."""
-        return AsyncIngestion(self._sync._builder(source, None, resume), dry=True, cancel=cancel)
+        builder = self._sync._builder(source, None, resume, manifest)
+        return AsyncIngestion(builder, dry=True, cancel=cancel)
 
 
 async def _drive(run: AsyncIngestion, on_event: EventSink | None) -> IngestResult:
@@ -573,10 +626,13 @@ def ingest(
     on_event: EventSink | None = None,
     cancel: threading.Event | None = None,
     resume: bool = False,
+    manifest: ManifestChoice = None,
 ) -> IngestResult:
     """``Neptune(workspace, adapters=..., options=...).ingest(source, destination, ...)``."""
     client = Neptune(workspace, adapters=adapters, options=options)
-    return client.ingest(source, destination, on_event=on_event, cancel=cancel, resume=resume)
+    return client.ingest(
+        source, destination, on_event=on_event, cancel=cancel, resume=resume, manifest=manifest
+    )
 
 
 def dry_run(
@@ -588,7 +644,10 @@ def dry_run(
     on_event: EventSink | None = None,
     cancel: threading.Event | None = None,
     resume: bool = False,
+    manifest: ManifestChoice = None,
 ) -> IngestResult:
     """``Neptune(workspace, adapters=..., options=...).dry_run(source, ...)``."""
     client = Neptune(workspace, adapters=adapters, options=options)
-    return client.dry_run(source, on_event=on_event, cancel=cancel, resume=resume)
+    return client.dry_run(
+        source, on_event=on_event, cancel=cancel, resume=resume, manifest=manifest
+    )

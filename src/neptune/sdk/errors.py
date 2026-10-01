@@ -48,6 +48,7 @@ from typing import ClassVar, Final
 from neptune.adapters.contract import ConfigError
 from neptune.discovery.ignore import IgnoreError
 from neptune.discovery.scratch import ScratchError
+from neptune.manifest import ManifestError
 from neptune.runtime import JobError
 from neptune.runtime.sandbox import SandboxError
 from neptune.store.assemble import NotDurableError
@@ -192,7 +193,7 @@ def from_job_error(error: JobError, destination: Path | None = None) -> NeptuneE
     kind: type[NeptuneError] = JobFailedError
     if isinstance(cause, SandboxError):
         kind = SandboxUnavailableError
-    elif isinstance(cause, ConfigError | IgnoreError):
+    elif isinstance(cause, ConfigError | IgnoreError | ManifestError):
         kind = ConfigurationError
     elif isinstance(cause, WorkspaceError | ScratchError):
         kind = WorkspaceUnusableError
