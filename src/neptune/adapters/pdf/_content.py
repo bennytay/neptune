@@ -55,6 +55,7 @@ from ._objects import (
     stream,
     string_bytes,
 )
+from ._reader import Warnings
 
 MAX_FORM_DEPTH: Final = 8
 MAX_STATE_DEPTH: Final = 1024
@@ -209,6 +210,22 @@ class _Bounded(ContentStream):
             self.error = type(exc).__name__
 
 
+class FontCache:
+    """The fonts a chunk's pages have loaded, and what loading each one made pypdf warn about.
+
+    A font many pages use (a big ToUnicode CMap) is loaded once; each page that uses it is still
+    reported the warnings loading it caused, so findings do not depend on which pages share a
+    chunk. At most ``LIMIT`` fonts are kept (the cache is cleared past it, a font is then loaded
+    again), and each is held with its dictionary so a direct font's ``id`` is never reused.
+    """
+
+    LIMIT: Final = 16
+
+    def __init__(self) -> None:
+        self.fonts: dict[object, tuple[Font | None, object]] = {}
+        self.warned: dict[object, tuple[tuple[int, int], object]] = {}  # (streams, other)
+
+
 @dataclass
 class _Marked:
     mcid: int | None
@@ -219,9 +236,8 @@ class _Marked:
 class Interpreter:
     """Runs one page's content; ``run`` returns what it drew. A fresh instance per page.
 
-    ``fonts`` is the chunk's font cache, shared by its pages: a ToUnicode CMap many pages use is
-    parsed once. A page still counts each limited font it uses, so findings do not depend on
-    which pages share a chunk.
+    ``fonts`` is the chunk's font cache, shared by its pages (see ``FontCache``); ``warnings``
+    collects pypdf's, so a cached font's are reported again for each page that uses it.
     """
 
     def __init__(
@@ -231,14 +247,16 @@ class Interpreter:
         max_operations: int,
         max_content_bytes: int,
         space_threshold: int,
-        fonts: dict[object, Font | None] | None = None,
+        fonts: FontCache | None = None,
+        warnings: Warnings | None = None,
     ) -> None:
         self._reader = reader
         self._max_operations = max_operations
         self._max_content_bytes = max_content_bytes
         self._space = space_threshold / 1000.0
         self._content = PageContent()
-        self._fonts: dict[object, Font | None] = fonts if fonts is not None else {}
+        self._fonts = fonts if fonts is not None else FontCache()
+        self._warnings = warnings
         self._used: set[object] = set()
         self._forms: dict[object, list[tuple[object, bytes]] | None] = {}
         self._failed: set[object] = set()
@@ -340,20 +358,33 @@ class Interpreter:
         if found is None:
             return None
         key = reference(found) or id(found)
-        if key not in self._fonts:
+        cache, caught = self._fonts, self._warnings
+        if key not in cache.fonts:
+            before = (caught.streams, caught.other) if caught is not None else (0, 0)
             try:
                 loaded = load_font(found)
             except (MemoryError, ShortReadError, RecursionError):
                 raise
             except Exception:
                 loaded = None
-            self._fonts[key] = loaded
-        loaded = self._fonts[key]
+            if len(cache.fonts) >= cache.LIMIT:
+                cache.fonts.clear()
+            cache.fonts[key] = (loaded, found)
+            if caught is not None:
+                real = (caught.streams - before[0], caught.other - before[1])
+                known = cache.warned.setdefault(key, (real, found))[0]
+                caught.streams += known[0] - real[0]  # a reload may warn less: report the first
+                caught.other += known[1] - real[1]
+        elif key not in self._used and caught is not None:
+            replayed = cache.warned.get(key, ((0, 0), None))[0]
+            caught.streams += replayed[0]
+            caught.other += replayed[1]
+        font = cache.fonts[key][0]
         if key not in self._used:
             self._used.add(key)
-            if loaded is not None and loaded.limited:
+            if font is not None and font.limited:
                 self._content.fonts_limited += 1
-        return loaded
+        return font
 
     def set_text_state(self, field_name: str, value: float) -> None:
         state = self._state

@@ -83,8 +83,7 @@ from neptune.model.world import (
     StructuredTable,
 )
 
-from ._content import FormFailure, Interpreter, PageContent
-from ._fonts import Font
+from ._content import FontCache, FormFailure, Interpreter, PageContent
 from ._labels import MAX_LABEL_CHARS, page_labels
 from ._objects import (
     array,
@@ -777,7 +776,7 @@ def _pages(out: _Output, captured: Warnings, first: int, count: int) -> None:
         raise
     except Exception:
         structure = None
-    fonts: dict[object, Font | None] = {}  # shared by the chunk's pages
+    fonts = FontCache()  # shared by the chunk's pages
     for index in range(first, min(first + count, len(pages), MAX_PAGES)):
         if structure is not None:
             structure.begin_page()  # a page's tags never depend on which pages share its chunk
@@ -790,7 +789,7 @@ def _page(
     opened: Opened,
     captured: Warnings,
     structure: Structure | None,
-    fonts: dict[object, Font | None],
+    fonts: FontCache,
     page: DictionaryObject,
     index: int,
 ) -> None:
@@ -802,6 +801,7 @@ def _page(
         max_content_bytes=config.integer("max_page_content_bytes"),
         space_threshold=config.integer("space_threshold"),
         fonts=fonts,
+        warnings=captured,
     )
     content = interpreter.run(page)  # what was drawn before any fault is kept
     placed: PageStructure | None = None

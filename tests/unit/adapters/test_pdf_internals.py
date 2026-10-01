@@ -31,6 +31,7 @@ from neptune.adapters.pdf._fonts import (
     parse_to_unicode,
 )
 from neptune.adapters.pdf._page import PLACEHOLDER, blocks, join
+from neptune.adapters.pdf._structure import _TreeKids
 from neptune.model.world import BlockRole
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures" / "pdf"
@@ -100,6 +101,34 @@ def test_a_cmap_of_exactly_the_entry_bound_is_read_whole_and_one_more_is_cut() -
     assert not whole.limited and whole.lookup(MAX_TABLE_ENTRIES - 2, 3) == "A"
     cut = parse_to_unicode(cmap_of(MAX_TABLE_ENTRIES))
     assert cut.limited and cut.lookup(MAX_TABLE_ENTRIES - 1, 3) is None
+
+
+def test_number_tree_kids_are_found_by_their_limits_in_their_own_order() -> None:
+    kids = [DictionaryObject() for _ in range(5)]
+    declared = [(10, 20), (0, 100), None, (15, 15), (30, 5)]  # overlapping, unlimited, inverted
+    limited = sorted(
+        (low, high, index, kids[index])
+        for index, limits in enumerate(declared)
+        if limits is not None
+        for low, high in [limits]
+    )
+    highest: list[int] = []
+    for _, high, _, _ in limited:
+        highest.append(max(high, highest[-1]) if highest else high)
+    tree = _TreeKids(
+        ((2, kids[2]),), tuple(item[0] for item in limited), tuple(limited), tuple(highest)
+    )
+    found = {key: tree.holding(key)[0] for key in (-1, 0, 12, 15, 16, 31, 101)}
+    expected = {
+        -1: [kids[2]],
+        0: [kids[1], kids[2]],
+        12: [kids[0], kids[1], kids[2]],
+        15: [kids[0], kids[1], kids[2], kids[3]],
+        16: [kids[0], kids[1], kids[2]],
+        31: [kids[1], kids[2]],
+        101: [kids[2]],
+    }
+    assert found == expected
 
 
 def test_a_cmap_without_a_code_space_splits_into_two_byte_codes() -> None:

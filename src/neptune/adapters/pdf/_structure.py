@@ -200,17 +200,19 @@ class _TreeKids:
     limited: tuple[tuple[int, int, int, DictionaryObject], ...]  # (low, high, index, kid)
     highest: tuple[int, ...]  # the largest high limit among limited[:i + 1]
 
-    def holding(self, key: int) -> list[DictionaryObject]:
-        """The kids that may hold ``key``, in their order."""
+    def holding(self, key: int) -> tuple[list[DictionaryObject], int]:
+        """The kids that may hold ``key``, in their order, and how many kids it looked at."""
         found = list(self.unlimited)
         at = bisect_right(self.lows, key) - 1
+        looked = len(found)
         while at >= 0 and self.highest[at] >= key:
             low, high, index, kid = self.limited[at]
             if low <= key <= high:
                 found.append((index, kid))
             at -= 1
+            looked += 1
         found.sort(key=lambda pair: pair[0])
-        return [kid for _, kid in found]
+        return [kid for _, kid in found], looked
 
 
 @dataclass
@@ -501,7 +503,6 @@ class Structure:
     def _read_cells(self, row: DictionaryObject) -> list[DictionaryObject]:
         cells = []
         for raw in self.kids(row):
-            self._visit()
             if (cell := dictionary(raw)) is not None:
                 cells.append(cell)
         return cells
@@ -588,7 +589,7 @@ class Structure:
             owner, row, column = self._owner(node)
             own = self._mcid_index(node, mcid)
             result.placements[mcid] = Placement(owner, (*self._path(node), own), row, column)
-            if owner.key in self._page_tables:
+            if owner.role is BlockRole.TABLE and owner.key in self._page_tables:
                 result.tables[owner.key] = self._page_tables[owner.key]
         return result
 
@@ -622,18 +623,20 @@ class Structure:
             value = self._numbers(current).get(key)
             if value is not None:
                 return value.get_object() if isinstance(value, IndirectObject) else value
-            kids = self._tree_kids(current).holding(key)
+            kids, looked = self._tree_kids(current).holding(key)
+            self._charge(looked)  # a lookup's steps, not the index's: it is built once, uncharged
             stack.extend((kid, depth + 1) for kid in reversed(kids))
         return None
 
     def _numbers(self, node: DictionaryObject) -> dict[int, object]:
-        """A number tree node's ``/Nums`` as key to value, the first of a repeated key winning."""
+        """A number tree node's ``/Nums`` as key to value, the first of a repeated key winning.
+
+        Built once per chunk and not charged: a page pays for its lookups (``_number_tree``)."""
 
         def build() -> dict[int, object]:
             numbers: dict[int, object] = {}
             nums: list[object] = list(array(entry(node, "/Nums")) or [])
             for index in range(0, len(nums) - 1, 2):
-                self._visit()
                 found = integer(nums[index])
                 if found is not None:
                     numbers.setdefault(found, nums[index + 1])
@@ -648,7 +651,6 @@ class Structure:
             unlimited: list[tuple[int, DictionaryObject]] = []
             limited: list[tuple[int, int, int, DictionaryObject]] = []
             for index, kid_raw in enumerate(array(entry(node, "/Kids")) or []):
-                self._visit()
                 kid = dictionary(kid_raw)
                 if kid is None:
                     continue

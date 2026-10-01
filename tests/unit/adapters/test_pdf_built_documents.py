@@ -5,6 +5,7 @@ Each document is written with the fixture generator's PDF writer and read by the
 the harness, so every law of the contract is checked on it too.
 """
 
+import importlib
 import importlib.util
 import json
 import sys
@@ -13,6 +14,8 @@ import tracemalloc
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
+
+import pytest
 
 from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.pdf import PdfAdapter
@@ -343,6 +346,23 @@ def test_pages_sharing_a_big_number_tree_read_it_once() -> None:
     assert roles(output) == ["paragraph"] * 100
 
 
+@pytest.mark.parametrize("bound", [40, 150, 170, 200, 230, 260, 600])
+def test_every_pages_tag_limit_is_the_same_in_any_chunking(
+    bound: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Paragraphs under one element and a table, at bounds that cut some pages and not others:
+    # the shared indexes (kids, rows, cells, tables) are charged to each page as if it built them.
+    monkeypatch.setattr(
+        importlib.import_module("neptune.adapters.pdf._structure"), "MAX_VISITS", bound
+    )
+    data = tagged_report(3, 20, 12)
+    outputs = [ingest(data, pages_per_chunk=size) for size in (4, 2, 1)]
+    seen = [
+        ([(f.code, f.details["page"]) for f in o.findings()], roles(o), texts(o)) for o in outputs
+    ]
+    assert seen[0] == seen[1] == seen[2]
+
+
 def test_a_pages_tags_do_not_depend_on_the_pages_sharing_its_chunk() -> None:
     # Page 1 reads both elements: 150,000 + 60,000 kid steps pass the 200,000 bound. Page 0 builds
     # the first index, but page 1 is charged for it all the same, in a chunk of its own or not.
@@ -401,6 +421,29 @@ def page_with_codes(cmap: bytes, codes: list[int]) -> bytes:
 def texts(output: SourceOutput) -> list[Any]:
     found = [r for r in output.records() if isinstance(r, DocumentBlock)]
     return [state(block.text) for block in sorted(found, key=lambda block: block.order)]
+
+
+def test_a_shared_fonts_warnings_are_reported_on_every_page_that_uses_it() -> None:
+    pdf = MAKE.Pdf()
+    tree = pdf.reserve()
+    broken = pdf.add(MAKE.Stream({"Filter": MAKE.Name("FlateDecode")}, b"not deflate data at all"))
+    font = pdf.add(
+        {
+            "Type": MAKE.Name("Font"),
+            "Subtype": MAKE.Name("Type1"),
+            "BaseFont": MAKE.Name("Helvetica"),
+            "ToUnicode": broken,
+        }
+    )
+    shown = MAKE.text("F1", 12, 72, 700, b"Hello")
+    refs = [MAKE.page(pdf, tree, shown, {"Font": {"F1": font}}) for _ in range(3)]
+    MAKE.page_tree(pdf, refs, tree)
+    data = bytes(pdf.build(MAKE.catalog(pdf, tree)))
+    found = [
+        sorted((f.code, f.details["page"]) for f in ingest(data, pages_per_chunk=size).findings())
+        for size in (3, 1)
+    ]
+    assert found[0] == found[1] == [("pdf.content_unreadable", page) for page in range(3)]
 
 
 def test_pages_sharing_a_big_cmap_parse_it_once_per_chunk() -> None:
