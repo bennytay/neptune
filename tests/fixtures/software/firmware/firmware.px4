@@ -1,0 +1,14 @@
+{
+  "board_id": 53,
+  "magic": "PX4FWv1",
+  "description": "Firmware for the PX4_FMU_V6X board",
+  "image": "eNpjYKAMAAAAQAAB",
+  "build_time": 1790762400,
+  "summary": "PX4_FMU_V6X",
+  "version": "0.1",
+  "image_size": 64,
+  "image_maxsize": 2080768,
+  "git_identity": "v1.15.0-12-g8f3c2a1",
+  "git_hash": "8f3c2a1d9e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a",
+  "board_revision": 0
+}

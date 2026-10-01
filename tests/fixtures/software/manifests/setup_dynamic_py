@@ -1,0 +1,8 @@
+"""Perception utilities."""
+from setuptools import find_packages, setup
+
+setup(
+    name="perception_utils",
+    version=read_version(),
+    packages=find_packages(),
+)
