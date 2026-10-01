@@ -144,7 +144,8 @@ them did not all hold, and the coordinator recorded follow-ups the gate had to l
 - **Retrying a short read.** The bytes behind it are the same on the next attempt.
 - **Blaming the source for every short read naming it.** It blamed the source for an adapter's
   bug: with an intact source, the only reader that could read short is the adapter's own.
-  Verifying costs one more pass over the source, and only when a call raises one.
+  Verifying costs one more pass over the source when a call raises one, and only one per job
+  while the file's inode, size and times are unchanged, however many chunks and attempts fail.
 - **Folding isolation into chunk identity.** New record ids for the same evidence (ADR 0003)
   and a recomputation for nothing the output depends on; see §6.
 

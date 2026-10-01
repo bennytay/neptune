@@ -28,6 +28,7 @@ from neptune.adapters.contract import (
     make_chunk,
 )
 from neptune.adapters.registry import AdapterRegistry
+from neptune.discovery.verify import verify_artifact
 from neptune.identity.hashing import content_id
 from neptune.model.finding import FindingCategory, Severity, subject_to_json
 from neptune.model.knowledge import Known
@@ -35,6 +36,7 @@ from neptune.model.provenance import ByteRange, EvidenceRef
 from neptune.model.series import ColumnType, SeriesBatch, SeriesColumn
 from neptune.model.world import DocumentBlock, DocumentRecord
 from neptune.runtime import IngestJob, Isolation, JobError, JobEvent, JobOptions, JobState, Phase
+from neptune.runtime import job as job_module
 from neptune.runtime import lineage as runtime_lineage
 from neptune.store.package import read_package
 from neptune.store.workspace import Workspace
@@ -633,12 +635,20 @@ def test_a_committed_run_the_workspace_cannot_read_fails_the_job_not_the_source(
 
 @pytest.mark.parametrize("isolation", [Isolation.SUBPROCESS, Isolation.IN_PROCESS])
 def test_a_short_read_over_an_intact_source_is_the_adapters_failure(
-    tmp_path: Path, isolation: Isolation
+    tmp_path: Path, isolation: Isolation, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The job's reader never reads short, so a ``ShortReadError`` naming a source that still
     matches its artifact came from the adapter's own window over it: ``plan_failed`` or
     ``chunk_failed`` naming ``ShortReadError``, after the usual retries, and no finding blames
-    the source; one naming another reader is the adapter's too (ADR 0033 §3)."""
+    the source; one naming another reader is the adapter's too (ADR 0033 §3). An unchanged file
+    found intact is verified once, not once per attempt."""
+    verified: list[str] = []
+
+    def counting(stream: Any, artifact: Any) -> Any:
+        verified.append(artifact.content_id)
+        return verify_artifact(stream, artifact)
+
+    monkeypatch.setattr(job_module, "verify_artifact", counting)
     root = tmp_path / "root"
     root.mkdir()
     shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
@@ -670,6 +680,7 @@ def test_a_short_read_over_an_intact_source_is_the_adapters_failure(
         )
     retried = sorted(str(e.details["error"]) for e in seen if e.kind == "chunk_retried")
     assert retried == ["ShortReadError", "ShortReadError"]
+    assert sorted(verified) == sorted([content_id(short), content_id(planned)])  # never elsewhere
     assert not [e for e in seen if e.kind == "source_short_read"]
     assert not [c for c in codes(package) if c.startswith("neptune.discovery.")]
     assert len(outcome.ingested) == 1  # the notes

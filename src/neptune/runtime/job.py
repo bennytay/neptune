@@ -42,6 +42,7 @@ Each miss names the rule that caused it, and the job leaves a ``CacheReport`` be
 """
 
 import errno
+import os
 import platform
 import threading
 import time
@@ -251,6 +252,7 @@ class _Source:
     replaced: ContentId | None = None  # bytes a location of it held before, if any
     plan_cache: PlanCache | None = None  # set once the job decides to plan or reuse
     hits: set[str] = field(default_factory=set)  # chunks the workspace had committed
+    intact: tuple[int, ...] | None = None  # the file's state when last verified intact
 
     @property
     def content_id(self) -> ContentId:
@@ -738,14 +740,24 @@ class IngestJob:
     def _differences(self, item: _Source) -> tuple[IngestFinding, ...] | None:
         """How the source differs now from the artifact it was hashed as: ``verify_artifact``'s
         findings (truncated, grown, changed chunks; ADR 0029 §3), empty when it is intact, and
-        ``None`` when it cannot be opened. One pass over the file as it is now.
+        ``None`` when it cannot be opened.
+
+        One pass over the file as it is now, except that a file found intact is not read again
+        while its device, inode, size and change times stay the same: an adapter whose own
+        window reads short fails every chunk, and every attempt, the same way.
         """
         assert self._local is not None
         try:
             with self._local.open(item.location) as stream:
-                return verify_artifact(stream, item.artifact)
+                info = os.fstat(stream.fileno())
+                state = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+                if state == item.intact:
+                    return ()
+                found = verify_artifact(stream, item.artifact)
         except _UNREADABLE:
             return None
+        item.intact = None if found else state
+        return found
 
     def _verify(self, item: _Source) -> None:
         """Record exactly what differs in a source that changed under the job.
