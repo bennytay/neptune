@@ -1,6 +1,6 @@
 """Measure one large source through the real job: the M2 gate's large-source scenario (MVL-57).
 
-Usage: ``python stress_large_source.py WORKDIR GIB``
+Usage: ``python stress_large_source.py WORKDIR GIB``, or ``... WORKDIR many FILES``
 
 Generates a sparse frame log of ``GIB`` GiB under ``WORKDIR/run`` (headers written, payloads
 holes, so it costs no disk), ingests it with the sandbox into a workspace under ``WORKDIR``,
@@ -16,9 +16,11 @@ ingests it again, and prints one JSON object of measurements:
   largest of its sandboxed calls';
 - ``rerun``: the second job's adapter calls.
 
-``GIB`` 0 measures a small log, for tests. The generated run directory is removed at the end;
-the workspace and packages are left in ``WORKDIR``. Peak memory is the process's, so run it in a
-process of its own (as ``main`` does) for a clean number.
+``many FILES`` measures the other end of scale instead: ``FILES`` small text files, one
+sandboxed probe and one sandboxed call per chunk each, so the per-source cost of the job is
+``inspect_seconds / FILES`` and so on. ``GIB`` 0 measures a small log, for tests. The generated
+run directory is removed at the end; the workspace and packages are left in ``WORKDIR``. Peak
+memory is the process's, so run it in a process of its own (as ``main`` does) for a clean number.
 """
 
 import importlib.util
@@ -147,9 +149,42 @@ def measure(workdir: Path, gib: int) -> dict[str, Any]:
     }
 
 
+def measure_many(workdir: Path, files: int) -> dict[str, Any]:
+    root = workdir / "run"
+    root.mkdir(parents=True)
+    for index in range(files):
+        (root / f"note-{index:06d}.txt").write_text(f"Operator note {index}.\n\nAll nominal.\n")
+    workspace = Workspace(workdir / "home")
+    started = time.perf_counter()
+    first = IngestJob(root, workdir / "first", workspace, AdapterRegistry(builtin_adapters())).run()
+    first_seconds = time.perf_counter() - started
+    started = time.perf_counter()
+    again = IngestJob(root, workdir / "again", workspace, AdapterRegistry(builtin_adapters())).run()
+    rerun_seconds = time.perf_counter() - started
+    shutil.rmtree(root)
+    durations = {phase: round(seconds, 3) for phase, seconds in first.durations}
+    return {
+        "calls": {"ingest": first.cache.calls.ingest, "plan": first.cache.calls.plan},
+        "files": files,
+        "first_receipt_seconds": round(first_seconds, 3),
+        "inspect_seconds": durations["inspect"],
+        "parent_peak_rss_mib": _mib(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss),
+        "parse_seconds": round(durations["parse"] + durations["normalize"], 3),
+        "plan_seconds": durations["plan"],
+        "rerun_seconds": round(rerun_seconds, 3),
+        "same_package": again.package == first.package,
+        "sources": len(first.ingested),
+        "state": str(first.state),
+    }
+
+
 def main(argv: list[str]) -> int:
-    workdir, gib = Path(argv[0]), int(argv[1])
-    sys.stdout.write(json.dumps(measure(workdir, gib), sort_keys=True) + "\n")
+    workdir = Path(argv[0])
+    if argv[1] == "many":
+        measured = measure_many(workdir, int(argv[2]))
+    else:
+        measured = measure(workdir, int(argv[1]))
+    sys.stdout.write(json.dumps(measured, sort_keys=True) + "\n")
     return 0
 
 

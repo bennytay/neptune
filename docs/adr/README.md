@@ -31,8 +31,10 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0024](0024-adapter-abi-types-selection-and-reference-adapter.md) | The adapter ABI's exact types, adapter selection, and the reference adapter | Accepted |
 | [0025](0025-series-files-sorted-merged-and-pinned.md) | Series files: one sorted Parquet file per stream, merged from runs, pinned settings | Accepted |
 | [0026](0026-local-workspace-in-place-reads-and-assembly.md) | The local workspace, reading sources in place, and assembling packages | Accepted; §1 amended by 0031 (format 2) |
-| [0027](0027-probe-engine-sniffing-containers-and-selection-findings.md) | The probe engine: sniffing, bounded container inspection, and selection as findings | Accepted |
-| [0028](0028-ingest-job-phases-resume-quarantine-and-events.md) | The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events | Accepted |
-| [0029](0029-hostile-file-handling.md) | Hostile file handling: walk findings, archive limits, source verification, scratch space | Accepted |
-| [0030](0030-parser-sandbox-fork-per-call-confinement-and-limits.md) | The parser sandbox: a confined child process per adapter call, limits, and crash findings | Accepted |
-| [0031](0031-cache-keys-invalidation-lazy-derivatives-and-collection.md) | The cache: chunk ids as keys, named invalidation rules, lazy derivatives, a report and collection | Accepted |
+| [0027](0027-probe-engine-sniffing-containers-and-selection-findings.md) | The probe engine: sniffing, bounded container inspection, and selection as findings | Accepted; §4 amended by 0033 |
+| [0028](0028-ingest-job-phases-resume-quarantine-and-events.md) | The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events | Accepted; inspect phase and walk findings amended by 0033 |
+| [0029](0029-hostile-file-handling.md) | Hostile file handling: walk findings, archive limits, source verification, scratch space | Accepted; §3–§4 wired by 0033 |
+| [0030](0030-parser-sandbox-fork-per-call-confinement-and-limits.md) | The parser sandbox: a confined child process per adapter call, limits, and crash findings | Accepted; §1, §3, §4 amended by 0033 |
+| [0031](0031-cache-keys-invalidation-lazy-derivatives-and-collection.md) | The cache: chunk ids as keys, named invalidation rules, lazy derivatives, a report and collection | Accepted; §2 amended by 0033 |
+| [0032](0032-probe-listing-and-archive-inspection-stay-two-passes.md) | The probe's container listing and the archive inspector stay two passes | Accepted |
+| [0033](0033-m2-gate-probing-scratch-short-reads-and-reuse.md) | The M2 gate: the job probes in the sandbox, calls get scratch, short reads are the source's | Accepted |

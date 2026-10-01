@@ -31,7 +31,9 @@ class Adapter(Protocol):
 (`read_pieces` streams a range). `discovery.reader.BytesReader` serves bytes from memory. A reader
 that serves no bytes inside the size it declares makes `read_pieces` raise `ShortReadError`: the
 source's fault, not the adapter's, so it propagates, and the runtime records
-`neptune.discovery.short_read` for the unserved range and goes on with the job (ADR 0029 §3).
+`neptune.discovery.short_read` for the unserved range with `verify_artifact`'s account, never
+retries it, quarantines the source and goes on with the job (ADR 0029 §3, ADR 0033 §3). Raise it
+only for the reader you were given; one naming another reader is your own failure.
 
 ## Laws
 
@@ -55,10 +57,17 @@ source's fault, not the adapter's, so it propagates, and the runtime records
 9. **One chunk per output.** No record or finding is emitted by two chunks. A source's output cites the
    source at least once, even when it is empty or unreadable, so the receipt always shows who read it.
 10. **Sandboxed by default** (ADR 0030). Every call runs in a fresh child process: nothing an adapter
-    keeps on itself survives to the next call, and opening a socket, writing a file (temporary files
-    included), starting a process or signalling another one fails with an `OSError`. Reading files
-    (lazy imports, codec and time-zone tables) works. A crash, a hang or runaway memory is a
-    finding about the source, never a failed job.
+    keeps on itself survives to the next call, and opening a socket, writing a file, starting a
+    process or signalling another one fails with an `OSError`. Reading files (lazy imports, codec
+    and time-zone tables) works. A crash, a hang or runaway memory is a finding about the source,
+    never a failed job.
+11. **Scratch, only where given** (ADR 0033 §2). `contract.scratch_directory()` is an empty private
+    directory a `plan` or `ingest` call may write temporary files in (a spool for a nested
+    archive, a decoder that wants a file), removed when the call returns; each file is at most
+    `scratch_bytes` (1 GiB by default; past it the call stops with `limit_exceeded`). It is
+    `None` for `probe` and `inspect`, outside a job, and on a host without Landlock: an adapter
+    that needs scratch and has none reports that as a finding. Output never depends on what a
+    previous call left, since nothing is left.
 
 ## Config, chunks and output (ADR 0024)
 
@@ -190,7 +199,7 @@ For registers, geometry, photos, video files and documents:
 | resume | skip chunks whose id is already committed in the store |
 | cache | the chunk id, which covers source id, adapter id and version, config hash, libraries and context; a version or config change recomputes only that adapter's chunks (ADR 0031) |
 | validation across sources | `validate/` engine over the store |
-| sandboxing | each `probe`, `plan` and `ingest` call in a child forked for it, with CPU, wall-time and memory limits, no network, no writes, no new processes (ADR 0030); the result crosses back as JSON, so it must be what the contract says (records with their `to_json`) |
+| sandboxing | each source's probe (every adapter's `probe` in one call, through the probe engine), each `plan` and each `ingest` in a child forked for it, with CPU, wall-time and memory limits, no network, no writes but beneath the call's scratch directory, no new processes (ADRs 0030, 0033); the result crosses back as JSON, so it must be what the contract says (records with their `to_json`) |
 | explanation | assembles `ProbeResult`, `plan` output and `descriptor` into the receipt |
 | scheduling / backpressure | bounded worker queues (M9) |
 
