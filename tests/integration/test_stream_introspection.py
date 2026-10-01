@@ -15,9 +15,11 @@ from typing import Final
 
 import pytest
 
-from neptune.derived.schemas import LayoutState, PathKind
+from neptune.derived.introspection import IntrospectionConfig, introspect
+from neptune.derived.schemas import LayoutState, PathKind, SchemaLimits
 from neptune.derived.semantics import KNOWN_TYPE, KNOWN_TYPE_UNCHECKED, Semantic, SemanticState
 from neptune.model.knowledge import Known
+from neptune.model.provenance import ByteRange, EvidenceRef
 from neptune.sdk import Neptune, RunContents, StreamContents, Workspace, run_contents
 from neptune.store.package import read_package
 
@@ -193,3 +195,44 @@ def test_introspection_is_deterministic(
     assert run_contents(second) == runs == result.contents()
     lines = [json.dumps(line, sort_keys=True) for line in first.derived["stream_semantic"]]
     assert lines == sorted(lines, key=lambda line: json.loads(line)["id"])
+
+
+def test_the_driver_reads_each_definition_once_and_within_its_budgets(
+    ingested: tuple[Path, tuple[RunContents, ...]],
+) -> None:
+    _, runs = ingested
+    records = [s.stream for s in streams(runs)]
+    calls: list[EvidenceRef] = []
+
+    def unreadable(ref: EvidenceRef) -> bytes | None:
+        calls.append(ref)
+        return None
+
+    found = introspect(records, unreadable)
+    # /imu and /imu_rear share one MCAP schema record: read once.
+    assert len(calls) == len(set(calls))
+    states = {line.problem.reason for line in found.layouts if line.problem is not None}
+    assert "definition_unreadable" in states
+    assert all(line.state is not LayoutState.KNOWN for line in found.layouts)
+    codes = {f.code for f in found.findings}
+    assert "neptune.introspection.definition_unreadable" in codes
+
+    calls.clear()
+    small = IntrospectionConfig(SchemaLimits(max_definition_bytes=64), max_total_bytes=128)
+    bounded = introspect(records, unreadable, small)
+    reasons = {line.problem.reason for line in bounded.layouts if line.problem is not None}
+    assert {"definition_too_large", "introspection_budget"} <= reasons
+    assert (
+        sum(ref.locator[0].length for ref in calls if isinstance(ref.locator[0], ByteRange)) <= 128
+    )
+    assert bounded.transform.id != found.transform.id  # the limits are its config: new lineage
+
+
+def test_the_driver_is_order_independent(ingested: tuple[Path, tuple[RunContents, ...]]) -> None:
+    _, runs = ingested
+    records = [s.stream for s in streams(runs)]
+
+    def none(ref: EvidenceRef) -> bytes | None:
+        return None
+
+    assert introspect(records, none) == introspect(list(reversed(records)), none)
