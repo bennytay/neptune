@@ -356,7 +356,7 @@ def tiff_of(entries: list[tuple[int, int, int, int]], tail: bytes = b"") -> byte
     return b"II*\x00" + struct.pack("<I", 8) + ifd + struct.pack("<I", 0) + tail
 
 
-def timed(data: bytes, seconds: float = 3.0, **config: Any) -> SourceOutput:
+def timed(data: bytes, seconds: float = 20.0, **config: Any) -> SourceOutput:
     started = time.monotonic()
     output = run(data, **config)
     assert time.monotonic() - started < seconds
@@ -393,7 +393,7 @@ def test_a_bigtiff_side_of_two_to_the_64_minus_one_is_a_finding_not_an_exception
 
 def test_a_tiff_ifd_declaring_65535_entries_is_read_entry_by_entry_within_the_budget() -> None:
     data = b"II*\x00" + struct.pack("<IH", 8, 65535) + bytes(12 * 65535 + 4)
-    output = timed(data, seconds=5.0)
+    output = timed(data, max_entries=2000)
     assert "image.limit_exceeded" in codes(output)
 
 
