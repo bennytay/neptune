@@ -66,14 +66,22 @@ def test_contracts_run_every_member_but_not_the_compiler() -> None:
     assert _plan("contracts/ledger.schema.json") == (False, tuple(sorted(MEMBERS)), False)
 
 
-def test_harness_runs_the_platform_job_only() -> None:
-    """harness/ is the platform's: its tests live in packages/neptune-platform/tests."""
+def test_harness_runs_the_platform_job_which_lints_it() -> None:
+    """harness/ is the platform's: its tests live in packages/neptune-platform/tests, and the
+    platform job's `make lint` formats and lints harness/ (the Makefile's MEMBER_DIRS)."""
     assert _plan("harness/runner.py") == (False, ("neptune-platform",), False)
     assert _plan("harness/x.py", "docs/y.md")[:2] == (
         True,
         ("neptune-ledger", "neptune-platform", "neptune-recall"),
     )
     assert _plan("harnessy/x.py")[0] is True  # only the harness/ directory itself
+
+
+def test_member_dirs_agree_with_the_makefile() -> None:
+    makefile = (Path(__file__).parents[2] / "Makefile").read_text()
+    (line,) = [x for x in makefile.splitlines() if x.startswith("MEMBER_DIRS :=")]
+    pairs = [pair.split(":") for pair in line.split(":=", 1)[1].split()]
+    assert {f"{d}/": member for member, d in pairs} == ci_plan.MEMBER_DIRS
 
 
 OWNERS = {"package-schema": "neptune", "catalog-api": "neptune-ledger"}

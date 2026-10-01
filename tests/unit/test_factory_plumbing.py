@@ -193,7 +193,7 @@ def _make(
     tmp_path: Path, target: str, pkg: str = "", fail_format_in: str = ""
 ) -> tuple[int, list[str]]:
     workspace = tmp_path / "ws"
-    for member in ("_template", "alpha"):
+    for member in ("_template", "alpha", "neptune-platform"):
         (workspace / "packages" / member).mkdir(parents=True)
         (workspace / "packages" / member / "pyproject.toml").write_text("")
     shutil.copy(ROOT / "Makefile", workspace / "Makefile")
@@ -223,8 +223,18 @@ def test_make_lint_stops_when_an_earlier_package_fails_format(tmp_path: Path) ->
 def test_make_lint_runs_every_package_when_all_pass(tmp_path: Path) -> None:
     status, calls = _make_lint(tmp_path, fail_format_in="")
     assert status == 0
-    assert len(calls) == 4  # format + check for the compiler and for alpha
+    assert len(calls) == 6  # format + check for the compiler, alpha and neptune-platform
     assert sum(c.split(" ", 1)[0].endswith("/packages/alpha") for c in calls) == 2
+
+
+def test_make_lint_gives_harness_to_the_platform_not_the_compiler(tmp_path: Path) -> None:
+    status, calls = _make(tmp_path, "lint")
+    assert status == 0
+    harness = str((tmp_path / "ws").resolve() / "harness")
+    by_dir = {c.split(" ", 1)[0].rsplit("/", 1)[-1]: c for c in calls if " format " in c}
+    assert by_dir["neptune-platform"].endswith(f"ruff format --check . {harness}")
+    assert "--extend-exclude harness" in by_dir["ws"] and harness not in by_dir["ws"]
+    assert not by_dir["alpha"].endswith("harness")
 
 
 def _contracts_calls(calls: list[str]) -> list[str]:
@@ -239,7 +249,8 @@ def test_make_contracts_check_runs_one_consumer_check_and_the_matrix(tmp_path: P
     assert _contracts_calls(calls) == [
         "check-owner --package neptune",
         "check-owner --package alpha",
-        "check --all --package alpha",
+        "check-owner --package neptune-platform",
+        "check --all --package alpha --package neptune-platform",
         "matrix --check",
     ]
 

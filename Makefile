@@ -19,10 +19,16 @@ SELECTED := $(if $(PKG),$(PKG),$(COMPILER) $(MEMBERS))
 SELECTED_MEMBERS := $(filter $(MEMBERS),$(SELECTED))
 # Every tool runs against the whole workspace environment, from the package's own directory so its
 # own ruff / mypy / pytest configuration applies. Members are linted only by their own job.
+# MEMBER_DIRS (<member>:<root dir>) are root directories whose tests live in a member: that member
+# lints them (`$$d`) and the compiler does not; .github/scripts/ci_plan.py routes them the same way.
 RUN := $(UV) run --all-packages --all-groups
-EACH = set -ef; for p in $(SELECTED); do \
-  if [ "$$p" = $(COMPILER) ]; then cd "$(CURDIR)"; x="--extend-exclude packages/*"; \
-  else cd "$(CURDIR)/packages/$$p"; x=""; fi; echo "--- $$p" >&2;
+MEMBER_DIRS := neptune-platform:harness
+EACH = set -ef; for p in $(SELECTED); do d=""; \
+  if [ "$$p" = $(COMPILER) ]; then cd "$(CURDIR)"; \
+    x="--extend-exclude packages/*$(foreach m,$(MEMBER_DIRS), --extend-exclude $(word 2,$(subst :, ,$(m))))"; \
+  else cd "$(CURDIR)/packages/$$p"; x=""; \
+    for m in $(MEMBER_DIRS); do if [ "$${m%%:*}" = "$$p" ]; then d="$$d $(CURDIR)/$${m\#*:}"; fi; done; \
+  fi; echo "--- $$p" >&2;
 ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
@@ -40,7 +46,7 @@ fmt: ## Format code and auto-fix lint findings
 
 lint: adr-index-check ## Formatting, lint and ADR-index check without modifying files
 # `set -e` ignores a failure on the left of `&&`, so each step exits explicitly.
-> @$(EACH) $(RUN) ruff format --check $$x . || exit 1; $(RUN) ruff check $$x . || exit 1; done
+> @$(EACH) $(RUN) ruff format --check $$x . $$d || exit 1; $(RUN) ruff check $$x . $$d || exit 1; done
 
 type: ## Static type check (mypy --strict)
 > @$(EACH) $(RUN) mypy; done
