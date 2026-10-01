@@ -12,8 +12,10 @@ What it emits for a file (ADR 0038):
 Roles are the syntax's: an ATX or setext heading is a ``heading`` with its level; a paragraph in a
 list item is a ``list_item`` with its list depth, in a blockquote a ``quote``, otherwise a
 ``paragraph``; fenced and indented code is ``code``; a GFM table is a ``table``. An HTML block's
-role is ``Unknown``: CommonMark declares raw HTML, not what it is. Thematic breaks, blank lines
-and link reference definitions are not blocks; they stay in the bytes.
+role is ``Unknown``: CommonMark declares raw HTML, not what it is. So is a link reference definition's
+(``[label]: url "title"``): the model has no role for it, but the text is evidence a learner needs to
+resolve ``[text][label]``, so it is a block, and ``markdown.link_definitions`` says how many.
+Thematic breaks and blank lines are not blocks; they stay in the bytes.
 
 The text is the file's bytes after a leading UTF-8 BOM, decoded as UTF-8; spans count code
 points, an invalid sequence counting as the U+FFFD that Python's ``errors="replace"`` gives it,
@@ -140,6 +142,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "blocks whose bytes are not valid UTF-8 have Unknown text (unrepresentable, warning)",
         ),
         Documented(
+            "markdown.link_definitions",
+            "link reference definitions are blocks with an Unknown role: the model has no role for"
+            " them (unrepresentable, info)",
+        ),
+        Documented(
             "markdown.nesting_limit",
             "containers nested past the parser's limit: their content is not parsed (limit, error)",
         ),
@@ -158,7 +165,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
     conventions=(
         Documented(
             "blocks",
-            "CommonMark leaf blocks with text (paragraphs, headings, code, HTML, GFM tables);"
+            "CommonMark leaf blocks with text (paragraphs, headings, code, HTML, link reference"
+            " definitions, GFM tables);"
             " spans per ADR 0038: content without container markers or heading markers",
         ),
         Documented("chunks", "chunk 0 holds the document; chunk 1 holds every block"),
@@ -453,6 +461,7 @@ def _blocks(out: _Output) -> None:
     lines_map = Lines(text, normalized)
     parsed = parse(normalized)
     damaged: list[RecordId] = []
+    definitions: list[RecordId] = []
 
     def bad(start: int, end: int) -> bool:
         index = bisect_left(invalid, start)
@@ -479,8 +488,20 @@ def _blocks(out: _Output) -> None:
                 region=NotApplicable(),
             )
         )
+        if block.definition:
+            definitions.append(block_id)
         if block.role is BlockRole.TABLE and block.rows:
             _table(out, block, cited, lines_map, text, bad)
+    if definitions:
+        out.finding(
+            "markdown.link_definitions",
+            FindingCategory.UNREPRESENTABLE,
+            Severity.INFO,
+            f"{len(definitions)} link reference definition(s) are blocks with an unknown role;"
+            " the canonical model has no role for them",
+            {"blocks": len(definitions)},
+            definitions,
+        )
     if damaged:
         out.finding(
             "markdown.invalid_utf8",

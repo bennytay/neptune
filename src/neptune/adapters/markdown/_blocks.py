@@ -12,6 +12,8 @@ then exact, in the parser's own terms, without re-implementing container prefixe
 - fenced and indented code: its content lines whole, from where the first one begins inside its
   containers (indentation included) to the last one's end;
 - HTML block: from the first line's content start to the last non-blank character;
+- link reference definition: from its first character to its last non-blank one; CommonMark
+  declares it, the model has no role for it, so the block's role is ``Unknown``;
 - table: from the header row's first character to the last row's last non-blank character, and
   each row and cell by the GFM rule (cells split at unescaped pipes, then trimmed).
 
@@ -35,14 +37,27 @@ from markdown_it.rules_block import (
     html_block,
     lheading,
     paragraph,
+    reference,
     table,
 )
+from markdown_it.parser_block import _rules as _BLOCK_RULES
 from markdown_it.token import Token
 
 from neptune.model.world import BlockRole
 
 MAX_NESTING: Final = 64
+_LEAVES: Final = (
+    "paragraph",
+    "heading",
+    "table",
+    "fence",
+    "code_block",
+    "html_block",
+    "definition",
+)
 NEWLINES: Final = re.compile(r"\r\n?|\n")
+# Which blocks each rule may interrupt: ``Ruler.at`` resets these, so the wrapper restores them.
+_INTERRUPTS: Final = {name: {"alt": list(alt)} for name, _, alt in _BLOCK_RULES}
 _ROLES: Final[dict[str, BlockRole]] = {
     "fence": BlockRole.CODE,
     "code_block": BlockRole.CODE,
@@ -87,6 +102,7 @@ class Block:
     leveled: bool
     rows: tuple[Row, ...] = ()  # tables: header first, then body rows; the delimiter row is not one
     lines: tuple[int, int] = (0, 0)
+    definition: bool = False  # a link reference definition
 
 
 @dataclass
@@ -138,18 +154,20 @@ def _recording(
 
 def parser(records: dict[int, Recorded]) -> MarkdownIt:
     """CommonMark plus GFM tables, inline parsing off, each leaf rule recording into ``records``."""
-    md = MarkdownIt("commonmark", {"maxNesting": MAX_NESTING}).enable("table")
+    options = {"maxNesting": MAX_NESTING, "inline_definitions": True}
+    md = MarkdownIt("commonmark", options).enable("table")
     md.disable(["inline", "text_join"], ignoreInvalid=True)
     for name, rule in (
         ("table", table),
         ("code", code),
         ("fence", fence),
+        ("reference", reference),
         ("html_block", html_block),
         ("heading", heading),
         ("lheading", lheading),
         ("paragraph", paragraph),
     ):
-        md.block.ruler.at(name, _recording(name, rule, records))
+        md.block.ruler.at(name, _recording(name, rule, records), _INTERRUPTS[name])
     return md
 
 
@@ -243,7 +261,7 @@ def parse(text: str) -> Parsed:
             lists -= 1
             continue
         leaf = kind.removesuffix("_open")
-        if leaf not in ("paragraph", "heading", "table", "fence", "code_block", "html_block"):
+        if leaf not in _LEAVES:
             continue
         if kind == leaf and leaf in ("paragraph", "heading", "table"):
             continue  # a close token
@@ -261,7 +279,16 @@ def parse(text: str) -> Parsed:
             body = [line for number, line in enumerate(record.lines) if number != 1]
             rows = tuple(_split_row(text, low, high) for low, high in body)
         parsed.blocks.append(
-            Block(span[0], span[1], role, level, leveled, rows, (token.map[0], token.map[1]))
+            Block(
+                span[0],
+                span[1],
+                role,
+                level,
+                leveled,
+                rows,
+                (token.map[0], token.map[1]),
+                leaf == "definition",
+            )
         )
     return parsed
 
@@ -273,7 +300,7 @@ def _role(
         return BlockRole.HEADING, int(token.tag[1]), True
     if leaf in _ROLES:
         return _ROLES[leaf], None, False
-    if leaf == "html_block":
+    if leaf in ("html_block", "definition"):
         return None, None, False
     innermost = containers[-1] if containers else None
     if innermost == "item":

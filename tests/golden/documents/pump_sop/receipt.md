@@ -1,12 +1,12 @@
 # Ingest receipt
 
-Receipt `rec:sha256:3829d07aeffb1ac85b40ef27380409b22489072dcff4338a32d798826e0bd04c`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:77c0fbfad5ea718ccdca78e2041592f6887f662de0a17a40741cf7ab1e9418fd`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 2 seen, 2 read, 0 not read, 0 gone
 - Runs: 0; streams: 0; entities: 0
-- Findings: 0 errors, 0 warnings, 0 info; ambiguous fields: 0
+- Findings: 0 errors, 0 warnings, 1 info; ambiguous fields: 0
 
 ## Sources
 
@@ -26,8 +26,9 @@ Receipt `rec:sha256:3829d07aeffb1ac85b40ef27380409b22489072dcff4338a32d798826e0b
 
 | Kind | Records |
 |---|---|
-| `document_block` | 26 |
+| `document_block` | 27 |
 | `document_record` | 2 |
+| `ingest_finding` | 1 |
 | `source_artifact` | 2 |
 | `source_revision` | 2 |
 | `structured_record` | 5 |
@@ -51,7 +52,7 @@ Receipt `rec:sha256:3829d07aeffb1ac85b40ef27380409b22489072dcff4338a32d798826e0b
 
 ## Findings
 
-None.
+- **info** `markdown.link_definitions` (unrepresentable): 1 link reference definition(s) are blocks with an unknown role; the canonical model has no role for them · `rec:60a17f6976c5`
 
 ## Ambiguous fields
 

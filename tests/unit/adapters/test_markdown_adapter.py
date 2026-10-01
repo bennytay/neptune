@@ -202,9 +202,54 @@ def test_commonmark_blocks_carry_the_roles_the_syntax_declares() -> None:
         ),
         (BlockRole.HEADING, 2, "Sign-off"),  # setext
         ("Unknown", "Unknown", "<!-- reviewed by operations -->"),  # raw HTML
+        ("Unknown", "Unknown", "[register]: https://example.invalid/register"),  # link definition
     ]
-    assert output.findings() == ()
+    assert [f.code for f in output.findings()] == ["markdown.link_definitions"]
     check_citations(data, output)
+
+
+def test_link_reference_definitions_are_kept_as_evidence() -> None:
+    data = b"See [spec][s] and [a].\n\n[s]: https://example.invalid/spec\n  'Spec'\n[A]: </a b>\n"
+    data += b"[s]: /duplicate\n> [q]: /quoted\n- [i]: /listed\n"
+    output = run(data)
+    kept = [(state(b.role), state(b.text)) for b in blocks(output)]
+    assert kept == [
+        (BlockRole.PARAGRAPH, "See [spec][s] and [a]."),
+        ("Unknown", "[s]: https://example.invalid/spec\n  'Spec'"),
+        ("Unknown", "[A]: </a b>"),
+        ("Unknown", "[s]: /duplicate"),  # a later duplicate is evidence too
+        ("Unknown", "[q]: /quoted"),
+        ("Unknown", "[i]: /listed"),
+    ]
+    found = finding(output, "markdown.link_definitions")
+    assert (found.severity, found.details) == (Severity.INFO, {"blocks": 5})
+    assert len(found.records) == 5
+    check_citations(data, output)
+
+
+def test_a_malformed_definition_is_only_a_paragraph() -> None:
+    for data in (
+        b"[a]:\n",
+        b"[a] : /u\n",
+        b"[a]: /u trailing junk\n",
+        b"    [a]: /u\n",
+        b"[]: /u\n",
+    ):
+        output = run(data)
+        assert not [f for f in output.findings() if f.code == "markdown.link_definitions"]
+        assert all(state(b.role) != "Unknown" for b in blocks(output)), data
+        check_citations(data, output)
+
+
+def test_a_fence_or_heading_interrupts_a_paragraph_as_commonmark_says() -> None:
+    output = run(b"intro\n```\ncode\n```\ntext\n# Head\n> quote\n")
+    assert [(state(b.role), state(b.text)) for b in blocks(output)] == [
+        (BlockRole.PARAGRAPH, "intro"),
+        (BlockRole.CODE, "code"),
+        (BlockRole.PARAGRAPH, "text"),
+        (BlockRole.HEADING, "Head"),
+        (BlockRole.QUOTE, "quote"),
+    ]
 
 
 def test_the_front_matter_title_cites_its_value() -> None:
