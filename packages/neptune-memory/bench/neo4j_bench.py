@@ -39,8 +39,7 @@ VIS = (
 )
 THREAD = """
 UNWIND $preds AS p
-CALL {
-  WITH p
+CALL (p) {
   MATCH (c:Claim)
   WHERE c.subject = $subject AND c.predicate = p AND c.valid_from <= $valid_at
     AND c.valid_clock = $clock AND c.recorded_at <= $known_at
@@ -110,7 +109,7 @@ def stop() -> None:
 
 
 def driver() -> Any:
-    return GraphDatabase.driver(URI)
+    return GraphDatabase.driver(URI, notifications_min_severity="OFF")
 
 
 def preds_for(robot: str) -> list[str]:
@@ -279,7 +278,8 @@ def write(n: int, seconds: float = 30.0, writers: int = 4, readers: int = 8) -> 
     robots = w.entities(n, "robot")
     with driver() as d:
         recs, _, _ = d.execute_query(
-            "MATCH (c:Claim) WHERE c.claim_id % 7 = 0 AND c.superseded_at IS NULL "
+            f"MATCH (c:Claim) WHERE c.claim_id % {7 if n >= 10**6 else 1} = 0 "
+            "AND c.superseded_at IS NULL "
             "AND c.object_value IS NOT NULL RETURN c.claim_id LIMIT 200000"
         )
         top, _, _ = d.execute_query("MATCH (c:Claim) RETURN max(c.claim_id), max(c.recorded_at)")

@@ -8,3 +8,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-place-in-the-programme-and-contract-pins.md) | Memory's place in the programme, declared contract versions, and the stub Ledger | Accepted |
+| [0004](0004-claim-graph-store.md) | Claim graph store: PostgreSQL 16 + Apache AGE + pgvector, measured against Neo4j 5 | Accepted |

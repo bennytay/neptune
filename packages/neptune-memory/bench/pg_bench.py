@@ -212,6 +212,11 @@ def vector(n: int, reps: int = 100, k: int = 10) -> None:
     w.save("pg", n, "vector", res)
 
 
+def stride(n: int) -> int:
+    """Spread superseded claims over the fleet; small scales need every claim to last 30 s."""
+    return 7 if n >= 10**6 else 1
+
+
 def write(n: int, seconds: float = 30.0, writers: int = 4, readers: int = 8) -> None:
     """Superseding writes (close old + append correction, one transaction) under thread reads."""
     robots = w.entities(n, "robot")
@@ -221,7 +226,7 @@ def write(n: int, seconds: float = 30.0, writers: int = 4, readers: int = 8) -> 
             r[0]
             for r in c.execute(
                 f"SELECT claim_id FROM {S}.claim WHERE superseded_at IS NULL "
-                "AND object_value IS NOT NULL AND claim_id % 7 = 0 LIMIT 200000"
+                f"AND object_value IS NOT NULL AND claim_id % {stride(n)} = 0 LIMIT 200000"
             ).fetchall()
         ]
     next_id = [int(top[0]) + 1_000_000]
