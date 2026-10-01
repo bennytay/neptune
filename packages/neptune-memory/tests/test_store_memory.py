@@ -1,12 +1,12 @@
 """MemoryStore seam: records, Protocol conformance, SQL text, the Neo4j stub, a live Postgres run.
 
 Nothing here needs a database except the ``@slow`` live tests, which run only when
-``NEPTUNE_MEMORY_PG_DSN`` names a PostgreSQL with pgvector + Apache AGE and psycopg imports.
+``NEPTUNE_MEMORY_PG_DSN`` names a PostgreSQL with pgvector and psycopg imports. Apache AGE is
+optional (ADR 0004): only the snapshot check needs it, and it skips without it.
 """
 
 from __future__ import annotations
 
-import os
 import re
 from collections import deque
 from dataclasses import replace
@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from memory_pg_live import has_age, open_live
 from neptune_memory.store import (
     AsOf,
     ClaimEmbedding,
@@ -217,9 +218,10 @@ def test_thread_sql_returns_every_visible_claim_not_one_per_predicate() -> None:
 def test_walk_expands_each_entity_once() -> None:
     """A visited set bounds the walk by entities, not by paths through hubs or cycles."""
     sql = pg.neighbours_sql("memory")
-    assert "e.other <> ALL (b.seen)" in sql
-    assert "b.seen || n.ents" in sql
+    assert "NOT jsonb_exists(b.seen, e.other)" in sql  # keyed lookup, not a scan (MVL-106)
+    assert "b.seen || n.added" in sql
     assert "DISTINCT ON (e.other)" in sql
+    assert "<> ALL" not in sql
 
 
 def test_ddl_is_schema_qualified_and_rejects_bad_dimensions() -> None:
@@ -363,6 +365,49 @@ def test_rebuild_drops_and_recreates_indexes_and_the_optional_graph() -> None:
     assert any("create_graph('claimgraph')" in q for q, _ in conn.log)
 
 
+def test_a_connection_that_cannot_report_its_transaction_status_is_refused() -> None:
+    """Without a status the idle check would pass anything, and the store's commit could end the
+    caller's transaction (MVL-106)."""
+
+    class Silent(RecordingConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            del self.info
+
+    with pytest.raises(TypeError, match="transaction status"):
+        PostgresStore(Silent())
+    conn = RecordingConnection()
+    conn.info.transaction_status = None  # type: ignore[assignment]
+    with pytest.raises(TypeError, match="transaction status"):
+        PostgresStore(conn)
+
+
+@pytest.mark.parametrize("kind", ["read", "write"])
+def test_a_failing_rollback_never_hides_the_original_error(kind: str) -> None:
+    class Broken(RecordingConnection):
+        def cursor(self) -> RecordingCursor:
+            cur = RecordingCursor(self)
+
+            def boom(query: str, params: Any = None) -> None:
+                raise RuntimeError("canceling statement due to statement timeout")
+
+            cur.execute = boom  # type: ignore[method-assign]
+            cur.executemany = boom  # type: ignore[method-assign,assignment]
+            return cur
+
+        def rollback(self) -> None:
+            super().rollback()
+            raise ConnectionError("server closed the connection unexpectedly")
+
+    store = PostgresStore(Broken())
+    with pytest.raises(RuntimeError, match="statement timeout") as caught:
+        if kind == "read":
+            store.as_of_thread("robot:arm-001", AT)
+        else:
+            store.write_claims([claim()])
+    assert any("rollback also failed: ConnectionError" in n for n in caught.value.__notes__)
+
+
 def test_failed_bulk_write_rolls_back_so_the_connection_stays_usable() -> None:
     class Failing(RecordingConnection):
         def cursor(self) -> RecordingCursor:
@@ -445,23 +490,7 @@ def _hub(first_id: int) -> list[ClaimRecord]:
 
 @pytest.fixture
 def live() -> Iterator[tuple[Any, PostgresStore]]:
-    dsn = os.environ.get("NEPTUNE_MEMORY_PG_DSN")
-    if not dsn:
-        pytest.skip("NEPTUNE_MEMORY_PG_DSN not set (no PostgreSQL with pgvector + AGE)")
-    psycopg = pytest.importorskip("psycopg")
-    with psycopg.connect(dsn) as conn:
-        conn.execute("DROP SCHEMA IF EXISTS memory_test CASCADE")
-        conn.commit()
-        store = PostgresStore(conn, schema="memory_test", dimensions=3)
-        store.create()
-        yield conn, store
-        conn.rollback()
-        conn.execute("DROP SCHEMA memory_test CASCADE")
-        conn.execute(
-            "SELECT ag_catalog.drop_graph(name, true) FROM ag_catalog.ag_graph "
-            "WHERE name = 'memory_test_graph'"
-        )
-        conn.commit()
+    yield from open_live()
 
 
 @pytest.mark.slow
@@ -529,6 +558,8 @@ def test_live_corroboration_and_supersede_across_known_at(live: tuple[Any, Postg
         store.supersede(3, replace(fix, claim_id=5))
     assert conn.info.transaction_status == 0
     # The optional AGE snapshot is a rebuild-time copy of the edges.
+    if not has_age(conn):
+        pytest.skip("Apache AGE not installed: the optional snapshot is not checked")
     snap = PostgresStore(conn, schema="memory_test", dimensions=3, graph="memory_test_graph")
     store.write_claims([claim(claim_id=6, object_value=None, object_entity="site:01")])
     snap.rebuild()

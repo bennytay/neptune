@@ -7,10 +7,11 @@ indexes and the HNSW index. An Apache AGE graph snapshot can optionally be built
 writes, it goes stale at the first write, and nothing on the ``MemoryStore`` seam reads it.
 
 The driver is not a dependency. Pass a DB-API 2.0 connection that uses ``%(name)s`` parameters
-and is not in autocommit mode (psycopg 3's default). The store owns transaction boundaries: every
-call needs an idle connection, runs in its own transaction, and commits (writes) or rolls back
-(reads, errors) before it returns. Every SQL text comes from a pure function, testable without a
-database.
+and is not in autocommit mode (psycopg 3's default), and that reports its transaction status as
+``info.transaction_status`` (psycopg 3; psycopg2 >= 2.8). The store owns transaction boundaries:
+every call needs an idle connection, runs in its own transaction, and commits (writes) or rolls
+back (reads, errors) before it returns; a rollback that fails after an error never hides that
+error. Every SQL text comes from a pure function, testable without a database.
 """
 
 from __future__ import annotations
@@ -204,15 +205,22 @@ ORDER BY c.predicate, c.valid_from, c.claim_id"""
 
 
 def _walk_cte(schema: str) -> str:
-    """Breadth-first walk that expands each entity once (a ``seen`` set), so cost is bounded by
-    the entities and edges reached, not by the number of paths through hubs or cycles."""
+    """Breadth-first walk that expands each entity once, so cost is bounded by the entities and
+    edges reached, not by the number of paths through hubs or cycles.
+
+    The visited set is a ``jsonb`` object keyed by entity (MVL-106): ``jsonb_exists`` is a keyed
+    lookup, logarithmic in the entities seen, where the earlier ``text[]`` with ``<> ALL`` scanned
+    every seen entity for every edge (quadratic around a hub). A level adds its entities with one
+    ``||``. The lookup is a function call, not the ``?`` operator, so no driver mistakes it for a
+    placeholder."""
     s = _ident(schema)
     return f"""WITH RECURSIVE bfs(depth, ents, paths, seen) AS (
-  SELECT 0, ARRAY[%(start)s::text], ARRAY[''::text], ARRAY[%(start)s::text]
+  SELECT 0, ARRAY[%(start)s::text], ARRAY[''::text], jsonb_build_object(%(start)s::text, 0)
   UNION ALL
-  SELECT b.depth + 1, n.ents, n.paths, b.seen || n.ents
+  SELECT b.depth + 1, n.ents, n.paths, b.seen || n.added
   FROM bfs b CROSS JOIN LATERAL (
-    SELECT array_agg(x.other ORDER BY x.other) AS ents, array_agg(x.path ORDER BY x.other) AS paths
+    SELECT array_agg(x.other ORDER BY x.other) AS ents, array_agg(x.path ORDER BY x.other) AS paths,
+      jsonb_object_agg(x.other, b.depth + 1) AS added
     FROM (
       SELECT DISTINCT ON (e.other) e.other,
         concat_ws(',', NULLIF(f.path, ''), e.claim_id::text) AS path
@@ -224,7 +232,7 @@ def _walk_cte(schema: str) -> str:
         SELECT c.subject, c.claim_id FROM {s}.claim c
         WHERE c.object_entity = f.entity AND {_visible("c")}
       ) e
-      WHERE e.other <> ALL (b.seen)
+      WHERE NOT jsonb_exists(b.seen, e.other)
       ORDER BY e.other, e.claim_id
     ) x
   ) n
@@ -316,6 +324,17 @@ def _check_hops(hops: int) -> None:
 # --- adapter -------------------------------------------------------------------------------------
 
 
+def _transaction_status(conn: object) -> int | None:
+    """The driver's transaction status (0 = idle), or ``None`` if the connection reports none."""
+    status = getattr(getattr(conn, "info", None), "transaction_status", None)
+    if status is None or isinstance(status, bool):
+        return None
+    try:
+        return int(status)
+    except (TypeError, ValueError):
+        return None
+
+
 class PostgresStore:
     """:class:`MemoryStore` over one PostgreSQL schema. Call :meth:`create` once per schema.
 
@@ -334,6 +353,12 @@ class PostgresStore:
     ) -> None:
         if getattr(conn, "autocommit", False):
             raise ValueError("PostgresStore needs a connection with autocommit off")
+        if _transaction_status(conn) is None:
+            raise TypeError(
+                "PostgresStore needs a connection that reports its transaction status"
+                " (``info.transaction_status``, as psycopg 3 and psycopg2 >= 2.8 do): without it"
+                " the store cannot tell whether committing would end the caller's work"
+            )
         if not 1 <= ef_search <= 1000:
             raise ValueError("ef_search must be in [1, 1000] (pgvector's range)")
         self.conn = conn
@@ -344,17 +369,26 @@ class PostgresStore:
 
     def _require_idle(self) -> None:
         """Refuse to run inside a transaction the caller opened: committing or rolling back here
-        would end the caller's work. psycopg exposes ``info.transaction_status`` (0 = idle)."""
-        status = getattr(getattr(self.conn, "info", None), "transaction_status", 0)
-        if int(status) != 0:
+        would end the caller's work. The constructor guarantees the status is readable."""
+        if _transaction_status(self.conn) != 0:
             raise RuntimeError("PostgresStore needs an idle connection; end the open transaction")
+
+    def _abort(self, error: BaseException) -> None:
+        """Roll back after ``error`` without hiding it: a rollback that fails too (a dropped
+        connection) is attached to ``error`` as a note, and ``error`` is what propagates."""
+        try:
+            self.conn.rollback()
+        except Exception as rollback_error:
+            error.add_note(
+                f"rollback also failed: {type(rollback_error).__name__}: {rollback_error}"
+            )
 
     def _write(self, work: Callable[[Cursor], None]) -> None:
         self._require_idle()
         try:
             work(self.conn.cursor())
-        except BaseException:
-            self.conn.rollback()
+        except BaseException as error:
+            self._abort(error)
             raise
         self.conn.commit()
 
@@ -366,9 +400,12 @@ class PostgresStore:
             for statement in setup:
                 cur.execute(statement)
             cur.execute(sql, params)
-            return cur.fetchall()
-        finally:
-            self.conn.rollback()
+            rows = cur.fetchall()
+        except BaseException as error:
+            self._abort(error)
+            raise
+        self.conn.rollback()
+        return rows
 
     def _run(self, statements: Iterable[str]) -> None:
         def work(cur: Cursor) -> None:
