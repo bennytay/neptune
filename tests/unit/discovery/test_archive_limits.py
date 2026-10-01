@@ -73,6 +73,43 @@ def codes(report: ArchiveReport) -> list[str]:
     return [finding.code for finding in report.findings]
 
 
+def with_checksum(block: bytearray) -> bytes:
+    """A tar header block with its checksum recomputed after bytes were patched."""
+    block[148:156] = b" " * 8
+    block[148:156] = b"%06o\x00 " % sum(block)
+    return bytes(block)
+
+
+def pax_tar(pax: dict[str, str], data: bytes) -> bytes:
+    """One member of ``data`` behind a pax header holding ``pax`` verbatim."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.PAX_FORMAT) as archive:
+        info = tarfile.TarInfo("m")
+        info.size = len(data)
+        info.pax_headers = pax
+        archive.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+ERROR_CODES = {
+    "recursion_limit",
+    "out_of_memory",
+    "unsupported",
+    "end_of_data",
+    "bad_zip",
+    "bad_tar",
+    "bad_gzip",
+    "bad_deflate",
+    "bad_xz",
+    "bad_struct",
+    "bad_encoding",
+    "bad_value",
+    "bad_index",
+    "os_error",
+    "other",
+}
+
+
 def peak_memory(run: Callable[[], object]) -> int:
     tracemalloc.start()
     try:
@@ -385,6 +422,70 @@ def test_not_an_archive_and_an_empty_zip(tmp_path: Path) -> None:
     assert (codes(report), report.members, report.complete) == ([], (), True)
     report = inspect(b"PK\x05\x06" + bytes(4), tmp_path)
     assert codes(report) == [CORRUPT]
+
+
+def test_a_zip_version_zipfile_refuses_is_a_finding(tmp_path: Path) -> None:
+    """zipfile raises ``NotImplementedError`` for "version needed 6.4" while listing members."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("a.txt", b"hi")
+    data = bytearray(buffer.getvalue())
+    data[data.find(b"PK\x01\x02") + 6] = 64
+    report = inspect(bytes(data), tmp_path)
+    assert codes(report) == [CORRUPT]
+    assert report.findings[0].details == {"size": len(data), "error": "unsupported"}
+    assert (report.members, report.complete) == ((), False)
+
+
+def sparse_extended_then_eof() -> bytes:
+    """A GNU sparse ``S`` header promising an extension block (byte 482), then the end."""
+    info = tarfile.TarInfo("s")
+    info.type = tarfile.GNUTYPE_SPARSE
+    block = bytearray(info.tobuf(tarfile.GNU_FORMAT))
+    block[482] = 1
+    return with_checksum(block)
+
+
+@pytest.mark.parametrize(
+    ("make", "error"),
+    [
+        (sparse_extended_then_eof, "bad_index"),
+        (lambda: pax_tar({"GNU.sparse.map": "a,b"}, bytes(512)), "bad_value"),
+        (
+            lambda: pax_tar(
+                {"GNU.sparse.major": "1", "GNU.sparse.minor": "0"}, b"zz\n" + bytes(509)
+            ),
+            "bad_value",
+        ),
+    ],
+    ids=["gnu-sparse-extension-eof", "pax-sparse-map-not-numbers", "pax-sparse-1.0-bad-count"],
+)
+def test_tar_header_errors_tarfile_does_not_wrap_are_findings(
+    tmp_path: Path, make: Callable[[], bytes], error: str
+) -> None:
+    """tarfile lets ``IndexError`` and ``ValueError`` escape from sparse headers."""
+    data = make()
+    report = inspect(data, tmp_path)
+    assert codes(report) == [CORRUPT]
+    assert report.findings[0].details == {"error": error}
+    assert not report.complete
+    report = inspect(gzip.compress(data, mtime=0), tmp_path)  # the same inside a compressed tar
+    assert codes(report) == [CORRUPT]
+
+
+def test_defects_record_a_stable_code_never_the_library_message(tmp_path: Path) -> None:
+    """Library messages vary across Python and zlib versions; findings must not."""
+    seen = set()
+    for name in ("corrupt_member.zip", "huge_member.tar", "truncated.tar", "truncated.tar.gz"):
+        for finding in inspect(fixture(name), tmp_path).findings:
+            assert "detail" not in finding.details
+            assert finding.details["error"] in ERROR_CODES
+            seen.add(finding.details["error"])
+    assert seen == {"bad_deflate", "end_of_data"}
+    data = bytearray(fixture("bomb.tar.gz"))
+    data[len(data) // 2 : len(data) // 2 + 64] = bytes(64)  # a broken deflate stream mid-tar
+    report = inspect(bytes(data), tmp_path, ArchiveLimits(max_compression_ratio=10_000))
+    assert [f.details.get("error") for f in report.findings] == ["bad_deflate"]
 
 
 # --- provenance, determinism, config -----------------------------------------------------------

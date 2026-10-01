@@ -222,16 +222,63 @@ class _State:
         self.total_remaining = max(self.total_remaining - amount, 0)
 
 
-# What reading a member's bytes may raise once its header parsed: a bad CRC, a broken deflate,
-# bzip2 or xz stream, or data that ends early. Each is that member's finding, never the job's.
-_MEMBER_READ_ERRORS: Final = (
-    EOFError,
-    tarfile.TarError,
-    zipfile.BadZipFile,
-    zlib.error,
-    lzma.LZMAError,
-    OSError,
+# Hostile bytes can make zipfile, tarfile and the decompressors raise nearly anything: a bad CRC
+# or a broken stream, but also ``IndexError`` and ``ValueError`` from a tar sparse map,
+# ``NotImplementedError`` from a zip version, ``RecursionError`` from chained headers. Each is the
+# archive's or the member's finding, never the job's. A finding records the error's class as a
+# fixed code, never the library's message, which varies across Python and zlib versions
+# (non-negotiable 5). The first matching class wins, so subclasses come before their bases.
+_ERROR_CODES: Final[tuple[tuple[type[BaseException], str], ...]] = (
+    (RecursionError, "recursion_limit"),
+    (MemoryError, "out_of_memory"),
+    (NotImplementedError, "unsupported"),
+    (EOFError, "end_of_data"),
+    (zipfile.BadZipFile, "bad_zip"),
+    (tarfile.TarError, "bad_tar"),
+    (gzip.BadGzipFile, "bad_gzip"),
+    (zlib.error, "bad_deflate"),
+    (lzma.LZMAError, "bad_xz"),
+    (struct.error, "bad_struct"),
+    (UnicodeError, "bad_encoding"),
+    (ValueError, "bad_value"),
+    (LookupError, "bad_index"),
+    (OSError, "os_error"),
 )
+
+
+def _error(exc: BaseException) -> JsonObject:
+    """A defect's stable classification, for a finding's details."""
+    if _is_truncation(exc):
+        return {"error": "end_of_data"}
+    for kind, code in _ERROR_CODES:
+        if isinstance(exc, kind):
+            return {"error": code}
+    return {"error": "other"}
+
+
+class _MemberDefect(Exception):
+    """A member's decoder raised; ``cause`` is what it raised."""
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(type(cause).__name__)
+        self.cause = cause
+
+
+class _Guarded:
+    """A member's file object whose read errors, whatever they are, become ``_MemberDefect``.
+
+    Only reads are guarded, so an error writing the spool in scratch space is never mistaken for
+    a defect in the member.
+    """
+
+    def __init__(self, fileobj: _Readable) -> None:
+        self._fileobj = fileobj
+
+    def read(self, n: int = -1, /) -> bytes:
+        try:
+            return self._fileobj.read(n)
+        except Exception as exc:  # any decoder error is the member's defect, see _ERROR_CODES
+            raise _MemberDefect(exc) from exc
 
 
 @dataclass(frozen=True)
@@ -336,9 +383,10 @@ def _pump(
     allowed = min(caps.values())
     read = 0
     spool: IO[bytes] | None = None
+    guarded = _Guarded(fileobj)
     try:
         try:
-            head = _read_up_to(fileobj, min(PROBE_SIZE, allowed + 1))
+            head = _read_up_to(guarded, min(PROBE_SIZE, allowed + 1))
             read = len(head)
             inner = sniff(head)
             if inner is not None and read <= allowed:
@@ -357,13 +405,14 @@ def _pump(
                 )
                 spool.write(head)
             while read <= allowed:
-                block = fileobj.read(min(_BLOCK, allowed - read + 1))
+                block = guarded.read(min(_BLOCK, allowed - read + 1))
                 if not block:
                     break
                 read += len(block)
                 if spool is not None and read <= allowed:
                     spool.write(block)
-        except _MEMBER_READ_ERRORS as exc:
+        except _MemberDefect as defect:
+            exc = defect.cause
             state.charge(read)
             code = MEMBER_TRUNCATED if _is_truncation(exc) else MEMBER_CORRUPT
             _member_defect(state, code, name, locator, read, declared, exc)
@@ -436,7 +485,7 @@ def _member_defect(
     details: dict[str, JsonValue] = {
         **text_field("name", name),
         "read_bytes": read,
-        **_detail(exc),
+        **_error(exc),
     }
     if declared is not None:
         details["declared_size"] = declared
@@ -448,10 +497,6 @@ def _member_defect(
         f"member {what}; {read} bytes were read",
         details,
     )
-
-
-def _detail(exc: BaseException) -> JsonObject:
-    return text_field("detail", str(exc) or type(exc).__name__)
 
 
 def _read_up_to(fileobj: _Readable, count: int) -> bytes:
@@ -542,14 +587,14 @@ def _zip(
     stream.seek(0)
     try:
         archive = zipfile.ZipFile(stream)
-    except (zipfile.BadZipFile, EOFError, OSError, ValueError, struct.error) as exc:
+    except Exception as exc:  # any parser error is the archive's finding, see _ERROR_CODES
         state.finding(
             CORRUPT,
             FindingCategory.CORRUPT,
             Severity.ERROR,
             scope,
             "zip central directory cannot be read",
-            {"size": size, **_detail(exc)},
+            {"size": size, **_error(exc)},
         )
         return [], False
     with archive:
@@ -645,18 +690,18 @@ def _zip_member(
         return member(0)
     try:
         fileobj = archive.open(info)
-    except (zipfile.BadZipFile, EOFError, OSError, ValueError, struct.error) as exc:
-        _member_defect(state, MEMBER_CORRUPT, name, locator, 0, info.file_size, exc)
-        return member(0)
-    except (NotImplementedError, RuntimeError) as exc:
+    except NotImplementedError as exc:
         state.finding(
             MEMBER_UNSUPPORTED,
             FindingCategory.UNSUPPORTED,
             Severity.ERROR,
             locator,
             "member uses a compression method or feature Neptune does not decode; not read",
-            {**text_field("name", name), "method": info.compress_type, **_detail(exc)},
+            {**text_field("name", name), "method": info.compress_type, **_error(exc)},
         )
+        return member(0)
+    except Exception as exc:  # any parser error is the member's finding, see _ERROR_CODES
+        _member_defect(state, MEMBER_CORRUPT, name, locator, 0, info.file_size, exc)
         return member(0)
     with fileobj:
         if kind is MemberKind.SYMLINK:
@@ -682,7 +727,7 @@ def _zip_link(
                 break
             pieces.append(block)
             got += len(block)
-    except _MEMBER_READ_ERRORS as exc:
+    except Exception as exc:  # any decoder error is the member's finding, see _ERROR_CODES
         # zipfile inflates no more than the declared size, and the bytes of the read that
         # raised are not counted in ``got``: charge the declared size, the exact bound.
         state.charge(declared)
@@ -755,11 +800,9 @@ def _compressed(
     try:
         with _open_compressed(kind, stream) as inflater:
             head = _read_up_to(inflater, PROBE_SIZE)
-    except EOFError as exc:
-        _stream_defect(state, TRUNCATED, kind, scope, size, exc)
-        return [], False
-    except (OSError, zlib.error, lzma.LZMAError) as exc:
-        _stream_defect(state, CORRUPT, kind, scope, size, exc)
+    except Exception as exc:  # any decoder error is the stream's finding, see _ERROR_CODES
+        code = TRUNCATED if _is_truncation(exc) else CORRUPT
+        _stream_defect(state, code, kind, scope, size, exc)
         return [], False
     if sniff(head) is ArchiveKind.TAR:
         return _tar(state, stream, size, kind, prefix, depth)
@@ -794,7 +837,7 @@ def _stream_defect(
         Severity.ERROR,
         scope,
         f"{kind} stream {what}",
-        {"size": size, **_detail(exc)},
+        {"size": size, **_error(exc)},
     )
 
 
@@ -826,7 +869,7 @@ def _tar(
         except _HeaderTooLarge as exc:
             _header_too_large(state, scope, exc)
             return members, False
-        except (tarfile.TarError, EOFError, zlib.error, lzma.LZMAError, OSError) as exc:
+        except Exception as exc:  # any parser error is the archive's finding, see _ERROR_CODES
             _tar_error(state, scope, exc)
             return members, False
         with archive:
@@ -851,7 +894,7 @@ def _tar_members(
         except _HeaderTooLarge as exc:
             _header_too_large(state, scope, exc)
             return members, False
-        except (tarfile.TarError, EOFError, zlib.error, lzma.LZMAError, OSError) as exc:
+        except Exception as exc:  # any parser error is the archive's finding, see _ERROR_CODES
             _tar_error(state, scope, exc)
             return members, False
         if info is None:
@@ -923,7 +966,11 @@ def _tar_member(
         _link_finding(state, name, locator, str(kind), target)
         state.charge(info.size)
         return member(0), True
-    fileobj = archive.extractfile(info)
+    try:
+        fileobj = archive.extractfile(info)
+    except Exception as exc:  # a member tarfile cannot even open, see _ERROR_CODES
+        _member_defect(state, MEMBER_CORRUPT, name, locator, 0, info.size, exc)
+        return member(0), False
     if fileobj is None:
         state.charge(info.size)
         return member(0), True
@@ -1013,7 +1060,7 @@ def _tar_error(state: _State, scope: tuple[Locator, ...], exc: BaseException) ->
         Severity.ERROR,
         scope,
         f"tar {what}; inspection stopped",
-        _detail(exc),
+        _error(exc),
     )
 
 
