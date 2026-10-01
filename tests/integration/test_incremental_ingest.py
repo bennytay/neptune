@@ -351,7 +351,7 @@ def a_new_law(monkeypatch: pytest.MonkeyPatch, law: str) -> None:
     ``check_chunk_output``: a document block may not come third or later in its document (some
     text chunks break it). ``chunk_series``: a series may not hold ``seq`` 5 (one tally chunk).
     """
-    monkeypatch.setattr(lineage, "RUNTIME_VERSION", "0.2.0")
+    monkeypatch.setattr(lineage, "RUNTIME_VERSION", "99.0.0")  # any version but this one
     if law == "check_chunk_output":
 
         def stricter(
@@ -388,7 +388,7 @@ def test_a_new_per_chunk_law_judges_kept_chunks_as_a_fresh_workspace_would(
     laws refuse quarantines its source exactly as in a fresh workspace, so the package is the
     same whatever the cache held (ADR 0031 §2)."""
     warm = Runner(tmp_path / "warm" / "home", tmp_path / "warm" / "out")
-    before, _ = warm(corpus, adapters())  # every chunk committed under 0.1.0's laws
+    before, _ = warm(corpus, adapters())  # every chunk committed under this version's laws
     assert not [f for f in before.findings if f.code == lineage.CHUNK_FAILED]
 
     a_new_law(monkeypatch, law)

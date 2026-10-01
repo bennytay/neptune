@@ -5,7 +5,8 @@ The job hands a runner one unit of adapter work at a time (a probe, a plan, one 
 
 - ``Returned``: the call's value, of the type its codec names;
 - ``Raised``: the call raised, or returned a value of another type; the exception's class (never
-  its text), whether it was a contract violation or a source that changed, and the wrong type;
+  its text), whether it was a contract violation, a source that changed or a read that came up
+  short (and where), and the wrong type;
 - ``Crashed``: the process died without a reply: killed by a signal, an exit, or a reply that
   does not decode;
 - ``Exceeded``: a limit stopped it: CPU seconds, wall seconds, memory, or the reply's size.
@@ -31,7 +32,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final, Generic, NoReturn, Protocol, TypeAlias, TypeVar
 
-from neptune.adapters.contract import ContractError
+from neptune.adapters.contract import ContractError, ShortReadError
 from neptune.discovery.reader import SourceChangedError
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.runtime import confine
@@ -44,6 +45,7 @@ _MIN_MEMORY: Final = 64 * _MIB  # below this the interpreter itself cannot run a
 _MAX_MEMORY: Final = 1 << 40
 _MIN_REPLY: Final = 64 * 1024  # a reply never has to be smaller than its own envelope
 _ERROR_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,99}")
+_CONTENT_ID: Final = re.compile(r"sha256:[0-9a-f]{64}")
 _TYPE_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_.<>]{0,299}")
 
 # The Landlock ABI below which a source is not safe from a compromised parser, so the sandbox
@@ -148,10 +150,13 @@ class Raised:
 
     ``contract`` marks a ``ContractError`` (a bug: never retried); ``changed`` a
     ``SourceChangedError`` (the source's bytes are not the ones fingerprinted: never retried,
-    reported as the source's problem, not the adapter's). ``returned`` is the ``module.qualname``
-    of a value of the wrong type the call returned; ``unencodable`` marks a value of the right
-    type that could not be encoded to cross back (a record with no JSON form), ``error`` being
-    what encoding raised. Both are contract errors: the value breaks the contract.
+    reported as the source's problem, not the adapter's). ``short_read`` is a ``ShortReadError``'s
+    ``(source, offset, length)``: a reader served no bytes inside the size it declares, which is
+    the source's fault too and never retried (ADR 0033 §3); the runtime checks the source is the
+    one it gave. ``returned`` is the ``module.qualname`` of a value of the wrong type the call
+    returned; ``unencodable`` marks a value of the right type that could not be encoded to cross
+    back (a record with no JSON form), ``error`` being what encoding raised. Both are contract
+    errors: the value breaks the contract.
     """
 
     error: str
@@ -159,6 +164,7 @@ class Raised:
     changed: bool = False
     returned: str | None = None
     unencodable: bool = False
+    short_read: tuple[str, int, int] | None = None
 
     def __post_init__(self) -> None:
         if not _ERROR_NAME.fullmatch(self.error):
@@ -169,14 +175,33 @@ class Raised:
             raise ValueError(f"a wrong result is a contract error naming a type: {self.returned!r}")
         if self.unencodable and (not self.contract or self.returned is not None or self.changed):
             raise ValueError("an unencodable result is a contract error of the right type")
+        if self.short_read is not None:
+            if self.contract or self.changed or self.returned is not None or self.unencodable:
+                raise ValueError("a short read is neither a contract error nor a changed source")
+            if not isinstance(self.short_read, tuple) or len(self.short_read) != 3:
+                raise ValueError(f"a short read is (source, offset, length): {self.short_read!r}")
+            source, offset, length = self.short_read
+            if not isinstance(source, str) or not _CONTENT_ID.fullmatch(source):
+                raise ValueError(f"a short read names its source's content id: {source!r}")
+            for value in (offset, length):
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    raise ValueError(f"a short read's offset and length are counts: {value!r}")
 
     @classmethod
     def of(cls, exc: BaseException) -> "Raised":
         name = type(exc).__name__
+        short: tuple[str, int, int] | None = None
+        if isinstance(exc, ShortReadError):
+            candidate = (exc.source, exc.offset, exc.length)
+            try:  # an adapter may build one from anything: only a well-formed one is a short read
+                short = cls("ShortReadError", short_read=candidate).short_read
+            except (TypeError, ValueError):
+                short = None
         return cls(
             error=name if _ERROR_NAME.fullmatch(name) else "Exception",
             contract=isinstance(exc, ContractError),
             changed=isinstance(exc, SourceChangedError),
+            short_read=short,
         )
 
     @classmethod
@@ -310,8 +335,10 @@ _OUT_OF_MEMORY: Final = b"M"
 _UNREPORTED: Final = 70  # the child's exit status when it could not even write its reply
 
 
-_RAISED_KEYS: Final = frozenset({"changed", "contract", "error", "returned", "unencodable"})
-# A sound raised reply is five short fields; anything larger is a forged reply a compromised child
+_RAISED_KEYS: Final = frozenset(
+    {"changed", "contract", "error", "returned", "short_read", "unencodable"}
+)
+# A sound raised reply is six short fields; anything larger is a forged reply a compromised child
 # wrote, so it is refused before ``json.loads`` builds anything, never decoded unbounded.
 _MAX_RAISED_REPLY: Final = 4096
 
@@ -323,6 +350,7 @@ def encode_raised(raised: Raised) -> bytes:
             "contract": raised.contract,
             "error": raised.error,
             "returned": raised.returned,
+            "short_read": None if raised.short_read is None else list(raised.short_read),
             "unencodable": raised.unencodable,
         },
         separators=(",", ":"),
@@ -330,7 +358,7 @@ def encode_raised(raised: Raised) -> bytes:
 
 
 def decode_raised(data: bytes) -> Raised:
-    """A ``Raised`` reply, strictly: exactly its five fields, each of its type. Refused unread if
+    """A ``Raised`` reply, strictly: exactly its six fields, each of its type. Refused unread if
     it is larger than any sound raised reply, so the ``E`` tag cannot smuggle a giant payload
     past the value-count bound the returned reply gets."""
     if len(data) > _MAX_RAISED_REPLY:
@@ -344,8 +372,13 @@ def decode_raised(data: bytes) -> Raised:
         raise ValueError("a raised reply's error is text and its flags booleans")
     if not (returned is None or isinstance(returned, str)):
         raise ValueError("a raised reply's returned is a type name or null")
+    short = value["short_read"]
+    if short is not None and (not isinstance(short, list) or len(short) != 3):
+        raise ValueError("a raised reply's short read is [source, offset, length] or null")
     contract, changed, unencodable = flags
-    return Raised(error, contract, changed, returned, unencodable)
+    return Raised(
+        error, contract, changed, returned, unencodable, None if short is None else tuple(short)
+    )
 
 
 def _send(fd: int, data: bytes) -> None:

@@ -2,7 +2,7 @@
 
 What an adapter could not say about a source, the runtime says: an adapter raised, crashed or hit
 a sandbox limit on a chunk or a plan, a source's chunks broke a cross-chunk law, a file changed
-under the job or could not be opened, a walk entry was not read. Each is an ``IngestFinding`` from
+under the job or could not be opened. Each is an ``IngestFinding`` from
 the runtime's own ``TransformRecord`` (``neptune.runtime`` at ``RUNTIME_VERSION``, with the job's
 retry and isolation policy as its config: attempts, isolation and, when sandboxed, the limits), so
 a package records who said it and under what policy (ADR 0028 §4, ADR 0030). The transform enters
@@ -39,11 +39,10 @@ RUNTIME_ID: Final = "neptune.runtime"
 # chunks and verdicts record it, so a new version judges what is kept again (ADR 0031). The sandbox
 # (ADR 0030) does not bump it: isolation and limits ride in the transform config, and a crash or a
 # limit stops a chunk before it commits, so they never re-judge what is kept.
-RUNTIME_VERSION: Final = "0.1.0"
+RUNTIME_VERSION: Final = "0.2.0"  # 0.2.0: walk entries are discovery's findings (ADR 0033 §3)
 
 ADAPTER_CRASHED: Final = f"{RUNTIME_ID}.adapter_crashed"
 CHUNK_FAILED: Final = f"{RUNTIME_ID}.chunk_failed"
-ENTRY_SKIPPED: Final = f"{RUNTIME_ID}.entry_skipped"
 LIMIT_EXCEEDED: Final = f"{RUNTIME_ID}.limit_exceeded"
 OUTPUT_INVALID: Final = f"{RUNTIME_ID}.output_invalid"
 PLAN_FAILED: Final = f"{RUNTIME_ID}.plan_failed"
@@ -61,11 +60,6 @@ FINDING_CODES: Final[tuple[Documented, ...]] = (
         CHUNK_FAILED,
         "an adapter raised, or broke the contract, on a chunk after every attempt; the source is"
         " not in this package (failed, error)",
-    ),
-    Documented(
-        ENTRY_SKIPPED,
-        "a walk entry was not read: not a regular file (info), vanished (warning), or unreadable"
-        " (error) (skipped)",
     ),
     Documented(
         LIMIT_EXCEEDED,
@@ -93,13 +87,6 @@ FINDING_CODES: Final[tuple[Documented, ...]] = (
         "a fingerprinted file could not be opened when it was time to read it (skipped, error)",
     ),
 )
-
-_SKIP_SEVERITY: Final = {
-    SkipReason.NOT_REGULAR_FILE: Severity.INFO,
-    SkipReason.MISSING: Severity.WARNING,
-    SkipReason.SYMLINK: Severity.WARNING,
-    SkipReason.UNREADABLE: Severity.ERROR,
-}
 
 
 class Step(StrEnum):
@@ -422,19 +409,4 @@ def source_unreadable(
         transform=transform,
         message=f"the file could not be opened or read ({said})",
         details=details,
-    )
-
-
-def entry_skipped(
-    transform: TransformRecord, location: LocalPath | RawLocalPath, reason: SkipReason
-) -> IngestFinding:
-    """A walk entry discovery did not read, and why."""
-    return ingest_finding(
-        code=ENTRY_SKIPPED,
-        category=FindingCategory.SKIPPED,
-        severity=_SKIP_SEVERITY[reason],
-        subject=location,
-        transform=transform,
-        message=f"not read: {reason}",
-        details={"reason": str(reason)},
     )

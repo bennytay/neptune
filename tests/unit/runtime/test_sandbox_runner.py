@@ -24,8 +24,9 @@ from typing import Final
 
 import pytest
 
-from neptune.adapters.contract import ContractError
+from neptune.adapters.contract import ContractError, ShortReadError
 from neptune.discovery.reader import SourceChangedError
+from neptune.model.ids import ContentId
 from neptune.runtime import confine, wire
 from neptune.runtime.sandbox import (
     DEFAULT_LIMITS,
@@ -48,6 +49,7 @@ from neptune.runtime.sandbox import (
 )
 
 MIB: Final = 1024 * 1024
+SOURCE: Final = ContentId("sha256:" + "5" * 64)
 TEXT: Final = Codec(str, str.encode, bytes.decode)
 RAW: Final = Codec(bytes, bytes, bytes)
 
@@ -193,6 +195,25 @@ def test_what_the_call_raises_comes_back_as_its_class(box: Subprocess) -> None:
         raise SystemExit(0)
 
     assert box.call(leave, TEXT) == Raised("SystemExit")
+
+    def short() -> str:
+        raise ShortReadError(SOURCE, 7, 9)
+
+    assert box.call(short, TEXT) == Raised("ShortReadError", short_read=(SOURCE, 7, 9))
+
+
+def test_a_short_read_carries_where_and_only_when_it_is_well_formed() -> None:
+    assert Raised.of(ShortReadError(SOURCE, 0, 1)).short_read == (SOURCE, 0, 1)
+    for forged in (
+        ShortReadError(ContentId("not an id"), 0, 1),
+        ShortReadError(SOURCE, -1, 1),
+        ShortReadError(SOURCE, True, 1),
+    ):
+        assert Raised.of(forged) == Raised("ShortReadError")  # an adapter's raise like any other
+    with pytest.raises(ValueError, match="short read"):
+        Raised("ShortReadError", changed=True, short_read=(SOURCE, 0, 1))
+    with pytest.raises(ValueError, match="short read"):
+        Raised("ShortReadError", short_read=(SOURCE, 0))  # type: ignore[arg-type]
 
 
 def test_a_result_of_the_wrong_type_is_caught_in_either_isolation(box: Subprocess) -> None:
@@ -569,9 +590,15 @@ def test_a_raised_reply_is_decoded_strictly() -> None:
         Raised("OSError"),
         Raised("SourceChangedError", changed=True),
         Raised("ContractError", contract=True, returned="builtins.NoneType"),
+        Raised("ShortReadError", short_read=(SOURCE, 7, 9)),
     ):
         assert decode_raised(encode_raised(raised)) == raised
+    fields = b'"changed":false,"contract":false,"error":"E","returned":null,"unencodable":false'
     for data in (
+        b"{" + fields + b',"short_read":["sha256:x",1,2]}',
+        b"{" + fields + b',"short_read":["' + SOURCE.encode() + b'",-1,2]}',
+        b"{" + fields + b',"short_read":["' + SOURCE.encode() + b'",1]}',
+        b"{" + fields + b',"short_read":"' + SOURCE.encode() + b'"}',
         b"",
         b"[]",
         b'{"changed":false,"contract":false,"error":"E"}',

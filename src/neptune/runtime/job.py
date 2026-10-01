@@ -71,6 +71,7 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.registry import AdapterRegistry, Candidate, Selection, SelectionStatus, select
+from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
 from neptune.discovery.reader import LocalReader, SourceChangedError
 from neptune.discovery.scan import fingerprint
 from neptune.discovery.source import (
@@ -82,12 +83,14 @@ from neptune.discovery.source import (
     SymlinkEntry,
     WalkEntry,
 )
+from neptune.discovery.verify import short_read_finding, verify_artifact
 from neptune.identity import canonical_json
 from neptune.identity.revisions import Observation, SourceLedger
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.package import ReceiptEnvelope
+from neptune.model.provenance import TransformRecord
 from neptune.model.run import Stream
 from neptune.model.series import SEQ, SeriesBatch
 from neptune.model.source import (
@@ -478,6 +481,10 @@ class IngestJob:
         self._entered_at: float | None = None
         self._durations: dict[Phase, float] = dict.fromkeys(PHASES, 0.0)
         self._findings: dict[RecordId, IngestFinding] = {}
+        # Every producer whose findings the job records, by transform id: the runtime, and the
+        # discovery and probe transforms whose findings it records for them (ADR 0033 §1, §3).
+        self._producers: dict[RecordId, TransformRecord] = {self.transform.id: self.transform}
+        self._local: LocalSource | None = None
         self._sources: list[_Source] = []
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
@@ -532,7 +539,7 @@ class IngestJob:
         return self._outcome(package)
 
     def _phases(self, started: str) -> ContentId:
-        source = LocalSource(self.root)
+        source = self._local = LocalSource(self.root)
         entries = self._discover(source)
         ledger = self._fingerprint(source, entries)
         self._inspect(source)
@@ -639,7 +646,14 @@ class IngestJob:
 
     # --- Findings ------------------------------------------------------------------------------
 
-    def _record(self, finding: IngestFinding) -> None:
+    def _record(self, finding: IngestFinding, producer: TransformRecord | None = None) -> None:
+        """Keep ``finding`` for the package; ``producer`` is its transform if not the runtime's."""
+        if producer is not None:
+            if producer.id != finding.transform:
+                raise ValueError(f"finding {finding.id} is not {producer.id}'s")
+            self._producers[producer.id] = producer
+        elif finding.transform != self.transform.id:
+            raise ValueError(f"finding {finding.id} names a producer the job does not know")
         self._findings[finding.id] = finding
 
     def _quarantine(self, source: _Source, finding: IngestFinding) -> None:
@@ -648,8 +662,8 @@ class IngestJob:
         source.quarantined.append(finding.code)
 
     def _skip(self, entry: SkippedEntry) -> None:
+        """A walk entry that was not read: discovery's finding says why; this is its event."""
         location = local_location(entry.raw_path)
-        self._record(lineage.entry_skipped(self.transform, location, entry.reason))
         self._emit(
             events.ENTRY_SKIPPED, {"location": location.to_json(), "reason": str(entry.reason)}
         )
@@ -664,6 +678,7 @@ class IngestJob:
         if isinstance(exc, SourceChangedError):
             finding = lineage.source_changed(self.transform, source.location, source.content_id)
             self._emit(events.SOURCE_CHANGED, {"location": location, "source": source.content_id})
+            self._verify(source)
         else:
             reason = exc.reason if isinstance(exc, SourceAccessError) else SkipReason.UNREADABLE
             finding = lineage.source_unreadable(
@@ -674,6 +689,56 @@ class IngestJob:
                 {"location": location, "reason": str(reason), "source": source.content_id},
             )
         self._quarantine(source, finding)
+
+    def _verify(self, item: _Source) -> None:
+        """Re-read a source that changed or read short against its artifact, and record exactly
+        what differs (``verify_artifact``: truncated, grown, changed chunks; ADR 0029 §3).
+
+        One pass over the file as it is now; nothing is said if it cannot be opened, since the
+        finding that brought the job here already says the source was not read.
+        """
+        assert self._local is not None
+        try:
+            with self._local.open(item.location) as stream:
+                found = verify_artifact(stream, item.artifact)
+        except _UNREADABLE:
+            return
+        for finding in found:
+            self._record(finding, DISCOVERY_TRANSFORM)
+
+    def _short(
+        self, item: _Source, raised: Raised, step: Step, chunk: Chunk | None, attempt: int
+    ) -> None:
+        """A call raised ``ShortReadError``: never retried (ADR 0033 §3).
+
+        One that names this source and a range inside it is the source's fault: discovery's
+        ``short_read`` finding for the unserved range, then ``verify_artifact``'s account, and
+        the source is quarantined. One that names any other reader or range is the adapter's
+        failure at ``step``, as any other raise.
+        """
+        assert raised.short_read is not None and item.adapter is not None
+        source, offset, length = raised.short_read
+        if source != item.content_id or length == 0 or offset + length > item.artifact.size:
+            failure = Failure(step, raised.error)
+            if chunk is None:
+                self._fail_plan(item, failure)
+            else:
+                self._fail_chunk(item, chunk, attempt, failure)
+            return
+        finding = short_read_finding(item.content_id, offset, length)
+        self._record(finding, DISCOVERY_TRANSFORM)
+        item.quarantined.append(finding.code)
+        details: dict[str, JsonValue] = {
+            "adapter": item.adapter.descriptor.id,
+            "length": length,
+            "offset": offset,
+            "source": item.content_id,
+            "step": str(step),
+        }
+        if chunk is not None:
+            details["chunk"] = chunk.id
+        self._emit(events.SOURCE_SHORT_READ, details)
+        self._verify(item)
 
     # --- discover ------------------------------------------------------------------------------
 
@@ -711,6 +776,8 @@ class IngestJob:
                 self.workspace.save_ledger(self.root, ledger)
             except OSError as exc:
                 raise JobError(f"the ledger of {self.root} cannot be saved: {exc}") from exc
+            for finding in result.findings:  # what the walk saw and did not read (ADR 0029 §1)
+                self._record(finding, result.transform)
             walked = {
                 (e.raw_path, e.reason, e.detail) for e in entries if isinstance(e, SkippedEntry)
             }
@@ -918,6 +985,8 @@ class IngestJob:
         if isinstance(outcome, Raised):
             if outcome.changed:
                 self._unreadable(item, SourceChangedError(item.content_id))
+            elif outcome.short_read is not None:
+                self._short(item, outcome, Step.PLAN, None, 1)
             else:
                 self._fail_plan(
                     item, _failure(outcome, Step.PLAN, Step.PLAN_RESULT, Step.CHECK_PLAN)
@@ -1040,6 +1109,7 @@ class IngestJob:
                         if item.quarantined and item.quarantined[-1] in (
                             lineage.SOURCE_CHANGED,
                             lineage.SOURCE_UNREADABLE,
+                            SHORT_READ,
                         ):
                             break  # nothing more of this source can be read
                         continue
@@ -1076,6 +1146,9 @@ class IngestJob:
                 outcome = self._call(work, wire.OUTPUT, reader)
             if isinstance(outcome, Raised) and outcome.changed:
                 self._unreadable(item, SourceChangedError(item.content_id))
+                return None
+            if isinstance(outcome, Raised) and outcome.short_read is not None:
+                self._short(item, outcome, Step.INGEST, chunk, attempt)
                 return None
             if not isinstance(outcome, Returned):
                 retry = isinstance(outcome, Crashed) or (
@@ -1436,13 +1509,15 @@ class IngestJob:
                     self._ingested.append(item.key)
                     self._emit(events.SOURCE_ADMITTED, details)
             # A degraded run records its runtime transform even with no findings, so the receipt
-            # always names the guarantees it could not give; a sound run adds it only to carry a
-            # finding, keeping its lineage unchanged (ADR 0030).
-            extra = (
-                [self.transform, *self._findings.values()]
-                if self._findings or self._lost_guarantees
-                else []
-            )
+            # always names the guarantees it could not give; a sound run adds a transform only to
+            # carry a finding, keeping its lineage unchanged (ADR 0030).
+            cited = {finding.transform for finding in self._findings.values()}
+            if self._lost_guarantees:
+                cited.add(self.transform.id)
+            extra = [
+                *(self._producers[transform] for transform in sorted(cited)),
+                *self._findings.values(),
+            ]
             try:
                 self._staged = stage(
                     self.destination, self.workspace, ledger, self._ingested, extra=extra

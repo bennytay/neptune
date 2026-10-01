@@ -22,7 +22,12 @@ with these texts misbehave instead:
   per-chunk check catches);
 - ``dup``: the block cites the first line's span, so its id collides with that line's block (a
   cross-chunk violation only the whole source's output shows);
-- a first line ``plan-crash``: ``plan`` raises ``RuntimeError``.
+- ``short``: ``ingest`` reads its line through a reader that serves nothing from the line on, as a
+  source cut after it was hashed would (``read_pieces`` raises ``ShortReadError``);
+- ``short-elsewhere``: ``ingest`` raises a ``ShortReadError`` naming another source (an adapter's
+  own reader, not the one it was given);
+- a first line ``plan-crash``: ``plan`` raises ``RuntimeError``; ``plan-short``: ``plan`` reads
+  the source short, as ``short`` does.
 """
 
 from typing import Final
@@ -43,11 +48,13 @@ from neptune.adapters.contract import (
     ProbeReason,
     ProbeResult,
     Resources,
+    ShortReadError,
     SourceReader,
     make_chunk,
+    read_pieces,
 )
 from neptune.identity.provenance import evidence_record_id
-from neptune.model.ids import RecordId
+from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject
 from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotApplicable, NotCovered
 from neptune.model.provenance import ByteRange, EvidenceRef, Provenance, Span
@@ -68,7 +75,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
     locator_steps=(),
     conventions=(
         Documented("blocks", "one block per line after the signature, citing the line's span"),
-        Documented("faults", "crash, flaky, bad-output, dup and a first line plan-crash misbehave"),
+        Documented(
+            "faults",
+            "crash, flaky, bad-output, dup, short, short-elsewhere and a first line plan-crash"
+            " or plan-short misbehave",
+        ),
     ),
     resources=Resources(max_memory=1024 * 1024, streaming=False),
     security=("Test-only.",),
@@ -96,6 +107,29 @@ def _lines(source: SourceReader) -> list[tuple[int, bytes]]:
     return found
 
 
+class _CutFrom:
+    """``source`` as a reader would serve it if its bytes ended at ``cut``: same id and size."""
+
+    def __init__(self, source: SourceReader, cut: int) -> None:
+        self._source, self._cut = source, cut
+
+    @property
+    def content_id(self) -> ContentId:
+        return self._source.content_id
+
+    @property
+    def size(self) -> int:
+        return self._source.size
+
+    def read(self, offset: int, length: int) -> bytes:
+        return self._source.read(offset, max(0, min(length, self._cut - offset)))
+
+
+def _read_short(source: SourceReader, start: int, end: int) -> bytes:
+    """Read ``[start, end)`` through a reader cut at ``start``: ``ShortReadError``."""
+    return b"".join(read_pieces(_CutFrom(source, start), start, end))
+
+
 class BrittleAdapter:
     descriptor = DESCRIPTOR
 
@@ -114,6 +148,8 @@ class BrittleAdapter:
         lines = _lines(source)
         if lines and lines[0][1] == b"plan-crash":
             raise RuntimeError("the plan was asked to crash")
+        if lines and lines[0][1] == b"plan-short":
+            _read_short(source, lines[0][0], source.size)
         chunks = [make_chunk(source, config, {"part": "document"}, source.size)]
         for order, (offset, line) in enumerate(lines):
             context: JsonObject = {"end": offset + len(line), "order": order, "start": offset}
@@ -136,6 +172,10 @@ class BrittleAdapter:
         text = source.read(start, end - start).decode("ascii")
         if text == "crash":
             raise RuntimeError("the chunk was asked to crash")
+        if text == "short":
+            _read_short(source, start, end)
+        if text == "short-elsewhere":
+            raise ShortReadError(ContentId("sha256:" + "e" * 64), 0, 1)
         if text == "flaky" and chunk.id not in self._flaked:
             self._flaked.add(chunk.id)
             raise OSError("a transient fault, once")

@@ -59,6 +59,7 @@ SOURCE_UNSUPPORTED: Final = "source_unsupported"
 SOURCE_AMBIGUOUS: Final = "source_ambiguous"
 SOURCE_UNREADABLE: Final = "source_unreadable"
 SOURCE_CHANGED: Final = "source_changed"
+SOURCE_SHORT_READ: Final = "source_short_read"  # a call read the source short (ADR 0033 §3)
 SOURCE_PLANNED: Final = "source_planned"
 PLAN_FAILED: Final = "plan_failed"
 CHUNK_SKIPPED: Final = "chunk_skipped"
