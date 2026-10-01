@@ -30,3 +30,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0023](0023-m1-gate-freeze-and-growth.md) | The M1 gate: the model freezes, grows only by addition, and fixes four gaps | Accepted |
 | [0024](0024-adapter-abi-types-selection-and-reference-adapter.md) | The adapter ABI's exact types, adapter selection, and the reference adapter | Accepted |
 | [0025](0025-series-files-sorted-merged-and-pinned.md) | Series files: one sorted Parquet file per stream, merged from runs, pinned settings | Accepted |
+| [0027](0027-probe-engine-sniffing-containers-and-selection-findings.md) | The probe engine: sniffing, bounded container inspection, and selection as findings | Accepted |

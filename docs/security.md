@@ -26,6 +26,7 @@ receipts, logs, caches or cloud sync; supply-chain risk from parser dependencies
 | Milestone | Control |
 |---|---|
 | M1 (MVL-2) | done: `LocalSource` walks with `O_NOFOLLOW` per component; symlinks recorded, never followed; special files never opened (ADRs 0009, 0010) |
+| M2 (MVL-8) | done: containers are inspected, never extracted: member names listed verbatim and never resolved; decoding bounded by `ProbePolicy` (members, decoded bytes, depth, declared ratio); a crashing probe is a finding (ADR 0027) |
 | M2 (MVL-10) | subprocess isolation, CPU/memory/time limits, archive-bomb limits, temp-file policy, crash capture; seed adversarial fixtures |
 | M2 (MVL-16) | local-only mode |
 | M6 (MVL-28/29) | malformed PDF/image safeguards; no active content execution |

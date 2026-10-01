@@ -56,6 +56,16 @@ FIFOs/sockets/devices, and reports everything else as a `SkippedEntry` with a re
 `discovery.scan.scan()` is one pass: walk, digest, record, then mark absent only the locations the scan could
 see are gone — never under an unreadable directory or a symlinked ancestor. Details: ADR 0010.
 
+## Probing sources
+
+`discovery.probe.ProbeEngine` (ADR 0027) decides which adapter reads a source from its bytes alone: it sniffs the
+head (signatures and text class, observations only), gives the head to every registered adapter with crashes
+isolated, and applies the registry's selection rule (ADR 0024 §7). A zip, tar, gzip, bzip2 or xz is inspected
+within `ProbePolicy` and its members probed the same way; members are cited as `ByteRange` steps, nested per
+ADR 0016, and nothing is extracted. A tie, an unclaimed source, a crashed probe, a misleading name and every
+container problem is an `IngestFinding` from the engine's own transform (`neptune.probe`), so the receipt shows
+who looked at a source nobody decoded. `SourceProbe.to_json()` is the explanation a dry run renders.
+
 ## Provenance record (`model/provenance.py`, ADR 0016)
 
 Every canonical record embeds, and any `Knowledge` state may carry:
