@@ -120,6 +120,8 @@ class Shared:
     decision: _crs.Decision
     array: tuple[int, int]
     mode: str
+    features_table: RecordId
+    properties_table: RecordId
 
     @staticmethod
     def of(
@@ -138,14 +140,9 @@ class Shared:
             _crs.decision_from_json(context_object(context, "crs")),
             (first, second),
             context_text(context, "mode"),
+            record_id(StructuredTable.kind, cite(source, first, second), config),
+            record_id(StructuredTable.kind, cite(source, first, second, properties_step()), config),
         )
-
-    def features_table(self) -> RecordId:
-        return record_id(StructuredTable.kind, cite(self.source, *self.array), self.config)
-
-    def properties_table(self) -> RecordId:
-        evidence = cite(self.source, *self.array, properties_step())
-        return record_id(StructuredTable.kind, evidence, self.config)
 
 
 # --- Root: the artifact and the tables ---------------------------------------------------------
@@ -185,7 +182,7 @@ def root_output(
         )  # the table's own name, not the file's: see ADR 0057 §4
         records.append(
             StructuredTable(
-                id=shared.features_table(),
+                id=shared.features_table,
                 provenance=observed(at, config),
                 name=features_name,
                 header=Known(FEATURE_COLUMNS, observed(at, config)),
@@ -194,7 +191,7 @@ def root_output(
         pat = cite(source, *shared.array, properties_step())
         records.append(
             StructuredTable(
-                id=shared.properties_table(),
+                id=shared.properties_table,
                 provenance=observed(pat, config),
                 name=Known("properties", observed(pat, config)),
                 header=Known(PROPERTY_COLUMNS, observed(pat, config)),
@@ -212,6 +209,7 @@ _NOT_READ: Final = object()  # a leaf that is a container (empty, repeated or to
 class _Leaf:
     pointer: str
     start: int  # char offsets in the feature's text: the member (its name), its value and its end
+    name_end: int
     value_start: int
     end: int
     value: object
@@ -259,7 +257,15 @@ def _leaves(text: str, top: list[Member], limits: Limits) -> tuple[list[_Leaf], 
             break
         leaf_value = _NOT_READ if isinstance(value, dict | list | Deep) else value
         found.append(
-            _Leaf(pointer, member.name_start, member.start, member.end, leaf_value, repeated)
+            _Leaf(
+                pointer,
+                member.name_start,
+                member.name_end,
+                member.start,
+                member.end,
+                leaf_value,
+                repeated,
+            )
         )
     return found, truncated, too_deep
 
@@ -394,8 +400,8 @@ def _read(
         if shared.mode == "geometry":  # a bare geometry: the one feature is its own geometry
             value, _ = decode_value(text, 0)
             members = [
-                Member("type", 0, 0, 0, "Feature"),
-                Member("geometry", 0, 0, len(text), value),
+                Member("type", 0, 0, 0, 0, "Feature"),
+                Member("geometry", 0, 0, 0, len(text), value),
             ]
     except ScanError as exc:
         issues.add("json_syntax", start, end, index, f"feature {index} is not valid JSON: {exc}")
@@ -456,7 +462,7 @@ def _records(feature: _Feature) -> list[EvidenceRecord]:
         StructuredRecord(
             id=record_id(StructuredRecord.kind, evidence, config),
             provenance=observed(evidence, config),
-            table=shared.features_table(),
+            table=shared.features_table,
             row=feature.index,
             cells=tuple(cells),
         )
@@ -507,7 +513,15 @@ def _property_rows(feature: _Feature, top: list[Member]) -> list[EvidenceRecord]
                 "a property string has a lone surrogate: it is Unknown",
                 label="surrogate",
             )
-        key_at = stated(cite(source, at(leaf.start), at(leaf.value_start)), config)
+        named = leaf.name_end > leaf.start  # an array element's key is its own value
+        key_at = stated(
+            cite(
+                source,
+                at(leaf.start if named else leaf.value_start),
+                at(leaf.name_end if named else leaf.end),
+            ),
+            config,
+        )
         key: Knowledge[CellValue] = (
             Known(leaf.pointer, key_at) if text_ok(leaf.pointer) else Unknown(key_at)
         )
@@ -515,7 +529,7 @@ def _property_rows(feature: _Feature, top: list[Member]) -> list[EvidenceRecord]
             StructuredRecord(
                 id=record_id(StructuredRecord.kind, member, config),
                 provenance=observed(member, config),
-                table=shared.properties_table(),
+                table=shared.properties_table,
                 row=row,
                 cells=(Known(feature.index, observed(feature.evidence, config)), key, cell),
             )

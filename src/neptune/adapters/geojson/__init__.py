@@ -662,10 +662,12 @@ def _chunks(
         contradicted = "the file is not read to its end, so a crs member cannot be ruled out"
     elif mode == "none":
         contradicted = "no features were read to check the default against"
-    decision, crs_findings = _crs.decide(
-        source, config, members, contradicted=contradicted, whole=whole
-    )
-    findings.extend(crs_findings)
+    decision = _crs.Decision("unknown", (), whole, False)
+    if mode != "unread":
+        decision, crs_findings = _crs.decide(
+            source, config, members, contradicted=contradicted, whole=whole
+        )
+        findings.extend(crs_findings)
     if crs_given:
         again = [m for m in members if m.name == "crs"]
         if len(again) > 1:

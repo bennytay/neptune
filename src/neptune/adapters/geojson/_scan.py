@@ -27,6 +27,7 @@ _WS: Final = " \t\n\r"
 _DECODER: Final = json.JSONDecoder()
 _BRACKETS: Final = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"|[\[\]{}]', re.DOTALL)
 WINDOW: Final = 1024 * 1024  # bytes a window starts with
+_SLACK: Final = 8192  # an error this close to a window's end may be the window's
 
 
 class Deep:
@@ -96,6 +97,7 @@ def bracket_end(text: str, i: int) -> int | None:
 class Member:
     name: str
     name_start: int
+    name_end: int  # the same as ``name_start`` for an array's element, which has no name
     start: int  # the value's first character
     end: int
     value: object
@@ -123,12 +125,13 @@ def object_members(text: str, i: int) -> tuple[list[Member], int]:
             raise ScanError("syntax", i, "expected a member name")
         name_start = i
         name, i = read_string(text, i)
+        name_end = i
         i = skip_ws(text, i)
         if text[i : i + 1] != ":":
             raise ScanError("syntax", i, "expected ':'")
         i = skip_ws(text, i + 1)
         value, end = decode_value(text, i)
-        found.append(Member(name, name_start, i, end, value))
+        found.append(Member(name, name_start, name_end, i, end, value))
         i = skip_ws(text, end)
         char = text[i : i + 1]
         if char == "}":
@@ -146,7 +149,7 @@ def array_items(text: str, i: int) -> tuple[list[Member], int]:
         return found, i + 1
     while True:
         value, end = decode_value(text, i)
-        found.append(Member(str(len(found)), i, i, end, value))
+        found.append(Member(str(len(found)), i, i, i, end, value))
         i = skip_ws(text, end)
         char = text[i : i + 1]
         if char == "]":
@@ -246,9 +249,11 @@ class Reader:
             try:
                 value, end = decode_value(self._text, self._i)
             except ScanError as exc:
-                if exc.kind == "truncated" and self._grow():
-                    continue
-                if exc.kind == "truncated" and self._more():
+                # an error in the last few KiB may be the window's end, not the text's
+                near_end = exc.kind == "truncated" or exc.offset >= len(self._text) - _SLACK
+                if exc.kind != "number" and near_end and self._more():
+                    if self._grow():
+                        continue
                     raise ScanError("large", start, "a value longer than the window cap") from None
                 raise ScanError(exc.kind, self._base + exc.offset, exc.reason) from None
             if end >= len(self._text) and self._more() and self._grow():
