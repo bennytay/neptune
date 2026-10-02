@@ -17,9 +17,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, cast
 
-from neptune.adapters.config import ConfigAdapter
-from neptune.adapters.harness import ingest_source
-from neptune.discovery.reader import BytesReader
 from neptune.identity import canonical_json
 from neptune.identity.hashing import digest_stream
 from neptune.identity.provenance import evidence_record_id, transform_record
@@ -364,11 +361,17 @@ def reparse(
 
 # A controller parameter file exported beside a recording, in no robot's vocabulary: what a
 # package-schema 2 run of the compiler also ingests, as configuration records (root ADR 0037).
+# ``controller_parameters/`` holds those records as the compiler's config adapter wrote them for
+# these bytes, frozen: Ledger members never import a format adapter or run ingestion (CI plan
+# and merge freshness rely on it), and a schema-2 package is history that must not drift.
 PARAMETERS: Final = b"""# Controller parameters exported with the recording.
 max_linear_speed: 1.5
 max_angular_speed: 0.8
 stop_on_lost_link: true
 """
+
+
+_CONFIGURATION: Final = Path(__file__).parent / "controller_parameters"
 
 
 def at_schema_2(
@@ -394,10 +397,12 @@ def at_schema_2(
     ]
     ledger = SourceLedger()
     ledger.observe(LocalPath("params/controller.yaml"), digest_stream(io.BytesIO(PARAMETERS)))
-    output = ingest_source(ConfigAdapter(), BytesReader(PARAMETERS))
-    return package_files(
-        [*records, *ledger.artifacts(), *ledger.revisions(), *output.package_records()]
-    )
+    configuration = [
+        _read(path.stem, canonical_json.loads(line))
+        for path in sorted(_CONFIGURATION.glob("*.jsonl"))
+        for line in path.read_bytes().splitlines()
+    ]
+    return package_files([*records, *ledger.artifacts(), *ledger.revisions(), *configuration])
 
 
 def with_source_size(name: str, size: int, directory: Path | None = None) -> dict[str, bytes]:
