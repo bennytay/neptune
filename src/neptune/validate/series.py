@@ -181,7 +181,7 @@ def time_regression(context: Context) -> Iterator[Draft]:
                 "clock": clock,
                 "declared_monotonic": declared,
                 "domain": stream.clocks[clock],
-                "falls": falls,
+                "descents": falls,
                 "previous_seq": _int(prior[SEQ]),
                 "previous_ticks": _int(prior[clocks[clock]]),
                 "seq": _int(values[SEQ]),
@@ -193,8 +193,8 @@ def time_regression(context: Context) -> Iterator[Draft]:
                 details["other_clocks"] = "not_judged"  # file order is not source order
             yield Draft(
                 subject=_evidence(stream, parquet, row, cite),
-                message=f"stream {short(stream.id)} steps back in time on clock {clock}"
-                f" {plural(falls, 'time')} in source order",
+                message=f"stream {short(stream.id)} is not in time order on clock {clock}"
+                f" in source order ({plural(falls, 'descent')})",
                 details=details,
                 related=(_evidence(stream, parquet, prior_row, cite),),
                 records=(stream.id,),

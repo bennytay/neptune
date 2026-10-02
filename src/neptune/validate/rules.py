@@ -106,7 +106,6 @@ def interval_reversed(context: Context) -> Iterator[Draft]:
 # The fields a consumer cannot use a record without. Only ``Unknown`` is reported: the evidence
 # should have said it and did not. NotCovered and NotApplicable say the format does not carry it.
 REQUIRED: Final = {
-    "calibration": ("subject",),
     "frame_transform": ("direction",),
     "stream": ("message_encoding", "schema_name", "topic"),
     "timestamp_domain": ("resolution",),
