@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from neptune.identity.hashing import content_id
+from neptune.model.kinds import package_version
 from neptune.model.knowledge import AssertionKind, Known, KnownAbsent, NotApplicable, Unknown
 from neptune.model.lifecycle import LIFECYCLE_KINDS
 from neptune.model.provenance import ByteRange, JsonPointer, Provenance, RowCell, Span
@@ -389,7 +390,9 @@ def test_map_package_writes_a_readable_package_and_leaves_the_base_untouched(
     assert _tree(root) == before
     written = read_package(tmp_path / "out")
     assert written.id == package_id
-    assert written.manifest.version == PACKAGE_SCHEMA_VERSION
+    # Written at the lowest version that holds its records (root ADR 0037 §1), within Deploy's pin.
+    kinds = [kind for kind, count in written.manifest.tables if count]
+    assert written.manifest.version == package_version(kinds) <= PACKAGE_SCHEMA_VERSION
 
 
 # --- Rules, tables and the command line ----------------------------------------------------------
