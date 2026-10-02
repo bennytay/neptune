@@ -28,7 +28,7 @@ Todo ──(branch created, first commit)──▶ In Progress ──(PR open, a
 
 ## Branching and merging
 
-- Trunk-based. `main` is protected: PR required, CI (`check`) green, up to date with `main` (strict), linear
+- Trunk-based. `main` is protected: PR required, CI (`check`) green, linear
   history, no force-push, no deletion. Merged branches are deleted automatically.
 - One branch per issue. PR title = issue title. Keep the branch current with `git merge origin/main`; never
   rebase or force-push a branch that has been pushed (a reviewer may be reading it).
@@ -112,13 +112,15 @@ so the strict up-to-date refresh is cheap; the cap is set by the conflict rate o
 3. **Review.** When the implementer reports, spawn a reviewer with the PR number and head SHA. Post the
    verdict as a PR comment (`Review: MERGE|REVISE|REJECT @ <sha>` plus the findings) so a resumed session can
    find it. REVISE goes back to the same implementer and the new head is re-reviewed. REJECT closes the PR.
-4. **Refresh.** After every merge, bring each open PR up to date on its own branch: `git merge origin/main`,
+4. **Refresh only when asked.** `factory-merge.sh` merges a PR that is behind `main` when nothing `main`
+   changed reaches it (packages/neptune-platform/docs/adr/0005-merge-without-a-queue.md). When it refuses with
+   "needs a refresh", bring that PR up to date on its own branch: `git merge origin/main`,
    resolve conflicts (hotspots below), push, `gh pr checks <n> --watch`. A clean auto-merge keeps the verdict
    valid for the new head; a hand-resolved conflict needs a re-review. When a PR's base branch has just
    merged: `gh api -X PATCH repos/bennytay/neptune/pulls/<n> -f base=main`, then merge `origin/main`
    (`git merge -s ours origin/main` is safe only while `git diff origin/main <old-base-tip>` is empty).
 5. **Merge** with `scripts/factory-merge.sh <pr> <reviewed-head-sha>`. It refuses unless the base is `main`,
-   `mergeable_state` is `clean`, the `check` run on that head succeeded and the head is the reviewed SHA; it
+   the PR has no conflicts, main's latest `check` is green (or the PR is labelled `fix-main`), the PR is fresh, the `check` run on that head succeeded and the head is the reviewed SHA; it
    squash-merges pinned to that SHA with the PR title as commit title and the PR body as the message.
 6. **Linear.** The integration moves the issue to Done on merge; the coordinator comments the merge SHA, sets
    Done if the integration did not, and removes the worktree (`git worktree remove <path>`).
