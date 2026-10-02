@@ -127,6 +127,7 @@ from neptune.runtime.cache import (
 from neptune.runtime.declared import Declarations
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
 from neptune.runtime.lineage import Failure, Law, Step, failure_from_json, type_name
+from neptune.runtime.plugins import Plugins
 from neptune.runtime.sandbox import (
     DEFAULT_LIMITS,
     Crashed,
@@ -489,7 +490,8 @@ class IngestJob:
     Build it, then ``run`` it once, or ``dry_run`` it once to see what ``run`` would ingest
     (ADR 0035); a dry run needs no destination. ``on_event`` receives every ``JobEvent`` as it
     happens; ``cancel`` is checked at every checkpoint. Problems with one source become findings
-    in the package; problems with the job raise ``JobError``.
+    in the package; problems with the job raise ``JobError``. ``plugins`` are the plugins the
+    registry was built from (ADR 0058): the findings about those refused join the job's.
     """
 
     def __init__(
@@ -502,6 +504,7 @@ class IngestJob:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        plugins: Plugins | None = None,
     ) -> None:
         self.root = Path(root)
         self.destination = Path(destination) if destination is not None else None
@@ -562,6 +565,9 @@ class IngestJob:
         if self._declared is not None:  # the manifest's own findings name it
             manifest = self._declared.loaded.transform
             self._producers[manifest.id] = manifest
+        if plugins is not None:  # the plugins the registry was built without (ADR 0058)
+            for finding in plugins.findings:
+                self._record(finding, plugins.transform)
         self._layout = Layout(())
         self._grouping: Grouping | None = None
         self._dry = False  # a dry run: stops after plan and explains (ADR 0035, 0044)

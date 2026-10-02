@@ -21,6 +21,8 @@ workspace allows it.
   package contains (streams, declared field paths, inferred semantics) without decoding a
   message (ADR 0049).
 - ``errors``: ``NeptuneError`` and its subclasses, each with a stable ``code``.
+- ``PluginPolicy`` and ``Plugins``: which installed plugins a client reads, and what it read
+  (``neptune.runtime.plugins``, ADR 0058).
 
 Imports the runtime, the store and the adapters; the CLI (MVL-11) wraps this.
 """
@@ -38,6 +40,7 @@ from neptune.runtime import (
     Limits,
     Phase,
 )
+from neptune.runtime.plugins import PluginPolicy, Plugins
 from neptune.sdk.client import (
     AsyncIngestion,
     AsyncNeptune,
@@ -95,6 +98,8 @@ __all__ = [
     "NothingToResumeError",
     "PackageInvalidError",
     "Phase",
+    "PluginPolicy",
+    "Plugins",
     "PublishIncompleteError",
     "RunContents",
     "SandboxUnavailableError",

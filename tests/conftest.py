@@ -1,6 +1,8 @@
 """Shared fixtures: loaders for the generator scripts under ``tests/fixtures``."""
 
 import importlib.util
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 
@@ -33,3 +35,26 @@ def tabular_fixtures() -> ModuleType:
 def tabular_golden() -> ModuleType:
     """The tabular golden-file generator, ``tests/golden/tabular/make_tabular_golden.py``."""
     return load_generator(Path(__file__).parent / "golden" / "tabular" / "make_tabular_golden.py")
+
+
+@pytest.fixture(scope="session")
+def plugin_dists() -> ModuleType:
+    """The installed-distribution generator, ``tests/fixtures/plugins/make_plugin_dists.py``."""
+    return load_generator(FIXTURES / "plugins" / "make_plugin_dists.py")
+
+
+@pytest.fixture
+def forget_plugins() -> Iterator[None]:
+    """Forget the test plugins' modules after the test, so the next one imports its own."""
+    yield
+    for name in [name for name in sys.modules if name.startswith("neptune_test_")]:
+        del sys.modules[name]
+
+
+@pytest.fixture
+def plugin_site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, forget_plugins: None) -> Path:
+    """An empty site directory on ``sys.path``, for ``make_plugin_dists.install``."""
+    site = tmp_path / "site"
+    site.mkdir()
+    monkeypatch.syspath_prepend(str(site))
+    return site
