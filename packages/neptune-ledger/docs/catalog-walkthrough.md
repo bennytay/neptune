@@ -39,7 +39,8 @@ transaction in the tenant's schema does the rest:
    The examples have nine transforms, one per adapter (`ulog`, `rosbag2`, `mcap`, `urdf`, `stl`,
    `handeye`, `rosbag1`, `csv`, `png`, all `1.0.0`), and no upstream edges.
 8. `clock` from each `timestamp_domain` record: its field and scope.
-9. `record`: one row per line of every `records/<kind>.jsonl`, into the kind's partition, with
+9. `record`: one row per line of every `records/<kind>.jsonl` the manifest counts, into the kind's
+   partition, or `record_default` for a kind without one (ADR 0008), with
    the package's `tx_seq` as `registration_key`, the provenance summary (source, locator,
    transform, assertion kind), the world time where ADR 0003 §3 gives the kind one, the
    pointers of its `Ambiguous` fields and `body_digest`, the sha256 of the record's line. A record

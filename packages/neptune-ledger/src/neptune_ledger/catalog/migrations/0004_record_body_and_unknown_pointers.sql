@@ -1,7 +1,7 @@
 -- 0004 record bodies and Unknown pointers (Ledger ADR 0009 §1, §2).
 --
 -- Applied after 0003 in the same tenant schema, with search_path set to that schema alone.
--- Columns are added to the partitioned parent, so every partition, present or generated later,
+-- Columns are added to the partitioned parent, so every partition, record_default included,
 -- has them. Nothing here is generated: the hot-filter projections are migration 0005 onwards,
 -- generated from the package schema by neptune_ledger.catalog.projection.
 

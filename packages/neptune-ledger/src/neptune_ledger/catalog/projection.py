@@ -4,8 +4,10 @@ The package schema's JSON Schema export (``contracts/package-schema/v<version>/s
 ``neptune.model.schema``) names every record kind and its top-level fields. ``projection_spec``
 reads it into a ``Spec``: the kinds, the hot-filter fields (machine, site, run, stream, clock) each
 kind states, and the free-form objects no pointer walk may enter. ``render_migration`` turns the
-difference between two specs into a migration: a partition per new kind, columns and indexes per
-new hot-filter shape. Neither touches a database, so both are pure functions of their inputs.
+difference between two specs into a migration: columns and indexes per new hot-filter shape. It
+never creates a partition: a kind without one of its own lives in ``record_default`` (ADR 0008),
+and splitting it out is a rebuild, not a migration step (ADR 0009 §6). Neither touches a database,
+so both are pure functions of their inputs.
 
 The spec the Ledger indexes with is committed beside the migrations as ``projections.json``, and
 ``index`` reads that file, never the compiler's live schema: indexing is a function of the package
@@ -227,14 +229,13 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
             f" {[f'{p.kind}.{p.field}' for p in gone]} or free-form fields"
             f" {[f'{kind}.{field}' for kind, field in gone_opaque]}; removals need an ADR"
         )
-    added_kinds = sorted(set(new.kinds) - set(old.kinds))
     added = sorted(set(new.projections) - set(old.projections))
     groups = sorted(
         {(p.filter, p.columns) for p in new.projections}
         - {(p.filter, p.columns) for p in old.projections}
     )
-    if not added_kinds and not added:
-        return ""
+    if not added:
+        return ""  # a new kind without hot filters needs no migration: it lives in record_default
     out = [
         f"-- {version:04d} record projections for {new.schema_id} (Ledger ADR 0009).",
         "--",
@@ -248,17 +249,24 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
     ]
     out += [f"--   {p.kind}.{p.field} -> {', '.join(p.columns)}" for p in added]
     # Rows already filed for a kind that gains a projection would read as "not Known": a blank
-    # turned into a fact. Records of an older schema version do not state the field, so only
-    # rows of this version or later make the migration refuse; the catalog is then rebuilt from
-    # its packages and registration log (ADR 0002 §4) by a Ledger that ships this migration.
-    existing = sorted({p.kind for p in added} & set(old.kinds))
-    if existing:
+    # turned into a fact. A kind new to the spec states the field in every row; an older kind's
+    # rows state it only from this schema version on. Either makes the migration refuse, and the
+    # catalog is rebuilt from its packages and registration log (ADR 0002 §4) by a Ledger that
+    # ships it.
+    fresh = sorted({p.kind for p in added} - set(old.kinds))
+    grown = sorted({p.kind for p in added} & set(old.kinds))
+    tests = []
+    if fresh:
+        tests.append(f"kind IN ({', '.join(repr(k) for k in fresh)})")
+    if grown:
+        listed = ",\n".join(f"      '{kind}'" for kind in grown)
+        tests.append(f"(schema_version >= {new.major} AND kind IN (\n{listed}))")
+    if tests:
         out += [
             "",
             "DO $$",
             "BEGIN",
-            f"  IF EXISTS (SELECT 1 FROM record WHERE schema_version >= {new.major} AND kind IN (",
-            ",\n".join(f"      '{kind}'" for kind in existing) + ")) THEN",
+            f"  IF EXISTS (SELECT 1 FROM record WHERE {' OR '.join(tests)}) THEN",
             "    RAISE EXCEPTION 'record rows of a kind gaining a projection would read as not'",
             "      ' Known; rebuild this catalog from its packages and registration log"
             " (ADR 0009)';",
@@ -266,8 +274,6 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
             "END",
             "$$;",
         ]
-    for kind in added_kinds:
-        out += ["", f"CREATE TABLE record_{kind} PARTITION OF record FOR VALUES IN ('{kind}');"]
     for filter_name, columns in groups:
         if len(columns) == 1:
             (name,) = columns

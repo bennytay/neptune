@@ -3,8 +3,9 @@
 A pure function of the package's bytes and this Ledger version: every value comes from the record
 lines that registration hashed, read once, and the kind-specific projections come from the spec
 this Ledger ships (``projection.shipped_spec``), never from the compiler's live schema. So the same
-package gives the same rows in any catalog, whatever was registered before it. Records are ordered
-by kind, then record id (ADR 0009 §4).
+package gives the same rows in any catalog, whatever was registered before it. It indexes the
+package's own tables, exactly the kinds of its schema version (Ledger ADR 0008 §2), never the
+compiler's whole list. Records are ordered by kind, then record id (ADR 0009 §4).
 """
 
 import hashlib

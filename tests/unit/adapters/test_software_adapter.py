@@ -12,7 +12,7 @@ from types import ModuleType
 from typing import Final
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from neptune.adapters.check import check_chunk_output
@@ -254,18 +254,24 @@ def _forced(key: str, data: bytes) -> ChunkOutput:
 
 
 @settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
-@given(st.data())
+@given(
+    relative=st.sampled_from(FIXTURES),
+    edits=st.lists(st.tuples(st.integers(0, 2**20), st.integers(0, 255)), max_size=6),
+    cut=st.integers(0, 2**20),
+    key=st.sampled_from([spec.key for spec in FORMATS]),
+)
+@example(relative="git/packed-refs", edits=[(99, 0xC3)], cut=268, key="git_packed_refs")
+@example(
+    relative="git/packed-refs", edits=[(99, 0xFF), (100, 0x80)], cut=268, key="git_packed_refs"
+)
 def test_damaged_fixtures_read_as_any_format_are_findings_never_exceptions(
-    data: st.DataObject,
+    relative: str, edits: list[tuple[int, int]], cut: int, key: str
 ) -> None:
-    relative = data.draw(st.sampled_from(FIXTURES))
     raw = bytearray(ORACLE.fixture(relative))
-    for _ in range(data.draw(st.integers(0, 6))):
+    for at, value in edits:
         if raw:
-            raw[data.draw(st.integers(0, len(raw) - 1))] = data.draw(st.integers(0, 255))
-    cut = data.draw(st.integers(0, len(raw)))
-    key = data.draw(st.sampled_from([spec.key for spec in FORMATS]))
-    _forced(key, bytes(raw[:cut]))
+            raw[at % len(raw)] = value
+    _forced(key, bytes(raw[: cut % (len(raw) + 1)]))
 
 
 @settings(max_examples=200, deadline=None)

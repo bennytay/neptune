@@ -5,8 +5,9 @@
 - Issue: MVL-91
 - Amends: ADR 0002 §3 and §5 (the catalog now holds a projection copy of each record body, and
   new `record` columns) and its rejected alternative "store record bodies (`jsonb`)"; ADR 0002 §5's
-  `ambiguous_pointers` and `record_logical_id` walks (free-form objects are skipped). Completes
-  ADR 0007 §1's MVL-91 half.
+  `ambiguous_pointers` and `record_logical_id` walks (free-form objects are skipped).
+- Supersedes: ADR 0008 §4 (how a kind leaves `record_default`), by §6 below.
+- Completes ADR 0007 §1's MVL-91 half.
 
 ## Context
 
@@ -70,31 +71,31 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
    `clock`). No v1 kind states a `stream` field, so there is no `stream` column yet. The first kind
    that states one gets the column from its generated migration. PostgreSQL requires every
    partition to have its parent's columns, so the columns live on the parent and only the listed
-   kinds fill them.
-   - The spec Ledger indexes with is committed as `catalog/projections.json`, and `index`
-     reads that file, never the compiler's live schema. Indexing therefore depends on the
-     Ledger version only, and a kind cannot be indexed before its migration exists.
+   kinds fill them, whether a kind has its own partition or lives in `record_default` (ADR 0008).
+   - The spec the Ledger indexes with is committed as `catalog/projections.json`, and `index`
+     reads that file, never the compiler's live schema. Projections therefore depend on the
+     Ledger version only.
    - `python -m neptune_ledger.catalog.projection <schema.json>` rewrites the spec and writes
-     the next migration from the difference: a partition for each new kind, and columns,
-     constraint and index for each new column group. Migration 0005 is its output for package
-     schema 1 (baseline: 0001's partitions). A test pins 0004 and `projections.json` to the
-     generator's output over the v1.0.0 export.
+     the next migration from the difference: columns, constraint and index for each new column
+     group. It never creates a partition (§6), and a new kind with no hot filter needs no
+     migration. Migration 0005 is its output for package schema 1 (baseline: 0001's kinds, no
+     projections). A test pins 0005 and `projections.json` to the generator's output over the
+     v1.0.0 export.
    - A hot-filter field in an unknown shape, or a kind, projection or free-form field that
      disappears, raises `ProjectionError`. A new shape or a removal needs an ADR. A free-form
      field that gains a `description` stops matching, so it fails loudly instead of being walked
      again.
-   - A generated migration that adds a projection to a kind already partitioned refuses to
-     apply if that kind holds rows of the new schema version or later. Those rows state the
-     field, but they would read as not Known. Rows of older versions do not state it, so NULL is
-     their truth.
-   - The compiler's kind list is not closed. A package table of a kind the spec does not name is
-     indexed with the common columns and no projections. Where it is filed is the partition rule
-     of migration 0003 (the default/on-demand partition hotfix); its projections arrive with the
-     generated migration for its schema.
+   - A generated migration refuses to apply over rows its projections would leave blank: any row
+     of a kind new to the spec (a kind states its fields from the version that introduced it),
+     and rows of the new schema version or later for a kind that gains a field. Such rows would
+     read as not Known. Rows of older versions do not state the field, so NULL is their truth.
+     The catalog is then rebuilt (ADR 0002 §4) by a Ledger that ships the migration.
+   - The compiler's kind list is not closed. A table of a kind the spec does not name is indexed
+     with the common columns and no projections, in `record_default` (ADR 0008 §1, §3).
 4. **Order and batches.** `package_rows` orders records by `(kind, record_id, line)`.
    Registration writes `record` and `record_logical_id` in batches of `BATCH_ROWS = 1000` rows per
-   `executemany`, each batch built when it is sent. Every column except `registration_key` is a function of the package and the
-   Ledger version. Registering the same packages in any order gives the same rows apart from
+   `executemany`, each batch built when it is sent. Every column except `registration_key` is a
+   function of the package and the Ledger version. Registering the same packages in any order gives the same rows apart from
    `registration_key` and the transaction columns. Registering them in the same order into two
    empty Ledgers gives identical tables apart from host times (ADR 0007 §5).
 5. **`resolve`** reads `package_source`, `source`, `source_location`, `location_absence` and
@@ -108,6 +109,21 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
    innermost step's `kind` for the schema's core steps and `adapter` otherwise. An anchor
    outside the contract, or an `as_of` that is not an integer of at least 1 (a `bool` is not),
    is `invalid_request`.
+6. **A kind leaves `record_default` only in a rebuild** (supersedes ADR 0008 §4). Moving rows out
+   of the default inside a migration does not work. `CREATE TABLE … PARTITION OF record FOR
+   VALUES IN (k)` raises a check violation while `record_default` holds rows of `k`. The
+   append-only trigger refuses the `DELETE` that would empty it. `record_logical_id`'s foreign
+   key blocks `DETACH`. Only `session_replication_role = replica`, which needs a superuser,
+   bypasses the triggers. So:
+   - No generated migration creates a partition. Projection columns live on the parent, so a
+     kind needs no partition of its own to be projected.
+   - A hand-written migration that gives a kind its own partition first refuses, with a
+     `RAISE`, if `record_default` holds any row of that kind. It applies cleanly to an empty
+     catalog, which is how a rebuild starts. A catalog that already holds the kind is rebuilt
+     from its packages and registration log (ADR 0002 §4) by the Ledger that ships the
+     migration. That is a new catalog lineage when the Ledger version changes, by design.
+   - Moving rows in place, under a superuser with triggers disabled, is not a supported
+     procedure. It would bypass the append-only guarantee that the rebuild guarantee rests on.
 
 ## Alternatives considered
 
@@ -125,6 +141,9 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
 - **Escape or drop U+0000 to fit `jsonb`.** Rejected. That alters evidence, and a NULL body with
   the package authoritative loses nothing.
 - **Keep walking free-form objects.** Rejected. A config value would become a thread key.
+- **Generated migrations create a partition per new kind** (this ADR's first draft). Rejected:
+  it fails whenever `record_default` already holds the kind (§6), which ADR 0008 now allows.
+- **Split a kind out of the default in place, as a superuser with triggers off.** Rejected (§6).
 
 ## Consequences
 
