@@ -41,6 +41,7 @@ MAX_BODY: Final = 32 * 1024 * 1024  # bytes of one JSON response
 MAX_LINK_RESPONSE: Final = 64 * 1024
 MAX_LINK: Final = 8192  # characters in a download link
 STREAM_PATH: Final = "/data/stream"
+USER_AGENT: Final = "neptune-deploy-foxglove/0.1.0"
 
 
 class ResponseInvalid(TransportError):
@@ -80,6 +81,16 @@ def parse_json(body: bytes) -> JsonValue:
 
 class FoxgloveTransport(Transport):
     """``Transport`` plus the one ``POST`` this connector sends: a request for a download link."""
+
+    def __init__(
+        self,
+        endpoint: Endpoint,
+        network: NetworkGate,
+        purpose: str,
+        *,
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> None:
+        super().__init__(endpoint, network, purpose, timeout=timeout, user_agent=USER_AGENT)
 
     def post_stream_request(self, document: JsonValue, headers: dict[str, str]) -> Response:
         """``POST <base>/data/stream`` with a JSON body. No other request is sent by a ``POST``."""
@@ -222,7 +233,7 @@ class FoxgloveClient:
                     old.drop()
                 self._link_transports.clear()
             self._link_transports[endpoint] = Transport(
-                endpoint, self._network, self._purpose, timeout=self._timeout
+                endpoint, self._network, self._purpose, timeout=self._timeout, user_agent=USER_AGENT
             )
         return self._link_transports[endpoint]
 

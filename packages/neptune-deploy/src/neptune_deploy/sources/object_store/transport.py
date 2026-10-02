@@ -196,12 +196,14 @@ class Transport:
         *,
         timeout: float = DEFAULT_TIMEOUT,
         tls: ssl.SSLContext | None = None,
+        user_agent: str = USER_AGENT,
     ) -> None:
         self.endpoint = endpoint
         self._network = network
         self._purpose = purpose
         self._timeout = timeout
         self._tls = tls
+        self._user_agent = user_agent
         self._connection: http.client.HTTPConnection | None = None
         self.requests = 0
 
@@ -277,7 +279,7 @@ class Transport:
         self._network.require_network(self._purpose)
         pairs = [(quote(k), quote(v)) for k, v in query]
         target = path + ("?" + "&".join(f"{k}={v}" if v else k for k, v in pairs) if pairs else "")
-        sent = {"Host": self.endpoint.authority, "User-Agent": USER_AGENT, **headers}
+        sent = {"Host": self.endpoint.authority, "User-Agent": self._user_agent, **headers}
         raw = self._send(target, sent, method, body)
         response = Response(
             raw.status, {k.lower(): v for k, v in raw.getheaders()}, raw, _transport=self
