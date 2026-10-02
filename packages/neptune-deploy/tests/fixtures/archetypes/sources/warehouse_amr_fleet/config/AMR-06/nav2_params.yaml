@@ -1,0 +1,18 @@
+# AMR-06 navigation parameters, exported by the fleet manager
+config_revision: 12
+robot_id: AMR-06
+site: S-007
+firmware_compat: 4.3.1
+controller_server:
+  ros__parameters:
+    controller_frequency: 20.0
+    max_vel_x: 1.0
+    min_vel_x: 0.0
+    max_vel_theta: 0.8
+local_costmap:
+  ros__parameters:
+    inflation_radius: 0.55
+    robot_radius: 0.62
+safety:
+  protective_field_m: 1.4
+  warning_field_m: 2.8

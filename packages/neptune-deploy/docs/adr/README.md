@@ -10,3 +10,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0001](0001-a-compiler-plugin-of-adapters-and-read-only-sources.md) | Deploy is a compiler plugin of adapters and read-only Sources, pinned to package schema 4 | Accepted |
 | [0002](0002-lifecycle-records-are-a-declared-mapping-over-canonical-tables.md) | Lifecycle records are a declared, provenanced mapping over the compiler's canonical tables | Accepted |
 | [0003](0003-lifecycle-records-from-documents-are-declared-templates-over-the-compilers-document-records.md) | Lifecycle records from documents are declared templates over the compiler's document records | Accepted |
+| [0004](0004-archetype-deployments-are-generated-folders-run-through-ingest-and-the-mapper.md) | The archetype deployments are generated folders, run through ingest and the mapper, with golden receipts | Accepted |
