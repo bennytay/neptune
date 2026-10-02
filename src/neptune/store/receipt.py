@@ -7,6 +7,7 @@ writes the same content for people as Markdown: no wall clock, no host, and no t
 so a time reads as ticks on a named clock.
 """
 
+import itertools
 from collections import defaultdict
 from collections.abc import Iterable, Iterator
 from dataclasses import replace
@@ -286,37 +287,53 @@ def _state(knowledge: Knowledge[Any], clocks: dict[str, str]) -> str:
             return str(knowledge.state).replace("_", " ")
 
 
-def _table(header: tuple[str, ...], rows: Iterable[tuple[str, ...]]) -> list[str]:
-    lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
-    lines += ["| " + " | ".join(row) + " |" for row in rows]
-    return lines
+def _table(header: tuple[str, ...], rows: Iterable[tuple[str, ...]]) -> Iterator[str]:
+    yield "| " + " | ".join(header) + " |"
+    yield "|" + "---|" * len(header)
+    for row in rows:
+        yield "| " + " | ".join(row) + " |"
 
 
 def render_receipt(receipt: IngestReceipt) -> str:
     """The receipt core as Markdown. Deterministic: the same core renders to the same text."""
+    return "".join(render_lines(receipt))
+
+
+def render_lines(receipt: Any) -> Iterator[str]:
+    """``render_receipt`` one line at a time, each ending in a newline.
+
+    ``receipt`` is an ``IngestReceipt``, or anything with its fields whose sections can be read
+    more than once and counted (``len``): a streaming writer passes its large sections that way,
+    read back from disk, so the text is never held whole (ADR 0065).
+    """
     adapters = {t.id: f"{t.adapter_id} {t.adapter_version}" for t in receipt.transforms}
     clocks = _clock_names(receipt)
     counts = dict(receipt.records)
     read = [source for source in receipt.sources if source.read_by]
-    severities = {s: sum(1 for f in receipt.findings if f.severity is s) for s in SEVERITY_ORDER}
-    lines = [
-        "# Ingest receipt",
-        "",
-        f"Receipt {_code(receipt.id)}. Every id below is shortened; `receipt.json` has them whole.",
-        "",
-        "## Summary",
-        "",
-        f"- Sources: {len(receipt.sources)} seen, {len(read)} read, "
-        f"{len(receipt.sources) - len(read)} not read, {len(receipt.absent)} gone",
-        f"- Runs: {len(receipt.runs)}; streams: {len(receipt.streams)}; "
-        f"entities: {len(receipt.entities)}",
-        f"- Findings: {severities[Severity.ERROR]} errors, "
-        f"{severities[Severity.WARNING]} warnings, {severities[Severity.INFO]} info; "
-        f"ambiguous fields: {len(receipt.ambiguous)}",
-        "",
-        "## Sources",
-        "",
-        *_table(
+    severities = dict.fromkeys(SEVERITY_ORDER, 0)
+    for finding in receipt.findings:
+        severities[finding.severity] += 1
+    lines: Iterable[str] = itertools.chain(
+        [
+            "# Ingest receipt",
+            "",
+            f"Receipt {_code(receipt.id)}. Every id below is shortened; `receipt.json` has them"
+            " whole.",
+            "",
+            "## Summary",
+            "",
+            f"- Sources: {len(receipt.sources)} seen, {len(read)} read, "
+            f"{len(receipt.sources) - len(read)} not read, {len(receipt.absent)} gone",
+            f"- Runs: {len(receipt.runs)}; streams: {len(receipt.streams)}; "
+            f"entities: {len(receipt.entities)}",
+            f"- Findings: {severities[Severity.ERROR]} errors, "
+            f"{severities[Severity.WARNING]} warnings, {severities[Severity.INFO]} info; "
+            f"ambiguous fields: {len(receipt.ambiguous)}",
+            "",
+            "## Sources",
+            "",
+        ],
+        _table(
             ("Location", "Bytes", "Content", "Read by"),
             (
                 (
@@ -328,15 +345,10 @@ def render_receipt(receipt: IngestReceipt) -> str:
                 for source in receipt.sources
             ),
         ),
-    ]
-    if receipt.absent:
-        lines += ["", "Gone since an earlier scan: "]
-        lines += [f"- {_code(_location(location))}" for location in receipt.absent]
-    lines += [
-        "",
-        "## Adapters",
-        "",
-        *_table(
+        ["", "Gone since an earlier scan: "] if receipt.absent else [],
+        (f"- {_code(_location(location))}" for location in receipt.absent),
+        ["", "## Adapters", ""],
+        _table(
             ("Adapter", "Version", "Config", "Libraries", "Transform"),
             (
                 (
@@ -349,17 +361,13 @@ def render_receipt(receipt: IngestReceipt) -> str:
                 for t in sorted(receipt.transforms, key=lambda t: (t.adapter_id, t.id))
             ),
         ),
-        "",
-        "## Records",
-        "",
-        *_table(
+        ["", "## Records", ""],
+        _table(
             ("Kind", "Records"),
             ((_code(kind), str(count)) for kind, count in sorted(counts.items()) if count),
         ),
-        "",
-        "## Runs",
-        "",
-        *_table(
+        ["", "## Runs", ""],
+        _table(
             ("Run", "Session", "Machine", "First", "Last", "Streams"),
             (
                 (
@@ -373,10 +381,8 @@ def render_receipt(receipt: IngestReceipt) -> str:
                 for run in receipt.runs
             ),
         ),
-        "",
-        "## Streams",
-        "",
-        *_table(
+        ["", "## Streams", ""],
+        _table(
             ("Stream", "Run", "Topic", "Clocks", "Messages", "First", "Last"),
             (
                 (
@@ -391,10 +397,8 @@ def render_receipt(receipt: IngestReceipt) -> str:
                 for stream in receipt.streams
             ),
         ),
-        "",
-        "## Entities",
-        "",
-        *_table(
+        ["", "## Entities", ""],
+        _table(
             ("Kind", "Record", "Stated ids"),
             (
                 (
@@ -405,21 +409,16 @@ def render_receipt(receipt: IngestReceipt) -> str:
                 for entity in receipt.entities
             ),
         ),
-        "",
-        "## Findings",
-        "",
-    ]
-    if not receipt.findings:
-        lines.append("None.")
-    for finding in receipt.findings:
-        lines.append(
+        ["", "## Findings", ""],
+        [] if len(receipt.findings) else ["None."],
+        (
             f"- **{finding.severity}** {_code(finding.code)} ({finding.category}): "
             f"{_cell(finding.message)} · {_code(_short(finding.id))}"
-        )
-    lines += ["", "## Ambiguous fields", ""]
-    if not receipt.ambiguous:
-        lines.append("None.")
-    lines += [
-        f"- {_code(_short(field.record))} {_code(field.pointer)}" for field in receipt.ambiguous
-    ]
-    return "\n".join(lines) + "\n"
+            for finding in receipt.findings
+        ),
+        ["", "## Ambiguous fields", ""],
+        [] if len(receipt.ambiguous) else ["None."],
+        (f"- {_code(_short(field.record))} {_code(field.pointer)}" for field in receipt.ambiguous),
+    )
+    for line in lines:
+        yield line + "\n"
