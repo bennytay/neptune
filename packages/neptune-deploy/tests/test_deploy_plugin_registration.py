@@ -34,10 +34,15 @@ def test_deploy_registers_its_adapters_and_nothing_else() -> None:
     assert _entry_points(ADAPTERS_GROUP) == {
         "deploy_lifecycle": "neptune_deploy.adapters.lifecycle:LifecycleAdapter"
     }
-    assert _entry_points(SOURCES_GROUP) == {  # read-only connectors (ADR 0006)
+    assert _entry_points(SOURCES_GROUP) == {  # read-only connectors (ADR 0006, ADR 0008)
         "deploy_azure_blob": "neptune_deploy.sources.object_store:azure_source",
+        "deploy_confluence": "neptune_deploy.sources.records:confluence_source",
         "deploy_gcs": "neptune_deploy.sources.object_store:gcs_source",
+        "deploy_gdrive": "neptune_deploy.sources.records:gdrive_source",
+        "deploy_jira": "neptune_deploy.sources.records:jira_source",
+        "deploy_rest": "neptune_deploy.sources.records:rest_source",
         "deploy_s3": "neptune_deploy.sources.object_store:s3_source",
+        "deploy_servicenow": "neptune_deploy.sources.records:servicenow_source",
     }
 
 

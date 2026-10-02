@@ -216,6 +216,7 @@ def test_each_provider_is_one_entry_point_named_by_its_connector_id() -> None:
         ep.name: ep.value
         for ep in distribution("neptune-deploy").entry_points
         if ep.group == "neptune.sources"
+        and ep.value.startswith("neptune_deploy.sources.object_store:")
     }
     factories = {"s3": s3_source, "gcs": gcs_source, "azure": azure_source}
     assert set(points) == set(CONNECTOR_IDS.values())
