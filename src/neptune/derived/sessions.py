@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, ClassVar, Final, TypeAlias
 
+from neptune.derived.bindings import BINDING_KIND, inferred_snapshot_binding_from_json
 from neptune.derived.provenance import DERIVED_SCHEMA_VERSION as DERIVED_SCHEMA_VERSION
 from neptune.derived.provenance import INFERRED
 from neptune.derived.provenance import derived_object as _derived_object
@@ -582,6 +583,7 @@ DERIVED_KINDS: Final[Mapping[str, Callable[[JsonValue], Any]]] = {
     DEFINITION_KIND: definition_layout_from_json,  # ADR 0049
     LAYOUT_KIND: stream_layout_from_json,
     SEMANTIC_KIND: stream_semantic_from_json,
+    BINDING_KIND: inferred_snapshot_binding_from_json,  # ADR 0064
 }
 
 

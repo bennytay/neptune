@@ -75,6 +75,7 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatus
+from neptune.derived.bindings import Bindings, bind_snapshots, binding_inputs
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
@@ -102,7 +103,7 @@ from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.package import ReceiptEnvelope, package_manifest_from_json
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
-from neptune.model.run import Stream
+from neptune.model.run import Run, Stream
 from neptune.model.series import SEQ, SeriesBatch
 from neptune.model.source import (
     LocalPath,
@@ -110,6 +111,7 @@ from neptune.model.source import (
     SourceArtifact,
     local_location,
 )
+from neptune.model.world import StructuredRecord
 from neptune.runtime import events, explain, lineage, sandbox, wire
 from neptune.runtime.cache import (
     VERDICT_FILE,
@@ -148,6 +150,7 @@ from neptune.store.package import (
 from neptune.store.series import RunCheck, SeriesError, SeriesReadError, check_run, read_run
 from neptune.store.workspace import (
     Collected,
+    CommittedChunk,
     Derivative,
     DerivativeKey,
     Held,
@@ -1970,15 +1973,21 @@ class IngestJob:
             if self._lost_guarantees:
                 cited.add(self.transform.id)
             derived: dict[str, Iterable[JsonObject]] | None = None
+            bound: tuple[object, ...] = ()
             if self._grouping is not None:  # its derived tables name its transform
                 cited.add(self._grouping.transform.id)
                 derived = dict(self._grouping.tables())
+                if (bindings := self._bind_snapshots(self._grouping)) is not None:
+                    cited.add(bindings.transform.id)
+                    derived.update(bindings.tables())
+                    bound = bindings.stated
             if (introspection := self._introspect()) is not None:
                 cited.add(introspection.transform.id)
                 derived = {**(derived or {}), **introspection.tables()}
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
+                *bound,
             ]
             assert self.destination is not None  # ``run`` refuses to start without one
             try:
@@ -2001,6 +2010,48 @@ class IngestJob:
             self._finish(
                 Phase.ASSEMBLE, {"quarantined": quarantined, "sources": len(self._ingested)}
             )
+
+    def _bind_snapshots(self, grouping: Grouping) -> Bindings | None:
+        """Bind each admitted run to the configuration, software, hardware and calibration
+        snapshots evidence relates it to (ADR 0064), over the grouping's sessions. Reads committed
+        records only: runs and snapshots, then the declared rows of the sources that hold a run.
+        A package with no run gets no binding: no table, no transform, no finding."""
+        inputs: list[object] = []
+        keys = sorted(set(self._ingested))
+        with_runs: set[tuple[ContentId, RecordId]] = set()
+        try:
+            for key in keys:
+                for output in self._outputs(key):
+                    for record in binding_inputs(output.records):
+                        inputs.append(record)
+                        if isinstance(record, Run):
+                            with_runs.add(key)
+            statements = [
+                record
+                for key in keys
+                if key in with_runs
+                for output in self._outputs(key)
+                for record in output.records
+                if isinstance(record, StructuredRecord)
+            ]
+        except (WorkspaceError, ValueError, OSError) as exc:
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+        found = bind_snapshots(inputs, statements, self._layout, grouping)
+        if found is None:
+            return None
+        self._producers[found.transform.id] = found.transform
+        for finding in found.findings:
+            self._record(finding, found.transform)
+        self._emit(events.SNAPSHOTS_BOUND, found.summary())
+        return found
+
+    def _outputs(self, key: tuple[ContentId, RecordId]) -> Iterator[CommittedChunk]:
+        """The committed outputs of one admitted source's chunks, in plan order."""
+        plan = self.workspace.load_plan(*key)
+        if plan is None:
+            return  # staging refuses the package and says why
+        for chunk in plan.chunks:
+            yield self.workspace.load(str(chunk["id"]))
 
     def _introspect(self) -> Introspection | None:
         """Stage 9a, before the package is staged: read the admitted sources' streams' declared

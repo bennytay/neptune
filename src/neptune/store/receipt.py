@@ -38,8 +38,9 @@ from neptune.model.time import Timestamp
 RECEIPT_KIND: Final = "ingest_receipt"
 _LEDGER: Final = frozenset({"source_artifact", "source_revision", "source_absence"})
 # Producers that cite sources without reading them: validation judges the stored package, never
-# a source's bytes (ADR 0054), so its findings never make it a reader in ``read_by``.
-NON_READERS: Final = frozenset({"neptune.validate"})
+# a source's bytes (ADR 0054), and snapshot binding joins committed records (ADR 0064), so their
+# findings and bindings never make them readers in ``read_by``.
+NON_READERS: Final = frozenset({"neptune.validate", "neptune.bindings"})
 
 
 def _walk(value: JsonValue, pointer: str = "") -> Iterator[tuple[str, JsonValue]]:
