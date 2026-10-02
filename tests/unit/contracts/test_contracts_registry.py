@@ -96,7 +96,7 @@ def test_committed_compatibility_matrix_is_current() -> None:
     text = tool.render_matrix(_registry())
     assert text == (CONTRACTS / "compatibility.md").read_text("utf-8")
     assert text == tool.render_matrix(_registry())
-    assert "| `neptune-ledger` | 2.0.0 current |" in text
+    assert "| `neptune-ledger` | 3.0.0 current |" in text
     assert "| `catalog-api` | `neptune-ledger` | active | 1.2.0 | — |" in text
 
 
@@ -222,7 +222,7 @@ def test_matrix_follows_the_registry(registry: Any, capsys: pytest.CaptureFixtur
     assert tool.main([*root, "matrix"]) == 0
     text = _text(registry.root / "compatibility.md")
     assert f"| `package-schema` | `neptune` | active | {newer} | — |" in text
-    assert "| `neptune-ledger` | 2.0.0 behind |" in text
+    assert "| `neptune-ledger` | 3.0.0 behind |" in text
     assert tool.main([*root, "matrix", "--check"]) == 0
     lock = registry.lock()
     registry.write_lock({**lock, "neptune-deploy": {}})
