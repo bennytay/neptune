@@ -14,7 +14,7 @@ from neptune.adapters.builtin import default_registry
 from neptune.model.finding import Severity
 from neptune.model.package import SEVERITY_ORDER
 from neptune.runtime import IngestJob, Isolation, JobEvent, JobOptions, JobState
-from neptune.store.package import read_package
+from neptune.store.package import package_contents, read_package, write_package
 from neptune.store.workspace import Workspace
 from neptune.validate import VALIDATOR_ID, validate_package
 
@@ -22,6 +22,7 @@ pytestmark = pytest.mark.integration
 
 FIXTURES: Final = Path(__file__).parents[1] / "fixtures" / "mcap"
 TABULAR: Final = Path(__file__).parents[1] / "fixtures" / "tabular"
+CONFIG: Final = Path(__file__).parents[1] / "fixtures" / "config"
 OPTIONS: Final = JobOptions(isolation=Isolation.IN_PROCESS)
 
 
@@ -103,3 +104,25 @@ def test_a_clean_table_gains_nothing(tmp_path: Path) -> None:
     assert verified.details["package"] == package.id
     validation = verified.details["validation"]
     assert isinstance(validation, dict) and validation["findings"] == 0
+
+
+def test_a_configuration_snapshot_that_lost_values(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copyfile(CONFIG / "nav2_params.yaml", root / "nav2_params.yaml")
+    job = IngestJob(
+        root, tmp_path / "package", Workspace(tmp_path / "home"), default_registry(), OPTIONS
+    )
+    assert job.run().state is JobState.COMMITTED
+    package = read_package(tmp_path / "package")
+    assert validate_package(package).findings == ()  # whole: nothing to say
+    values = sorted(
+        (r for r in package.records if r.kind == "configuration_value"), key=lambda r: r.id
+    )
+    kept = [r for r in package.records if r is not values[-1]]
+    store = dict(package.manifest.store)
+    contents = package_contents(kept, series=package.series, store=store, derived=package.derived)
+    write_package(tmp_path / "cut", contents)
+    (finding,) = validate_package(read_package(tmp_path / "cut")).findings
+    assert finding.code == f"{VALIDATOR_ID}.snapshot_incomplete"
+    assert (finding.details["missing"], finding.details["stored"]) == (1, len(values) - 1)

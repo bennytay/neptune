@@ -35,6 +35,7 @@ not by re-parsing. The checks must not become a second parser, must not guess un
    |---|---|---|
    | `source_incomplete` | per source, roll up every `corrupt` finding about its bytes; name the records read from it (a `limit` stopped an intact file and is not damage) | corrupt |
    | `count_mismatch` | a stream's `Known` declared message count against its series' rows, unless a `skipped` finding names the stream (rows left out on request, as `mcap.not_selected`) | inconsistent |
+   | `snapshot_incomplete` | a configuration snapshot's declared value count against the `configuration_value` records naming it | inconsistent |
    | `time_regression` | per stream and clock, samples out of time order in source order (below), on a clock that declares itself monotonic | inconsistent |
    | `time_out_of_order` | the same, on a clock that does not declare it (`info`: an observation, not a contradiction) | inconsistent |
    | `interval_reversed` | run and stream `first > last`, calibration `valid_from > valid_until`, same clock only | inconsistent |

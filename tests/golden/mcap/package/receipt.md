@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:364810e6d35747562ec0e1c766ab023e465b70d3b72ea51ac9761f7eaa754127`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:05d5ef8847f269b85e30dd8fb4189f2953b28d83176f4c417f8647b27db48260`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -12,7 +12,7 @@ Receipt `rec:sha256:364810e6d35747562ec0e1c766ab023e465b70d3b72ea51ac9761f7eaa75
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `robot.mcap` | 4816 | `sha256:9e775857ab35` | neptune.validate 0.1.0, mcap 0.1.0 |
+| `robot.mcap` | 4816 | `sha256:9e775857ab35` | mcap 0.1.0, neptune.validate 0.1.0 |
 
 ## Adapters
 
@@ -20,7 +20,7 @@ Receipt `rec:sha256:364810e6d35747562ec0e1c766ab023e465b70d3b72ea51ac9761f7eaa75
 |---|---|---|---|---|
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
 | `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:a46247e2db11` |
-| `neptune.validate` | `0.1.0` | `sha256:d96d1fae05d7` | none | `rec:06628a52b384` |
+| `neptune.validate` | `0.1.0` | `sha256:0a0d08ccf4b7` | none | `rec:c712df3eb7ab` |
 
 ## Records
 
@@ -63,7 +63,7 @@ Receipt `rec:sha256:364810e6d35747562ec0e1c766ab023e465b70d3b72ea51ac9761f7eaa75
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:2a04449178fd`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 4's message payloads are not decoded; each row cites its message's bytes · `rec:542c3cbcba95`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:5e30cda4992d`
-- **info** `neptune.validate.time_out_of_order` (inconsistent): stream rec:f6ee7d482736 is not in time order on clock 0 in source order · `rec:4f873b9d5b6e`
+- **info** `neptune.validate.time_out_of_order` (inconsistent): stream rec:f6ee7d482736 is not in time order on clock 0 in source order · `rec:e756366c5877`
 
 ## Ambiguous fields
 

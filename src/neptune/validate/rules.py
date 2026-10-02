@@ -64,6 +64,27 @@ def source_incomplete(context: Context) -> Iterator[Draft]:
         )
 
 
+def snapshot_incomplete(context: Context) -> Iterator[Draft]:
+    """A configuration snapshot counts more (or fewer) values than the package holds for it."""
+    held: Counter[str] = Counter(value.snapshot for value in context.records("configuration_value"))
+    for snapshot in context.records("configuration_snapshot"):
+        stored = held.get(snapshot.id, 0)
+        if stored == snapshot.values:
+            continue
+        yield Draft(
+            subject=evidence_of(snapshot),
+            message=f"configuration snapshot {short(snapshot.id)} has"
+            f" {plural(snapshot.values, 'value')}; the package holds {stored}",
+            details={
+                "declared": snapshot.values,
+                "missing": max(snapshot.values - stored, 0),
+                "snapshot": snapshot.id,
+                "stored": stored,
+            },
+            records=(snapshot.id,),
+        )
+
+
 # --- impossible ranges ---------------------------------------------------------------------------
 
 _INTERVALS: Final = {
@@ -589,6 +610,9 @@ RULES_ON: Final = (
     Rule("software_conflict", 1, _C.INCONSISTENT, _W,
          "one release, build or commit of named software is declared two ways",
          software_conflict),
+    Rule("snapshot_incomplete", 1, _C.INCONSISTENT, _W,
+         "a configuration snapshot's value count differs from the values the package holds",
+         snapshot_incomplete),
     Rule("source_incomplete", 1, _C.CORRUPT, _W,
          "a source's bytes were cut off or corrupt: its findings rolled up, its records named",
          source_incomplete),
