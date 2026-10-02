@@ -26,5 +26,39 @@ Linear, review, merge) apply unchanged; this file adds what is specific to this 
 <!-- BEGIN layer-specific: owned by this package's coordinator; replace the stub below. -->
 ## Layer-specific rules
 
-_Stub._ State what this layer is, what it must never become, and its own non-negotiables.
+Deploy turns deployment lifecycle evidence (commissioning, authorisation envelopes, interventions,
+maintenance, requalification, incidents, changes, risk assessments) into the compiler's canonical lifecycle
+records, for an arm cell, an AMR fleet or any other deployment. It is a **compiler plugin**: it adds adapters
+and read-only `Source`s through the compiler's entry points and nothing else
+([ADR 0001](docs/adr/0001-a-compiler-plugin-of-adapters-and-read-only-sources.md)). It never becomes a
+compliance engine, a safety case generator, a CMMS or a dashboard.
+
+### Non-negotiables
+
+1. **Lifecycle records are `stated` evidence only.** Each cites the one form, ticket, work order or register
+   row it comes from, values exactly as declared (root ADR 0051): no ranking a severity, no converting a
+   speed limit, no reading "approved with conditions" as a boolean.
+2. **Never infer lifecycle state.** Nothing orders stages, decides that a deployment is commissioned,
+   checks an intervention against its envelope, or decides that a requalification passed.
+3. **Every connector is read-only.** A `Source` lists and fetches; it never writes, acknowledges,
+   transitions or comments on anything it reads, and it uses the network only after `require_network`.
+4. **Adapters follow the four-method ABI and the sandbox.** Leaves over `neptune.model`,
+   `neptune.identity` and `neptune.adapters.contract`; no network, filesystem or subprocess. Each is
+   registered under the `neptune.adapters` entry point and passes `neptune.adapters.conformance`.
+5. **Record kinds come from the compiler model.** A missing field is a compiler PR, never a Deploy type.
+   Deploy pins package schema 3 (`PACKAGE_SCHEMA_VERSION`, `docs/contracts.md`, `contracts/lock.toml`).
+
+### Repo map (`src/neptune_deploy/`; subpackages appear as their issues land)
+
+```
+adapters/lifecycle/  lifecycle source formats (forms, CMMS exports, tickets, registers) -> lifecycle records
+sources/             read-only connectors (CMMS, ticketing, fleet managers) as compiler `Source`s
+packs/               the evidence-pack compiler: a deployment's lifecycle evidence assembled from packages
+console/             a thin read-only front end over packs/
+```
+
+### Model policy
+
+Sonnet by default (adapters, connectors, console); Opus for the evidence-pack compiler (`packs/`), ADRs and
+gates.
 <!-- END layer-specific -->

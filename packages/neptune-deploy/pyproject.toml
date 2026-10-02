@@ -3,10 +3,21 @@
 [project]
 name = "neptune-deploy"
 version = "0.0.1"
-description = "neptune-deploy: a Neptune workspace member."
+description = "Neptune Deploy: deployment lifecycle evidence (commissioning, authorisation, interventions) as a compiler plugin."
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
-dependencies = []
+# The compiler, at package schema 3: the version whose model holds the deployment lifecycle kinds
+# (root ADR 0051). The pin is contracts/lock.toml and PACKAGE_SCHEMA_VERSION (ADR 0001 §3).
+dependencies = ["neptune"]
+
+# The compiler's plugin entry points (ADR 0001 §1). `neptune.adapters`: name = the adapter id,
+# value = a zero-argument callable returning the adapter. `neptune.sources` is reserved for
+# read-only connectors and stays empty until the first one lands.
+[project.entry-points."neptune.adapters"]
+deploy_lifecycle = "neptune_deploy.adapters.lifecycle:LifecycleAdapter"
+
+[tool.uv.sources]
+neptune = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
