@@ -40,6 +40,21 @@ from neptune.identity.findings import ingest_finding
 from neptune.identity.hashing import digest_stream
 from neptune.identity.provenance import evidence_record_id, transform_record
 from neptune.identity.revisions import SourceLedger
+from neptune.model.alignment import (
+    ClockAnchor,
+    ClockMapping,
+    FrameBinding,
+    FrameBindingBasis,
+    IdentityLink,
+    LinkBasis,
+    MappingMethod,
+    MemberRole,
+    RunAssembly,
+    RunMember,
+    SnapshotBinding,
+    SnapshotKind,
+    ValidityWindow,
+)
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.frames import (
     STATIC,
@@ -95,6 +110,7 @@ from neptune.model.time import (
     NANOSECOND,
     SECOND,
     ClockRole,
+    Duration,
     Epoch,
     Timestamp,
 )
@@ -173,6 +189,11 @@ class Example:
         return evidence_record_id(
             kind, provenance.evidence, self.transforms[_adapter_of(self, provenance)]
         )
+
+    def revision(self, path: str) -> RecordId:
+        """The id of the ``SourceRevision`` that saw ``path``."""
+        (found,) = (r.id for r in self.ledger.revisions() if r.location == LocalPath(path))
+        return found
 
     def add(self, record: R) -> R:
         self.records.append(record)
@@ -393,7 +414,7 @@ def drone() -> Example:
         details={"key": "ver_sw_release"},
         records=[software.id],
     )
-    ex.add(
+    calibration = ex.add(
         Calibration(
             id=ex.id_of("calibration", parameter("CAL_ACC0_ID")),
             provenance=parameter("CAL_ACC0_ID"),
@@ -424,6 +445,67 @@ def drone() -> Example:
         message="the logger dropped 120 ms of data, so every series has a gap",
         details={"duration_ms": 120},
         records=[stream.id for stream in streams],
+    )
+    # Alignment (ADR 0050). The log is its own run, and the hardware, software and calibration it
+    # declares in its definitions apply from its start; it states no end.
+    ex.add(
+        RunAssembly(
+            id=ex.id_of("run_assembly", header),
+            provenance=header,
+            run=run.id,
+            rule="recording",
+            members=(RunMember(ex.revision(log), MemberRole.RECORDING, header.evidence),),
+            validity=NotApplicable(),
+        )
+    )
+    from_start = Known(
+        ValidityWindow(
+            boot.id, start=Known(Timestamp(DRONE_START_US, boot.id), header), end=NotCovered()
+        )
+    )
+    for snapshot, snapshot_kind, declared in (
+        (hardware.id, SnapshotKind.HARDWARE_CONFIGURATION, info("ver_hw")),
+        (software.id, SnapshotKind.SOFTWARE_CONFIGURATION, info("ver_sw")),
+        (calibration.id, SnapshotKind.CALIBRATION, parameter("CAL_ACC0_ID")),
+    ):
+        ex.add(
+            SnapshotBinding(
+                id=ex.id_of("snapshot_binding", declared),
+                provenance=declared,
+                run=run.id,
+                snapshot=snapshot,
+                snapshot_kind=snapshot_kind,
+                validity=from_start,
+            )
+        )
+    # The fleet register names the drone by its asset tag and by the sys_uuid the log declares:
+    # one declaration, two ids, so a co-declared identity link. Never a merge.
+    fleet = "fleet.json"
+
+    def row(pointer: str = "") -> Provenance:
+        return ex.pointer("fleet", fleet, "/assets/0" + pointer, kind=STATED)
+
+    tag = LogicalId("fleet.asset_tag", "D-07")
+    ex.add(
+        Machine(
+            id=ex.id_of("machine", row()),
+            provenance=row(),
+            identifiers=(Known(tag, row("/asset_tag")), Known(uuid, row("/sys_uuid"))),
+            manufacturer=Unknown(),  # the register could say and does not
+            model=Unknown(),
+        )
+    )
+    ex.add(
+        IdentityLink(
+            id=ex.id_of("identity_link", row()),
+            provenance=row(),
+            left=tag,
+            right=Known(uuid, row("/sys_uuid")),
+            basis=LinkBasis.CO_DECLARED,
+            identifier=NotApplicable(),
+            evidence=(),
+            validity=Unknown(),  # the register could state when the tag was assigned; it does not
+        )
     )
     return ex
 
@@ -548,7 +630,7 @@ def quadruped() -> Example:
             Known(3, statistics),
             (("offered_qos_profiles", QOS),),
         )
-    ex.add(
+    software = ex.add(
         SoftwareConfiguration(
             id=ex.id_of("software_configuration", yaml("/ros_distro")),
             provenance=yaml("/ros_distro"),
@@ -586,7 +668,7 @@ def quadruped() -> Example:
         ("front_camera_joint", "front_camera", (0.28, 0.0, 0.05), (0.0, 0.25, 0.0)),
     ):
         at = ex.at("urdf", urdf, f"joint:{joint}")
-        ex.add(
+        edge = ex.add(
             FrameTransform(
                 id=ex.id_of("frame_transform", at),
                 provenance=at,
@@ -605,6 +687,19 @@ def quadruped() -> Example:
                     ),
                 ),
                 validity=STATIC,
+            )
+        )
+        # The joint's origin gives its edge its value; a URDF has no place for a time.
+        ex.add(
+            FrameBinding(
+                id=ex.id_of("frame_binding", at),
+                provenance=at,
+                parent=edge.parent,
+                child=edge.child,
+                transform=edge.id,
+                basis=FrameBindingBasis.ROBOT_DESCRIPTION,
+                calibration=NotApplicable(),
+                validity=NotCovered(),
             )
         )
     hardware = ex.add(
@@ -647,6 +742,61 @@ def quadruped() -> Example:
             unit=NotCovered(),  # STL has no place for a unit
             crs=NotCovered(),
             frame=NotCovered(),
+        )
+    )
+    # Alignment (ADR 0050). The metadata lists the bag's storage files, and rosbag2 writes its
+    # starting_time from the same receive times it stores as MCAP log_time: the identity map, with
+    # no error, over the bag's span. Its last instant is start + duration, so the window ends one
+    # tick later.
+    listed = yaml("/relative_file_paths")
+    members = sorted(
+        (
+            RunMember(
+                ex.revision(bag), MemberRole.RECORDING, yaml("/relative_file_paths/0").evidence
+            ),
+            RunMember(ex.revision(meta), MemberRole.DESCRIPTION, yaml("").evidence),
+        ),
+        key=lambda member: member.revision,
+    )
+    ex.add(
+        RunAssembly(
+            id=ex.id_of("run_assembly", listed),
+            provenance=listed,
+            run=run.id,
+            rule="rosbag2.metadata",
+            members=tuple(members),
+            validity=NotApplicable(),
+        )
+    )
+    split = yaml("/files/0")
+    span = Known(
+        ValidityWindow(
+            started.id,
+            start=Known(Timestamp(T0, started.id), yaml("/starting_time")),
+            end=Known(Timestamp(T0 + 45 * MS + 1, started.id), yaml("")),
+        )
+    )
+    ex.add(
+        ClockMapping(
+            id=ex.id_of("clock_mapping", split),
+            provenance=split,
+            source=started.id,
+            target=log_time.id,
+            method=MappingMethod.STATED,
+            anchor=Known(ClockAnchor(Timestamp(T0, started.id), Timestamp(T0, log_time.id))),
+            rate=Known(Fraction(1)),
+            residual_bound=Known(Duration(0, log_time.id)),
+            validity=span,
+        )
+    )
+    ex.add(
+        SnapshotBinding(
+            id=ex.id_of("snapshot_binding", yaml("/ros_distro")),
+            provenance=yaml("/ros_distro"),
+            run=run.id,
+            snapshot=software.id,
+            snapshot_kind=SnapshotKind.SOFTWARE_CONFIGURATION,
+            validity=span,
         )
     )
     return ex
@@ -760,7 +910,7 @@ def manipulator() -> Example:
         message="the transformation states no unit for x, y and z",
         records=[transform.id],
     )
-    ex.add(
+    calibration = ex.add(
         Calibration(
             id=ex.id_of("calibration", whole),
             provenance=whole,
@@ -776,6 +926,30 @@ def manipulator() -> Example:
                 ),
             ),
             extrinsics=(transform.id,),
+        )
+    )
+    # Alignment (ADR 0050): the calibration gives its edge its value, for a window it does not
+    # state; the recording is its own run. Nothing relates the two files, so nothing binds them.
+    ex.add(
+        FrameBinding(
+            id=ex.id_of("frame_binding", moved),
+            provenance=moved,
+            parent=transform.parent,
+            child=transform.child,
+            transform=transform.id,
+            basis=FrameBindingBasis.CALIBRATION,
+            calibration=Known(calibration.id),
+            validity=Unknown(),
+        )
+    )
+    ex.add(
+        RunAssembly(
+            id=ex.id_of("run_assembly", header),
+            provenance=header,
+            run=run.id,
+            rule="recording",
+            members=(RunMember(ex.revision(log), MemberRole.RECORDING, header.evidence),),
+            validity=NotApplicable(),
         )
     )
     return ex
@@ -847,6 +1021,17 @@ def mobile_robot() -> Example:
             )
         )
 
+    # Alignment (ADR 0050): the bag is its own run.
+    ex.add(
+        RunAssembly(
+            id=ex.id_of("run_assembly", header),
+            provenance=header,
+            run=run.id,
+            rule="recording",
+            members=(RunMember(ex.revision(bag), MemberRole.RECORDING, header.evidence),),
+            validity=NotApplicable(),
+        )
+    )
     # The register: a table, its rows cell by cell, and the sites the rows name (ADR 0020).
     table_at = ex.cite("csv", register, ex.whole(register), kind=STATED)
     rows = ex.sources[register].data.decode().splitlines()

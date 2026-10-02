@@ -47,6 +47,7 @@ class Family(StrEnum):
     WORLD = "world"  # world / record context: sites, assets, maps, photos, documents, registers
     TASK = "task"  # task context: briefs, SOPs, requirements, work orders (MVL-33)
     RUN = "run"  # run / experience evidence: sessions and their timestamped streams
+    ALIGNMENT = "alignment"  # what evidence says relates other records: ids, clocks, frames, runs
 
 
 class SchemaVersionError(ValueError):

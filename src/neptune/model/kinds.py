@@ -8,6 +8,18 @@ once. A test checks that every record class in ``neptune.model`` is listed.
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
+from neptune.model.alignment import (
+    ClockMapping,
+    FrameBinding,
+    IdentityLink,
+    RunAssembly,
+    SnapshotBinding,
+    clock_mapping_from_json,
+    frame_binding_from_json,
+    identity_link_from_json,
+    run_assembly_from_json,
+    snapshot_binding_from_json,
+)
 from neptune.model.finding import IngestFinding, ingest_finding_from_json
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.machine import (
@@ -94,6 +106,11 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (DocumentBlock, document_block_from_json),
         (StructuredTable, structured_table_from_json),
         (StructuredRecord, structured_record_from_json),
+        (IdentityLink, identity_link_from_json),
+        (ClockMapping, clock_mapping_from_json),
+        (FrameBinding, frame_binding_from_json),
+        (RunAssembly, run_assembly_from_json),
+        (SnapshotBinding, snapshot_binding_from_json),
     )
 }
 

@@ -107,7 +107,9 @@ def drone() -> list[Source]:
         data=DRONE_DATA,
         dropouts=((3, 120),),
     )
-    return [Source("flight.ulg", data, layout)]
+    # The fleet register that names the drone by its asset tag and its flight controller's id.
+    fleet = {"assets": [{"asset_tag": "D-07", "sys_uuid": DRONE_SYS_UUID}]}
+    return [Source("flight.ulg", data, layout), Source("fleet.json", _json(fleet), {})]
 
 
 # --- ROS 2 message definitions (ros2msg, as rosbag2 stores them) -------------------------------

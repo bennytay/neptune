@@ -1,23 +1,25 @@
 # Ingest receipt
 
-Receipt `rec:sha256:c0beebc8288c96775757b3d192400e73b0016237c4932926c9d3523b9723da29`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:17c7e82e1217b3fca0ac5121cbfadb32c3b37b904f2dbbcc28b7064832138d49`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
-- Sources: 1 seen, 1 read, 0 not read, 0 gone
-- Runs: 1; streams: 2; entities: 1
+- Sources: 2 seen, 2 read, 0 not read, 0 gone
+- Runs: 1; streams: 2; entities: 2
 - Findings: 0 errors, 2 warnings, 0 info; ambiguous fields: 0
 
 ## Sources
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
+| `fleet.json` | 114 | `sha256:3196fbce1bad` | fleet 1.0.0 |
 | `flight.ulg` | 744 | `sha256:dfa933a5f86a` | ulog 1.0.0 |
 
 ## Adapters
 
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
+| `fleet` | `1.0.0` | `sha256:44136fa355b3` | none | `rec:bf99dcb2bd54` |
 | `ulog` | `1.0.0` | `sha256:44136fa355b3` | none | `rec:e9fbe1a6c74e` |
 
 ## Records
@@ -27,15 +29,18 @@ Receipt `rec:sha256:c0beebc8288c96775757b3d192400e73b0016237c4932926c9d3523b9723
 | `calibration` | 1 |
 | `hardware_component` | 2 |
 | `hardware_configuration` | 1 |
+| `identity_link` | 1 |
 | `ingest_finding` | 2 |
-| `machine` | 1 |
+| `machine` | 2 |
 | `run` | 1 |
+| `run_assembly` | 1 |
+| `snapshot_binding` | 3 |
 | `software_configuration` | 1 |
-| `source_artifact` | 1 |
-| `source_revision` | 1 |
+| `source_artifact` | 2 |
+| `source_revision` | 2 |
 | `stream` | 2 |
 | `timestamp_domain` | 3 |
-| `transform_record` | 1 |
+| `transform_record` | 2 |
 
 ## Runs
 
@@ -55,6 +60,7 @@ Receipt `rec:sha256:c0beebc8288c96775757b3d192400e73b0016237c4932926c9d3523b9723
 | Kind | Record | Stated ids |
 |---|---|---|
 | machine | `rec:534181a799ce` | `px4.sys_uuid:000200000000343233345117003a0027` |
+| machine | `rec:f436770b63eb` | `fleet.asset_tag:D-07`, `px4.sys_uuid:000200000000343233345117003a0027` |
 
 ## Findings
 
