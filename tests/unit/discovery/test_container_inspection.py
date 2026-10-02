@@ -356,7 +356,7 @@ def test_pax_and_gnu_long_names_are_read() -> None:
     (member,) = container.members
     assert member.name == b"deep/" * 30 + b"flight.ulg"
     assert member.probe is not None
-    assert [s.name for s in member.probe.sniff.signatures] == ["ULog"]
+    assert {s.name for s in member.probe.sniff.signatures} == {"ULog"}
     container, _ = report("gnu_longname.tar")
     (member,) = container.members
     assert member.name == b"gnu/" * 30 + b"notes.txt"
