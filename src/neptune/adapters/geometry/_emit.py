@@ -73,7 +73,7 @@ FINDINGS: Final[Mapping[str, tuple[FindingCategory, Severity, str]]] = {
         FindingCategory.LIMIT,
         Severity.WARNING,
         "a configured limit stopped a parse or skipped a value; a scan cut short gives no bounds"
-        " or counts (they are NotCovered) and what was read before it is kept",
+        " or counts (they are NotCovered) and what was read before it (dependencies) is kept",
     ),
     MALFORMED: (
         FindingCategory.CORRUPT,

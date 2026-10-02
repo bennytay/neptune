@@ -49,7 +49,8 @@ class Context:
         self.out.finding(
             LIMIT_EXCEEDED,
             where or self.whole,
-            f"{hit.option} ({hit.limit}) stopped the scan: its counts and bounds are NotCovered",
+            f"{hit.option} ({hit.limit}) stopped the scan: its counts and bounds are NotCovered"
+            " and its dependencies are those read before it",
             {"limit": hit.limit, "option": hit.option},
         )
 
