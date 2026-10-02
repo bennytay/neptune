@@ -258,7 +258,8 @@ def test_check_cli_unions_packages_and_runs_each_owner_once(
             (registry.root.parent / target).touch()
     argv = ["--root", str(registry.root), "check", "--all", "--package", "neptune-ledger"]
     assert tool.main([*argv, "--package", "neptune-ledger"]) == 0
-    assert len(calls) == len(pinned)  # each pinned contract's owner tests, once each
+    owners = {registry.contract(contract).owner.package for contract in pinned}
+    assert len(calls) == len(owners)  # each pinned contract's owner's tests, once per owner
     assert tool.main(["--root", str(registry.root), "check", "--package", "demo"]) == 1
 
 
