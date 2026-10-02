@@ -52,7 +52,8 @@ compliance engine, a safety case generator, a CMMS or a dashboard.
 
 ```
 adapters/lifecycle/  lifecycle source formats that need byte-level reading (forms) -> lifecycle records
-lifecycle/           the mapper: a package's tables (CMMS, tickets, registers) + mapping files -> new package
+lifecycle/           the mapper: a package's tables (CMMS, tickets, registers) + mapping files, and its
+                     documents (risk assessments, reports, SOPs) + document templates -> new package
 sources/             read-only connectors (CMMS, ticketing, fleet managers) as compiler `Source`s
 packs/               the evidence-pack compiler: a deployment's lifecycle evidence assembled from packages
 console/             a thin read-only front end over packs/

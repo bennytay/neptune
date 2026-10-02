@@ -212,6 +212,18 @@ def test_a_declared_form_that_lacks_required_structure_is_a_finding_that_names_i
     assert _of(package, "risk_assessment") == []
 
 
+def test_an_untagged_document_has_no_tables_so_a_template_that_requires_one_does_not_match() -> (
+    None
+):
+    """The compiler does not guess tables in an untagged PDF (root ADR 0038 section 5); the
+    mapper sees labels and sections only, and says the document was not matched."""
+    base = _base("manipulator_cell")
+    kept = tuple(r for r in base.records if r.kind not in ("structured_table", "structured_record"))
+    package = _mapped(replace(base, records=kept))
+    assert _of(package, "risk_assessment") == [] and _of(package, "commissioning_baseline") == []
+    assert len(_codes(package)["document_unmatched"]) == 2
+
+
 # --- Values the document leaves blank, repeats or writes unreadably ---------------------------
 
 
