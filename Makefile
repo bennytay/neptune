@@ -29,7 +29,9 @@ EACH = set -ef; for p in $(SELECTED); do d=""; \
   else cd "$(CURDIR)/packages/$$p"; x=""; \
     for m in $(MEMBER_DIRS); do if [ "$${m%%:*}" = "$$p" ]; then d="$$d $(CURDIR)/$${m\#*:}"; fi; done; \
   fi; echo "--- $$p" >&2;
+# The compiler's own index (repository-wide numbers) is generated too; members' are local to the package.
 ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
+COMPILER_ADR = $(if $(filter $(COMPILER),$(SELECTED)),--compiler docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
   contracts-check harness
@@ -40,7 +42,7 @@ help: ## Show available targets
 setup: ## Install the compiler, every workspace member and the dev tools into .venv
 > $(UV) sync --all-packages --all-groups
 
-fmt: ## Format code and auto-fix lint findings
+fmt: adr-index ## Format code, auto-fix lint findings and regenerate the ADR index
 > $(UV) run ruff format .
 > $(UV) run ruff check --fix .
 
@@ -59,11 +61,11 @@ test-fast: ## Test suite excluding tests marked slow
 
 check: lint type test ## Everything CI runs; must pass before opening a PR (PKG=<name> for one)
 
-adr-index: ## Regenerate each member's docs/adr/README.md
-> $(if $(ADR_DIRS),python3 .github/scripts/adr_index.py $(ADR_DIRS),@true)
+adr-index: ## Regenerate docs/adr/README.md (compiler and each member); `make fmt` runs it
+> python3 .github/scripts/adr_index.py $(COMPILER_ADR) $(ADR_DIRS)
 
-adr-index-check: ## Fail if a member's ADR index is stale
-> $(if $(ADR_DIRS),python3 .github/scripts/adr_index.py --check $(ADR_DIRS),@true)
+adr-index-check: ## Fail if an ADR index is stale
+> python3 .github/scripts/adr_index.py --check $(COMPILER_ADR) $(ADR_DIRS)
 
 schema: ## Regenerate docs/schema/canonical.schema.json from the model's types
 > $(UV) run python -m neptune.model.schema docs/schema/canonical.schema.json
