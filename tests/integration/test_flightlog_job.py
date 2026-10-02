@@ -19,6 +19,7 @@ from neptune.model.finding import IngestFinding
 from neptune.model.run import Run, Stream
 from neptune.sdk import Neptune
 from neptune.store.series import read_rows
+from neptune.validate import RULE_FAILED
 
 pytestmark = pytest.mark.integration
 
@@ -82,8 +83,9 @@ def test_every_log_lands_read_by_flightlog_inside_the_sandbox(
         c
         for c in codes
         if c.startswith("neptune.")
-        and not c.startswith(("neptune.grouping.", "neptune.introspection."))
+        and not c.startswith(("neptune.grouping.", "neptune.introspection.", "neptune.validate."))
     }
+    assert RULE_FAILED not in codes  # every validation rule ran
     assert not quarantined
     assert {"flightlog.truncated", "flightlog.dropout", "flightlog.units_not_declared"} <= codes
     runs = [r for r in package.records if isinstance(r, Run)]

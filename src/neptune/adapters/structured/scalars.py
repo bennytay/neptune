@@ -16,7 +16,7 @@ from collections.abc import Callable
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Final, Literal, TypeAlias
 
-from neptune.adapters.config._tree import Issue, Null, Reading, Unreadable, Value
+from neptune.adapters.structured.tree import Issue, Null, Reading, Unreadable, Value
 from neptune.model.configuration import ConfigScalar, ScalarType
 from neptune.model.scalars import real
 
