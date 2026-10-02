@@ -38,6 +38,8 @@ python -m neptune.cli ingest ...        # the same command
 | `--no-manifest` | apply no manifest, even if the source has one |
 | `--isolation {subprocess,in_process}` | adapters run in a confined child process per call (default) or, for trusted adapters only, in this process |
 | `--allow-degraded-sandbox` | run where not every sandbox guarantee is available; the receipt records which were lost |
+| `--no-plugins` | use only the shipped adapters: read no installed plugin (`neptune.adapters` / `neptune.sources` entry points, ADR 0058) |
+| `--plugin DIST` | read only the plugins of the installed distribution `DIST`; repeatable. Default: every installed plugin. A plugin that cannot be used is a `neptune.plugins.*` finding, not an error. With `--no-plugins`: usage error (exit 2) |
 | `--job NAME` | the job's name in the package's envelope (`volatile/`); default a random token |
 | `--json` | JSON Lines on stdout (below) |
 | `-v, --verbose` | one progress line per job event on stderr |
