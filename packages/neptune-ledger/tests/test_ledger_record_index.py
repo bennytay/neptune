@@ -52,6 +52,8 @@ AMBIGUOUS_TRANSFORM: Final = (
     "rec:sha256:e2c144c52c3f1c398b3a8f14738901a89d68bd7853dce97e558c112e596044f6"
 )
 MACHINE_CITERS: Final = ("calibration", "hardware_configuration", "run", "software_configuration")
+# Kinds whose plain ``run`` record id fills run_ids (stream since schema 1; the rest since 3).
+RUN_CITERS: Final = ("run_assembly", "snapshot_binding", "stream")
 # Every column a registration-order change may move: the registration key and transaction time.
 ORDER_COLUMNS: Final = (*TX_COLUMNS, "tx_seq", "last_seq", "registration_key")
 
@@ -101,7 +103,8 @@ def _states(value: Any, state: str, pointer: str = "") -> list[str]:
 
 
 def _expected_projection(kind: str, record: dict[str, Any]) -> dict[str, Any]:
-    """Package schema 1's hot filters, written out by hand (ADR 0009 §3's table)."""
+    """The declared package schema's hot filters, written out by hand (ADR 0009 §3's table;
+    schema 3 adds the run filter on run_assembly and snapshot_binding)."""
     out: dict[str, Any] = dict.fromkeys(projection_columns())
 
     def logical(name: str, field: dict[str, Any]) -> None:
@@ -113,8 +116,9 @@ def _expected_projection(kind: str, record: dict[str, Any]) -> dict[str, Any]:
         logical("machine", record["machine"])
     if kind == "asset":
         logical("site", record["site"])
-    if kind == "stream":
+    if kind in RUN_CITERS:
         out["run_ids"] = [record["run"]]
+    if kind == "stream":
         out["clock_ids"] = list(record["clocks"])
     if kind == "video":
         out["clock_ids"] = [record["clock"]]
@@ -208,10 +212,16 @@ def test_the_hot_filters_find_a_machines_records(
     ).fetchall()
     assert ("run",) in found
     assert {kind for (kind,) in found} <= set(MACHINE_CITERS)
-    streams = indexed.execute(
-        "SELECT count(*) FROM record WHERE run_ids @> ARRAY[%s]", (run["id"],)
-    ).fetchone()
-    assert streams == (len(packages["drone"].records("stream")),)
+    citing = indexed.execute(
+        "SELECT kind, count(*) FROM record WHERE run_ids @> ARRAY[%s] GROUP BY kind ORDER BY 1",
+        (run["id"],),
+    ).fetchall()
+    expected = {
+        kind: sum(1 for r in packages["drone"].records(kind) if r["run"] == run["id"])
+        for kind in RUN_CITERS
+    }
+    assert {str(k): int(str(n)) for k, n in citing} == {k: n for k, n in expected.items() if n}
+    assert expected["stream"] == len(packages["drone"].records("stream"))
 
 
 # --- a pure function of (package, Ledger version) ---------------------------------------------
