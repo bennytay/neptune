@@ -19,7 +19,7 @@ work, never a reading of its prose.
 or table that record's transform produced. References to other things (``site``, ``assets``,
 ``task``) are declared ids, never record ids: linking them is identity resolution's (MVL-35).
 A heading that only looks like a step, or a sentence that only reads like a requirement, is a
-derived candidate (``neptune.derived.context``), never one of these records.
+derived candidate (``neptune.derived.declared``), never one of these records.
 """
 
 from dataclasses import dataclass
@@ -156,8 +156,9 @@ class Requirement:
     in a document, a requirements table's row, a manifest's ``requirements`` entry.
 
     - ``identifiers``: the id it is labelled by (``("requirement", "R-12")``).
-    - ``text``: the statement, verbatim, citing exactly its span or cell. Nothing is paraphrased,
-      and its modal verb (``shall``, ``should``) stays in the text.
+    - ``text``: the statement, verbatim (a wrapped statement's lines joined by one space), citing
+      exactly its span or cell. Nothing is paraphrased, and its modal verb (``shall``,
+      ``should``) stays in the text.
     - ``task``: the declared id of the task the same declaration states it for: the document's own
       ``Task ID:`` label, a table's ``task_id`` cell. ``Unknown`` when it states none.
     """
@@ -221,7 +222,7 @@ class SOPSection:
     - ``procedure``: the declared id of the procedure (the document's ``Procedure ID:`` or
       ``SOP ID:`` label); ``Unknown`` when the document declares none.
     - ``number``: the step's number as written (``3``, ``4.2``), never parsed into an int.
-    - ``title``: the rest of the labelled line, verbatim.
+    - ``title``: the rest of the labelled text, verbatim (wrapped lines joined by one space).
     - ``order``: its 0-based position among the document's steps, in reading order.
     """
 

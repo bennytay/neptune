@@ -12,12 +12,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-from neptune.context._emit import Output, as_id, identifiers, names, split_items, sub_span
+from neptune.declared._emit import Output, as_id, identifiers, names, split_items, sub_span
 from neptune.model._fields import Identifiers
 from neptune.model.finding import FindingCategory
-from neptune.model.ids import LogicalId, RecordId, check_token
+from neptune.model.ids import LogicalId, RecordId
 from neptune.model.knowledge import Knowledge, Known, KnownAbsent, Unknown
-from neptune.model.provenance import EvidenceRef
+from neptune.model.provenance import EvidenceRef, Provenance
 from neptune.model.spatial import CrsCode, GeodeticPosition
 from neptune.model.task import Requirement, TaskBrief, WorkOrder
 from neptune.model.world import Asset, Site
@@ -30,23 +30,6 @@ KIND_KEYS: Final = (
     ("task_id", "task"),  # a task register lists the assets it involves, not the reverse
     ("asset_id", "asset"),
     ("site_id", "site"),
-)
-# Keys naming another thing's id: references, never an identifier of the entry itself.
-_REFERENCES: Final = frozenset(
-    {
-        "site_id",
-        "asset_id",
-        "asset_ids",
-        "parent_id",
-        "task_id",
-        "requirement_id",
-        "work_order_id",
-        "procedure_id",
-        "machine_id",
-        "machine_ids",
-        "robot_id",
-        "robot_ids",
-    }
 )
 _NAME: Final = ("name", "title")
 _ALIASES: Final = ("aliases", "alias")
@@ -71,6 +54,17 @@ _LONGITUDE: Final = ("longitude", "lon", "lng")
 _HEIGHT: Final = ("altitude", "height", "elevation")
 _SERIAL: Final = ("serial", "serial_number")
 _EXTERNAL: Final = ("external_id",)
+# Systems of record whose id for a thing is that thing's own id, by column or key: a maintenance
+# system's equipment number, an ERP's asset number, a physical asset tag. Fixed and documented
+# (ADR 0063 §2); any other ``<x>_id`` column (``zone_id``, ``vendor_id``) names something else and
+# stays in the row, cited there, never an identifier of the entry.
+_SYSTEMS_OF_RECORD: Final = (
+    ("asset_tag", "asset_tag"),
+    ("cmms_id", "cmms"),
+    ("eam_id", "eam"),
+    ("erp_id", "erp"),
+    ("sap_id", "sap"),
+)
 # A coordinate is a decimal number as written: no exponent, no thousands separator, no unit.
 _DECIMAL: Final = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)")
 
@@ -158,17 +152,17 @@ class _Reader:
         )
 
     def identifiers(self, id_keys: Sequence[str], namespace: str) -> Identifiers:
-        """The entry's own id under ``namespace``, its serial and external ids, and any other
-        ``<scheme>_id`` key as an id in that scheme (``cmms_id`` → ``("cmms", …)``)."""
+        """The entry's own id under ``namespace``, its serial and external ids, and its ids in the
+        fixed systems of record (``cmms_id`` → ``("cmms", …)``). No other column is an id of it."""
         found: list[Known[LogicalId]] = []
         own = self.text(id_keys)
         if isinstance(own, Known):
             found.append(own.map(lambda text: LogicalId(namespace, text)))
-        schemes = [(key, "serial") for key in _SERIAL] + [(key, "external") for key in _EXTERNAL]
-        for key in sorted(self.entry):
-            other = key.endswith("_id") and key not in _REFERENCES and key not in id_keys
-            if other and key not in _EXTERNAL and _scheme(key[:-3]):
-                schemes.append((key, key[:-3]))
+        schemes = [
+            *((key, "serial") for key in _SERIAL),
+            *((key, "external") for key in _EXTERNAL),
+            *_SYSTEMS_OF_RECORD,
+        ]
         for key, scheme in schemes:
             value = self.entry.get(key)
             if value is not None and value.text is not None:
@@ -206,32 +200,37 @@ class _Reader:
         if not isinstance(latitude, float) or not isinstance(longitude, float):
             return self.out.unknown(self.evidence)
         height = self.coordinate(_HEIGHT)
+        height_at = _first(self.entry, _HEIGHT)
+        height_state: Knowledge[float]
+        if isinstance(height, Unknown):
+            height_state = height
+        elif height is None:
+            height_state = self.missing(self.out, self.evidence)
+        else:  # its own cell or key
+            cited = height_at.evidence if height_at is not None else self.evidence
+            height_state = self.out.known(height, cited)
         crs_text = self.text(("crs",))
         crs: Knowledge[CrsCode] = crs_text  # type: ignore[assignment]  # every state but Known
         if isinstance(crs_text, Known):
             authority, colon, code = crs_text.value.partition(":")
             crs = Unknown(crs_text.provenance)
-            if colon and authority.strip() and code.strip():
-                try:
-                    crs = crs_text.map(lambda _: CrsCode(authority.strip(), code.strip()))
-                except ValueError:  # longer than any registry's code: not a CRS code
-                    self.out.finding(
-                        "crs_not_a_code",
-                        FindingCategory.UNREPRESENTABLE,
-                        self.evidence,
-                        f"the {self.kind}'s crs is not an authority:code pair; it is unknown",
-                    )
+            try:
+                if not (colon and authority.strip() and code.strip()):
+                    raise ValueError("no authority:code")
+                crs = crs_text.map(lambda _: CrsCode(authority.strip(), code.strip()))
+            except ValueError:  # no colon, or longer than any registry's code: not a CRS code
+                assert isinstance(crs_text.provenance, Provenance)
+                self.out.finding(
+                    "crs_not_a_code",
+                    FindingCategory.UNREPRESENTABLE,
+                    crs_text.provenance.evidence,
+                    f"the {self.kind}'s crs is not an authority:code pair; it is unknown",
+                )
         return self.out.known(
             GeodeticPosition(
                 latitude=latitude,
                 longitude=longitude,
-                height=(
-                    self.out.known(height, self.evidence)
-                    if isinstance(height, float)
-                    else height
-                    if height is not None
-                    else self.missing(self.out, self.evidence)
-                ),
+                height=height_state,
                 crs=crs,
                 angle_unit=self.out.unknown(self.evidence),
                 height_unit=self.out.unknown(self.evidence),
@@ -239,14 +238,6 @@ class _Reader:
             ),
             self.evidence,
         )
-
-
-def _scheme(text: str) -> bool:
-    try:
-        check_token("namespace", text)
-    except ValueError:
-        return False
-    return True
 
 
 def build(

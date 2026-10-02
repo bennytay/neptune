@@ -1,10 +1,10 @@
 """Write the context fixtures (ADR 0063): site manifests, registers, procedures, briefs, orders.
 
-Run ``uv run python tests/fixtures/context/make_context_fixtures.py`` to rewrite them. Every file
+Run ``uv run python tests/fixtures/declared/make_declared_fixtures.py`` to rewrite them. Every file
 is written from the literals below, so the bytes never change unless this script does. They span
 embodiments: a warehouse AMR fleet's site manifest and asset register, a manipulator cell's SOP,
 an inspection drone's task brief, a marine ROV's requirements, an AMR work order; and the
-malformed shapes the context pass must turn into findings, never failures.
+malformed shapes the declared-records pass must turn into findings, never failures.
 """
 
 from pathlib import Path

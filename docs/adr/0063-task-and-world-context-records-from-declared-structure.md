@@ -25,19 +25,22 @@ without re-parsing the corpus. Forces:
 
 ## Decision
 
-1. **A package-level pass, `neptune.context`, over records, not bytes.** It runs at assembly beside
+1. **A package-level pass, `neptune.declared`, over records, not bytes.** It runs at assembly beside
    stream introspection (ADR 0049), over the admitted sources' committed records: `DocumentRecord`
    and `DocumentBlock`, `StructuredTable` and `StructuredRecord`, `ConfigurationSnapshot` and
    `ConfigurationValue`. It reads no source byte, calls no adapter, and lives in a new package,
-   `src/neptune/context/` (imports: model, identity, derived), so adapters stay leaves.
-   - **One transform per upstream adapter transform**: `neptune.context` 0.1.0, config `{}`,
+   `src/neptune/declared/` (imports: model, identity, derived), so adapters stay leaves. The
+     name is `declared`, not `context`, which is the separate Neptune Context layer
+     (`packages/neptune-context`).
+   - **One transform per upstream adapter transform**: `neptune.declared` 0.1.0, config `{}`,
      `upstream` that one transform. A record's spans and cells are in the text or table its upstream
      produced, and its id (`evidence_record_id`) moves only when that lineage does. A transform that
      declared nothing is not written; a package with no declarations gains no transform or table.
-   - It emits a `context_extracted` event with its counts. Its findings are `context.*` (§8).
-   - It holds only what it reads: streams, documents and their blocks, configurations, tables, and
-     only the rows of tables that can declare something (a register's, an undeclared table's first
-     row, a JSON row whose keys name a kind). A telemetry table's rows are streamed past.
+   - It emits a `declared_extracted` event with its counts. Its findings are `declared.*` (§8).
+   - It loads only sources whose adapter declares one of the kinds it reads (a ROS 1 bag never), and
+     holds only those kinds. Rows are loaded in a second pass, only from sources holding a table
+     that can declare something (a register, an undeclared or JSON table), and only those rows are
+     kept: a log's telemetry tables are not loaded for it.
 2. **Registers and manifests (tables and configurations) → `Site`, `Asset`, `TaskBrief`,
    `Requirement`, `WorkOrder`.**
    - Keys are compared case-folded with runs of spaces and dashes as `_` (`Asset ID` = `asset_id`).
@@ -56,24 +59,37 @@ without re-parsing the corpus. Forces:
      each item citing its span inside the cell (`[RowCell, Span]`, ADR 0020 §1). Other keys stay in
      the row or configuration, cited there.
    - Ids: the entry's own as `(<kind>, value)`; `serial`/`serial_number` as `("serial", …)`;
-     `external_id` as `("external", …)`; any other `<scheme>_id` column as `(<scheme>, …)`
-     (`cmms_id` → `("cmms", …)`). References use the namespaces `site`, `asset`, `task`, `machine`,
-     `procedure`, `work_order`. Equal ids in two declarations are two records.
+     `external_id` as `("external", …)`; and a fixed list of systems of record whose id is the
+     thing's own: `cmms_id` → `cmms`, `eam_id` → `eam`, `erp_id` → `erp`, `sap_id` → `sap`,
+     `asset_tag` → `asset_tag`. No other column is an identifier: `zone_id`, `vendor_id` or
+     `technician_id` name other things and stay in the row, cited there, so identity resolution
+     never sees two rows sharing a foreign key as sharing an identity. References use the
+     namespaces `site`, `asset`, `task`, `machine`, `procedure`, `work_order`. Equal ids in two
+     declarations are two records.
    - A position is built from a latitude and a longitude written as decimals, citing the entry; its
      CRS is the entry's `crs` (`EPSG:4326`) or `Unknown`; angle unit, height unit and height
-     reference are always `Unknown`. A table with no such column says `NotCovered`; a blank cell or
+     reference are always `Unknown`; a height cites its own cell or key. A table with no such column says `NotCovered`; a blank cell or
      a missing manifest key says `Unknown`; a JSON or YAML null is `KnownAbsent`.
 3. **Documents → `TaskBrief`, `WorkOrder`, `Requirement`, `SOPSection`, by explicit labels only.**
-   Blocks are read line by line (code blocks never), each line citing its exact span inside its
-   block's citation (after the block's `Page` step in a PDF).
+   Blocks are read line by line (code and table blocks never; a table is read as its
+   `StructuredTable`), each line citing its exact span inside its block's citation (after the
+   block's `Page` step in a PDF). A blockquote's later lines are read without their `>` markers,
+   still citing exactly.
    - `<Label>: <value>` for the labels `Task ID`, `Procedure ID`/`SOP ID`, `Work Order (ID)`,
      `Title`, `Objective`, `Status`, `Site (ID)`, `Asset(s)`/`Asset ID`, `Robot(s)`/`Machine(s)`.
-     The first value of a label is read; a different later one is `context.label_repeated`.
+     The first value of a label is read; a different later one is `declared.label_repeated`.
    - A document with a `Work Order` label is a `WorkOrder` and its `Task ID` names the task it
      serves; otherwise a `Task ID` label makes it a `TaskBrief`.
-   - `Requirement <id>: <statement>` (or `REQ <id>:`) anywhere is a `Requirement`; its `task` is the
-     document's `Task ID`, else `Unknown`.
-   - A block whose first line is `Step <number>: <title>` (`.`, `)` or a dash for `:`) is an
+   - `Requirement <id>: <statement>` (or `REQ <id>:`) anywhere is a `Requirement`; the id contains a
+     digit (`R-12`, `INS-1`), so `Requirement type: Functional` and `Req coverage: 80%` are not
+     requirements. Its `task` is the document's `Task ID`, else `Unknown`.
+   - A statement (a requirement's text, a step's title) runs over the block's following lines up
+     to the next labelled line, since a PDF wraps at every visual line end: its lines are joined by
+     one space and it cites the one span from its first character to the end of its last line. At
+     most 64 lines and 4096 code points; past them the rest is not read as part of it and
+     `declared.statement_too_long` (limit) says so.
+   - A block whose first line is `Step <number>: <title>` (`.`, `)` or a dash for `:`, and no other
+     separator: `Step 3 is optional` is prose) is an
      `SOPSection`. It spans that block and the following ones up to the next step block or the next
      heading at its level or above (any heading, when the step block is not a heading). Its
      `procedure` is the document's `Procedure ID`, else `Unknown`. Its text stays in its blocks.
@@ -93,24 +109,26 @@ without re-parsing the corpus. Forces:
      (text). A step spans at least its own block, each block once.
 5. **`Site` and `Asset` are reused unchanged** (ADR 0020). Their record-level citation is the row
    or manifest entry; a document's `Site:` line is a reference, never a `Site`.
-6. **Provenance.** Every record and field is `stated` by its context transform and cites the exact
+6. **Provenance.** Every record and field is `stated` by its declared transform and cites the exact
    cell, span or JSON pointer; a record cites its row, entry, label line or step block. A document's
-   declared title is re-cited by the context transform at the title's own citation.
-7. **Candidates are derived** (`derived/context_candidate.jsonl`, `neptune.derived.context`):
+   declared title is re-cited by the declared transform at the title's own citation.
+7. **Candidates are derived** (`derived/declared_candidate.jsonl`, `neptune.derived.declared`):
    `numbered_heading_in_procedure` (0.5: a heading `3. Restore power` in a document that has steps
    or a procedure id), `modal_sentence_without_label` (0.4: an unlabelled prose line with `shall` or
    `must`), `undeclared_header_names_register` (0.6: a table whose header is undeclared but whose
    first row names an id column). Each names the record it read, the kind it proposes, the rule,
    the matched text and its citation. None becomes a record: a user who agrees adds the label or
    declares the header, and the next ingest states it.
-8. **Malformed input costs findings, never the job.** `context.label_repeated` (inconsistent),
-   `context.requirement_without_text` (missing; the record keeps `text` `Unknown`),
-   `context.unnamed_declaration` (missing; no record), `context.section_not_entries`
-   (unsupported), `context.coordinate_not_decimal` (unrepresentable; location `Unknown`),
-   `context.value_not_text` (unsupported; the field `Unknown`), `context.crs_not_a_code`
-   (unrepresentable; the CRS `Unknown`). A decimal no finite double holds is not a coordinate. If a
-   reader still fails on one document, table or configuration, what it wrote is dropped and
-   `context.failed` (failed, error) names that holder; the rest of the package is unaffected. All
+8. **Malformed input costs findings, never the job.** `declared.label_repeated` (inconsistent),
+   `declared.requirement_without_text` (missing; the record keeps `text` `Unknown`),
+   `declared.unnamed_declaration` (missing; no record), `declared.section_not_entries`
+   (unsupported), `declared.coordinate_not_decimal` (unrepresentable; location `Unknown`),
+   `declared.value_not_text` (unsupported; the field `Unknown`), `declared.crs_not_a_code`
+   (unrepresentable; the CRS `Unknown`: no `authority:code` pair, or a code too long for any
+   registry), `declared.statement_too_long` (limit; §3). A decimal no finite double holds is not a coordinate. If a
+   reader still fails on one document, table or configuration, it wrote into a scratch output that
+   is dropped, and
+   `declared.failed` (failed, error) names that holder; the rest of the package is unaffected. All
    patterns are anchored with bounded repetition, so a hostile line costs time linear in its length.
 9. **Schema version 5, provisional** (ADR 0037 §1): the four kinds are `since` 5, so packages that
    hold none of them keep their bytes. Package-schema 5.0.0, catalog-api 1.5.0 (programme rule:
@@ -145,15 +163,15 @@ without re-parsing the corpus. Forces:
 
 - "Which source stated INS-1?" and "which register states AMR-07's serial?" are answered from the
   package's `requirement` and `asset` tables, down to the span or cell
-  (`tests/integration/test_context_job.py`).
-- Every package with declarations gains one `neptune.context` transform per upstream adapter
-  transform and a `context_candidate` table; a package without any is unchanged.
-- The label and key vocabularies are part of `neptune.context` 0.1.0: adding a label is a new
+  (`tests/integration/test_declared_job.py`).
+- Every package with declarations gains one `neptune.declared` transform per upstream adapter
+  transform and a `declared_candidate` table; a package without any is unchanged.
+- The label and key vocabularies are part of `neptune.declared` 0.1.0: adding a label is a new
   version, so a new lineage, never a rewrite.
 - A CSV register needs `csv_header=first_row` (a manifest's `adapters.tabular` options) to be read
   as one; until then it yields a candidate.
 - A JSON object of lists (`{"assets": [...]}`) is read by the text adapter (ADR 0037 §7), so it
   declares nothing here; YAML and TOML manifests, CSV, Parquet and JSON-array tables do.
-- `docs/architecture.md`'s package table does not list `context/` yet (a dedicated docs PR).
+- `docs/architecture.md`'s package table does not list `declared/` yet (a dedicated docs PR).
 - Revisit when MVL-35 needs more declared ids, when a dialect adapter (GeoJSON, MVL-31) states
   sites itself, or when users need labels in other languages.

@@ -12,8 +12,8 @@ import math
 from collections.abc import Sequence
 from typing import Any, Final
 
-from neptune.context._emit import Output, field_key
-from neptune.context._entries import KIND_KEYS, Entry, Value, build
+from neptune.declared._emit import Output, field_key
+from neptune.declared._entries import KIND_KEYS, Entry, Value, build
 from neptune.model.ids import RecordId
 from neptune.model.knowledge import Knowledge, Known, KnownAbsent, NotCovered, Unknown
 from neptune.model.provenance import EvidenceRef, JsonPointer, Provenance
@@ -74,6 +74,17 @@ def _kind(entry: Entry) -> str | None:
         if key in entry:
             return kind
     return None
+
+
+def table_wanted(table: StructuredTable) -> bool:
+    """Whether any row of ``table`` can declare something: a register's header names a kind's
+    id column; an undeclared table's first row may be a candidate; a JSON table's rows name
+    their own keys. A table with a declared header and no id column (telemetry) cannot."""
+    match table.header:
+        case Known(value=header):
+            return any(field_key(name) in _ID_KEYS for name in header)
+        case _:
+            return True
 
 
 def row_wanted(table: StructuredTable, row: StructuredRecord) -> bool:

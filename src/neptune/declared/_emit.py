@@ -1,10 +1,10 @@
-"""What one context transform writes, and the helpers every reader shares (ADR 0063 §6)."""
+"""What one declared transform writes, and the helpers every reader shares (ADR 0063 §6)."""
 
 import re
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Final
 
-from neptune.derived.context import ContextCandidate, candidate_id
+from neptune.derived.declared import DeclaredCandidate, candidate_id
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import evidence_record_id
 from neptune.model._fields import Identifiers, Names
@@ -53,33 +53,40 @@ def split_items(text: str) -> list[tuple[int, int]]:
 
 
 class Output:
-    """The records, candidates and findings of one context transform."""
+    """The records, candidates and findings of one declared transform."""
 
     def __init__(self, transform: TransformRecord) -> None:
         self.transform = transform
         self.records: dict[RecordId, Any] = {}
-        self.candidates: dict[RecordId, ContextCandidate] = {}
+        self.candidates: dict[RecordId, DeclaredCandidate] = {}
         self.findings: dict[RecordId, IngestFinding] = {}
 
-    def guarded(self, subject: EvidenceRef, read: Callable[[], None]) -> None:
-        """Run one declaration-holder's reader; if it fails, drop what it wrote and say so.
+    def guarded(self, subject: EvidenceRef, read: Callable[["Output"], None]) -> None:
+        """Run one declaration-holder's reader into a scratch output and keep what it wrote; if
+        it fails, keep nothing from it and say so.
 
         The readers are written not to raise, but one unforeseen document must cost its own
-        records and a finding, never the job (non-negotiable 7).
+        records and a finding, never the job (non-negotiable 7). The scratch costs only what one
+        holder writes, so a corpus of many documents stays linear.
         """
-        before = (dict(self.records), dict(self.candidates), dict(self.findings))
+        scratch = Output(self.transform)
         try:
-            read()
+            read(scratch)
         except Exception as exc:
-            self.records, self.candidates, self.findings = before
             self.finding(
                 "failed",
                 FindingCategory.FAILED,
                 subject,
-                "the context pass failed on this declaration's holder; nothing was read from it",
+                "the declared-records pass failed on this holder; nothing was read from it",
                 {"error": type(exc).__name__},
                 severity=Severity.ERROR,
             )
+            return
+        for record in scratch.records.values():
+            self.add(record)
+        for key, candidate in scratch.candidates.items():
+            self.candidates.setdefault(key, candidate)
+        self.findings.update(scratch.findings)
 
     def prov(self, evidence: EvidenceRef) -> Provenance:
         return Provenance(evidence, self.transform.id, STATED)
@@ -114,7 +121,7 @@ class Output:
     ) -> None:
         cid = candidate_id(self.transform.id, subject, proposes, rule)
         if cid not in self.candidates:  # one rule, one subject, one kind: one line
-            self.candidates[cid] = ContextCandidate(
+            self.candidates[cid] = DeclaredCandidate(
                 cid, self.transform.id, subject, proposes, rule, confidence, text, (evidence,)
             )
 
@@ -129,7 +136,7 @@ class Output:
         severity: Severity = Severity.WARNING,
     ) -> None:
         found = ingest_finding(
-            code=f"context.{code}",
+            code=f"declared.{code}",
             category=category,
             severity=severity,
             subject=subject,
@@ -147,7 +154,7 @@ def as_id(state: Knowledge[str], namespace: str) -> Knowledge[LogicalId]:
     if isinstance(state, Known):
         return Known(LogicalId(namespace, state.value), state.provenance)
     if isinstance(state, Ambiguous):
-        raise AssertionError("the context readers never state an ambiguous value")
+        raise AssertionError("the declared-records readers never state an ambiguous value")
     return state
 
 

@@ -1,12 +1,12 @@
-"""Context candidates: what only looks like a task or world declaration (ADR 0063 §7).
+"""Declared candidates: what only looks like a task or world declaration (ADR 0063 §7).
 
-The context pass (``neptune.context``) makes task and world records from explicit declarations
-only. Where a block or table looks like one without saying so (a numbered heading in a procedure
-that is not labelled ``Step``, a sentence with ``shall`` that carries no requirement label, a CSV
-whose undeclared first row reads like a register's header), the pass writes a
-``context_candidate`` line here instead: inferred, with the rule that fired and its confidence,
-pointing at the parsed record it read. Nothing reads a candidate as a fact; a user who agrees
-states it (a label, a manifest's ``csv_header``) and the next ingest makes the record.
+The declared-records pass (``neptune.declared``) makes task and world records from explicit
+declarations only. Where a block or table looks like one without saying so (a numbered heading
+in a procedure that is not labelled ``Step``, a sentence with ``shall`` that carries no
+requirement label, a CSV whose undeclared first row reads like a register's header), the pass
+writes a ``declared_candidate`` line here instead: inferred, with the rule that fired and its
+confidence, pointing at the parsed record it read. Nothing reads a candidate as a fact; a user
+who agrees states it (a label, a manifest's ``csv_header``) and the next ingest makes the record.
 """
 
 import math
@@ -24,7 +24,7 @@ from neptune.model.provenance import EvidenceRef, evidence_ref_from_json
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-CANDIDATE_KIND: Final = "context_candidate"
+CANDIDATE_KIND: Final = "declared_candidate"
 
 
 def candidate_id(transform: RecordId, subject: RecordId, proposes: str, rule: str) -> RecordId:
@@ -36,7 +36,7 @@ def candidate_id(transform: RecordId, subject: RecordId, proposes: str, rule: st
 
 
 @dataclass(frozen=True)
-class ContextCandidate:
+class DeclaredCandidate:
     """A parsed record that may hold a declaration of kind ``proposes``, by ``rule``.
 
     ``subject`` is the ``DocumentBlock`` or ``StructuredTable`` the rule read; ``text`` is the
@@ -95,7 +95,7 @@ class ContextCandidate:
         }
 
 
-def context_candidate_from_json(data: JsonValue) -> ContextCandidate:
+def declared_candidate_from_json(data: JsonValue) -> DeclaredCandidate:
     obj: Mapping[str, JsonValue] = _derived_object(
         data,
         CANDIDATE_KIND,
@@ -104,7 +104,7 @@ def context_candidate_from_json(data: JsonValue) -> ContextCandidate:
     confidence = obj["confidence"]
     if not isinstance(confidence, float):
         raise ValueError(f"confidence must be a float, got {confidence!r}")
-    return ContextCandidate(
+    return DeclaredCandidate(
         id=parse_record_id(json_str(obj["id"], "id")),
         transform=parse_record_id(json_str(obj["transform"], "transform")),
         subject=parse_record_id(json_str(obj["subject"], "subject")),

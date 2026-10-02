@@ -18,7 +18,7 @@ flowchart LR
     PKG[("Ingest package")]
     VAL["Validation &amp; alignment"]
     DER["Derived annotations<br/>session proposals<br/>stream layouts · semantics<br/>media streams · clock mappings<br/>declared candidates"]
-    CTX["Context records<br/>sites · assets · briefs<br/>requirements · SOP steps"]
+    DCL["Declared records<br/>sites · assets · briefs<br/>requirements · SOP steps"]
     MAN["Optional manifest<br/>neptune.yaml · init-manifest"]
   end
 
@@ -42,9 +42,9 @@ flowchart LR
   RT -->|streams · definitions · row counts · series times| DER
   SDK -->|media window by clock| PKG
   SDK -.->|lazy frame bytes| RAW
-  RT -->|documents · tables · configs| CTX
-  CTX -->|stated records| PKG
-  CTX -->|candidates| DER
+  RT -->|documents · tables · configs| DCL
+  DCL -->|stated records| PKG
+  DCL -->|candidates| DER
   RAW -.->|neptune.yaml| MAN
   CLI -->|init-manifest| MAN
   MAN -->|stated declarations| RT
@@ -64,7 +64,7 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class CAN,WS,K1 built
-  class DISC,RT,AD,PKG,DER,MAN,VAL,PLG,CTX,K2 partial
+  class DISC,RT,AD,PKG,DER,MAN,VAL,PLG,DCL,K2 partial
   class K3 todo
   class SB built
   class SDK,CLI built

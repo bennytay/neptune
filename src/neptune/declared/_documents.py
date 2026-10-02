@@ -4,13 +4,18 @@ A document's blocks are read line by line, each line citing its exact span insid
 Only explicit labels are read; the labels and their patterns are fixed and case-insensitive:
 
 - ``<Label>: <value>`` for the labels of ``_LABELS`` (``Task ID: TB-117``, ``Site: WH-3``).
-- ``Requirement <id>: <statement>`` (or ``REQ <id>: …``) anywhere: one ``Requirement``.
-- ``Step <number>: <title>`` as a block's first line (``.``, ``)`` or a dash may stand for ``:``):
-  one ``SOPSection`` spanning that block and its body.
+- ``Requirement <id>: <statement>`` (or ``REQ <id>: …``) anywhere, the id holding a digit: one
+  ``Requirement``.
+- ``Step <number>: <title>`` as a block's first line (``.``, ``)`` or a dash may stand for ``:``,
+  nothing else): one ``SOPSection`` spanning that block and its body.
+
+A statement or a title runs over the block's following lines up to the next labelled line (a PDF
+wraps at every visual line end), joined by one space and citing its whole span, within bounds.
 
 A document with a ``Task ID`` label is a brief, one with a ``Work Order`` label a work order, one
-with a ``Procedure ID`` label a procedure whose steps name it. Code blocks are never read. What only
-looks like a step or a requirement becomes a derived candidate.
+with a ``Procedure ID`` label a procedure whose steps name it. Code and table blocks are never
+read (a table is its ``StructuredTable``); a quote's later lines are read without their markers.
+What only looks like a step or a requirement becomes a derived candidate.
 """
 
 import re
@@ -18,7 +23,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from neptune.context._emit import Output, as_id, field_key, identifiers, split_items, sub_span
+from neptune.declared._emit import Output, as_id, field_key, identifiers, split_items, sub_span
 from neptune.model._fields import Identifiers
 from neptune.model.finding import FindingCategory
 from neptune.model.ids import LogicalId
@@ -54,13 +59,20 @@ _LIST_LABELS: Final = frozenset({"assets", "machines"})
 # Bounded quantifiers only: a hostile line costs time linear in its length.
 _LABEL: Final = re.compile(r"(?P<label>[A-Za-z][A-Za-z ._\-]{0,30}?)[ \t]*:[ \t]+(?P<value>\S.*)")
 _REQUIREMENT: Final = re.compile(
-    r"(?i:requirement|req)[ \t]+(?!(?i:id|no|number)[ \t]*:)"  # "Requirement ID:" names no id
-    r"(?P<id>[A-Za-z0-9][A-Za-z0-9._/\-]{0,63})[ \t]*:(?P<text>.*)"
-)
+    r"(?i:requirement|req)[ \t]+"
+    r"(?P<id>(?=[A-Za-z0-9])[A-Za-z0-9._/\-]{0,63}\d[A-Za-z0-9._/\-]{0,63})[ \t]*:(?P<text>.*)"
+)  # an id has a digit: "Requirement type: Functional" and "Req coverage: 80%" are not ids
 _STEP: Final = re.compile(
     r"(?i:step)[ \t]+(?P<number>\d{1,9}(?:\.\d{1,9}){0,8})(?!\.?\d)"  # the whole number
-    r"(?:[ \t]*[:.)\-\u2013\u2014][ \t]*|[ \t]+)(?P<title>\S.*)"
+    r"[ \t]*[:.)\-\u2013\u2014][ \t]*(?P<title>\S.*)"
 )
+# A blockquote's later lines keep their markers in the block's text; the first line's are outside.
+_QUOTE_MARKERS: Final = re.compile(r"[ \t]{0,3}(?:>[ \t]?){1,16}")
+# A requirement's statement or a step's title runs over its block's wrapped lines (a PDF wraps at
+# every visual line end), joined by one space, up to the next labelled line: at most this many
+# lines and code points, past which the rest is left unread with a finding.
+MAX_CONTINUATION_LINES: Final = 64
+MAX_STATEMENT_LENGTH: Final = 4096
 _NUMBERED: Final = re.compile(r"\d{1,9}(?:\.\d{1,9}){0,8}[.)][ \t]+\S")
 _MODAL: Final = re.compile(r"\b(?:shall|must)\b", re.IGNORECASE)
 # Blocks never read line by line: code is not prose, and a table's cells are its
@@ -96,11 +108,45 @@ def _lines(block: DocumentBlock) -> Iterator[_Line]:
     if not isinstance(block.text, Known) or _role(block) in _UNREAD:
         return
     text = block.text.value
+    quoted = _role(block) is BlockRole.QUOTE
     offset = 0
-    for raw in text.split("\n"):
+    for number, raw in enumerate(text.split("\n")):
         line = raw.removesuffix("\r")
-        yield _Line(block, line, offset)
+        marker = _QUOTE_MARKERS.match(line) if quoted and number else None
+        skip = marker.end() if marker is not None else 0
+        yield _Line(block, line[skip:], offset + skip)
         offset += len(raw) + 1
+
+
+@dataclass(frozen=True)
+class _Statement:
+    """A labelled line and the wrapped lines that continue it, as one cited text."""
+
+    first: _Line
+    match: re.Match[str]
+    group: str  # the match group the text starts at: a requirement's text, a step's title
+    rest: tuple[_Line, ...]
+
+    def text_and_span(self) -> tuple[str, EvidenceRef] | None:
+        """The text joined by single spaces, citing from its first character to the end of its
+        last line; ``None`` when there is none."""
+        raw = self.match[self.group]
+        head = raw.strip()
+        lead = self.match.start(self.group) + (len(raw) - len(raw.lstrip()))
+        parts = ([head] if head else []) + [line.text for line in self.rest]
+        if not parts:
+            return None
+        start = self.first.start + lead if head else self.rest[0].start
+        last = self.rest[-1] if self.rest else self.first
+        end = last.start + len(last.text) if self.rest else self.first.start + lead + len(head)
+        span = sub_span(self.first.block.provenance.evidence, start, end)
+        return " ".join(parts), span
+
+    def cite(self) -> EvidenceRef:
+        """The whole statement: its labelled line through its last continuation line."""
+        last = self.rest[-1] if self.rest else self.first
+        end = last.start + len(last.text)
+        return sub_span(self.first.block.provenance.evidence, self.first.start, end)
 
 
 def _trim(line: _Line) -> _Line:
@@ -123,33 +169,76 @@ class _Reader:
     ) -> None:
         self.out, self.document, self.blocks = out, document, blocks
         self.labels: dict[str, list[_Label]] = {}
-        self.requirements: list[tuple[_Line, re.Match[str]]] = []
-        self.steps: list[tuple[int, _Line, re.Match[str]]] = []
+        self.requirements: list[_Statement] = []
+        self.steps: list[tuple[int, _Statement]] = []
         for index, block in enumerate(blocks):
-            for number, line in enumerate(_lines(block)):
-                body = _trim(line)
-                if not body.text:
-                    continue
-                if number == 0 and (step := _STEP.fullmatch(body.text)):
-                    self.steps.append((index, body, step))
-                    continue
-                if requirement := _REQUIREMENT.fullmatch(body.text):
-                    self.requirements.append((body, requirement))
-                elif (label := _LABEL.fullmatch(body.text)) and (
-                    role := _LABELS.get(field_key(label["label"]))
-                ):
-                    self.labels.setdefault(role, []).append(
-                        _Label(body, label["value"], label.start("value"))
+            lines = [line for line in map(_trim, _lines(block)) if line.text]
+            kinds = [self._kind(line, number == 0) for number, line in enumerate(lines)]
+            number = 0
+            while number < len(lines):
+                line, (kind, match) = lines[number], kinds[number]
+                if kind in ("step", "requirement"):
+                    assert match is not None
+                    end = number + 1
+                    while end < len(lines) and kinds[end][0] == "plain":
+                        end += 1
+                    rest = self._bounded(lines[number + 1 : end], match, line)
+                    statement = _Statement(
+                        line, match, "title" if kind == "step" else "text", tuple(rest)
                     )
-                elif _MODAL.search(body.text) and _role(block) not in _NOT_PROSE:
+                    if kind == "step":
+                        self.steps.append((index, statement))
+                    else:
+                        self.requirements.append(statement)
+                    number += 1 + len(rest)
+                    continue
+                if kind == "label":
+                    assert match is not None
+                    self.labels.setdefault(_LABELS[field_key(match["label"])], []).append(
+                        _Label(line, match["value"], match.start("value"))
+                    )
+                elif _MODAL.search(line.text) and _role(block) not in _NOT_PROSE:
                     out.candidate(
                         block.id,
                         Requirement.kind,
                         "modal_sentence_without_label",
                         MODAL_SENTENCE_CONFIDENCE,
-                        body.text,
-                        body.cite(),
+                        line.text,
+                        line.cite(),
                     )
+                number += 1
+
+    @staticmethod
+    def _kind(line: _Line, first: bool) -> tuple[str, re.Match[str] | None]:
+        """What a line is: a step label (a block's first line only), a requirement label, a known
+        ``Label:``, or plain text."""
+        if first and (step := _STEP.fullmatch(line.text)):
+            return "step", step
+        if requirement := _REQUIREMENT.fullmatch(line.text):
+            return "requirement", requirement
+        label = _LABEL.fullmatch(line.text)
+        if label and field_key(label["label"]) in _LABELS:
+            return "label", label
+        return "plain", None
+
+    def _bounded(self, rest: list[_Line], match: re.Match[str], first: _Line) -> list[_Line]:
+        """The continuation lines a statement takes, within its bounds; a finding past them."""
+        kept: list[_Line] = []
+        length = len(first.text)
+        for line in rest:
+            length += 1 + len(line.text)
+            if len(kept) >= MAX_CONTINUATION_LINES or length > MAX_STATEMENT_LENGTH:
+                self.out.finding(
+                    "statement_too_long",
+                    FindingCategory.LIMIT,
+                    first.cite(),
+                    "a labelled statement runs past its bounds; its later lines are not read"
+                    " as part of it",
+                    {"lines": MAX_CONTINUATION_LINES, "length": MAX_STATEMENT_LENGTH},
+                )
+                break
+            kept.append(line)
+        return kept
 
     # --- labels ---------------------------------------------------------------------------------
 
@@ -251,23 +340,21 @@ class _Reader:
                     task_ref,
                 )
             )
-        for line, match in self.requirements:
-            self.requirement(line, match, task_ref)
+        for statement in self.requirements:
+            self.requirement(statement, task_ref)
         procedure = self.ref("procedure", "procedure")
         self.sections(procedure)
 
-    def requirement(self, line: _Line, match: re.Match[str], task: Knowledge[LogicalId]) -> None:
-        evidence = line.cite()
+    def requirement(self, statement: _Statement, task: Knowledge[LogicalId]) -> None:
+        line, match = statement.first, statement.match
+        evidence = statement.cite()
         ident = match["id"]
         id_state = self.out.known(
             LogicalId("requirement", ident), line.cite(match.start("id"), match.end("id"))
         )
-        raw = match["text"]
-        statement = raw.strip()
         text: Knowledge[str]
-        if statement:
-            lead = match.start("text") + (len(raw) - len(raw.lstrip()))
-            text = self.out.known(statement, line.cite(lead, lead + len(statement)))
+        if (found := statement.text_and_span()) is not None:
+            text = self.out.known(*found)
         else:
             text = Unknown(self.out.prov(evidence))
             self.out.finding(
@@ -289,8 +376,11 @@ class _Reader:
         )
 
     def sections(self, procedure: Knowledge[LogicalId]) -> None:
-        starts = {index for index, _, _ in self.steps}
-        for order, (index, line, match) in enumerate(self.steps):
+        starts = {index for index, _ in self.steps}
+        for order, (index, statement) in enumerate(self.steps):
+            line, match = statement.first, statement.match
+            titled = statement.text_and_span()
+            assert titled is not None  # the step pattern needs a title
             block = self.blocks[index]
             level = _level(block) if _role(block) is BlockRole.HEADING else None
             body = []
@@ -313,13 +403,7 @@ class _Reader:
                     self.out.known(
                         match["number"], line.cite(match.start("number"), match.end("number"))
                     ),
-                    self.out.known(
-                        match["title"].rstrip(),
-                        line.cite(
-                            match.start("title"),
-                            match.start("title") + len(match["title"].rstrip()),
-                        ),
-                    ),
+                    self.out.known(*titled),
                     order,
                     (block.id, *body),
                 )

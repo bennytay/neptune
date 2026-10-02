@@ -32,7 +32,7 @@ BRIEF = "Task ID: TB-117\nSite: SOLAR-2\nRequirement INS-1: The aircraft shall h
 SOURCE = content_id(BRIEF.encode())
 UPSTREAM = transform_record(adapter_id="markdown", adapter_version="1.0.0", config={})
 CONTEXT = transform_record(
-    adapter_id="neptune.context", adapter_version="0.1.0", config={}, upstream=[UPSTREAM.id]
+    adapter_id="neptune.declared", adapter_version="0.1.0", config={}, upstream=[UPSTREAM.id]
 )
 VALIDATOR = Draft202012Validator(canonical_schema())
 

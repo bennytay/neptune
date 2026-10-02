@@ -272,23 +272,23 @@ a bug, not a value.
   one row, cells in their source's types (a CSV's text stays text). Blank is `Unknown`; a defined
   "none" is `KnownAbsent` citing the definition. A row cited as `Row(r)` hoists its cells' citations:
   cell `c` is `RowCell(r, c, header[c])` (`cell_evidence`).
-- Sites and assets are written by the context pass (`neptune.context`, ADR 0063) from registers whose
+- Sites and assets are written by the declared-records pass (`neptune.declared`, ADR 0063) from registers whose
   header is declared and from site manifests' `site` / `assets` sections; never from prose.
 
 ## Task context (ADR 0063; `model/task.py`)
 
 - Every task record is one explicit declaration that an adapter already parsed, `stated`, written by the
-  context pass (`neptune.context`, one transform per upstream adapter transform). `declared_in` names the
+  declared-records pass (`neptune.declared`, one transform per upstream adapter transform). `declared_in` names the
   `DocumentRecord`, `StructuredTable` or `ConfigurationSnapshot` holding it: its spans and cells are in
   that record's transform's text. References (`site`, `assets`, `machines`, `task`, `procedure`) are
   declared `LogicalId`s, never record ids; MVL-35 links them.
 - `TaskBrief`: `identifiers`, `name`, `objective`, `site`, `assets`, `machines`. `Requirement`:
-  `identifiers`, `text` (verbatim, modal verb kept) and the `task` its declaration states it for.
+  `identifiers`, `text` (verbatim, modal verb kept; wrapped lines joined by one space, citing the whole span) and the `task` its declaration states it for.
   `SOPSection`: a `Step <n>:` block with `procedure`, `number` (as written), `title`, `order` and the
   `blocks` it spans. `WorkOrder`: the request (`identifiers`, `name`, `status` verbatim, `site`,
   `assets`, `task`); the work done is a lifecycle record (ADR 0051).
 - What only looks like a declaration (a numbered heading, an unlabelled "shall", an undeclared header
-  naming an id column) is a `context_candidate` in `derived/`, never a task record.
+  naming an id column) is a `declared_candidate` in `derived/`, never a task record.
 
 ## Deployment lifecycle records (ADR 0051; `model/lifecycle.py`)
 

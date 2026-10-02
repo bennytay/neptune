@@ -10,6 +10,6 @@ from typing import Final
 __version__ = "0.0.1"
 
 # The package schema Deploy is built against: version 4 added the lifecycle kinds (root ADR 0051).
-# Version 5 adds the task kinds (root ADR 0063); Deploy reads them as declared.
+# It builds against version 5, which adds the task kinds (root ADR 0063); Deploy ignores them.
 # contracts/lock.toml declares the same version as package-schema 5.0.0 (ADR 0001 §3).
 PACKAGE_SCHEMA_VERSION: Final = 5

@@ -12,8 +12,8 @@ import math
 from collections.abc import Sequence
 from typing import Final
 
-from neptune.context._emit import Output, field_key
-from neptune.context._entries import Value, build
+from neptune.declared._emit import Output, field_key
+from neptune.declared._entries import Value, build
 from neptune.model.configuration import (
     CollectionType,
     ConfigCollection,

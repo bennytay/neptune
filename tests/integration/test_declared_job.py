@@ -19,13 +19,13 @@ from neptune.model.provenance import JsonPointer, RowCell, Span, TransformRecord
 from neptune.model.source import LocalPath, SourceRevision
 from neptune.model.task import Requirement, SOPSection, TaskBrief, WorkOrder
 from neptune.model.world import Asset, DocumentRecord, Site
-from neptune.runtime import IngestJob, JobOptions, JobState
+from neptune.runtime import IngestJob, Isolation, JobOptions, JobState
 from neptune.store.package import read_package
 from neptune.store.workspace import Workspace
 
 pytestmark = pytest.mark.integration
 
-FIXTURES: Final = Path(__file__).parents[1] / "fixtures" / "context"
+FIXTURES: Final = Path(__file__).parents[1] / "fixtures" / "declared"
 CONFIG: Final = {"tabular": {"csv_header": "first_row"}}  # the register's header is declared
 
 
@@ -60,7 +60,7 @@ def ids(records: list[Any]) -> set[str]:
     return {record.identifiers[0].value.value for record in records}
 
 
-def test_context_records_answer_who_stated_what_from_the_package_alone(
+def test_declared_records_answer_who_stated_what_from_the_package_alone(
     corpus: Path, tmp_path: Path
 ) -> None:
     outcome, package = ingest(corpus, tmp_path, "package")
@@ -133,23 +133,27 @@ def test_context_records_answer_who_stated_what_from_the_package_alone(
     )
 
     # Candidates are derived and inferred; malformed declarations are findings, not failures.
-    candidates = [r for r in read_derived(package.derived) if r.kind == "context_candidate"]
+    candidates = [r for r in read_derived(package.derived) if r.kind == "declared_candidate"]
     assert {(c.proposes, c.rule) for c in candidates} == {
         ("sop_section", "numbered_heading_in_procedure"),
         ("requirement", "modal_sentence_without_label"),
     }
-    codes = sorted(r.code for r in package.records if getattr(r, "code", "").startswith("context."))
+    codes = sorted(
+        r.code for r in package.records if getattr(r, "code", "").startswith("declared.")
+    )
     assert codes == [
-        "context.coordinate_not_decimal",
-        "context.label_repeated",
-        "context.requirement_without_text",
-        "context.section_not_entries",
-        "context.unnamed_declaration",
-        "context.unnamed_declaration",
+        "declared.coordinate_not_decimal",
+        "declared.label_repeated",
+        "declared.requirement_without_text",
+        "declared.section_not_entries",
+        "declared.unnamed_declaration",
+        "declared.unnamed_declaration",
     ]
     # Neptune's own manifest shape is ADR 0047's: no site is read from it.
     assert "SHOULD-NOT-BE-READ" not in ids(by_kind(package, Site))
-    transforms = [t for t in by_kind(package, TransformRecord) if t.adapter_id == "neptune.context"]
+    transforms = [
+        t for t in by_kind(package, TransformRecord) if t.adapter_id == "neptune.declared"
+    ]
     assert {len(t.upstream) for t in transforms} == {1}
     assert outcome.package is not None
 
@@ -161,3 +165,44 @@ def test_a_second_job_writes_the_same_package(corpus: Path, tmp_path: Path) -> N
     assert (tmp_path / "one" / "records" / "requirement.jsonl").read_bytes() == (
         tmp_path / "two" / "records" / "requirement.jsonl"
     ).read_bytes()
+
+
+def test_the_pass_loads_no_log_twice_and_some_never(
+    corpus: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    shutil.copy(FIXTURES.parent / "series" / "imu.mcap", corpus / "imu.mcap")
+    shutil.copy(FIXTURES.parent / "rosbag1" / "robot_none.bag", corpus / "robot.bag")
+    workspace = Workspace(tmp_path / "with-logs-home")
+    job = IngestJob(
+        corpus,
+        tmp_path / "with-logs",
+        workspace,
+        default_registry(),
+        JobOptions(config=CONFIG, isolation=Isolation.IN_PROCESS),
+    )
+    assert job.run().state is JobState.COMMITTED
+    package = read_package(tmp_path / "with-logs")
+    paths = {
+        r.location.path: r.content_id
+        for r in package.records
+        if isinstance(r, SourceRevision) and isinstance(r.location, LocalPath)
+    }
+    chunks: dict[str, set[str]] = {}
+    for content, transform in job._ingested:
+        plan = workspace.load_plan(content, transform)
+        assert plan is not None
+        chunks.setdefault(content, set()).update(str(chunk["id"]) for chunk in plan.chunks)
+    loads: list[str] = []
+    load = Workspace.load
+
+    def spy(self: Workspace, chunk: str) -> Any:
+        loads.append(chunk)
+        return load(self, chunk)
+
+    monkeypatch.setattr(Workspace, "load", spy)
+    job._declared_records()
+    mcap, bag = chunks[paths["imu.mcap"]], chunks[paths["robot.bag"]]
+    assert not bag & set(loads)  # a ROS 1 bag's adapter declares none of the pass's kinds
+    assert sum(chunk in mcap for chunk in loads) == len(mcap)  # read once: no register rows
+    register = chunks[paths["warehouse_amr_assets.csv"]]
+    assert sum(chunk in register for chunk in loads) == 2 * len(register)  # tables, then rows
