@@ -87,11 +87,7 @@ def test_every_bag_lands_read_by_rosbag1_and_the_recording_by_mcap(
     transforms = {t.id: t.adapter_id for t in package.receipt.transforms}
     readers = {}
     for source in package.receipt.sources:
-        derived = {
-            "neptune.grouping",
-            "neptune.introspection",
-            "neptune.clocks",
-        }  # interpretation, not readers
+        derived = {"neptune.grouping", "neptune.introspection"}  # interpretation, not readers
         names = [transforms[t] for t in source.read_by if transforms[t] not in derived]
         readers[getattr(source.location, "path", "")] = names
     assert readers["same_recording.mcap"] == ["mcap"]

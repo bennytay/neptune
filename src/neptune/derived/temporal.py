@@ -211,9 +211,12 @@ def _time(row: Mapping[str, object], index: int) -> int | None:
 
 
 def _co_recorded(index: int) -> Callable[[Mapping[str, object]], tuple[int, int] | None]:
+    """A row's two clock readings; a zero reading is the common "not set" (an MCAP writer that
+    never fills ``publish_time``, a ROS header never stamped), so it is no anchor."""
+
     def pair(row: Mapping[str, object]) -> tuple[int, int] | None:
         source, target = _time(row, index), _time(row, 0)
-        return None if source is None or target is None else (source, target)
+        return None if not source or not target else (source, target)
 
     return pair
 
@@ -341,7 +344,8 @@ class _Pass:
         line = fit_line(pairs, self.config.max_rate_denominator)
         records = (stream.id, task.source)
         details: dict[str, JsonValue] = {"rule": task.rule, "source": task.source}
-        details["target"] = task.target
+        if task.target in self.domains:  # a found clock is written only once it has a reading
+            details["target"] = task.target
         if line is FitProblem.NO_ANCHORS:
             self.finding(
                 "anchors_absent",

@@ -72,7 +72,7 @@ def test_every_log_lands_read_by_flightlog_inside_the_sandbox(
         source.location.path: [
             transforms[t]
             for t in source.read_by
-            if transforms[t] not in {"neptune.grouping", "neptune.introspection", "neptune.clocks"}
+            if transforms[t] not in {"neptune.grouping", "neptune.introspection"}
         ]
         for source in package.receipt.sources
     }

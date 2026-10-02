@@ -38,7 +38,9 @@ does not. Forces:
      (`vehicle_gps_position`, `sensor_gps`; microseconds, epoch `unix`, timescale `posix`; 0 means
      no time) and ArduPilot `GWk`,`GMS` (`GPS`, `GPS2`; milliseconds, epoch and timescale `gps`;
      week 0 means no time). A found clock is kept only where some row gives it a reading.
-   A cell that is not a known integer in signed 64-bit range is never an anchor.
+   A cell that is not a known integer in signed 64-bit range is never an anchor, nor is a zero
+   reading in `stream.co_recorded`: zero is the common "not set" (an MCAP writer that never fills
+   `publish_time`, an unstamped ROS header), and a real reading at tick 0 costs one anchor.
 3. **The fit is exact and fixed.** Integer sums give the least-squares slope as a `Fraction`; the
    rate is that slope rounded with `limit_denominator(10^9)`; the anchor is the floored source mean
    and the rounded line value there. The residual is the largest distance, over every anchor, from
@@ -93,7 +95,8 @@ does not. Forces:
   them, and the receipt says so.
 - Packages with two or more clocks gain two derived tables, the `neptune.clocks` transform and
   findings, so their package ids change; one-clock packages are unchanged.
-- The pass reads each matched stream's runs twice, column-projected.
+- The pass reads each matched stream's runs twice, column-projected. Like validation, it reads
+  stored series, not source bytes, so its findings never list it in a source's `read_by`.
 - Revisit when payload decoding lands (more anchor rules), when a clock relation proves
   non-affine over a run (piecewise maps, ADR 0050's revisit trigger), or when the Ledger needs a
   bound where only a latency estimate exists.

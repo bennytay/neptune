@@ -424,6 +424,7 @@ def test_hostile_cells_are_never_anchors() -> None:
             {"time/0": 2**64, "time/1": 1, "time/2": 1},
             {"time/0": "10", "time/1": 1, "time/2": 1},
             {"time/0": None, "time/1": 1, "time/2": 1},
+            {"time/0": 5, "time/1": 0, "time/2": 0},  # never stamped: zero is "not set"
         ]
     }
     found = align_clocks(records, reader(rows))

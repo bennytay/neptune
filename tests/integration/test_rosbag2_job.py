@@ -68,11 +68,7 @@ def test_each_file_is_read_by_the_adapter_that_claims_it(ingested: Ingested) -> 
     for source in package.receipt.sources:
         path = str(getattr(source.location, "path", ""))
         readers[path] = sorted(
-            {
-                transforms[t]
-                for t in source.read_by
-                if transforms[t] not in {"neptune.grouping", "neptune.clocks"}
-            }
+            {transforms[t] for t in source.read_by if transforms[t] != "neptune.grouping"}
         )
     for bag in BAGS:
         assert readers[f"{bag}/metadata.yaml"] == ["rosbag2"]
