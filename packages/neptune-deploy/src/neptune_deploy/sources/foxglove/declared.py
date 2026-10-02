@@ -183,17 +183,22 @@ class Declarer:
         self._host = host
         self._devices: dict[str, JsonObject] | None = None
         self._cache: OrderedDict[ExternalObjectRef, DeclaredRecording] = OrderedDict()
+        self._failed_reads = 0  # device-list requests that failed (their results are not kept)
 
     def declared(self, recording: "Recording") -> DeclaredRecording:
         """Declared metadata of ``recording``; the last few are kept, so a million-recording index
         does not become a million kept results."""
         if recording.location in self._cache:
             self._cache.move_to_end(recording.location)
-        else:
-            self._cache[recording.location] = self._declare(recording)
-            if len(self._cache) > MAX_DECLARED_CACHE:
-                self._cache.popitem(last=False)
-        return self._cache[recording.location]
+            return self._cache[recording.location]
+        failed = self._failed_reads
+        result = self._declare(recording)
+        if failed != self._failed_reads:
+            return result  # declared without the device list: asked for again next time
+        self._cache[recording.location] = result
+        if len(self._cache) > MAX_DECLARED_CACHE:
+            self._cache.popitem(last=False)
+        return result
 
     # --- Provenance ----------------------------------------------------------------------------
 
@@ -217,13 +222,19 @@ class Declarer:
     def devices(self) -> dict[str, JsonObject]:
         """Devices by id, from every page of ``GET /devices`` (empty, with a finding on failure)."""
         if self._devices is None:
-            self._devices = self._read_devices()
+            found, transient = self._read_devices()
+            if transient:
+                self._failed_reads += 1
+                return found  # a failed request is not kept: the next call asks again
+            self._devices = found
         return self._devices
 
-    def _read_devices(self) -> dict[str, JsonObject]:
+    def _read_devices(self) -> tuple[dict[str, JsonObject], bool]:
+        """The devices by id, and whether a request failed (a limit reached is not a failure)."""
         host = self._host
         found: dict[str, JsonObject] = {}
         offset = pages = invalid = held = 0
+        transient = False
         seen: set[str] = set()  # ids of every device entry seen, to notice a page served again
         while pages < MAX_PAGES:
             try:
@@ -231,12 +242,14 @@ class Declarer:
             except TransportError as exc:
                 code, details = failure(exc, "devices_failed")
                 host.report(code, host.listing_ref, {"page": pages, **details})
+                transient = True
                 break
             pages += 1
             if not page:
                 break
             offset += len(page)
             before = len(seen)
+            limited = False
             for item in page:
                 doc = strip_nulls(item)
                 seen.add(item_digest(item))
@@ -254,16 +267,19 @@ class Declarer:
                     continue
                 if held + weight > host.options.max_listing_bytes:
                     host.report("listing_limit", host.listing_ref, {"call": "devices"})
-                    return found  # the devices after this one are not covered
+                    limited = True  # the devices after this one are not covered
+                    break
                 if str(doc["id"]) not in found:
                     found[str(doc["id"])] = doc
                     held += weight
+            if limited:
+                break
             if len(seen) == before:
                 host.report("pagination_loop", host.listing_ref, {"call": "devices"})
                 break
         if invalid:
             host.report("record_invalid", host.listing_ref, {"call": "devices", "count": invalid})
-        return found
+        return found, transient
 
     # --- One recording -------------------------------------------------------------------------
 

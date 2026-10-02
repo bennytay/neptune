@@ -27,6 +27,7 @@ import threading
 import urllib.parse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Final, Protocol
 
 from neptune_deploy.sources.object_store.sigv4 import quote
@@ -331,7 +332,10 @@ class Transport:
         raise AssertionError("unreachable")
 
     def get(
-        self, path: str, query: Sequence[tuple[str, str]] = (), headers: Mapping[str, str] = {}
+        self,
+        path: str,
+        query: Sequence[tuple[str, str]] = (),
+        headers: Mapping[str, str] = MappingProxyType({}),
     ) -> Response:
         """Send ``GET path?query``. ``path`` is percent-encoded already; ``query`` is raw text,
         encoded here as ``sigv4.canonical_query`` encodes it, so what is signed is what is sent.
@@ -348,7 +352,7 @@ class Transport:
         method: str,
         path: str,
         query: Sequence[tuple[str, str]] = (),
-        headers: Mapping[str, str] = {},
+        headers: Mapping[str, str] = MappingProxyType({}),
         body: bytes | None = None,
     ) -> Response:
         self._network.require_network(self._purpose)

@@ -33,6 +33,7 @@ from test_deploy_foxglove_source import (
     declared_bytes,
     declared_of,
     fingerprint,
+    identifiers,
     online,
 )
 
@@ -818,3 +819,65 @@ def test_declared_values_are_bounded_text(tmp_path: Path) -> None:
     broken(fake, ARM, lambda r: r.update(key="k" * 5000))
     with connect(fake, tmp_path) as source:
         assert ARM not in listed(source)
+
+
+# --- Review fixes: the verification budget, unimported recordings, devices, compression --------
+
+
+def test_every_gone_check_counts_against_the_budget_whatever_the_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A narrowed listing leaves many recordings the API still has: each question is one of the
+    budget (ADR 0007 §5), found or not."""
+    monkeypatch.setattr("neptune_deploy.sources.foxglove.source.MAX_VERIFICATIONS", 2)
+    fake = FakeFoxglove()
+    ledger = SourceLedger()
+    with connect(fake, tmp_path) as source:
+        fingerprint(source, ledger, source.walk())
+    fake.requests.clear()
+    with connect(fake, tmp_path, ledger=ledger, device_id="dev_amr_07") as source:
+        assert listed(source) == [AMR]
+        discovery = source.discover(ledger)
+    assert discovery.gone == ()
+    checks = [r for r in fake.api_requests() if r.path.startswith("/v1/recordings/")]
+    assert len(checks) == 2
+    (finding,) = [f for f in source.findings() if f.code.endswith("gone_unverified")]
+    assert finding.details == {"count": 2}  # four candidates, two asked, two never asked
+
+
+def test_a_recording_not_yet_imported_may_lack_its_time_range_and_is_import_incomplete(
+    tmp_path: Path,
+) -> None:
+    fake = FakeFoxglove()
+    for recording in fake.recordings:
+        if recording["id"] == PENDING:
+            for name in ("start", "end", "path"):
+                recording.pop(name, None)
+    with connect(fake, tmp_path) as source:
+        walked = list(source.walk())
+    assert "import_incomplete" in {w.reason for w in walked if isinstance(w, SkippedObject)}
+    assert "deploy_foxglove.record_invalid" not in codes(source)
+    assert "deploy_foxglove.import_incomplete" in codes(source)
+
+
+def test_a_failed_device_list_is_asked_again_not_remembered(tmp_path: Path) -> None:
+    fake = FakeFoxglove()
+    with connect(fake, tmp_path, identifier_properties=["asset_tag"]) as source:
+        fake.status = {"/v1/devices": 500}
+        first = declared_of(source, AMR)
+        fake.status = {}
+        second = declared_of(source, AMR)
+    tag = ("foxglove.device_property.asset_tag", "AMR-0007")
+    assert tag not in identifiers(first) and tag in identifiers(second)
+    assert "deploy_foxglove.devices_failed" in codes(source)
+
+
+def test_no_compression_leaves_the_key_out_of_the_stream_request(tmp_path: Path) -> None:
+    fake = FakeFoxglove()
+    with connect(fake, tmp_path, compression="") as source:
+        entry = next(e for e in source.walk() if isinstance(e, StreamEntry))
+        fake.requests.clear()
+        with source.open(entry.location) as stream:
+            stream.read(10)
+    (post,) = [r for r in fake.requests if r.method == "POST"]
+    assert "compressionFormat" not in json.loads(post.body)

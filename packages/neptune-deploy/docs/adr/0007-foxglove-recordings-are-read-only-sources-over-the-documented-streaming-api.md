@@ -60,7 +60,8 @@ the bytes come from a generated stream behind a link the API names; a device's n
    operator's: `projectId` from the URL, and the options `device_id`, `device_name`, `start`, `end`. Every
    entry is checked against the documented shape and bounded (§8); a recording whose `importStatus` is not
    `complete` has no data to stream and is skipped with `import_incomplete` (counted by status), never
-   asserted gone. `importId`, `GET /data/imports` and `GET /data/coverage` are not used.
+   asserted gone. The status is read first: a recording that is not imported need not state
+   `start`, `end`, `path`, `createdAt` or `projectId`, and is not `record_invalid` for lacking them. `importId`, `GET /data/imports` and `GET /data/coverage` are not used.
 3. **Identity.** A recording is `ExternalObjectRef("deploy_foxglove", [<store>:]recording/<recording id>,
    <token>)`. The token is `import:<importedAt or ->;created:<createdAt>;size:<size>`, each part as the API
    states it. The project and the filters are not identity: they say what was asked for, and the same recording
@@ -101,7 +102,7 @@ the bytes come from a generated stream behind a link the API names; a device's n
    hold recordings another project's or device's source ingested. An unanswered or over-budget check is not
    gone (`gone_unverified`). An incomplete index asserts nothing gone.
 6. **Bytes: ranged reads of a stream, no export.** `POST /data/stream` with
-   `{"recordingId", "outputFormat": "mcap", "compressionFormat": <option, default lz4>, "includeAttachments": true}`
+   `{"recordingId", "outputFormat": "mcap", "compressionFormat": <option, default lz4; none leaves the key out>, "includeAttachments": true}`
    (no time window, no topic filter: the stream is the recording, so metadata and attachments are kept) returns
    a link, and `GET <link>` with `Range: bytes=a-b` and `Accept-Encoding: identity` returns the bytes. A link is
    good for 15 seconds, so none is kept: each ranged read asks for a fresh one, two requests, and the
@@ -117,7 +118,7 @@ the bytes come from a generated stream behind a link the API names; a device's n
      against the artifact's chunk hashes before serving a byte: a stream that differs between requests fails
      loudly and is never read as a mix.
    - **The link is untrusted.** It must be `https` (or `http` to loopback) at the API's own host and port, or a
-     host the operator declared in `link_hosts`; it may hold no user information, fragment, backslash, space or
+     host the operator declared in `link_hosts` (a host, on any port: the operator trusts the host); it may hold no user information, fragment, backslash, space or
      non-ASCII character, and no more than 8,192 characters; its query is sent verbatim. It never receives the
      API key. A redirect is never followed (`redirect_refused`). A `Content-Encoding` other than identity has
      no byte positions and is refused. The answer to a ranged read must be a `206` for exactly the bytes asked
@@ -147,7 +148,8 @@ the bytes come from a generated stream behind a link the API names; a device's n
      are kept for every page size; the finding says how many were covered. Pages are limited to 100,000, and a
      page that adds nothing new is a `pagination_loop`.
    - The device list is bounded by the same byte budget, a recording's topics by 10,000 and 16 MiB, and
-     `declared()` keeps only the last 256 results.
+     `declared()` keeps only the last 256 results. A device list that failed (a failed request, not a limit) is not remembered and a declaration made
+     without it is not kept: the next call asks again.
    - Every request has the transport's per-request deadline, so a server that trickles is cut off. Digits in
      headers are ASCII only. No URL, key, signature, link host or error text reaches a finding, an error or the
      transform: configuration errors do not repeat the URL they refuse.

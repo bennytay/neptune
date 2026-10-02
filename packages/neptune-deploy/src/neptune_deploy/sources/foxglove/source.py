@@ -77,7 +77,6 @@ from neptune_deploy.sources.object_store.source import (
 )
 from neptune_deploy.sources.object_store.transport import (
     HttpStatusError,
-    NetworkGate,
     ShortRead,
     TransportError,
 )
@@ -146,7 +145,6 @@ class FoxgloveSource:
         self,
         project: str | None,
         client: FoxgloveClient,
-        network: NetworkGate,
         options: Options,
         *,
         ledger: SourceLedger | None = None,
@@ -155,7 +153,6 @@ class FoxgloveSource:
         self.client = client
         self.options = options
         self.connector_id = CONNECTOR_ID
-        self._network = network
         self._ledger = ledger
         self._findings: dict[str, IngestFinding] = {}
         self._sizes: dict[ExternalObjectRef, StreamEntry | str] = {}
@@ -246,9 +243,14 @@ class FoxgloveSource:
         size = doc.get("size")
         if isinstance(size, bool) or not isinstance(size, int) or not 0 <= size < 2**63:
             raise Invalid("record_invalid")
-        for name in ("createdAt", "start", "end", "importStatus", "projectId"):
+        status = text(doc.get("importStatus"), MAX_TOKEN_PART)
+        # A recording that is not imported has no data to stream, and may have no time range or
+        # path yet: only an imported one must state them.
+        required = (
+            ("createdAt", "start", "end", "projectId", "path") if status == "complete" else ()
+        )
+        for name in required:
             text(doc.get(name), MAX_TOKEN_PART if name != "projectId" else MAX_ID)
-        text(doc.get("path"))
         if "importedAt" in doc:
             text(doc["importedAt"], MAX_TOKEN_PART)
         self._check_optional(doc)
@@ -258,7 +260,7 @@ class FoxgloveSource:
             raise Invalid("record_invalid") from exc
         if weight > MAX_DOCUMENT_BYTES:
             raise Invalid("record_invalid")
-        if doc["importStatus"] != "complete":
+        if status != "complete":
             raise Invalid("import_incomplete")
         token = f"import:{doc.get('importedAt', '-')};created:{doc['createdAt']};size:{size}"
         return Recording(self.ref(recording_id, token), recording_id, doc, weight)
@@ -419,14 +421,15 @@ class FoxgloveSource:
 
         candidates = absent_candidates(ledger, CONNECTOR_ID, self.scope, seen, blind=unused)
         gone: list[SourceRevision] = []
-        unverified = 0
+        unverified = checked = 0
         for revision in candidates:
             where = revision.location
             assert isinstance(where, ExternalObjectRef)
             recording_id = where.object_id[len(self.scope) :]
-            if len(gone) + unverified >= MAX_VERIFICATIONS or not valid_id(recording_id):
+            if checked >= MAX_VERIFICATIONS or not valid_id(recording_id):
                 unverified += 1
                 continue
+            checked += 1  # every question counts, whatever the answer
             try:
                 found = self.client.recording(recording_id)
             except TransportError:

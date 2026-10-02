@@ -208,12 +208,13 @@ class FoxgloveClient:
 
     def stream_link(self, recording_id: str) -> str:
         """A fresh download link for ``recording_id`` as MCAP (valid for a few seconds)."""
-        request: JsonValue = {
-            "compressionFormat": self._compression,
+        request: dict[str, JsonValue] = {
             "includeAttachments": True,
             "outputFormat": "mcap",
             "recordingId": recording_id,
         }
+        if self._compression:  # "" is no compression: the key is left out, not sent empty
+            request["compressionFormat"] = self._compression
         response = self.transport.post_stream_request(request, self._auth())
         document = parse_json(response.body(MAX_LINK_RESPONSE))
         if not isinstance(document, dict) or "link" not in document:

@@ -87,4 +87,4 @@ def foxglove_source(
         compression=parsed.compression,
         timeout=parsed.timeout,
     )
-    return FoxgloveSource(project, client, network, parsed, ledger=ledger)
+    return FoxgloveSource(project, client, parsed, ledger=ledger)
