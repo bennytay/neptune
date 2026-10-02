@@ -123,6 +123,9 @@ class ServiceNowSystem:
         page_size: int,
     ) -> None:
         self.api = api
+        self.declared_options: dict[str, dict[str, JsonValue]] = {
+            "tabular": {"csv_header": "first_row"}
+        }
         self.table = table
         self.columns = columns
         self.filter = flt

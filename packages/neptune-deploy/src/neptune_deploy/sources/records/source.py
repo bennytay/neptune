@@ -314,6 +314,14 @@ class RecordSource:
         """Where the next run may continue (``since``), or ``None`` to keep the previous cursor."""
         return self.listing().cursor
 
+    def ingest_options(self) -> dict[str, dict[str, JsonValue]]:
+        """Adapter options the snapshots need declared when they are ingested, by adapter id: a CSV
+        snapshot's first row is its header, which the compiler's tabular adapter reads only if told
+        (``csv_header: first_row``, root ADR 0042). The compiler has no way yet for a plugin Source
+        to declare them itself (ADR 0008 compiler gaps), so the caller writes them to the
+        manifest."""
+        return {adapter: dict(options) for adapter, options in self.system.declared_options.items()}
+
     def relations(self) -> tuple[Relation, ...]:
         """Each attachment's declared parent, in child id order."""
         by_id = {entry.id: entry for entry in self.listing().entries}

@@ -87,6 +87,7 @@ class DriveSystem:
         self, api: Api, drive: str, mime_types: frozenset[str] | None, page_size: int
     ) -> None:
         self.api = api
+        self.declared_options: dict[str, dict[str, JsonValue]] = {}
         self.drive = drive
         self.mime_types = mime_types
         self.page_size = page_size

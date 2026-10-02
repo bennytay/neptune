@@ -115,6 +115,7 @@ class JiraSystem:
         page_size: int,
     ) -> None:
         self.api = api
+        self.declared_options: dict[str, dict[str, JsonValue]] = {}
         self.page_size = page_size
         self.project = project
         self.fields = fields

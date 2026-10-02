@@ -50,6 +50,7 @@ def _plan(authority: str, path: str, options: Options) -> Plan:
 class ConfluenceSystem:
     def __init__(self, api: Api, space: str, page_size: int) -> None:
         self.api = api
+        self.declared_options: dict[str, dict[str, JsonValue]] = {}
         self.space = space
         self.page_size = page_size
 

@@ -8,11 +8,18 @@ It holds no policy (limits, ordering, findings, discovery), so the systems canno
 from collections.abc import Generator
 from typing import Protocol
 
+from neptune.model.jsonvalue import JsonValue
+from neptune_deploy.sources.records.http import Api
 from neptune_deploy.sources.records.model import Fetch, Page
 
 
 class System(Protocol):
     """What the source needs of a record system."""
+
+    api: Api
+    declared_options: dict[str, dict[str, JsonValue]]
+    # Compiler adapter options the snapshots need declared at ingest (``{adapter: {option: v}}``):
+    # a CSV snapshot's first row is its header, and the compiler never guesses one (root ADR 0042).
 
     def pages(self, since: str | None) -> Generator[Page, None, None]:
         """The feed's pages in order: every record if ``since`` is ``None``, else what changed

@@ -269,6 +269,9 @@ class RestSystem:
         self.profile = profile
         self.page_size = page_size
         self.attachments = attachments and profile.attachments is not None
+        self.declared_options: dict[str, dict[str, JsonValue]] = (
+            {"tabular": {"csv_header": "first_row"}} if profile.snapshot["format"] == "csv" else {}
+        )
 
     def pages(self, since: str | None) -> Generator[Page, None, None]:
         profile = self.profile
