@@ -74,7 +74,9 @@ case $path in
   */issues/7/comments) file=comments ;;
   */pulls/7/reviews) file=reviews ;;
   */pulls/7/files) file=files ;;
-  */commits/main/check-runs*) file=main-check-runs ;;
+  */commits\?sha=main*) file=main-commits ;;
+  */commits/aaaaaaa*/check-runs*) file=main-pending ;;
+  */commits/mmmmmmm*/check-runs*) file=main-check-runs ;;
   */check-runs*) file=check-runs ;;
   */compare/main...*) file=compare-pr ;;
   */compare/*...main) file=compare-main ;;
@@ -130,6 +132,8 @@ def _factory_merge(
         "reviews": [],
         "files": [{"filename": f} for f in files],
         "check-runs": runs("success"),
+        "main-commits": [{"sha": "a" * 40}, {"sha": "m" * 40}],
+        "main-pending": {"check_runs": [{"status": "in_progress", "conclusion": None}]},
         "main-check-runs": runs(main_check),
         "compare-pr": {"behind_by": behind, "merge_base_commit": {"sha": "b" * 40}},
         "compare-main": {"files": [{"filename": f} for f in main_files]},
@@ -143,6 +147,7 @@ def _factory_merge(
         "GH_FIXTURES": str(tmp_path),
         "DRY_RUN": "1",
         "FACTORY_MERGE_LOCK": str(tmp_path / "merge.lock"),
+        "FRESHNESS_REF": "HEAD",
     }
     return subprocess.run(
         ["bash", str(SCRIPTS / "factory-merge.sh"), "7", HEAD[:7]],
@@ -197,7 +202,7 @@ def test_factory_merge_merges_a_behind_pr_when_main_changed_elsewhere(tmp_path: 
         [_comment("OWNER", "MERGE")],
         files=("src/neptune/adapters/mcap/adapter.py",),
         behind=3,
-        main_files=("src/neptune/adapters/urdf/adapter.py", "packages/neptune-ledger/src/x.py"),
+        main_files=("packages/neptune-ledger/src/x.py", "packages/neptune-memory/src/y.py"),
     )
     assert result.returncode == 0, result.stderr
     assert "3 commit(s) behind main" in result.stderr
@@ -215,15 +220,24 @@ def test_factory_merge_asks_for_a_refresh_when_main_changed_what_the_pr_reaches(
         main_files=("src/neptune/model/time.py",),
     )
     assert result.returncode == 1
-    assert "needs a refresh (the compiler core changed under adapter:mcap)" in result.stderr
+    assert "needs a refresh (main changed inputs to neptune)" in result.stderr
 
 
-@pytest.mark.parametrize(("labels", "accepted"), [((), False), (("fix-main",), True)])
+@pytest.mark.parametrize(
+    ("main_check", "labels", "accepted"),
+    [
+        ("failure", (), False),
+        ("cancelled", (), False),
+        ("failure", ("fix-main",), True),
+        ("success", (), True),
+    ],
+)
 def test_factory_merge_stops_the_line_on_a_red_main(
-    tmp_path: Path, labels: tuple[str, ...], accepted: bool
+    tmp_path: Path, main_check: str, labels: tuple[str, ...], accepted: bool
 ) -> None:
+    """main's head is still running, so its parent's completed check decides."""
     result = _factory_merge(
-        tmp_path, [_comment("OWNER", "MERGE")], main_check="failure", labels=labels
+        tmp_path, [_comment("OWNER", "MERGE")], main_check=main_check, labels=labels
     )
     assert result.returncode == (0 if accepted else 1), result.stderr
     assert ("the latest check on main failed" in result.stderr) is not accepted

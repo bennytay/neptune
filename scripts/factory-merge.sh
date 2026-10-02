@@ -15,7 +15,8 @@
 # lock so coordinators merge one at a time, it refuses while the latest `check` on main failed (unless
 # the PR carries the `fix-main` label), and, when the PR is behind main, asks scripts/merge_freshness.py
 # whether anything main changed since the merge base could change the jobs that tested the PR; if so it
-# refuses with "needs a refresh" and the reason, otherwise it merges the PR as it stands.
+# refuses with "needs a refresh" and the reason, otherwise it merges the PR as it stands. The red-main
+# test uses the newest main commit whose `check` completed (failure, cancelled, timed_out count red).
 #
 # Then runs `gh pr merge --squash --auto --match-head-commit <head>` with the PR title (#N) as the
 # commit title and the PR body as the commit message, so the queue merges it. If GitHub rejects
@@ -52,10 +53,9 @@ repo=${GH_REPO:-$(gh repo view --json nameWithOwner --jq .nameWithOwner)}
 
 # One merge at a time on this machine: every coordinator's decision sees the main the merge lands on.
 lock=${FACTORY_MERGE_LOCK:-$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo /tmp)/factory-merge.lock}
-if command -v flock >/dev/null; then
-  exec 9>"$lock"
-  flock -w "${LOCK_TIMEOUT:-1800}" 9 || refuse "another merge held $lock for ${LOCK_TIMEOUT:-1800}s"
-fi
+command -v flock >/dev/null || refuse "flock is not installed (util-linux); merges must be serialised"
+exec 9>"$lock"
+flock -w "${LOCK_TIMEOUT:-1800}" 9 || refuse "another merge held $lock for ${LOCK_TIMEOUT:-1800}s"
 
 # mergeable_state reads "unknown" for a few seconds after a push while GitHub recomputes it.
 pull=""
@@ -101,12 +101,17 @@ if [[ -z $conclusion ]]; then
 fi
 [[ $conclusion == success ]] || refuse "check for $head is '${conclusion:-missing}', not 'success'"
 
-files=$(gh api --paginate "repos/$repo/pulls/$pr/files" --jq '.[].filename')
+files=$(gh api --paginate "repos/$repo/pulls/$pr/files" --jq '.[] | .filename, (.previous_filename // empty)')
 
 # Stop the line: nothing merges on top of a red main except a fix for it.
-main_check=$(gh api "repos/$repo/commits/main/check-runs?check_name=check" \
-  --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at) | last | .conclusion // empty')
-if [[ $main_check == failure ]] &&
+# The newest main commit whose `check` has completed decides; one still running defers to its parent.
+main_check=""
+for sha in $(gh api "repos/$repo/commits?sha=main&per_page=${MAIN_LOOKBACK:-20}" --jq '.[].sha'); do
+  main_check=$(gh api "repos/$repo/commits/$sha/check-runs?check_name=check" \
+    --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at) | last | .conclusion // empty')
+  [[ -z $main_check ]] || break
+done
+if [[ $main_check =~ ^(failure|cancelled|timed_out|action_required)$ ]] &&
   ! jq -e '[.labels[]?.name] | index("fix-main")' <<<"$pull" >/dev/null; then
   refuse "the latest check on main failed; fix main first (label the fixing PR 'fix-main')"
 fi
@@ -115,14 +120,20 @@ fi
 # changed (scripts/merge_freshness.py); the compare API lists at most 300 files, so more is a refresh.
 compare=$(gh api "repos/$repo/compare/main...$head" --jq '{behind: .behind_by, base: .merge_base_commit.sha}')
 if [[ $(jq -r .behind <<<"$compare") != 0 ]]; then
-  main_files=$(gh api "repos/$repo/compare/$(jq -r .base <<<"$compare")...main" --jq '.files[].filename')
+  main_files=$(gh api "repos/$repo/compare/$(jq -r .base <<<"$compare")...main" \
+    --jq '.files[] | .filename, (.previous_filename // empty)')
   [[ $(grep -c . <<<"$main_files") -lt 300 ]] ||
     refuse "needs a refresh: main changed 300+ files since the merge base; merge origin/main into it"
   scratch=$(mktemp -d)
   trap 'rm -rf "$scratch"' EXIT
   printf '%s\n' "$files" >"$scratch/pr"
   printf '%s\n' "$main_files" >"$scratch/main"
-  freshness=$(python3 "$here/merge_freshness.py" "$scratch/pr" "$scratch/main") ||
+  # The workspace graph as main has it, not as this checkout has it.
+  ref=${FRESHNESS_REF:-origin/main}
+  if [[ -z ${FRESHNESS_REF:-} ]]; then
+    git -C "$here" fetch -q origin main || refuse "could not fetch origin/main to read the workspace graph"
+  fi
+  freshness=$(python3 "$here/merge_freshness.py" "$scratch/pr" "$scratch/main" "$ref") ||
     refuse "needs a refresh (${freshness#refresh: }); merge origin/main into it, wait for check, re-verdict"
   echo "#$pr is $(jq -r .behind <<<"$compare") commit(s) behind main; nothing it reaches changed, merging as is" >&2
 fi
