@@ -17,6 +17,9 @@ workspace allows it.
 - ``client``: ``Neptune`` and ``AsyncNeptune`` (one surface), ``Ingestion`` and
   ``AsyncIngestion`` (a job on its own thread), and the shorthands ``ingest`` and ``dry_run``.
 - ``result``: ``IngestResult``, ``read_package``, and ``committed_result`` (ADR 0035 §3).
+- ``contents``: ``run_contents``, ``RunContents`` and ``StreamContents``: what each run of a
+  package contains (streams, declared field paths, inferred semantics) without decoding a
+  message (ADR 0049).
 - ``errors``: ``NeptuneError`` and its subclasses, each with a stable ``code``.
 
 Imports the runtime, the store and the adapters; the CLI (MVL-11) wraps this.
@@ -43,6 +46,7 @@ from neptune.sdk.client import (
     dry_run,
     ingest,
 )
+from neptune.sdk.contents import RunContents, StreamContents, run_contents
 from neptune.sdk.errors import (
     ERRORS,
     ConfigurationError,
@@ -92,7 +96,9 @@ __all__ = [
     "PackageInvalidError",
     "Phase",
     "PublishIncompleteError",
+    "RunContents",
     "SandboxUnavailableError",
+    "StreamContents",
     "UnsupportedError",
     "Workspace",
     "WorkspaceUnusableError",
@@ -101,4 +107,5 @@ __all__ = [
     "dry_run",
     "ingest",
     "read_package",
+    "run_contents",
 ]
