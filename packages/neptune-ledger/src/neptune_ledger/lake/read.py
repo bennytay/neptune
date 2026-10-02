@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Protocol
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from neptune.model.ids import parse_record_id
@@ -27,6 +28,7 @@ from neptune_ledger.lake.store import Location, S3Settings, arrow_s3
 
 FIXED: Final = ("package_id", "stream_id", "clock", "ticks", "seq")
 _PARTITION: Final = "__partition"
+_SCAN: Final = "__scan"
 _PREFIXES: Final = ("value/", "state/", "locator/")
 
 
@@ -124,6 +126,8 @@ def plan_series(
         first[clock] = min(first.get(clock, file.registration_key), file.registration_key)
     order = sorted(first, key=lambda clock: (first[clock], clock.encode("utf-8")))
     rank = {clock: index for index, clock in enumerate(order)}
+    # Scans in output order, so a scan's index sorts as (partition, package id, stream id) do.
+    readable.sort(key=lambda c: (rank[c[1]], c[0].package_id.encode(), c[0].stream_id.encode()))
     scans = tuple(
         Scan(file, clock, str(file.time_column(clock)), window, rank[clock])
         for file, clock, window in readable
@@ -167,11 +171,14 @@ def _columns(schemas: list[Any], columns: Sequence[str] | None) -> tuple[str, ..
     )
 
 
+_ID: Final = pa.dictionary(pa.int32(), pa.string())
+
+
 def _output_schema(schemas: list[Any], columns: tuple[str, ...]) -> Any:
     fields = [
-        pa.field("package_id", pa.string(), nullable=False),
-        pa.field("stream_id", pa.string(), nullable=False),
-        pa.field("clock", pa.string(), nullable=False),
+        pa.field("package_id", _ID, nullable=False),
+        pa.field("stream_id", _ID, nullable=False),
+        pa.field("clock", _ID, nullable=False),
         pa.field("ticks", pa.int64()),
         pa.field("seq", pa.int64(), nullable=False),
     ]
@@ -190,36 +197,35 @@ def _ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def _text(value: str) -> str:
-    """A validated id as a SQL string literal (ids are hex and ASCII; quoted defensively)."""
-    return "'" + value.replace("'", "''") + "'"
-
-
 def _tick(value: int) -> str:
     # -2^63 is not a literal in either dialect (it parses as the negation of 2^63).
     return f"({value + 1} - 1)" if value == INT64_MIN else str(value)
 
 
 def series_sql(plan: SeriesPlan, tables: Sequence[str]) -> str:
-    """The plan as one SQL statement over ``tables`` (one per scan), in both engines' dialect."""
+    """The plan as one SQL statement over ``tables`` (one per scan), in both engines' dialect.
+
+    Each row carries its scan's index, not its ids: scans are in output order, so ordering by
+    the index orders by (partition, package id, stream id), and ``_conform`` turns the index into
+    dictionary-encoded id columns without the engine materialising a string per row.
+    """
     branches = []
-    for scan, table in zip(plan.scans, tables, strict=True):
+    for index, (scan, table) in enumerate(zip(plan.scans, tables, strict=True)):
         ticks = _ident(scan.column)
         values = "".join(f", {_ident(c)}" for c in plan.columns)
         branch = (
-            f"SELECT {scan.partition} AS {_PARTITION}, {_text(scan.file.package_id)} AS package_id,"
-            f" {_text(scan.file.stream_id)} AS stream_id, {_text(scan.clock)} AS clock,"
-            f" {ticks} AS ticks, seq{values} FROM {table}"
+            f"SELECT CAST({scan.partition} AS INTEGER) AS {_PARTITION},"
+            f" CAST({index} AS INTEGER) AS {_SCAN}, {ticks} AS ticks, seq{values} FROM {table}"
         )
         if scan.window is not None:
             low, high = _tick(scan.window.first), _tick(scan.window.last)
             branch += f" WHERE {ticks} >= {low} AND {ticks} <= {high}"
         branches.append(branch)
-    keep = ", ".join([*FIXED, *(_ident(c) for c in plan.columns)])
+    keep = ", ".join([_SCAN, "ticks", "seq", *(_ident(c) for c in plan.columns)])
     union = " UNION ALL ".join(branches)
     return (
         f"SELECT {keep} FROM ({union}) AS rows"
-        f" ORDER BY {_PARTITION}, ticks NULLS LAST, package_id, stream_id, seq"
+        f" ORDER BY {_PARTITION}, ticks NULLS LAST, {_SCAN}, seq"
     )
 
 
@@ -238,9 +244,26 @@ def _empty(plan: SeriesPlan) -> Any:
     return plan.schema.empty_table()
 
 
+def _ids(scan_index: Any, per_scan: list[str]) -> Any:
+    """A dictionary-encoded id column: each row's scan's id, from the scan index column."""
+    values = sorted(set(per_scan), key=lambda v: v.encode("utf-8"))
+    position = {v: i for i, v in enumerate(values)}
+    mapping = pa.array([position[v] for v in per_scan], pa.int32())
+    indices = pc.take(mapping, scan_index.combine_chunks())
+    return pa.DictionaryArray.from_arrays(indices, pa.array(values, pa.string()))
+
+
 def _conform(table: Any, plan: SeriesPlan) -> Any:
-    """The engine's table in the plan's schema: string views and list field names normalised."""
-    arrays = [table.column(i).cast(f.type) for i, f in enumerate(plan.schema)]
+    """The engine's table in the plan's schema: the scan index made into id columns, string
+    views and list field names normalised."""
+    scan_index = table.column(0).cast(pa.int32())
+    arrays = [
+        _ids(scan_index, [s.file.package_id for s in plan.scans]),
+        _ids(scan_index, [s.file.stream_id for s in plan.scans]),
+        _ids(scan_index, [s.clock for s in plan.scans]),
+    ]
+    # The engine's columns after the scan index are the schema's after the three id columns.
+    arrays += [table.column(i - 2).cast(f.type) for i, f in enumerate(plan.schema) if i >= 3]
     return pa.Table.from_arrays(arrays, schema=plan.schema)
 
 

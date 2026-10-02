@@ -7,6 +7,7 @@ push each window down to the scan, and leave every byte where it was.
 """
 
 import json
+import re
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
@@ -598,3 +599,46 @@ def test_series_files_say_which_column_holds_each_clock(
     assert [file.time_column(c) for c in mobile["odom"].clocks] == ["time/0", "time/1"]
     assert file.time_column("rec:sha256:" + "7" * 64) is None
     assert file.settings["row_group_rows"] == 65_536
+
+
+# --- the budget: a 10^6-row window under 200 ms ----------------------------------------------
+
+BUDGET_ROWS = 1_000_000
+BUDGET_SECONDS = 0.2
+
+
+@pytest.mark.slow
+def test_a_million_row_window_reads_under_200_ms(
+    catalog: PostgresCatalog, series: SeriesCatalog, tmp_path: Path
+) -> None:
+    """MVL-95's acceptance: a mobile base's wheel odometry at 100 Hz for 3 h 20 min (1.2 M rows,
+    19 row groups), a window of exactly 10^6 of them. Timed end to end per read: resolving the
+    file from the catalog and the manifest, planning (one footer read), and the engine's scan
+    into one Arrow table. The median of five reads after a warm-up must hold the budget."""
+    from time import perf_counter
+
+    rows_ = subset(*MOBILE)
+    odom = stream_of(rows_, "/wheel_odom")
+    step = 10_000_000  # 100 Hz in ns
+    package = write(
+        rows_, tmp_path / "long", {"/wheel_odom": batch(odom, 1_200_000, START, step, odometry)}
+    )
+    register(catalog, tmp_path / "long")
+    first = START + 100_000 * step
+    window = TimeWindow(odom.clocks[0], first, first + (BUDGET_ROWS - 1) * step)
+    pairs = [(package, odom.id)]
+    timings = {}
+    for reader in READERS:
+        laps = []
+        for _ in range(6):
+            began = perf_counter()
+            plan = plan_series(series.files(pairs).files, windows=[window])
+            table = reader.read(plan)
+            laps.append(perf_counter() - began)
+            assert table.num_rows == BUDGET_ROWS
+        timings[reader.name] = sorted(laps[1:])[2]
+    assert table.column("seq")[0].as_py() == 100_000
+    assert all(t < BUDGET_SECONDS for t in timings.values()), timings
+    analyzed = DataFusionReader().explain(plan, analyze=True)
+    pruned = re.search(r"row_groups_pruned_statistics=(\d+)", analyzed)
+    assert pruned and int(pruned.group(1)) >= 1, "row groups outside the window are not read"
