@@ -50,6 +50,7 @@ from neptune.derived.grouping import (
     BAG_METADATA,
     BAG_STORAGE,
     CONFIDENCE,
+    GROUPING_ID,
     NO_SESSION,
     SHARED_REFERENCE,
     TOO_MANY_SESSIONS,
@@ -77,8 +78,11 @@ from neptune.model.source import local_location
 from neptune.model.time import Epoch, Timescale
 from neptune.model.world import DocumentBlock, StructuredRecord, StructuredTable
 
-ASSEMBLY_ID: Final = "neptune.assembly"
-ASSEMBLY_VERSION: Final = "0.1.0"
+# The grouping producer at its next version: the same producer name, so consumers that look for
+# ``neptune.grouping`` keep finding the package's grouping, and a new version, so a new lineage
+# (ADR 0066 §7). v0 (``LayoutGrouper``) stays 0.1.0, the dry run's layout-only reading.
+ASSEMBLY_ID: Final = GROUPING_ID
+ASSEMBLY_VERSION: Final = "0.2.0"
 
 # Finding codes, ``<producer>.<name>``.
 LISTED_PART_MISSING: Final = f"{ASSEMBLY_ID}.listed_part_missing"

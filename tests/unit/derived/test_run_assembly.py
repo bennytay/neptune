@@ -172,7 +172,8 @@ def test_without_evidence_the_readings_are_v0s() -> None:
     assembled = RunAssembler().propose(tree)
     plain = LayoutGrouper().propose(tree)
     assert shape(assembled) == shape(plain)
-    assert assembled.transform.adapter_id == "neptune.assembly"
+    assert assembled.transform.adapter_id == "neptune.grouping"
+    assert assembled.transform.adapter_version == "0.2.0"
     assert assembled.transform.id != plain.transform.id
 
 
