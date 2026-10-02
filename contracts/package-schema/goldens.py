@@ -2,8 +2,9 @@
 
 ``scripts/contracts.py bump package-schema <version>`` runs this file and stores its output under
 ``v<version>/golden/``. It packages the compiler's four worked examples (a drone, a manipulator, a
-mobile robot and a quadruped; ``tests/fixtures/model/``) with ``neptune.store.package_files`` and
-keeps, per example, the manifest, the receipt and the first line of every non-empty record table.
+mobile robot and a quadruped; ``tests/fixtures/model/``) and the assertion adapter's three golden
+packages (``tests/golden/assertion/``, ADR 0062) with ``neptune.store.package_files`` and keeps,
+per package, the manifest, the receipt and the first line of every non-empty record table.
 Nothing is hand-written, and the same compiler gives the same bytes.
 
 Prints one JSON object: golden file name -> {"target": JSON pointer into the schema, "value"}.
@@ -18,15 +19,25 @@ from neptune.identity import canonical_json
 from neptune.model.kinds import RECORD_KINDS
 from neptune.store.package import MANIFEST, RECEIPT, package_files
 
-EXAMPLES: Final = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "model"
-NAMES: Final = ("drone", "manipulator", "mobile_robot", "quadruped")
+TESTS: Final = Path(__file__).resolve().parents[2] / "tests"
+# Golden name prefix -> the directory holding the package's records/ tables.
+PACKAGES: Final = {
+    **{
+        name: TESTS / "fixtures" / "model" / name
+        for name in ("drone", "manipulator", "mobile_robot", "quadruped")
+    },
+    **{
+        f"assertion_{name}": TESTS / "golden" / "assertion" / name
+        for name in ("cell_baseline", "fleet_identity", "retraction")
+    },
+}
 DOCUMENTS: Final = {MANIFEST: "#/$defs/PackageManifest", RECEIPT: "#/$defs/IngestReceipt"}
 
 
-def records(name: str) -> list[Any]:
-    """Every record of one worked example, read through the compiler's strict readers."""
+def records(root: Path) -> list[Any]:
+    """Every record of one package's tables, read through the compiler's strict readers."""
     found: list[Any] = []
-    for path in sorted((EXAMPLES / name / "records").glob("*.jsonl")):
+    for path in sorted((root / "records").glob("*.jsonl")):
         _, read = RECORD_KINDS[path.stem]
         found += [read(canonical_json.loads(line)) for line in path.read_bytes().splitlines()]
     return found
@@ -34,8 +45,8 @@ def records(name: str) -> list[Any]:
 
 def goldens() -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
-    for name in NAMES:
-        files = package_files(records(name))
+    for name, root in PACKAGES.items():
+        files = package_files(records(root))
         for document, target in DOCUMENTS.items():
             value = json.loads(files[document])
             out[f"{name}.{document}"] = {"target": target, "value": value}

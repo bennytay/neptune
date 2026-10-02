@@ -71,7 +71,15 @@ def test_compiler_owner_rule_holds() -> None:
 def test_package_schema_goldens_cover_four_robots_and_every_document() -> None:
     latest = _registry().latest("package-schema")
     robots = {name.split(".", 1)[0] for name in latest.goldens}
-    assert robots == {"drone", "manipulator", "mobile_robot", "quadruped"}
+    assert robots == {
+        "drone",
+        "manipulator",
+        "mobile_robot",
+        "quadruped",
+        "assertion_cell_baseline",  # human assertions (ADR 0062)
+        "assertion_fleet_identity",
+        "assertion_retraction",
+    }
     for robot in robots:
         assert latest.goldens[f"{robot}.manifest.json"] == "#/$defs/PackageManifest"
         assert latest.goldens[f"{robot}.receipt.json"] == "#/$defs/IngestReceipt"
@@ -93,11 +101,14 @@ def test_catalog_api_is_owned_by_the_ledger_export() -> None:
 
 def test_committed_compatibility_matrix_is_current() -> None:
     """contracts/compatibility.md is generated; a PR that changes the registry regenerates it."""
-    text = tool.render_matrix(_registry())
+    registry = _registry()
+    text = tool.render_matrix(registry)
     assert text == (CONTRACTS / "compatibility.md").read_text("utf-8")
-    assert text == tool.render_matrix(_registry())
-    assert "| `neptune-ledger` | 3.0.0 current |" in text
-    assert "| `catalog-api` | `neptune-ledger` | active | 1.3.0 | — |" in text
+    assert text == tool.render_matrix(registry)
+    pinned = registry.lock()["neptune-ledger"]["package-schema"]
+    assert f"| `neptune-ledger` | {pinned} current |" in text
+    catalog = ".".join(map(str, registry.versions("catalog-api")[-1].version))
+    assert f"| `catalog-api` | `neptune-ledger` | active | {catalog} | — |" in text
 
 
 def test_golden_generator_is_deterministic() -> None:
@@ -215,6 +226,7 @@ def test_a_minor_version_must_accept_its_majors_goldens(registry: Any) -> None:
 def test_matrix_follows_the_registry(registry: Any, capsys: pytest.CaptureFixture[str]) -> None:
     root = ["--root", str(registry.root)]
     assert tool.main([*root, "matrix", "--check"]) == 0
+    pinned = registry.lock()["neptune-ledger"]["package-schema"]
     newer = _next(registry, "package-schema")
     _publish(registry, "package-schema", newer)
     assert tool.main([*root, "matrix", "--check"]) == 1
@@ -222,7 +234,7 @@ def test_matrix_follows_the_registry(registry: Any, capsys: pytest.CaptureFixtur
     assert tool.main([*root, "matrix"]) == 0
     text = _text(registry.root / "compatibility.md")
     assert f"| `package-schema` | `neptune` | active | {newer} | — |" in text
-    assert "| `neptune-ledger` | 3.0.0 behind |" in text
+    assert f"| `neptune-ledger` | {pinned} behind |" in text
     assert tool.main([*root, "matrix", "--check"]) == 0
     lock = registry.lock()
     registry.write_lock({**lock, "neptune-deploy": {}})
