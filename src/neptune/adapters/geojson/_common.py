@@ -161,6 +161,12 @@ CODES: Final[dict[str, tuple[FindingCategory, Severity, str]]] = {
         _S.ERROR,
         "the root is not a GeoJSON object: nothing is read",
     ),
+    "number_too_long": (
+        _C.LIMIT,
+        _S.WARNING,
+        "an integer literal has more digits than the interpreter reads (4300 by default): its"
+        " value is NotCovered and the rest of the file is read",
+    ),
     "position_budget": (
         _C.LIMIT,
         _S.WARNING,

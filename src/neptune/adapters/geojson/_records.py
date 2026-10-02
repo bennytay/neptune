@@ -31,6 +31,7 @@ from neptune.adapters.geojson._scan import (
     ArrayState,
     Deep,
     Member,
+    Overlong,
     Reader,
     ScanError,
     array_items,
@@ -209,6 +210,7 @@ def root_output(
 
 # --- Features ----------------------------------------------------------------------------------
 
+_HUGE: Final = object()  # a leaf whose integer literal has too many digits for ``json``
 _NOT_READ: Final = object()  # a leaf that is a container (empty, repeated or too deep): not read
 
 
@@ -229,7 +231,7 @@ def _escape(name: str) -> str:
 
 def _children(text: str, member: Member) -> list[Member]:
     try:
-        if isinstance(member.value, dict):
+        if text[member.start : member.start + 1] == "{":
             return object_members(text, member.start)[0]
         return array_items(text, member.start)[0]
     except ScanError:
@@ -252,17 +254,25 @@ def _leaves(text: str, top: list[Member], limits: Limits) -> tuple[list[_Leaf], 
         pointer = f"{prefix}/{member.name if is_array else _escape(member.name)}"
         repeated = not is_array and counts[member.name] > 1
         value = member.value
-        container = isinstance(value, dict | list) and bool(value)
+        container = (isinstance(value, dict | list) and bool(value)) or (
+            isinstance(value, Overlong) and value.container
+        )
         if container and not repeated and depth < limits.max_depth:
             children = _children(text, member)
-            counted = Counter(m.name for m in children) if isinstance(value, dict) else Counter()
-            stack.append((iter(children), pointer, depth + 1, isinstance(value, list), counted))
+            is_object = text[member.start : member.start + 1] == "{"
+            counted = Counter(m.name for m in children) if is_object else Counter()
+            stack.append((iter(children), pointer, depth + 1, not is_object, counted))
             continue
         too_deep = too_deep or (container and not repeated)
         if len(found) >= limits.max_properties:
             truncated = True
             break
-        leaf_value = _NOT_READ if isinstance(value, dict | list | Deep) else value
+        if isinstance(value, Overlong):
+            leaf_value = _HUGE
+        elif isinstance(value, dict | list | Deep):
+            leaf_value = _NOT_READ
+        else:
+            leaf_value = value
         found.append(
             _Leaf(
                 pointer,
@@ -289,6 +299,8 @@ def _property_cell(
         return KnownAbsent(provenance), ""
     if value is _NOT_READ:
         return Unknown(provenance), ""
+    if value is _HUGE:
+        return NotCovered(provenance), "huge"
     if isinstance(value, bool):
         return Known(value, provenance), ""
     if isinstance(value, str):
@@ -427,6 +439,11 @@ def _id_cell(feature: _Feature, member: Member | None) -> Knowledge[CellValue]:
         return Unknown(observed(feature.evidence, config))
     provenance = stated(feature.span(member), config)
     value = member.value
+    if isinstance(value, Overlong):
+        feature.problem(
+            "number_too_long", "its id has an integer literal with too many digits", label="id"
+        )
+        return NotCovered(provenance)
     if value is None:
         return KnownAbsent(provenance)
     if isinstance(value, str):
@@ -455,6 +472,13 @@ def _records(feature: _Feature) -> list[EvidenceRecord]:
         geometry_evidence = feature.span(geometry)
         if geometry.value is None:
             cells += [KnownAbsent(stated(geometry_evidence, config))] * 8
+        elif isinstance(geometry.value, Overlong):
+            feature.problem(
+                "number_too_long",
+                "its geometry holds an integer literal with too many digits: it is NotCovered",
+                label="geometry",
+            )
+            cells += [NotCovered(observed(geometry_evidence, config))] * 8
         elif geometry.value is DEEP:
             feature.problem("too_deep", "its geometry nests deeper than the interpreter reads")
             cells += [Unknown(observed(geometry_evidence, config))] * 8
@@ -476,7 +500,10 @@ def _records(feature: _Feature) -> list[EvidenceRecord]:
     ]
     top: list[Member] = []
     props = feature.one("properties")
-    if props is not None and isinstance(props.value, dict):
+    if props is not None and (
+        isinstance(props.value, dict)
+        or (isinstance(props.value, Overlong) and props.value.container)
+    ):
         top = _children(feature.text, props)
         out.extend(_property_rows(feature, top))
     elif props is not None and props.value is DEEP:
@@ -512,6 +539,12 @@ def _property_rows(feature: _Feature, top: list[Member]) -> list[EvidenceRecord]
             feature.problem(
                 "duplicate_member",
                 "a property name is repeated: those members are Unknown",
+                label="properties",
+            )
+        elif problem == "huge":
+            feature.problem(
+                "number_too_long",
+                "an integer literal has too many digits to read: that value is NotCovered",
                 label="properties",
             )
         elif problem == "surrogate":

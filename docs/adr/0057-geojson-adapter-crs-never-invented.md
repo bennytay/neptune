@@ -86,7 +86,11 @@ One adapter, `geojson`, emitting existing kinds only (no schema change).
    `max_feature_bytes` (8 MiB); a feature or root member over it, and what follows, is not read
    (`feature_too_large`). `json`'s C scanner decodes each value and says where it ends; a value
    nested beyond the interpreter's limit is skipped by an iterative bracket count and reported
-   `too_deep`, never recursed into. Geometries are walked with a stack. Settings: `max_source_bytes`
+   `too_deep`, never recursed into; one linear pass, so an unterminated string ends the count.
+   An integer literal over the interpreter's digit limit (4,300 by default) is valid JSON that
+   `json` refuses: that value, not the file, is skipped (`number_too_long`, the cell `NotCovered`)
+   and the features after it are read; a skipped feature is not checked against the RFC 7946
+   default. Geometries are walked with a stack. Settings: `max_source_bytes`
    (1 GiB), `max_features` (10 M), `max_positions` (500,000 per geometry; over it the geometry is
    not walked and its bounds are `Unknown`: `position_budget`), `max_properties` (4,096 per
    feature), `max_depth` (32, for GeometryCollections and properties). Blocks of features are cut by

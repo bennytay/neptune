@@ -695,16 +695,49 @@ def test_huge_and_non_finite_numbers_never_raise() -> None:
     assert values["/c"].value is NonFinite.NAN
 
 
-def test_an_integer_literal_over_the_interpreters_digit_limit_stops_the_read() -> None:
-    data = collection(
-        b'{"type": "Feature", "geometry": {"type": "Point", "coordinates": ['
-        + b"9" * 5000
-        + b", 1]}}",
-        GOOD_POINT,
+def test_an_integer_literal_over_the_digit_limit_skips_that_value_not_the_file() -> None:
+    digits = b"9" * 5000
+    wide = b'{"type": "Feature", "geometry": null, "properties": {"a": ' + digits + b', "b": 2}}'
+    point = b'{"type": "Feature", "geometry": {"type": "Point", "coordinates": [%s, 1]}}' % digits
+    nested = b'{"type": "Feature", "geometry": null, "properties": {"o": {"n": [' + digits + b"]}}}"
+    output = run(collection(GOOD_POINT, wide, point, nested, GOOD_POINT))
+    assert len(feature_rows(output)) == 5  # every feature after the long literal is read
+    assert "json_syntax" not in codes(output)
+    named: list[Any] = []
+    for found in output.findings():
+        if found.code.endswith("number_too_long"):
+            named += list(found.details["features"])  # type: ignore[arg-type]
+    assert sorted(named) == [1, 2, 3]  # each feature is named
+    crs = artifact(output).crs
+    assert isinstance(crs, Known) and crs.value == CrsCode("OGC", "CRS84")  # not Unknown
+    values = {(r.cells[0].value, r.cells[1].value): r.cells[2] for r in rows(output, "properties")}
+    assert isinstance(values[(1, "/a")], NotCovered)
+    assert values[(1, "/b")].value == 2  # the rest of its own properties is read
+    assert isinstance(values[(3, "/o/n/0")], NotCovered)
+    geometry = feature_rows(output)[2].cells[1:]
+    assert all(isinstance(cell, NotCovered) for cell in geometry)
+
+
+def test_an_integer_literal_over_the_digit_limit_in_the_root_leaves_the_crs_alone() -> None:
+    data = (
+        b'{"type": "FeatureCollection", "big": ' + b"9" * 5000 + b", "
+        b'"crs": {"type": "name", "properties": {"name": "EPSG:3857"}}, "features": ['
+        + GOOD_POINT
+        + b"]}"
     )
     output = run(data)
-    assert "json_syntax" in codes(output)
-    assert isinstance(artifact(output).crs, Unknown)
+    assert artifact(output).crs.value == CrsCode("EPSG", "3857")
+    assert "number_too_long" in codes(output)
+    assert len(feature_rows(output)) == 1
+
+
+def test_an_integer_literal_over_the_digit_limit_in_an_id_is_not_covered() -> None:
+    data = collection(
+        b'{"type": "Feature", "id": ' + b"9" * 5000 + b', "geometry": null, "properties": {}}'
+    )
+    output = run(data)
+    assert isinstance(feature_rows(output)[0].cells[0], NotCovered)
+    assert "number_too_long" in codes(output)
 
 
 def test_millions_of_positions_are_a_budget_and_a_finding() -> None:

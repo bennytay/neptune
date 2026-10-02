@@ -25,6 +25,7 @@ from neptune.adapters.contract import SourceReader
 
 _WS: Final = " \t\n\r"
 _DECODER: Final = json.JSONDecoder()
+_INTEGER: Final = re.compile(r"-?[0-9]+")
 _STRUCTURE: Final = re.compile(r'["\[\]{}]')
 WINDOW: Final = 1024 * 1024  # bytes a window starts with
 _SLACK: Final = 8192  # an error this close to a window's end may be the window's
@@ -37,10 +38,24 @@ class Deep:
 DEEP: Final = Deep()
 
 
+class Overlong(Deep):
+    """The value of a member or element holding an integer literal over the interpreter's digit
+    limit (``sys.get_int_max_str_digits``, 4300 by default): it is valid JSON that ``json``
+    refuses to read. ``container`` is whether the value is an array or object (which may hold
+    other values worth reading) and not the number itself."""
+
+    def __init__(self, *, container: bool) -> None:
+        self.container = container
+
+
+HUGE_NUMBER: Final = Overlong(container=False)
+HUGE_CONTAINER: Final = Overlong(container=True)
+
+
 class ScanError(Exception):
-    """The text breaks off or breaks its grammar. ``kind`` is ``truncated``, ``syntax``,
-    ``number`` (an integer literal over the interpreter's digit limit) or ``large`` (a value that
-    does not fit the cap); ``offset`` is where, counted in the text read."""
+    """The text breaks off or breaks its grammar. ``kind`` is ``truncated``, ``syntax`` or
+    ``large`` (a value that does not fit the cap); ``offset`` is where, counted in the text
+    read."""
 
     def __init__(self, kind: str, offset: int, reason: str) -> None:
         super().__init__(f"{kind} at {offset}: {reason}")
@@ -63,8 +78,10 @@ def _decode_error(text: str, error: json.JSONDecodeError) -> ScanError:
 
 
 def decode_value(text: str, i: int) -> tuple[object, int]:
-    """The JSON value at ``i`` and where it ends. A value nested too deeply is ``DEEP``, its end
-    found by counting brackets; ``ScanError`` for a grammar error."""
+    """The JSON value at ``i`` and where it ends. A value nested too deeply is ``DEEP``, one with
+    an integer literal over the digit limit is ``HUGE_NUMBER`` (the literal) or ``HUGE_CONTAINER``
+    (the array or object holding it), their ends found without ``json``; ``ScanError`` for a
+    grammar error."""
     try:
         return _DECODER.raw_decode(text, i)
     except json.JSONDecodeError as exc:
@@ -74,8 +91,22 @@ def decode_value(text: str, i: int) -> tuple[object, int]:
         if end is None:
             raise ScanError("truncated", len(text), "a nested value is not closed") from None
         return DEEP, end
-    except ValueError as exc:  # an integer literal over sys.get_int_max_str_digits()
-        raise ScanError("number", i, str(exc)) from exc
+    except ValueError:  # an integer literal over sys.get_int_max_str_digits()
+        return _overlong(text, i)
+
+
+def _overlong(text: str, i: int) -> tuple[object, int]:
+    """The value at ``i`` that ``json`` refused for its digits, and where it ends: everything
+    before the literal was valid, so a container ends where its brackets balance."""
+    if text[i : i + 1] in ("[", "{"):
+        end = bracket_end(text, i)
+        if end is None:
+            raise ScanError("truncated", len(text), "a nested value is not closed")
+        return HUGE_CONTAINER, end
+    match = _INTEGER.match(text, i)
+    if match is None:
+        raise ScanError("syntax", i, "not a number")
+    return HUGE_NUMBER, match.end()
 
 
 def bracket_end(text: str, i: int) -> int | None:
@@ -275,7 +306,7 @@ class Reader:
             except ScanError as exc:
                 # an error in the last few KiB may be the window's end, not the text's
                 near_end = exc.kind == "truncated" or exc.offset >= len(self._text) - _SLACK
-                if exc.kind != "number" and near_end and self._more():
+                if near_end and self._more():
                     if self._grow():
                         continue
                     raise ScanError("large", start, "a value longer than the window cap") from None

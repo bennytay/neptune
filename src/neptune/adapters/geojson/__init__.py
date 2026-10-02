@@ -69,6 +69,8 @@ from neptune.adapters.geojson._records import Shared, feature_output, root_outpu
 from neptune.adapters.geojson._scan import (
     DEEP,
     ArrayState,
+    Deep,
+    Overlong,
     Reader,
     ScanError,
     decode_value,
@@ -521,6 +523,17 @@ def _walk(
                             {"name": "features"},
                         )
                     )
+                if isinstance(value, Overlong):
+                    findings.append(
+                        finding(
+                            config,
+                            "number_too_long",
+                            cite(source, start, end),
+                            f"the root member {shown(name)} holds an integer literal with too"
+                            " many digits; it is not decoded",
+                            {"name": name[:64]},
+                        )
+                    )
                 members.append(_crs.RootMember(name, start, end, value))
         except ScanError as exc:
             if exc.kind == "large":
@@ -580,7 +593,7 @@ def _scan_feature(value: object, limits: Limits, outside: bool, nested: bool) ->
         return outside, nested
     nested = nested or "crs" in value
     geometry = value.get("geometry")
-    if geometry is None or geometry is DEEP:
+    if geometry is None or isinstance(geometry, Deep):
         return outside, nested
     found = measure(geometry, geographic=True, limits=limits)
     return (
@@ -646,7 +659,7 @@ def _chunks(
             mode, array = ("feature" if kind == "Feature" else "geometry"), root
             by_name = {m.name: m.value for m in members}
             geometry = by_name.get("geometry") if kind == "Feature" else by_name
-            if geometry is not None and geometry is not DEEP:
+            if geometry is not None and not isinstance(geometry, Deep):
                 found = measure(geometry, geographic=True, limits=limits)
                 outside = outside or "coordinate_out_of_range" in found.problems
                 nested = nested or found.nested_crs
