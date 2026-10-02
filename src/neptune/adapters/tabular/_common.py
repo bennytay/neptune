@@ -137,6 +137,72 @@ CODES: Final[dict[str, tuple[FindingCategory, Severity, str]]] = {
         _S.ERROR,
         "rows of a block hold more cells than max_columns: they have no record",
     ),
+    "xlsx_cell_ref": (
+        _C.CORRUPT,
+        _S.WARNING,
+        "a cell's reference is not an A1 reference of its row, or does not follow the cell before"
+        " it: the cell is dropped and its place is a blank cell",
+    ),
+    "xlsx_cell_unreadable": (
+        _C.CORRUPT,
+        _S.WARNING,
+        "a cell's value does not read as the type the cell declares: the cell is Unknown, its"
+        " value stays in the bytes",
+    ),
+    "xlsx_corrupt": (
+        _C.CORRUPT,
+        _S.ERROR,
+        "the workbook's zip or one of its XML parts is damaged: what precedes the damage is read,"
+        " the rest is not",
+    ),
+    "xlsx_external_link": (
+        _C.SKIPPED,
+        _S.INFO,
+        "the workbook links to external workbooks or addresses; no link is ever followed",
+    ),
+    "xlsx_formula_no_value": (
+        _C.MISSING,
+        _S.INFO,
+        "formula cells with no cached value: the cell is Unknown, nothing is ever calculated",
+    ),
+    "xlsx_limit": (
+        _C.LIMIT,
+        _S.ERROR,
+        "a workbook, part, sheet or table over a limit of the reader is not read (or is read only"
+        " as far as the limit): the details name the limit",
+    ),
+    "xlsx_macros": (
+        _C.SKIPPED,
+        _S.INFO,
+        "the workbook carries a VBA project: it is never read, parsed or run",
+    ),
+    "xlsx_number_text": (
+        _C.UNREPRESENTABLE,
+        _S.INFO,
+        "a numeric cell no int64, uint64 or double holds exactly is kept as its literal text",
+    ),
+    "xlsx_part_refused": (
+        _C.UNSUPPORTED,
+        _S.ERROR,
+        "a part is not read: encrypted, an unsupported compression, not UTF-8, or XML with a"
+        " document type declaration (entities are never expanded)",
+    ),
+    "xlsx_row_order": (
+        _C.INCONSISTENT,
+        _S.WARNING,
+        "a row does not come after the rows before it in the sheet: it is dropped",
+    ),
+    "xlsx_shared_string_ref": (
+        _C.INCONSISTENT,
+        _S.WARNING,
+        "a cell names a shared string the workbook does not have: the cell is Unknown",
+    ),
+    "xlsx_sheet_unsupported": (
+        _C.UNSUPPORTED,
+        _S.INFO,
+        "a sheet that is not a readable worksheet (a chart sheet, a missing or unresolvable"
+        " part): it has a table with no header and no rows",
+    ),
 }
 
 
@@ -148,6 +214,7 @@ class Layout(StrEnum):
     JSON_LINES = "json_lines"  # one JSON text per line: each non-blank line is a row
     JSON_DOCUMENT = "json_document"  # one JSON text of another root: one row
     PARQUET = "parquet"
+    XLSX = "xlsx"  # an OOXML workbook: a zip of XML parts; each sheet is a table
 
 
 @dataclass(frozen=True)
@@ -256,11 +323,18 @@ class _Issue:
 
 
 class Issues:
-    """One block's findings about its rows: one per code and label, however many rows."""
+    """One block's findings about its rows: one per code and label, however many rows.
 
-    def __init__(self, source: SourceReader, config: AdapterConfig) -> None:
+    ``scope`` is the path to the bytes the rows' offsets are in: nothing for a source's own bytes,
+    the member a workbook's sheet is stored in for XLSX.
+    """
+
+    def __init__(
+        self, source: SourceReader, config: AdapterConfig, scope: tuple[Locator, ...] = ()
+    ) -> None:
         self._source = source
         self._config = config
+        self._scope = scope  # the steps before the byte range a finding cites (a zip member)
         self._found: dict[tuple[str, str], _Issue] = {}
 
     def add(
@@ -300,7 +374,9 @@ class Issues:
                 finding(
                     self._config,
                     name,
-                    bytes_at(self._source, issue.start, issue.end),
+                    cite(
+                        self._source, *self._scope, ByteRange(issue.start, issue.end - issue.start)
+                    ),
                     f"{issue.message}{more}",
                     details,
                     issue.records,
