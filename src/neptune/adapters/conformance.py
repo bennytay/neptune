@@ -8,8 +8,10 @@ to the contract:
 - ``probe`` is given exactly the bounded head, returns a ``ProbeResult`` whose reasons carry the
   adapter's id, and answers the same way twice;
 - ``inspect`` returns an ``InspectResult``, the same twice, whose findings pass the finding checks;
-- ``ingest_source`` (every check in ``neptune.adapters.check``) passes, and a second run gives
-  byte-identical records, findings and series.
+- ``ingest_source`` (every check in ``neptune.adapters.check``) passes, and a second run within
+  one process gives byte-identical records, findings and series. That catches state kept across
+  calls, not output that depends on hash randomisation: a cross-process run would need the
+  adapter to be importable by name, and adapters under test often are not.
 
 Each runs over the given samples and over hostile inputs derived from them: an empty source and
 each sample cut in half. An exception from the adapter on any of them is a broken law ("findings,

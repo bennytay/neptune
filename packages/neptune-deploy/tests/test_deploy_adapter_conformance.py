@@ -109,5 +109,8 @@ def _imports(path: Path) -> list[str]:
 @pytest.mark.parametrize("path", sorted(ADAPTERS.rglob("*.py")), ids=lambda p: p.stem)
 def test_adapters_are_leaves_with_no_network(path: Path) -> None:
     for name in _imports(path):
-        allowed = name.startswith(ALLOWED) or name.split(".")[0] in STDLIB_ALLOWED
+        allowed = (
+            any(name == prefix or name.startswith(f"{prefix}.") for prefix in ALLOWED)
+            or name.split(".")[0] in STDLIB_ALLOWED
+        )
         assert allowed, f"{path.relative_to(ADAPTERS)} imports {name}"
