@@ -233,6 +233,12 @@ For registers, geometry, photos, video files and documents:
   Blank is `Unknown`; only a token the source or its spec defines as none is `KnownAbsent`.
   A row not cited as `Row(r)` (a JSON element, a table on a page) gives each cell its own
   provenance. The `tabular` adapter (ADR 0042) is the worked example for CSV, JSON and Parquet.
+  Its XLSX reader (ADR 0059) is the worked example for a container: a sheet per table, each cell
+  citing `[the part's stored bytes in the zip, the cell's bytes in the inflated part, an adapter
+  step]`; a date stays its serial, with the workbook's epoch recorded as stated; a formula is its
+  cached value and its text a row of its own table; blank, absent and `""` are `Unknown` told apart
+  by the citation; a zip and its XML are read by bounded standard-library parsers (no entity, no
+  link followed, no macro run).
 - A `Site` or `Asset` per row or feature that names one, with its ids and names each citing its cell or
   span. Don't copy the rest of the row into it.
 - Geometry: a `SpatialArtifact` per file citing the whole file (the lazy handle: nothing is copied), unit /

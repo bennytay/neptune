@@ -1345,6 +1345,8 @@ def _header_names(ctx: _Context, raw: _Row, number: int, issues: Issues) -> tupl
                 details={"max_columns": ctx.limits.max_columns},
             )
             return None
+        if _decode(cell, ctx.shared).kind == "not_covered":
+            return None  # a header cell names a shared string that was not read
         columns[column] = _raw_text(cell, ctx.shared)
     if not columns:
         return None

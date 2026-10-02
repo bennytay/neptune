@@ -369,7 +369,8 @@ def test_findings_are_counted_per_block(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(_csv, "BLOCK_ROWS", 3)
     output = run(data, csv_delimiter=",", csv_header="first_row")
     ragged = [f for f in output.findings() if f.code == "tabular.csv_ragged_rows"]
-    ragged.sort(key=lambda f: f.details["rows"][0])  # findings come sorted by id, not by place
+    # findings come sorted by id, not by place: put them in row order
+    ragged.sort(key=lambda f: (f.details["rows"] or [0])[0])  # type: ignore[index, return-value, arg-type]
     assert [f.details["count"] for f in ragged] == [3, 3, 1]
 
 
