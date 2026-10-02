@@ -110,13 +110,13 @@ class Run:
         assert self.outcome.state is JobState.COMMITTED
         self.package: Any = read_package(tmp_path / name)
 
+    @property
+    def found(self) -> list[IngestFinding]:
+        """The job's findings but snapshot binding's (ADR 0064): its runs bind to nothing here."""
+        return [f for f in self.outcome.findings if not f.code.startswith("neptune.bindings.")]
+
     def codes(self) -> list[str]:
-        """The job's codes but snapshot binding's (ADR 0064): its runs bind to nothing here."""
-        return sorted(
-            finding.code
-            for finding in self.outcome.findings
-            if not finding.code.startswith("neptune.bindings.")
-        )
+        return sorted(finding.code for finding in self.found)
 
     def finding(self, code: str) -> IngestFinding:
         (found,) = [f for f in self.outcome.findings if f.code == code]
@@ -174,7 +174,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
         "neptune.runtime.limit_exceeded",
         "neptune.runtime.limit_exceeded",
     ]
-    for finding in run.outcome.findings:
+    for finding in run.found:
         assert (finding.category, finding.severity) == (FindingCategory.FAILED, Severity.ERROR)
         assert finding.details["adapter"] == "hostile" and finding.details["version"] == "1.0.0"
         assert finding.details["step"] == "ingest"
@@ -183,7 +183,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
     assert crash.details["signal"] == "SIGSEGV" and crash.details["attempts"] == 2
     limits = {
         f.details["limit"]: f.details["value"]
-        for f in run.outcome.findings
+        for f in run.found
         if f.code == "neptune.runtime.limit_exceeded"
     }
     assert limits == {"memory_bytes": 256 * MIB, "wall_seconds": 2}
@@ -197,7 +197,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
     for path in ("crash.hostile", "hang.hostile", "hog.hostile"):
         assert run.committed_for(run.source(path)) == 3  # the document, before, after
     # Nothing of a stopped call reached the workspace, not even half a chunk.
-    for finding in run.outcome.findings:
+    for finding in run.found:
         assert not run.workspace.committed(str(finding.details["chunk"]))
     assert run.staging_is_empty()
 
@@ -239,7 +239,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
         "scratch_bytes": 1024 * MIB,
         "wall_seconds": 2,
     }
-    assert {f.transform for f in run.outcome.findings} == {runtime.id}
+    assert {f.transform for f in run.found} == {runtime.id}
 
 
 def test_a_spinning_parser_is_stopped_at_its_cpu_limit(tmp_path: Path) -> None:
