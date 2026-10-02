@@ -32,7 +32,7 @@ from neptune.identity import canonical_json
 from neptune.model.knowledge import KnowledgeState, Known
 from neptune.model.provenance import ByteRange, EvidenceRef
 from neptune.model.run import Stream
-from neptune.sdk import InvalidRequestError, Neptune
+from neptune.sdk import InvalidRequestError, Neptune, PackageInvalidError
 from neptune.sdk.media import (
     FileSource,
     Frame,
@@ -319,6 +319,17 @@ def test_hostile_handles_and_payloads_are_refused_not_trusted(
         with pytest.raises(HydrationError):
             frames.payload(huge)
         payload = frames.payload(frame)
+        outer, inner = frame.handle.locator
+        assert isinstance(outer, ByteRange) and isinstance(inner, ByteRange)
+        for locator in (
+            (ByteRange(file.size + 10, 64), inner),  # no chunk there
+            (ByteRange(0, outer.length), inner),  # the magic and header, not a chunk
+            (outer, ByteRange(inner.offset, inner.length - 1)),  # short of its record
+            (outer, ByteRange(inner.offset, inner.length + 9)),  # past its record
+        ):
+            hostile = dataclasses.replace(frame, handle=EvidenceRef(frame.handle.source, locator))
+            with pytest.raises(HydrationError):
+                Hydrator(file).payload(hostile)
     other = dataclasses.replace(frame, hydrator=None)
     with pytest.raises(HydrationError):
         Hydrator(FileSource(source, frame.handle.source)).payload(other)
@@ -332,6 +343,11 @@ def test_hostile_handles_and_payloads_are_refused_not_trusted(
     assert (refused.state, refused.reason) == (KnowledgeState.NOT_COVERED, "payload_malformed")
     with pytest.raises(ValueError):
         point_cloud_ref(payload[:40], "cdr")
+    garbage = tmp_path / "garbage.parquet"
+    garbage.write_bytes(b"PAR1 not a series PAR1")
+    broken = dataclasses.replace(package, series={**package.series, frame.stream: garbage})
+    with pytest.raises(PackageInvalidError):
+        media_window(broken, "log_time", T0, T0 + SECOND)
     with pytest.raises(InvalidRequestError):
         media_window(package, "log_time", 2, 1)
     with pytest.raises(InvalidRequestError):

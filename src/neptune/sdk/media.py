@@ -166,7 +166,19 @@ def _mask(table: Any, column: str, start: int, end: int) -> Any:
 def _window(
     stream: Stream, line: MediaStream, source: Any, index: int, start: int, end: int, budget: int
 ) -> tuple[int, tuple[Frame, ...] | None]:
-    """The rows in the window: their count, and the frames when at most ``budget``."""
+    """The rows in the window: their count, and the frames when at most ``budget``. A series
+    that cannot be read, or a row that breaks the series contract, makes the package invalid."""
+    try:
+        return _rows(stream, line, source, index, start, end, budget)
+    except (pa.ArrowException, OSError, ValueError, TypeError, KeyError) as exc:
+        raise PackageInvalidError(
+            f"the series of stream {stream.id} cannot be read: {exc}"
+        ) from exc
+
+
+def _rows(
+    stream: Stream, line: MediaStream, source: Any, index: int, start: int, end: int, budget: int
+) -> tuple[int, tuple[Frame, ...] | None]:
     file = pq.ParquetFile(pa.BufferReader(source) if isinstance(source, bytes) else source)
     column = time_column(index)
     groups = _groups(file, column, start, end)
@@ -375,14 +387,25 @@ class Hydrator:
             data = self._open(offset, length)
             start, size = inner[0]
             record = data[start : start + size]
+        expected = length if not inner else inner[0][1]
+        if len(record) != expected:  # the source or its chunk ends before the record does
+            raise HydrationError(f"the frame's record is cut: {len(record)} of {expected} bytes")
         if len(record) < RECORD_HEADER + MESSAGE_FIELDS or record[0] != Opcode.MESSAGE:
             raise HydrationError("the frame's handle does not name an MCAP Message record")
+        _, declared = record_header(record[:RECORD_HEADER])
+        if RECORD_HEADER + declared != len(record):
+            raise HydrationError("the frame's handle does not span its Message record")
         return record[RECORD_HEADER + MESSAGE_FIELDS :]
 
     def _open(self, offset: int, length: int) -> bytes:
         if self._chunk is not None and self._chunk[0] == (offset, length):
             return self._chunk[1]
-        _, declared = record_header(self.source.read(offset, RECORD_HEADER))
+        head = self.source.read(offset, RECORD_HEADER)
+        if len(head) != RECORD_HEADER or length < RECORD_HEADER:
+            raise HydrationError("the frame's chunk is past the end of the source")
+        opcode, declared = record_header(head)
+        if opcode != Opcode.CHUNK:
+            raise HydrationError("the frame's handle does not name an MCAP Chunk record")
         cut = RECORD_HEADER + declared > length
         record = TopRecord(
             offset, Opcode.CHUNK, declared, None, cut=cut, present=length - RECORD_HEADER
