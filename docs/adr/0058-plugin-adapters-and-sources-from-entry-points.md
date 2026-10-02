@@ -85,8 +85,10 @@ failing every job on the host.
 
 ## Consequences
 
-- With Deploy installed, a default `neptune ingest` registers `deploy_lifecycle`; it claims nothing
-  until a format lands, so packages change only where a manifest pins it.
+- With Deploy installed, a default `neptune ingest` registers `deploy_lifecycle` and probes every
+  source with it. It claims nothing until a format lands (and a manifest cannot pin an adapter
+  whose probe declines, ADR 0047), so no selection or record changes; an unread file's
+  `neptune.probe.unsupported` finding lists its decline beside the built-ins'.
 - Every root test runs in the whole workspace environment, so installed members' adapters join
   default-registry tests. Tests that count probes or list adapters build their registry
   explicitly, or pass `plugins=False`.
