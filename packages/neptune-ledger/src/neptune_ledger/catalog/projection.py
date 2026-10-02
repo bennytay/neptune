@@ -1,4 +1,4 @@
-"""Kind-specific projection columns, generated from the compiler's JSON Schema (Ledger ADR 0009).
+"""Kind-specific projection columns, generated from the compiler's JSON Schema (ADRs 0009, 0011).
 
 The package schema's JSON Schema export (``contracts/package-schema/v<version>/schema.json``, from
 ``neptune.model.schema``) names every record kind and its top-level fields. ``projection_spec``
@@ -9,17 +9,22 @@ never creates a partition: a kind without one of its own lives in ``record_defau
 and splitting it out is a rebuild, not a migration step (ADR 0009 §6). Neither touches a database,
 so both are pure functions of their inputs.
 
-The spec the Ledger indexes with is committed beside the migrations as ``projections.json``, and
+The Ledger keeps one spec per package-schema version it reads, the schema-version registry
+(``Registry``, ADR 0011). It is committed beside the migrations as ``projections.json``, and
 ``index`` reads that file, never the compiler's live schema: indexing is a function of the package
-and the Ledger version alone. A schema bump is one command, which rewrites the spec and writes the
-next migration::
+and the Ledger version alone. Each record is projected with the spec of the version it states, so
+packages of every version are indexed side by side, and a package of a version the registry does
+not hold is refused. Adding a version is one command over the registry's version directory, which
+appends its spec and writes the next migration when it adds projections::
 
-    uv run python -m neptune_ledger.catalog.projection contracts/package-schema/v1.0.0/schema.json
+    uv run python -m neptune_ledger.catalog.projection contracts/package-schema/v3.0.0/schema.json
 
-A hot filter in a shape this module does not know, or a kind or projection that disappears, raises
-``ProjectionError``: a new shape or a removal is a decision for an ADR, not a guess.
+A hot filter in a shape this module does not know, a kind or projection that disappears, or an
+indexed version whose mapping would change raises ``ProjectionError``: a new shape, a removal or a
+re-mapping is a decision for an ADR, not a guess.
 """
 
+import hashlib
 import json
 import re
 import sys
@@ -161,6 +166,114 @@ class Spec:
 
 
 BASELINE: Final = Spec("baseline: migration 0001", BASELINE_KINDS, (), ())
+_SEMVER: Final = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+_DIGEST: Final = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+@dataclass(frozen=True)
+class SchemaVersion:
+    """One package-schema version the Ledger reads, and the spec its records are indexed with.
+
+    ``contract_version`` and ``schema_sha256`` name the package-schema registry version the spec
+    was generated from (``contracts/package-schema/v<contract_version>/schema.json`` and the
+    sha256 of its bytes): the schema is referenced by digest, never copied (ADR 0011 §1).
+    """
+
+    contract_version: str
+    schema_sha256: str
+    spec: Spec
+
+    def __post_init__(self) -> None:
+        match = _SEMVER.fullmatch(self.contract_version)
+        if match is None or int(match.group(1)) != self.version:
+            raise ProjectionError(
+                f"{self.spec.schema_id} cannot come from package-schema {self.contract_version!r}:"
+                " the registry major is the schema version"
+            )
+        if not _DIGEST.fullmatch(self.schema_sha256):
+            raise ProjectionError(f"{self.schema_sha256!r} is not a sha256 content id")
+
+    @property
+    def version(self) -> int:
+        return self.spec.major
+
+    @property
+    def mapping(self) -> str:
+        """The projection mapping as canonical JSON text: what the catalog stores per version."""
+        return canonical_json.dumps(self.spec.to_json()).decode("utf-8")
+
+    @property
+    def mapping_digest(self) -> str:
+        return "sha256:" + hashlib.sha256(self.mapping.encode("utf-8")).hexdigest()
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            **self.spec.to_json(),
+            "contract_version": self.contract_version,
+            "schema_sha256": self.schema_sha256,
+        }
+
+    @staticmethod
+    def from_json(value: Any) -> "SchemaVersion":
+        spec = {k: v for k, v in value.items() if k not in ("contract_version", "schema_sha256")}
+        return SchemaVersion(
+            value["contract_version"], value["schema_sha256"], Spec.from_json(spec)
+        )
+
+
+@dataclass(frozen=True)
+class Registry:
+    """Every package-schema version this Ledger reads, 1..n without gaps (ADR 0011 §1).
+
+    A version's spec never changes once shipped: its records were indexed with it, and the
+    catalog is append-only. The record columns are the union of every version's projections.
+    """
+
+    versions: tuple[SchemaVersion, ...]
+
+    def __post_init__(self) -> None:
+        numbers = [entry.version for entry in self.versions]
+        if not numbers or numbers != list(range(1, len(numbers) + 1)):
+            raise ProjectionError(f"registry versions must be 1..n without gaps, got {numbers}")
+
+    @property
+    def numbers(self) -> tuple[int, ...]:
+        return tuple(entry.version for entry in self.versions)
+
+    @property
+    def latest(self) -> SchemaVersion:
+        return self.versions[-1]
+
+    def entry(self, version: int) -> SchemaVersion | None:
+        if isinstance(version, bool) or not isinstance(version, int):
+            return None
+        return self.versions[version - 1] if 1 <= version <= len(self.versions) else None
+
+    def spec(self, version: int) -> Spec | None:
+        entry = self.entry(version)
+        return entry.spec if entry is not None else None
+
+    def columns(self) -> tuple[tuple[str, str], ...]:
+        """Every projection column ``(name, SQL type)`` any version fills, sorted by name."""
+        return tuple(sorted({column for e in self.versions for column in e.spec.columns()}))
+
+    def covered(self, kind: str, version: int, column: str) -> bool:
+        """Whether a ``kind`` record of ``version`` states the field behind ``column``.
+
+        False for a NULL column means NotCovered by that version (or never a field of the kind),
+        never "absent"; the migration's ``projection_covered`` answers the same in SQL.
+        """
+        spec = self.spec(version)
+        return spec is not None and any(
+            p.kind == kind and column in p.columns for p in spec.projections
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return {"versions": [entry.to_json() for entry in self.versions]}
+
+    @staticmethod
+    def from_json(value: Any) -> "Registry":
+        return Registry(tuple(SchemaVersion.from_json(entry) for entry in value["versions"]))
 
 
 def column_names(filter_name: str, shape: Shape) -> tuple[str, ...]:
@@ -307,43 +420,108 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
 
 
 @cache
+def shipped_registry() -> Registry:
+    """The registry this Ledger version indexes with: ``projections.json`` beside the migrations."""
+    return read_registry(files("neptune_ledger.catalog").joinpath(SPEC_FILE).read_bytes())
+
+
 def shipped_spec() -> Spec:
-    """The spec this Ledger version indexes with: ``projections.json`` beside the migrations."""
-    return read_spec(files("neptune_ledger.catalog").joinpath(SPEC_FILE).read_bytes())
+    """The spec of the newest package-schema version this Ledger reads."""
+    return shipped_registry().latest.spec
+
+
+def read_registry(data: bytes) -> Registry:
+    """A registry from ``projections.json`` bytes, as ``registry_bytes`` writes them."""
+    return Registry.from_json(canonical_json.loads(data.removesuffix(b"\n")))
+
+
+def registry_bytes(registry: Registry) -> bytes:
+    """``projections.json`` as committed: canonical JSON and a final newline."""
+    return canonical_json.dumps(registry.to_json()) + b"\n"
 
 
 def read_spec(data: bytes) -> Spec:
-    """A spec from ``projections.json`` bytes, as ``spec_bytes`` writes them."""
+    """A spec from ``spec_bytes``."""
     return Spec.from_json(canonical_json.loads(data.removesuffix(b"\n")))
 
 
 def spec_bytes(spec: Spec) -> bytes:
-    """``projections.json`` as committed: canonical JSON and a final newline."""
+    """One spec as canonical JSON and a final newline."""
     return canonical_json.dumps(spec.to_json()) + b"\n"
 
 
-def generate(schema_path: Path, catalog_dir: Path) -> Path | None:
-    """Regenerate ``projections.json`` from ``schema_path`` and write the next migration.
+def schema_version_from(schema_path: Path) -> SchemaVersion:
+    """The registry entry one published package-schema version gives.
 
-    Returns the new migration's path, or None when the schema adds nothing.
+    ``schema_path`` is ``contracts/package-schema/v<version>/schema.json``; the ``version.json``
+    beside it names the registry version and the schema's sha256, which must be its bytes'.
     """
-    schema = json.loads(schema_path.read_bytes())
-    old = read_spec((catalog_dir / SPEC_FILE).read_bytes())
-    new = projection_spec(schema)
-    existing = sorted(
-        int(match.group(1))
-        for path in (catalog_dir / "migrations").iterdir()
-        if (match := _MIGRATION.fullmatch(path.name))
-    )
-    version = (existing[-1] if existing else 0) + 1
-    text = render_migration(old, new, version)
-    target = catalog_dir / "migrations" / f"{version:04d}_projections_schema_{new.major}.sql"
+    data = schema_path.read_bytes()
+    try:
+        published = json.loads((schema_path.parent / "version.json").read_bytes())
+        contract, version = published["contract"], published["version"]
+        recorded = published["schema_sha256"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ProjectionError(
+            f"{schema_path.parent} is not a published package-schema version: {exc!r}"
+        ) from exc
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    if contract != "package-schema" or recorded != digest or not isinstance(version, str):
+        raise ProjectionError(
+            f"{schema_path} is not the package-schema version its version.json records"
+        )
+    return SchemaVersion(version, digest, projection_spec(json.loads(data)))
+
+
+def add_version(registry: Registry, entry: SchemaVersion) -> Registry:
+    """``registry`` with ``entry``: the next version, or an indexed one whose mapping is unchanged.
+
+    An indexed version's spec never changes (ADR 0011 §2): its records were indexed with it. A
+    later registry version of the same schema version (``2.1.0`` after ``2.0.0``) only re-points
+    the entry's provenance when its mapping is identical.
+    """
+    known = registry.entry(entry.version)
+    if known is not None:
+        if known.spec != entry.spec:
+            raise ProjectionError(
+                f"package-schema {entry.version} is already indexed with another mapping; a"
+                " change to an indexed version needs an ADR and a rebuild"
+            )
+        versions = list(registry.versions)
+        versions[entry.version - 1] = entry
+        return Registry(tuple(versions))
+    if entry.version != registry.latest.version + 1:
+        raise ProjectionError(
+            f"package-schema {entry.version} skips a version; add"
+            f" {registry.latest.version + 1} first"
+        )
+    return Registry((*registry.versions, entry))
+
+
+def generate(schema_path: Path, catalog_dir: Path) -> Path | None:
+    """Add the package-schema version at ``schema_path`` to the registry; write its migration.
+
+    Returns the new migration's path, or None when the version adds no projection.
+    """
+    entry = schema_version_from(schema_path)
+    old = read_registry((catalog_dir / SPEC_FILE).read_bytes())
+    new = add_version(old, entry)
+    text = ""
+    if old.entry(entry.version) is None:
+        existing = sorted(
+            int(match.group(1))
+            for path in (catalog_dir / "migrations").iterdir()
+            if (match := _MIGRATION.fullmatch(path.name))
+        )
+        number = (existing[-1] if existing else 0) + 1
+        text = render_migration(old.latest.spec, entry.spec, number)
+        target = catalog_dir / "migrations" / f"{number:04d}_projections_schema_{entry.version}.sql"
     if text:
         # The migration first, never over an existing file: a spec naming columns no migration
         # creates would make every registration fail.
         with target.open("x", encoding="utf-8") as out:
             out.write(text)
-    (catalog_dir / SPEC_FILE).write_bytes(spec_bytes(new))
+    (catalog_dir / SPEC_FILE).write_bytes(registry_bytes(new))
     return target if text else None
 
 
@@ -355,7 +533,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stderr.write("usage: python -m neptune_ledger.catalog.projection SCHEMA_JSON\n")
         return 2
     written = generate(Path(args[0]), Path(__file__).resolve().parent)
-    sys.stdout.write(f"{written or 'spec rewritten; no new projections, so no migration'}\n")
+    sys.stdout.write(f"{written or 'registry rewritten; no new projections, so no migration'}\n")
     return 0
 
 

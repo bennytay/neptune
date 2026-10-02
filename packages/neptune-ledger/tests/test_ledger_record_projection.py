@@ -1,7 +1,8 @@
 """Projection columns generated from the package schema's JSON Schema export (ADR 0009 §3).
 
-The committed spec and migration 0004 are pinned to the generator's output over the published
-package-schema v1.0.0 export. A schema-bump fixture adds a record kind, and the migration the
+The committed registry's newest spec is pinned to the published package-schema v2.0.0 export and
+migration 0005 to the generator's output over the v1.0.0 export (each version's entry is pinned in
+test_ledger_schema_registry.py). A schema-bump fixture adds a record kind, and the migration the
 generator writes for it applies on top of the shipped ones and files the new kind's rows.
 """
 
@@ -27,8 +28,10 @@ from neptune_ledger.catalog.projection import (
     Spec,
     generate,
     projection_spec,
+    read_registry,
     read_spec,
     render_migration,
+    shipped_registry,
     shipped_spec,
     spec_bytes,
 )
@@ -87,9 +90,9 @@ def migration(version: int, text: str) -> Migration:
 
 
 def test_the_shipped_spec_is_generated_from_the_declared_package_schema() -> None:
-    """The spec follows the declared version (2); version 2 only adds kinds with no hot filter,
-    so it needs no migration beyond 0005 (generated from version 1)."""
-    assert (CATALOG / "projections.json").read_bytes() == spec_bytes(projection_spec(schema_v2()))
+    """The newest spec follows the declared version (2); version 2 only adds kinds with no hot
+    filter, so it needs no migration beyond 0005 (generated from version 1)."""
+    assert shipped_registry().latest.spec == projection_spec(schema_v2())
     assert shipped_spec() == projection_spec(schema_v2())
     assert render_migration(projection_spec(schema_v1()), projection_spec(schema_v2()), 6) == ""
     assert set(shipped_spec().kinds) - set(BASELINE_KINDS) == {
@@ -268,23 +271,37 @@ def test_a_projection_added_to_an_existing_kind_guards_its_filed_rows() -> None:
     assert "      'image'))) THEN" in text
 
 
+def published(directory: Path, schema: dict[str, Any], version: str) -> Path:
+    """``schema`` published as package-schema ``version`` in ``directory`` (as the registry
+    lays a version out: schema.json and the version.json recording its sha256)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(schema).encode("utf-8")
+    (directory / "schema.json").write_bytes(data)
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    record = {"contract": "package-schema", "schema_sha256": digest, "version": version}
+    (directory / "version.json").write_text(json.dumps(record), encoding="utf-8")
+    return directory / "schema.json"
+
+
 def test_generate_writes_the_spec_and_numbers_the_next_migration(tmp_path: Path) -> None:
     catalog = tmp_path / "catalog"
     (catalog / "migrations").mkdir(parents=True)
     for path in (CATALOG / "migrations").glob("*.sql"):
         (catalog / "migrations" / path.name).write_bytes(path.read_bytes())
     (catalog / "projections.json").write_bytes((CATALOG / "projections.json").read_bytes())
-    schema = tmp_path / "schema.json"
-    schema.write_text(json.dumps(schema_v2()), encoding="utf-8")
-    assert generate(schema, catalog) is None  # nothing new
-    schema.write_text(json.dumps(bumped_schema()), encoding="utf-8")
-    written = generate(schema, catalog)
+    # The published v2.0.0 again: nothing new, and the registry bytes do not change.
+    assert generate(SCHEMA_V2, catalog) is None
+    assert (catalog / "projections.json").read_bytes() == (
+        CATALOG / "projections.json"
+    ).read_bytes()
+    written = generate(published(tmp_path / "v3.0.0", bumped_schema(), "3.0.0"), catalog)
     assert (
         written == catalog / "migrations" / f"{len(migrations()) + 1:04d}_projections_schema_3.sql"
     )
-    assert read_spec((catalog / "projections.json").read_bytes()) == projection_spec(
-        bumped_schema()
-    )
+    registry = read_registry((catalog / "projections.json").read_bytes())
+    assert registry.numbers == (1, 2, 3)
+    assert registry.latest.spec == projection_spec(bumped_schema())
+    assert registry.versions[:2] == shipped_registry().versions
 
 
 def test_the_generator_command_needs_one_schema_path() -> None:

@@ -18,12 +18,11 @@ from dataclasses import dataclass
 from typing import Annotated, Any, ClassVar, Final, Literal, TypeAlias
 
 from neptune.identity import canonical_json
-from neptune.model.kinds import RECORD_KINDS
 from neptune.model.knowledge import AssertionKind, Knowledge, Known
 
 # The catalog API's registry version (contracts/catalog-api). It equals the registry version
 # exactly (platform ADR 0002 §3); a reader-incompatible change raises the major (ADR 0004 §5).
-CATALOG_API_VERSION: Final = "1.2.0"
+CATALOG_API_VERSION: Final = "1.3.0"
 API_MAJOR: Final = int(CATALOG_API_VERSION.split(".", 1)[0])
 
 
@@ -79,8 +78,18 @@ TierTwoId: TypeAlias = Annotated[
         f"^rec:{_SHA256}$",
     ),
 ]
+# A record kind is named by the package-schema contract, not listed here (Ledger ADR 0011 §4): a
+# package-schema version that adds kinds changes no catalog-api version. The kind is checked
+# against the package-schema version a package declares, where it enters the catalog.
 RecordKind: TypeAlias = Annotated[
-    str, Constraint("RecordKind", "A record kind of package schema 1.", enum=tuple(RECORD_KINDS))
+    str,
+    Constraint(
+        "RecordKind",
+        "A record kind, by the package-schema contract (contracts/package-schema): the kind of a"
+        " record table at the schema version its package declares. Not enumerated here, so a"
+        " package-schema version that adds kinds changes no catalog-api version.",
+        r"^[a-z][a-z0-9_]*$",
+    ),
 ]
 Token: TypeAlias = Annotated[str, Constraint("Token", "A machine token.", r"^[a-z][a-z0-9_.\-]*$")]
 Text: TypeAlias = Annotated[str, Constraint(min_length=1)]
@@ -278,6 +287,8 @@ class RegisterRequest:
 
 @dataclass(frozen=True)
 class KindCount:
+    """How many records of one kind a registered package holds."""
+
     kind: RecordKind
     count: Count
 
@@ -291,6 +302,10 @@ class Registration:
       ``registration_key``, ``root_locator`` and ``ledger_version`` are returned.
     - ``refused``: nothing was written; ``findings`` say why, and ``registration_key`` is
       ``NotApplicable``. ``package_id`` is ``Unknown`` when no manifest could be read.
+
+    ``schema_version`` is the package-schema version the manifest declares, and every kind in
+    ``record_counts`` is a kind of that version (1.3.0: kinds are named by the package-schema
+    contract, Ledger ADR 0011 §4).
     """
 
     outcome: Literal["already_registered", "refused", "registered"]

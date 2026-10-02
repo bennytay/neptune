@@ -45,6 +45,7 @@ from neptune_ledger.api.types import (
 from neptune_ledger.contract_tests.examples import (
     EXAMPLES,
     WorkedPackage,
+    at_schema_2,
     evidence_anchor,
     machine_threads,
     materialise,
@@ -183,6 +184,23 @@ class CatalogContract:
         assert isinstance(first.registration_key, Known)
         assert isinstance(after.registration_key, Known)
         assert after.registration_key.value.tx_seq == first.registration_key.value.tx_seq + 1
+
+    def test_packages_of_two_schema_versions_register_side_by_side(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage], tmp_path: Path
+    ) -> None:
+        """The same source ingested by a schema-1 and a schema-2 compiler (Ledger ADR 0011):
+        both register, each at the version its manifest declares, whichever comes first."""
+        older = packages["drone"]
+        newer = write("drone-v2", tmp_path / "drone-v2", at_schema_2("drone", "2.0.0", {}))
+        assert (older.manifest["schema_version"], newer.manifest["schema_version"]) == (1, 2)
+        for package, version in ((newer, 2), (older, 1)):
+            result = catalog.register(package.root)
+            _validate(result)
+            assert result.outcome == "registered", result.findings
+            assert result.schema_version == Known(version)
+            assert result.record_counts == package.record_counts()
+        kinds = {count.kind for count in newer.record_counts()}
+        assert {"configuration_snapshot", "configuration_value"} <= kinds
 
     def test_tampered_package_is_refused_and_nothing_is_written(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
@@ -936,6 +954,16 @@ class CatalogContract:
         self.register_all(catalog, packages)
         window = TimeWindow("rec:" + UNKNOWN_ID, 10, 9)
         table = catalog.query(QuerySpec(kinds=("run",), window=window))
+        assert table.num_rows == 0
+        assert _codes(arrow.query_meta(table).findings) == {"invalid_request"}
+
+    def test_query_rejects_a_kind_no_schema_version_declares(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        """A record kind is any table name in the schema (1.3.0); one that no package-schema
+        version the catalog reads declares is an argument outside the contract."""
+        self.register_all(catalog, packages)
+        table = catalog.query(QuerySpec(kinds=("run", "telepathy")))
         assert table.num_rows == 0
         assert _codes(arrow.query_meta(table).findings) == {"invalid_request"}
 

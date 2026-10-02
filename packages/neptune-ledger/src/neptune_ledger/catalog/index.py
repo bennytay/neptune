@@ -1,11 +1,13 @@
-"""The catalog rows one verified package produces (Ledger ADR 0002 §5, ADR 0005 §2, §3, ADR 0009).
+"""The catalog rows one verified package produces (Ledger ADRs 0002 §5, 0005 §2, §3, 0009, 0011).
 
 A pure function of the package's bytes and this Ledger version: every value comes from the record
-lines that registration hashed, read once, and the kind-specific projections come from the spec
-this Ledger ships (``projection.shipped_spec``), never from the compiler's live schema. So the same
-package gives the same rows in any catalog, whatever was registered before it. It indexes the
-package's own tables, exactly the kinds of its schema version (Ledger ADR 0008 §2), never the
-compiler's whole list. Records are ordered by kind, then record id (ADR 0009 §4).
+lines that registration hashed, read once, and the kind-specific projections come from the
+schema-version registry this Ledger ships (``projection.shipped_registry``), never from the
+compiler's live schema. Each record is projected with the spec of the schema version it states
+(ADR 0011 §3), so packages of every version share one set of record columns. So the same package
+gives the same rows in any catalog, whatever was registered before it. It indexes the package's
+own tables, exactly the kinds of its schema version (Ledger ADR 0008 §2), never the compiler's
+whole list. Records are ordered by kind, then record id (ADR 0009 §4).
 """
 
 import hashlib
@@ -15,7 +17,7 @@ from functools import cache
 from typing import Any, Final
 
 from neptune.identity import canonical_json
-from neptune_ledger.catalog.projection import Spec, shipped_spec
+from neptune_ledger.catalog.projection import Registry, Spec, shipped_registry
 
 # The fields that state an entry's world time (ADR 0003 §3): start, end, and the fallback that
 # stands in for both when neither is Known.
@@ -74,6 +76,13 @@ class PackageRows:
     transforms: tuple[TransformRow, ...]
     clocks: tuple[tuple[str, str, tuple[str, ...]], ...]  # (clock id, field, scope)
     records: tuple[RecordRow, ...]
+    # Every package-schema version the package states: its manifest's and its records' (ADR 0011).
+    schema_versions: tuple[int, ...] = ()
+
+
+class UnindexedVersion(ValueError):
+    """A record states a schema version the registry does not hold or the package does not
+    reach; registration refuses the package rather than guess its shape (ADR 0011 §3)."""
 
 
 def canonical(value: Any) -> str:
@@ -82,19 +91,38 @@ def canonical(value: Any) -> str:
 
 
 def package_rows(
-    package_id: str, manifest: Mapping[str, Any], lines: Mapping[str, tuple[bytes, ...]]
+    package_id: str,
+    manifest: Mapping[str, Any],
+    lines: Mapping[str, tuple[bytes, ...]],
+    registry: Registry | None = None,
 ) -> PackageRows:
-    """The rows of one package whose manifest and record lines were verified."""
-    spec = shipped_spec()
+    """The rows of one package whose manifest and record lines were verified.
+
+    Raises ``UnindexedVersion`` when a record states a schema version the registry does not hold
+    or that is newer than the package's own.
+    """
+    registry = registry or shipped_registry()
+    columns = projection_columns(registry)
+    version = manifest["schema_version"]
     # Every table the package holds: the compiler's kind list is not closed (ADR 0009 §3). A kind
-    # the spec does not know is indexed with its common columns and no projections.
+    # its version's spec does not know is indexed with its common columns and no projections.
     tables: dict[str, list[Any]] = {
         kind: [canonical_json.loads(line) for line in lines[kind]] for kind in lines
     }
+    stated = {version} | {record["schema_version"] for rows in tables.values() for record in rows}
+    unindexed = sorted(
+        (v for v in stated if registry.entry(v) is None or v > version), key=canonical
+    )
+    if unindexed:
+        raise UnindexedVersion(
+            f"records state schema versions {', '.join(canonical(v) for v in unindexed)}; this"
+            f" package is version {version} and this Ledger indexes"
+            f" {', '.join(str(n) for n in registry.numbers)}"
+        )
     records = tuple(
         sorted(
             (
-                _record_row(spec, kind, number, line, body)
+                _record_row(registry, columns, kind, number, line, body)
                 for kind in tables
                 for number, (line, body) in enumerate(
                     zip(lines[kind], tables[kind], strict=True), 1
@@ -131,20 +159,26 @@ def package_rows(
             (d["id"], d["field"], tuple(d["scope"])) for d in tables.get("timestamp_domain", [])
         ),
         records=records,
+        schema_versions=tuple(sorted(stated)),
     )
 
 
-def projection_columns(spec: Spec | None = None) -> tuple[str, ...]:
-    """The kind-specific projection columns of ``record``, in the order ``projected`` holds."""
-    return _columns(spec or shipped_spec())
+def projection_columns(source: Spec | Registry | None = None) -> tuple[str, ...]:
+    """The kind-specific projection columns of ``record``, in the order ``projected`` holds:
+    one spec's, or the union over every version of a registry (the shipped one by default)."""
+    return _columns(source or shipped_registry())
 
 
 @cache
-def _columns(spec: Spec) -> tuple[str, ...]:
-    return tuple(name for name, _ in spec.columns())
+def _columns(source: Spec | Registry) -> tuple[str, ...]:
+    return tuple(name for name, _ in source.columns())
 
 
-def _record_row(spec: Spec, kind: str, number: int, line: bytes, record: Any) -> RecordRow:
+def _record_row(
+    registry: Registry, columns: tuple[str, ...], kind: str, number: int, line: bytes, record: Any
+) -> RecordRow:
+    spec = registry.spec(record["schema_version"])
+    assert spec is not None  # package_rows refused every version the registry does not hold
     source, locator, transform, assertion = provenance_summary(kind, record)
     clock, first, last = world_time(kind, record)
     ambiguous, unknown, logical = fields(record, spec.opaque_fields(kind))
@@ -165,15 +199,19 @@ def _record_row(spec: Spec, kind: str, number: int, line: bytes, record: Any) ->
         logical_ids=tuple(logical),
         body=None if _holds_nul(record) else line.decode("utf-8"),
         unknown_pointers=tuple(unknown),
-        projected=projected(spec, kind, record),
+        projected=projected(spec, kind, record, columns),
     )
 
 
-def projected(spec: Spec, kind: str, record: Any) -> tuple[Any, ...]:
+def projected(
+    spec: Spec, kind: str, record: Any, columns: tuple[str, ...] | None = None
+) -> tuple[Any, ...]:
     """One value per projection column (ADR 0009 §3); None where the kind does not fill it.
 
-    A logical id fills ``<filter>_namespace`` and ``<filter>_value`` only when Known; a record id
-    or record id list fills ``<filter>_ids`` as stated, in order.
+    ``spec`` is the spec of the record's schema version, ``columns`` the record columns (the
+    spec's own by default). A logical id fills ``<filter>_namespace`` and ``<filter>_value`` only
+    when Known; a record id or record id list fills ``<filter>_ids`` as stated, in order. A column
+    the record's version does not project is None: NotCovered, never "absent" (ADR 0011 §3).
     """
     values: dict[str, Any] = {}
     for p in spec.projections:
@@ -191,7 +229,7 @@ def projected(spec: Spec, kind: str, record: Any) -> tuple[Any, ...]:
             ids = [stated] if p.shape == "record_id" else list(stated)
             (column,) = p.columns
             values[column] = [*values.get(column, []), *ids]
-    return tuple(values.get(name) for name in projection_columns(spec))
+    return tuple(values.get(name) for name in (columns or projection_columns(spec)))
 
 
 def _holds_nul(value: Any) -> bool:
