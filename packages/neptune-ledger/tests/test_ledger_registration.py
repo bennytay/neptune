@@ -116,10 +116,13 @@ def test_registration_writes_exactly_the_walkthrough_rows(
     for name in ("drone", "quadruped", "manipulator", "mobile_robot"):
         harness_register(pg, "tenant_harness", load_package(name))
     # The harness applies ADR 0002 §5's mapping; ADR 0009's columns are checked against their
-    # own oracle in test_ledger_record_index.py, and the derived thread index (ADR 0010) against
-    # ADR 0003's rules in test_ledger_threads.py and the contract suite.
+    # own oracle in test_ledger_record_index.py, the derived thread index (ADR 0010) against
+    # ADR 0003's rules in test_ledger_threads.py and the contract suite, and ADR 0011's registry
+    # tables in test_ledger_schema_registry.py.
     skip = (*TX_COLUMNS, "root_locator", "body", "unknown_pointers", *projection_columns())
     real, harness = dump(pg, "tenant_acme", skip), dump(pg, "tenant_harness", skip)
+    for table in ("schema_version", "schema_version_projection"):
+        assert real.pop(table) and harness.pop(table) == []
     derived = (
         "thread",
         "thread_member",
