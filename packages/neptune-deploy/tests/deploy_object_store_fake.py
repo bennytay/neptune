@@ -75,6 +75,7 @@ class FakeStore:
     sas_required: bool = False  # Azure: refuse a request without a SAS signature
     _counter: int = 0
     _pages_served: int = 0
+    _cache: tuple[object, list[Entry]] = (None, [])
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     # --- Writing (the test's, never the connector's) -------------------------------------------
@@ -118,6 +119,10 @@ class FakeStore:
         return versions[-1]
 
     def entries(self, prefix: bytes, *, all_versions: bool) -> list[Entry]:
+        """Every listing entry under ``prefix``, in key order; kept until the next write."""
+        cache_key = (prefix, all_versions, self._counter)
+        if self._cache[0] == cache_key:
+            return self._cache[1]
         found: list[Entry] = []
         for key in sorted(k for k in self.history if k.startswith(prefix)):
             versions = self.history[key]
@@ -128,6 +133,7 @@ class FakeStore:
                 ]
             elif not versions[-1].deleted:
                 found.append(Entry(key, versions[-1], True))
+        self._cache = (cache_key, found)
         return found
 
     def object_requests(self) -> list[Request]:
