@@ -163,8 +163,9 @@ its name.
 - **Inflate the zip with `inspect_archive` first.** It inflates every member once and spools
   nested archives in scratch space, which a sandboxed `plan` need not have. This adapter keeps
   its limits (§10) to the bounds the directory and the parts it reads need, using the same
-  directory checks (`neptune.discovery.archive.zip_directory`, `zip_directory_entries` and
-  `directory_cap`, which this change exposes as public names).
+  directory checks, restated: an adapter imports only the model, identity and the contract
+  (ADR 0008 §4), so `neptune.discovery.archive`'s helpers cannot be called from here, and are
+  mirrored (end record, zip64 locator, the walked entry count, the directory cap).
 
 ## Consequences
 

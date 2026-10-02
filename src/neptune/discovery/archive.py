@@ -1336,10 +1336,3 @@ def limits_from_json(data: JsonValue) -> ArchiveLimits:
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValueError(f"{name} must be an integer, got {value!r}")
     return ArchiveLimits(**{name: int(value) for name, value in values.items()})
-
-
-# Public names for the zip directory bounds, for an adapter that opens a zip itself and must
-# bound it the same way before ``zipfile`` builds every entry (ADR 0059).
-zip_directory = _zip_directory
-zip_directory_entries = _zip_directory_entries
-directory_cap = _directory_cap

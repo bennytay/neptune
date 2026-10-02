@@ -14,21 +14,16 @@ into a finding. A ``ShortReadError`` is not damage and passes through (ADR 0033 
 import io
 import posixpath
 import re
+import struct
 import zipfile
 import zlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from typing import Final
+from typing import IO, Final
 from urllib.parse import unquote
 from xml.parsers import expat
 
 from neptune.adapters.contract import AdapterConfig, ShortReadError, SourceReader
-from neptune.discovery.archive import (
-    ArchiveLimits,
-    directory_cap,
-    zip_directory,
-    zip_directory_entries,
-)
 from neptune.model.jsonvalue import JsonObject
 from neptune.model.provenance import ByteRange, Locator
 
@@ -147,6 +142,61 @@ class _SourceFile(io.RawIOBase):
         return len(data)
 
 
+@dataclass(frozen=True)
+class _Directory:
+    entries: int  # as the end record declares them
+    start: int  # where the central directory starts: its end record's place less its size
+    size: int
+
+
+_END: Final = b"PK\x05\x06"
+_END64: Final = b"PK\x06\x06"
+_LOCATOR64: Final = b"PK\x06\x07"
+_CENTRAL: Final = b"PK\x01\x02"
+_CENTRAL_FIXED: Final = 46
+_DIRECTORY_BYTES_PER_PART: Final = 1024
+_MIN_DIRECTORY_CAP: Final = 1024 * 1024
+
+
+def _directory(stream: IO[bytes], size: int) -> _Directory | None:
+    """The central directory as the end records (zip64 included) declare it, or ``None`` if the
+    file has no end record. Only the end records are read."""
+    tail_at = max(0, size - (22 + 65535))
+    stream.seek(tail_at)
+    tail = stream.read(size - tail_at)
+    at = tail.rfind(_END)
+    if at < 0 or at + 22 > len(tail):
+        return None
+    entries, length, offset = struct.unpack_from("<HII", tail, at + 10)
+    end = tail_at + at
+    wide = entries == 0xFFFF or length == 0xFFFFFFFF or offset == 0xFFFFFFFF
+    if wide and at >= 20 and tail[at - 20 : at - 16] == _LOCATOR64:
+        (record_at,) = struct.unpack_from("<Q", tail, at - 12)
+        stream.seek(record_at)
+        record = stream.read(56)
+        if len(record) == 56 and record.startswith(_END64):
+            entries, length = struct.unpack_from("<QQ", record, 32)
+            end = record_at
+    return _Directory(entries, end - length, length)
+
+
+def _walk(stream: IO[bytes], directory: _Directory, stop: int) -> int:
+    """How many entries the directory holds, counting no further than ``stop``: each fixed part is
+    read and its name, extra field and comment are seeked over, so nothing is held. The end
+    record's count can lie low, and ``zipfile`` builds every entry it finds."""
+    stream.seek(directory.start)
+    count = walked = 0
+    while walked < directory.size and count < stop:
+        fixed = stream.read(_CENTRAL_FIXED)
+        if len(fixed) < _CENTRAL_FIXED or not fixed.startswith(_CENTRAL):
+            break  # zipfile refuses the directory here, and its finding says so
+        variable = sum(struct.unpack_from("<3H", fixed, 28))
+        stream.seek(variable, io.SEEK_CUR)
+        walked += _CENTRAL_FIXED + variable
+        count += 1
+    return count
+
+
 def small_int(text: str | None, digits: int = 9) -> int | None:
     """A non-negative integer an attribute states in at most ``digits`` ASCII digits, else
     ``None``: hostile text never reaches ``int`` unbounded."""
@@ -189,14 +239,8 @@ class Package:
         """Open ``source`` as a zip within ``limits``; a ``Problem`` says why not."""
         size = source.size
         stream = io.BufferedReader(_SourceFile(source))
-        bounds = ArchiveLimits(
-            max_members=limits.max_parts,
-            max_member_size=limits.max_part_bytes,
-            max_total_size=limits.max_total_bytes,
-            max_compression_ratio=limits.max_compression_ratio,
-        )
         try:
-            directory = zip_directory(stream)
+            directory = _directory(stream, size)
         except ShortReadError:
             raise
         except Exception as exc:
@@ -219,7 +263,7 @@ class Package:
                 " its end record",
                 {"error": "bad_directory", "size": size},
             )
-        cap = directory_cap(bounds)
+        cap = max(_MIN_DIRECTORY_CAP, limits.max_parts * _DIRECTORY_BYTES_PER_PART)
         if directory.entries > limits.max_parts or directory.size > cap:
             raise Problem(
                 "xlsx_limit",
@@ -228,7 +272,7 @@ class Package:
                 {"limit": "xlsx_max_parts", "parts": directory.entries, "max": limits.max_parts},
             )
         try:
-            walked = zip_directory_entries(stream, directory, limits.max_parts + 1)
+            walked = _walk(stream, directory, limits.max_parts + 1)
         except ShortReadError:
             raise
         except Exception as exc:

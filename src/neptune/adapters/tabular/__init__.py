@@ -302,8 +302,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " with no cell and the empty string are Unknown, told apart by the cell step's"
             " content; a formula cell its cached value (content formula), its text a row of the"
             " sheet's formulas table; the workbook table holds the date system (1900 or 1904) when"
-            " the workbook states it and Unknown when it does not, the sheet count and each sheet's name and declared state; the first row is"
-            " the header under csv_header first_row; blocks of 4,096 rows, 32,768 cells or 1 MiB",
+            " the workbook states it and Unknown when it does not, the sheet count and each"
+            " sheet's name and declared state; the first row is the header under csv_header"
+            " first_row; blocks of 4,096 rows, 32,768 cells or 1 MiB",
         ),
     ),
     resources=Resources(max_memory=512 * 1024 * 1024, streaming=True),
