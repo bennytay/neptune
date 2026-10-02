@@ -152,7 +152,7 @@ def test_both_kinds_are_machine_records_added_in_schema_version_2() -> None:
     for kind in (ConfigurationSnapshot, ConfigurationValue):
         assert kind.family is Family.MACHINE and kind.since == 2
         assert KIND_SINCE[kind.kind] == 2
-    assert SCHEMA_VERSION >= 2  # later additions raise it (ADR 0051)
+    assert SCHEMA_VERSION >= 2  # later versions add other kinds (ADR 0050)
 
 
 @pytest.mark.parametrize(

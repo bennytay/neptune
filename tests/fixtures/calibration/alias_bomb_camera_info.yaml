@@ -1,0 +1,14 @@
+image_width: 640
+image_height: 480
+camera_name: bomb
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: &a [1.0, 2.0, 3.0]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 4
+  data: [*a, *a, *a, *a]
+extra: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a]
+more: &c [*b, *b, *b, *b, *b, *b, *b, *b, *b]

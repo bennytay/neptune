@@ -1,0 +1,20 @@
+image_width: 640
+image_height: 480
+camera_name: wrist_cam
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [615.2631, 0.0, 322.1054, 0.0, 614.9087, 241.7762, 0.0, 0.0, 1.0]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.0912, -0.1874, 0.0007, -0.0011, 0.0]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [615.2631, 0.0, 322.1054, 0.0, 0.0, 614.9087, 241.7762, 0.0, 0.0, 0.0, 1.0, 0.0]

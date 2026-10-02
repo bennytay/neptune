@@ -220,6 +220,39 @@ def test_adr_index_check_fails_when_stale_and_write_fixes_it(tmp_path: Path) -> 
     assert adr_index.main([]) == 2
 
 
+def test_adr_index_shows_who_amends_a_decision(tmp_path: Path) -> None:
+    _adr(tmp_path, "0001-a.md", "First", "Accepted")
+    _adr(tmp_path, "0002-b.md", "Second", "Accepted; §3 amended by 0003")
+    (tmp_path / "0003-c.md").write_text(
+        "# 0003 — Third\n\n- Status: Accepted\n- Amends: ADR 0001 §2 (one thing), ADR 0002\n"
+        "  §3 (wrapped); settles ADR 0004's open point\n\n## Context\n\nAmends: ADR 0001\n"
+    )
+    rows = adr_index.render(tmp_path, compiler=True).splitlines()
+    assert (
+        "amended by 0003 |" not in adr_index.render(tmp_path).split("| First |")[1].split("\n")[0]
+    )
+    assert rows[-3].endswith("| First | Accepted; amended by 0003 |")
+    assert rows[-2].endswith("| Second | Accepted; §3 amended by 0003 |")  # already named
+    assert "amended by" not in rows[-1]  # the settled ADR 0004 is not amended
+
+
+def test_adr_index_compiler_header_and_determinism(tmp_path: Path) -> None:
+    _adr(tmp_path, "0001-a.md", "First", "Accepted")
+    compiler = adr_index.render(tmp_path, compiler=True)
+    assert "Status values:" in compiler
+    assert "Numbers are local" in adr_index.render(tmp_path)
+    assert adr_index.main(["--compiler", str(tmp_path)]) == 0
+    assert (tmp_path / "README.md").read_text() == compiler
+    assert adr_index.main(["--check", "--compiler", str(tmp_path)]) == 0
+    assert adr_index.main(["--check", str(tmp_path)]) == 1  # the other header: stale
+
+
+def test_compiler_adr_index_is_current() -> None:
+    """A PR adding an ADR runs `make adr-index` (or `make fmt`); nobody edits the table by hand."""
+    root = Path(__file__).parents[2]
+    assert adr_index.main(["--check", "--compiler", str(root / "docs" / "adr")]) == 0
+
+
 def test_committed_package_indexes_are_current() -> None:
     root = Path(__file__).parents[2]
     dirs = sorted(str(p) for p in (root / "packages").glob("*/docs/adr"))

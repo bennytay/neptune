@@ -15,3 +15,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0006](0006-l1-gate-catalog-api-amendments.md) | L1 gate: catalog API amendments for hostile packages, moved evidence, tenant roots and paging; catalog-api 1.1.0 stable | Accepted |
 | [0007](0007-registration-implementation-boundaries-and-source-checks.md) | Registration: the indexing boundary, local package roots, and on-request source checks behind a read-only store | Accepted |
 | [0008](0008-a-default-record-partition-for-declared-kinds.md) | A default record partition for declared kinds; registration decides which kinds a package holds | Accepted |
+| [0009](0009-record-index-bodies-pointers-and-generated-projections.md) | Record index: stored bodies, Unknown pointers, schema-generated projection columns and fixed ordering | Accepted |

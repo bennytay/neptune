@@ -23,7 +23,7 @@ from neptune.model.knowledge import AssertionKind, Knowledge, Known
 
 # The catalog API's registry version (contracts/catalog-api). It equals the registry version
 # exactly (platform ADR 0002 §3); a reader-incompatible change raises the major (ADR 0004 §5).
-CATALOG_API_VERSION: Final = "1.3.0"
+CATALOG_API_VERSION: Final = "1.4.0"
 API_MAJOR: Final = int(CATALOG_API_VERSION.split(".", 1)[0])
 
 

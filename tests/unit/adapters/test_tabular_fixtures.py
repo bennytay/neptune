@@ -14,6 +14,7 @@ from neptune.adapters.contract import PROBE_HEAD_SIZE, ProbeHints
 from neptune.adapters.registry import SelectionStatus
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures" / "tabular"
+WORKBOOKS: Final = (".xlsx", ".xlsm")
 PARQUET: Final = ("humanoid_joints.parquet", "truncated.parquet", "bad_tail.parquet")
 SENT_TO_TABULAR: Final = (
     "telemetry_amr.csv",
@@ -29,7 +30,8 @@ SENT_TO_TABULAR: Final = (
 
 def test_text_fixtures_are_exactly_what_the_generator_builds(tabular_fixtures: ModuleType) -> None:
     built = tabular_fixtures.build()
-    on_disk = {p.name for p in FIXTURES.iterdir() if p.suffix not in (".py", ".md")}
+    # The workbooks have a generator of their own (make_xlsx_fixtures.py).
+    on_disk = {p.name for p in FIXTURES.iterdir() if p.suffix not in (".py", ".md", *WORKBOOKS)}
     assert set(built) == on_disk - {"__pycache__"}
     for name, data in built.items():
         if name not in PARQUET:
@@ -52,7 +54,9 @@ def test_parquet_fixtures_are_what_the_generator_builds_by_content(
 
 
 def test_every_fixture_is_small() -> None:
-    assert all(p.stat().st_size < 64 * 1024 for p in FIXTURES.iterdir())
+    assert all(
+        p.stat().st_size < 64 * 1024 for p in FIXTURES.iterdir() if p.suffix not in WORKBOOKS
+    )
 
 
 @pytest.mark.parametrize("name", SENT_TO_TABULAR)

@@ -45,8 +45,8 @@ the wrong size, a raise naming another reader) and the call failed like any othe
 3. **Findings, not exceptions.** Recoverable problems are `IngestFinding`s in `ChunkOutput`, built with
    `identity.findings.ingest_finding` and a documented `<adapter id>.<name>` code (ADR 0017 §9). An uncaught
    exception is treated by the runtime as a crash: the chunk is quarantined with a finding; the job continues.
-4. **Leaf packages.** Adapters import `model/`, `identity/` and `adapters.contract`; never each other, the
-   registry or `runtime/`.
+4. **Leaf packages.** Adapters import `model/`, `identity/`, `adapters.contract` and, for JSON, TOML and YAML,
+   the shared `adapters.structured` readers (ADR 0055); never each other, the registry or `runtime/`.
 5. **Locators are exact.** Every emitted record carries an `EvidenceRef` that resolves to the bytes it came from.
    Nested evidence is a locator path from the outermost source inward (ADR 0016); build the transform with
    `identity.provenance.transform_record` and tier-2 ids with `evidence_record_id`.
@@ -202,7 +202,9 @@ For sources that describe machines (manifests, robot descriptions, flight logs, 
   write `Unknown` citing where you looked and emit `<adapter>.software_identity_missing`.
 - Calibration: one `Calibration` per calibrated subject, parameters under their declared names with
   numbers in source order, and extrinsics as `FrameTransform`s in the calibration file's own graph,
-  direction `Ambiguous` unless the format says which way they map.
+  direction `Ambiguous` unless the format says which way they map. The `calibration` adapter (ADR 0055) is the
+  worked example: ROS `camera_info`, Kalibr and OpenCV `FileStorage`, claimed by required keys at `VERIFIED`.
+  An extrinsic whose frames the file does not name stays a parameter with a `frame_unresolved` finding.
 
 ## Configuration (ADR 0037)
 
@@ -231,10 +233,24 @@ For registers, geometry, photos, video files and documents:
   Blank is `Unknown`; only a token the source or its spec defines as none is `KnownAbsent`.
   A row not cited as `Row(r)` (a JSON element, a table on a page) gives each cell its own
   provenance. The `tabular` adapter (ADR 0042) is the worked example for CSV, JSON and Parquet.
+  Its XLSX reader (ADR 0059) is the worked example for a container: a sheet per table, each cell
+  citing `[the part's stored bytes in the zip, the cell's bytes in the inflated part, an adapter
+  step]`; a date stays its serial, with the workbook's epoch recorded as stated; a formula is its
+  cached value and its text a row of its own table; blank, absent and `""` are `Unknown` told apart
+  by the citation; a zip and its XML are read by bounded standard-library parsers (no entity, no
+  link followed, no macro run).
 - A `Site` or `Asset` per row or feature that names one, with its ids and names each citing its cell or
   span. Don't copy the rest of the row into it.
-- Geometry: a `SpatialArtifact` per file, unit / CRS / frame as declared (`NotCovered` where the format
-  has no place), objects cited by `ObjectLocator`.
+- Geometry: a `SpatialArtifact` per file citing the whole file (the lazy handle: nothing is copied), unit /
+  CRS / frame as declared (`NotCovered` where the format has no place), objects cited by `ObjectLocator`.
+  What the record has no field for (bounds, counts, up axis, dependencies) is a cited properties table and
+  dependencies table, each row citing its bytes; a reference is classified by its text and never opened.
+  The `geometry` adapter (ADR 0052) is the worked example for OBJ, STL, PLY, glTF/GLB and USD.
+  A CRS is never invented: a stated one is `Known` as written (authority and code verbatim), two different
+  ones `Ambiguous`, an unreadable or absent one `Unknown` with a finding; a format default is `Known`
+  citing the specification, and only where nothing in the file contradicts it. Never reproject, wrap or
+  repair. The `geojson` adapter (ADR 0057) is the worked example for a vector map: features and their
+  bounds as table rows, ids as hints, never merged.
 - Media: an `Image` per still, a `Video` per video track, `capture` from EXIF / XMP / container metadata.
   Never apply EXIF orientation, never caption.
 - Documents: one `DocumentRecord`, then `DocumentBlock`s in reading order with the text of each exact

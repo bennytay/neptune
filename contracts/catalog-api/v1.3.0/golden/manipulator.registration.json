@@ -5,7 +5,7 @@
   "outcome": "registered",
   "package_id": {
     "knowledge": "known",
-    "value": "sha256:e2d6d834f64229ce5d913159ff209f23d3913cbd9ab468e34c3069602b2017df"
+    "value": "sha256:b6cba1bf32cb7de4a65c12d4403de38137fb130b76ea551cbb356be2a2dd501a"
   },
   "record_counts": [
     {
@@ -13,12 +13,12 @@
       "kind": "calibration"
     },
     {
-      "count": 1,
-      "kind": "commissioning_baseline"
-    },
-    {
       "count": 4,
       "kind": "frame"
+    },
+    {
+      "count": 1,
+      "kind": "frame_binding"
     },
     {
       "count": 1,
@@ -34,26 +34,18 @@
     },
     {
       "count": 1,
-      "kind": "maintenance_event"
-    },
-    {
-      "count": 1,
-      "kind": "requalification_record"
-    },
-    {
-      "count": 1,
-      "kind": "risk_assessment"
-    },
-    {
-      "count": 1,
       "kind": "run"
     },
     {
-      "count": 3,
+      "count": 1,
+      "kind": "run_assembly"
+    },
+    {
+      "count": 2,
       "kind": "source_artifact"
     },
     {
-      "count": 3,
+      "count": 2,
       "kind": "source_revision"
     },
     {
@@ -61,11 +53,11 @@
       "kind": "stream"
     },
     {
-      "count": 5,
+      "count": 4,
       "kind": "timestamp_domain"
     },
     {
-      "count": 3,
+      "count": 2,
       "kind": "transform_record"
     }
   ],
@@ -79,6 +71,6 @@
   "root_locator": "/srv/neptune/packages/manipulator",
   "schema_version": {
     "knowledge": "known",
-    "value": 1
+    "value": 3
   }
 }

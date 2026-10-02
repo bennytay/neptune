@@ -1,4 +1,4 @@
-# 0001 — Deploy is a compiler plugin of adapters and read-only Sources, pinned to package schema 3
+# 0001 — Deploy is a compiler plugin of adapters and read-only Sources, pinned to package schema 4
 
 - Status: Accepted
 - Date: 2026-10-02
@@ -13,7 +13,7 @@ already owns the parts that make ingestion trustworthy:
 
 - the adapter ABI (root ADRs 0008, 0024): four methods, the laws, the sandbox and the runtime;
 - the `Source` interface (root ADR 0009): what bytes exist and how they are opened;
-- the record model (root ADR 0051): the eight lifecycle kinds, added at package schema 3, all `stated`.
+- the record model (root ADR 0051): the eight lifecycle kinds, added at package schema 4, all `stated`.
 
 If Deploy grows its own runtime, its own record kinds or its own write path, the two disagree on
 provenance, determinism and identity. If its connectors write back to a CMMS or a ticketing system,
@@ -45,8 +45,8 @@ Deploy's adapters by building its own `AdapterRegistry` from them, which root AD
      keeps out the network, the filesystem and subprocesses (the sandbox, root ADR 0030).
    - Everything an adapter emits is `stated` evidence. No adapter infers a lifecycle state, orders stages,
      checks an intervention against its envelope or decides that a requalification passed.
-3. **Deploy pins package schema 3.** `neptune_deploy.PACKAGE_SCHEMA_VERSION = 3`, `docs/contracts.md` and
-   `contracts/lock.toml` (`package-schema = "3.0.0"`) name one version. A test fails if they disagree with each
+3. **Deploy pins package schema 4.** `neptune_deploy.PACKAGE_SCHEMA_VERSION = 4`, `docs/contracts.md` and
+   `contracts/lock.toml` (`package-schema = "4.0.0"`) name one version. A test fails if they disagree with each
    other or with the compiler's `SCHEMA_VERSION`, or if any lifecycle kind is newer than the pin. The
    dependency is the workspace's `neptune` with no version specifier: the distribution version does not move
    with the schema, so the pin lives in the contracts registry, as the Ledger's does.

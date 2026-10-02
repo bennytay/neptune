@@ -9,25 +9,21 @@
   },
   "cited_by": [
     {
-      "kind": "authorisation_envelope",
+      "kind": "image",
       "line": 1,
-      "package_id": "sha256:41048ca51b55770281f886e2a9c1e240765500e6b9de07b90911d2526386bab4",
-      "record_id": "rec:sha256:cd83aea97e78dbc95d6a6e3a3ba9b5110caeb5ff1477079cc44d45b07e414290"
+      "package_id": "sha256:c804f5687845a7958966de0b52d46916240c8b307defa9d1c2cfbfc9efe89f3c",
+      "record_id": "rec:sha256:deec240cd3f458123c480eb7794a21c41facef5588f32c45e3dcd8888fe26006"
     }
   ],
   "evidence_ref": {
     "locator": [
       {
         "kind": "byte_range",
-        "length": 4903,
+        "length": 352,
         "offset": 0
-      },
-      {
-        "kind": "json_pointer",
-        "pointer": "/authorisations/0"
       }
     ],
-    "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+    "source": "sha256:a129a6a387b18d19bbbb00672f13b41987ea69ea42261895d257fb3b084fe0eb"
   },
   "fetch": [
     {
@@ -37,24 +33,25 @@
       "locations": [
         {
           "kind": "local",
-          "path": "deployment/records.json"
+          "path": "photos/dock.png"
         }
       ],
-      "package_id": "sha256:41048ca51b55770281f886e2a9c1e240765500e6b9de07b90911d2526386bab4",
+      "package_id": "sha256:c804f5687845a7958966de0b52d46916240c8b307defa9d1c2cfbfc9efe89f3c",
       "storage": "referenced"
     }
   ],
   "findings": [],
   "region": {
-    "addressing": "json_pointer",
+    "addressing": "byte_range",
     "step": {
-      "kind": "json_pointer",
-      "pointer": "/authorisations/0"
+      "kind": "byte_range",
+      "length": 352,
+      "offset": 0
     }
   },
   "size": {
     "knowledge": "known",
-    "value": 4903
+    "value": 352
   },
   "status": "resolved"
 }
