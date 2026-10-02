@@ -111,7 +111,9 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
    - A lifecycle record whose lists are all bare arrays is written at 4, as before. One holding
      any other list state is written at 5 (`LIST_STATES_SINCE`), so a version 4 reader refuses it
      by version and never by key.
-   - A reader also refuses a line that declares an older version than its content uses.
+   - A reader refuses a line whose declared version is not exactly the version its content
+     uses. An older one is refused by version; a newer one would be a second encoding of the same
+     record, so it is refused too.
    - The record's version is its `schema_version` property, and `kinds.record_version` reads it.
    - A package is written at `records_version`: the highest of its records' versions, not only
      its kinds'. The package reader checks the manifest against the records it read.

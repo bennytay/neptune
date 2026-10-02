@@ -533,15 +533,25 @@ def test_a_civil_zone_naming_a_clock_the_package_lacks(tmp_path: Path) -> None:
     assert list(finding.records) == [zone.id]
 
 
-def test_two_civil_zones_on_one_clock_are_in_doubt_even_when_they_agree(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("names", "zones"),
+    [
+        (("Europe/Berlin", "Europe/Vienna"), ["Europe/Berlin", "Europe/Vienna"]),
+        (("Europe/Berlin", "Europe/Berlin"), ["Europe/Berlin"]),
+    ],
+    ids=["disagree", "agree"],
+)
+def test_two_civil_zones_on_one_clock_are_in_doubt_even_when_they_agree(
+    tmp_path: Path, names: tuple[str, str], zones: list[str]
+) -> None:
     kit = Kit("register", "cmms")
     clock = kit.clock()
-    first = _zone(kit, clock.id, "Europe/Berlin")
-    second = _zone(kit, clock.id, "Europe/Vienna")
+    first = _zone(kit, clock.id, names[0])
+    second = _zone(kit, clock.id, names[1])
     (finding,) = validate_package(build(tmp_path, kit)).findings
     assert finding.code.endswith("civil_zone_repeated")
     assert finding.category is FindingCategory.AMBIGUOUS
-    assert finding.details["zones"] == ["Europe/Berlin", "Europe/Vienna"]
+    assert finding.details["zones"] == zones
     assert set(finding.records) == {first.id, second.id}
     one = Kit("register", "cmms")
     _zone(one, one.clock().id, "UTC")
