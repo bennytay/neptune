@@ -12,9 +12,9 @@ and the findings of what does not hold together:
 - **groups**: frames joined by declared transforms, stated bindings and tree edges, never by a
   link, each with its origin (one root, several, or none in a loop) and an ``Unknown`` earth
   reference;
-- **spatial references**: per stream with a header, the frames its rows name and how often (and
-  the rows naming none), its geodetic type; per spatial artifact, site or asset, its declared
-  frame and CRS;
+- **spatial references**: per stream with a header and rows, the frames its rows name and how
+  often (and the rows naming none), its geodetic type; per spatial artifact, site or asset, its
+  declared frame and CRS;
 - **findings**: a run's frames in groups no transform joins (``disconnected``), a frame with two
   parents, a loop, a static transform restated with other values, rows naming no frame, names
   differing by a leading ``/``, a subject with no frame and no CRS (``origin_unknown``).
@@ -332,13 +332,14 @@ class _Pass:
 
     def read_headers(
         self, tree: _Tree, stream: Stream, rows: RowReader
-    ) -> tuple[dict[str, int], int]:
+    ) -> tuple[dict[str, int], int, int]:
         """The frames a header stream's rows name (header and, for odometry, child), counted,
-        and the rows whose header names none."""
+        the rows whose header names none, and the rows read."""
         counts: dict[str, int] = {}
-        unset = 0
+        unset = read = 0
         columns = (FRAME, f"state/{FRAME}", CHILD_FRAME, f"state/{CHILD_FRAME}")
         for row in rows(stream, columns):
+            read += 1
             for column in (FRAME, CHILD_FRAME):
                 if not _state(row, column):
                     continue
@@ -353,7 +354,7 @@ class _Pass:
         tree.frames.update(counts)
         if unset:
             tree.unset[stream.id] = tree.unset.get(stream.id, 0) + unset
-        return counts, unset
+        return counts, unset, read
 
 
 def _crs(state: Knowledge[CrsCode]) -> Knowledge[CrsCode]:
@@ -444,7 +445,7 @@ def _run(
         tree = tree_of(stream)
         tree.streams.append(stream)
         work.read_transforms(tree, stream, rows)
-    header_counts: dict[RecordId, tuple[dict[str, int], int]] = {}
+    header_counts: dict[RecordId, tuple[dict[str, int], int, int]] = {}
     for stream in header_streams:
         tree = tree_of(stream)
         tree.streams.append(stream)
@@ -476,7 +477,7 @@ def _run(
                 union.add(ref)
         tree_frames[tree.id] = sorted(refs.values(), key=_key)
         for stream in tree.streams:
-            for name in header_counts.get(stream.id, ({}, 0))[0]:
+            for name in header_counts.get(stream.id, ({}, 0, 0))[0]:
                 if name in refs:
                     work.evidence[refs[name]].append(stream.provenance.evidence)
         _tree_edges(work, tree, refs, union, parents, dynamic, edge_lines)
@@ -686,7 +687,7 @@ def _tree_findings(
 def _references(
     work: _Pass,
     header_streams: list[Stream],
-    counts: Mapping[RecordId, tuple[dict[str, int], int]],
+    counts: Mapping[RecordId, tuple[dict[str, int], int, int]],
     trees: Mapping[RecordId, _Tree],
     artifacts: list[SpatialArtifact | Site | Asset],
     union: _Union,
@@ -695,7 +696,9 @@ def _references(
     found: list[SpatialReference] = []
     for stream in header_streams:
         tree = trees[stream.run]
-        named, unset = counts[stream.id]
+        named, unset, read = counts[stream.id]
+        if not read:
+            continue  # no row: no value to place
         frames = []
         for name in sorted(named):
             try:
