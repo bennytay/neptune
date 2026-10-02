@@ -57,7 +57,7 @@ class RangeInvalid(TransportError):
     code = "range_invalid"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Listed:
     """One object as a listing states it: its key, revision token and size."""
 
@@ -66,7 +66,7 @@ class Listed:
     size: int
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Unlisted:
     """An entry in a listing that cannot become an object: its key bytes, as listed, and why."""
 
