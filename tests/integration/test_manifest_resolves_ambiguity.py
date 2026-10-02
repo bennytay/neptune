@@ -118,7 +118,11 @@ def test_a_generated_and_edited_manifest_resolves_every_ambiguity(tmp_path: Path
     assert stated.config["source"] == sources[("local", "neptune.yaml")]  # the manifest is a source
     declarations: Any = stated.config["declarations"]
     assert [m["embodiment"] for m in declarations["machines"]] == ["manipulator", "legged"]
-    assert transforms["neptune.grouping"].upstream == (stated.id,)
+    # The grouping (ADR 0066) names the manifest that declared its sessions, and the adapters
+    # whose records it read as evidence.
+    grouping = transforms["neptune.grouping"]
+    assert stated.id in grouping.upstream
+    assert set(grouping.upstream) - {stated.id} <= {t.id for t in transforms.values()}
     assert "markdown" in transforms  # the notes, read by the adapter the manifest chose
 
     proposals = [r for r in read_derived(package.derived) if isinstance(r, SessionProposal)]

@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:4aa68c6a500ffa0634bf034bed82cfe2c0eab3a1dea7438133bfe99428f9432d`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:d77ba31ab7b0ba42e9750b286cf1a4c3862b85d15e11305d152c00f3b5f48fb1`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -19,7 +19,7 @@ Receipt `rec:sha256:4aa68c6a500ffa0634bf034bed82cfe2c0eab3a1dea7438133bfe99428f9
 
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
-| `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:a46247e2db11` |
+| `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:1bc3f4fa541f` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
 
 ## Records
