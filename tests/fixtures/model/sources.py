@@ -7,6 +7,13 @@ Four robots, each with the sources such a team typically has (MVL-70):
 - manipulator: an MCAP recording and a hand-eye calibration result;
 - mobile_robot: a ROS 1 bag, a site register (CSV) and a photo taken at a dock (PNG with EXIF).
 
+Two deployments add the records a deployment keeps (ADR 0051), each a JSON export of its forms,
+tickets and work orders, whose date-times carry their offset and whose values are written as the
+people who filled the forms wrote them:
+
+- warehouse_amr: a mobile robot's warehouse deployment;
+- manipulator_cell: a manipulator cell's.
+
 YAML sources are written in flow style, which is valid YAML and parses as JSON, so tests can
 resolve JSON pointers into them with the standard library.
 """
@@ -368,6 +375,103 @@ HANDEYE: Final = {
 }
 
 
+# The manipulator cell's records: commissioning to ANSI/RIA R15.08 and ISO 10218-2, its risk
+# assessment, a joint-drive replacement and the requalification that returned it to service.
+CELL_RECORDS: Final = {
+    "cell": "CELL-3",
+    "commissioning": {
+        "record": "CC-3-001",
+        "robot": "20415",
+        "configuration": "CELL3-CFG-A",
+        "date": "2026-09-14T08:30:00+10:00",
+        "hardware": [
+            {"item": "arm", "model": "UR10e", "serial": "20415"},
+            {"item": "gripper", "model": "2F-140", "serial": "G140-7781"},
+            {"item": "light curtain", "model": "C4000", "serial": "LC-55102"},
+        ],
+        "software": [
+            {"item": "PolyScope", "version": "5.15.2"},
+            {"item": "cell PLC program", "version": "rev 7"},
+        ],
+        "calibrations": ["HE-0930"],
+        "tests": [
+            {
+                "test": "protective stop response",
+                "result": "PASS",
+                "date": "2026-09-14T10:05:00+10:00",
+            },
+            {"test": "light curtain muting", "result": "PASS", "date": "2026-09-14T10:40:00+10:00"},
+        ],
+        "constraints": ["collaborative operation disabled", "tool speed <= 250 mm/s in zone Z2"],
+        "signed_off_by": "Integrator commissioning engineer",
+        "signed_off": "2026-09-14T15:00:00+10:00",
+        "acceptance": "accepted",
+    },
+    "risk_assessment": {
+        "record": "RA-CELL3",
+        "robot": "20415",
+        "configuration": "CELL3-CFG-A",
+        "method": "ISO 12100 risk graph",
+        "date": "2026-09-10T13:00:00+10:00",
+        "hazards": [
+            {
+                "hazard": "crush between gripper and fixture",
+                "severity": "S2",
+                "exposure": "F1",
+                "avoidance": "P2",
+                "PLr": "d",
+                "mitigations": ["light curtain C4000 at cell entry", "reduced speed in zone Z2"],
+            },
+            {
+                "hazard": "ejected part on gripper loss",
+                "severity": "S1",
+                "exposure": "F2",
+                "avoidance": "P1",
+                "PLr": "b",
+                "mitigations": ["polycarbonate guarding"],
+            },
+        ],
+        "approved_by": "Plant safety officer",
+        "approved": "2026-09-11T09:00:00+10:00",
+        "decision": "accepted",
+    },
+    "maintenance": {
+        "work_order": "WO-55190",
+        "robot": "20415",
+        "date": "2026-09-29T07:10:00+10:00",
+        "diagnosis": "joint 3 encoder fault: 14 protective stops over two shifts",
+        "actions": ["replace joint 3 drive", "re-run joint calibration"],
+        "parts": [{"part": "joint 3 drive", "removed": "J3-118842", "installed": "J3-120077"}],
+        "as_maintained_configuration": "CELL3-CFG-A.1",
+    },
+    "requalification": {
+        "record": "RQ-0019",
+        "robot": "20415",
+        "configuration": "CELL3-CFG-A.1",
+        "work_order": "WO-55190",
+        "date": "2026-09-29T13:30:00+10:00",
+        "cause": "joint 3 drive replaced under WO-55190",
+        "corrective_actions": ["joint calibration", "payload and TCP re-entered"],
+        "tests": [
+            {
+                "test": "protective stop response",
+                "result": "PASS",
+                "date": "2026-09-29T14:00:00+10:00",
+            },
+            {
+                "test": "joint 3 stopping distance",
+                "result": "118 mm",
+                "date": "2026-09-29T14:20:00+10:00",
+            },
+        ],
+        "result": "pass",
+        "return_to_service": "returned to service",
+        "returned_by": "Maintenance supervisor",
+        "returned": "2026-09-29T15:00:00+10:00",
+    },
+}
+
+
 def manipulator() -> list[Source]:
     schemas = (
         McapSchema(1, "sensor_msgs/msg/JointState", "ros2msg", JOINT_STATE.encode()),
@@ -424,6 +528,145 @@ DOCK_EXIF: Final = Exif(
 )
 
 
+# The warehouse deployment at site S-007: AMR-07's commissioning, its authorisation, a remote
+# assist, a collision with a rack, the map and zone change that followed, and the risk assessment.
+WAREHOUSE_RECORDS: Final = {
+    "site": "S-007",
+    "commissioning": [
+        {
+            "form": "COM-0042",
+            "machine": "AMR-07",
+            "configuration": "CFG-AMR07-r3",
+            "commissioned": "2026-09-21T09:00:00+10:00",
+            "hardware": [
+                {"item": "drive unit", "model": "DU-200", "serial": "DU2-55120", "revision": "C"},
+                {
+                    "item": "safety lidar",
+                    "model": "microScan3",
+                    "serial": "23110457",
+                    "revision": "1.4",
+                },
+            ],
+            "software": [
+                {"item": "navigation stack", "version": "2.4.1"},
+                {"item": "safety controller firmware", "version": "V01.03.02"},
+            ],
+            "calibrations": ["CAL-LIDAR-0912"],
+            "tests": [
+                {"test": "emergency stop", "result": "PASS", "date": "2026-09-21T10:15:00+10:00"},
+                {
+                    "test": "braking distance at 1.5 m/s",
+                    "result": "0.92 m",
+                    "date": "2026-09-21T10:40:00+10:00",
+                },
+            ],
+            "constraints": [
+                "no operation in aisle 14 during forklift shift change",
+                "ambient temperature at most 35 C",
+            ],
+            "signed_off_by": "Site safety lead",
+            "signed_off": "2026-09-21T16:00:00+10:00",
+            "acceptance": "accepted",
+        }
+    ],
+    "authorisations": [
+        {
+            "authorisation": "AUTH-0042-1",
+            "commissioning": "COM-0042",
+            "machine": "AMR-07",
+            "configuration": "CFG-AMR07-r3",
+            "missions": ["tote transport", "empty pallet return"],
+            "payload": {"min": 0, "max": 150, "unit": "kg"},
+            "zones": [
+                {"zone": "PICK-A", "speed_limit": 1.5, "unit": "m/s"},
+                {"zone": "DOCK-1", "speed_limit": 0.8, "unit": "m/s"},
+            ],
+            "supervision": "remote supervision, 1 operator : 6 robots",
+            "dependencies": ["Wi-Fi coverage AP-3 to AP-9", "fire door interlock FD-2"],
+            "valid_from": "2026-09-22T00:00:00+10:00",
+            "valid_until": "2027-03-22T00:00:00+10:00",
+            "decision": "approved with conditions",
+            "approved_by": "Operations manager",
+            "approved": "2026-09-21T17:30:00+10:00",
+        }
+    ],
+    "interventions": [
+        {
+            "ticket": "INT-1187",
+            "machine": "AMR-07",
+            "mode": "remote assist",
+            "authority": "level 2 remote operator",
+            "reason": "blocked by a pallet in aisle 12",
+            "commands": ["pause", "set waypoint W-12-3", "resume"],
+            "start": "2026-09-24T14:02:10+10:00",
+            "end": "2026-09-24T14:05:41+10:00",
+            "outcome": "mission completed",
+        }
+    ],
+    "incidents": [
+        {
+            "incident": "INC-0007",
+            "severity": "S3",
+            "occurred": "2026-09-25T04:12:00+10:00",
+            "zone": "DOCK-1",
+            "location": "dock door 4",
+            "machines": ["AMR-07"],
+            "assets": ["RACK-R12"],
+            "timeline": [
+                {"time": "2026-09-25T04:12:00+10:00", "entry": "AMR-07 touched rack upright R12"},
+                {"time": "2026-09-25T04:12:01+10:00", "entry": "bumper stop; robot halted"},
+            ],
+            "description": "low-speed contact with a rack upright while docking",
+            "root_cause": "map offset after rack R12 was moved",
+            "evidence": ["VID-20260925-0412", "drive.bag"],
+        }
+    ],
+    "changes": [
+        {
+            "change": "CHG-0031",
+            "incident": "INC-0007",
+            "machines": ["AMR-07"],
+            "configuration": "CFG-AMR07-r4",
+            "items": [
+                {"type": "map", "target": "warehouse map", "from": "r12", "to": "r13"},
+                {
+                    "type": "zone",
+                    "target": "DOCK-1 speed limit",
+                    "from": "0.8 m/s",
+                    "to": "0.5 m/s",
+                },
+            ],
+            "decision": "approved",
+            "approved_by": "Site safety lead",
+            "approved": "2026-09-26T11:00:00+10:00",
+            "effective": "2026-09-27T06:00:00+10:00",
+            "rollback": "map r12",
+        }
+    ],
+    "risk_assessments": [
+        {
+            "assessment": "RA-0042",
+            "machines": ["AMR-07"],
+            "configuration": "CFG-AMR07-r3",
+            "method": "ISO 3691-4 Annex A risk matrix",
+            "assessed": "2026-09-18T10:00:00+10:00",
+            "hazards": [
+                {
+                    "hazard": "collision with a pedestrian in PICK-A",
+                    "severity": "high",
+                    "likelihood": "unlikely",
+                    "risk": "12",
+                    "mitigations": ["safety lidar protective field", "speed limit 1.5 m/s"],
+                }
+            ],
+            "decision": "accepted",
+            "approved_by": "Site safety lead",
+            "approved": "2026-09-19T09:00:00+10:00",
+        }
+    ],
+}
+
+
 def mobile_robot() -> list[Source]:
     bag, bag_layout = ros1_bag((WHEEL_ODOM, BATTERY), MOBILE_MESSAGES)
     photo, photo_layout = png(8, 6, (96, 110, 120), DOCK_EXIF)
@@ -434,9 +677,19 @@ def mobile_robot() -> list[Source]:
     ]
 
 
+def warehouse_amr() -> list[Source]:
+    return [Source("records.json", _json(WAREHOUSE_RECORDS), {})]
+
+
+def manipulator_cell() -> list[Source]:
+    return [Source("records.json", _json(CELL_RECORDS), {})]
+
+
 EXAMPLES: Final = {
     "drone": drone,
     "quadruped": quadruped,
     "manipulator": manipulator,
     "mobile_robot": mobile_robot,
+    "warehouse_amr": warehouse_amr,
+    "manipulator_cell": manipulator_cell,
 }
