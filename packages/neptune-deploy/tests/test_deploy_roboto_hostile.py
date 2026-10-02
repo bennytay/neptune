@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from deploy_roboto_fake import DATASET, ORG, TOKEN, FakeRoboto, content_for
+from neptune.model.ids import ExternalObjectRef
 from neptune.model.knowledge import Known, Unknown
 from neptune.store.workspace import Workspace
 from neptune_deploy.sources.object_store import ObjectReadError
@@ -287,7 +288,7 @@ def test_the_same_path_listed_twice_with_different_versions_is_used_by_neither(
     assert codes(source) == ["deploy_roboto.key_duplicated"]
 
 
-# --- Annotations -----------------------------------------------------------------------------------
+# --- Annotations ---------------------------------------------------------------------------
 
 
 def test_a_malformed_events_page_is_one_finding_and_the_rest_stands(tmp_path: Path) -> None:
@@ -345,14 +346,11 @@ def test_odd_event_values_are_kept_as_stated_or_unknown_and_never_interpreted(
         catalog = source.catalog()
     (table,) = [t for t in catalog.tables if getattr(t.name, "value", None) == "roboto events"]
     assert isinstance(table.header, Known)
-    rows = {
-        cells["event_id"].value: cells
-        for cells in (
-            dict(zip(table.header.value, r.cells, strict=True))
-            for r in catalog.rows
-            if r.table == table.id
-        )
-    }
+    rows: dict[Any, dict[str, Any]] = {}
+    for record in catalog.rows:
+        if record.table == table.id:
+            cells: dict[str, Any] = dict(zip(table.header.value, record.cells, strict=True))
+            rows[cells["event_id"].value] = cells
     assert rows["e1"]["start_time"].value == "soon"  # text stays text: no time was made of it
     assert isinstance(rows["e1"]["@clock:start_time"], Unknown)  # a string is on no clock
     assert rows["e1"]["end_time"].value == 1.5
@@ -365,6 +363,7 @@ def test_odd_event_values_are_kept_as_stated_or_unknown_and_never_interpreted(
     assert rows["e4"]["start_time"].value == 2**70
     (finding,) = source.findings()
     assert finding.code == "deploy_roboto.value_unrepresentable"
+    assert isinstance(finding.subject, ExternalObjectRef)
     assert finding.subject.object_id == f"{ORG}/{DATASET}:events"  # the document, as its id says
 
 
@@ -394,7 +393,7 @@ def test_an_event_time_range_on_a_clock_is_two_records_citing_the_same_event(
     ends = [d for d in catalog.domains if d.field == "end_time"]
     assert len(starts) == len(ends) == 1 and starts[0].id != ends[0].id
     assert str(starts[0].role.value) == "sample"  # type: ignore[union-attr]
-    assert transform.config["event_clock"] == {  # type: ignore[index]
+    assert transform.config["event_clock"] == {
         "epoch": "unix",
         "resolution": "1/1000000000",
         "role": "sample",
@@ -402,7 +401,7 @@ def test_an_event_time_range_on_a_clock_is_two_records_citing_the_same_event(
     }
 
 
-# --- Signed URLs ------------------------------------------------------------------------------------
+# --- Signed URLs ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -430,9 +429,8 @@ def test_a_signed_url_that_is_not_a_plain_read_of_an_allowed_host_is_never_reque
 ) -> None:
     fake = FakeRoboto()
     fake.signed_url = url
-    with connect(fake, tmp_path) as source:
-        with pytest.raises(ObjectReadError) as raised:
-            read_first(source)
+    with connect(fake, tmp_path) as source, pytest.raises(ObjectReadError) as raised:
+        read_first(source)
     assert raised.value.code == "read_failed"
     assert fake.content_requests() == []
     assert "deploy_roboto.read_failed" in codes(source)
@@ -489,9 +487,8 @@ def test_a_content_host_that_fails_or_lies_is_a_read_finding(
     fake = FakeRoboto()
     for name, value in knob.items():
         setattr(fake, name, value)
-    with connect(fake, tmp_path) as source:
-        with pytest.raises(ObjectReadError):
-            read_first(source)
+    with connect(fake, tmp_path) as source, pytest.raises(ObjectReadError):
+        read_first(source)
     assert [c for c in codes(source) if c.startswith("deploy_roboto.")]
 
 

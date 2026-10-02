@@ -22,11 +22,10 @@ from neptune_deploy.sources.object_store.config import ObjectStoreConfigError
 from neptune_deploy.sources.rerun import (
     RerunExport,
     RerunSource,
-    parse_export,
     parse_storage_url,
     rerun_source,
 )
-from neptune_deploy.sources.rerun.export import read_export
+from neptune_deploy.sources.rerun.export import parse_export, read_export
 
 EXPORT = Path(__file__).parent / "fixtures" / "connectors" / "rerun" / "catalog_export.json"
 CREDENTIALS = {"s3_access_key_id": "AKIDEXAMPLE", "s3_secret_access_key": "s3cr3t-never-printed"}
@@ -368,6 +367,7 @@ def test_every_record_is_stated_and_cites_a_catalog_document(tmp_path: Path) -> 
         assert row.provenance.transform == source.transform.id
         assert row.provenance.evidence.source in documents
         for cell in row.cells:
+            assert isinstance(cell, Known | Unknown)
             assert isinstance(cell.provenance, Provenance)
             assert cell.provenance.assertion_kind is AssertionKind.STATED
         assert structured_record_from_json(row.to_json()) == row
