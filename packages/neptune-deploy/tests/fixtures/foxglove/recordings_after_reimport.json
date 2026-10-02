@@ -1,0 +1,138 @@
+[
+  {
+    "id": "rec_arm_cell_0001",
+    "projectId": "prj_plant_a",
+    "path": "/logs/cell1/pick_place_0930.mcap",
+    "size": 5042,
+    "createdAt": "2026-09-30T06:10:00Z",
+    "start": "2026-09-30T05:30:00Z",
+    "end": "2026-09-30T05:59:59.5Z",
+    "importStatus": "complete",
+    "site": {
+      "id": "site_1",
+      "name": "primary",
+      "indexingStrategy": "split-files"
+    },
+    "key": "cell1-2026-09-30-a",
+    "metadata": [
+      {
+        "name": "cell",
+        "metadata": {
+          "line": "B",
+          "station": "4"
+        }
+      }
+    ],
+    "importedAt": "2026-10-01T08:00:00Z",
+    "device": {
+      "id": "dev_ur5e_cell1",
+      "name": "ur5e-cell-1"
+    },
+    "sessionId": "rs_shift_0930"
+  },
+  {
+    "id": "rec_amr_fleet_0002",
+    "projectId": "prj_plant_a",
+    "path": "/logs/amr07/route_0930.mcap",
+    "size": 5042,
+    "createdAt": "2026-09-30T06:58:00Z",
+    "start": "2026-09-30T06:00:00Z",
+    "end": "2026-09-30T06:45:00Z",
+    "importStatus": "complete",
+    "site": {
+      "id": "site_1",
+      "name": "primary",
+      "indexingStrategy": "split-files"
+    },
+    "key": "amr07-2026-09-30-b",
+    "metadata": [],
+    "importedAt": "2026-09-30T07:00:00Z",
+    "device": {
+      "id": "dev_amr_07",
+      "name": "amr-fleet-07"
+    },
+    "sessionId": "rs_shift_0930"
+  },
+  {
+    "id": "rec_legged_0003",
+    "projectId": "prj_plant_a",
+    "path": "stairs_014.bag",
+    "size": 5042,
+    "createdAt": "2026-09-29T20:59:00Z",
+    "start": "2026-09-29T20:00:00Z",
+    "end": "2026-09-29T20:40:00Z",
+    "importStatus": "complete",
+    "site": {
+      "id": "site_1",
+      "name": "primary",
+      "indexingStrategy": "split-files"
+    },
+    "key": "quad02-stairs-014",
+    "metadata": [],
+    "importedAt": "2026-09-29T21:00:00Z",
+    "device": {
+      "id": "dev_quad_02",
+      "name": "quadruped-02"
+    }
+  },
+  {
+    "id": "rec_marine_0004",
+    "projectId": "prj_plant_a",
+    "path": "harbour_survey.mcap",
+    "size": 5042,
+    "createdAt": "2026-09-28T10:59:00Z",
+    "start": "2026-09-28T08:00:00Z",
+    "end": "2026-09-28T10:30:00Z",
+    "importStatus": "complete",
+    "site": {
+      "id": "site_1",
+      "name": "primary",
+      "indexingStrategy": "split-files"
+    },
+    "metadata": [],
+    "importedAt": "2026-09-28T11:00:00Z",
+    "device": {
+      "id": "dev_asv_01",
+      "name": "asv-harbour-1"
+    }
+  },
+  {
+    "id": "rec_pending_0005",
+    "projectId": "prj_plant_a",
+    "path": "/edge/ugv04/night.mcap",
+    "size": 5042,
+    "createdAt": "2026-09-30T23:00:00Z",
+    "start": "2026-09-30T22:00:00Z",
+    "end": "2026-09-30T22:50:00Z",
+    "importStatus": "pending",
+    "site": {
+      "id": "site_1",
+      "name": "primary",
+      "indexingStrategy": "split-files"
+    },
+    "key": "ugv04-night",
+    "metadata": [],
+    "device": {
+      "id": "dev_ugv_04",
+      "name": "ugv-depot-4"
+    }
+  },
+  {
+    "id": "rec_unassigned_0006",
+    "projectId": "prj_plant_a",
+    "path": "uav_survey_3.mcap",
+    "size": 5042,
+    "createdAt": "2026-09-27T08:59:00Z",
+    "start": "2026-09-27T08:00:00Z",
+    "end": "2026-09-27T08:20:00Z",
+    "importStatus": "complete",
+    "site": {
+      "id": "site_1",
+      "name": "primary",
+      "indexingStrategy": "split-files"
+    },
+    "key": "manual-upload-17",
+    "metadata": [],
+    "importedAt": "2026-09-27T09:00:00Z"
+  }
+]

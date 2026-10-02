@@ -54,13 +54,35 @@ AMBIGUOUS_TRANSFORM: Final = (
 MACHINE_CITERS: Final = ("calibration", "hardware_configuration", "run", "software_configuration")
 # Kinds whose plain ``run`` record id fills run_ids (stream since schema 1; the rest since 3).
 RUN_CITERS: Final = ("run_assembly", "snapshot_binding", "stream")
+# Kinds whose ``site`` logical id fills site_namespace and site_value: asset since schema 1, the
+# lifecycle kinds since schema 4 (root ADR 0051; Ledger ADR 0011 §2).
+SITE_CITERS: Final = (
+    "asset",
+    "authorisation_envelope",
+    "change_record",
+    "commissioning_baseline",
+    "incident_record",
+    "intervention",
+    "maintenance_event",
+    "requalification_record",
+    "risk_assessment",
+)
 # Every column a registration-order change may move: the registration key and transaction time.
-ORDER_COLUMNS: Final = (*TX_COLUMNS, "tx_seq", "last_seq", "registration_key")
+ORDER_COLUMNS: Final = (
+    *TX_COLUMNS,
+    "tx_seq",
+    "last_seq",
+    "registration_key",
+    "first_registration_key",
+)
+# The contract's four worked examples and the schema-4 manipulator cell, whose lifecycle kinds
+# (commissioning, maintenance, requalification, risk) only it holds.
+INDEXED: Final = (*EXAMPLES, "manipulator_cell")
 
 
 @pytest.fixture
 def packages(tmp_path: Path) -> dict[str, WorkedPackage]:
-    return {name: materialise(name, tmp_path / name) for name in EXAMPLES}
+    return {name: materialise(name, tmp_path / name) for name in INDEXED}
 
 
 @pytest.fixture
@@ -72,7 +94,7 @@ def catalog(pg_uri: str) -> Iterator[PostgresCatalog]:
 @pytest.fixture
 def indexed(pg_uri: str, packages: dict[str, WorkedPackage]) -> Iterator[Conn]:
     with fresh(pg_uri) as catalog:
-        for name in EXAMPLES:
+        for name in INDEXED:
             assert catalog.register(packages[name].root).outcome == "registered"
     with psycopg.connect(pg_uri, autocommit=True) as conn:
         conn.execute("SET search_path TO tenant_acme")
@@ -104,7 +126,8 @@ def _states(value: Any, state: str, pointer: str = "") -> list[str]:
 
 def _expected_projection(kind: str, record: dict[str, Any]) -> dict[str, Any]:
     """The declared package schema's hot filters, written out by hand (ADR 0009 §3's table;
-    schema 3 adds the run filter on run_assembly and snapshot_binding)."""
+    schema 3 adds the run filter on run_assembly and snapshot_binding, schema 4 the site filter on
+    the lifecycle kinds)."""
     out: dict[str, Any] = dict.fromkeys(projection_columns())
 
     def logical(name: str, field: dict[str, Any]) -> None:
@@ -114,7 +137,7 @@ def _expected_projection(kind: str, record: dict[str, Any]) -> dict[str, Any]:
 
     if kind in MACHINE_CITERS:
         logical("machine", record["machine"])
-    if kind == "asset":
+    if kind in SITE_CITERS:
         logical("site", record["site"])
     if kind in RUN_CITERS:
         out["run_ids"] = [record["run"]]
@@ -131,7 +154,7 @@ def _expected_projection(kind: str, record: dict[str, Any]) -> dict[str, Any]:
 def test_counts_match_every_manifests_tables(
     indexed: Conn, packages: dict[str, WorkedPackage]
 ) -> None:
-    for name in EXAMPLES:
+    for name in INDEXED:
         package = packages[name]
         counted = {
             str(kind): int(str(count))
@@ -152,7 +175,7 @@ def test_every_row_holds_its_body_pointers_and_projections(
 ) -> None:
     columns = projection_columns()
     checked = 0
-    for name in EXAMPLES:
+    for name in INDEXED:
         package = packages[name]
         for kind, line, record in package.every_record():
             row = indexed.execute(
@@ -224,6 +247,28 @@ def test_the_hot_filters_find_a_machines_records(
     assert expected["stream"] == len(packages["drone"].records("stream"))
 
 
+def test_the_site_filter_finds_a_cells_lifecycle_records(
+    indexed: Conn, packages: dict[str, WorkedPackage]
+) -> None:
+    """The schema-4 lifecycle kinds are indexed beside the schema-1..3 examples (MVL-94 (a))."""
+    cell = packages["manipulator_cell"]
+    lifecycle = [(k, r) for k, _, r in cell.every_record() if k in SITE_CITERS]
+    assert {k for k, _ in lifecycle} == {
+        "commissioning_baseline",
+        "maintenance_event",
+        "requalification_record",
+        "risk_assessment",
+    }
+    for kind, record in lifecycle:
+        site = record["site"]["value"]
+        found = indexed.execute(
+            "SELECT package_id, schema_version FROM record"
+            " WHERE kind = %s AND site_namespace = %s AND site_value = %s",
+            (kind, site["namespace"], site["value"]),
+        ).fetchall()
+        assert found == [(cell.package_id, 4)], kind
+
+
 # --- a pure function of (package, Ledger version) ---------------------------------------------
 
 
@@ -251,7 +296,7 @@ def test_registration_order_changes_only_registration_keys_and_times(
     pg_server: str, packages: dict[str, WorkedPackage]
 ) -> None:
     dumps = []
-    for order in (EXAMPLES, tuple(reversed(EXAMPLES))):
+    for order in (INDEXED, tuple(reversed(INDEXED))):
         uri = new_database(pg_server)
         with fresh(uri) as catalog:
             for name in order:
@@ -260,7 +305,7 @@ def test_registration_order_changes_only_registration_keys_and_times(
             dumps.append(dump(conn, "tenant_acme", ORDER_COLUMNS))
     assert dumps[0] == dumps[1]
     assert len(dumps[0]["record"]) == sum(
-        sum(packages[name].manifest["tables"].values()) for name in EXAMPLES
+        sum(packages[name].manifest["tables"].values()) for name in INDEXED
     )
 
 
@@ -430,10 +475,11 @@ def test_unknown_inside_ambiguous_candidates_is_not_a_field() -> None:
 # --- migrations over rows registered before them ----------------------------------------------
 
 
-@pytest.mark.parametrize("before", [4, 5])
+@pytest.mark.parametrize("before", [4, 5, 7])
 def test_a_migration_refuses_rows_it_would_leave_blank(pg: Conn, before: int) -> None:
     """ADR 0009 §1, §3: rows filed before 0004 (bodies) or 0005 (projections) would read as "no
-    Unknown field" or "no Known machine"; the migration refuses, and the catalog is rebuilt."""
+    Unknown field" or "no Known machine", and packages before 0007 would be in no thread (ADR
+    0010 §1); the migration refuses, and the catalog is rebuilt."""
     shipped = migrations()
     apply_migrations(pg, "acme", shipped=shipped[: before - 1])
     package = add_package(pg, "tenant_acme", "sha256:" + "e" * 64, 1)

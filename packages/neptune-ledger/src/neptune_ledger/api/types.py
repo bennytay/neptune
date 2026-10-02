@@ -14,16 +14,15 @@ Names follow Ledger ADR 0002 (transaction key, registration key, refusal finding
 
 import hashlib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Any, ClassVar, Final, Literal, TypeAlias
 
 from neptune.identity import canonical_json
-from neptune.model.kinds import RECORD_KINDS
-from neptune.model.knowledge import AssertionKind, Knowledge, Known
+from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotCovered
 
 # The catalog API's registry version (contracts/catalog-api). It equals the registry version
 # exactly (platform ADR 0002 §3); a reader-incompatible change raises the major (ADR 0004 §5).
-CATALOG_API_VERSION: Final = "1.4.0"
+CATALOG_API_VERSION: Final = "1.6.0"
 API_MAJOR: Final = int(CATALOG_API_VERSION.split(".", 1)[0])
 
 
@@ -79,8 +78,18 @@ TierTwoId: TypeAlias = Annotated[
         f"^rec:{_SHA256}$",
     ),
 ]
+# A record kind is named by the package-schema contract, not listed here (Ledger ADR 0011 §4): a
+# package-schema version that adds kinds changes no catalog-api version. The kind is checked
+# against the package-schema version a package declares, where it enters the catalog.
 RecordKind: TypeAlias = Annotated[
-    str, Constraint("RecordKind", "A record kind of package schema 1.", enum=tuple(RECORD_KINDS))
+    str,
+    Constraint(
+        "RecordKind",
+        "A record kind, by the package-schema contract (contracts/package-schema): the kind of a"
+        " record table at the schema version its package declares. Not enumerated here, so a"
+        " package-schema version that adds kinds changes no catalog-api version.",
+        r"^[a-z][a-z0-9_]*$",
+    ),
 ]
 Token: TypeAlias = Annotated[str, Constraint("Token", "A machine token.", r"^[a-z][a-z0-9_.\-]*$")]
 Text: TypeAlias = Annotated[str, Constraint(min_length=1)]
@@ -150,6 +159,10 @@ ThreadKind: TypeAlias = Literal[
     "stream",
     "task",
     "zone",
+]
+# The kind of thing an identity link's two ids name, as the evidence states it (ADR 0010 §8).
+EntityKind: TypeAlias = Annotated[
+    ThreadKind, Constraint("EntityKind", "The kind of entity a link's ids name (a thread kind).")
 ]
 Role: TypeAlias = Literal["cites", "part_of", "subject"]
 Order: TypeAlias = Literal["transaction", "world"]
@@ -278,6 +291,8 @@ class RegisterRequest:
 
 @dataclass(frozen=True)
 class KindCount:
+    """How many records of one kind a registered package holds."""
+
     kind: RecordKind
     count: Count
 
@@ -291,6 +306,10 @@ class Registration:
       ``registration_key``, ``root_locator`` and ``ledger_version`` are returned.
     - ``refused``: nothing was written; ``findings`` say why, and ``registration_key`` is
       ``NotApplicable``. ``package_id`` is ``Unknown`` when no manifest could be read.
+
+    ``schema_version`` is the package-schema version the manifest declares, and every kind in
+    ``record_counts`` is a kind of that version (1.6.0: kinds are named by the package-schema
+    contract, Ledger ADR 0011 §4).
     """
 
     outcome: Literal["already_registered", "refused", "registered"]
@@ -587,7 +606,14 @@ class UnresolvedMember:
 
 @dataclass(frozen=True)
 class ThreadLink:
-    """An ``IdentityLink`` record relating two declared threads; never a merge (§1.5)."""
+    """An ``IdentityLink`` record relating two declared ids; never a merge (§1.5).
+
+    ``from_key`` and ``to_key`` are the link's left and right ids as keys of the thread that
+    lists it: their ``kind`` is the kind the caller asked for, a lookup, not something the link
+    states. ``entity_kind`` is what the evidence states about the kind of thing the two ids
+    name: ``NotCovered`` for every link of package schema 3, which has no field to state it in
+    (ADR 0010 §8).
+    """
 
     link_record_id: RecordId
     package_id: PackageId
@@ -595,6 +621,7 @@ class ThreadLink:
     to_key: ThreadKey
     assertion_kind: Literal["observed", "stated"]
     state: Literal["ambiguous", "known", "not_applicable", "not_covered", "unknown"]
+    entity_kind: Knowledge[EntityKind] = field(default_factory=NotCovered)
 
 
 @dataclass(frozen=True)

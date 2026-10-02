@@ -1,0 +1,88 @@
+{
+  "data": {
+    "items": [
+      {
+        "association_id": "ds_shift_0914",
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_ops_bot",
+        "description": null,
+        "device_id": null,
+        "file_id": "fl_arm3_pick",
+        "fs_type": "file",
+        "ingestion_status": "ingested",
+        "metadata": {
+          "robot": "arm_cell3"
+        },
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_ops_bot",
+        "name": "pick_place_0914.mcap",
+        "org_id": "og_acme_robotics",
+        "origination": "upload-agent",
+        "parent_id": null,
+        "relative_path": "arm_cell3/pick_place_0914.mcap",
+        "size": 220,
+        "status": "available",
+        "storage_type": "uploaded",
+        "tags": [],
+        "upload_id": "tx_0914",
+        "uri": "s3://roboto-acme-uploads/og_acme_robotics/ds_shift_0914/arm_cell3/pick_place_0914.mcap",
+        "version": 1
+      },
+      {
+        "association_id": "ds_shift_0914",
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_ops_bot",
+        "description": null,
+        "device_id": null,
+        "file_id": "fl_legged_patrol",
+        "fs_type": "file",
+        "ingestion_status": "ingested",
+        "metadata": {
+          "robot": "legged01"
+        },
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_ops_bot",
+        "name": "patrol_0914.bag",
+        "org_id": "og_acme_robotics",
+        "origination": "upload-agent",
+        "parent_id": null,
+        "relative_path": "legged01/patrol_0914.bag",
+        "size": 180,
+        "status": "available",
+        "storage_type": "uploaded",
+        "tags": [],
+        "upload_id": "tx_0914",
+        "uri": "s3://roboto-acme-uploads/og_acme_robotics/ds_shift_0914/legged01/patrol_0914.bag",
+        "version": 4
+      },
+      {
+        "association_id": "ds_shift_0914",
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_ops_bot",
+        "description": null,
+        "device_id": null,
+        "file_id": "fl_upload",
+        "fs_type": "file",
+        "ingestion_status": "ingested",
+        "metadata": {
+          "robot": "legged01"
+        },
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_ops_bot",
+        "name": "uploading.bag",
+        "org_id": "og_acme_robotics",
+        "origination": "upload-agent",
+        "parent_id": null,
+        "relative_path": "legged01/uploading.bag",
+        "size": 0,
+        "status": "reserved",
+        "storage_type": "uploaded",
+        "tags": [],
+        "upload_id": "tx_0914",
+        "uri": "s3://roboto-acme-uploads/og_acme_robotics/ds_shift_0914/legged01/uploading.bag",
+        "version": 1
+      }
+    ],
+    "next_token": null
+  }
+}

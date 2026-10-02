@@ -27,10 +27,12 @@ from neptune_ledger.api.protocol import CatalogApi
 from neptune_ledger.api.types import (
     CATALOG_API_VERSION,
     AsRegisteredBy,
+    ClockMerge,
     DeclaredKey,
     EvidenceAnchor,
     History,
     LatestTransform,
+    MappedInterval,
     Pinned,
     QueryCursor,
     QueryRow,
@@ -45,6 +47,8 @@ from neptune_ledger.api.types import (
 from neptune_ledger.contract_tests.examples import (
     EXAMPLES,
     WorkedPackage,
+    at_schema_1,
+    at_schema_2,
     evidence_anchor,
     machine_threads,
     materialise,
@@ -183,6 +187,56 @@ class CatalogContract:
         assert isinstance(first.registration_key, Known)
         assert isinstance(after.registration_key, Known)
         assert after.registration_key.value.tx_seq == first.registration_key.value.tx_seq + 1
+
+    def test_packages_of_two_schema_versions_register_side_by_side(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        """The same source ingested by a schema-1 and a schema-2 compiler (Ledger ADR 0011):
+        both register, each at the version its manifest declares, whichever comes first."""
+        older = write("drone-v1", tmp_path / "drone-v1", at_schema_1("drone"))
+        newer = write("drone-v2", tmp_path / "drone-v2", at_schema_2("drone", "2.0.0", {}))
+        assert (older.manifest["schema_version"], newer.manifest["schema_version"]) == (1, 2)
+        for package, version in ((newer, 2), (older, 1)):
+            result = catalog.register(package.root)
+            _validate(result)
+            assert result.outcome == "registered", result.findings
+            assert result.schema_version == Known(version)
+            assert result.record_counts == package.record_counts()
+        kinds = {count.kind for count in newer.record_counts()}
+        assert {"configuration_snapshot", "configuration_value"} <= kinds
+
+    def test_a_thread_over_two_schema_versions_holds_both_as_lineage_siblings(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        """MVL-93 acceptance (Ledger ADR 0011): in the drone's machine thread, each lineage set
+        holds the schema-1 record and its schema-2 sibling, and following either package resolves
+        every set to that package's transform. What schema 1 has no table for (the configuration
+        kinds) is NotCovered by its version, which the Ledger's registry tests read in SQL."""
+        older = write("drone-v1", tmp_path / "drone-v1", at_schema_1("drone"))
+        newer = write("drone-v2", tmp_path / "drone-v2", at_schema_2("drone", "2.0.0", {}))
+        for package in (older, newer):
+            assert catalog.register(package.root).outcome == "registered"
+        transform = {
+            p.package_id: {r["id"] for r in p.records("transform_record")} for p in (older, newer)
+        }
+        keys = machine_threads([older, newer])
+        assert keys, "the drone declares its machine"
+        for key in keys:
+            history = catalog.thread(key, "world", History())
+            _validate(history)
+            assert history.lineage_sets
+            for lineage_set in history.lineage_sets:
+                # A schema-1 record and its schema-2 sibling: one lineage set, two transforms.
+                assert len(lineage_set.transforms) == 2, lineage_set
+                for package in (older, newer):
+                    (mine,) = set(lineage_set.transforms) & transform[package.package_id]
+                    view = catalog.thread(key, "world", AsRegisteredBy(package.package_id))
+                    _validate(view)
+                    resolved = {(s.kind, s.source): s.resolution for s in view.lineage_sets}
+                    assert resolved[(lineage_set.kind, lineage_set.source)] == Known(mine)
+        assert not {"configuration_snapshot", "configuration_value"} & {
+            count.kind for count in older.record_counts()
+        }
 
     def test_tampered_package_is_refused_and_nothing_is_written(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
@@ -676,6 +730,42 @@ class CatalogContract:
         untimed = {e.record_id for e in thread.partitions[2].entries}
         assert untimed == {package.records("stream")[1]["id"]}
 
+    def test_a_named_clock_mapping_merges_onto_the_reference_clock(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        """ADR 0003 §3 over the quadruped's stated ``ClockMapping`` (package schema 3): rosbag2's
+        ``starting_time`` onto MCAP ``log_time``, rate 1, offset 0, bound 0. The run, timed on
+        ``starting_time``, joins one merged partition on the reference clock with its interval
+        and path; its stored world time is unchanged. Without the merge it stays on its clock."""
+        quadruped = packages["quadruped"]
+        assert catalog.register(quadruped.root).outcome == "registered"
+        (run,) = quadruped.records("run")
+        (mapping,) = quadruped.records("clock_mapping")
+        world = timed(run)
+        anchor = evidence_anchor(run)
+        assert world is not None and anchor is not None and world.clock == mapping["source"]
+        key = ThreadKey("run", anchor)
+        native = catalog.thread(key, "world", History())
+        self._assert_unmerged(native)
+        merge = ClockMerge(mapping["target"], (mapping["id"],))
+        thread = catalog.thread(key, "world", History(), merge=merge)
+        _validate(thread)
+        assert thread.findings == () and thread.merge == merge
+        merged = [p for p in thread.partitions if p.kind == "merged"]
+        assert len(merged) == 1 and merged[0].clock_key == mapping["target"]
+        (entry,) = merged[0].entries
+        assert entry.record_id == run["id"]
+        ticks = world.start.ticks
+        assert entry.mapped == MappedInterval(mapping["target"], ticks, ticks, (mapping["id"],))
+        assert entry.world == Known(world), "stored ticks are never rewritten"
+        rest = [e.record_id for p in thread.partitions if p.kind != "merged" for e in p.entries]
+        assert sorted(rest) == sorted(
+            e.record_id for p in native.partitions if p.clock_key != world.clock for e in p.entries
+        )
+        assert codec.dumps(thread) == codec.dumps(
+            catalog.thread(key, "world", History(), merge=merge)
+        )
+
     def test_current_view_is_within_history(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
     ) -> None:
@@ -936,6 +1026,16 @@ class CatalogContract:
         self.register_all(catalog, packages)
         window = TimeWindow("rec:" + UNKNOWN_ID, 10, 9)
         table = catalog.query(QuerySpec(kinds=("run",), window=window))
+        assert table.num_rows == 0
+        assert _codes(arrow.query_meta(table).findings) == {"invalid_request"}
+
+    def test_query_rejects_a_kind_no_schema_version_declares(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        """A record kind is any table name in the schema (1.6.0); one that no package-schema
+        version the catalog reads declares is an argument outside the contract."""
+        self.register_all(catalog, packages)
+        table = catalog.query(QuerySpec(kinds=("run", "telepathy")))
         assert table.num_rows == 0
         assert _codes(arrow.query_meta(table).findings) == {"invalid_request"}
 
