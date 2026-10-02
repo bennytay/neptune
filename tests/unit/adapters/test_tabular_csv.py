@@ -78,6 +78,15 @@ def test_probing_reads_content_not_names() -> None:
     assert probe(b"\xef\xbb\xbfa,b,c\n1,2,3\n", "x") == STRUCTURE
 
 
+def test_a_yaml_or_toml_name_is_never_a_sniffed_table() -> None:
+    flow = b'a: &a ["lol","lol","lol"]\nb: &b [*a,*a,*a]\nc: &c [*b,*b,*b]\n'
+    assert probe(flow, "bomb") == STRUCTURE  # unnamed, the commas agree
+    for name in ("bomb.yaml", "bomb.YML", "tool.toml"):
+        result = TabularAdapter().probe(flow, ProbeHints(name, len(flow)))
+        assert result.confidence == 0.0
+        assert [r.code for r in result.reasons] == ["tabular.not_delimited_name"]
+
+
 def test_two_fields_a_line_need_the_name_to_be_a_table() -> None:
     data = b"a,b\n1,2\n3,4\n"
     assert probe(data, "pairs") == NAME_ONLY

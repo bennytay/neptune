@@ -36,6 +36,7 @@ from neptune_ledger.catalog.projection import (
 Conn = psycopg.Connection[tuple[object, ...]]
 REPO: Final = Path(__file__).resolve().parents[3]
 SCHEMA_V1: Final = REPO / "contracts" / "package-schema" / "v1.0.0" / "schema.json"
+SCHEMA_V2: Final = REPO / "contracts" / "package-schema" / "v2.0.0" / "schema.json"
 CATALOG: Final = Path(projection.__file__).resolve().parent
 RECORD: Final = "rec:sha256:" + "a" * 64
 STREAM: Final = "rec:sha256:" + "b" * 64
@@ -48,10 +49,16 @@ def schema_v1() -> dict[str, Any]:
     return loaded
 
 
+def schema_v2() -> dict[str, Any]:
+    loaded = json.loads(SCHEMA_V2.read_bytes())
+    assert isinstance(loaded, dict)
+    return loaded
+
+
 def bumped_schema() -> dict[str, Any]:
-    """Package schema 1 plus a contact-event kind that states a machine, a stream and a clock."""
-    schema = copy.deepcopy(schema_v1())
-    schema["$id"] = "urn:neptune:schema:canonical:2"
+    """Package schema 2 plus a contact-event kind that states a machine, a stream and a clock."""
+    schema = copy.deepcopy(schema_v2())
+    schema["$id"] = "urn:neptune:schema:canonical:3"
     schema["$defs"]["ContactEvent"] = {
         "additionalProperties": False,
         "properties": {
@@ -61,7 +68,7 @@ def bumped_schema() -> dict[str, Any]:
             "kind": {"const": "contact_event"},
             "machine": {"$ref": "#/$defs/Knowledge_LogicalId"},
             "provenance": {"$ref": "#/$defs/Provenance"},
-            "schema_version": {"const": 2},
+            "schema_version": {"const": 3},
             "stream": {"$ref": "#/$defs/RecordId"},
         },
         "required": ["clock", "details", "id", "kind", "machine", "provenance", "stream"],
@@ -79,9 +86,16 @@ def migration(version: int, text: str) -> Migration:
 # --- the committed spec and migration are the generator's output -------------------------------
 
 
-def test_the_shipped_spec_is_generated_from_package_schema_1() -> None:
-    assert (CATALOG / "projections.json").read_bytes() == spec_bytes(projection_spec(schema_v1()))
-    assert shipped_spec() == projection_spec(schema_v1())
+def test_the_shipped_spec_is_generated_from_the_declared_package_schema() -> None:
+    """The spec follows the declared version (2); version 2 only adds kinds with no hot filter,
+    so it needs no migration beyond 0005 (generated from version 1)."""
+    assert (CATALOG / "projections.json").read_bytes() == spec_bytes(projection_spec(schema_v2()))
+    assert shipped_spec() == projection_spec(schema_v2())
+    assert render_migration(projection_spec(schema_v1()), projection_spec(schema_v2()), 6) == ""
+    assert set(shipped_spec().kinds) - set(BASELINE_KINDS) == {
+        "configuration_snapshot",
+        "configuration_value",
+    }
 
 
 def test_migration_0005_is_the_generated_migration_for_package_schema_1() -> None:
@@ -97,10 +111,9 @@ def test_the_baseline_kinds_are_migration_0001s_partitions() -> None:
     assert tuple(sorted(partitions)) == BASELINE_KINDS
 
 
-def test_the_shipped_spec_knows_the_compilers_schema_1_kinds() -> None:
-    """The spec covers every kind of the schema it was read from; a kind outside it (a newer
-    compiler's) is still indexed, without projections (ADR 0009 §3)."""
-    assert set(shipped_spec().kinds) == set(BASELINE_KINDS)
+def test_a_kind_outside_the_spec_has_no_projections() -> None:
+    """The compiler's kind list is not closed: a kind the spec does not name is still indexed,
+    with every projection column NULL (ADR 0009 §3)."""
     record = {"machine": {"knowledge": "known", "value": {"namespace": "a", "value": "b"}}}
     assert projected(shipped_spec(), "contact_event", record) == (None,) * len(projection_columns())
 
@@ -149,7 +162,7 @@ def test_schema_key_order_does_not_change_the_spec() -> None:
 def test_a_bump_that_adds_a_kind_renders_its_new_columns_only() -> None:
     """No partition: the new kind lives in record_default (ADR 0008; ADR 0009 §6)."""
     text = render_migration(projection_spec(schema_v1()), projection_spec(bumped_schema()), 5)
-    assert text.startswith("-- 0005 record projections for urn:neptune:schema:canonical:2")
+    assert text.startswith("-- 0005 record projections for urn:neptune:schema:canonical:3")
     assert "CREATE TABLE" not in text
     assert "IF EXISTS (SELECT 1 FROM record WHERE kind IN ('contact_event')) THEN" in text
     assert "ADD COLUMN stream_ids text[]" in text
@@ -246,12 +259,12 @@ def test_generate_writes_the_spec_and_numbers_the_next_migration(tmp_path: Path)
         (catalog / "migrations" / path.name).write_bytes(path.read_bytes())
     (catalog / "projections.json").write_bytes((CATALOG / "projections.json").read_bytes())
     schema = tmp_path / "schema.json"
-    schema.write_text(json.dumps(schema_v1()), encoding="utf-8")
+    schema.write_text(json.dumps(schema_v2()), encoding="utf-8")
     assert generate(schema, catalog) is None  # nothing new
     schema.write_text(json.dumps(bumped_schema()), encoding="utf-8")
     written = generate(schema, catalog)
     assert (
-        written == catalog / "migrations" / f"{len(migrations()) + 1:04d}_projections_schema_2.sql"
+        written == catalog / "migrations" / f"{len(migrations()) + 1:04d}_projections_schema_3.sql"
     )
     assert read_spec((catalog / "projections.json").read_bytes()) == projection_spec(
         bumped_schema()
@@ -294,7 +307,7 @@ def test_a_schema_bump_migration_applies_and_files_the_new_kind(pg: Conn) -> Non
     pg.execute(
         "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id, registration_key,"
         f" line, schema_version, body_digest, body, {', '.join(columns)})"
-        f" VALUES ('acme', 'contact_event', %s, %s, 1, 1, 2, %s, %s::jsonb,"
+        f" VALUES ('acme', 'contact_event', %s, %s, 1, 1, 3, %s, %s::jsonb,"
         f" {', '.join(['%s'] * len(columns))})",
         (RECORD, package, "sha256:" + "0" * 64, json.dumps(record), *values),
     )
@@ -324,7 +337,7 @@ def test_a_bump_migration_refuses_rows_of_its_kind_already_filed(pg: Conn) -> No
     pg.execute(
         "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
         " registration_key, line, schema_version, body_digest)"
-        " VALUES ('acme', 'contact_event', %s, %s, 1, 1, 2, %s)",
+        " VALUES ('acme', 'contact_event', %s, %s, 1, 1, 3, %s)",
         (RECORD, package, "sha256:" + "0" * 64),
     )
     bump = migration(len(shipped) + 1, render_migration(shipped_spec(), new, len(shipped) + 1))

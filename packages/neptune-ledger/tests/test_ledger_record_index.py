@@ -21,6 +21,7 @@ from neptune.model.knowledge import Known, NotCovered
 from neptune.store.package import package_files
 from neptune_ledger.api.types import EvidenceAnchor
 from neptune_ledger.catalog import registry
+from neptune_ledger.catalog.check import kinds_of
 from neptune_ledger.catalog.index import (
     ambiguous_pointers,
     fields,
@@ -127,7 +128,7 @@ def test_counts_match_every_manifests_tables(
             ).fetchall()
         }
         tables = package.manifest["tables"]
-        assert set(tables) == set(RECORD_KINDS)
+        assert set(tables) == kinds_of(package.manifest["schema_version"])
         assert {kind: counted.get(kind, 0) for kind in tables} == tables, name
     kinds = {str(row[0]) for row in indexed.execute("SELECT DISTINCT kind FROM record").fetchall()}
     assert len(kinds) >= 20  # the examples between them cover most kinds
@@ -210,7 +211,7 @@ def test_the_hot_filters_find_a_machines_records(
 def _lines(package: WorkedPackage) -> dict[str, tuple[bytes, ...]]:
     return {
         kind: tuple(package.files[f"records/{kind}.jsonl"].split(b"\n")[:-1])
-        for kind in RECORD_KINDS
+        for kind in package.manifest["tables"]
     }
 
 

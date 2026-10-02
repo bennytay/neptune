@@ -345,7 +345,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stderr.write("usage: python -m neptune_ledger.catalog.projection SCHEMA_JSON\n")
         return 2
     written = generate(Path(args[0]), Path(__file__).resolve().parent)
-    sys.stdout.write(f"{written or 'no new kinds or projections'}\n")
+    sys.stdout.write(f"{written or 'spec rewritten; no new projections, so no migration'}\n")
     return 0
 
 

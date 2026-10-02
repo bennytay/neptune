@@ -79,8 +79,10 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
      the next migration from the difference: columns, constraint and index for each new column
      group. It never creates a partition (§6), and a new kind with no hot filter needs no
      migration. Migration 0005 is its output for package schema 1 (baseline: 0001's kinds, no
-     projections). A test pins 0005 and `projections.json` to the generator's output over the
-     v1.0.0 export.
+     projections). Package schema 2 adds `configuration_snapshot` and `configuration_value`,
+     with no hot filter and no free-form field, so moving the spec to the v2.0.0 export writes
+     no migration. Tests pin 0005 to the v1.0.0 export and `projections.json` to the v2.0.0
+     export.
    - A hot-filter field in an unknown shape, or a kind, projection or free-form field that
      disappears, raises `ProjectionError`. A new shape or a removal needs an ADR. A free-form
      field that gains a `description` stops matching, so it fails loudly instead of being walked
