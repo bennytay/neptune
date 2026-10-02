@@ -182,18 +182,55 @@ def test_twenty_thousand_30_kb_keys_cost_a_bounded_few_bytes_each(tmp_path: Path
     assert peak < 256 * 2**20, f"{peak / 2**20:.0f} MiB peak"
 
 
-def test_the_listing_byte_budget_stops_the_listing(tmp_path: Path) -> None:
+def _limited(tmp_path: Path, keys: list[str], page_size: int, **options: Any) -> tuple[Any, ...]:
     fake = FakeStore()
-    for index in range(50):
-        fake.put(f"fleet/{index:02d}-" + "k" * 200, b"x")
-    with connect(fake, tmp_path, max_listing_bytes=4096, page_size=5) as source:
+    for key in keys:
+        fake.put(key, b"x")
+    with connect(fake, tmp_path, page_size=page_size, **options) as source:
         listing = source.listing()
+    return listing, tuple(f.id for f in source.findings()), source.findings()
+
+
+def test_the_byte_budget_stops_at_the_same_entry_whatever_the_page_size(tmp_path: Path) -> None:
+    keys = [f"fleet/{index:02d}-" + "k" * 200 for index in range(50)]
+    assert {len(key.encode()) for key in keys} == {209}
+    reference = _limited(tmp_path, keys, 1000, max_listing_bytes=4096)
+    listing, _, findings = reference
     assert not listing.complete and 0 < len(listing.entries) < 50
-    (finding,) = source.findings()
+    assert [e.key for e in listing.entries] == keys[: len(listing.entries)]
+    (finding,) = findings
     assert finding.code == "deploy_s3.listing_limit"
     assert finding.details["max_listing_bytes"] == 4096
     last = listing.entries[-1].key.encode()
-    assert finding.details["covered_through_hex"] == last[:256].hex()  # NotCovered after it
+    assert finding.details["covered_through_hex"] == last.hex()  # not covered after it
+    for page_size in (1, 2, 5, 7, 50):
+        assert _limited(tmp_path, keys, page_size, max_listing_bytes=4096)[:2] == reference[:2]
+
+
+def test_the_object_limit_cuts_in_byte_order_past_a_shared_prefix(tmp_path: Path) -> None:
+    shared = "fleet/" + "p" * 300  # longer than the 256 bytes an unused key keeps
+    keys = [shared + "a" * 10, shared + "b" * 10, shared + "c"]
+    reference = _limited(tmp_path, keys, 1000, max_objects=1)
+    listing, _, (finding,) = reference
+    assert [e.key for e in listing.entries] == [shared + "a" * 10]
+    assert finding.details["covered_through_hex"] == (shared + "a" * 10).encode().hex()
+    for page_size in (1, 2, 3):
+        assert _limited(tmp_path, keys, page_size, max_objects=1)[:2] == reference[:2]
+
+
+def test_unused_keys_never_move_the_cut_and_are_always_reported(tmp_path: Path) -> None:
+    shared = "fleet/" + "p" * 300
+    used = [f"fleet/{index:02d}.bag" for index in range(6)]
+    huge = [shared + "y" * 1000, shared + "z" * 1000]  # too long: unused, sharing 256 bytes
+    reference = _limited(tmp_path, [*used, *huge], 1000, max_objects=3)
+    listing, _, findings = reference
+    assert [e.key for e in listing.entries] == used[:3]
+    assert [f.code for f in findings] == ["deploy_s3.listing_limit"]  # huge keys sort after
+    complete = _limited(tmp_path, [*used, *huge], 1000)
+    assert complete[0].complete and [s.reason for s in complete[0].skipped] == ["key_too_long"] * 2
+    assert {f.details.get("count") for f in complete[2]} == {2}
+    for page_size in (1, 2, 3):
+        assert _limited(tmp_path, [*used, *huge], page_size, max_objects=3)[:2] == reference[:2]
 
 
 def test_a_continuation_token_over_4_kib_stops_the_listing(tmp_path: Path) -> None:
