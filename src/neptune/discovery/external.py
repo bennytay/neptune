@@ -302,8 +302,11 @@ def open_spooled_or_listed(
 
 @dataclass(frozen=True)
 class Listed:
-    """One listed object observed: ``fetched`` is false when it was recognised by its token."""
+    """One listed object observed. ``location`` is as listed now, with the token the bytes are
+    read under: the observation's revision may name another token for the same bytes.
+    ``fetched`` is false when the object was recognised by its token."""
 
+    location: ExternalObjectRef
     observation: Observation
     fetched: bool
 
@@ -371,7 +374,7 @@ def fingerprint_external(
         known = ledger.recognise(location)
         artifact = ledger.artifact(known.content_id) if known is not None else None
         if artifact is not None and artifact.size == entry.size:
-            listed.append(Listed(ledger.observe(location, artifact), fetched=False))
+            listed.append(Listed(location, ledger.observe(location, artifact), fetched=False))
             continue
         if on_fetch is not None:
             on_fetch(entry)
@@ -386,7 +389,7 @@ def fingerprint_external(
             unread.append(location)
             findings.append(size_changed_finding(location, entry.size, artifact.size))
             continue
-        listed.append(Listed(ledger.observe(location, artifact), fetched=True))
+        listed.append(Listed(location, ledger.observe(location, artifact), fetched=True))
     absences = _absences(source, ledger, discovery, {e.location.key for e in entries})
     return ExternalScan(
         tuple(listed), tuple(unread), tuple(absences), tuple(findings), discovery.complete

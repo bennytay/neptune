@@ -1195,7 +1195,7 @@ class IngestJob:
                     location = observation.revision.location
                     raise JobError(f"a local scan yielded a non-local location: {location!r}")
             scanned, listed, files, summary = self._take(
-                ledger, [(o, True) for o in result.observations]
+                ledger, [(o.revision.location, o, True) for o in result.observations]
             )
             for absence in result.absences:
                 self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
@@ -1239,10 +1239,14 @@ class IngestJob:
             raise JobError(message) from _unusable(exc)
 
     def _take(
-        self, ledger: SourceLedger, observed: Sequence[tuple[Observation, bool]]
+        self,
+        ledger: SourceLedger,
+        observed: Sequence[tuple[SourceLocation, Observation, bool]],
     ) -> tuple[SourceLedger, list[Observation], list[explain.InventoryFile], dict[str, JsonValue]]:
-        """This scan's sources, from its observations in ``ledger``, each with whether it was
-        hashed now (``False``: a connector's object recognised by its token, ADR 0067).
+        """This scan's sources, from its observations in ``ledger``: each with the location as
+        seen now (a connector's object with the token it is read under, which its ledger revision
+        may not name, ADR 0067) and whether it was hashed now (``False``: recognised by its
+        token).
 
         Returns the ledger the package lists (ADR 0035 §9), its observations, the inventory's
         files, and the counts the phase reports.
@@ -1252,10 +1256,9 @@ class IngestJob:
         listed: list[Observation] = []
         files: list[explain.InventoryFile] = []
         new_artifacts = new_revisions = 0
-        replaced = _replaced(ledger, (observation for observation, _ in observed))
-        for observation, hashed in observed:
+        replaced = _replaced(ledger, (observation for _, observation, _ in observed))
+        for location, observation, hashed in observed:
             revision = observation.revision
-            location = revision.location
             new_artifacts += observation.new_artifact
             new_revisions += observation.new_revision
             artifact = ledger.artifact(revision.content_id)
@@ -1332,7 +1335,7 @@ class IngestJob:
                 self._emit(events.ENTRY_SKIPPED, details)
             self._connector_findings()
             scanned, _, files, summary = self._take(
-                ledger, [(item.observation, item.fetched) for item in result.listed]
+                ledger, [(item.location, item.observation, item.fetched) for item in result.listed]
             )
             for absence in result.absences:
                 self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
