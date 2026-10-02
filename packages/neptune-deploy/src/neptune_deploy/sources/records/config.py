@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from neptune.model.jsonvalue import JsonValue
-from neptune_deploy.sources.object_store.transport import DEFAULT_TIMEOUT, Endpoint
+from neptune_deploy.sources.object_store.transport import DEFAULT_TIMEOUT, MAX_TIMEOUT, Endpoint
 
 DEFAULT_MAX_RECORDS: Final = 100_000
 DEFAULT_MAX_ATTACHMENT_BYTES: Final = 64 * 1024 * 1024
@@ -110,8 +110,12 @@ class Options:
                 raise RecordConfigError(f"{name} is an integer from {low} to {high}")
             counts[name] = value
         timeout = given.get("timeout", DEFAULT_TIMEOUT)
-        if isinstance(timeout, bool) or not isinstance(timeout, int | float) or not timeout > 0:
-            raise RecordConfigError("timeout is a positive number of seconds")
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, int | float)
+            or not 0 < timeout <= MAX_TIMEOUT
+        ):
+            raise RecordConfigError(f"timeout is from 0 to {MAX_TIMEOUT} seconds")
         return cls(
             instance=instance,
             scheme=scheme,

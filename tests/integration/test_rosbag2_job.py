@@ -18,6 +18,7 @@ from neptune.adapters.rosbag2._sqlite import Database, read_schema
 from neptune.derived.grouping import Rule
 from neptune.derived.sessions import SessionProposal, read_derived
 from neptune.discovery.reader import BytesReader
+from neptune.model.alignment import RunAssembly
 from neptune.model.finding import IngestFinding
 from neptune.model.provenance import ByteRange
 from neptune.model.run import Run, Stream
@@ -119,9 +120,13 @@ def test_the_bags_are_grouped_as_recordings_of_their_parts(ingested: Ingested) -
     found = {
         str(getattr(p.members[0].location, "path", "")).rsplit("/", 1)[0]: p
         for p in read_derived(package.derived)
-        if isinstance(p, SessionProposal) and p.rule == Rule.ROSBAG2_DIRECTORY
+        if isinstance(p, SessionProposal) and p.rule == Rule.ROSBAG2_FILE_LIST
     }
+    # Each bag is read by the files its metadata lists (ADR 0066 §1), each with a stated assembly.
     assert {"mobile_base_sqlite3", "mobile_base_mcap", "split_sqlite3"} <= set(found)
+    assemblies = [r for r in package.records if isinstance(r, RunAssembly)]
+    assert len(assemblies) >= 3
+    assert all(r.provenance.assertion_kind.value == "stated" for r in assemblies)
     assert len(found["split_sqlite3"].members) == 3  # metadata.yaml and both parts
     assert len(found["mobile_base_mcap"].members) == 2
 

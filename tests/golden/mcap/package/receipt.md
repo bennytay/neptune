@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:be98eae05ad45f0d615881aca4dfeb740705dc444d3a95e03b8f0e3f7b8043ac`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:e0fe434a6558e51807f74cb10b18a241d3ed8f6619579bd6de0faf551c5d017d`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -20,7 +20,7 @@ Receipt `rec:sha256:be98eae05ad45f0d615881aca4dfeb740705dc444d3a95e03b8f0e3f7b80
 |---|---|---|---|---|
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
 | `neptune.clocks` | `0.1.0` | `sha256:8abe788c243b` | none | `rec:c63eb19977e6` |
-| `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:a46247e2db11` |
+| `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:e338a1172927` |
 | `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:e29bd75e0779` |
 | `neptune.validate` | `0.2.0` | `sha256:e29ee45e7bd8` | none | `rec:cc0ca8e2997c` |
 
