@@ -1,0 +1,19 @@
+#usda 1.0
+(
+    defaultPrim = "chassis"
+    doc = """AMR chassis. A doc string may say upAxis = "Y" and metersPerUnit = 1 without meaning it."""
+    metersPerUnit = 0.01
+    subLayers = [
+        @./materials/steel.usda@,
+        @../shared/wheels.usda@
+    ]
+    upAxis = "Z"
+)
+
+def Xform "chassis"
+{
+    def Mesh "body"
+    {
+        point3f[] points = [(-25, -18.75, 0), (25, -18.75, 0), (25, 18.75, 12.5)]
+    }
+}
