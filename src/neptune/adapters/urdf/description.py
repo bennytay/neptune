@@ -203,7 +203,8 @@ class _Reader:
     # Citations
 
     def provenance(self, element: Element) -> Provenance:
-        return Provenance(self.cite(element), self.transform.id, AssertionKind.OBSERVED)
+        # Everything a description gives is what the file declares about a robot: stated (ADR 0039).
+        return Provenance(self.cite(element), self.transform.id, AssertionKind.STATED)
 
     def record_id(self, kind: str, element: Element) -> RecordId:
         return evidence_record_id(kind, self.cite(element), self.transform)

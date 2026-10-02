@@ -378,6 +378,27 @@ def test_a_xacro_records_its_expansion_and_cites_into_it() -> None:
         assert text.startswith(b"<") and text.endswith(b">")
 
 
+def _assertion_kinds(value: Any) -> set[str]:
+    if isinstance(value, dict):
+        own = {value["assertion_kind"]} if "assertion_kind" in value else set()
+        return own.union(*(_assertion_kinds(v) for v in value.values()))
+    if isinstance(value, list):
+        return set().union(*(_assertion_kinds(v) for v in value))
+    return set()
+
+
+@pytest.mark.parametrize("name", ["robots/arm6.urdf", "xacro/diff_drive.urdf.xacro"])
+def test_what_the_file_declares_is_stated_and_only_the_expansion_is_observed(name: str) -> None:
+    output = run(fixture(name))
+    for record in output.records():
+        data = record.to_json()
+        if isinstance(record, DescriptionExpansion):
+            assert data["provenance"]["assertion_kind"] == "observed"  # the adapter's digest
+            assert _assertion_kinds(data["arguments"]) == {"stated"}
+        else:
+            assert _assertion_kinds(data) == {"stated"}, record.kind
+
+
 def test_what_needs_ros_or_another_file_is_not_covered_never_guessed() -> None:
     output = run(fixture("xacro/diff_drive.urdf.xacro"))
     assert codes(output) == [

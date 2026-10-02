@@ -440,6 +440,7 @@ class UrdfAdapter:
         transform = config.transform
         record = DescriptionExpansion(
             id=evidence_record_id(DescriptionExpansion.kind, whole, transform),
+            # The digest and size are of the expansion the adapter made: observed.
             provenance=Provenance(whole, transform.id, AssertionKind.OBSERVED),
             language="xacro",
             digest=content_id(expanded),
@@ -474,7 +475,7 @@ def _argument(
 ) -> DeclaredParameter:
     """A declared argument and the text the expansion used for it, citing its declaration."""
     cited = Provenance(
-        _bytes_of(source, argument.element), config.transform.id, AssertionKind.OBSERVED
+        _bytes_of(source, argument.element), config.transform.id, AssertionKind.STATED
     )
     value: Knowledge[ParameterValue]
     if argument.value is None:
