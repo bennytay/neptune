@@ -2055,7 +2055,7 @@ class IngestJob:
         return kept
 
     def _contextualise(self, admitted: list[Any]) -> ContextExtraction | None:
-        """Stage 9b, before the package is staged: the sites, assets, briefs, requirements,
+        """Stage 9c, before the package is staged: the sites, assets, briefs, requirements,
         procedure steps and work orders the admitted documents, tables and configurations
         explicitly declare, and the candidates that only look like one (ADR 0063). Reads records
         only; no source byte is read and no adapter called."""
