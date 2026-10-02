@@ -215,7 +215,7 @@ def test_each_provider_is_one_entry_point_named_by_its_connector_id() -> None:
     points = {
         ep.name: ep.value
         for ep in distribution("neptune-deploy").entry_points
-        if ep.group == "neptune.sources"
+        if ep.group == "neptune.sources" and ep.name != "deploy_foxglove"  # its own ADR (0007)
     }
     factories = {"s3": s3_source, "gcs": gcs_source, "azure": azure_source}
     assert set(points) == set(CONNECTOR_IDS.values())
@@ -254,6 +254,7 @@ def test_building_a_source_sends_nothing(tmp_path: Path) -> None:
     assert source.transform.adapter_id == "deploy_s3"
     assert dict(source.transform.config) == {
         "bucket": "fleet-logs",
+        "max_listing_bytes": 256 * 1024 * 1024,
         "max_objects": 1_000_000,
         "prefix": "amr/",
         "provider": "s3",

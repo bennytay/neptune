@@ -11,6 +11,9 @@ from neptune.identity.canonical_json import CanonicalJsonError
 from neptune.identity.canonical_json import dumps as canonical_dumps
 from neptune.model.jsonvalue import JsonValue
 
+MAX_DOCUMENT_BYTES: Final = (
+    1024 * 1024
+)  # canonical JSON of one recording or device; more is not used
 MAX_TEXT: Final = 4096  # characters in a declared value (a path, a key, a device name)
 MAX_TOKEN_PART: Final = 64  # characters in a time string or status that enters a revision token
 

@@ -74,8 +74,8 @@ def parse_json(body: bytes) -> JsonValue:
         value: JsonValue = json.loads(
             text, object_pairs_hook=_no_duplicates, parse_constant=_no_constant
         )
-    except (ValueError, RecursionError) as exc:  # UnicodeDecodeError and JSONDecodeError too
-        raise ResponseInvalid("not strict JSON") from exc
+    except (ValueError, RecursionError):  # UnicodeDecodeError and JSONDecodeError too
+        raise ResponseInvalid("not strict JSON") from None  # nothing of the body is repeated
     return value
 
 
@@ -118,8 +118,8 @@ def parse_link(link: JsonValue, api: Endpoint, link_hosts: Sequence[str]) -> tup
         raise LinkRefused("the link is not an absolute http(s) URL with a path")
     try:
         endpoint = Endpoint.parse(f"{scheme}://{authority}")
-    except ValueError as exc:
-        raise LinkRefused("the link's address is not allowed") from exc
+    except ValueError:
+        raise LinkRefused("the link's address is not allowed") from None
     same_api = (endpoint.scheme, endpoint.host, endpoint.port) == (api.scheme, api.host, api.port)
     if not same_api and endpoint.host not in link_hosts:
         raise LinkRefused("the link points at a host that was not declared")
@@ -184,7 +184,7 @@ class FoxgloveClient:
     def recording(self, recording_id: str) -> "JsonValue | None":
         """One recording, or ``None`` if the API says it does not exist (404)."""
         if not valid_id(recording_id):
-            raise ValueError(f"not a recording id: {recording_id!r}")
+            raise ValueError("not a recording id")
         try:
             return self._document(f"/recordings/{quote(recording_id)}", ())
         except HttpStatusError as exc:

@@ -26,6 +26,7 @@ ALL_PROJECTS: Final = "-"
 
 MAX_ID: Final = 128  # characters in a recording, device, project or session id
 DEFAULT_MAX_RECORDINGS: Final = 1_000_000
+DEFAULT_MAX_LISTING_BYTES: Final = 256 * 1024 * 1024  # canonical JSON bytes a listing may hold
 DEFAULT_PAGE_SIZE: Final = 1000
 MAX_PAGE_SIZE: Final = 2000  # the API's own limit: more is a 400
 COMPRESSIONS: Final = ("", "lz4", "zstd")
@@ -37,7 +38,9 @@ _ID: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]{0,127}")
 _STORE: Final = re.compile(r"[a-z0-9][a-z0-9\-]{0,62}")
 _HOST: Final = re.compile(r"[a-z0-9]([a-z0-9\-.]{0,251}[a-z0-9])?")
 # RFC 3339 as the API documents it: UTC, up to nine fractional digits.
-_RFC3339: Final = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?Z")
+_RFC3339: Final = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z"
+)
 _PROPERTY_KEY: Final = re.compile(r"[A-Za-z][A-Za-z0-9_\-]{0,63}")
 
 
@@ -60,8 +63,10 @@ def parse_url(url: str) -> str | None:
     if rest == ALL_PROJECTS:
         return None
     if not valid_id(rest):
+        # The URL is not echoed: nothing the operator typed is repeated in an error or a log.
         raise FoxgloveConfigError(
-            f"foxglove://<project id> or foxglove://{ALL_PROJECTS}, got {url!r}"
+            f"foxglove://<project id> or foxglove://{ALL_PROJECTS} (a URL holds no user"
+            " information, query or path)"
         )
     return rest
 
@@ -91,6 +96,7 @@ class Options:
     topics: bool = True
     compression: str = "lz4"
     max_recordings: int = DEFAULT_MAX_RECORDINGS
+    max_listing_bytes: int = DEFAULT_MAX_LISTING_BYTES
     page_size: int = DEFAULT_PAGE_SIZE
     timeout: float = DEFAULT_TIMEOUT
 
@@ -109,6 +115,7 @@ class Options:
             "topics",
             "compression",
             "max_recordings",
+            "max_listing_bytes",
             "page_size",
             "timeout",
         }
@@ -126,7 +133,7 @@ class Options:
         if endpoint is not None and not isinstance(endpoint, str):
             raise FoxgloveConfigError("endpoint is a URL")
         if store is not None and (not isinstance(store, str) or not _STORE.fullmatch(store)):
-            raise FoxgloveConfigError(f"not a store name: {store!r}")
+            raise FoxgloveConfigError("not a store name")
         ids: dict[str, str | None] = {}
         for name in ("device_id",):
             value = given.get(name)
@@ -162,6 +169,7 @@ class Options:
         counts: dict[str, int] = {}
         for name, low, high in (
             ("max_recordings", 1, 10**8),
+            ("max_listing_bytes", 1024, 2**40),
             ("page_size", 1, MAX_PAGE_SIZE),
         ):
             value = given.get(name, getattr(default, name))
@@ -183,6 +191,7 @@ class Options:
             topics=topics,
             compression=str(compression),
             max_recordings=counts["max_recordings"],
+            max_listing_bytes=counts["max_listing_bytes"],
             page_size=counts["page_size"],
             timeout=float(timeout),
         )

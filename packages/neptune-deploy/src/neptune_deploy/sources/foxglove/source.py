@@ -25,6 +25,7 @@ index needs that a bucket does not:
 Every problem is a finding (``findings()``), deterministic and free of URLs, keys and error text.
 """
 
+import hashlib
 import io
 from collections import defaultdict
 from collections.abc import Iterator, Mapping, Sequence
@@ -53,6 +54,7 @@ from neptune_deploy.sources.foxglove.config import (
 )
 from neptune_deploy.sources.foxglove.declared import DeclaredRecording, Declarer
 from neptune_deploy.sources.foxglove.validation import (
+    MAX_DOCUMENT_BYTES,
     MAX_TOKEN_PART,
     Invalid,
     stable_name,
@@ -61,6 +63,7 @@ from neptune_deploy.sources.foxglove.validation import (
 )
 from neptune_deploy.sources.object_store.clients import RangeInvalid
 from neptune_deploy.sources.object_store.source import (
+    MAX_EXAMPLE_BYTES,
     MAX_EXAMPLES,
     MAX_PAGES,
     MIN_WINDOW,
@@ -94,6 +97,7 @@ class Recording:
     location: ExternalObjectRef
     recording_id: str
     document: JsonObject = field(compare=False, hash=False, repr=False)
+    weight: int = field(default=0, compare=False, hash=False, repr=False)  # canonical bytes held
 
     @property
     def key(self) -> str:
@@ -176,6 +180,7 @@ class FoxgloveSource:
         config: dict[str, JsonValue] = {
             "compression": self.options.compression,
             "identifier_properties": list(self.options.identifier_properties),
+            "max_listing_bytes": self.options.max_listing_bytes,
             "max_recordings": self.options.max_recordings,
             "project": self.project if self.project is not None else "-",
             "topics": self.options.topics,
@@ -239,7 +244,7 @@ class FoxgloveSource:
         if not valid_id(recording_id):
             raise Invalid("recording_id_invalid")
         size = doc.get("size")
-        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+        if isinstance(size, bool) or not isinstance(size, int) or not 0 <= size < 2**63:
             raise Invalid("record_invalid")
         for name in ("createdAt", "start", "end", "importStatus", "projectId"):
             text(doc.get(name), MAX_TOKEN_PART if name != "projectId" else MAX_ID)
@@ -248,13 +253,15 @@ class FoxgloveSource:
             text(doc["importedAt"], MAX_TOKEN_PART)
         self._check_optional(doc)
         try:
-            canonical_dumps(doc)
+            weight = len(canonical_dumps(doc))
         except CanonicalJsonError as exc:
             raise Invalid("record_invalid") from exc
+        if weight > MAX_DOCUMENT_BYTES:
+            raise Invalid("record_invalid")
         if doc["importStatus"] != "complete":
             raise Invalid("import_incomplete")
         token = f"import:{doc.get('importedAt', '-')};created:{doc['createdAt']};size:{size}"
-        return Recording(self.ref(recording_id, token), recording_id, doc)
+        return Recording(self.ref(recording_id, token), recording_id, doc, weight)
 
     @staticmethod
     def _check_optional(doc: JsonObject) -> None:
@@ -281,15 +288,20 @@ class FoxgloveSource:
     @cached_property
     def _index(self) -> RecordingIndex:
         limit = self.options.max_recordings
+        budget = self.options.max_listing_bytes
         kept: dict[str, Recording] = {}
         duplicated: set[str] = set()
-        skipped: dict[tuple[str, bytes], str] = {}  # (reason, raw) -> import status ("" if none)
-        distinct: set[bytes] = set()
-        complete = limited = False
+        skipped: dict[
+            SkippedObject, str
+        ] = {}  # -> the import status it was skipped for ("" if n/a)
+        distinct: set[str] = set()  # digests of the ids seen, used or not: never the ids themselves
+        held = 0  # bytes the listing holds: kept documents whole, skipped ids capped
+        complete = False
+        stopped: dict[str, JsonValue] | None = None  # why a limit stopped the listing
         offset = pages = 0
-        while not limited:
+        while stopped is None:
             if pages >= MAX_PAGES:
-                self.report("listing_limit", self.listing_ref, {"pages": pages})
+                stopped = {"pages": pages}
                 break
             try:
                 page = self.client.recordings(self._filters(), offset, self.options.page_size)
@@ -309,54 +321,69 @@ class FoxgloveSource:
                     if isinstance(raw, str)
                     else stable_name(item)
                 )
-                if name not in distinct and len(distinct) >= limit:
-                    self.report("listing_limit", self.listing_ref, {"max_recordings": limit})
-                    limited = True
+                digest = hashlib.sha256(name).hexdigest()
+                # Items are taken in the order the API sends them and the first one past a limit
+                # stops the listing, so what is kept is the same for every page size.
+                if digest not in distinct and (len(distinct) >= limit or held > budget):
+                    stopped = (
+                        {"max_recordings": limit}
+                        if len(distinct) >= limit
+                        else {"max_listing_bytes": budget}
+                    )
                     break
-                distinct.add(name)
+                distinct.add(digest)
                 try:
                     recording = self._recording(item)
                 except Invalid as bad:
                     status = ""
                     if bad.reason == "import_incomplete" and isinstance(item, dict):
                         found = item.get("importStatus")
-                        status = found if isinstance(found, str) and len(found) <= 32 else "other"
-                    skipped[(bad.reason, name)] = status
+                        usable = isinstance(found, str) and len(found) <= 32 and found.isprintable()
+                        status = str(found) if usable else "other"
+                    skip = SkippedObject(name, bad.reason)
+                    if skip not in skipped:
+                        held += len(skip.raw_key)
+                    skipped[skip] = status
                     continue
                 known = kept.get(recording.recording_id)
                 if known is not None and known.document != recording.document:
                     duplicated.add(recording.recording_id)
-                else:
+                elif known is None:
                     kept[recording.recording_id] = recording
-            if not limited and len(distinct) == before:
+                    held += recording.weight
+            if stopped is None and len(distinct) == before:
                 self.report("pagination_loop", self.listing_ref, {"page": pages})
                 break
             offset += len(page)
+        if stopped is not None:
+            self.report("listing_limit", self.listing_ref, {**stopped, "covered": len(distinct)})
         for recording_id in duplicated:
             del kept[recording_id]
-            skipped[("recording_duplicated", recording_id.encode("utf-8"))] = ""
+            skipped[SkippedObject(recording_id.encode("utf-8"), "recording_duplicated")] = ""
         recordings = tuple(kept[key] for key in sorted(kept))
-        unique = tuple(SkippedObject(raw, reason) for (reason, raw) in sorted(skipped))
+        unique = tuple(sorted(skipped, key=lambda s: (s.reason, s.order)))
         self._report_skipped(unique, skipped)
         return RecordingIndex(recordings, unique, complete)
 
     def _report_skipped(
-        self, skipped: tuple[SkippedObject, ...], statuses: Mapping[tuple[str, bytes], str]
+        self, skipped: tuple[SkippedObject, ...], statuses: Mapping[SkippedObject, str]
     ) -> None:
         """One finding per reason, citing the first ids (as hex) and counting them all."""
-        by_reason: defaultdict[str, list[bytes]] = defaultdict(list)
+        by_reason: defaultdict[str, list[SkippedObject]] = defaultdict(list)
         for item in skipped:
-            by_reason[item.reason].append(item.raw_key)
+            by_reason[item.reason].append(item)
         for reason in SKIP_REASONS:
-            keys = by_reason.get(reason)
-            if not keys:
+            items = by_reason.get(reason)
+            if not items:
                 continue
-            examples: list[JsonValue] = [key[:256].hex() for key in keys[:MAX_EXAMPLES]]
-            details: dict[str, JsonValue] = {"count": len(keys), "keys_hex": examples}
+            examples: list[JsonValue] = [
+                item.raw_key[:MAX_EXAMPLE_BYTES].hex() for item in items[:MAX_EXAMPLES]
+            ]
+            details: dict[str, JsonValue] = {"count": len(items), "keys_hex": examples}
             if reason == "import_incomplete":
                 counts: defaultdict[str, int] = defaultdict(int)
-                for key in keys:
-                    counts[statuses[(reason, key)]] += 1
+                for item in items:
+                    counts[statuses[item]] += 1
                 details["statuses"] = dict(sorted(counts.items()))
             self.report(reason, self.listing_ref, details)
 
@@ -382,9 +409,15 @@ class FoxgloveSource:
         if not index.complete:
             return ()
         seen = {recording.location.object_id for recording in index.recordings}
-        for item in index.skipped:  # seen but not used: nothing is known of them
-            seen.add(self.object_id(item.raw_key.decode("utf-8", "backslashreplace")))
-        candidates = absent_candidates(ledger, CONNECTOR_ID, self.scope, seen)
+        blind = {item.sha256 for item in index.skipped}  # seen, not used: nothing is known of them
+
+        def unused(object_id: str) -> bool:
+            digest = hashlib.sha256(
+                object_id[len(self.scope) :].encode("utf-8", "backslashreplace")
+            )
+            return digest.hexdigest() in blind
+
+        candidates = absent_candidates(ledger, CONNECTOR_ID, self.scope, seen, blind=unused)
         gone: list[SourceRevision] = []
         unverified = 0
         for revision in candidates:

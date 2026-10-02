@@ -15,6 +15,7 @@ reconciled:
   or ``NotCovered`` (the ``topics`` option is off). A blank is never a fact.
 """
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol
 
@@ -44,6 +45,7 @@ from neptune_deploy.sources.foxglove.client import FoxgloveClient
 from neptune_deploy.sources.foxglove.codes import failure
 from neptune_deploy.sources.foxglove.config import Options, valid_id
 from neptune_deploy.sources.foxglove.validation import (
+    MAX_DOCUMENT_BYTES,
     Invalid,
     json_pointer,
     strip_nulls,
@@ -56,6 +58,9 @@ if TYPE_CHECKING:
     from neptune_deploy.sources.foxglove.source import Recording
 
 MAX_TOPIC_PAGES: Final = 50
+MAX_TOPICS: Final = 10_000  # topics one recording may declare
+MAX_TOPIC_BYTES: Final = 16 * 1024 * 1024  # canonical JSON bytes of one recording's topics
+MAX_DECLARED_CACHE: Final = 256  # recordings whose declared metadata is kept for repeat calls
 LOCATOR_KIND: Final = "deploy_foxglove:response"
 
 # Namespaces of the declared identifiers (``LogicalId.namespace``), one per thing Foxglove names.
@@ -176,11 +181,17 @@ class Declarer:
     def __init__(self, host: DeclarerHost) -> None:
         self._host = host
         self._devices: dict[str, JsonObject] | None = None
-        self._cache: dict[ExternalObjectRef, DeclaredRecording] = {}
+        self._cache: OrderedDict[ExternalObjectRef, DeclaredRecording] = OrderedDict()
 
     def declared(self, recording: "Recording") -> DeclaredRecording:
-        if recording.location not in self._cache:
+        """Declared metadata of ``recording``; the last few are kept, so a million-recording index
+        does not become a million kept results."""
+        if recording.location in self._cache:
+            self._cache.move_to_end(recording.location)
+        else:
             self._cache[recording.location] = self._declare(recording)
+            if len(self._cache) > MAX_DECLARED_CACHE:
+                self._cache.popitem(last=False)
         return self._cache[recording.location]
 
     # --- Provenance ----------------------------------------------------------------------------
@@ -211,7 +222,7 @@ class Declarer:
     def _read_devices(self) -> dict[str, JsonObject]:
         host = self._host
         found: dict[str, JsonObject] = {}
-        offset = pages = invalid = 0
+        offset = pages = invalid = held = 0
         while pages < MAX_PAGES:
             try:
                 page = host.client.devices(host.project, offset, host.options.page_size)
@@ -231,11 +242,18 @@ class Declarer:
                     text(doc.get("name"), 100)
                     if not isinstance(doc.get("properties", {}), dict):
                         raise Invalid("record_invalid")
-                    canonical_dumps(doc)
+                    weight = len(canonical_dumps(doc))
+                    if weight > MAX_DOCUMENT_BYTES:
+                        raise Invalid("record_invalid")
                 except (Invalid, CanonicalJsonError):
                     invalid += 1
                     continue
-                found.setdefault(str(doc["id"]), doc)
+                if held + weight > host.options.max_listing_bytes:
+                    host.report("listing_limit", host.listing_ref, {"call": "devices"})
+                    return found  # the devices after this one are not covered
+                if str(doc["id"]) not in found:
+                    found[str(doc["id"])] = doc
+                    held += weight
         if invalid:
             host.report("record_invalid", host.listing_ref, {"call": "devices", "count": invalid})
         return found
@@ -359,7 +377,7 @@ class Declarer:
         if not host.options.topics:
             return (), NotCovered(whole)
         topics: dict[tuple[str, ...], Knowledge[DeclaredTopic]] = {}
-        offset = pages = invalid = 0
+        offset = pages = invalid = held = 0
         try:
             while pages < MAX_TOPIC_PAGES:
                 page = host.client.topics(rid, offset, host.options.page_size)
@@ -375,6 +393,10 @@ class Declarer:
                     except (Invalid, CanonicalJsonError):
                         invalid += 1
                         continue
+                    held += len(canonical_dumps(item))
+                    if len(topics) >= MAX_TOPICS or held > MAX_TOPIC_BYTES:
+                        host.report("listing_limit", where, {"call": "topics"})
+                        return (), Unknown(whole)
                     key = (
                         topic.topic,
                         topic.schema_name,

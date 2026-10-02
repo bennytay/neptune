@@ -14,6 +14,7 @@ import hashlib
 import json
 import random
 import threading
+import time
 import urllib.parse
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -76,6 +77,9 @@ class FakeStore:
     drop_idle: bool = False  # close every connection after its response, without saying so
     wrong_range: bool = False  # a 206 whose Content-Range starts one byte later than asked
     no_length: bool = False  # answer reads with 200, other bytes and no length (transcoding)
+    headers: dict[str, str] = field(default_factory=dict)  # replace these headers on reads
+    cursor_pad: int = 0  # pad ListObjectsV2 continuation tokens with this many bytes
+    drip: float | None = None  # send object bodies one byte per this many seconds
     _counter: int = 0
     _pages_served: int = 0
     _cache: tuple[object, list[Entry]] = (None, [])
@@ -197,9 +201,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _send(self, status: int, body: bytes, headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
-        for name, value in (headers or {}).items():
+        sent = {"Content-Length": str(len(body)), **(headers or {})}
+        for name, value in sent.items():
             self.send_header(name, value)
-        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
         if self.fake.drop_idle:  # a keep-alive connection the server then closes while idle
@@ -259,6 +263,21 @@ class _Handler(BaseHTTPRequestHandler):
             shift = 1 if self.fake.wrong_range else 0
             headers["Content-Range"] = f"bytes {start + shift}-{end}/{len(data)}"
             data = data[start : end + 1]
+        headers.update(self.fake.headers)
+        if self.fake.drip is not None:  # a server that trickles: one byte at a time
+            self.send_response(status)
+            for name, value in {"Content-Length": str(len(data)), **headers}.items():
+                self.send_header(name, value)
+            self.end_headers()
+            try:
+                for index in range(len(data)):
+                    self.wfile.write(data[index : index + 1])
+                    self.wfile.flush()
+                    time.sleep(self.fake.drip)
+            except OSError:
+                pass  # the client gave up
+            self.close_connection = True
+            return
         if self.fake.truncate_after is not None:
             self.send_response(status)
             for name, value in headers.items():
@@ -354,7 +373,8 @@ class _Handler(BaseHTTPRequestHandler):
         encoded = params.get("encoding-type") == "url"
         prefix = params.get("prefix", "").encode("utf-8", "surrogateescape")
         entries = fake.entries(prefix, all_versions=False)
-        start = int(params["continuation-token"]) if "continuation-token" in params else 0
+        token = params.get("continuation-token", "0").partition("-")[0]
+        start = int(token) if "continuation-token" in params else 0
         if fake.loop and "continuation-token" in params:
             start = 0
         chosen, after = fake.page(entries, start, int(params.get("max-keys", "1000")))
@@ -370,7 +390,7 @@ class _Handler(BaseHTTPRequestHandler):
         if after is not None:
             parts.append(
                 f"<IsTruncated>true</IsTruncated><NextContinuationToken>{after}"
-                "</NextContinuationToken>"
+                f"{'-' + 'x' * fake.cursor_pad if fake.cursor_pad else ''}</NextContinuationToken>"
             )
         else:
             parts.append("<IsTruncated>false</IsTruncated>")
