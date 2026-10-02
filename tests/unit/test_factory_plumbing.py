@@ -272,7 +272,16 @@ def _make(
     env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS", "PKG"))}
     env |= {"UV_LOG": str(log), "FAIL_FORMAT_IN": fail_format_in}
     result = subprocess.run(
-        ["make", "-C", str(workspace), target, f"UV={tmp_path / 'uv'}", "ADR_DIRS=", f"PKG={pkg}"],
+        [
+            "make",
+            "-C",
+            str(workspace),
+            target,
+            f"UV={tmp_path / 'uv'}",
+            "ADR_DIRS=",
+            "COMPILER_ADR=",
+            f"PKG={pkg}",
+        ],
         env=env,
         capture_output=True,
         text=True,
