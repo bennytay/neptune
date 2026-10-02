@@ -134,6 +134,7 @@ registered side by side forever. Three gaps followed from ADRs 0008 and 0009:
 - Consumers read a `RecordKind` they do not know as a kind of a newer package-schema version.
 - MVL-92 and MVL-98 use `projection_covered` and the registry's kinds when they read projection
   columns or report per-package kind coverage. The acceptance test over the two-version fixture
-  (`at_schema_2`) runs at the catalog level here; a `thread` over it is MVL-92's.
+  (`at_schema_2`) runs at the catalog level and as a contract test over the drone's machine
+  `thread` (MVL-92's thread index): each lineage set holds both versions' transforms.
 - Revisit if the compiler ever changes an existing field rather than adding one: §3 assumes a
   record's version fully determines its shape.

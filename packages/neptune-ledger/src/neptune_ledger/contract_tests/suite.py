@@ -205,6 +205,39 @@ class CatalogContract:
         kinds = {count.kind for count in newer.record_counts()}
         assert {"configuration_snapshot", "configuration_value"} <= kinds
 
+    def test_a_thread_over_two_schema_versions_holds_both_as_lineage_siblings(
+        self, catalog: CatalogApi, tmp_path: Path
+    ) -> None:
+        """MVL-93 acceptance (Ledger ADR 0011): in the drone's machine thread, each lineage set
+        holds the schema-1 record and its schema-2 sibling, and following either package resolves
+        every set to that package's transform. What schema 1 has no table for (the configuration
+        kinds) is NotCovered by its version, which the Ledger's registry tests read in SQL."""
+        older = write("drone-v1", tmp_path / "drone-v1", at_schema_1("drone"))
+        newer = write("drone-v2", tmp_path / "drone-v2", at_schema_2("drone", "2.0.0", {}))
+        for package in (older, newer):
+            assert catalog.register(package.root).outcome == "registered"
+        transform = {
+            p.package_id: {r["id"] for r in p.records("transform_record")} for p in (older, newer)
+        }
+        keys = machine_threads([older, newer])
+        assert keys, "the drone declares its machine"
+        for key in keys:
+            history = catalog.thread(key, "world", History())
+            _validate(history)
+            assert history.lineage_sets
+            for lineage_set in history.lineage_sets:
+                # A schema-1 record and its schema-2 sibling: one lineage set, two transforms.
+                assert len(lineage_set.transforms) == 2, lineage_set
+                for package in (older, newer):
+                    (mine,) = set(lineage_set.transforms) & transform[package.package_id]
+                    view = catalog.thread(key, "world", AsRegisteredBy(package.package_id))
+                    _validate(view)
+                    resolved = {(s.kind, s.source): s.resolution for s in view.lineage_sets}
+                    assert resolved[(lineage_set.kind, lineage_set.source)] == Known(mine)
+        assert not {"configuration_snapshot", "configuration_value"} & {
+            count.kind for count in older.record_counts()
+        }
+
     def test_tampered_package_is_refused_and_nothing_is_written(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
     ) -> None:
