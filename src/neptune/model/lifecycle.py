@@ -26,7 +26,7 @@ and inherit its provenance is written at ``LIFECYCLE_SINCE``, as before; one hol
 list state at ``LIST_STATES_SINCE``.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, fields
 from typing import Any, ClassVar, Final, Generic, TypeAlias, TypeVar
 
@@ -423,6 +423,28 @@ class Hazard(_Value):
                 raise ValueError(f"a hazard's score names are unique: {names}")
 
 
+def _groundings(value: Any) -> Iterator[Any]:
+    """Every provenance slot inside ``value``: its states', their values', and its parts'."""
+    match value:
+        case Known(value=inner, provenance=provenance):
+            yield provenance
+            yield from _groundings(inner)
+        case KnownAbsent(provenance=provenance) | Unknown(provenance=provenance):
+            yield provenance
+        case NotCovered(provenance=provenance):
+            yield provenance
+        case Ambiguous(candidates=candidates):
+            for candidate in candidates:
+                yield candidate.provenance
+                yield from _groundings(candidate.value)
+        case tuple():
+            for item in value:
+                yield from _groundings(item)
+        case _Value():
+            for name in value._CODECS:
+                yield from _groundings(getattr(value, name))
+
+
 # --- Records -----------------------------------------------------------------------------------
 
 R = TypeVar("R", bound="_Lifecycle")
@@ -453,6 +475,13 @@ class _Lifecycle(_Declared):
                 f"a {self.kind} is stated by its declaration, not {self.provenance.assertion_kind}"
             )
         self._check_fields()
+        # Every value is stated too, however deeply nested (ADR 0051 §1): a state may cite its
+        # own evidence, but never as an observation.
+        for name in self._CODECS:
+            for provenance in _groundings(getattr(self, name)):
+                kind = getattr(provenance, "assertion_kind", AssertionKind.STATED)
+                if kind is not AssertionKind.STATED:
+                    raise ValueError(f"{self.kind}.{name} is stated by its declaration, not {kind}")
 
     @property
     def schema_version(self) -> int:

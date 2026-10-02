@@ -7,7 +7,7 @@
   `civil_time_zone`, not a domain property); ADR 0023 §2 (a zone-less civil date-time may have a
   zone the source declares elsewhere); ADR 0037 §1 and ADR 0023 §1 (a field may gain states, and a
   record that uses one is written at the version that added it); ADR 0051 §4 (lifecycle lists are
-  states, and a blank list is `Unknown`, not `()`)
+  states, and a blank list is `Unknown`, not `()`); enforces ADR 0051 §1 on every nested value
 
 ## Context
 
@@ -110,11 +110,17 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
    - The record's version is its `schema_version` property, and `kinds.record_version` reads it.
    - A package is written at `records_version`: the highest of its records' versions, not only
      its kinds'. The package reader checks the manifest against the records it read.
-7. **Schema version 5** (provisional; the coordinator renumbers at merge). It adds
-   `civil_time_zone` and the list states. Package-schema is published at **5.0.0**, because
-   `SCHEMA_VERSION` is the registry major (platform ADR 0002 §3). Catalog-api takes a minor bump,
-   since it adds a kind and accepts every earlier document. No worked example or golden package
-   changes: none uses a zone or a list state.
+7. **Schema version 5.** It adds `civil_time_zone` and the list states.
+   - Package-schema is published at **5.0.0**, because `SCHEMA_VERSION` is the registry major
+     (platform ADR 0002 §3).
+   - Catalog-api takes a minor bump: it adds a kind and accepts every earlier document.
+   - No worked example or golden package changes, because none uses a zone or a list state.
+8. **Every value on a lifecycle record is stated, not only the record** (enforces ADR 0051 §1).
+   A state may cite its own evidence, but any explicit provenance anywhere in a lifecycle record
+   must be `stated`. This covers a field, a list, each item, an `Ambiguous` candidate and every
+   value inside a part. Inherited provenance is the record's, which is already stated. A
+   constructor or reader given an `observed` citation refuses it, so such a line never
+   round-trips.
 
 ## Alternatives considered
 

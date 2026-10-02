@@ -281,7 +281,7 @@ a bug, not a value.
 ## Deployment lifecycle records (ADR 0051; `model/lifecycle.py`)
 
 - Eight `world` kinds from schema version 4, each `stated` by one form, ticket, work order or register
-  row: `CommissioningBaseline`, `AuthorisationEnvelope`, `Intervention`, `MaintenanceEvent`,
+  row (every citation inside one is `stated` as well, ADR 0061 §8): `CommissioningBaseline`, `AuthorisationEnvelope`, `Intervention`, `MaintenanceEvent`,
   `RequalificationRecord`, `IncidentRecord`, `ChangeRecord`, `RiskAssessment`.
 - Shared fields, all declared ids: `identifiers` (the record's own), `site`, `machines`, `configuration`
   (a maintenance event's is the as-maintained one it states) and `related` (records and evidence it
