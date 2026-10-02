@@ -34,6 +34,7 @@ from neptune_ledger.api.types import (
     TransactionKey,
     WorldTime,
 )
+from neptune_ledger.threads import merge as merge_module
 from neptune_ledger.threads.merge import ClockMapping, Window, hops, merge, paths
 from neptune_ledger.threads.merge import Path as MergePath
 from neptune_ledger.threads.order import (
@@ -512,3 +513,85 @@ def test_p7_ties_go_to_the_smaller_mapping_ids_and_bounds_rank_first() -> None:
     tight_early = ClockMapping(ids[1], b, a, Fraction(1), Fraction(0), Fraction(1), (0, 100))
     ranked = paths(a, b, [loose, tight_late, tight_early])
     assert [p.ids for p in ranked] == [(ids[1],), (ids[2],), (ids[0],)]
+
+
+# --- P7 at scale: the merge's search is pruned by windows and bounded --------------------------
+
+
+def _entries_on(clock: str, starts: Sequence[int]) -> tuple[ThreadEntry, ...]:
+    return tuple(
+        ThreadEntry(
+            f"rec:sha256:{j:064x}",
+            "stream",
+            ("subject",),
+            ("sha256:" + "0" * 64,),
+            TransactionKey(1, "2026-01-01T00:00:00Z"),
+            "rec:sha256:" + "f" * 64,
+            "sha256:" + "1" * 64,
+            Known(WorldTime(TimePoint(clock, ticks), NotCovered())),
+        )
+        for j, ticks in enumerate(starts)
+    )
+
+
+def test_p7_piecewise_mappings_are_searched_only_where_their_windows_hold(
+    monkeypatch: Any,
+) -> None:
+    """A sensor → host → PTP → GPS chain with one stated mapping per 1000-tick sync window (30
+    per hop) and 2000 entries. Listing every path first made this 27 000 paths per entry; the
+    windows leave one per entry. A budget of 100 steps per entry and 200 000 per merge holds."""
+    monkeypatch.setattr(merge_module, "MAX_ENTRY_STEPS", 100)
+    monkeypatch.setattr(merge_module, "MAX_MERGE_STEPS", 200_000)
+    a, b, c, d = CLOCKS[:4]
+    mappings = [
+        ClockMapping(
+            f"rec:sha256:{n:02x}{i:062x}",
+            s,
+            t,
+            Fraction(1),
+            Fraction(0),
+            Fraction(0),
+            (i * 1000, (i + 1) * 1000),
+        )
+        for n, (s, t) in enumerate(((a, b), (b, c), (c, d)))
+        for i in range(30)
+    ]
+    entries = _entries_on(a, [j * 15 for j in range(2000)])
+    merged, findings = merge([Partition("clock", entries, a)], d, mappings)
+    assert findings == []
+    (partition,) = merged
+    assert partition.kind == "merged" and len(partition.entries) == 2000
+    for entry in partition.entries:
+        assert entry.mapped is not None
+        window = entry.world.value.start.ticks // 1000  # type: ignore[union-attr]
+        assert entry.mapped.path == tuple(f"rec:sha256:{n:02x}{window:062x}" for n in range(3))
+
+
+def test_p7_a_search_past_its_budget_is_a_finding_not_a_stall() -> None:
+    """Twelve hops of three parallel open-window mappings: 531 441 usable paths. The search
+    stops at its step budget and the entry stays on its clock with a mapping_out_of_range
+    finding; nothing raises and the read ends."""
+    clocks = [f"rec:sha256:{0xC0 + i:064x}" for i in range(13)]
+    mappings = [
+        ClockMapping(
+            f"rec:sha256:{i:032x}{j:032x}",
+            clocks[i],
+            clocks[i + 1],
+            Fraction(1),
+            Fraction(0),
+            Fraction(0),
+            (None, None),
+        )
+        for i in range(12)
+        for j in range(3)
+    ]
+    entries = _entries_on(clocks[0], [5, 6])
+    merged, findings = merge([Partition("clock", entries, clocks[0])], clocks[12], mappings)
+    assert [p.kind for p in merged] == ["clock"]
+    assert [f.code for f in findings] == ["mapping_out_of_range"] * 2
+    assert all("step budget" in f.detail for f in findings)
+    short = [m for m in mappings if m.source in clocks[:4]]  # three hops: 27 paths, all searched
+    merged, findings = merge([Partition("clock", entries, clocks[0])], clocks[3], short)
+    assert findings == [] and [p.kind for p in merged] == ["merged"]
+    best = paths(clocks[0], clocks[3], short)[0]
+    assert all(e.mapped and e.mapped.path == best.ids for e in merged[0].entries)

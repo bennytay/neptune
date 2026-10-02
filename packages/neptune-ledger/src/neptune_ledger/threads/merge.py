@@ -3,15 +3,17 @@
 Only when the caller names a reference clock and ``ClockMapping`` ids. Clocks are nodes, usable
 named mappings are undirected edges, and all arithmetic is exact (``Fraction``) until the final
 ``floor``/``ceil``. A mapping is usable iff it is affine and monotone increasing
-(``f(t) = a·t + b`` with ``a > 0``). Each clock ranks its simple paths to the reference by total
-bound, then by mapping-id sequence; each entry takes the best path whose hops' validity windows
-hold its whole interval, or stays in its native partition. Stored ticks are never rewritten.
+(``f(t) = a·t + b`` with ``a > 0``). Paths to the reference rank by total bound, then by
+mapping-id sequence; each entry takes the best-ranked path whose hops' validity windows hold its
+whole interval, or stays in its native partition. The search for it follows only hops whose
+window holds the interval, within a step budget (ADR 0010 §6). Stored ticks are never rewritten.
 """
 
 import math
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
+from typing import Final
 
 from neptune_ledger.api.types import (
     CatalogFinding,
@@ -126,13 +128,26 @@ def _inside(lo: Fraction, hi: Fraction, window: Window) -> bool:
     return (start is None or lo >= start) and (end is None or hi < end)
 
 
-def paths(clock: str, reference: str, mappings: Sequence[ClockMapping]) -> list[Path]:
-    """Every simple path of usable mappings from ``clock`` to ``reference``, best first."""
+def _edges(mappings: Sequence[ClockMapping]) -> dict[str, list[Hop]]:
+    """The usable mappings as hops, both ways, per source clock, in mapping-id order."""
     edges: dict[str, list[Hop]] = {}
     for mapping in mappings:
         if mapping.usable:
             for hop in hops(mapping):
                 edges.setdefault(hop.source, []).append(hop)
+    for found in edges.values():
+        found.sort(key=lambda h: (h.mapping_id.encode("utf-8"), h.target.encode("utf-8")))
+    return edges
+
+
+def paths(clock: str, reference: str, mappings: Sequence[ClockMapping]) -> list[Path]:
+    """Every simple path of usable mappings from ``clock`` to ``reference``, best first.
+
+    The specification of ADR 0003 §3.3 written out: exponential in the length of a chain of
+    parallel mappings, so ``merge`` never calls it. The property tests use it as the oracle that
+    ``merge``'s pruned search must agree with.
+    """
+    edges = _edges(mappings)
 
     def walk(at: str, seen: frozenset[str], used: tuple[Hop, ...]) -> Iterator[Path]:
         if at == reference:
@@ -147,15 +162,96 @@ def paths(clock: str, reference: str, mappings: Sequence[ClockMapping]) -> list[
     return sorted(walk(clock, frozenset({clock}), ()), key=Path.rank)
 
 
+# The work one merge may do: a step is one hop whose window is checked against an interval. A
+# search that runs out leaves its entry on its own clock with a mapping_out_of_range finding,
+# never an exception or an unbounded read (ADR 0005 §5's budget; ADR 0010 §6).
+MAX_ENTRY_STEPS: Final = 10_000
+MAX_MERGE_STEPS: Final = 1_000_000
+# How many of the paths an out-of-range entry tried its finding names.
+MAX_PATHS_NAMED: Final = 16
+
+
+@dataclass
+class _Budget:
+    left: int
+
+
+@dataclass(frozen=True)
+class _Search:
+    """One entry's search: the best usable path and its interval, the path prefixes whose last
+    hop's window did not hold the interval, and whether the step budget ran out."""
+
+    best: tuple[Path, tuple[int, int]] | None
+    tried: tuple[tuple[str, ...], ...]
+    exhausted: bool
+
+
+def _search(
+    clock: str, reference: str, s: int, edges: Mapping[str, Sequence[Hop]], budget: _Budget
+) -> _Search:
+    """The highest-ranked usable path for an entry starting at ``s`` (ADR 0003 §3.3-3.4).
+
+    A depth-first walk that follows a hop only when its validity window holds the interval as it
+    stands, which is exactly what makes a path usable, so every complete walk is a usable path
+    and the best-ranked of them is the answer ``paths`` + ``Path.interval`` give. Windows prune
+    piecewise mappings (one per sync window) to the hops that cover the entry.
+    """
+    if clock == reference:
+        return _Search((Path(()), (s, s)), (), False)
+    best: tuple[Path, tuple[int, int]] | None = None
+    tried: set[tuple[str, ...]] = set()
+    steps = 0
+    start = Fraction(s)
+    stack: list[tuple[str, frozenset[str], tuple[Hop, ...], Fraction, Fraction]] = [
+        (clock, frozenset({clock}), (), start, start)
+    ]
+    while stack:
+        at, seen, used, lo, hi = stack.pop()
+        for hop in reversed(edges.get(at, ())):
+            if hop.target in seen:
+                continue
+            if steps >= MAX_ENTRY_STEPS or budget.left <= 0:
+                return _Search(None, tuple(sorted(tried)), True)
+            steps += 1
+            budget.left -= 1
+            if not _inside(lo, hi, hop.window):
+                tried.add(tuple(h.mapping_id for h in (*used, hop)))
+                continue
+            path = (*used, hop)
+            next_lo, next_hi = hop.apply(lo) - hop.bound, hop.apply(hi) + hop.bound
+            if hop.target == reference:
+                found = Path(path)
+                if best is None or found.rank() < best[0].rank():
+                    best = (found, (math.floor(next_lo), math.ceil(next_hi)))
+                continue
+            stack.append((hop.target, seen | {hop.target}, path, next_lo, next_hi))
+    return _Search(best, tuple(sorted(tried)), False)
+
+
+def _reaches(clock: str, reference: str, edges: Mapping[str, Sequence[Hop]]) -> bool:
+    """Whether any path of usable mappings joins ``clock`` to ``reference``, windows aside."""
+    seen, frontier = {clock}, [clock]
+    while frontier:
+        at = frontier.pop()
+        if at == reference:
+            return True
+        for hop in edges.get(at, ()):
+            if hop.target not in seen:
+                seen.add(hop.target)
+                frontier.append(hop.target)
+    return False
+
+
 def merge(
     partitions: Sequence[Partition], reference: str, mappings: Sequence[ClockMapping]
 ) -> tuple[tuple[Partition, ...], list[CatalogFinding]]:
     """Merge every clock partition that a usable path joins to ``reference`` (ADR 0003 §3.1-5).
 
     Entries that a path covers go to one ``merged`` partition, sorted by ``(lo, hi, clock key
-    bytes, native key)`` and each carrying its interval and path. Entries with paths but none
-    usable stay in their clock partition and get a ``mapping_out_of_range`` finding naming the
-    paths tried; unusable mappings are reported ``unsupported_mapping``.
+    bytes, native key)`` and each carrying its interval and path. Entries of a clock that some
+    path reaches but whose windows hold no path for them stay in their clock partition and get a
+    ``mapping_out_of_range`` finding naming the paths tried; so do entries whose search runs past
+    the step budget. Unusable mappings are reported ``unsupported_mapping``.
     """
     findings = [
         CatalogFinding(
@@ -166,7 +262,10 @@ def merge(
         for m in sorted(mappings, key=lambda m: m.mapping_id.encode("utf-8"))
         if not m.usable
     ]
-    ranked: dict[str, list[Path]] = {}
+    edges = _edges(mappings)
+    budget = _Budget(MAX_MERGE_STEPS)
+    reaches: dict[str, bool] = {}
+    searched: dict[tuple[str, int], _Search] = {}
     merged: list[tuple[tuple[object, ...], ThreadEntry]] = []
     out: list[Partition] = []
     untimed: list[Partition] = []
@@ -175,19 +274,24 @@ def merge(
             untimed.append(partition)
             continue
         clock = partition.clock_key
-        if clock not in ranked:
-            ranked[clock] = paths(clock, reference, mappings)
+        if clock not in reaches:
+            reaches[clock] = clock == reference or _reaches(clock, reference, edges)
         stay: list[ThreadEntry] = []
         for entry in partition.entries:
+            if not reaches[clock]:
+                stay.append(entry)
+                continue
             world = timed(entry)
             assert world is not None
-            chosen = _first_usable(ranked[clock], world.start.ticks)
-            if chosen is None:
+            ticks = world.start.ticks
+            if (clock, ticks) not in searched:
+                searched[clock, ticks] = _search(clock, reference, ticks, edges, budget)
+            result = searched[clock, ticks]
+            if result.best is None:
                 stay.append(entry)
-                if ranked[clock]:
-                    findings.append(_out_of_range(entry, ranked[clock]))
+                findings.append(_out_of_range(entry, result))
                 continue
-            path, (lo, hi) = chosen
+            path, (lo, hi) = result.best
             mapped = MappedInterval(reference, lo, hi, path.ids)
             key = (lo, hi, clock.encode("utf-8"), native_key(entry))
             merged.append((key, replace(entry, mapped=mapped)))
@@ -201,18 +305,20 @@ def merge(
     return (*out, *untimed), findings
 
 
-def _first_usable(ranked: Iterable[Path], s: int) -> tuple[Path, tuple[int, int]] | None:
-    for path in ranked:
-        interval = path.interval(s)
-        if interval is not None:
-            return path, interval
-    return None
-
-
-def _out_of_range(entry: ThreadEntry, tried: Sequence[Path]) -> CatalogFinding:
+def _out_of_range(entry: ThreadEntry, search: _Search) -> CatalogFinding:
+    named = sorted(search.tried, key=lambda ids: tuple(i.encode("utf-8") for i in ids))
+    if search.exhausted:
+        detail = (
+            f"the path search stopped at its step budget ({MAX_ENTRY_STEPS} per entry,"
+            f" {MAX_MERGE_STEPS} per merge); the entry stays on its clock"
+        )
+    else:
+        detail = "no path's validity windows cover this entry"
+    if len(named) > MAX_PATHS_NAMED:
+        detail += f"; {MAX_PATHS_NAMED} of {len(named)} paths tried are named"
     return CatalogFinding(
         "mapping_out_of_range",
         entry.record_id,
-        f"no path's validity windows cover this entry in package {entry.packages[0]}",
-        paths_tried=tuple(MappingPath(p.ids) for p in tried if p.ids),
+        f"{detail} (package {entry.packages[0]})",
+        paths_tried=tuple(MappingPath(ids) for ids in named[:MAX_PATHS_NAMED]) or None,
     )

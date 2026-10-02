@@ -200,8 +200,9 @@ def revisions(conn: Conn, tenant: str, sets: set[SetKey], limit: int) -> tuple[R
 def links(conn: Conn, tenant: str, key: ThreadKey, limit: int) -> tuple[ThreadLink, ...]:
     """The identity links that name this thread's declared id on either side (ADR 0003 §1.5,
     ADR 0010 §8), registered by ``limit``: one edge per link, package and right-side id, from the
-    link's left id to that right id, both in this thread's kind. Listed by ``(registration key,
-    link record id, package id, right id)``. Never a merge: no other thread's record is read."""
+    link's left id to that right id. The keys take this thread's kind because it is the lookup;
+    the link's own ``entity_kind`` is ``Unknown``. Listed by ``(registration key, link record id,
+    package id, right id)``. Never a merge: no other thread's record is read."""
     if key.kind not in LINKED_KINDS or not isinstance(key.key, DeclaredKey):
         return ()
     stated = declared_json(key.key)
@@ -220,6 +221,7 @@ def links(conn: Conn, tenant: str, key: ThreadKey, limit: int) -> tuple[ThreadLi
             to_key=link_key(key.kind, str(right)),
             assertion_kind=cast("Any", str(assertion)),
             state=cast("Any", str(state)),
+            entity_kind=Unknown(),  # a schema-3 IdentityLink states no kind (ADR 0010 §8)
         )
         for package, record, _, left, right, state, assertion in rows
     )

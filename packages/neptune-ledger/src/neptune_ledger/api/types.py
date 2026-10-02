@@ -14,16 +14,16 @@ Names follow Ledger ADR 0002 (transaction key, registration key, refusal finding
 
 import hashlib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Annotated, Any, ClassVar, Final, Literal, TypeAlias
 
 from neptune.identity import canonical_json
 from neptune.model.kinds import RECORD_KINDS
-from neptune.model.knowledge import AssertionKind, Knowledge, Known
+from neptune.model.knowledge import AssertionKind, Knowledge, Known, Unknown
 
 # The catalog API's registry version (contracts/catalog-api). It equals the registry version
 # exactly (platform ADR 0002 §3); a reader-incompatible change raises the major (ADR 0004 §5).
-CATALOG_API_VERSION: Final = "1.4.0"
+CATALOG_API_VERSION: Final = "1.5.0"
 API_MAJOR: Final = int(CATALOG_API_VERSION.split(".", 1)[0])
 
 
@@ -150,6 +150,10 @@ ThreadKind: TypeAlias = Literal[
     "stream",
     "task",
     "zone",
+]
+# The kind of thing an identity link's two ids name, as the evidence states it (ADR 0010 §8).
+EntityKind: TypeAlias = Annotated[
+    ThreadKind, Constraint("EntityKind", "The kind of entity a link's ids name (a thread kind).")
 ]
 Role: TypeAlias = Literal["cites", "part_of", "subject"]
 Order: TypeAlias = Literal["transaction", "world"]
@@ -587,7 +591,13 @@ class UnresolvedMember:
 
 @dataclass(frozen=True)
 class ThreadLink:
-    """An ``IdentityLink`` record relating two declared threads; never a merge (§1.5)."""
+    """An ``IdentityLink`` record relating two declared ids; never a merge (§1.5).
+
+    ``from_key`` and ``to_key`` are the link's left and right ids as keys of the thread that
+    lists it: their ``kind`` is the kind the caller asked for, a lookup, not something the link
+    states. ``entity_kind`` is what the evidence states about the kind of thing the two ids
+    name: ``Unknown`` for every link of package schema 3, which has no such field (ADR 0010 §8).
+    """
 
     link_record_id: RecordId
     package_id: PackageId
@@ -595,6 +605,7 @@ class ThreadLink:
     to_key: ThreadKey
     assertion_kind: Literal["observed", "stated"]
     state: Literal["ambiguous", "known", "not_applicable", "not_covered", "unknown"]
+    entity_kind: Knowledge[EntityKind] = field(default_factory=Unknown)
 
 
 @dataclass(frozen=True)
