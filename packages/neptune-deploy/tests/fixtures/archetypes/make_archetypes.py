@@ -1,4 +1,4 @@
-"""Generate the two deployment archetypes and run them through the pipeline (Deploy ADR 0004).
+"""Generate the two deployment archetypes and their committed packages (Deploy ADR 0004).
 
 ``sources/warehouse_amr_fleet`` is a small AMR fleet at two sites and ``sources/manipulator_cell``
 is one arm in a cell. Each is a deployment folder as a team would hand it over: logs, bags, URDFs,
@@ -6,20 +6,21 @@ configs, maps, exports and PDFs. The fleet has a corrupt bag and a stale config;
 have export rows that no mapping reads (an inspection, a task) and blank cells. Run from the
 repository root::
 
-    uv run python packages/neptune-deploy/tests/fixtures/archetypes/make_archetypes.py
+    uv run --all-packages --all-groups python \
+        packages/neptune-deploy/tests/fixtures/archetypes/make_archetypes.py
 
-It rewrites ``sources/`` and ``golden/``. Output is deterministic: no clock, randomness or network,
-and no third-party writer. MCAP files and PDFs are written with the compiler's own fixture writers
-(``tests/fixtures/mcap/make_mcap.py``, ``tests/fixtures/pdf/make_pdfs.py`` and this package's
-``documents/make_document_fixtures.py``), loaded by path. Chunks are uncompressed, so the bytes do
-not follow a compression library, and ROS 2 bags use MCAP storage, because a SQLite file's header
-carries the library version.
+It rewrites three trees. ``sources/`` is written by this file; output is deterministic (no clock,
+randomness, network or third-party writer). MCAP files and PDFs are written with the compiler's own
+fixture writers (``tests/fixtures/mcap/make_mcap.py``, ``tests/fixtures/pdf/make_pdfs.py`` and this
+package's ``documents/make_document_fixtures.py``), loaded by path. Chunks are uncompressed, so the
+bytes do not follow a compression library, and ROS 2 bags use MCAP storage, because a SQLite file's
+header carries the library version.
 
-``pipeline`` is the one ADR 0002 draws: ``neptune ingest`` (the SDK the command line wraps) builds
-the base package from a folder, then the Deploy mapper builds a new lineage from declared mapping
-files and document templates (``declared/``), each value citing the base package's cells and spans.
-``golden/<name>/base`` keeps the base package's manifest and receipt. ``golden/<name>/lifecycle``
-keeps the mapped package whole, because it is the lifecycle evidence later layers read.
+``packages/<name>`` is the base package: ``neptune ingest`` run as a subprocess (a member never
+imports the compiler's runtime; root ``test_merge_freshness``), committed without ``volatile/``,
+as ADR 0002 does for its fixtures. ``golden/<name>/lifecycle`` is the Deploy mapper's output over
+that base package with the declared mapping files and document templates (``declared/``), kept
+whole because it is the lifecycle evidence later layers read. Deploy's tests run the mapper only.
 
 Every number and name is invented. The fleet reuses the compiler's worked example identifiers
 (site S-007, AMR-07, INC-0007, zones DOCK-1 and PICK-A); the cell reuses CELL-3 and ARM-3A.
@@ -33,6 +34,7 @@ import io
 import json
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -46,6 +48,7 @@ HERE: Final = Path(__file__).resolve().parent
 ROOT: Final = HERE.parents[4]
 SOURCES: Final = HERE / "sources"
 GOLDEN: Final = HERE / "golden"
+PACKAGES: Final = HERE / "packages"
 DECLARED: Final = HERE / "declared"
 DOCUMENTS: Final = HERE.parent / "documents"
 FLEET: Final = "warehouse_amr_fleet"
@@ -490,6 +493,7 @@ WO-26-0306,PM,AMR-10,S-012,07/03/2026,Scheduled 500 h service,Clean lidar window
 WO-26-0319,CM,AMR-07,S-007,2026-03-19 15:10,Fork carriage chain stretch,Replace lift chain; Re-tension,Lift chain,LC-0442,LC-0518,4.2.0,,J. Ortiz,2.5
 WO-26-0402,CM,AMR-07,S-007,2026-04-02 16:00,Contact with rack upright,Straighten left fork; Inspect mast,,,,4.2.0,INC-0007,J. Ortiz,4
 WO-26-0414,CM,AMR-07,S-007,2026-04-14 19:30,Localisation drift after map update,Flash controller firmware; Re-run lidar calibration,,,,4.3.1,CHG0050023; INC-0007,J. Ortiz,1.5
+WO-26-0416,CM,AMR-09,S-012,2026-04-14 20:10,Localisation drift after map update,Flash controller firmware,,,,4.3.1,CHG0050025,A. Weber,1
 WO-26-0420,INSP,AMR-09,S-012,2026-04-20 08:00,Monthly inspection,Visual check,,,,4.3.1,,A. Weber,0.5
 WO-26-0520,CM,AMR-08,S-012,2026-05-19 15:30,Bumper switch intermittent after contact,Replace bumper switch,Bumper switch,BS-2201,BS-2307,4.3.1,INC-0013,A. Weber,2
 WO-26-0611,CM,AMR-10,S-012,,Charging contacts worn,Replace charge contact plate,Charge contact plate,CC-0091,CC-0144,4.3.1,,A. Weber,3
@@ -543,7 +547,7 @@ def fleet_changes() -> bytes:
 FLEET_REQUALIFICATION: Final = """\
 Requal ID,Site,Robot,Performed,Cause,Corrective Actions,Test 1,Result 1,Test 2,Result 2,Test 3,Result 3,Result,Decision,Decided By,Decided On,Work Order,Inspector
 RQ-S007-0007,S-007,AMR-07,2026-04-15 09:30,Firmware 4.3.1 (CHG0050023) and map revision 14,Re-teach PICK-A pick positions; Verify rack face offsets,Protective stop distance at 1.5 m/s,0.94 m,Lidar field switch at DOCK-1,PASS,Fork height interlock,PASS,PASS,Returned to service,Site safety lead,2026-04-15 11:00,WO-26-0414,R. Okafor
-RQ-S012-0003,S-012,AMR-09,2026-04-16 13:10,Firmware 4.3.1 (CHG0050025),Verify localisation repeatability,Localisation repeatability at PICK-C,22 mm,Protective stop distance at 1.2 m/s,0.81 m,,,PASS with note,Returned to service with speed restriction,Site safety lead,,WO-26-0420,S. Brandt
+RQ-S012-0003,S-012,AMR-09,2026-04-16 13:10,Firmware 4.3.1 (CHG0050025),Verify localisation repeatability,Localisation repeatability at PICK-C,22 mm,Protective stop distance at 1.2 m/s,0.81 m,,,PASS with note,Returned to service with speed restriction,Site safety lead,,WO-26-0416,S. Brandt
 """
 
 
@@ -1080,16 +1084,20 @@ PIPELINES: Final = {
 }
 
 
-def ingest(root: Path, out: Path, scratch: Path) -> None:
-    """``neptune ingest`` over ``root``, in process (no sandbox: the bytes are ours).
+def ingest(name: str, out: Path) -> None:
+    """``neptune ingest`` over ``sources/<name>`` into ``out``, without ``volatile/``.
 
-    It goes through the SDK the command line wraps, so the folder's ``neptune.yaml`` is applied.
+    The command line, as a subprocess: it applies the folder's ``neptune.yaml``, and ``in_process``
+    keeps the receipt independent of the host's sandbox level (the compiler's own golden packages
+    do the same). The job is named ``archetype`` so its envelope is stable.
     """
-    from neptune.runtime import Isolation, JobOptions
-    from neptune.sdk import Neptune
-
-    options = JobOptions(isolation=Isolation.IN_PROCESS, job="archetype")
-    Neptune(scratch / "home", options=options).ingest(root, out)
+    command = [str(Path(sys.executable).parent / "neptune"), "ingest", str(SOURCES / name)]
+    flags = ["--isolation", "in_process", "--job", "archetype"]
+    with tempfile.TemporaryDirectory() as workspace:
+        subprocess.run(
+            [*command, "--out", str(out), "-w", workspace, *flags], check=True, capture_output=True
+        )
+    shutil.rmtree(out / "volatile", ignore_errors=True)
 
 
 def lifecycle(base: Path, declared: Declared, out: Path) -> None:
@@ -1107,43 +1115,25 @@ def lifecycle(base: Path, declared: Declared, out: Path) -> None:
     map_package(base, mappings, out, templates)
 
 
-def package_documents(root: Path, *, whole: bool) -> dict[str, bytes]:
-    """The package's files, without ``volatile/``. A base package is kept as its manifest and
-    receipt; a mapped one whole, but for empty record tables its manifest lists with hashes."""
-    keep = {"manifest.json", "receipt.json", "receipt.md"}
-    files: dict[str, bytes] = {}
-    for path in sorted(root.rglob("*")):
-        relative = path.relative_to(root).as_posix()
-        if not path.is_file() or relative.startswith("volatile/"):
-            continue
-        if whole and path.stat().st_size == 0:
-            continue
-        if whole or relative in keep:
-            files[relative] = path.read_bytes()
-    return files
-
-
-def pipeline(name: str, sources: Path, scratch: Path) -> tuple[Path, Path]:
-    """Ingest ``sources/<name>`` and map it; the base package's and the mapped package's roots."""
-    base, mapped = scratch / f"{name}.base", scratch / f"{name}.lifecycle"
-    ingest(sources / name, base, scratch / name)
-    lifecycle(base, PIPELINES[name], mapped)
-    return base, mapped
-
-
-def golden_files(name: str, base: Path, mapped: Path) -> dict[str, bytes]:
-    """One deployment's golden files, by path relative to ``golden/``."""
-    files = {
-        f"{name}/base/{relative}": data
-        for relative, data in package_documents(base, whole=False).items()
+def package_files(root: Path, *, empty: bool) -> dict[str, bytes]:
+    """A package's files by relative path, but for ``volatile/``. A base package keeps its empty
+    record tables (the reader expects them); a mapped one drops them, its manifest lists them."""
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+        and "volatile" not in path.relative_to(root).parts
+        and (empty or path.stat().st_size)
     }
-    files.update(
-        {
-            f"{name}/lifecycle/{relative}": data
-            for relative, data in package_documents(mapped, whole=True).items()
-        }
-    )
-    return files
+
+
+def lifecycle_files(name: str, scratch: Path) -> dict[str, bytes]:
+    """The mapper's package over the committed base package, by path under ``golden/<name>/``."""
+    out = scratch / name
+    lifecycle(PACKAGES / name, PIPELINES[name], out)
+    return {
+        f"{name}/lifecycle/{path}": data for path, data in package_files(out, empty=False).items()
+    }
 
 
 def golden() -> dict[str, bytes]:
@@ -1151,7 +1141,7 @@ def golden() -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     with tempfile.TemporaryDirectory() as scratch:
         for name in PIPELINES:
-            files.update(golden_files(name, *pipeline(name, SOURCES, Path(scratch))))
+            files.update(lifecycle_files(name, Path(scratch)))
     return files
 
 
@@ -1166,8 +1156,15 @@ def write_tree(root: Path, files: dict[str, bytes], clear: bool = True) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     write_tree(SOURCES, build())
+    shutil.rmtree(PACKAGES, ignore_errors=True)
+    for name in PIPELINES:
+        with tempfile.TemporaryDirectory() as scratch:
+            ingest(name, Path(scratch) / "package")
+            write_tree(
+                PACKAGES / name, package_files(Path(scratch) / "package", empty=True), clear=False
+            )
     write_tree(GOLDEN, golden())
-    sys.stdout.write(f"wrote {SOURCES.relative_to(ROOT)} and {GOLDEN.relative_to(ROOT)}\n")
+    sys.stdout.write("wrote sources/, packages/ and golden/\n")
     return 0
 
 

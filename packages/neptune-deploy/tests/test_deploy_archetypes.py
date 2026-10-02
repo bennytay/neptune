@@ -1,11 +1,12 @@
-"""The two deployment archetypes, end to end: compiler ingest, then the Deploy mapper (ADR 0004).
+"""The two deployment archetypes, through the compiler's packages and the Deploy mapper (ADR 0004).
 
 ``fixtures/archetypes/make_archetypes.py`` writes the sources (an AMR fleet and a manipulator cell),
-runs ``IngestJob``-equivalent ingestion through the SDK and the Deploy mapper over each base
-package, and keeps the receipts as golden files. The fast tests check the generator and the
-sources. The slow ones run the pipeline and check the golden files, that the corrupt bag and the
-stale config are findings and not failures, and that every lifecycle value is ``stated`` and cites
-the export, form or span it came from.
+runs ``neptune ingest`` over them as a subprocess into the committed base packages, and keeps the
+mapper's output as golden files. These tests never run ingestion (a member may not, root
+``test_merge_freshness``): they check the generator and the sources, that each base package is the
+ingest of exactly those sources, that the mapper over a base package gives the golden lifecycle
+package, that the corrupt bag and the stale config are findings and not failures, and that every
+lifecycle value is ``stated`` and cites the export, form or span it came from.
 """
 
 import importlib.util
@@ -18,6 +19,7 @@ from xml.etree import ElementTree  # our own generated fixtures, not hostile inp
 
 import pytest
 
+from neptune.identity.hashing import content_id
 from neptune.model.ids import ContentId
 from neptune.model.knowledge import AssertionKind, Known
 from neptune.model.lifecycle import LIFECYCLE_KINDS
@@ -134,13 +136,17 @@ def test_the_embodiments_are_ground_vehicles_and_an_arm() -> None:
     assert configured == {f"AMR-{n:02d}" for n in range(5, 11)}
 
 
-# --- The pipeline (slow: a real ingest job per deployment) ----------------------------------------
+# --- The committed base packages and the mapper over them -----------------------------------------
 
 
 @pytest.fixture(scope="module")
 def packages(tmp_path_factory: pytest.TempPathFactory) -> dict[str, tuple[Path, Path]]:
     work = tmp_path_factory.mktemp("archetypes")
-    return {name: A.pipeline(name, A.SOURCES, work) for name in A.PIPELINES}
+    out = {}
+    for name in A.PIPELINES:
+        A.lifecycle(A.PACKAGES / name, A.PIPELINES[name], work / name)
+        out[name] = (A.PACKAGES / name, work / name)
+    return out
 
 
 def _of(package: IngestPackage, kind: str) -> list[Any]:
@@ -181,30 +187,29 @@ def _found(package: IngestPackage, code: str) -> list[str]:
     return sorted(out)
 
 
-@pytest.mark.slow
-@pytest.mark.integration
 def test_both_archetypes_are_golden(packages: dict[str, tuple[Path, Path]]) -> None:
-    # On failure, run make_archetypes.py and explain the diff in the PR (a compiler adapter change
-    # reaches the golden base receipts here, which is the point).
-    built: dict[str, bytes] = {}
-    for name, (base, mapped) in packages.items():
-        built.update(A.golden_files(name, base, mapped))
+    # On failure, run make_archetypes.py and explain the diff in the PR. A mapper, template or
+    # mapping change moves these; a compiler adapter change moves the base packages only when they
+    # are re-ingested (the Platform harness sees that drift, MVL-181).
+    built = {
+        f"{name}/lifecycle/{path}": data
+        for name, (_, mapped) in packages.items()
+        for path, data in A.package_files(mapped, empty=False).items()
+    }
     assert built == _tree(A.GOLDEN)
 
 
-@pytest.mark.slow
-@pytest.mark.integration
-def test_every_source_lands_as_records_or_findings(
+def test_each_base_package_is_the_ingest_of_exactly_these_sources(
     packages: dict[str, tuple[Path, Path]],
 ) -> None:
     for name, (base, _) in packages.items():
-        package = read_package(base)
-        sources = set(_paths(package).values())
-        assert sources == set(_tree(A.SOURCES / name)), name
+        revisions = _of(read_package(base), "source_revision")  # read_package verifies the hashes
+        raw = _tree(A.SOURCES / name)
+        assert {r.location.path for r in revisions} == set(raw), name
+        for revision in revisions:
+            assert revision.content_id == content_id(raw[revision.location.path]), revision
 
 
-@pytest.mark.slow
-@pytest.mark.integration
 def test_the_corrupt_bag_is_a_finding_not_a_failure(
     packages: dict[str, tuple[Path, Path]],
 ) -> None:
@@ -223,8 +228,6 @@ def test_the_corrupt_bag_is_a_finding_not_a_failure(
     )
 
 
-@pytest.mark.slow
-@pytest.mark.integration
 def test_the_stale_config_is_a_finding_and_a_stated_revision(
     packages: dict[str, tuple[Path, Path]],
 ) -> None:
@@ -259,8 +262,6 @@ def test_the_stale_config_is_a_finding_and_a_stated_revision(
     assert not {path for path in lifecycle if path.startswith("runs/")}
 
 
-@pytest.mark.slow
-@pytest.mark.integration
 def test_the_fleet_lifecycle_package(packages: dict[str, tuple[Path, Path]]) -> None:
     mapped = read_package(packages[A.FLEET][1])
     kinds = Counter(r.kind for r in mapped.records if isinstance(r, LIFECYCLE_KINDS))
@@ -268,7 +269,7 @@ def test_the_fleet_lifecycle_package(packages: dict[str, tuple[Path, Path]]) -> 
         "authorisation_envelope": 4,
         "change_record": 6,
         "incident_record": 2,
-        "maintenance_event": 11,
+        "maintenance_event": 12,
         "requalification_record": 2,
     }
     machines = {
@@ -287,8 +288,6 @@ def test_the_fleet_lifecycle_package(packages: dict[str, tuple[Path, Path]]) -> 
     assert sites == {"S-007", "S-012"}
 
 
-@pytest.mark.slow
-@pytest.mark.integration
 def test_the_cell_lifecycle_package(packages: dict[str, tuple[Path, Path]]) -> None:
     mapped = read_package(packages[A.CELL][1])
     kinds = Counter(r.kind for r in mapped.records if isinstance(r, LIFECYCLE_KINDS))
@@ -306,8 +305,6 @@ def test_the_cell_lifecycle_package(packages: dict[str, tuple[Path, Path]]) -> N
     assert len(snapshots) == 4
 
 
-@pytest.mark.slow
-@pytest.mark.integration
 def test_lifecycle_values_are_stated_and_cite_their_source(
     packages: dict[str, tuple[Path, Path]],
 ) -> None:
@@ -333,8 +330,6 @@ def test_lifecycle_values_are_stated_and_cite_their_source(
     assert MAPPER_ID == "deploy_lifecycle_map"
 
 
-@pytest.mark.slow
-@pytest.mark.integration
 def test_the_mapper_neither_changes_the_base_nor_varies(
     packages: dict[str, tuple[Path, Path]], tmp_path: Path
 ) -> None:

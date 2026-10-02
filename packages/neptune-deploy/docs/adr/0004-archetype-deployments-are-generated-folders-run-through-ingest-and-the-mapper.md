@@ -34,21 +34,29 @@ this corpus, and the D1 gate (MVL-116) stress-tests lifecycle records on both.
      replacement with a recalibration, a tool change with a recalibration, and an inspection after the near
      miss), a ServiceNow export (controller update, tool offset), a requalification sheet (three rows), a
      Jira near-miss export, and a risk assessment, a commissioning report and a tool-change SOP as PDFs.
-3. **The pipeline is the one ADR 0002 draws.** `pipeline(name, ...)` runs the compiler's ingest through the SDK
-   the command line wraps (so `neptune.yaml` applies), in process and with the job named `archetype`, then
-   `neptune_deploy.lifecycle.map_package` with the deployment's declared files. In process, so the receipt
-   does not depend on the host's Landlock level (the compiler's own golden packages do the same). The
-   declared files are shipped presets where one fits (`cmms_generic`, `servicenow_csv`, `register_zone`,
-   `jira_json`), MVL-114's risk and commissioning templates unchanged, and four files written here
-   (`declared/`: the fleet's requalification mapping and incident template, the cell's requalification
-   mapping, which is MVL-113's with the plant's zone, and its SOP template). No plugin entry point is loaded: the compiler does not load them yet
-   (MVL-200), and the mapper is outside the ABI (ADR 0002 §2).
-4. **Golden receipts, in CI.** `golden/<name>/base` holds the base package's `manifest.json`, `receipt.json` and
-   `receipt.md`; `golden/<name>/lifecycle` holds the mapped package whole but for its empty tables (about
-   220 KiB for the fleet; the manifest lists those with their hashes). The base manifest pins every record
-   table by hash, so a compiler adapter change is seen without committing the series and the large tables.
-   The pipeline tests are `slow` and `integration` (a real ingest job, about 25 s for both folders) and run
-   in the package's CI job. Changing a golden file needs an explanation in the PR (root AGENTS.md).
+3. **The pipeline is the one ADR 0002 draws, split where the root rule requires.** `neptune ingest` builds
+   each base package and the Deploy mapper builds the lifecycle lineage from it with the deployment's
+   declared files. A member may not import the compiler's runtime or SDK (root
+   `tests/unit/test_merge_freshness.py`: only `neptune-platform` ingests), so the generator runs the
+   command line as a subprocess (`--isolation in_process --job archetype`, so the receipt does not depend
+   on the host's sandbox level and the envelope is stable) and commits the result as
+   `packages/<name>/`, without `volatile/`, as ADR 0002 does for its fixtures. Deploy's tests run only the
+   mapper over those packages (`neptune_deploy.lifecycle.map_package`). The declared files are shipped
+   presets where one fits (`cmms_generic`, `servicenow_csv`, `register_zone`, `jira_json`), MVL-114's risk
+   and commissioning templates unchanged, and four files written here (`declared/`: the fleet's
+   requalification mapping and incident template, the cell's requalification mapping, which is MVL-113's
+   with the plant's zone, and its SOP template). No plugin entry point is loaded: the compiler does not
+   load them yet (MVL-200), and the mapper is outside the ABI (ADR 0002 §2).
+4. **What is golden, and what catches what.** `golden/<name>/lifecycle` is the mapper's package whole but for
+   its empty tables (about 220 KiB for the fleet; the manifest lists those with their hashes), and a fast
+   test in Deploy's job checks that mapping the committed base package gives exactly it. A mapper, mapping
+   or template change moves it. The base packages are committed ingest output: the receipts of
+   `packages/<name>/` are the compiler's receipts for these sources. A test checks that each base package
+   holds exactly these sources by content hash, so a source edit without a re-ingest fails, but Deploy's
+   job does not re-ingest and so does not see a compiler adapter change. That drift (an adapter change
+   altering what ingest writes for these sources) is caught where ingestion is allowed: the Platform
+   harness, which ingests the corpus (X4 and MVL-181). Regenerating the packages after an adapter change is
+   a deliberate PR with the diff explained (root AGENTS.md).
 5. **Damage is a finding, never a failed job.**
    - The corrupt bag is AMR-08's rosbag2 bag from the day of INC-0013: the MCAP storage file is cut in the
      middle of its last chunk (an interrupted copy) and the metadata still claims every message. The base
@@ -65,13 +73,15 @@ this corpus, and the D1 gate (MVL-116) stress-tests lifecycle records on both.
      reports `row_unmatched`, `value_blank`, `value_unreadable` and `list_cell_blank`; those records keep
      `Unknown` fields.
 6. **Clocks stay as declared, and the stories agree.** Logs are POSIX nanoseconds (UTC); incident, CMMS and
-   requalification times are wall-clock text. The fleet's mapping and template zones are `unstated`
-   because two sites in two zones share one export and one form. The cell is one plant: every template and
-   mapping declares `America/Detroit`, and its calibration files and near-miss ticket state offsets of that
-   zone (-05:00 in February, -04:00 in summer). Each calibration precedes the work order and requalification
-   that cite it, and every CMMS row after the controller update (2026-03-10) states the 5.6.0 it left. A
-   contradiction in a golden lifecycle package is therefore a finding about the pipeline or a deliberate
-   case, never an accident of the fixtures. Nothing is moved to UTC.
+   requalification times are wall-clock text. The fleet's mapping and template zones are all `unstated`,
+   because two sites in two zones share one export and one form. The cell's PDF templates (risk,
+   commissioning, SOP) and its requalification mapping declare `America/Detroit`; the shipped CMMS,
+   ServiceNow and Jira presets it also uses declare `unstated`, and stay so rather than guess. Its
+   calibration files and near-miss ticket state offsets of the plant's zone (-05:00 in February, -04:00 in
+   summer). Each calibration precedes the work order and requalification that cite it, every requalification
+   cites an earlier work order, and every CMMS row after the controller update (2026-03-10) states the
+   5.6.0 it left. A contradiction in a golden lifecycle package is therefore a finding about the pipeline or
+   a deliberate case (the stale AMR-09 config), never an accident of the fixtures. Nothing is moved to UTC.
 7. **Formats the compiler reads today.** ROS 2 bags use MCAP storage with uncompressed chunks, because a
    SQLite file's header carries the library version and a compression library changes bytes; the MCAP and
    the bag were read once with the official `mcap` and `rosbags` readers (never dependencies) to check them,
@@ -81,18 +91,19 @@ this corpus, and the D1 gate (MVL-116) stress-tests lifecycle records on both.
 8. **Handing the corpus to Platform X4.** The corpus is `tests/fixtures/archetypes/sources/`, one folder per
    archetype, which is the shape `harness/corpus.py` expects. X4 sets
    `ARCHETYPES = REPO / "packages" / "neptune-deploy" / "tests" / "fixtures" / "archetypes" / "sources"` (the
-   hook currently names a path this package does not use). `golden/` is what a harness run should reproduce
-   for the compiler stage; the lifecycle stage reads `golden/<name>/lifecycle`.
+   hook currently names a path this package does not use). `packages/<name>` is what a harness
+   run's compiler stage should reproduce (its drift check, MVL-181); the lifecycle stage reads
+   `golden/<name>/lifecycle`.
 
 ## Alternatives considered
 
 - **The compiler's `warehouse_amr` and `manipulator_cell` records as the corpus.** They are one JSON export
   each and skip every adapter, so no log, config or document is exercised. Kept as the model's golden, not
   used here.
-- **Committing whole base packages, as ADR 0002 does for its fixtures.** Those never run ingestion so an
-  adapter-only compiler change cannot break Deploy unseen. For the archetypes the compiler's output is part
-  of what is under test, the base packages hold a megabyte of stream tables, and the base manifest already
-  pins them by hash. Lost.
+- **Running the real ingest inside Deploy's tests (the first version of this PR).** It tests the compiler's
+  output end to end, but it imports the compiler's runtime, which the root rule forbids members (adapter-only
+  compiler changes are routed past member jobs, so such a test would go red on main unseen). Lost; the
+  harness owns re-ingest.
 - **Writing the bags and PDFs with `mcap`, `rosbags` or `reportlab`.** Each would be a new dependency, and
   `reportlab` embeds a clock. Lost; the compiler's own fixture writers do the work.
 - **SQLite-storage bags.** Their bytes follow the host's SQLite. Lost.
@@ -101,13 +112,12 @@ this corpus, and the D1 gate (MVL-116) stress-tests lifecycle records on both.
 
 ## Consequences
 
-- The goldens pin the versions of the libraries the adapters record in the receipt (`pypdf`, `pyarrow`,
-  `pyyaml`, `lz4`, `zstandard`) and the Parquet bytes `pyarrow` writes, like the compiler's own golden
-  packages. A dependency bump that changes them is a regeneration in the bump's PR; the diff is the library
-  strings and table hashes, and the PR says so.
-- A compiler adapter change (a PDF, MCAP, config or tabular change) moves the golden base receipts, and a
-  mapper or template change moves the lifecycle ones; either is a deliberate regeneration PR with the diff
-  explained. The 25 s the pipeline tests take is the price of testing the real ingest.
+- The committed base packages record the versions of the libraries the adapters used (`pypdf`, `pyarrow`,
+  `pyyaml`, `lz4`, `zstandard`) and the Parquet bytes `pyarrow` wrote, like the compiler's own golden
+  packages. A dependency bump does not fail Deploy's job; it shows up when the packages are regenerated.
+- Committed base packages mean the lifecycle goldens cannot drift because of an adapter change, and neither
+  can they notice one. The Platform harness is where an adapter change shows up (MVL-181 wires the check);
+  until then regenerating after an adapter change is a manual step this ADR records.
 - When MVL-200 lands, the same corpus drives the pipeline through the loaded plugin; a real URDF or GeoJSON
   adapter and payload decoding will change the base receipts, and the corpus needs no edit.
 - MVL-181 (the acceptance corpus) can extend these folders rather than start again.

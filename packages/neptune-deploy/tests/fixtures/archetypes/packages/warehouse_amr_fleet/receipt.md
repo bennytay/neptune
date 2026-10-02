@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:4e1eca469d784b834554084a255531e09e0bf256b08bcde02620b1a5f17a1b25`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:5ad3edc84f84f09d0135c0a2ee267b5dcd5d7cf692f9350a2765a24575de67e6`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -14,7 +14,7 @@ Receipt `rec:sha256:4e1eca469d784b834554084a255531e09e0bf256b08bcde02620b1a5f17a
 |---|---|---|---|
 | `authorisation/zone_register.csv` | 788 | `sha256:4b797207931a` | tabular 0.1.0 |
 | `changes/servicenow_changes.csv` | 1618 | `sha256:2b7b4b194dd1` | tabular 0.1.0 |
-| `cmms/work_orders.csv` | 1841 | `sha256:184e31cadd41` | tabular 0.1.0 |
+| `cmms/work_orders.csv` | 1978 | `sha256:46a7c074ef28` | tabular 0.1.0 |
 | `config/AMR-05/nav2_params.yaml` | 405 | `sha256:6495d96ee25f` | config 0.1.0 |
 | `config/AMR-06/nav2_params.yaml` | 405 | `sha256:7f04720e8e8b` | config 0.1.0 |
 | `config/AMR-07/nav2_params.yaml` | 405 | `sha256:9e0b456f5606` | config 0.1.0 |
@@ -26,7 +26,7 @@ Receipt `rec:sha256:4e1eca469d784b834554084a255531e09e0bf256b08bcde02620b1a5f17a
 | `maps/S-007_zones.geojson` | 1393 | `sha256:83d1dc3347fe` | text 0.1.0 |
 | `maps/S-012_zones.geojson` | 1394 | `sha256:22a6767e99ac` | text 0.1.0 |
 | `neptune.yaml` | 149 | `sha256:2c6ff33f9633` | config 0.1.0 |
-| `requalification/requalification_tests.csv` | 785 | `sha256:78f1799105e9` | tabular 0.1.0 |
+| `requalification/requalification_tests.csv` | 785 | `sha256:82e663e574ca` | tabular 0.1.0 |
 | `runs/S-007/amr-05_2026-03-03.mcap` | 17400 | `sha256:08528ca2ef6f` | mcap 0.1.0 |
 | `runs/S-007/amr-06_2026-03-03.mcap` | 17515 | `sha256:b80fb68ef024` | mcap 0.1.0 |
 | `runs/S-007/amr-07_2026-04-02.mcap` | 17516 | `sha256:34bb6772f2fd` | mcap 0.1.0 |
@@ -64,7 +64,7 @@ Receipt `rec:sha256:4e1eca469d784b834554084a255531e09e0bf256b08bcde02620b1a5f17a
 | `source_artifact` | 25 |
 | `source_revision` | 25 |
 | `stream` | 21 |
-| `structured_record` | 43 |
+| `structured_record` | 44 |
 | `structured_table` | 10 |
 | `timestamp_domain` | 29 |
 | `transform_record` | 8 |
@@ -139,9 +139,9 @@ Receipt `rec:sha256:4e1eca469d784b834554084a255531e09e0bf256b08bcde02620b1a5f17a
 - **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded; each row cites its message's bytes · `rec:cee68bfcba62`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:e765b4253ec8`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:ee43ce9237a6`
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:1ea18398b615`
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:873cb9fcf76e`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:4ec1a1ce29b4`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:8b22f879a5a9`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:aeba41f5da58`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:ebf3e6cfd782`
 
 ## Ambiguous fields
