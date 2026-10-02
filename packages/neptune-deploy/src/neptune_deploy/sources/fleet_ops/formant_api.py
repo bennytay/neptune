@@ -86,6 +86,11 @@ class QueryTransport(Transport):
                 sock.shutdown(socket.SHUT_RDWR)
         super().abort()
 
+    def drop(self) -> None:
+        """Close the connection and forget its socket, so a later ``abort`` hits nothing stale."""
+        self._sock = None
+        super().drop()
+
     def post_query(self, path: str, body: bytes, headers: Mapping[str, str]) -> Response:
         """``POST`` ``body`` to one of the five query routes, and nowhere else."""
         route = path.removeprefix(self.endpoint.base_path)

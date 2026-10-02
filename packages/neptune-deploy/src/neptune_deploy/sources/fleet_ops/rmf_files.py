@@ -80,18 +80,25 @@ def safe_path(root: str, relative: str) -> str:
     return str(current)
 
 
-def read_bytes(path: str, limit: int) -> bytes:
-    """A regular file's bytes, at most ``limit``; ``O_NOFOLLOW`` repeats the symlink check."""
+def open_regular(path: str, limit: int) -> int:
+    """A descriptor for a regular file of at most ``limit`` bytes, opened without following a
+    symlink and without waiting on a FIFO: its type and size are checked on the descriptor."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
     except OSError:
         raise FileRefused("file_unreadable") from None
-    with os.fdopen(fd, "rb") as handle:
-        info = os.fstat(handle.fileno())
-        if not stat.S_ISREG(info.st_mode):
-            raise FileRefused("not_regular_file")
-        if info.st_size > limit:
-            raise FileRefused("file_too_large")
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+        os.close(fd)
+        raise FileRefused(
+            "not_regular_file" if not stat.S_ISREG(info.st_mode) else "file_too_large"
+        )
+    return fd
+
+
+def read_bytes(path: str, limit: int) -> bytes:
+    """A regular file's bytes, at most ``limit``."""
+    with os.fdopen(open_regular(path, limit), "rb") as handle:
         data = handle.read(limit + 1)
     if len(data) > limit:
         raise FileRefused("file_too_large")
@@ -115,8 +122,8 @@ def json_items(data: bytes, max_rows: int, *, whole: bool = False) -> Rows:
             try:
                 candidates.append(parse_json(raw))
             except DocumentInvalid:
-                rows.stopped = "file_invalid"
-                return rows
+                rows.stopped = "file_invalid"  # a cut-short last line: what came before is kept
+                break
             if len(candidates) > max_rows:
                 break
     elif whole:
@@ -168,14 +175,42 @@ def _value(raw: object, parse: bool, rows: Rows) -> tuple[bool, Any]:
 
 
 def sqlite_items(
-    path: str, table: str, json_columns: tuple[str, ...], max_rows: int, *, timeout: float = 5.0
+    path: str,
+    table: str,
+    json_columns: tuple[str, ...],
+    max_rows: int,
+    max_bytes: int,
+    *,
+    timeout: float = 5.0,
 ) -> Rows:
-    """The rows of ``table`` in the database at ``path``, read-only (see the module docstring)."""
-    with Path(path).open("rb") as handle:
-        if handle.read(len(SQLITE_MAGIC)) != SQLITE_MAGIC:
+    """The rows of ``table`` in the database at ``path``, read-only (see the module docstring).
+
+    The file is opened and checked by descriptor first (not a symlink, regular, within
+    ``max_bytes``, the SQLite magic). SQLite then opens the path itself, as it must for ``mode=ro``,
+    so a path swapped in between is not excluded; what is read is discarded unless the file at the
+    path afterwards is the very file that was checked (``file_changed``).
+    """
+    fd = open_regular(path, max_bytes)
+    try:
+        if os.pread(fd, len(SQLITE_MAGIC), 0) != SQLITE_MAGIC:
             raise FileRefused("not_sqlite")
+        checked = os.fstat(fd)
+        rows = _query(path, table, json_columns, max_rows, timeout)
+        now = Path(path).lstat()
+        if (now.st_dev, now.st_ino) != (checked.st_dev, checked.st_ino) or not stat.S_ISREG(
+            now.st_mode
+        ):
+            raise FileRefused("file_changed")
+        return rows
+    finally:
+        os.close(fd)
+
+
+def _query(
+    path: str, table: str, json_columns: tuple[str, ...], max_rows: int, timeout: float
+) -> Rows:
     rows = Rows()
-    uri = "file:" + urllib.parse.quote(str(Path(path).resolve())) + "?mode=ro"
+    uri = "file:" + urllib.parse.quote(str(Path(path).absolute())) + "?mode=ro"
     try:
         connection = sqlite3.connect(uri, uri=True, timeout=timeout)
     except sqlite3.Error:
@@ -225,11 +260,3 @@ def sqlite_items(
         with contextlib.suppress(sqlite3.Error):
             connection.close()
     return rows
-
-
-def under(root: str) -> str:
-    """The directory the operator named, as a path string; it must exist."""
-    path = Path(root)
-    if not path.is_dir():
-        raise NotADirectoryError("the Open-RMF directory does not exist")
-    return str(path)

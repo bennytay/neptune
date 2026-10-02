@@ -114,9 +114,17 @@ def test_json_lines_are_read_and_a_damaged_line_fails_that_file(tmp_path: Path) 
     write(tmp_path, "tasks.json", '{"booking": {"id": "a"}}\n\n{"booking": {"id": "b"}}\n')
     ok = src(tmp_path, {"tasks": {"file": "tasks.json"}})
     assert [r.logical_id.value.value for r in ok.catalog().of("run")] == ["a", "b"]
-    write(tmp_path, "tasks.json", '{"booking": {"id": "a"}}\n{"booking"\n')
+    # A log cut short by a crash keeps every line before the cut, and says it was cut.
+    write(
+        tmp_path, "tasks.json", '{"booking": {"id": "a"}}\n{"booking": {"id": "b"}}\n{"booking"\n'
+    )
+    cut = src(tmp_path, {"tasks": {"file": "tasks.json"}})
+    assert [r.logical_id.value.value for r in cut.catalog().of("run")] == ["a", "b"]
+    (invalid,) = codes(cut)["part_invalid"]
+    assert (invalid.details["part"], invalid.details["records"]) == ("tasks", 2)
+    write(tmp_path, "tasks.json", '{"booking"\n')
     bad = src(tmp_path, {"tasks": {"file": "tasks.json"}})
-    assert list(bad.walk()) == [] and codes(bad)["part_invalid"][0].details["part"] == "tasks"
+    assert list(bad.walk()) == [] and codes(bad)["part_invalid"][0].details["records"] == 0
 
 
 def test_entries_that_are_not_objects_are_counted_and_dropped(tmp_path: Path) -> None:
@@ -259,6 +267,48 @@ def test_something_that_is_not_a_database_or_is_cut_short_is_a_finding(tmp_path:
     source = sql(tmp_path)
     assert list(source.walk()) == []  # a finding, never an exception
     assert codes(source)
+
+
+def test_a_database_swapped_for_another_file_while_it_is_read_is_discarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from neptune_deploy.sources.fleet_ops import rmf_files
+
+    for name in ("rmf.db", "other.db"):
+        db = database(tmp_path, name)
+        db.execute("CREATE TABLE task_state(id_ TEXT)")
+        db.execute("INSERT INTO task_state VALUES ('a')")
+        db.commit()
+        db.close()
+    real = rmf_files._query
+
+    def swap(*args: Any) -> Any:
+        rows = real(*args)
+        (tmp_path / "rmf.db").unlink()
+        (tmp_path / "rmf.db").symlink_to(tmp_path / "other.db")  # after the check, before the end
+        return rows
+
+    monkeypatch.setattr(rmf_files, "_query", swap)
+    source = sql(tmp_path)
+    assert list(source.walk()) == [] and causes(source) == {"tasks": "file_changed"}
+
+
+def test_a_map_level_name_stated_twice_builds_no_frame_and_a_bad_map_is_a_finding(
+    tmp_path: Path,
+) -> None:
+    maps = [
+        {"name": "a", "levels": {"L1": {"lanes": [1]}, "L2": {"lanes": []}}},
+        {"name": "b", "levels": {"L1": {"lanes": [2]}}},
+        {"name": "c", "levels": [1, 2]},
+        7,
+    ]
+    write(tmp_path, "maps.json", "\n".join(json.dumps(m) for m in maps))
+    source = src(tmp_path, {"map": {"file": "maps.json"}})
+    catalog = source.catalog()
+    assert [a.name.value for a in catalog.of("spatial_artifact")] == ["L2"]  # L1 is two frames
+    reasons = sorted(f.details["reason"] for f in codes(source)["record_skipped"])
+    assert reasons == ["level_invalid_or_repeated", "map_has_no_levels_object"]
+    assert len(catalog.documents[0].items) == 3  # the document keeps all three levels as stated
 
 
 def test_the_authoriser_allows_reading_and_nothing_else() -> None:

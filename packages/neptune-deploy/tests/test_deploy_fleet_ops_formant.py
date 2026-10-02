@@ -427,3 +427,51 @@ def test_the_transform_holds_what_decided_the_records_and_no_secret_or_endpoint(
 def test_fixture_is_recorded_shape_with_a_spread_of_embodiments() -> None:
     roles = {d["tags"]["role"] for d in fixture("devices")["items"]}
     assert roles == {"amr", "manipulator", "legged"}
+
+
+def test_a_page_that_breaks_keeps_what_was_read_before_it() -> None:
+    store = FakeFormant.standard()
+    store.bad_page["interventions"] = 2
+    with serve(store) as endpoint:
+        src = source(endpoint)
+        catalog = src.catalog()
+    assert {r.identifiers[0].value.value for r in catalog.of("intervention")} == {
+        "ir-0001",
+        "ir-0002",
+    }
+    (invalid,) = codes(src)["part_invalid"]
+    assert (invalid.details["part"], invalid.details["records"]) == ("interventions", 2)
+    assert "kept" in invalid.message  # the finding says what is and is not covered
+
+
+def test_a_command_that_is_not_text_is_cited_where_it_is() -> None:
+    store = FakeFormant.standard()
+    store.pages["interventions"] = [{"items": [{"id": "ir-9", "commands": ["stop", 5, "go"]}]}]
+    with serve(store) as endpoint:
+        src = source(endpoint)
+        catalog = src.catalog()
+    (record,) = catalog.of("intervention")
+    assert [c.value for c in record.commands] == ["stop", "go"]
+    (finding,) = codes(src)["value_unreadable"]
+    assert finding.subject.locator[-1] == JsonPointer("/items/0/commands/1")
+    assert finding.details["field"] == "commands/1"
+    document = next(d for d in catalog.documents if d.ref.object_id.endswith("/interventions"))
+    assert finding.subject.source == document.content_id
+
+
+def test_a_read_error_can_be_copied_and_raised_through_a_context_manager() -> None:
+    import contextlib
+    import copy
+    import pickle
+
+    location = ExternalObjectRef("deploy_formant", "@x/o/events", "records:y")
+    error = DocumentReadError("object_gone", location)
+    for clone in (copy.copy(error), pickle.loads(pickle.dumps(error))):
+        assert isinstance(clone, DocumentReadError) and clone.code == "object_gone"
+
+    @contextlib.contextmanager
+    def guarded() -> Any:
+        yield
+
+    with pytest.raises(DocumentReadError), guarded():
+        raise error

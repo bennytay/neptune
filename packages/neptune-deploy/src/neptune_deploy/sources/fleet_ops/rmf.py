@@ -207,10 +207,14 @@ class OpenRmfSource(FleetOpsSource):
 
     def _read(self, part: str, spec: FileSpec) -> Rows:
         path = safe_path(self._root, spec.file)
-        if Path(path).stat().st_size > self.options.max_file_bytes:
-            raise FileRefused("file_too_large")
         if spec.table is not None:
-            return sqlite_items(path, spec.table, spec.json_columns, self.options.max_rows)
+            return sqlite_items(
+                path,
+                spec.table,
+                spec.json_columns,
+                self.options.max_rows,
+                self.options.max_file_bytes,
+            )
         return json_items(
             read_bytes(path, self.options.max_file_bytes),
             self.options.max_rows,
@@ -253,8 +257,10 @@ class OpenRmfSource(FleetOpsSource):
         """One item per level of each map object: ``{"level": name, "data": <level>, ...}``."""
         out: list[JsonValue] = []
         extra: set[str] = set()
+        malformed = 0
         for found in maps:
             if not isinstance(found, dict) or not isinstance(found.get("levels"), dict):
+                malformed += 1
                 continue
             extra.update(
                 str(key) for key in found if key not in ("name", "coordinate_system", "levels")
@@ -265,6 +271,12 @@ class OpenRmfSource(FleetOpsSource):
                     if key in found:
                         item["map" if key == "name" else key] = found[key]
                 out.append(item)
+        if malformed:
+            self.report(
+                "record_skipped",
+                self.part_subject("map"),
+                {"count": malformed, "reason": "map_has_no_levels_object", "part": "map"},
+            )
         if extra:
             self.report(
                 "map_keys_not_recorded",

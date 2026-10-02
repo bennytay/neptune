@@ -21,6 +21,7 @@ bytes: no coordinate is moved, converted or projected, and the unit and CRS are 
 The frame's axes and handedness are ``Unknown``: the file does not say.
 """
 
+from collections import Counter
 from collections.abc import Callable, Mapping
 from typing import Any, Final
 
@@ -160,9 +161,13 @@ def build_map(
     )
     records: list[FrameGraph | Frame | SpatialArtifact] = [graph]
     skipped = 0
-    for index, item in enumerate(document.items):
-        level = _usable(item.get("level"))
-        if level is None:
+    names = [_usable(item.get("level")) for item in document.items]
+    # A level name stated by two items is two frames of one name in one graph: which is meant is not
+    # stated, so neither is used (as ADR 0006 §4 drops a key listed twice).
+    counts = Counter(name for name in names if name is not None)
+    repeated = {name for name, count in counts.items() if count > 1}
+    for index, level in enumerate(names):
+        if level is None or level in repeated:
             skipped += 1
             continue
         ref = FrameRef(level, graph.id)
@@ -190,6 +195,8 @@ def build_map(
         )
     if skipped:
         report(
-            "record_skipped", cite(document, "items"), {"count": skipped, "reason": "level_invalid"}
+            "record_skipped",
+            cite(document, "items"),
+            {"count": skipped, "reason": "level_invalid_or_repeated"},
         )
     return records if len(records) > 1 else []

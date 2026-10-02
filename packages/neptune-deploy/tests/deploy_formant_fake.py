@@ -53,6 +53,7 @@ class FakeFormant:
     status: dict[str, int] = field(default_factory=dict)  # part -> forced HTTP status
     raw: dict[str, bytes] = field(default_factory=dict)  # part -> forced body bytes
     loop: set[str] = field(default_factory=set)  # parts whose last page names its own token again
+    bad_page: dict[str, int] = field(default_factory=dict)  # part -> page number with a broken body
     trickle: set[str] = field(default_factory=set)  # parts that send a byte at a time, slowly
 
     @classmethod
@@ -125,6 +126,9 @@ def _handler(store: FakeFormant) -> type[BaseHTTPRequestHandler]:
             number = 0 if token is None else int(str(token).removeprefix("page-")) - 1
             if not 0 <= number < len(pages):
                 self._answer(200, b'{"items": []}')
+                return
+            if store.bad_page.get(part) == number + 1:
+                self._answer(200, b'{"items": [}')
                 return
             page = dict(pages[number])
             if number + 1 < len(pages):

@@ -56,8 +56,8 @@ CODES: Final[dict[str, tuple[FindingCategory, Severity, str]]] = {
     "part_invalid": (
         FindingCategory.CORRUPT,
         Severity.ERROR,
-        "a response or file is not the strict JSON or table the part is documented to be; the part"
-        " is not recorded",
+        "a response, page or file is not the strict JSON or table the part is documented to be;"
+        " what was read before it is kept and the rest of the part is not covered",
     ),
     "value_unrepresentable": (
         FindingCategory.UNREPRESENTABLE,
@@ -98,15 +98,18 @@ class DocumentEntry:
         return f"{self.part}.json"
 
 
-@dataclass(frozen=True, slots=True)
 class DocumentReadError(OSError):
-    """Opening an object that is not in this source (or whose revision moved on)."""
+    """Opening an object that is not in this source (or whose revision moved on); ``code`` is the
+    finding code without the connector prefix. A plain exception, as ADR 0006's ``ObjectReadError``
+    is: it can be copied, pickled and re-raised across a boundary."""
 
-    code: str
-    location: ExternalObjectRef
+    def __init__(self, code: str, location: ExternalObjectRef) -> None:
+        super().__init__(f"{location.connector_id}: {code}")
+        self.code = code
+        self.location = location
 
-    def __str__(self) -> str:
-        return f"{self.location.connector_id}: {self.code}"
+    def __reduce__(self) -> tuple[type, tuple[str, ExternalObjectRef]]:
+        return type(self), (self.code, self.location)
 
 
 @dataclass(frozen=True)

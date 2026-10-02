@@ -253,6 +253,7 @@ def test_a_wrong_mapping_file_fails_loudly_before_any_record_is_read(
         parse_mapping(json.dumps(data).encode())
     with pytest.raises(MappingError):
         parse_mapping(b"not json")
+
     with pytest.raises(MappingError):
         parse_mapping(b"[]")
     with pytest.raises(MappingError):
@@ -270,3 +271,22 @@ def test_the_finding_catalogue_is_what_the_mapper_can_report() -> None:
         "bag_payload_not_decoded",
         "nothing_to_map",
     }
+
+
+def test_a_mapping_file_is_read_to_its_limit_and_no_further(tmp_path: Path) -> None:
+    huge = tmp_path / "huge.json"
+    huge.write_bytes(b" " * (4 * 1024 * 1024))
+    with pytest.raises(MappingError, match="at most"):
+        load_mapping(huge)
+
+
+def test_a_mapping_file_is_strict_json() -> None:
+    text = VENDOR.read_text()
+    repeated = text.replace('"0": "diagnostic.ok",', '"0": "diagnostic.ok", "0": "other",')
+    assert repeated != text
+    with pytest.raises(MappingError, match="strict"):  # a repeated key has two readings
+        parse_mapping(repeated.encode())
+    with pytest.raises(MappingError, match="strict"):
+        parse_mapping(text.replace('"version": "2"', '"version": NaN').encode())
+    with pytest.raises(MappingError, match="strict"):
+        parse_mapping(text.replace('"version": "2"', '"version": 1e999').encode())

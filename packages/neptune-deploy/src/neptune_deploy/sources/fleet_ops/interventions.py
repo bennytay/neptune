@@ -88,11 +88,11 @@ class _Item:
     def prov(self, *key: str | int) -> Provenance:
         return stated(self.document, self.transform, "items", self.index, *key)
 
-    def _unreadable(self, key: str, why: str) -> None:
+    def _unreadable(self, why: str, *key: str | int) -> None:
         self.report(
             "value_unreadable",
-            cite(self.document, "items", self.index, key),
-            {"field": key, "reason": why},
+            cite(self.document, "items", self.index, *key),
+            {"field": "/".join(str(part) for part in key), "reason": why},
         )
 
     def text(self, key: str) -> Knowledge[str]:
@@ -103,7 +103,7 @@ class _Item:
             return Unknown(self.prov(key))
         text = _text(value)
         if text is None:
-            self._unreadable(key, "not_text")
+            self._unreadable("not_text", key)
             return Unknown(self.prov(key))
         return Known(text, self.prov(key))
 
@@ -121,7 +121,7 @@ class _Item:
             return Unknown(self.prov(key))
         reading = read_time(value, self.formats) if isinstance(value, str) else None
         if reading is None:
-            self._unreadable(key, "time_format")
+            self._unreadable("time_format", key)
             return Unknown(self.prov(key))
         where = cite(self.document, "items", self.index, key)
         domain = self._domain(key, reading.instant, reading.resolution, where)
@@ -152,11 +152,11 @@ class _Item:
         for position, command in enumerate(value[:MAX_COMMANDS]):
             text = _text(command) if isinstance(command, str) else None
             if text is None:
-                self._unreadable(f"commands/{position}", "not_text")
+                self._unreadable("not_text", "commands", position)
                 continue
             out.append(Known(text, self.prov("commands", position)))
         if len(value) > MAX_COMMANDS:
-            self._unreadable("commands", "too_many")
+            self._unreadable("too_many", "commands")
         return tuple(out)
 
 

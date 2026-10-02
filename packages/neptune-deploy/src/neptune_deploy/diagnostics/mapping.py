@@ -21,7 +21,6 @@ code is not in ``levels`` is a finding, and stays as declared. Anything else wro
 a ``MappingError`` before any record is read.
 """
 
-import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -32,7 +31,12 @@ from neptune.identity.hashing import content_id
 from neptune.model.ids import ContentId
 from neptune.model.jsonvalue import JsonValue
 from neptune_deploy.lifecycle.mapping import MappingError
-from neptune_deploy.sources.fleet_ops.documents import DeclaredClock, parse_clock
+from neptune_deploy.sources.fleet_ops.documents import (
+    DeclaredClock,
+    DocumentInvalid,
+    parse_clock,
+    parse_json,
+)
 
 MAPPING_SCHEMA: Final = "neptune-deploy.diagnostics-mapping/1"
 MAX_BYTES: Final = 1024 * 1024
@@ -112,9 +116,9 @@ def parse_mapping(data: bytes) -> DiagnosticsMapping:
     if len(data) > MAX_BYTES:
         raise MappingError(f"a mapping file is at most {MAX_BYTES} bytes")
     try:
-        raw = json.loads(data.decode("utf-8"))
-    except (ValueError, RecursionError) as exc:
-        raise MappingError("not JSON") from exc
+        raw = parse_json(data)  # strict: no repeated key, no NaN, bounded nesting
+    except DocumentInvalid as exc:
+        raise MappingError(f"not strict JSON: {exc}") from exc
     if not isinstance(raw, dict):
         raise MappingError("a mapping file is a JSON object")
     unknown = sorted(set(raw) - _TOP)
@@ -190,4 +194,6 @@ def parse_mapping(data: bytes) -> DiagnosticsMapping:
 
 
 def load_mapping(path: Path) -> DiagnosticsMapping:
-    return parse_mapping(path.read_bytes())
+    """The mapping file at ``path``; at most ``MAX_BYTES`` of it are ever read."""
+    with path.open("rb") as handle:
+        return parse_mapping(handle.read(MAX_BYTES + 1))

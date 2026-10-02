@@ -130,7 +130,8 @@ class _Run:
         self.base, self.mapping = base, mapping
         self.tables, _ = tables_of(base.records)
         self.pattern = re.compile(re.escape(mapping.array) + r"/([0-9]+)(/.*)?")
-        self.found = [t for t in self.tables if self.statuses(t)]
+        self.cache = {t.record.id: self.statuses(t) for t in self.tables}
+        self.found = [t for t in self.tables if self.cache[t.record.id]]
         self.streams = sorted(
             (s for s in base.records if isinstance(s, Stream) and self._diagnostic(s)),
             key=lambda s: s.id,
@@ -226,7 +227,7 @@ class _Run:
     # --- One table ------------------------------------------------------------------------
 
     def one(self, table: _Table) -> None:
-        statuses = self.statuses(table)
+        statuses = self.cache[table.record.id]
         clock = self._clock(table, statuses)
         source = table.evidence
         events = self._table(source, "events", EVENT_TABLE, EVENT_HEADER)

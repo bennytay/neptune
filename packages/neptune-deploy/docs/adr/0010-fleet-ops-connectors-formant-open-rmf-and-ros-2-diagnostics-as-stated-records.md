@@ -107,13 +107,18 @@ more than it says.
    - **Files.** A path is relative, with no `..`, empty, absolute or backslash part and no symlink on the way
      (`path_invalid`, `symlink_refused`); only a regular file is opened (`not_regular_file`, so a FIFO is never
      waited on), no larger than `max_file_bytes` (`file_too_large`), by an `O_NOFOLLOW` descriptor whose type and
-     size are checked. A refused file is a `file_refused` finding and the other parts are read.
+     size are checked. A refused file is a `file_refused` finding and the other parts are read. A JSON Lines
+     file cut short by a crash keeps every line before the damaged one and is a `part_invalid` finding saying
+     how many were read.
    - **SQLite is hostile input.** It is read with the standard library, read-only through a URI (`mode=ro`),
      with `PRAGMA query_only` and an authoriser that allows `SELECT`, reads, functions and recursive queries and
      denies everything else (no `ATTACH`, `PRAGMA`, write or DDL). A progress handler bounds a hostile view or
      recursive query by VM instruction count and not by the clock (`work_limit`), so a run is the same on a slow
      machine. The table must exist in `sqlite_master` under the declared name, which is then quoted: it is never
-     spliced into a statement as given (`table_missing`). At most `max_rows` rows are read (`row_limit`), in the
+     spliced into a statement as given (`table_missing`). The file is opened and checked by descriptor first
+     (not a symlink, regular, within the limit, the SQLite magic); SQLite then opens the path itself, as
+     `mode=ro` requires, so a path swapped in between is not excluded, and what was read is discarded unless the
+     file at the path afterwards is the one that was checked (`file_changed`). At most `max_rows` rows are read (`row_limit`), in the
      file's scan order, so a cut depends on the file. The database is never written or changed, and a test
      checks its bytes and its directory afterwards.
    - **Rows.** A row is an object of column to value as stored. A column the operator declares as JSON
@@ -133,7 +138,10 @@ more than it says.
      as the file names it, in one `FrameGraph` for the document. The geometry stays in the document's bytes: no
      coordinate is moved, converted or projected; `unit` and `crs` are `NotCovered`; the frame's axes and
      handedness are `Unknown`. Keys of the map beyond its name, coordinate system and levels (lifts, doors) are
-     not recorded and say so (`map_keys_not_recorded`).
+     not recorded and say so (`map_keys_not_recorded`). A level name stated by two items is two frames of one
+     name in one graph and which is meant is not stated, so neither is used (as ADR 0006 §4 drops a key listed
+     twice); a map entry with no `levels` object builds nothing. Both are `record_skipped` findings, and the
+     levels stay in the document as stated.
    - Identity: `ExternalObjectRef("deploy_open_rmf", "<site>/<part>", "records:<sha256>")`. `site` is declared and
      is the operator's name for the deployment. The directory is where bytes were read from, not what they are:
      a copy elsewhere has the same identity and the same bytes.
