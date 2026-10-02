@@ -7,8 +7,9 @@ skipped:
 
 1. ``unsafe_entry``: an entry at any depth that is not a regular file or a directory.
 2. ``manifest.json``: absent or not a file (``package_unreadable`` on register, ``file_missing``
-   on verify), not a manifest (``manifest_invalid``), another schema version
-   (``unsupported_schema_version``), or no table count for some record kind (``manifest_invalid``).
+   on verify), not a manifest (``manifest_invalid``), a schema version this Ledger does not read
+   (``unsupported_schema_version``), or tables other than exactly the record kinds of its schema
+   version (``manifest_invalid``; Ledger ADR 0008 §2).
 3. Files: ``file_missing``, ``unexpected_file``, ``file_digest_mismatch``. A listed path that is
    absolute or escapes the root can never equal a walked entry, so it is ``file_missing`` and
    nothing outside the root is opened. A file whose size differs is never read.
@@ -27,9 +28,10 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 from neptune.identity import canonical_json
+from neptune.model import kinds as model_kinds
 from neptune.model.kinds import RECORD_KINDS
 from neptune.model.package import package_manifest_from_json
-from neptune.model.record import SCHEMA_VERSION
+from neptune.model.record import OLDEST_READABLE_VERSION, SCHEMA_VERSION
 from neptune.store.package import MANIFEST, VOLATILE, IngestPackage, PackageError, read_files
 from neptune_ledger.api.types import CatalogFinding, FindingCode
 
@@ -41,6 +43,24 @@ _DIR_FLAGS: Final = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 _FILE_FLAGS: Final = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
 
 Mode = Literal["register", "verify"]
+
+
+def kinds_of(version: int) -> frozenset[str]:
+    """The record kinds a package of schema ``version`` holds a table for (Ledger ADR 0008 §2).
+
+    The compiler's ``neptune.model.kinds.kinds_at``. A compiler with one schema version has no
+    ``kinds_at``, and every kind is then of that version. The fallback goes once package schema 2
+    (compiler PR #37, which adds ``kinds_at``) is on main.
+    """
+    kinds_at = getattr(model_kinds, "kinds_at", None)
+    if kinds_at is None:
+        return frozenset(RECORD_KINDS)
+    return frozenset(kinds_at(version))
+
+
+def readable_versions() -> str:
+    """The package schema versions this Ledger reads, as text for a finding."""
+    return ", ".join(str(v) for v in range(OLDEST_READABLE_VERSION, SCHEMA_VERSION + 1))
 
 
 @dataclass(frozen=True)
@@ -125,7 +145,7 @@ def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> C
             "unsupported_schema_version" if problem == "version" else "manifest_invalid"
         )
         detail = (
-            f"schema version {version}; this Ledger reads {SCHEMA_VERSION}"
+            f"schema version {version}; this Ledger reads {readable_versions()}"
             if problem == "version"
             else problem
         )
@@ -182,7 +202,7 @@ def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> C
         for descriptor in parents.values():
             os.close(descriptor)
     lines: dict[str, tuple[bytes, ...]] = {}
-    for table in RECORD_KINDS:
+    for table in sorted(manifest["tables"]):  # exactly the kinds of its version (stage 2)
         data = files[f"records/{table}.jsonl"]
         assert isinstance(data, bytes)
         lines[table] = tuple(data.split(b"\n")[:-1])
@@ -213,10 +233,10 @@ def _manifest(data: bytes) -> tuple[dict[str, Any], str | None]:
     version = value.get("schema_version")
     if not isinstance(version, int) or isinstance(version, bool):
         return value, "no integer schema_version"
-    if version != SCHEMA_VERSION:
+    if not OLDEST_READABLE_VERSION <= version <= SCHEMA_VERSION:
         return value, "version"
     tables = value.get("tables")
-    if not isinstance(tables, dict) or set(tables) != set(RECORD_KINDS):
+    if not isinstance(tables, dict) or set(tables) != kinds_of(version):
         return value, "it must count a table for every record kind of the schema version"
     if not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in tables.values()):
         return value, "a table count is not a non-negative integer"

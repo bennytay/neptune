@@ -1,0 +1,6 @@
+rate: 10
+frame: map
+rate: 20
+nested:
+  x: 1
+  x: 2

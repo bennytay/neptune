@@ -25,9 +25,11 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any, Final
 
+from neptune.model.configuration import ConfigAlias, ValueDigest
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ConfigHash, ContentId, ExternalObjectRef, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.model.kinds import KIND_SINCE as _KIND_SINCE
 from neptune.model.kinds import RECORD_KINDS as _KINDS
 from neptune.model.knowledge import Known
 from neptune.model.package import IngestReceipt, PackageManifest, ReceiptEnvelope
@@ -39,7 +41,7 @@ from neptune.model.provenance import (
     RowCell,
     VideoFrame,
 )
-from neptune.model.record import SCHEMA_VERSION
+from neptune.model.record import OLDEST_READABLE_VERSION, SCHEMA_VERSION
 from neptune.model.reference import FrameTransform
 from neptune.model.scalars import NonFinite
 from neptune.model.source import LocalPath, RawLocalPath
@@ -169,10 +171,13 @@ class _Builder:
 
     def _dataclass(self, cls: type) -> JsonObject:
         hints = typing.get_type_hints(cls, localns=_JSON_NAMES)
+        # A document's ``version`` is written as its envelope's ``schema_version``, below.
         properties: dict[str, JsonValue] = {
             field.name: self.schema(hints[field.name])
             for field in dataclasses.fields(cls)
-            if field.init and (cls, field.name) not in _FIELD_OVERRIDES
+            if field.init
+            and (cls, field.name) not in _FIELD_OVERRIDES
+            and not (cls in DOCUMENT_KINDS and field.name == "version")
         }
         for (owner, field_name), build in _FIELD_OVERRIDES.items():
             if owner is cls:
@@ -180,8 +185,17 @@ class _Builder:
         kind = getattr(cls, "kind", None)
         if isinstance(kind, str) and "kind" not in properties:
             properties["kind"] = _const(kind)
-        if hasattr(cls, "family") or cls in DOCUMENT_KINDS:  # the envelope (ADR 0017 §2)
-            properties["schema_version"] = _const_int(SCHEMA_VERSION)
+        # The envelope (ADR 0017 §2): a record at the version that added its kind, a package's
+        # document at the package's version (ADR 0037 §1).
+        if hasattr(cls, "family") and isinstance(kind, str):
+            properties["schema_version"] = _const_int(_KIND_SINCE[kind])
+        elif cls in DOCUMENT_KINDS:
+            versions: JsonObject = {
+                "maximum": SCHEMA_VERSION,
+                "minimum": OLDEST_READABLE_VERSION,
+                "type": "integer",
+            }
+            properties["schema_version"] = versions
         return _obj(properties)
 
 
@@ -215,6 +229,7 @@ _NEWTYPES: Final[Mapping[Any, tuple[str, str]]] = {
     RecordId: ("RecordId", f"rec:{_SHA256}"),
     ContentId: ("ContentId", _SHA256),
     ConfigHash: ("ConfigHash", _SHA256),
+    ValueDigest: ("ValueDigest", _SHA256),
 }
 
 
@@ -303,6 +318,12 @@ def _non_finite(builder: _Builder) -> JsonObject:
     return _obj({"non_finite": {"enum": [member.value for member in NonFinite]}})
 
 
+def _config_alias(builder: _Builder) -> JsonObject:
+    target: JsonObject = {"items": {"type": ["string", "integer"]}, "type": "array"}
+    alias: JsonObject = {"anchor": dict(_STRING), "key": {"type": "boolean"}, "target": target}
+    return _obj({**alias, "type": _const("alias")})
+
+
 _OVERRIDES: Final[Mapping[type, Callable[[_Builder], JsonObject]]] = {
     LocalPath: _local_path,
     RawLocalPath: _raw_local_path,
@@ -314,6 +335,7 @@ _OVERRIDES: Final[Mapping[type, Callable[[_Builder], JsonObject]]] = {
     Fraction: _fraction,
     Unit: _unit,
     NonFinite: _non_finite,
+    ConfigAlias: _config_alias,
 }
 
 

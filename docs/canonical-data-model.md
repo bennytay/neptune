@@ -1,13 +1,14 @@
 # Canonical data model
 
-Status: **authoritative** and frozen at `SCHEMA_VERSION` 1 by the M1 gate (MVL-56, ADR 0023; review:
-`docs/reviews/m1-stress-test.md`). The model grows only by addition from here. Primitives are specified by
+Status: **authoritative**; frozen at `SCHEMA_VERSION` 1 by the M1 gate (MVL-56, ADR 0023; review:
+`docs/reviews/m1-stress-test.md`) and grown only by addition since: version 2 adds configuration snapshots
+(MVL-23, ADR 0037). Primitives are specified by
 MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66 (ADR 0017), runs, streams and series by MVL-67
 (ADR 0018), machine context by MVL-68 (ADR 0019) and world context by MVL-69 (ADR 0020). The JSON Schema
 (`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). Any change here needs
 an ADR and a schema-version bump, and must be an addition (ADR 0023 §1).
 
-## Record kinds (schema version 1)
+## Record kinds (schema version 2)
 
 Every record kind belongs to one family (ADR 0017 §4). The last four families are the design contract's source
 domains.
@@ -19,7 +20,7 @@ domains.
 | `finding` | `IngestFinding` | `model/finding.py` |
 | `reference` | `TimestampDomain`, `FrameGraph`, `Frame`, `FrameTransform` | `model/reference.py` |
 | `run` | `Run`, `Stream` | `model/run.py`, series contract in `model/series.py` (ADR 0018) |
-| `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration` | `model/machine.py` (ADR 0019) |
+| `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration`; since version 2 `ConfigurationSnapshot`, `ConfigurationValue` | `model/machine.py` (ADR 0019), `model/configuration.py` (ADR 0037) |
 | `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord` | `model/world.py` (ADR 0020) |
 | `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
 
@@ -32,8 +33,9 @@ boundary to the memory learner.
 
 ## Records and the envelope (ADR 0017; `model/record.py`)
 
-- Every record's JSON carries `kind` (its table) and `schema_version`. Readers check the version first and
-  refuse any other one, so a newer record fails with a version error, never a key error.
+- Every record's JSON carries `kind` (its table) and `schema_version`: the lowest version whose readers read it,
+  which is the version that added its kind (ADR 0037 §1). Readers check the version first and refuse a newer
+  one, so a newer record fails with a version error, never a key error.
 - **Evidence records** hold `id` and one record-level `Provenance`. The id is
   `evidence_record_id(kind, provenance.evidence, transform)`; `check_evidence_record_id` verifies it.
   Several records of one kind from one piece of evidence need finer locators, never counters.
@@ -44,11 +46,15 @@ boundary to the memory learner.
 - A value defined by a format specification (MCAP `log_time` is ns) cites the bytes that establish the format
   plus the transform that applies the spec. When the source carries the definition itself (a ROS message
   definition in an MCAP schema record), it cites that instead.
-- `SCHEMA_VERSION` is 1, set at the M1 gate (ADR 0023). A record kind's fields never change from then on. The
-  model grows only by addition (new record kinds, including companion kinds naming the record they extend, new
-  enum members, new locator steps), each through an ADR and a version bump. So every record from version 1 on
-  stays valid, readers read versions 1 to their own unchanged, and ids never move. Version 0 drafts are refused.
-  Stored packages are never rewritten. Anything that is not an addition is a new kind and a new adapter version.
+- `SCHEMA_VERSION` is 2. It became 1 at the M1 gate (ADR 0023), and a record kind's fields never change from
+  then on. The model grows only by addition (new record kinds, including companion kinds naming the record they
+  extend, new enum members, new locator steps), each through an ADR and a version bump. So every record from
+  version 1 on stays valid, readers read versions 1 to their own unchanged, and ids never move. Version 0
+  drafts are refused. Stored packages are never rewritten. Anything that is not an addition is a new kind and
+  a new adapter version.
+- An addition rewrites nothing that does not use it (ADR 0037 §1): a kind added later declares `since`, its
+  records are written at that version and all others at theirs, and a package is written at the lowest version
+  that holds its records (`kinds.package_version`), with a table for each kind of that version (`kinds_at`).
 - Records are frozen standard-library dataclasses with strict hand-written JSON; there is no modelling library.
   The JSON Schema is generated from them (MVL-70).
 
@@ -198,6 +204,28 @@ a bug, not a value.
 - Which configuration or calibration applied to which run is a binding (MVL-38); nothing here points
   at a run.
 
+## Configuration snapshots (ADR 0037; `model/configuration.py`)
+
+- `ConfigurationSnapshot` (since version 2): one configuration document as its bytes declare it, a JSON or
+  TOML file or one document of a YAML stream: `format`, `format_version` (a `%YAML` directive; `Unknown`
+  without one, `NotCovered` in JSON and TOML), `encoding`, `byte_order_mark`, `line_endings`, `comments`
+  (verbatim, each citing its span, never attached to a value), `values` (how many value records it has) and
+  `digest`.
+- `ConfigurationValue` (since version 2): one node, naming its `snapshot`: `path` (keys verbatim, positions as
+  integers), `occurrence` (per step, which of the entries sharing that key it passes through; `(path,
+  occurrence)` is unique in a snapshot), `order` among its parent's entries, `key_tag` (a YAML key's type
+  where it is not a string, else `NotApplicable`), YAML `tag` (`NotCovered` in JSON and TOML), `text` (a
+  scalar as written) and `value`: a `ConfigCollection`, a `ConfigAlias` (a reference, never expanded, to a
+  node, or with `key` to an anchored key's entry) or a `ConfigScalar` in the format's own type, citing its span. A format-defined null is `KnownAbsent` citing
+  the document; YAML 1.1 and 1.2 readings that differ in an undeclared document are `Ambiguous`.
+- A value's locator is a `JsonPointer` into the document as parsed, after a `config:document` step in YAML;
+  each entry of a repeated key is addressed by position (`config:entry`) instead.
+- Identity: the bytes by their content id, the values by `digest`, the sha256 of every value's path, occurrence
+  and `comparison_key`, in that order. `compare_configurations(left, right)` lists the paths whose declared values differ;
+  equal digests exactly when it lists none. Spelling, quoting, comments, key order and format never count.
+- Nothing is inferred: a key named `wheel_radius` is a declared number, with no unit unless the document
+  states one in a value of its own.
+
 ## World and record context (ADR 0020; `model/world.py`)
 
 - `Site` / `Asset`: a place or thing one declaration names (a register row, a manifest entry, a GeoJSON
@@ -221,9 +249,10 @@ a bug, not a value.
 
 ## The package and its receipt (ADR 0022; `model/package.py`, `store/`)
 
-- A package is a directory: `manifest.json`, `receipt.json`, `receipt.md`, `records/<kind>.jsonl` (every kind; empty
-  file = none), `derived/<kind>.jsonl` (inferred tables, below), `series/<stream hex>.parquet`,
-  `blobs/sha256/<2>/<64>`, and `volatile/receipt-envelope.json`.
+- A package is a directory: `manifest.json`, `receipt.json`, `receipt.md`, `records/<kind>.jsonl` (every kind of
+  the package's schema version; empty file = none), `derived/<kind>.jsonl` (inferred tables, below),
+  `series/<stream hex>.parquet`, `blobs/sha256/<2>/<64>`, and `volatile/receipt-envelope.json`. The manifest and
+  receipt carry the package's version: the lowest that holds its records (ADR 0037 §1).
 - `PackageManifest`: the receipt's id, record counts per kind, a handle per source (content id, size, referenced
   or materialised), every file's size and sha256, and the store's settings. The package id is the manifest's
   sha256.
@@ -250,7 +279,7 @@ a bug, not a value.
 - Time-series: Parquet, one file per stream, row groups sized for range queries, rows sorted by clock-0
   ticks, then source order (ADR 0018).
 - Raw evidence: content-addressed blobs, byte-identical to source.
-- Every record carries `kind` and `schema_version` (ADR 0017 §2, §7).
+- Every record carries `kind` and `schema_version`, the version that added its kind (ADR 0017 §2, ADR 0037 §1).
 - NaN and ±Infinity never appear in JSON. A record field that may hold them is typed `Real`, and a non-finite
   value is written `{"non_finite":"inf"}` (`model/scalars.py`, ADR 0017 §8). Parquet keeps IEEE values.
 

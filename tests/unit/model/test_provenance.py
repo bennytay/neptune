@@ -47,7 +47,7 @@ from neptune.model.provenance import (
     provenance_from_json,
     transform_record_from_json,
 )
-from neptune.model.record import SCHEMA_VERSION
+from neptune.model.record import OLDEST_READABLE_VERSION, SCHEMA_VERSION
 from neptune.model.time import INT64_MAX, Timestamp
 
 SOURCE = content_id(b"a small source")
@@ -312,7 +312,7 @@ TRANSFORM_JSON: dict[str, JsonValue] = {
     "id": TRANSFORM,
     "kind": "transform_record",
     "libraries": {"neptune.units-catalogue": "1"},
-    "schema_version": SCHEMA_VERSION,
+    "schema_version": OLDEST_READABLE_VERSION,
     "upstream": [],
 }
 
