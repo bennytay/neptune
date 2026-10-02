@@ -16,11 +16,7 @@ flowchart LR
     CAN["Canonical model<br/>records + provenance"]
     PKG[("Ingest package")]
     VAL["Validation &amp; alignment"]
-<<<<<<< HEAD
-    DER["Derived annotations<br/>session proposals<br/>stream layouts · semantics<br/>clock mappings"]
-=======
-    DER["Derived annotations<br/>session proposals<br/>stream layouts · semantics<br/>media streams"]
->>>>>>> origin/main
+    DER["Derived annotations<br/>session proposals<br/>stream layouts · semantics<br/>media streams · clock mappings"]
     MAN["Optional manifest<br/>neptune.yaml · init-manifest"]
   end
 
@@ -40,13 +36,9 @@ flowchart LR
   WS --> PKG
   PKG <--> VAL
   DISC -->|layout| DER
-<<<<<<< HEAD
-  RT -->|streams · definitions · series times| DER
-=======
-  RT -->|streams · definitions · row counts| DER
+  RT -->|streams · definitions · row counts · series times| DER
   SDK -->|media window by clock| PKG
   SDK -.->|lazy frame bytes| RAW
->>>>>>> origin/main
   RAW -.->|neptune.yaml| MAN
   CLI -->|init-manifest| MAN
   MAN -->|stated declarations| RT
