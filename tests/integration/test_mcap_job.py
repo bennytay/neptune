@@ -92,7 +92,9 @@ def test_every_recording_lands_read_by_mcap_inside_the_sandbox(
         assert readers == ["mcap"], source.location
     codes = {r.code for r in package.records if isinstance(r, IngestFinding)}
     quarantined = {
-        c for c in codes if c.startswith("neptune.") and not c.startswith("neptune.grouping.")
+        c
+        for c in codes
+        if c.startswith("neptune.") and not c.startswith(("neptune.grouping.", "neptune.validate."))
     }
     assert not quarantined  # session grouping may say a recording's session is ambiguous
     assert {"mcap.truncated", "mcap.crc_mismatch", "mcap.message_count_mismatch"} <= codes

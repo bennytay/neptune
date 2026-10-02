@@ -77,7 +77,9 @@ def test_every_log_lands_read_by_flightlog_inside_the_sandbox(
     assert all(found == ["flightlog"] for found in readers.values()), readers
     codes = {r.code for r in package.records if isinstance(r, IngestFinding)}
     quarantined = {
-        c for c in codes if c.startswith("neptune.") and not c.startswith("neptune.grouping.")
+        c
+        for c in codes
+        if c.startswith("neptune.") and not c.startswith(("neptune.grouping.", "neptune.validate."))
     }
     assert not quarantined
     assert {"flightlog.truncated", "flightlog.dropout", "flightlog.units_not_declared"} <= codes

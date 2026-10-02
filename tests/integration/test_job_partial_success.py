@@ -95,7 +95,12 @@ def run(
 
 
 def codes(package: Any) -> list[str]:
-    return sorted(finding.code for finding in package.receipt.findings)
+    """The receipt's codes but validation's (ADR 0054): these tests pin what the runtime says."""
+    return sorted(
+        finding.code
+        for finding in package.receipt.findings
+        if not finding.code.startswith("neptune.validate.")
+    )
 
 
 def path_of(details: Any) -> str:

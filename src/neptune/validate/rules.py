@@ -45,6 +45,8 @@ def source_incomplete(context: Context) -> Iterator[Draft]:
         if source in damaged:
             citing[source].append(record.id)
     for source in sorted(damaged):
+        if not citing[source]:  # quarantined or never read: its producer's finding says so
+            continue
         found = damaged[source]
         subject = context.whole(source) or found[0].subject
         assert isinstance(subject, EvidenceRef)

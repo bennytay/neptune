@@ -33,7 +33,7 @@ not by re-parsing. The checks must not become a second parser, must not guess un
 
    | Rule | Checks | Category |
    |---|---|---|
-   | `source_incomplete` | per source, roll up every `corrupt` finding about its bytes; name the records read from it (a `limit` stopped an intact file and is not damage) | corrupt |
+   | `source_incomplete` | per source, roll up every `corrupt` finding about the bytes of a source the package holds records from; name those records (a quarantined source is its producer's to report; a `limit` stopped an intact file and is not damage) | corrupt |
    | `count_mismatch` | a stream's `Known` declared message count against its series' rows, unless a `skipped` finding names the stream (rows left out on request, as `mcap.not_selected`) | inconsistent |
    | `snapshot_incomplete` | a configuration snapshot's declared value count against the `configuration_value` records naming it | inconsistent |
    | `time_regression` | per stream and clock, samples out of time order in source order (below), on a clock that declares itself monotonic | inconsistent |
@@ -108,8 +108,8 @@ not by re-parsing. The checks must not become a second parser, must not guess un
 - A package with findings costs two more passes over its series and blobs (amend hashes them
   again and verifies the whole before moving them); reusing the manifest's hashes is a later
   optimisation, not a contract.
-- The receipt lists `neptune.validate` among the transforms that read a source it cites, as it
-  already lists the runtime and discovery for theirs: a finding's citation counts as a read.
+- The receipt never lists `neptune.validate` as reading a source it cites (`store.receipt.NON_READERS`):
+  it judges the package, not the bytes. Runtime and discovery findings still count as reads.
 - Adding a rule, or changing one's logic, bumps its version and so the validator transform:
   packages with its findings get a new lineage; packages without stay identical.
 - Revisit when the limit, document-revision or run-binding kinds land (turn the pending rules

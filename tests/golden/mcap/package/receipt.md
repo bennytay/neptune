@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:05d5ef8847f269b85e30dd8fb4189f2953b28d83176f4c417f8647b27db48260`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:63f5b5325763383458da633f751117b6e4f0bfc73bed734ebc143a99551ef2b4`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -12,7 +12,7 @@ Receipt `rec:sha256:05d5ef8847f269b85e30dd8fb4189f2953b28d83176f4c417f8647b27db4
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `robot.mcap` | 4816 | `sha256:9e775857ab35` | mcap 0.1.0, neptune.validate 0.1.0 |
+| `robot.mcap` | 4816 | `sha256:9e775857ab35` | mcap 0.1.0 |
 
 ## Adapters
 
