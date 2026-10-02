@@ -51,7 +51,8 @@ compliance engine, a safety case generator, a CMMS or a dashboard.
 ### Repo map (`src/neptune_deploy/`; subpackages appear as their issues land)
 
 ```
-adapters/lifecycle/  lifecycle source formats (forms, CMMS exports, tickets, registers) -> lifecycle records
+adapters/lifecycle/  lifecycle source formats that need byte-level reading (forms) -> lifecycle records
+lifecycle/           the mapper: a package's tables (CMMS, tickets, registers) + mapping files -> new package
 sources/             read-only connectors (CMMS, ticketing, fleet managers) as compiler `Source`s
 packs/               the evidence-pack compiler: a deployment's lifecycle evidence assembled from packages
 console/             a thin read-only front end over packs/
