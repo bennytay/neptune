@@ -2,7 +2,8 @@
 
 - ``TestStubCatalog``: every API-calling test is a strict expected failure with
   ``NotImplementedError`` (ADR 0004 §6); any other failure, or a pass, turns CI red.
-- ``TestPostgresCatalog``: ``register``, ``verify`` (MVL-90) and ``resolve`` (MVL-91) must pass.
+- ``TestPostgresCatalog``: ``register``, ``verify`` (MVL-90), ``resolve`` (MVL-91), ``thread``,
+  ``threads_of`` and ``lineage`` (MVL-92) must pass.
   Each test that reaches a call not implemented yet is listed in ``PENDING`` with the issue that
   owns it, and is a strict expected failure with ``NotImplementedError``: when that call lands,
   the test passes, the strict xfail turns CI red, and the entry is deleted.
@@ -21,32 +22,20 @@ from neptune_ledger.catalog.migrate import apply_migrations
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.contract_tests import CatalogContract
 
-THREAD: Final = "thread(), threads_of() and lineage() are not implemented yet (MVL-92)"
 QUERY: Final = "query() is not implemented yet (MVL-98)"
 
 # Contract tests that reach a call the real catalog does not implement yet, by the first such call.
+# The first three pass every thread(), threads_of() and lineage() call (MVL-92) and then reach
+# query(); test_ledger_threads.py repeats their thread and lineage halves without it.
 PENDING: Final = {
-    "test_same_call_twice_gives_identical_bytes": THREAD,
-    "test_lineage_of_every_record": THREAD,
-    "test_lineage_of_an_unknown_record": THREAD,
-    "test_machine_threads_hold_exactly_their_declared_members": THREAD,
-    "test_world_order_partitions_by_clock": THREAD,
-    "test_two_clocks_across_packages_stay_apart_in_registration_order": THREAD,
-    "test_two_clocks_in_one_package_order_by_clock_key_bytes": THREAD,
-    "test_current_view_is_within_history": THREAD,
-    "test_latest_transform_resolves_to_the_dominant_version": THREAD,
-    "test_latest_transform_is_ambiguous_between_equal_versions": THREAD,
-    "test_pinned_selects_exactly_one_transform": THREAD,
-    "test_as_registered_by_follows_one_package": THREAD,
-    "test_as_of_beyond_the_catalog_is_refused": THREAD,
-    "test_thread_without_a_preference_is_rejected": THREAD,
-    "test_unknown_thread_is_empty_not_an_error": THREAD,
-    "test_threads_of_reports_every_machine_membership": THREAD,
-    "test_as_of_replays_an_earlier_catalog_point": THREAD,
+    "test_same_call_twice_gives_identical_bytes": QUERY,
+    "test_as_of_beyond_the_catalog_is_refused": QUERY,
+    "test_as_of_replays_an_earlier_catalog_point": QUERY,
     "test_query_by_kind_returns_catalog_rows": QUERY,
     "test_query_time_window_stays_on_one_clock": QUERY,
     "test_query_pages_by_cursor": QUERY,
     "test_query_rejects_an_inverted_window": QUERY,
+    "test_query_rejects_a_kind_no_schema_version_declares": QUERY,
 }
 
 

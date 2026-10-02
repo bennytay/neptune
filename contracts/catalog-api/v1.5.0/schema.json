@@ -117,6 +117,24 @@
       ],
       "type": "object"
     },
+    "EntityKind": {
+      "description": "The kind of entity a link's ids name (a thread kind).",
+      "enum": [
+        "asset",
+        "configuration",
+        "document",
+        "machine",
+        "person",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "type": "string"
+    },
     "EvidenceAnchor": {
       "additionalProperties": false,
       "description": "A source content id plus a locator: a record-level ``EvidenceRef`` (ADR 0003 §1).",
@@ -153,7 +171,7 @@
     },
     "KindCount": {
       "additionalProperties": false,
-      "description": "KindCount(kind: Annotated[str, Constraint(name='RecordKind', description='A record kind of package schema 1.', pattern=None, enum=('source_artifact', 'source_revision', 'source_absence', 'transform_record', 'ingest_finding', 'timestamp_domain', 'frame_graph', 'frame', 'frame_transform', 'run', 'stream', 'machine', 'hardware_configuration', 'hardware_component', 'software_configuration', 'calibration', 'configuration_snapshot', 'configuration_value', 'site', 'asset', 'spatial_artifact', 'image', 'video', 'document_record', 'document_block', 'structured_table', 'structured_record', 'task_brief', 'requirement', 'sop_section', 'work_order', 'identity_link', 'clock_mapping', 'frame_binding', 'run_assembly', 'snapshot_binding', 'commissioning_baseline', 'authorisation_envelope', 'intervention', 'maintenance_event', 'requalification_record', 'incident_record', 'change_record', 'risk_assessment'), minimum=None, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)], count: Annotated[int, Constraint(name=None, description=None, pattern=None, enum=None, minimum=0, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)])",
+      "description": "KindCount(kind: Annotated[str, Constraint(name='RecordKind', description='A record kind of package schema 1.', pattern=None, enum=('source_artifact', 'source_revision', 'source_absence', 'transform_record', 'ingest_finding', 'timestamp_domain', 'frame_graph', 'frame', 'frame_transform', 'run', 'stream', 'machine', 'hardware_configuration', 'hardware_component', 'software_configuration', 'calibration', 'configuration_snapshot', 'configuration_value', 'site', 'asset', 'spatial_artifact', 'image', 'video', 'document_record', 'document_block', 'structured_table', 'structured_record', 'identity_link', 'clock_mapping', 'frame_binding', 'run_assembly', 'snapshot_binding', 'commissioning_baseline', 'authorisation_envelope', 'intervention', 'maintenance_event', 'requalification_record', 'incident_record', 'change_record', 'risk_assessment'), minimum=None, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)], count: Annotated[int, Constraint(name=None, description=None, pattern=None, enum=None, minimum=0, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)])",
       "properties": {
         "count": {
           "minimum": 0,
@@ -168,6 +186,92 @@
         "kind"
       ],
       "type": "object"
+    },
+    "KnowledgeOfEntityKind": {
+      "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/EntityKind"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "$ref": "#/$defs/EntityKind"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "KnowledgeOfInteger": {
       "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
@@ -1359,14 +1463,12 @@
         "machine",
         "maintenance_event",
         "requalification_record",
-        "requirement",
         "risk_assessment",
         "run",
         "run_assembly",
         "site",
         "snapshot_binding",
         "software_configuration",
-        "sop_section",
         "source_absence",
         "source_artifact",
         "source_revision",
@@ -1374,11 +1476,9 @@
         "stream",
         "structured_record",
         "structured_table",
-        "task_brief",
         "timestamp_domain",
         "transform_record",
-        "video",
-        "work_order"
+        "video"
       ],
       "type": "string"
     },
@@ -2029,7 +2129,7 @@
     },
     "ThreadLink": {
       "additionalProperties": false,
-      "description": "An ``IdentityLink`` record relating two declared threads; never a merge (§1.5).",
+      "description": "An ``IdentityLink`` record relating two declared ids; never a merge (§1.5).",
       "properties": {
         "assertion_kind": {
           "enum": [
@@ -2037,6 +2137,9 @@
             "stated"
           ],
           "type": "string"
+        },
+        "entity_kind": {
+          "$ref": "#/$defs/KnowledgeOfEntityKind"
         },
         "from_key": {
           "$ref": "#/$defs/ThreadKey"
@@ -2063,6 +2166,7 @@
       },
       "required": [
         "assertion_kind",
+        "entity_kind",
         "from_key",
         "link_record_id",
         "package_id",
