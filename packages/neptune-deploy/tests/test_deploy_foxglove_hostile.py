@@ -453,7 +453,7 @@ def test_a_stream_with_no_stated_length_cannot_be_read_in_ranges_and_is_skipped(
         assert skipped == {reason, "import_incomplete"}, knob
         if knob == "no_length":
             finding = next(f for f in source.findings() if f.code.endswith(reason))
-            assert finding.details == {"cause": "range_invalid"}
+            assert finding.details == {"status": 200, "cause": "range_invalid"}
 
 
 def test_an_encoded_stream_has_no_byte_positions_and_is_refused(tmp_path: Path) -> None:
