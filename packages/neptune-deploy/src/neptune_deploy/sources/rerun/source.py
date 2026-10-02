@@ -59,6 +59,7 @@ from neptune_deploy.sources.stated_records import (
     DeclaredClock,
     StatedCatalog,
     build_document,
+    dumps,
     pointer,
     stated_table,
 )
@@ -88,9 +89,25 @@ CATALOG_CODES: Final[dict[str, tuple[FindingCategory, Severity, str]]] = {
     "value_unrepresentable": (
         FindingCategory.UNREPRESENTABLE,
         Severity.WARNING,
-        "catalog values that cannot be stored as cell text are Unknown",
+        "catalog values that cannot be stored are Unknown, and keys that cannot be columns and"
+        " elements that are not objects are not stored",
     ),
 }
+
+
+def _storage_config(storage: Options) -> dict[str, JsonValue]:
+    """What of a provider's options decides which revision token an object has. Not the endpoint:
+    like a local root path, it says where bytes were read from (ADR 0006 §3)."""
+    found: dict[str, JsonValue] = {
+        "anonymous": storage.anonymous,
+        "region": storage.region,
+        "versions": storage.versions,
+    }
+    if storage.addressing is not None:
+        found["addressing"] = storage.addressing.value
+    if storage.store is not None:
+        found["store"] = storage.store
+    return found
 
 
 def _hex(text: str) -> str:
@@ -157,6 +174,10 @@ class RerunSource(ObjectStoreSource):
             "dataset": self.export.dataset_id,
             "max_listing_bytes": opt.max_listing_bytes,
             "max_objects": opt.max_objects,
+            "storage": {
+                provider.value: _storage_config(storage)
+                for provider, storage in sorted(opt.storage.items(), key=lambda p: p[0].value)
+            },
             "timeline_clocks": {
                 name: clock.config() for name, clock in sorted(opt.timeline_clocks.items())
             },
@@ -265,10 +286,21 @@ class RerunSource(ObjectStoreSource):
         return None
 
     @cached_property
+    def _segment_rows(self) -> tuple[Mapping[str, JsonValue], ...]:
+        """The segment rows as the catalog document holds them: sorted by their bytes, identical
+        rows once. A row's index here is its ``/items/<i>`` in the ``segments`` document, so
+        findings, ``objects_of`` and the stated records all name a segment the same way, whatever
+        order the export listed them in."""
+        unique: dict[bytes, Mapping[str, JsonValue]] = {}
+        for row in self.export.segments:
+            assert isinstance(row, Mapping)
+            unique[dumps(row)] = row
+        return tuple(unique[key] for key in sorted(unique))
+
+    @cached_property
     def _listing(self) -> Listing:
         wanted: dict[tuple[Provider, str, str | None, str], list[int]] = {}
-        for index, row in enumerate(self.export.segments):
-            assert isinstance(row, Mapping)
+        for index, row in enumerate(self._segment_rows):
             self._segment(index, row, wanted)
         entries: dict[ExternalObjectRef, ObjectEntry] = {}
         complete = True
@@ -333,13 +365,14 @@ class RerunSource(ObjectStoreSource):
                     {"row": index, "scheme": scheme if scheme.isalnum() else ""},
                 )
                 continue
-            wanted.setdefault(parsed, []).append(index)
+            users = wanted.setdefault(parsed, [])
+            if index not in users:
+                users.append(index)
 
     def _size_check(self, users: list[int], entry: ObjectEntry) -> None:
         """A segment with one layer whose catalog row states a size: the store's must agree."""
         for index in users:
-            row = self.export.segments[index]
-            assert isinstance(row, Mapping)
+            row = self._segment_rows[index]
             stated = row.get("rerun_size_bytes")
             urls = row.get("rerun_storage_urls")
             if (
@@ -385,7 +418,10 @@ class RerunSource(ObjectStoreSource):
         return f"{self.export.catalog}:{self.export.dataset_id}/{part}"
 
     def objects_of(self, segment_row: int) -> tuple[ExternalObjectRef, ...]:
-        """The objects a segment row's layers resolved to, as the listing found them."""
+        """The objects a segment's layers resolved to, as the listing found them.
+
+        ``segment_row`` is the segment's row in the stated ``rerun segments`` table.
+        """
         self.listing()
         return tuple(self._objects.get((self.export.dataset_id, segment_row), ()))
 

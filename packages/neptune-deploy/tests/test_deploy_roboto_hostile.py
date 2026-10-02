@@ -1,6 +1,7 @@
 """The Roboto connector against hostile configuration, responses and signed URLs (ADR 0009 §6)."""
 
 import json
+import random
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -11,6 +12,7 @@ import pytest
 from deploy_roboto_fake import DATASET, ORG, TOKEN, FakeRoboto, content_for
 from neptune.model.ids import ExternalObjectRef
 from neptune.model.knowledge import Known, Unknown
+from neptune.model.provenance import JsonPointer
 from neptune.store.workspace import Workspace
 from neptune_deploy.sources.object_store import ObjectReadError
 from neptune_deploy.sources.object_store.config import ObjectStoreConfigError
@@ -56,7 +58,7 @@ def page(items: list[Any], token: str | None = None) -> bytes:
     return json.dumps({"data": {"items": items, "next_token": token}}).encode()
 
 
-# --- Configuration -------------------------------------------------------------------------------
+# --- Configuration ----------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -150,7 +152,7 @@ def test_the_token_is_never_printed(tmp_path: Path) -> None:
     assert TOKEN not in everything and "127.0.0.1" not in everything
 
 
-# --- The API's answers ----------------------------------------------------------------------------
+# --- The API's answers ------------------------------------------------------------------------
 
 
 def test_a_redirect_is_a_finding_and_is_never_followed(tmp_path: Path) -> None:
@@ -288,7 +290,7 @@ def test_the_same_path_listed_twice_with_different_versions_is_used_by_neither(
     assert codes(source) == ["deploy_roboto.key_duplicated"]
 
 
-# --- Annotations ---------------------------------------------------------------------------
+# --- Annotations ------------------------------------------------------------------------------
 
 
 def test_a_malformed_events_page_is_one_finding_and_the_rest_stands(tmp_path: Path) -> None:
@@ -401,7 +403,7 @@ def test_an_event_time_range_on_a_clock_is_two_records_citing_the_same_event(
     }
 
 
-# --- Signed URLs ---------------------------------------------------------------------------
+# --- Signed URLs ------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -527,3 +529,90 @@ def test_a_range_outside_the_listed_size_is_refused_before_any_request(tmp_path:
                 source.fetch(entry, start, length)
         assert len(fake.requests) == before
         assert source.fetch(entry, 116, 4) == content_for(CAL, 120)[116:120]  # the last bytes
+
+
+# --- Order, limits and hostile catalog values -------------------------------------------------
+
+
+def _all_records(fake: FakeRoboto) -> list[dict[str, Any]]:
+    return [r for r in fake.file_records() if r["fs_type"] == "file"]
+
+
+@pytest.mark.parametrize("page_size", [1, 2, 3, 1000])
+def test_what_a_limit_keeps_never_depends_on_the_apis_order_or_paging(
+    tmp_path: Path, page_size: int
+) -> None:
+    runs = []
+    for seed, name in enumerate(("a", "b", "c")):
+        fake = FakeRoboto()
+        records = _all_records(fake)
+        random.Random(seed).shuffle(records)  # Roboto documents no order for its files query
+        pages = {
+            None if i == 0 else f"p{i}": json.loads(
+                page(records[i * 2 : i * 2 + 2], f"p{i + 1}" if i * 2 + 2 < len(records) else None)
+            )
+            for i in range((len(records) + 1) // 2)
+        }
+        fake.file_pages = pages
+        with connect(fake, tmp_path / name, max_objects=2, page_size=page_size) as source:
+            listing = source.listing()
+            runs.append(([e.key for e in listing.entries], source.findings()))
+    assert runs[0] == runs[1] == runs[2]
+    keys, findings = runs[0]
+    assert keys == ["amr07/calibration.yaml", "amr07/run_0914_am.mcap"]  # the first two by path
+    (finding,) = findings
+    assert finding.code == "deploy_roboto.listing_limit"
+    assert finding.details["covered_through_hex"] == b"amr07/run_0914_am.mcap".hex()
+
+
+def test_a_failure_part_way_serves_what_was_read_then_reports_where_it_stopped(
+    tmp_path: Path,
+) -> None:
+    fake = FakeRoboto()
+    del fake.file_pages["tok_files_2"]  # the second page is a 404
+    with connect(fake, tmp_path) as source:
+        listing = source.listing()
+    assert listing.entries and not listing.complete
+    (finding,) = source.findings()
+    assert finding.code == "deploy_roboto.listing_failed"
+    assert finding.details["status"] == 404
+
+
+def test_a_number_no_json_writer_can_emit_is_refused_with_the_part_it_was_in(
+    tmp_path: Path,
+) -> None:
+    fake = FakeRoboto()
+    fake.raw_events = lambda token: b'{"data": {"items": [{"event_id": "e", "start_time": 1e999}]}}'
+    with connect(fake, tmp_path) as source:
+        catalog = source.catalog()  # no ValueError out of the document builder
+    (finding,) = [f for f in source.findings() if f.code == "deploy_roboto.catalog_invalid"]
+    assert finding.details["part"] == "events"
+    assert catalog.rows
+
+
+def test_an_events_page_with_stray_elements_and_odd_keys_keeps_its_pointers_true(
+    tmp_path: Path,
+) -> None:
+    fake = FakeRoboto()
+    items: list[Any] = ["stray", {"event_id": "e1", "start_time": 5, "\ud800": 1}, None]
+    fake.raw_events = lambda token: page(items)
+    with connect(fake, tmp_path, event_clock={"epoch": "unix"}) as source:
+        catalog = source.catalog()
+    (document,) = [d for d in catalog.documents if d.ref.object_id.endswith(":events")]
+    (domain,) = [d for d in catalog.domains if d.field == "start_time"]
+    (pointer_,) = domain.provenance.evidence.locator
+    assert isinstance(pointer_, JsonPointer)
+    index = int(pointer_.pointer.split("/")[2])
+    assert document.raw_items[index] == {"event_id": "e1", "start_time": 5, "\ud800": 1}
+    reasons = {
+        f.details["reason"] for f in source.findings() if f.code.endswith("value_unrepresentable")
+    }
+    assert reasons == {"not_an_object", "key_unusable"}
+
+
+def test_a_declared_content_host_matches_the_hosts_default_port_either_way() -> None:
+    from neptune_deploy.sources.roboto.client import _authorities
+
+    assert {"files.example.com", "files.example.com:443"} <= _authorities("files.example.com:443")
+    assert "files.example.com:8443" in _authorities("Files.Example.com:8443")
+    assert "localhost:9000" in _authorities("localhost:9000")

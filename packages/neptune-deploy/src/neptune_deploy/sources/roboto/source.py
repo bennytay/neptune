@@ -62,8 +62,8 @@ CATALOG_CODES: Final[dict[str, tuple[FindingCategory, Severity, str]]] = {
     "value_unrepresentable": (
         FindingCategory.UNREPRESENTABLE,
         Severity.WARNING,
-        "catalog values that cannot be stored as cell text (a lone surrogate, or too large) are"
-        " Unknown",
+        "catalog values that cannot be stored (a lone surrogate, or too large) are Unknown, and"
+        " keys that cannot be columns and elements that are not objects are not stored",
     ),
 }
 _LIMIT_CAUSES: Final = {"record_limit", "byte_limit", "page_limit"}

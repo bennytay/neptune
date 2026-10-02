@@ -122,6 +122,13 @@ class RobotoTransport(Transport):
         raise AssertionError("unreachable")
 
 
+Entry = Listed | Unlisted
+
+
+class _Looped(Exception):
+    """The files query named a page it had already returned, or ran past the page limit."""
+
+
 @dataclass
 class Records:
     """Records read from a paged endpoint, and whether all of them were."""
@@ -166,12 +173,18 @@ class RobotoApi:
             "X-Roboto-Api-Version": options.api_version,
             "X-Roboto-Resource-Owner-Id": location.org,
         }
-        allowed = {self._endpoint.authority, *options.content_hosts}
-        self._allowed = frozenset(host.lower() for host in allowed)
+        self._allowed = frozenset(
+            {
+                self._endpoint.authority,
+                *(form for host in options.content_hosts for form in _authorities(host)),
+            }
+        )
         self._content_transports: dict[str, Transport] = {}
         self._content: dict[tuple[str, int], Content] = {}
         self.file_records: list[tuple[str, str, JsonValue]] = []  # key, token, the record
         self._listing_bytes = 0
+        self._sorted: list[tuple[tuple[bytes, int, str], Entry]] | None = None
+        self._stopped: Exception | None = None
         self.last_bytes = 0  # the size of the body ``_data`` last read
 
     def __repr__(self) -> str:
@@ -256,35 +269,75 @@ class RobotoApi:
     # --- StoreClient -------------------------------------------------------------------------
 
     def list_page(self, prefix: str, cursor: tuple[str, ...] | None, page_size: int) -> Page:
-        """One page of the dataset's files whose ``relative_path`` starts with ``prefix``.
+        """One page of the dataset's files whose ``relative_path`` starts with ``prefix``, in byte
+        order of their paths.
+
+        Roboto's files query documents no order, and a limit keeps the first entries it meets. So
+        every page of the query is read on the first call, sorted by path, and then served in
+        ``page_size`` slices: what a limit keeps never depends on Roboto's order or paging. The
+        read is bounded by the listing's byte budget and the page limit. A failure part-way is
+        raised after the slices read before it are served, so the listing says where it stopped.
 
         A directory, a deleted file and a reserved (not yet uploaded) file are not objects and are
         not listed. A file's revision token is ``version:<file id>:<version>``: the file id is in
         it, so a file deleted and uploaded again at one path never reads as unchanged.
         """
-        token = cursor[0] if cursor else None
-        request: dict[str, JsonValue] = {"limit": page_size}
-        query: list[tuple[str, str]] = []
-        if token is not None:
-            request["page_token"] = token
-            query.append(("page_token", token))
-        path = self._path("datasets", self.location.dataset, "files", "query")
-        response = self.transport.post_query(path, query, dumps(request), self._headers)
-        data = self._data(response)
-        self._listing_bytes += self.last_bytes
-        if self._listing_bytes > self.options.max_listing_bytes:
-            raise ResponseTooLarge(f"more than {self.options.max_listing_bytes} bytes listed")
-        items, next_token = self._page_items(data)
-        found: list[Listed | Unlisted] = []
-        for record in items:
-            entry = self._file(record, prefix)
-            if entry is not None:
-                found.append(entry)
+        if self._sorted is None:
+            self._sorted = self._read_all(prefix, page_size)
+        start = int(cursor[0]) if cursor else 0
+        if start >= len(self._sorted) and self._stopped is not None:
+            if isinstance(self._stopped, _Looped):
+                return Page((), (), (str(start),))  # the cursor repeats: the source reports it
+            raise self._stopped
+        chunk = self._sorted[start : start + page_size]
+        end = start + len(chunk)
+        more = end < len(self._sorted) or self._stopped is not None
         return Page(
-            tuple(i for i in found if isinstance(i, Listed)),
-            tuple(i for i in found if isinstance(i, Unlisted)),
-            (next_token,) if next_token is not None else None,
+            tuple(i for _, i in chunk if isinstance(i, Listed)),
+            tuple(i for _, i in chunk if isinstance(i, Unlisted)),
+            (str(end),) if more else None,
         )
+
+    def _read_all(self, prefix: str, page_size: int) -> list[tuple[tuple[bytes, int, str], Entry]]:
+        found: list[tuple[tuple[bytes, int, str], Entry]] = []
+        seen: set[bytes] = set()
+        token: str | None = None
+        for _ in range(MAX_PAGES):
+            request: dict[str, JsonValue] = {"limit": page_size}
+            query: list[tuple[str, str]] = []
+            if token is not None:
+                request["page_token"] = token
+                query.append(("page_token", token))
+            path = self._path("datasets", self.location.dataset, "files", "query")
+            try:
+                response = self.transport.post_query(path, query, dumps(request), self._headers)
+                data = self._data(response)
+                self._listing_bytes += self.last_bytes
+                if self._listing_bytes > self.options.max_listing_bytes:
+                    raise ResponseTooLarge(
+                        f"more than {self.options.max_listing_bytes} bytes listed"
+                    )
+                items, token = self._page_items(data)
+            except (TransportError, ValueError) as exc:
+                self._stopped = exc
+                break
+            for record in items:
+                entry = self._file(record, prefix)
+                if isinstance(entry, Unlisted):
+                    found.append(((entry.raw, 0, entry.reason), entry))
+                elif entry is not None:
+                    found.append(((entry.key.encode("utf-8"), 1, ""), entry))
+            if token is None:
+                break
+            digest = hashlib.sha256(token.encode("utf-8", "surrogateescape")).digest()
+            if digest in seen:
+                self._stopped = _Looped()
+                break
+            seen.add(digest)
+        else:
+            self._stopped = _Looped()  # the page limit reads as a loop: it stops the same way
+        found.sort(key=lambda pair: pair[0])
+        return found
 
     def _file(self, record: JsonValue, prefix: str) -> Listed | Unlisted | None:
         """A file record as a listing entry; ``None`` when it is not an object under ``prefix``."""
@@ -409,6 +462,17 @@ class RobotoApi:
                 )
             self._content_transports[endpoint.authority] = transport
         return Content(transport, path, tuple(pairs))
+
+
+def _authorities(host: str) -> set[str]:
+    """The ``Host`` forms of a declared content host: ``host:443`` is ``host`` under https."""
+    forms = {host.lower()}
+    for scheme in ("https", "http"):
+        try:
+            forms.add(Endpoint.parse(f"{scheme}://{host}").authority.lower())
+        except ValueError:
+            continue
+    return forms
 
 
 def _count(value: object) -> int | None:

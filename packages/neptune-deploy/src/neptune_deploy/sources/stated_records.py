@@ -19,13 +19,17 @@ turns a list of JSON objects such a catalog returned into the compiler's own rec
   normalised (a time stays the integer the catalog wrote; a tag list stays a list).
 - A clock a catalog names (``start_time`` of an event) becomes a ``TimestampDomain`` whose epoch,
   timescale, resolution and role are ``Unknown`` unless the operator declared them. A catalog's
-  documentation saying "nanoseconds, assumed Unix epoch" is not something its responses state.
+  documentation saying "nanoseconds, assumed Unix epoch" is not something its responses state. A
+  declared part is the operator's word, not the catalog's: it is in the transform config that the
+  record's provenance names (so a different declaration is a different transform), and the record's
+  evidence cites only the catalog value that names the clock.
 
 Nothing here touches the network, a file or a clock.
 """
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
@@ -48,6 +52,7 @@ from neptune.model.time import ClockRole, Epoch, Timescale
 from neptune.model.world import CellValue, StructuredRecord, StructuredTable
 
 MAX_DEPTH: Final = 64  # nesting of a parsed API response; deeper is refused, never recursed into
+CLOCK_PREFIX: Final = "@clock:"  # companion columns; a catalog key of this form is not kept
 MAX_CELL_BYTES: Final = 1 << 20  # one cell's text; a longer one is not stored whole
 
 
@@ -73,9 +78,18 @@ def parse_json(data: bytes) -> JsonValue:
     def constant(token: str) -> JsonValue:
         raise DocumentInvalid(f"{token} is not JSON")
 
+    def number(text: str) -> float:
+        value = float(text)
+        if not math.isfinite(value):  # 1e999 is a number to the parser and no JSON to ``dumps``
+            raise DocumentInvalid("a number is not finite")
+        return value
+
     try:
         value: JsonValue = json.loads(
-            data.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant
+            data.decode("utf-8"),
+            object_pairs_hook=pairs,
+            parse_constant=constant,
+            parse_float=number,
         )
     except DocumentInvalid:
         raise
@@ -127,12 +141,18 @@ class CatalogDocument:
         return content_id(self.data)
 
     @cached_property
-    def items(self) -> tuple[Mapping[str, JsonValue], ...]:
+    def raw_items(self) -> tuple[JsonValue, ...]:
         parsed = parse_json(self.data)
         assert isinstance(parsed, Mapping)
         items = parsed["items"]
         assert isinstance(items, list)
-        return tuple(item for item in items if isinstance(item, Mapping))
+        return tuple(items)
+
+    @cached_property
+    def items(self) -> tuple[Mapping[str, JsonValue], ...]:
+        """One mapping per element of ``/items``, at the same index: an element that is not an
+        object is an empty mapping here, so every pointer ``/items/<i>`` names what it says."""
+        return tuple(item if isinstance(item, Mapping) else {} for item in self.raw_items)
 
 
 def build_document(
@@ -251,6 +271,17 @@ def _cell(
     return Known(text, provenance)
 
 
+def _usable_key(key: str) -> bool:
+    """A key a header can hold: valid Unicode, and not the name of a companion column."""
+    if key.startswith(CLOCK_PREFIX):
+        return False
+    try:
+        key.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def stated_table(
     document: CatalogDocument,
     name: str,
@@ -263,14 +294,16 @@ def stated_table(
     The header is every key any object has, sorted. An object's cell is ``Unknown`` for a key it
     does not have. ``clocks`` maps a column name to the clock its integer cells count on: each such
     column gets a companion column ``@clock:<name>`` whose cell is that clock's record id where the
-    object has a value, citing that value. ``@`` cannot start a catalog's own key here, because a
-    key starting with ``@`` is kept as is and never confused: companions are appended after the
-    sorted keys.
+    object has a value, citing that value. A catalog key that starts with ``@clock:``, or is not
+    valid Unicode, is not a column: it is reported as ``key_unusable`` and its value is not stored,
+    so a companion is never confused with a catalog's own key. An element of the document that is
+    not an object is a row of ``Unknown``, reported as ``not_an_object``. Companions are appended
+    after the sorted keys.
     """
     clocks = clocks or {}
     items = document.items
-    keys = sorted({key for item in items for key in item})
-    header = (*keys, *(f"@clock:{column}" for column in sorted(clocks)))
+    keys = sorted({key for item in items for key in item if _usable_key(key)})
+    header = (*keys, *(f"{CLOCK_PREFIX}{column}" for column in sorted(clocks)))
     table_evidence = EvidenceRef(document.content_id, (JsonPointer(pointer("items")),))
     table_provenance = Provenance(table_evidence, transform.id, AssertionKind.STATED)
     table = StructuredTable(
@@ -283,6 +316,9 @@ def stated_table(
     skipped: list[tuple[str, int, str]] = []
     for index, item in enumerate(items):
         reasons: list[str] = []
+        if not isinstance(document.raw_items[index], Mapping):
+            reasons.append("not_an_object")  # a row of Unknown: the catalog said something else
+        reasons.extend(sorted({"key_unusable" for key in item if not _usable_key(key)}))
         cells: list[Knowledge[CellValue]] = [
             _cell(document, transform, index, key, item[key], reasons)
             if key in item

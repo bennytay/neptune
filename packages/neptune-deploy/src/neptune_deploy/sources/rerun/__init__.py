@@ -45,7 +45,10 @@ def _path(url: str) -> str:
         parts = urllib.parse.urlsplit(url)
         if parts.netloc not in ("", "localhost"):
             raise ObjectStoreConfigError("a file:// URL names this machine's files only")
-        return urllib.parse.unquote(parts.path)
+        path = urllib.parse.unquote(parts.path)
+        if "\x00" in path:
+            raise ObjectStoreConfigError("a catalog export is named by a file path")
+        return path
     return url
 
 

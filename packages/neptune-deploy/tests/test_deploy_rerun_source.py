@@ -104,7 +104,7 @@ def codes(source: RerunSource) -> list[str]:
     return sorted(finding.code for finding in source.findings())
 
 
-# --- The objects a catalog names ----------------------------------------------------------------
+# --- The objects a catalog names --------------------------------------------------------------
 
 
 def test_every_layer_the_catalog_names_is_an_object_at_the_store_revision(tmp_path: Path) -> None:
@@ -271,7 +271,7 @@ def test_storage_urls_parse_per_provider_and_refuse_the_rest() -> None:
         assert parse_storage_url(bad) is None
 
 
-# --- The catalog as stated records --------------------------------------------------------------
+# --- The catalog as stated records ------------------------------------------------------------
 
 
 def _table(source: RerunSource, name: str) -> tuple[StructuredTable, list[StructuredRecord]]:
@@ -414,7 +414,7 @@ def test_no_credential_endpoint_or_path_reaches_a_finding_or_the_transform(tmp_p
         assert secret not in text
 
 
-# --- Hostile stores ------------------------------------------------------------------------------
+# --- Hostile stores ---------------------------------------------------------------------------
 
 
 def test_a_redirect_is_refused_and_never_followed(tmp_path: Path) -> None:
@@ -437,7 +437,7 @@ def test_a_store_that_ignores_ranges_is_a_finding_on_read(tmp_path: Path) -> Non
     assert [c for c in codes(source) if c.startswith("deploy_s3.")]
 
 
-# --- The network boundary ------------------------------------------------------------------------
+# --- The network boundary ---------------------------------------------------------------------
 
 
 def test_a_local_only_workspace_refuses_the_connector(tmp_path: Path) -> None:
@@ -481,7 +481,7 @@ def test_the_catalog_alone_needs_no_store_request(tmp_path: Path) -> None:
     assert fake.requests == []  # entity paths and timelines are the export's, read locally
 
 
-# --- The export file -----------------------------------------------------------------------------
+# --- The export file --------------------------------------------------------------------------
 
 
 def _refused(raw: bytes, match: str) -> None:
@@ -589,7 +589,7 @@ def test_options_are_closed_and_checked(
         rerun_source(export_file(tmp_path), network=online(tmp_path), options=options)
 
 
-# --- Limits and the inherited Source surface -----------------------------------------------------
+# --- Limits and the inherited Source surface --------------------------------------------------
 
 
 def test_max_objects_stops_the_listing_with_a_finding_at_the_same_place_every_time(
@@ -627,3 +627,59 @@ def test_every_inherited_source_method_runs_without_a_missing_attribute(tmp_path
             source.entry(ExternalObjectRef("deploy_gcs_other", "x", "y"))
         with pytest.raises(TypeError):
             source.entry("not a location")
+
+
+# --- Row identity -----------------------------------------------------------------------------
+
+
+def test_a_segment_is_the_same_row_in_findings_objects_and_records_whatever_the_export_order(
+    tmp_path: Path,
+) -> None:
+    fake = store()
+    fake.put("episodes/legged01_slip.rrd", b"RRF2" * 10)  # one layer, 40 bytes against a stated 180
+    results = []
+    for name, reverse in (("a", False), ("b", True)):
+        export = document()
+        if reverse:
+            export["segments"] = [*reversed(export["segments"]), export["segments"][0]]
+        with connect(fake, tmp_path / name, export) as source:
+            table, rows = _table(source, "rerun segments")
+            by_row = {row.row: _cells(table, row)["rerun_segment_id"].value for row in rows}
+            joined = {
+                by_row[i]: sorted(loc.object_id for loc in source.objects_of(i))
+                for i in range(len(rows))
+            }
+            (finding,) = source.findings()
+        results.append(
+            (joined, by_row[int(str(finding.details["row"]))], finding.details, len(rows))
+        )
+    assert (
+        results[0] == results[1]
+    )  # an identical row listed twice is one record and one stated row
+    joined, size_row, details, count = results[0]
+    assert count == 3 and size_row == "legged01_slip" and details["store"] == 40
+    assert len(joined["arm3_pick_0914"]) == 2 and len(joined["amr07_aisle12"]) == 1
+
+
+def test_the_storage_options_that_decide_revision_tokens_are_part_of_the_transform(
+    tmp_path: Path,
+) -> None:
+    transforms = []
+    for name, versions in (("a", True), ("b", False)):
+        with store().serve() as endpoint:
+            source = rerun_source(
+                export_file(tmp_path / name),
+                network=online(tmp_path / name),
+                options={
+                    "storage": {"s3": {"endpoint": endpoint, "store": "s", "versions": versions}}
+                },
+                credentials=CREDENTIALS,
+            )
+            transforms.append(source.transform)
+    assert transforms[0] != transforms[1]
+    assert "127.0.0.1" not in json.dumps(transforms[0].config, default=str)
+
+
+def test_an_encoded_nul_in_a_file_url_is_a_configuration_error(tmp_path: Path) -> None:
+    with pytest.raises(ObjectStoreConfigError):
+        rerun_source("file:///tmp/x%00.json", network=online(tmp_path))
