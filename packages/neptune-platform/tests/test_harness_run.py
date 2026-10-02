@@ -51,10 +51,14 @@ def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: 
         assert case["package"].startswith("sha256:")
     # Real ingest, partial success: the drone's ULog is claimed by the flightlog (PX4) adapter,
     # which reports the one sample dropout the log declares. Stream introspection (MVL-21) has no
-    # layout reader for its two streams' encoding, so each is not covered. Ingest is deterministic.
+    # layout reader for its two streams' encoding, so each is not covered. Clock alignment (MVL-36)
+    # maps the boot clock onto the GPS time its fix messages carry, and says the latency between
+    # each fix and its publication is stated nowhere, so the bound is unknown. Ingest is
+    # deterministic.
     drone = cases[0]
     assert drone["findings"] == {
         "flightlog.dropout": 1,
+        "neptune.clocks.latency_unbounded": 1,
         "neptune.introspection.encoding_not_covered": 2,
     }
     ids = {case["package"] for case in cases}

@@ -48,7 +48,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -78,6 +78,7 @@ from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatu
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
 from neptune.derived.media import MediaIndex, index_media
+from neptune.derived.temporal import ClockAlignment, align_clocks, clock_records
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.layout import Layout, layout_from_scan
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
@@ -153,6 +154,7 @@ from neptune.store.series import (
     SeriesReadError,
     check_run,
     count_rows,
+    read_rows,
     read_run,
 )
 from neptune.store.workspace import (
@@ -2005,6 +2007,9 @@ class IngestJob:
                 if (media := self._index_media(streams, introspection, frames)) is not None:
                     cited.add(media.transform.id)
                     derived = {**derived, **media.tables()}
+            if (clocks := self._align_clocks()) is not None:
+                cited.add(clocks.transform.id)
+                derived = {**(derived or {}), **clocks.tables()}
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
@@ -2083,6 +2088,41 @@ class IngestJob:
         for finding in found.findings:
             self._record(finding, found.transform)
         self._emit(events.STREAMS_INTROSPECTED, found.summary())
+        return found
+
+    def _align_clocks(self) -> ClockAlignment | None:
+        """Stage 9c, before the package is staged: relate the admitted sources' clocks (ADR 0060).
+        Reads only the time and value columns of the committed runs its rules name; writes no
+        tick. A package with fewer than two clocks gets no alignment: no tables, no transform."""
+        records: list[object] = []
+        runs: dict[RecordId, list[Path]] = defaultdict(list)
+        try:
+            for content, transform in sorted(set(self._ingested)):
+                plan = self.workspace.load_plan(content, transform)
+                if plan is None:
+                    continue  # staging refuses the package and says why
+                for chunk in plan.chunks:
+                    output = self.workspace.load(str(chunk["id"]))
+                    records.extend(clock_records(output.records))  # the rest is dropped here
+                    for stream, run in sorted(output.runs.items()):
+                        runs[stream].append(run)
+        except (WorkspaceError, ValueError, OSError) as exc:
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+
+        def rows(stream: Stream, columns: Sequence[str]) -> Iterator[Mapping[str, object]]:
+            for run in runs.get(stream.id, ()):
+                yield from read_rows(run, columns)
+
+        try:
+            found = align_clocks(records, rows)
+        except (SeriesError, OSError) as exc:  # the runs were checked when committed
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+        if found is None:
+            return None
+        self._producers[found.transform.id] = found.transform
+        for finding in found.findings:
+            self._record(finding, found.transform)
+        self._emit(events.CLOCKS_ALIGNED, found.summary())
         return found
 
     def _index_media(
