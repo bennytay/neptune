@@ -12,6 +12,7 @@ kinds as UTF-8 bytes, and only ``C`` makes the default text order, and so every 
 
 import hashlib
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib.resources import files
 from typing import Final
@@ -88,14 +89,21 @@ def migrations() -> tuple[Migration, ...]:
     return tuple(found)
 
 
-def apply_migrations(conn: psycopg.Connection[tuple[object, ...]], tenant_id: str) -> list[int]:
+def apply_migrations(
+    conn: psycopg.Connection[tuple[object, ...]],
+    tenant_id: str,
+    *,
+    shipped: Sequence[Migration] | None = None,
+) -> list[int]:
     """Bring ``tenant_id``'s schema up to date; return the versions applied by this call.
 
     ``conn`` must not be inside a transaction. A migration already recorded with different bytes
     raises ``MigrationError``: shipped migrations are never edited, a change is a new migration.
+    ``shipped`` replaces this package's migrations, in version order; it is for testing a
+    generated migration before it is committed (ADR 0008 §3).
     """
     schema = tenant_schema(tenant_id)
-    shipped = migrations()
+    shipped = migrations() if shipped is None else tuple(shipped)
     applied: list[int] = []
     with conn.transaction():
         locale = conn.execute(
