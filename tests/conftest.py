@@ -50,6 +50,13 @@ def plugin_dists() -> ModuleType:
 
 
 @pytest.fixture
+def fake_store() -> ModuleType:
+    """The in-process object store and connector, ``tests/fixtures/sources/fake_object_store.py``,
+    loaded afresh (its read log empty)."""
+    return load_generator(FIXTURES / "sources" / "fake_object_store.py")
+
+
+@pytest.fixture
 def forget_plugins() -> Iterator[None]:
     """Forget the test plugins' modules after the test, so the next one imports its own."""
     yield

@@ -174,27 +174,28 @@ class Spool:
         self,
         stream: BinaryIO,
         *,
-        limit: int,
+        size: int,
         expected: SourceArtifact | None = None,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
     ) -> SourceArtifact:
-        """Copy ``stream`` into the spool while hashing it; the artifact it holds.
+        """Copy ``stream`` into the spool while hashing it; the artifact of what it read.
 
-        At most ``limit + 1`` bytes are read, so a stream that runs on past what was listed
-        costs one byte more, never a disk. ``expected``: the bytes must be that artifact's, else
+        The copy is kept only if the stream held exactly ``size`` bytes, the listed size: at
+        most ``size + 1`` are read, so a stream that runs on past its listing costs one byte
+        more, never a disk. ``expected``: the bytes must be that artifact's, else
         ``SourceChangedError`` and nothing is kept.
         """
         handle, name = tempfile.mkstemp(dir=self.directory, prefix=".fill-")
         try:
             with os.fdopen(handle, "wb") as out:
-                copying = _Copying(stream, out, limit + 1)
+                copying = _Copying(stream, out, size + 1)
                 artifact = digest_stream(cast("BinaryIO", copying), chunk_size=chunk_size)
                 out.flush()
             if expected is not None and artifact.content_id != expected.content_id:
                 raise SourceChangedError(
                     f"{expected.content_id}: the store now serves other bytes under its token"
                 )
-            if artifact.size <= limit:
+            if artifact.size == size:
                 Path(name).replace(self._path(artifact.content_id))
                 name = ""
             return artifact
@@ -266,10 +267,10 @@ class ExternalReader(VerifiedReader):
         """The spooled copy's descriptor, spooling the object first if the job has no copy."""
         if self._file is None:
             with self._source.open(self._location) as stream:
-                self._spool.fill(stream, limit=self.size, expected=self._artifact)
+                self._spool.fill(stream, size=self.size, expected=self._artifact)
             self._file = self._spool.open(self.content_id)
             if self._file is None:
-                raise SourceChangedError(f"{self.content_id}: the store served too many bytes")
+                raise SourceChangedError(f"{self.content_id}: the store served another size")
         return self._file.fileno()
 
     def _fetch(self, start: int, length: int) -> bytes:
@@ -380,7 +381,7 @@ def fingerprint_external(
             on_fetch(entry)
         try:
             with source.open(location) as stream:
-                artifact = spool.fill(stream, limit=entry.size, chunk_size=chunk_size)
+                artifact = spool.fill(stream, size=entry.size, chunk_size=chunk_size)
         except (OSError, SourceChangedError) as exc:
             unread.append(location)
             findings.append(unreadable_finding(location, exc))
