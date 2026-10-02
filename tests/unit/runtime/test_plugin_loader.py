@@ -17,7 +17,9 @@ from neptune.runtime.plugins import (
     ADAPTERS_GROUP,
     DUPLICATE_ID,
     LOAD_FAILED,
+    MAX_OUTPUT,
     NO_PLUGINS,
+    OUTPUT,
     PLUGINS_ID,
     REFUSED,
     SOURCES_GROUP,
@@ -160,7 +162,8 @@ def test_a_plugin_that_does_not_import_is_a_finding_and_the_rest_load(
     assert finding.subject == ExternalObjectRef(
         PLUGINS_ID, "neptune.adapters/neptune-test-broken/broken", "0.1.0"
     )
-    assert finding.transform == plugins.transform.id == plugins_transform().id
+    assert finding.transform == plugins.transform.id
+    assert plugins.transform == plugins_transform(loaded={"neptune-test-tally": "1.0.0"})
     assert finding.details == {
         "distribution": "neptune-test-broken",
         "entry_point": "broken",
@@ -404,3 +407,144 @@ def test_loading_twice_gives_the_same_findings(plugin_dists: ModuleType, plugin_
         module=plugin_dists.RAISING_FACTORY,
     )
     assert _load(plugin_site).findings == _load(plugin_site).findings
+
+
+def test_the_loader_transform_names_every_distribution_it_admitted_from(
+    plugin_dists: ModuleType, plugin_site: Path
+) -> None:
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-tally",
+        "1.0.0",
+        adapters={"tally": ":TallyAdapter"},
+        module=plugin_dists.TALLY,
+    )
+    plugin_dists.install(
+        plugin_site,
+        "Neptune_Test_Store",
+        "3.0.0",
+        sources={"objstore": ":connector"},
+        module="def connector():\n    return None\n",
+    )
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-broken",
+        "0.1.0",
+        adapters={"broken": ":make"},
+        module=plugin_dists.BROKEN_IMPORT,
+    )
+    plugins = _load(plugin_site)
+    # Sorted, normalised, and only what was admitted: the broken one is a finding instead.
+    assert plugins.loaded == (("neptune-test-store", "3.0.0"), ("neptune-test-tally", "1.0.0"))
+    assert plugins.transform.libraries == plugins.loaded
+    assert plugins.distribution_of("tally") == "neptune-test-tally 1.0.0"
+    assert plugins.distribution_of("text") is None
+    assert _load(plugin_site, NO_PLUGINS).loaded == ()
+
+
+def test_what_a_plugin_prints_is_captured_bounded_and_kept_in_a_finding(
+    plugin_dists: ModuleType, plugin_site: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-chatty",
+        "0.1.0",
+        adapters={"chatty": ":TallyAdapter"},
+        module=plugin_dists.PRINTING,
+    )
+    plugins = _load(plugin_site)
+    assert capfd.readouterr() == ("", "")  # nothing reached this process's stdout or stderr
+    assert [a.descriptor.id for a in plugins.adapters] == ["chatty"]
+    (finding,) = plugins.findings
+    assert (finding.code, finding.severity) == (OUTPUT, Severity.INFO)
+    output = finding.details["output"]
+    assert isinstance(output, str) and len(output) == MAX_OUTPUT
+    assert output.startswith("loading the chatty plugin xxx")
+    assert finding.details["output_chars"] == len("loading the chatty plugin ") + 5000 + 1 + len(
+        "warning: chatty\n"
+    )
+    assert finding.details["step"] == "imported"
+
+
+@pytest.mark.parametrize(("module", "error"), [("BOOM", "Boom"), ("EXITING", "SystemExit")])
+def test_a_base_exception_at_import_is_a_finding(
+    plugin_dists: ModuleType, plugin_site: Path, module: str, error: str
+) -> None:
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-boom",
+        "0.1.0",
+        adapters={"boom": ":make"},
+        module=getattr(plugin_dists, module),
+    )
+    (finding,) = _load(plugin_site).findings
+    assert (finding.code, finding.details["error"]) == (LOAD_FAILED, error)
+
+
+def test_a_malformed_entry_points_file_is_a_finding_naming_its_distribution(
+    plugin_dists: ModuleType, plugin_site: Path
+) -> None:
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-garbled",
+        "0.2.0",
+        entry_points="[neptune.adapters]\nthis is not ini\n",
+    )
+    # A distribution that is no plugin may have a broken file too: none of Neptune's business.
+    plugin_dists.install(
+        plugin_site, "unrelated-tool", "1.0.0", entry_points="[console_scripts]\nnot ini\n"
+    )
+    plugins = _load(plugin_site)
+    (finding,) = plugins.findings
+    assert finding.code == LOAD_FAILED
+    assert finding.subject == ExternalObjectRef(PLUGINS_ID, "neptune-test-garbled", "0.2.0")
+    assert finding.details["step"] == "listed"
+    assert finding.details["distribution"] == "neptune-test-garbled"
+    assert "entry_point" not in finding.details
+    assert plugins.unmatched == ()
+
+
+def test_distributions_with_no_usable_name_are_each_refused(
+    plugin_dists: ModuleType, plugin_site: Path
+) -> None:
+    for package, metadata in (
+        ("neptune_test_anon_a", "Metadata-Version: 2.1\nVersion: 1.0.0\n"),
+        ("neptune_test_anon_b", "Metadata-Version: 2.1\nName: not a name!\nVersion: 2.0.0\n"),
+    ):
+        plugin_dists.install(
+            plugin_site,
+            package,
+            "1.0.0",
+            adapters={"tally": ":TallyAdapter"},
+            module=plugin_dists.TALLY,
+            metadata=metadata,
+        )
+    plugins = _load(plugin_site)
+    assert plugins.adapters == () and plugins.loaded == ()
+    assert [(f.code, f.details["reason"]) for f in plugins.findings] == [
+        (REFUSED, "unnamed_distribution"),
+        (REFUSED, "unnamed_distribution"),
+    ]
+    assert {f.details["value"] for f in plugins.findings} == {
+        "neptune_test_anon_a:TallyAdapter",
+        "neptune_test_anon_b:TallyAdapter",
+    }
+
+
+def test_an_allowlist_name_that_registers_nothing_is_unmatched(
+    plugin_dists: ModuleType, plugin_site: Path
+) -> None:
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-tally",
+        "1.0.0",
+        adapters={"tally": ":TallyAdapter"},
+        module=plugin_dists.TALLY,
+    )
+    plugin_dists.install(plugin_site, "neptune-test-empty", "1.0.0")  # installed, no plugin
+    plugins = _load(
+        plugin_site,
+        PluginPolicy(allow=("neptune-test-tally", "neptune-test-taly", "neptune-test-empty")),
+    )
+    assert plugins.unmatched == ("neptune-test-empty", "neptune-test-taly")
+    assert [a.descriptor.id for a in plugins.adapters] == ["tally"]

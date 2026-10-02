@@ -554,7 +554,14 @@ class IngestJob:
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
         self._calls: dict[str, int] = {"ingest": 0, "plan": 0, "probe": 0}
-        self._engine = ProbeEngine(registry)
+        self._plugins = plugins if plugins is not None else Plugins()
+        self._engine = ProbeEngine(
+            registry,
+            distributions={
+                adapter.descriptor.id: f"{adapter.origin.distribution} {adapter.origin.version}"
+                for adapter in self._plugins.adapters
+            },
+        )
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
         self._grouper = (
@@ -565,9 +572,11 @@ class IngestJob:
         if self._declared is not None:  # the manifest's own findings name it
             manifest = self._declared.loaded.transform
             self._producers[manifest.id] = manifest
-        if plugins is not None:  # the plugins the registry was built without (ADR 0058)
-            for finding in plugins.findings:
-                self._record(finding, plugins.transform)
+        # The plugins the registry was built from (ADR 0058): the findings about those refused,
+        # and, when any was admitted, the loader's transform naming every one, in every package.
+        self._producers[self._plugins.transform.id] = self._plugins.transform
+        for finding in self._plugins.findings:
+            self._record(finding, self._plugins.transform)
         self._layout = Layout(())
         self._grouping: Grouping | None = None
         self._dry = False  # a dry run: stops after plan and explains (ADR 0035, 0044)
@@ -1975,6 +1984,8 @@ class IngestJob:
                 cited.add(self._declared.loaded.transform.id)
             if self._lost_guarantees:
                 cited.add(self.transform.id)
+            if self._plugins.loaded:  # which plugins could change this package (ADR 0058 §5)
+                cited.add(self._plugins.transform.id)
             derived: dict[str, Iterable[JsonObject]] | None = None
             if self._grouping is not None:  # its derived tables name its transform
                 cited.add(self._grouping.transform.id)

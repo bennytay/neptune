@@ -30,13 +30,24 @@ failing every job on the host.
 2. **A fixed order.** Distributions are found on the import path; a name found twice is the first,
    as `import` loads it. Entry points are then sorted by (group, normalised distribution name
    (PEP 503), entry-point name). Installation order, path order and `entry_points.txt` order
-   change nothing.
+   change nothing. A distribution whose metadata has no usable name is never merged with another:
+   each of its plugin entry points is refused (`refused`, reason `unnamed_distribution`). A
+   distribution whose `entry_points.txt` names a plugin group but cannot be parsed is a
+   `load_failed` finding (step `listed`) naming the distribution; a broken file that names no
+   plugin group is not Neptune's to report.
 3. **Admission.** An entry point is used only if: its name is an id; it imports; it is callable;
    calling it builds an object with an `AdapterDescriptor` and the four methods, at this
    `ABI_VERSION`; the descriptor's id is the entry-point name; and its `libraries` do not pin its own
    distribution at another version. Otherwise a finding, and the plugin is not used:
    `neptune.plugins.load_failed` (import or build raised; the exception's class and step, never its
-   text) or `neptune.plugins.refused` (with a `reason`).
+   text) or `neptune.plugins.refused` (with a `reason`). Anything raised but `KeyboardInterrupt`
+   is contained, `SystemExit` and other `BaseException` subclasses included: a plugin never ends
+   the client.
+   Whatever a plugin prints to stdout or stderr while it is imported or built is captured, so it
+   never reaches the CLI's stdout (which `--json` owns): it is a `neptune.plugins.output` finding
+   (info) holding at most the first 1000 characters and the total count, or a detail of the
+   `load_failed` finding if the plugin then failed. Output written below Python's `sys.stdout`
+   (a C extension writing to file descriptor 1) is not captured.
 4. **Duplicate ids are refused, never resolved.** Two plugins with one id, or a plugin with a
    built-in's id, are each refused with `neptune.plugins.duplicate_id` naming every claimant. None
    of them is used: no order, first or last, decides a winner. A built-in keeps its id.
@@ -45,6 +56,13 @@ failing every job on the host.
    the `TransformRecord`, whose id is in every chunk id, plan key and cache key (ADR 0024 §4,
    ADR 0031): records name the plugin that made them, and upgrading it is a new lineage. Record ids
    keep ADR 0003's formula (adapter id, version, config hash).
+   Installing a plugin can change what an existing folder gives even where no plugin record lands
+   (a plugin that ties a built-in turns a selection into an ambiguity), so the package records the
+   plugins themselves: the loader's transform lists every distribution it admitted a plugin from as
+   its `libraries` (normalised name to version, sorted), and enters every package of a job that had
+   any, findings or not. A `neptune.probe.ambiguous` finding whose tie includes a plugin adapter
+   names its distribution and version (`plugins` in its details, and in its message); a tie among
+   built-ins reads as before.
 6. **Same sandbox, same laws.** Importing a plugin runs its code in the client's process, as
    importing any installed library does. Everything it is asked to do (probe, inspect, plan,
    ingest) runs through the same registry, sandbox (ADR 0030) and per-call checks
@@ -52,7 +70,7 @@ failing every job on the host.
    no adapter method: `neptune.adapters.conformance` would call them unsandboxed in the parent, so
    it stays a test-time gate for plugin authors.
 7. **Findings, not failures.** The loader is a producer, `neptune.plugins` at 0.1.0, with the
-   policy as its config. Its findings are about no bytes: the subject is an `ExternalObjectRef`
+   policy as its config and the admitted distributions as its libraries (§5). Its findings are about no bytes: the subject is an `ExternalObjectRef`
    (`neptune.plugins`, `<group>/<distribution>/<entry point>`, the version as revision), severity
    `warning`. Every job a client builds records them, so they are in the result and the package's
    receipt; the job does not fail.
@@ -60,7 +78,10 @@ failing every job on the host.
    `enabled=False` none; `allow` only the named distributions. A distribution the policy leaves out
    leaves no trace, so a package made with `--no-plugins` does not depend on what is installed.
    SDK: `Neptune(plugins=None | True | False | PluginPolicy)`. CLI (`ingest`, `init-manifest`):
-   `--no-plugins`, `--plugin DIST` (repeatable); both together is a usage error.
+   `--no-plugins`, `--plugin DIST` (repeatable); both together is a usage error. An allowlist name
+   that no installed distribution registering a plugin answers to (a typo, an uninstalled package)
+   is refused before anything runs (`ConfigurationError`, `invalid_configuration`): an explicit
+   allowlist never becomes a silent run without the plugin it meant.
 9. **Explicit adapters stay explicit.** `Neptune(adapters=...)` uses exactly those adapters; plugins
    then add only their Sources (and findings about them). `default_registry()` stays the shipped
    adapters only.
@@ -85,14 +106,20 @@ failing every job on the host.
 
 ## Consequences
 
-- With Deploy installed, a default `neptune ingest` registers `deploy_lifecycle` and probes every
-  source with it. It claims nothing until a format lands (and a manifest cannot pin an adapter
-  whose probe declines, ADR 0047), so no selection or record changes; an unread file's
+- With Deploy installed, a default `neptune ingest` registers `deploy_lifecycle`, probes every
+  source with it, and records `neptune-deploy` in the loader's transform in every package. It claims nothing until a format lands (and a manifest cannot pin an adapter
+  whose probe declines, ADR 0047), so no selection or evidence record changes; an unread file's
   `neptune.probe.unsupported` finding lists its decline beside the built-ins'.
 - Every root test runs in the whole workspace environment, so installed members' adapters join
   default-registry tests. Tests that count probes or list adapters build their registry
   explicitly, or pass `plugins=False`.
 - MVL-153 decides how a URI reaches a plugin Source; the loader already gives it a fixed,
   duplicate-free set of connectors.
-- Revisit if a plugin needs configuration at load time, if plugins need isolation at import, or
-  if two distributions legitimately need to share an id.
+- Importing runs in the client process with no time bound: a plugin whose import hangs (a network
+  call, a deadlock) hangs every `Neptune()` and `neptune ingest` on the host before any job starts.
+  The mitigation is `--no-plugins` (`plugins=False`), or an allowlist (`--plugin DIST`) that leaves
+  the hanging distribution out; neither imports it. A bounded, isolated import would need a child
+  process per plugin and a way back for the adapter object, which the sandbox's fork-per-call model
+  does not have.
+- Revisit if a plugin needs configuration at load time, if plugins need isolation (or a time bound)
+  at import, or if two distributions legitimately need to share an id.

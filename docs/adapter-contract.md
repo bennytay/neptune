@@ -295,6 +295,7 @@ deploy_lifecycle = "neptune_deploy.adapters.lifecycle:LifecycleAdapter"   # name
 - A plugin that does not import, does not build, is not an adapter of this ABI, is named by its entry
   point as another id, or shares an id with a built-in or another plugin is not used: a
   `neptune.plugins.*` finding (warning) in every job's receipt says why. Duplicates are never
-  resolved by order.
+  resolved by order. Every package of a job that had a plugin names it (the `neptune.plugins`
+  transform's libraries). Print nothing at import: it is captured into a finding.
 - It runs under the same sandbox and laws as a built-in. Test it from its own suite through
   `neptune.adapters.harness.ingest_source`, which runs every law, as a built-in's tests do.

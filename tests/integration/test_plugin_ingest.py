@@ -114,7 +114,11 @@ def test_neptune_ingest_probes_and_runs_an_installed_plugin_adapter(
     libraries = {t["adapter_id"]: t["libraries"] for t in receipt["transforms"]}
     assert libraries["tally"] == {"neptune-test-tally": "1.0.0"}
     assert libraries["framelog"] == {"neptune-test-framelog": "2.0.0"}
-    assert libraries[PLUGINS_ID] == {}
+    # The loader names every plugin the job could use, sorted (ADR 0058 §5).
+    assert libraries[PLUGINS_ID] == {
+        "neptune-test-framelog": "2.0.0",
+        "neptune-test-tally": "1.0.0",
+    }
     (broken,) = [f for f in receipt["findings"] if f["code"] == LOAD_FAILED]
     assert broken["severity"] == "warning"
 
@@ -258,6 +262,87 @@ def test_neptune_deploy_installed_its_adapter_is_probed_on_every_source(
         packages.append(package_bytes(tmp_path / f"pkg{len(flags)}"))
     findings = "records/ingest_finding.jsonl"
     differ = {name for name in packages[0] if packages[0][name] != packages[1].get(name)}
-    assert differ == {"manifest.json", "receipt.json", "receipt.md", findings}
+    transforms = "records/transform_record.jsonl"
+    assert differ == {"manifest.json", "receipt.json", "receipt.md", findings, transforms}
+    assert b"neptune-deploy" in packages[0][transforms]  # the loaded plugin, in the package
     assert b"deploy_lifecycle.no_reader" in packages[0][findings]  # the frame log's decline
     assert b"deploy_lifecycle" not in packages[1][findings]
+
+
+def test_the_package_names_the_loaded_plugins_even_when_none_reads_a_file(
+    plugin_dists: ModuleType, plugin_site: Path, tmp_path: Path
+) -> None:
+    """Installing a plugin can change what existing folders give; the receipt says it was there.
+
+    A plugin that ties the built-in ``text`` adapter turns a note into an ambiguity, and that
+    ambiguity names the plugin's distribution."""
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-shadow",
+        "0.1.0",
+        adapters={"shadow_text": ":Shadow"},
+        module=plugin_dists.SHADOW,
+    )
+    root = tmp_path / "run"
+    root.mkdir()
+    (root / "notes.txt").write_text("cell 3, second shift\n", encoding="utf-8")
+    result = Neptune(tmp_path / "ws").ingest(root, tmp_path / "pkg")
+    assert result.committed and result.ingested == ()
+    assert _transforms(result)[PLUGINS_ID] == {"neptune-test-shadow": "0.1.0"}
+    (tie,) = [f for f in result.findings if f.code == "neptune.probe.ambiguous"]
+    assert tie.details["adapters"] == ["shadow_text", "text"]
+    assert tie.details["plugins"] == {"shadow_text": "neptune-test-shadow 0.1.0"}
+    assert "shadow_text (plugin neptune-test-shadow 0.1.0)" in tie.message
+
+    plain = Neptune(tmp_path / "ws", plugins=False).ingest(root, tmp_path / "plain")
+    assert PLUGINS_ID not in _transforms(plain) and len(plain.ingested) == 1
+    assert "neptune.probe.ambiguous" not in {f.code for f in plain.read_receipt().findings}
+
+
+def test_a_plugin_that_prints_never_breaks_json_lines(
+    plugin_dists: ModuleType, plugin_site: Path, run_folder: Path, tmp_path: Path
+) -> None:
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-chatty",
+        "0.1.0",
+        adapters={"chatty": ":TallyAdapter"},
+        module=plugin_dists.PRINTING,
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = run(
+        ["ingest", str(run_folder), "--dry-run", "--json", "-w", str(tmp_path / "ws")],
+        stdout=out,
+        stderr=err,
+    )
+    assert code == exit_codes.OK and err.getvalue() == ""
+    lines = [json.loads(line) for line in out.getvalue().splitlines()]  # every line is JSON
+    assert lines[-1]["type"] == "result"
+    assert lines[-1]["findings"]["by_code"]["neptune.plugins.output"] == 1
+
+
+def test_an_allowlist_naming_no_installed_plugin_is_refused(
+    plugin_dists: ModuleType, plugin_site: Path, run_folder: Path, tmp_path: Path
+) -> None:
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-tally",
+        "1.0.0",
+        adapters={"tally": ":TallyAdapter"},
+        module=plugin_dists.TALLY,
+    )
+    code, result, _ = cli(
+        "ingest",
+        str(run_folder),
+        "--dry-run",
+        "-w",
+        str(tmp_path / "ws"),
+        "--plugin",
+        "neptune-test-tally",
+        "--plugin",
+        "neptune-test-taly",
+    )
+    assert code == exit_codes.for_code("invalid_configuration")
+    assert "neptune-test-taly" in result["error"]["message"]
+    with pytest.raises(ConfigurationError, match="neptune-test-taly"):
+        Neptune(tmp_path / "ws", plugins=PluginPolicy(allow=("neptune-test-taly",)))

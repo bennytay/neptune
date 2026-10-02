@@ -176,7 +176,7 @@ def _registry(adapters: Adapters | None, plugins: PluginChoice) -> tuple[Adapter
     """
     policy = _policy(plugins)
     if adapters is not None:
-        loaded = load_plugins(policy, groups=(SOURCES_GROUP,))
+        loaded = _admitted(load_plugins(policy, groups=(SOURCES_GROUP,)))
         if isinstance(adapters, AdapterRegistry):
             return adapters, loaded
         try:
@@ -185,8 +185,21 @@ def _registry(adapters: Adapters | None, plugins: PluginChoice) -> tuple[Adapter
             raise ConfigurationError(f"the adapters cannot be registered: {exc}") from exc
     builtins = builtin_adapters()
     reserved = [adapter.descriptor.id for adapter in builtins]
-    loaded = load_plugins(policy, reserved=reserved, groups=(ADAPTERS_GROUP, SOURCES_GROUP))
+    loaded = _admitted(
+        load_plugins(policy, reserved=reserved, groups=(ADAPTERS_GROUP, SOURCES_GROUP))
+    )
     return AdapterRegistry([*builtins, *loaded.adapters]), loaded
+
+
+def _admitted(loaded: Plugins) -> Plugins:
+    """``loaded``, unless an allowlist names a distribution that registers no plugin here: a
+    typo must not become a run without the plugin it meant (ADR 0058 §8)."""
+    if loaded.unmatched:
+        raise ConfigurationError(
+            "plugins are allowed from distributions that are not installed or register no"
+            f" plugin: {list(loaded.unmatched)}"
+        )
+    return loaded
 
 
 def _check_config(registry: AdapterRegistry, options: JobOptions) -> None:
