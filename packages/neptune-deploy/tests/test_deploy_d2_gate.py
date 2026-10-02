@@ -45,6 +45,7 @@ from deploy_d2_support import (
     spellings,
 )
 from neptune.identity.revisions import SourceLedger
+from neptune.model.finding import FindingCategory
 from neptune.model.ids import ExternalObjectRef
 from neptune.store.package import read_files, read_package
 from neptune.store.workspace import LocalOnlyError, Workspace
@@ -327,6 +328,8 @@ def test_g6_a_hostile_listing_is_findings_never_an_exception_or_a_hang(
         for f in findings
     )
     assert entries(walked) == [] or remote.connector == "deploy_open_rmf"
+    # A listing the remote broke says nothing is missing: what was not read is not known (B2).
+    assert not [f.code for f in findings if f.category is FindingCategory.MISSING]
     assert not [s for s in remote.leak_spellings() if s in text]
     assert elapsed < BOUND
 
@@ -480,6 +483,22 @@ CITED: dict[str, tuple[str, ...]] = {
         "test_many_rows_that_exceed_the_budget_stop_it_with_the_rows_already_read",
         "test_one_budget_covers_every_part_read_from_one_database",
         "test_the_database_cannot_be_written_through_the_uri",
+    ),
+    # ROS 2 diagnostics (MVL-156): hostile and boundary input to the mapper, and its lineage.
+    "test_deploy_fleet_ops_diagnostics.py": (
+        "test_a_code_outside_the_mapping_is_a_finding_and_stays_as_declared",
+        "test_a_bags_diagnostics_stream_is_a_finding_and_the_bag_is_never_opened",
+        "test_a_package_with_no_diagnostics_says_so",
+        "test_a_wrong_mapping_file_fails_loudly_before_any_record_is_read",
+        "test_a_mapping_file_is_read_to_its_limit_and_no_further",
+        "test_a_mapping_file_is_strict_json",
+        "test_a_stated_level_that_is_no_integer_is_invalid_not_missing",
+        "test_the_mapping_is_part_of_the_transform_so_a_new_mapping_is_new_lineage",
+        "test_the_result_is_byte_identical_and_the_base_is_never_changed",
+    ),
+    # The race B1 closes (ADR 0011 §2).
+    "test_deploy_transport_hardening.py": (
+        "test_a_socket_timeout_is_deadline_exceeded_even_when_the_timer_thread_is_late",
     ),
 }
 

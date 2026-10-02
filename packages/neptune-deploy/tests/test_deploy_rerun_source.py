@@ -424,7 +424,28 @@ def test_a_redirect_is_refused_and_never_followed(tmp_path: Path) -> None:
         listing = source.listing()
     assert listing.entries == ()
     assert all(r.headers.get("host", "").startswith("127.0.0.1") for r in fake.requests)
-    assert "deploy_rerun.object_not_found" in codes(source)
+    # A refused listing says nothing about whether the object exists (D2 gate B2).
+    assert "deploy_rerun.object_unresolved" in codes(source)
+    assert "deploy_rerun.object_not_found" not in codes(source)
+
+
+@pytest.mark.parametrize("hostile", ["redirect", "doctype"])
+def test_an_object_whose_listing_failed_is_unresolved_never_not_found(
+    tmp_path: Path, hostile: str
+) -> None:
+    """Regression (D2 gate B2): a storage listing that fails is not a store that lacks the object.
+    ``object_not_found`` (MISSING) is only for a complete listing without the key."""
+    fake = store()
+    if hostile == "redirect":
+        fake.redirect = 302
+    else:
+        fake.doctype = True  # a listing page that declares an entity: refused, response_invalid
+    with connect(fake, tmp_path) as source:
+        listing = source.listing()
+    assert listing.entries == () and not listing.complete
+    found = codes(source)
+    assert found.count("deploy_rerun.object_unresolved") == len(RRD)
+    assert "deploy_rerun.object_not_found" not in found
 
 
 def test_a_store_that_ignores_ranges_is_a_finding_on_read(tmp_path: Path) -> None:

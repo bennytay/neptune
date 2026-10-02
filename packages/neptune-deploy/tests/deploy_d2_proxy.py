@@ -191,11 +191,10 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         for name, value in headers.items():
             self.send_header(name, value)
-        padded = body if len(body) > 64 else body + b" " * (64 - len(body))
-        self.send_header("Content-Length", str(len(padded)))
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        for index in range(len(padded)):
-            self.wfile.write(padded[index : index + 1])
+        for index in range(len(body)):
+            self.wfile.write(body[index : index + 1])
             self.wfile.flush()
             time.sleep(self.owner.drip)
         self.close_connection = True
