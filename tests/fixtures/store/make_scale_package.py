@@ -83,6 +83,19 @@ def scale_records(rows: int) -> Iterator[Any]:
             )
 
 
+def _peak_mib() -> float:
+    """This process's peak resident memory, in MiB. ``VmHWM`` is the address space's own, so it
+    starts afresh at ``exec``; ``ru_maxrss`` keeps the peak of the process that forked this one,
+    such as a large test runner, and is only the fallback where ``/proc`` is absent."""
+    try:
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith("VmHWM:"):
+                return int(line.split()[1]) / 1024  # kB
+    except OSError:
+        pass
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # KiB on Linux
+
+
 def main(argv: list[str]) -> int:
     from neptune.store.package import package_files, write_package
 
@@ -95,7 +108,7 @@ def main(argv: list[str]) -> int:
 
         identity = write_package_stream(out, scale_records(rows), scratch=scratch)
     seconds = time.perf_counter() - start
-    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # KiB on Linux
+    peak = _peak_mib()
     result = {"rows": rows, "seconds": round(seconds, 2), "peak_mib": round(peak), "id": identity}
     sys.stdout.write(json.dumps(result) + "\n")
     return 0
