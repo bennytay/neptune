@@ -72,7 +72,7 @@ from neptune.model.versions import (
     GitCommit,
     ModelCheckpointHash,
 )
-from neptune.model.world import StructuredRecord
+from neptune.model.world import StructuredRecord, StructuredTable
 
 if TYPE_CHECKING:  # sessions.py reads this module's table, so these are imported for types only
     from neptune.derived.grouping import Grouping
@@ -284,7 +284,7 @@ class _Binder:
     def __init__(
         self,
         records: Iterable[object],
-        statements: Iterable[StructuredRecord],
+        statements: Iterable[StructuredRecord | StructuredTable],
         layout: Layout,
         grouping: "Grouping",
     ) -> None:
@@ -308,7 +308,11 @@ class _Binder:
                 continue
             upstream.add(record.provenance.transform)  # type: ignore[attr-defined]
         self.statements: dict[ContentId, list[StructuredRecord]] = defaultdict(list)
+        self.tables: dict[RecordId, StructuredTable] = {}
         for row in statements:
+            if isinstance(row, StructuredTable):
+                self.tables[row.id] = row
+                continue
             source = row.provenance.evidence.source
             if isinstance(source, str):
                 self.statements[ContentId(source)].append(row)
@@ -394,12 +398,14 @@ class _Binder:
         named.discard(view.source)
         return named
 
-    def stated_for(self, view: _Run) -> dict[ContentId, EvidenceRef | None]:
-        """What the run's own source names or declares: content to the citing row (``None``
-        for a snapshot its source declares itself)."""
+    def stated_for(self, view: _Run) -> tuple[dict[ContentId, EvidenceRef | None], set[ContentId]]:
+        """What the run's own source names or declares: content to the citing cell (``None``
+        for a snapshot its source declares itself); and the contents a declared value named
+        among others, which a conflict finding reports and nothing may then bind."""
         found: dict[ContentId, EvidenceRef | None] = {}
+        conflicted: set[ContentId] = set()
         if view.source is None or self.runs_in[view.source] != 1:
-            return found  # a source declaring several runs does not say which one a row is of
+            return found, conflicted  # several runs: which one a row is about is not stated
         if view.source in self.snapshots:
             found[view.source] = None
         local: dict[bytes, set[ContentId]] = defaultdict(set)
@@ -409,18 +415,27 @@ class _Binder:
                 for identity in _identities(snapshot):
                     local[identity.encode()].add(content)
         for row in self.statements.get(view.source, ()):
-            for cell in row.cells:
+            table = self.tables.get(row.table)
+            for column, cell in enumerate(row.cells):
                 if not isinstance(cell, Known) or not isinstance(cell.value, str):
                     continue
                 named = self._named(view, cell.value, local)
+                if not named:
+                    continue
+                cited = (
+                    row.cell_evidence(table, column)
+                    if table is not None
+                    else row.provenance.evidence
+                )
                 if len(named) > 1:
-                    self._conflict(
-                        view, DECLARED_BY_RUN, None, sorted(named), row.provenance.evidence
-                    )
-                elif named:
+                    conflicted |= named
+                    self._conflict(view, DECLARED_BY_RUN, None, sorted(named), cited)
+                else:
                     (content,) = named
-                    found.setdefault(content, row.provenance.evidence)
-        return found
+                    found.setdefault(content, cited)
+        for content in conflicted:
+            found.pop(content, None)  # named elsewhere alone, and among others here: undecided
+        return found, conflicted
 
     # --- inferred -------------------------------------------------------------------------------
 
@@ -450,8 +465,12 @@ class _Binder:
                 self._bind_inferred(view, snapshot, kind, DECLARED_BY_RUN, cited)
                 continue
             evidence = cited if cited is not None else snapshot.provenance.evidence
+            binding_id = evidence_record_id(BINDING_KIND, evidence, self.transform)
+            if binding_id in self.stated:  # one citation, one record: the rest are derived
+                self._bind_inferred(view, snapshot, kind, DECLARED_BY_RUN, evidence)
+                continue
             binding = SnapshotBinding(
-                id=evidence_record_id(BINDING_KIND, evidence, self.transform),
+                id=binding_id,
                 provenance=Provenance(evidence, self.transform.id, AssertionKind.STATED),
                 run=view.run.id,
                 snapshot=snapshot.id,
@@ -582,21 +601,27 @@ class _Binder:
 
     def bind(self, run: Run) -> None:
         view = self.view(run)
-        stated = self.stated_for(view)
+        stated, conflicted = self.stated_for(view)
         for content, cited in sorted(stated.items(), key=lambda item: item[0]):
             self._bind_stated(view, content, cited)
         bound = set(self.declared.get(run.id, ()))
         bound |= {kind for content in stated for _, kind in self.snapshots[content]}
+        settled: dict[tuple[SnapshotKind, bytes], set[ContentId]] = defaultdict(set)
+        for content in stated:
+            for path in self.paths.get(content, ()):
+                for _, kind in self.snapshots[content]:
+                    settled[kind, basename(path)].add(content)
         for slot, candidates in sorted(self.slots(view).items()):
             kind = slot[0]
             nearest = max(candidates.values())
             winners = sorted(c for c, near in candidates.items() if near == nearest)
-            said = sorted(c for c in stated if any(k is kind for _, k in self.snapshots[c]))
-            said_here = [c for c in said if c in candidates]
-            if said_here:  # the run's own statement settles its slot
-                if winners != said_here:
-                    self._differs(view, slot, said_here, winners)
+            if slot in settled:  # the run's own statement settles its slot, wherever it points
+                said = sorted(settled[slot])
+                if winners != said:
+                    self._differs(view, slot, said, winners)
                 continue
+            if conflicted & set(candidates):
+                continue  # a declared value named these among others: reported, not chosen
             if len(winners) > 1:
                 self._conflict(view, SESSION_NEAREST, slot, winners, run.provenance.evidence)
                 continue
@@ -642,15 +667,16 @@ class _Binder:
 
 def bind_snapshots(
     records: Iterable[object],
-    statements: Iterable[StructuredRecord],
+    statements: Iterable[StructuredRecord | StructuredTable],
     layout: Layout,
     grouping: "Grouping",
 ) -> Bindings | None:
     """Bind every run in ``records`` to the snapshots evidence relates it to (ADR 0064).
 
     ``records`` may hold anything; only runs, snapshots and canonical bindings are read.
-    ``statements`` are the declared rows of the runs' own sources. ``None`` when there is no run:
-    no transform, no table, no finding. The same inputs give the same result in any order.
+    ``statements`` are the declared rows of the runs' own sources, and their tables. ``None``
+    when there is no run: no transform, no table, no finding. The same inputs give the same
+    result in any order.
     """
     binder = _Binder(binding_inputs(records), statements, layout, grouping)
     if not binder.runs:

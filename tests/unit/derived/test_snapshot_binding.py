@@ -172,10 +172,10 @@ def test_a_firmware_version_naming_two_different_images_is_a_conflict() -> None:
     statement = row(paths[0], 0, "gripper_firmware", "v2.3.1")
     records = [arm, firmware(paths[1], "v2.3.1"), firmware(paths[2], "v2.3.1")]
     found = bind(paths, records, [statement])
-    assert not found.stated and not found.inferred  # the nearest rule ties as well
+    assert not found.stated and not found.inferred
     conflicts = [f for f in found.findings if f.code == CONFLICTING_SNAPSHOTS]
-    assert len(conflicts) == 2  # the declared value, and the slot
-    assert {f.details["rule"] for f in conflicts} == {"declared_by_run", "session_nearest"}
+    assert len(conflicts) == 1  # the declared value; its slot is then not decided by nearness
+    assert conflicts[0].details["rule"] == "declared_by_run"
     assert NO_SOFTWARE_IDENTITY in codes(found)
 
 
@@ -271,3 +271,36 @@ def test_stated_bindings_are_canonical_records_with_evidence_ids() -> None:
     assert found.transform.adapter_id == "neptune.bindings"
     assert TRANSFORM in found.transform.upstream
     assert found.summary()["stated"] == 1
+
+
+def test_one_row_naming_two_snapshots_binds_both() -> None:
+    paths = ["run_006/arm.mcap", "run_006/params.yaml", "run_006/fw.bin"]
+    arm = run(paths[0])
+    statement = row(paths[0], 0, "fw.bin", "v4")  # one row, two cells, two snapshots
+    found = bind(paths, [arm, hardware(paths[1]), firmware(paths[2], "v4")], [statement])
+    assert {b.snapshot for b in found.stated} | {
+        b.snapshot for b in found.inferred if b.evidence[0] != arm.provenance.evidence
+    } == {rid("sw", paths[2])}
+    assert kinds(found, arm.id)[SnapshotKind.SOFTWARE_CONFIGURATION] == {rid("sw", paths[2])}
+    assert len(found.stated) == 1  # the path and the version name one image: one binding
+
+
+def test_a_stated_snapshot_outside_the_session_settles_its_slot() -> None:
+    paths = ["shared/fw.bin", "run_007/arm.mcap", "run_007/fw.bin"]
+    arm = run(paths[1])
+    statement = row(paths[1], 0, "firmware", "shared/fw.bin")
+    found = bind(paths, [arm, firmware(paths[0], "v1"), firmware(paths[2], "v2")], [statement])
+    assert kinds(found, arm.id)[SnapshotKind.SOFTWARE_CONFIGURATION] == {rid("sw", paths[0])}
+    assert not found.inferred
+    assert "neptune.bindings.stated_differs_from_nearest" in codes(found)
+
+
+def test_a_value_naming_several_snapshots_binds_none_of_them_by_nearness() -> None:
+    paths = ["run_008/arm.mcap", "run_008/fw.bin", "run_008/sub/fw.bin"]
+    arm = run(paths[0])
+    statement = row(paths[0], 0, "firmware", "v5")
+    records = [arm, firmware(paths[1], "v5"), firmware(paths[2], "v5")]
+    found = bind(paths, records, [statement])
+    assert not found.stated and not found.inferred  # the nearer one is not chosen silently
+    assert codes(found).count(CONFLICTING_SNAPSHOTS) == 1
+    assert NO_SOFTWARE_IDENTITY in codes(found)

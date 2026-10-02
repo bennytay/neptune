@@ -111,7 +111,7 @@ from neptune.model.source import (
     SourceArtifact,
     local_location,
 )
-from neptune.model.world import StructuredRecord
+from neptune.model.world import StructuredRecord, StructuredTable
 from neptune.runtime import events, explain, lineage, sandbox, wire
 from neptune.runtime.cache import (
     VERDICT_FILE,
@@ -2032,7 +2032,7 @@ class IngestJob:
                 if key in with_runs
                 for output in self._outputs(key)
                 for record in output.records
-                if isinstance(record, StructuredRecord)
+                if isinstance(record, StructuredRecord | StructuredTable)
             ]
         except (WorkspaceError, ValueError, OSError) as exc:
             raise JobError(f"the package cannot be assembled: {exc}") from exc
