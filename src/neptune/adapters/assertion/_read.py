@@ -132,7 +132,7 @@ class Reader:
     def __init__(self, source: ContentId, transform: TransformRecord, max_assertions: int) -> None:
         self.source = source
         self.transform = transform
-        self.max_assertions = max_assertions
+        self.max_assertions = max(0, max_assertions)
         self.out = Output()
 
     def ref(self, locator: tuple[Locator, ...]) -> EvidenceRef:
@@ -174,7 +174,7 @@ class Reader:
         top = tree.members.get(0, {})
         unknown = [key for key in top if key not in TOP_KEYS]
         if unknown:
-            self._unknown_keys(tree, 0, top, unknown)
+            self.unknown_keys(tree, 0, top, unknown)
         found: dict[str, int] = {}
         for key in TOP_KEYS:
             nodes = top.get(key, [])
@@ -227,7 +227,7 @@ class Reader:
             f"not a {FORMAT} file: {why}; nothing is read",
         )
 
-    def _unknown_keys(
+    def unknown_keys(
         self, tree: _Tree, index: int, members: dict[str | int, list[int]], keys: list[str | int]
     ) -> None:
         names = sorted(str(key) for key in keys)
@@ -255,13 +255,17 @@ class Reader:
                 (Span(*skipped.span),),
                 f"a member no record can hold is not read: {skipped.reason}",
             )
-        nonstandard = [n for n in tree.document.nodes if Issue.NONSTANDARD_JSON in n.issues]
+        nonstandard = [
+            index
+            for index, node in enumerate(tree.document.nodes)
+            if Issue.NONSTANDARD_JSON in node.issues
+        ]
         if nonstandard:
             self.finding(
                 "nonstandard_json",
                 FindingCategory.INCONSISTENT,
                 Severity.INFO,
-                tree.locator(tree.document.nodes.index(nonstandard[0])),
+                tree.locator(nonstandard[0]),
                 f"{len(nonstandard)} numbers are NaN or Infinity, which RFC 8259 does not define;"
                 " they are kept as written",
                 {"values": len(nonstandard)},
@@ -333,7 +337,7 @@ class _Entry:
         members = tree.members.get(self.index, {})
         unknown = [key for key in members if key not in (*REQUIRED, *OPTIONAL)]
         if unknown:
-            self.reader._unknown_keys(tree, self.index, members, unknown)
+            self.reader.unknown_keys(tree, self.index, members, unknown)
         assertion_type = self.assertion_type()
         record = Assertion(
             id=self.id,
@@ -352,9 +356,16 @@ class _Entry:
         )
         self.reader.out.records.append(record)
 
+    def nodes(self, key: str) -> list[int]:
+        """Every node the entry writes for ``key``, in source order."""
+        return self.tree.members.get(self.index, {}).get(key, [])
+
+    def is_null(self, node: int) -> bool:
+        return isinstance(self.tree.node(node).value, Null)
+
     def member(self, key: str) -> int | _Absent | None:
         """The key's node, ``ABSENT``, or ``None`` where the key repeats (reported here)."""
-        nodes = self.tree.members.get(self.index, {}).get(key, [])
+        nodes = self.nodes(key)
         if not nodes:
             return ABSENT
         if len(nodes) > 1:
@@ -372,15 +383,23 @@ class _Entry:
         self.warn("missing_field", FindingCategory.MISSING, node, f"{key!r} {why}")
         return Unknown() if node is None else Unknown(self.stated(node))
 
+    def unreadable(self, node: int) -> str | None:
+        """Why the node, or a value directly in it, cannot be held; ``None`` if it can."""
+        for index in (node, *self.tree.children.get(node, [])):
+            value = self.tree.node(index).value
+            if isinstance(value, Unreadable):
+                return value.reason
+        return None
+
     def invalid(self, key: str, node: int, why: str) -> Unknown:
-        if isinstance(self.tree.node(node).value, Unreadable):
-            value = self.tree.node(node).value
-            assert isinstance(value, Unreadable)
+        """``Unknown`` with the finding a value that is not what its key needs gets."""
+        reason = self.unreadable(node)
+        if reason is not None:
             self.warn(
                 "value_not_read",
                 FindingCategory.UNREPRESENTABLE,
                 node,
-                f"{key!r} cannot be held: {value.reason}",
+                f"{key!r} cannot be held: {reason}",
             )
         else:
             self.warn("invalid_value", FindingCategory.CORRUPT, node, f"{key!r} {why}")
@@ -413,6 +432,9 @@ class _Entry:
         node = self.required(key) if required else self.optional(key)
         if not isinstance(node, int):
             return node
+        return self._logical_value(key, node)
+
+    def _logical_value(self, key: str, node: int) -> Knowledge[LogicalId]:
         parsed = self._logical(node)
         if parsed is None:
             return self.invalid(key, node, "is not {namespace, value}: a token and text")
@@ -450,6 +472,15 @@ class _Entry:
             return node
         text = self.tree.scalar(node, ScalarType.STRING)
         parsed = _civil_ticks(text) if isinstance(text, str) else None
+        if isinstance(parsed, _LeapSecond):
+            self.warn(
+                "value_not_read",
+                FindingCategory.UNREPRESENTABLE,
+                node,
+                "'authored_at' is a leap second (second 60): ticks that count 86,400-second days"
+                " (ADR 0023 §2) have none for it",
+            )
+            return Unknown(self.stated(node))
         if parsed is None:
             return self.invalid(
                 "authored_at",
@@ -496,12 +527,12 @@ class _Entry:
         for item in self.tree.children.get(node, []):
             ref = self._scope_ref(item)
             if ref is None:
-                self.warn(
-                    "invalid_value",
-                    FindingCategory.CORRUPT,
+                entry = self.tree.node(item).path[-1]
+                self.invalid(
+                    f"scope entry {entry}",
                     item,
-                    f"scope entry {self.tree.node(item).path[-1]} is neither a record id"
-                    " (rec:sha256:…) nor {namespace, value}; the scope is Unknown",
+                    "is neither a record id (rec:sha256:…) nor {namespace, value}; the scope is"
+                    " Unknown",
                 )
                 return Unknown(self.stated(node))
             refs.append(ref)
@@ -521,21 +552,26 @@ class _Entry:
             case Known(value=AssertionType.RETRACT):
                 return self.logical_id("retracts", required=True)
             case Known(value=other):
-                node = self.member("retracts")
-                if isinstance(node, int):
+                stated = [n for n in self.nodes("retracts") if not self.is_null(n)]
+                if stated:
                     self.warn(
                         "retracts_not_applicable",
                         FindingCategory.INCONSISTENT,
-                        node,
+                        stated[0],
                         f"a {other} assertion names an assertion it retracts; only a retract"
                         " does, so it is NotApplicable and stays in the file",
                     )
                 return NotApplicable()
             case _:
+                # The type was not read, so a retract target may or may not apply: read one if
+                # it is written, and leave it Unknown otherwise, with no finding of its own.
+                nodes = self.nodes("retracts")
+                if not nodes or all(self.is_null(n) for n in nodes):
+                    return Unknown(self.stated(nodes[0])) if nodes else Unknown()
                 node = self.member("retracts")
-                if isinstance(node, _Absent) or node is None:
+                if not isinstance(node, int):
                     return Unknown()
-                return self.logical_id("retracts", required=True)
+                return self._logical_value("retracts", node)
 
     def payload(self) -> Knowledge[str]:
         node = self.optional("payload")
@@ -558,12 +594,20 @@ class _Entry:
         return Known(text, self.stated(node))
 
 
-def _civil_ticks(text: str) -> tuple[int, Fraction, bool] | None:
+class _LeapSecond:
+    """A valid RFC 3339 time at second 60, which a count of 86,400-second days cannot hold."""
+
+
+LEAP_SECOND: Final = _LeapSecond()
+
+
+def _civil_ticks(text: str) -> tuple[int, Fraction, bool] | _LeapSecond | None:
     """Ticks, resolution in seconds and whether the text names an instant (ADR 0023 §2).
 
     A date-time with ``Z`` or an offset counts POSIX seconds from 1970-01-01T00:00:00Z; one
     without counts the same way on its own civil clock; a date alone counts days. The resolution
-    is the finest field written. ``None`` if the text is not one of these or overflows int64.
+    is the finest field written. ``None`` if the text is not one of these or overflows int64;
+    ``LEAP_SECOND`` for second 60, which RFC 3339 allows and no such count holds.
     """
     match = _DATE_TIME.fullmatch(text)
     if match is None:
@@ -577,9 +621,12 @@ def _civil_ticks(text: str) -> tuple[int, Fraction, bool] | None:
         return days, Fraction(DAY), False
     hour, minute, second = (int(part) for part in match.group(4, 5, 6))
     try:
-        datetime(year, month, day, hour, minute, second)  # range checks only: no zone implied
+        # Range checks only: no zone is implied. Second 60 is checked as 59.
+        datetime(year, month, day, hour, minute, min(second, 59))
     except ValueError:
         return None
+    if second == 60:
+        return LEAP_SECOND
     digits = match.group(7) or ""
     scale = 10 ** len(digits)
     offset = 0

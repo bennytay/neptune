@@ -220,6 +220,9 @@ def test_authored_at_is_counted_by_adr_0023_on_a_clock_of_its_own(
             "assertion.invalid_value",
         ),
         ({"authored_zone": "+02:00"}, "authored_zone", "assertion.invalid_value"),
+        ({"authored_zone": "-"}, "authored_zone", "assertion.invalid_value"),
+        ({"authored_at": "2016-12-31T23:59:60Z"}, "authored_at", "assertion.value_not_read"),
+        ({"scope": ["rec:" + "x" * 300]}, "scope", "assertion.invalid_value"),
         ({"scope": ...}, "scope", "assertion.missing_field"),
         ({"scope": {"a": 1}}, "scope", "assertion.invalid_value"),
         ({"scope": ["AMR-07"]}, "scope", "assertion.invalid_value"),
@@ -257,6 +260,35 @@ def test_a_retract_without_a_target_and_a_target_without_a_retract() -> None:
     # When the type is not read, a stated target is kept as stated.
     output = run(assertions_file(entry(assertion_type="merge", retracts=target)))
     assert only(output).retracts == Known(LogicalId(**target), only(output).retracts.provenance)  # type: ignore[union-attr]
+
+
+def test_a_null_or_repeated_target_is_quiet_where_it_cannot_apply() -> None:
+    output = run(assertions_file(entry(retracts=None)))
+    assert only(output).retracts == NotApplicable()
+    assert codes(output) == []
+    output = run(assertions_file(entry(assertion_type="merge", retracts=None)))
+    assert isinstance(only(output).retracts, Unknown)
+    assert codes(output) == ["assertion.invalid_value"]
+    target = '{"namespace": "a", "value": "0"}'
+    raw = json.dumps([entry()])[:-2] + f', "retracts": {target}, "retracts": {target}}}]'
+    output = run(assertions_file(raw=raw))
+    assert only(output).retracts == NotApplicable()
+    assert codes(output) == ["assertion.retracts_not_applicable"]
+
+
+def test_a_value_too_long_to_hold_inside_a_scope_or_an_id_is_not_read() -> None:
+    long_id = {"namespace": "fleet.asset_tag", "value": "x" * 200}
+    for changes in ({"scope": [long_id]}, {"author": long_id}):
+        output = run(assertions_file(entry(**changes)), max_scalar_length=100)
+        assert codes(output) == ["assertion.value_not_read"]
+
+
+def test_a_negative_limit_reads_nothing_and_says_so() -> None:
+    output = run(assertions_file(entry(), entry()), max_assertions=-1)
+    assert records(output) == []
+    (finding,) = output.findings()
+    assert finding.code == "assertion.too_many_assertions"
+    assert finding.details == {"assertions": 2, "max_assertions": 0}
 
 
 def test_a_repeated_key_chooses_nothing() -> None:
@@ -358,7 +390,7 @@ def test_utf16_with_a_byte_order_mark_cites_code_points() -> None:
     output = run(b"\xff\xfe" + text.encode("utf-16-le"))
     record = only(output)
     assert record.rationale == Known("Größe ✓", record.rationale.provenance)  # type: ignore[union-attr]
-    assert cited_text(text.encode(), record.rationale.provenance) == '"Größe ✓"'  # type: ignore[union-attr]
+    assert cited_text(text.encode(), record.rationale.provenance) == '"Größe ✓"'
 
 
 # --- Determinism and the contract --------------------------------------------------------------
@@ -405,6 +437,13 @@ def test_probe_claims_a_long_or_broken_file_by_its_marker_only() -> None:
     assert probe(long) == (SIGNATURE, ["assertion.marker"])
     broken = assertions_file(raw="[{")
     assert probe(broken) == (SIGNATURE, ["assertion.marker"])
+    # The format must be the root object's: a nested pair in a long config is not a claim.
+    nested = b'{"plugins": [{"format": "neptune.assertions"}], "pad": "' + b"x" * 70_000 + b'"}'
+    assert probe(nested)[0] == 0.0
+    chosen = ProbeEngine(default_registry()).probe(BytesReader(nested), "x.json")
+    assert chosen.adapter != "assertion"
+    escaped = b'{"note": "\\"format\\": \\"neptune.assertions\\"", "pad": "' + b"x" * 70_000
+    assert probe(escaped)[0] == 0.0
 
 
 @pytest.mark.parametrize(

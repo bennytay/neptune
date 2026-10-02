@@ -50,8 +50,10 @@ from neptune.model.reference import TimestampDomain
 
 PYTHON: Final = f"{sys.version_info.major}.{sys.version_info.minor}"
 MAX_DEPTH: Final = 64
-# The format marker a probe looks for in a head: an object whose "format" names this format.
-_MARKER: Final = re.compile(r'^\s*\{.*?"format"\s*:\s*"neptune\.assertions"', re.DOTALL)
+# What a probe looks for in a head: an object at the root, and a member of it naming this format.
+_OBJECT: Final = re.compile(r"\s*\{")
+_STRING: Final = re.compile(r'"(?:[^"\\]|\\.)*"', re.DOTALL)
+_NAMES_FORMAT: Final = re.compile(r'\s*:\s*"neptune\.assertions"')
 
 FINDING_CODES: Final = (
     ("byte_order_mark", "a byte-order mark JSON does not define; read past (inconsistent, info)"),
@@ -116,7 +118,7 @@ FINDING_CODES: Final = (
     (
         "value_not_read",
         "a value or member name no record can hold (over max_scalar_length, an unpaired"
-        " surrogate escape); the field is Unknown (unrepresentable, warning)",
+        " surrogate escape, a leap second); the field is Unknown (unrepresentable, warning)",
     ),
     (
         "version_unsupported",
@@ -183,8 +185,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "claims",
             "VERIFIED where the whole file parses as JSON with format neptune.assertions at its"
-            " root; SIGNATURE where the head starts an object naming that format (a long or"
-            " broken file); never from a name. Beats the config adapter's STRUCTURE claim",
+            " root; SIGNATURE where the head starts an object with that format as a member of"
+            " its own, not a nested value's (a long or broken file); never from a name. Beats"
+            " the config adapter's STRUCTURE claim",
         ),
         Documented(
             "kinds",
@@ -244,6 +247,31 @@ def _declares_format(text: str, encoding: TextEncoding) -> bool | None:
     return False
 
 
+def _root_names_format(text: str) -> bool:
+    """Whether a head starts an object with a member ``"format": "neptune.assertions"`` of its
+    own, not of a nested value. One pass, strings skipped whole; a head may end anywhere."""
+    if _OBJECT.match(text) is None:
+        return False
+    depth, position = 0, 0
+    while position < len(text):
+        char = text[position]
+        if char == '"':
+            token = _STRING.match(text, position)
+            if token is None:
+                return False  # the head ends inside a string
+            named = depth == 1 and token.group() == '"format"'
+            if named and _NAMES_FORMAT.match(text, token.end()):
+                return True
+            position = token.end()
+            continue
+        if char in "{[":
+            depth += 1
+        elif char in "}]":
+            depth -= 1
+        position += 1
+    return False
+
+
 class AssertionAdapter:
     """Neptune assertion files; one chunk per file."""
 
@@ -257,7 +285,7 @@ class AssertionAdapter:
         if isinstance(decoded, InvalidEncoding):
             reason = ProbeReason(code("not_text"), f"byte {decoded.offset} is not valid text")
             return ProbeResult(0.0, (reason,))
-        if _MARKER.match(decoded.text) is None:
+        if not _root_names_format(decoded.text):
             reason = ProbeReason(code("no_marker"), f"no object naming format {FORMAT}")
             return ProbeResult(0.0, (reason,))
         if complete:

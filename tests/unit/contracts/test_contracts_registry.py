@@ -44,6 +44,7 @@ def test_committed_registry_is_valid() -> None:
     assert report.problems == []
     assert set(tool.Registry(CONTRACTS).contract_ids()) == {
         "alignment-records",
+        "assertion-records",
         "catalog-api",
         "dataset-manifest",
         "graph-schema",

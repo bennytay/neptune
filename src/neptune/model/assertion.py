@@ -66,11 +66,12 @@ ASSERTION_SINCE: Final = 4
 # logical id. In JSON a record id is a string and a logical id an object.
 ScopeRef: TypeAlias = RecordId | LogicalId
 
-# An IANA time zone database name, by syntax only: components of letters, digits and ``._+-``
-# joined by ``/`` (``Europe/Berlin``, ``America/Argentina/Buenos_Aires``, ``Etc/GMT-5``, ``UTC``).
+# An IANA time zone database name, by syntax only: components that start with a letter, then
+# letters, digits and ``._+-``, joined by ``/`` (``Europe/Berlin``, ``America/Port-au-Prince``,
+# ``Etc/GMT-5``, ``UTC``).
 # Whether a tz database release holds the name is never checked: a record's bytes may not depend
 # on one (ADR 0062 §4).
-_ZONE_PART: Final = r"[A-Za-z0-9_+\-][A-Za-z0-9._+\-]*"
+_ZONE_PART: Final = r"[A-Za-z][A-Za-z0-9._+\-]*"
 _IANA_ZONE: Final = re.compile(f"{_ZONE_PART}(?:/{_ZONE_PART})*")
 IANA_ZONE_MAX: Final = 255
 
@@ -88,12 +89,7 @@ class AssertionType(StrEnum):
 
 def is_iana_zone(name: str) -> bool:
     """Whether ``name`` is spelled as an IANA zone name; it is not looked up anywhere."""
-    return (
-        isinstance(name, str)
-        and len(name) <= IANA_ZONE_MAX
-        and _IANA_ZONE.fullmatch(name) is not None
-        and not any(part in {".", ".."} for part in name.split("/"))
-    )
+    return len(name) <= IANA_ZONE_MAX and _IANA_ZONE.fullmatch(name) is not None
 
 
 def _check_states(name: str, value: Knowledge[Any], allowed: tuple[type, ...]) -> None:

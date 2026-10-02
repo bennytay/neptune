@@ -85,12 +85,15 @@ earlier statement. Nothing in the model can hold one. Forces:
      `max_scalar_length` (1 MiB) and `max_assertions` (100,000); everything past a limit is a
      finding, never an exception. An entry that is not an object is skipped with a finding.
    - Probing reads content only: `VERIFIED` where the whole file parses with this format at its
-     root, `SIGNATURE` where the head starts an object naming it (a long or broken file). This
-     beats the config adapter's `STRUCTURE` claim on the same bytes.
+     root, `SIGNATURE` where the head starts an object with a `"format": "neptune.assertions"`
+     member of its own, not of a nested value (a long or broken file). This beats the config
+     adapter's `STRUCTURE` claim on the same bytes.
 4. **Time and zone, as declared.** `authored_at` is RFC 3339 (`T`, `Z` upper-case; fraction up to
    nine digits) or a date alone, counted by ADR 0023 §2: with `Z` or an offset, POSIX ticks
    (timescale `posix`); without, ticks of its own civil clock (timescale `Unknown`); a date alone,
-   days. Each assertion's time is on a `TimestampDomain` of its own (role `document`, field
+   days. A leap second (second 60, valid RFC 3339) has no tick on a count of 86,400-second days:
+   it is `Unknown` with `assertion.value_not_read`, never moved to a neighbouring second. Each
+   assertion's time is on a `TimestampDomain` of its own (role `document`, field
    `authored_at`, scope the entry's pointer), as an image's capture time is (ADR 0041).
    `authored_zone` is the IANA zone name exactly as written, checked by spelling only and never
    looked up or applied: whether a tz release has the name depends on the release, and record
