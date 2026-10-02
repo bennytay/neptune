@@ -185,8 +185,17 @@ class _Deadline:
         self._timer.cancel()
 
     def error(self, exc: BaseException, default: TransportError) -> TransportError:
-        """``default``, unless the deadline is what ended the read."""
-        return DeadlineExceeded("the request outlived its deadline") if self.expired else default
+        """``default``, unless the deadline is what ended the read.
+
+        A socket timeout is the deadline too. Each socket operation has the same timeout as the
+        whole request, and the request's clock started first, so when one operation times out
+        the deadline has passed as well. Whether this timer's thread has run yet is scheduling,
+        not the server's behaviour; deciding by it alone gave one server two finding causes
+        (``transport_failed`` or ``deadline_exceeded``) under load (D2 gate, ADR 0011 §2).
+        """
+        if self.expired or isinstance(exc, TimeoutError):
+            return DeadlineExceeded("the request outlived its deadline")
+        return default
 
 
 @dataclass

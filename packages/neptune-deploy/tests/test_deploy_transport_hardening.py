@@ -342,3 +342,69 @@ def test_a_body_trickling_after_connection_close_is_cut_off_at_the_deadline(
             transport.get("/x").body(1_000_000)
         assert time.monotonic() - started < 5
         transport.drop()
+
+
+# --- (e) a socket timeout is the deadline, however late the deadline's timer runs (D2 gate) -----
+
+
+@contextmanager
+def serve_silent(head: bytes = b"") -> Iterator[Endpoint]:
+    """A server that reads the request, sends ``head`` (perhaps nothing) and then says nothing."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+    held: list[socket.socket] = []
+
+    def run() -> None:
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            held.append(conn)
+            try:
+                _drain(conn)
+                conn.sendall(head)
+            except OSError:
+                pass
+
+    threading.Thread(target=run, daemon=True).start()
+    try:
+        yield Endpoint.parse(f"http://127.0.0.1:{listener.getsockname()[1]}")
+    finally:
+        listener.close()
+        for conn in held:
+            conn.close()
+
+
+@pytest.mark.parametrize(
+    "head",
+    [b"", b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial"],
+    ids=["no-headers", "stalled-body"],
+)
+def test_a_socket_timeout_is_deadline_exceeded_even_when_the_timer_thread_is_late(
+    monkeypatch: pytest.MonkeyPatch, head: bytes
+) -> None:
+    """Regression (D2 gate B1): under CPU load the deadline's timer thread can run after the
+    socket's own timeout, which is the same length. The cause then read ``transport_failed`` in
+    some runs and ``deadline_exceeded`` in others, so one server gave two finding ids. Holding the
+    timer back makes the late-timer case happen every time."""
+    from neptune_deploy.sources.object_store import transport as module
+
+    original = module._Deadline.__init__
+
+    def late(self: Any, transport: Any, seconds: float) -> None:
+        original(self, transport, seconds + 30)
+
+    monkeypatch.setattr(module._Deadline, "__init__", late)
+
+    class Open:
+        def require_network(self, purpose: str) -> None:
+            pass
+
+    with serve_silent(head) as endpoint:
+        transport = Transport(endpoint, Open(), "test", timeout=0.3)
+        started = time.monotonic()
+        with pytest.raises(DeadlineExceeded):
+            transport.get("/").body(1000)
+        assert time.monotonic() - started < 5

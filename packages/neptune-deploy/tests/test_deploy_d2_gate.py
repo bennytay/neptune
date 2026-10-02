@@ -384,7 +384,7 @@ def test_g7_two_clean_syncs_emit_identical_bytes(name: str, tmp_path: Path) -> N
     assert clean_sync(name, tmp_path / "a") == clean_sync(name, tmp_path / "b")
 
 
-@pytest.mark.parametrize("attack", ["truncate", "redirect_loop", "oversized"])
+@pytest.mark.parametrize("attack", ATTACKS)
 def test_g7_a_hostile_run_is_as_deterministic_as_a_clean_one(
     remote: Rig, attack: str, tmp_path: Path
 ) -> None:
