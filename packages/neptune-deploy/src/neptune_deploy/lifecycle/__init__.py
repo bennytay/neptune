@@ -16,7 +16,13 @@ from pathlib import Path
 from typing import Final
 
 from neptune.model.ids import ContentId
-from neptune.store.package import IngestPackage, package_files, read_package, write_package
+from neptune.store.package import (
+    IngestPackage,
+    PackageError,
+    package_files,
+    read_package,
+    write_package,
+)
 from neptune_deploy.lifecycle.mapper import FINDINGS, MAPPER_ID, MAPPER_VERSION, map_records
 from neptune_deploy.lifecycle.mapping import (
     MAPPING_SCHEMA,
@@ -60,5 +66,11 @@ def map_files(base: IngestPackage, mappings: Sequence[LifecycleMapping]) -> dict
 
 
 def map_package(base_root: Path, mappings: Sequence[LifecycleMapping], out: Path) -> ContentId:
-    """Read and verify the package at ``base_root``, map it, write the new package to ``out``."""
+    """Read and verify the package at ``base_root``, map it, write the new package to ``out``.
+
+    ``out`` may not be the base package or inside it: the base is never changed (ADR 0002 §1).
+    """
+    base, target = base_root.resolve(), out.resolve()
+    if target == base or base in target.parents:
+        raise PackageError(f"{out} is inside the base package {base_root}; write it elsewhere")
     return write_package(out, map_files(read_package(base_root), mappings))

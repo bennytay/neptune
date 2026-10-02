@@ -192,7 +192,7 @@ def test_civil_times_keep_their_own_clock_and_record_the_declared_zone() -> None
     assert stamp.ticks == 20514 * 86400 + 9 * 3600 + 40 * 60
     (domain,) = [d for d in _of(package, "timestamp_domain") if d.id == stamp.domain_id]
     assert domain.field == "Completed"
-    assert domain.scope == ("zone=unstated",)
+    assert domain.scope == ()  # the declared zone is the mapping's, never the clock's scope
     assert isinstance(domain.timescale, Unknown)
     assert domain.resolution == Known(Fraction(1))
 
@@ -271,7 +271,11 @@ def test_cell_change_log_and_requalification_tests() -> None:
     (domain,) = [
         d for d in _of(package, "timestamp_domain") if d.id == requal.performed.value.domain_id
     ]
-    assert domain.scope == ("zone=Europe/Berlin",)
+    assert domain.scope == ()
+    (transform,) = [
+        t for t in _of(package, "transform_record") if t.id == domain.provenance.transform
+    ]
+    assert transform.config["mapping"]["zone"] == "Europe/Berlin"
 
 
 def test_mixed_encoding_cell_stays_unknown_and_a_missing_date_is_a_finding() -> None:
