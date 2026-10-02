@@ -76,6 +76,7 @@ SOURCE_ADMITTED: Final = "source_admitted"
 SOURCE_QUARANTINED: Final = "source_quarantined"
 STREAMS_INTROSPECTED: Final = "streams_introspected"  # introspection's counts (ADR 0049)
 CONTEXT_EXTRACTED: Final = "context_extracted"  # the context pass's counts (ADR 0063)
+MEDIA_INDEXED: Final = "media_indexed"  # media streams indexed (ADR 0056)
 PACKAGE_STAGED: Final = "package_staged"
 PACKAGE_VERIFIED: Final = "package_verified"
 JOB_COMMITTED: Final = "job_committed"

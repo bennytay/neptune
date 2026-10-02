@@ -33,6 +33,7 @@ from enum import StrEnum
 from typing import Any, ClassVar, Final, TypeAlias
 
 from neptune.derived.context import CANDIDATE_KIND, context_candidate_from_json
+from neptune.derived.media import MEDIA_KIND, media_stream_from_json
 from neptune.derived.provenance import DERIVED_SCHEMA_VERSION as DERIVED_SCHEMA_VERSION
 from neptune.derived.provenance import INFERRED
 from neptune.derived.provenance import derived_object as _derived_object
@@ -584,6 +585,7 @@ DERIVED_KINDS: Final[Mapping[str, Callable[[JsonValue], Any]]] = {
     LAYOUT_KIND: stream_layout_from_json,
     SEMANTIC_KIND: stream_semantic_from_json,
     CANDIDATE_KIND: context_candidate_from_json,  # ADR 0063
+    MEDIA_KIND: media_stream_from_json,  # ADR 0056
 }
 
 

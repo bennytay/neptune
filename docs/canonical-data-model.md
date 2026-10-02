@@ -325,8 +325,10 @@ a bug, not a value.
   The store checks their structure; `neptune.derived` reads their meaning and refuses kinds it does not define.
   The kinds are `session_proposal` and `session_unassigned` (run/session grouping), and `definition_layout`,
   `stream_layout` and `stream_semantic` (a distinct definition's declared field paths and types, written once;
-  each stream's line naming it; and what the stream carries, inferred; ADR 0049). Present and empty means the
-  producer ran and inferred nothing, absent means it did not run.
+  each stream's line naming it; and what the stream carries, inferred; ADR 0049), and `media_stream` (a stream
+  carrying images, video or point clouds: its media kind, frame count, hydrator and derivative states; its
+  frames are its series rows, queried and hydrated lazily by `neptune.sdk.media`; ADR 0056). Present and empty
+  means the producer ran and inferred nothing, absent means it did not run.
 
 ## Serialization (ADR 0002)
 

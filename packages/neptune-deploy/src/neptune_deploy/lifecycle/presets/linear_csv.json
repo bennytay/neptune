@@ -1,0 +1,22 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "ticketing.linear-csv",
+  "version": "1",
+  "description": "Linear issues exported as CSV, from a view filtered to interventions: each row is an intervention. Linear writes UTC times with Z.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "intervention",
+      "kind": "intervention",
+      "requires": ["ID", "Team", "Title"],
+      "ignore": ["Team", "Status", "Priority", "Assignee", "Labels", "Created", "Description"],
+      "fields": {
+        "identifiers": [{"column": "ID", "namespace": "linear.issue"}],
+        "related": [{"column": "Parent issue", "namespace": "linear.issue"}],
+        "reason": {"column": "Title"},
+        "start": {"column": "Started", "format": "%Y-%m-%dT%H:%M:%S.%f%z"},
+        "end": {"column": "Completed", "format": "%Y-%m-%dT%H:%M:%S.%f%z"}
+      }
+    }
+  ]
+}

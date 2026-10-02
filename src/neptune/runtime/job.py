@@ -78,6 +78,7 @@ from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatu
 from neptune.context import CONTEXT_INPUTS, ContextExtraction, extract_context, row_wanted
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
+from neptune.derived.media import MediaIndex, index_media
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.layout import Layout, layout_from_scan
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
@@ -147,7 +148,14 @@ from neptune.store.package import (
     write_cache_report,
     write_envelope,
 )
-from neptune.store.series import RunCheck, SeriesError, SeriesReadError, check_run, read_run
+from neptune.store.series import (
+    RunCheck,
+    SeriesError,
+    SeriesReadError,
+    check_run,
+    count_rows,
+    read_run,
+)
 from neptune.store.workspace import (
     Collected,
     Derivative,
@@ -1975,11 +1983,14 @@ class IngestJob:
             if self._grouping is not None:  # its derived tables name its transform
                 cited.add(self._grouping.transform.id)
                 derived = dict(self._grouping.tables())
-            admitted = self._admitted_records()
-            if (introspection := self._introspect(admitted)) is not None:
+            streams, frames = self._streams()
+            if (introspection := self._introspect(streams)) is not None:
                 cited.add(introspection.transform.id)
                 derived = {**(derived or {}), **introspection.tables()}
-            context = self._contextualise(admitted)
+                if (media := self._index_media(streams, introspection, frames)) is not None:
+                    cited.add(media.transform.id)
+                    derived = {**derived, **media.tables()}
+            context = self._contextualise(self._context_records())
             if context is not None:
                 cited.update(transform.id for transform in context.transforms)
                 derived = {**(derived or {}), **context.tables()}
@@ -2022,19 +2033,17 @@ class IngestJob:
         except (WorkspaceError, ValueError, OSError) as exc:
             raise JobError(f"the package cannot be assembled: {exc}") from exc
 
-    def _admitted_records(self) -> list[Any]:
-        """The admitted records the package-level passes read: streams (introspection) and
-        documents, tables and configurations (context). A table's rows are kept only where the
-        context pass reads them, so a large telemetry table is streamed past, never held."""
+    def _context_records(self) -> list[Any]:
+        """The admitted records the context pass reads: documents, tables and configurations. A
+        table's rows are kept only where the pass reads them, so a large telemetry table is
+        streamed past, never held."""
         kept: list[Any] = []
         tables: dict[RecordId, StructuredTable] = {}
         for records in self._chunk_records():
             for record in records:
                 if isinstance(record, StructuredTable):
                     tables[record.id] = record
-                if isinstance(record, (Stream, *CONTEXT_INPUTS)) and not isinstance(
-                    record, StructuredRecord
-                ):
+                if isinstance(record, CONTEXT_INPUTS) and not isinstance(record, StructuredRecord):
                     kept.append(record)
         if tables:  # rows may sit in other chunks than their table: a second pass
             for records in self._chunk_records():
@@ -2060,12 +2069,30 @@ class IngestJob:
         self._emit(events.CONTEXT_EXTRACTED, found.summary())
         return found
 
-    def _introspect(self, admitted: list[Any]) -> Introspection | None:
+    def _streams(self) -> tuple[list[Stream], dict[RecordId, int]]:
+        """The admitted sources' streams, and each stream's series rows, counted from its runs'
+        footers (no row is read)."""
+        streams: list[Stream] = []
+        frames: dict[RecordId, int] = {}
+        try:
+            for content, transform in sorted(set(self._ingested)):
+                plan = self.workspace.load_plan(content, transform)
+                if plan is None:
+                    continue  # staging refuses the package and says why
+                for chunk in plan.chunks:
+                    output = self.workspace.load(str(chunk["id"]))
+                    streams.extend(r for r in output.records if isinstance(r, Stream))
+                    for stream, run in output.runs.items():
+                        frames[stream] = frames.get(stream, 0) + count_rows(run)
+        except (WorkspaceError, SeriesError, ValueError, OSError) as exc:
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+        return streams, frames
+
+    def _introspect(self, streams: list[Stream]) -> Introspection | None:
         """Stage 9a, before the package is staged: read the admitted sources' streams' declared
         definitions into layouts and infer what each stream carries (ADR 0049). Only cited byte
         ranges are read, each through a verified reader; no message is decoded and no adapter
         called. A package with no stream gets no introspection, so no tables and no transform."""
-        streams = [record for record in admitted if isinstance(record, Stream)]
         if not streams:
             return None
         items = {item.content_id: item for item in self._sources}
@@ -2094,6 +2121,26 @@ class IngestJob:
         for finding in found.findings:
             self._record(finding, found.transform)
         self._emit(events.STREAMS_INTROSPECTED, found.summary())
+        return found
+
+    def _index_media(
+        self, streams: list[Stream], introspection: Introspection, frames: dict[RecordId, int]
+    ) -> MediaIndex | None:
+        """Stage 9b: one ``media_stream`` line per stream carrying images, video or point clouds
+        (ADR 0056). Reads the streams, their inferred semantics and their row counts: no row, no
+        source byte. A package without media gets no transform and no table."""
+        adapters = {
+            item.key[1]: item.adapter.descriptor.id
+            for item in self._sources
+            if item.adapter is not None and item.config is not None
+        }
+        found = index_media(streams, introspection.semantics, frames, adapters)
+        if found is None:
+            return None
+        self._producers[found.transform.id] = found.transform
+        for finding in found.findings:
+            self._record(finding, found.transform)
+        self._emit(events.MEDIA_INDEXED, found.summary())
         return found
 
     # --- validate ------------------------------------------------------------------------------
