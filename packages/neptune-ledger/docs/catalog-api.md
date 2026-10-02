@@ -126,9 +126,9 @@ Clock-merge and `mapping_out_of_range` tests are deferred to MVL-92. They need M
 
 This package runs the suite twice (`tests/contract/test_ledger_catalog_contract.py`): against
 `StubCatalog` as strict expected failures, where each test must fail with `NotImplementedError`,
-and against the real `neptune_ledger.catalog.registry.PostgresCatalog`. There, `register` and
-`verify` pass. Each test that reaches a call not implemented yet is listed by name with its
-owning issue (`resolve`: MVL-91; `thread`, `threads_of`, `lineage`: MVL-92; `query`: MVL-98)
+and against the real `neptune_ledger.catalog.registry.PostgresCatalog`. There, `register`,
+`verify` and `resolve` pass. Each test that reaches a call not implemented yet is listed by name
+with its owning issue (`thread`, `threads_of`, `lineage`: MVL-92; `query`: MVL-98)
 and is a strict expected failure until that call lands. `make_catalog` must return a catalog
 with no package-root limit, because the tests register from `tmp_path`.
 
