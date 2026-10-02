@@ -1,0 +1,25 @@
+{
+  "api_version": "1.6.0",
+  "findings": [
+    {
+      "code": "file_digest_mismatch",
+      "detail": "the file's sha256 differs from the manifest's",
+      "subject": "records/frame.jsonl"
+    }
+  ],
+  "ledger_version": "0.0.1",
+  "outcome": "refused",
+  "package_id": {
+    "knowledge": "known",
+    "value": "sha256:b6cba1bf32cb7de4a65c12d4403de38137fb130b76ea551cbb356be2a2dd501a"
+  },
+  "record_counts": [],
+  "registration_key": {
+    "knowledge": "not_applicable"
+  },
+  "root_locator": "/srv/neptune/packages/manipulator-tampered",
+  "schema_version": {
+    "knowledge": "known",
+    "value": 3
+  }
+}

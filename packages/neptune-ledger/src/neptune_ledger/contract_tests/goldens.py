@@ -20,6 +20,7 @@ from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
     CatalogFinding,
     ClockMerge,
+    DeclaredKey,
     EvidenceAnchor,
     History,
     LineageEdge,
@@ -41,6 +42,7 @@ from neptune_ledger.api.types import (
     Thread,
     ThreadEntry,
     ThreadKey,
+    ThreadLink,
     ThreadRequest,
     TimeWindow,
     TransactionKey,
@@ -262,11 +264,21 @@ def goldens() -> dict[str, dict[str, Any]]:
         documents["drone.thread.json"] = thread
         clock = next(p.clock_key for p in thread.partitions if p.clock_key is not None)
         assert clock is not None
-        # The shape of a merge request; the worked examples hold no ClockMapping, so the
-        # mapping id is a placeholder.
+        # The shape of a merge request; the drone holds no ClockMapping, so the mapping id is a
+        # placeholder.
         mapping = "rec:sha256:" + "a" * 64
         documents["drone.thread_request.merge_example.json"] = ThreadRequest(
             request.key, "world", History(), merge=ClockMerge(clock, (mapping,))
+        )
+        # The shape of a thread's identity-link edge (1.5.0): no worked example states a link
+        # (root ADR 0050 §10), so ids are placeholders. The entity kind is NotCovered.
+        documents["thread_link.example.json"] = ThreadLink(
+            "rec:sha256:" + "b" * 64,
+            drone.package_id,
+            ThreadKey("machine", DeclaredKey("fleet.asset_tag", "D-17")),
+            ThreadKey("machine", DeclaredKey("px4.sys_uuid", "0011223344556677")),
+            "stated",
+            "known",
         )
         documents["query_spec.window.json"] = QuerySpec(
             kinds=("run", "stream"), window=TimeWindow(clock, 0, 2**40), as_of=last
