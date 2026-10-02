@@ -11,8 +11,8 @@ prints ``refresh: <reason>`` and exits 1.
 There is no merge queue (a personal-account repository cannot have one), so ``main`` does not
 require branches to be up to date. Each side's changes select CI jobs exactly as CI does
 (``.github/scripts/ci_plan.py``). A job selected by both sides ran on the PR against a ``main``
-whose inputs to that job have since changed, so the PR needs a refresh. Disjoint job sets mean every job
-the PR ran would give the same result on top of today's ``main``.
+whose inputs to that job have since changed, so the PR needs a refresh. Disjoint job sets mean
+every job the PR ran would give the same result on top of today's ``main``.
 
 The platform job is left out of the comparison: its integration harness drives the whole stack, so
 it would make every pair of PRs overlap. Integration breaks between independently green PRs surface
