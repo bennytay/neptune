@@ -10,7 +10,7 @@ import json
 import shutil
 from collections.abc import Iterator
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 import psycopg
 import pytest
@@ -133,6 +133,45 @@ def test_an_object_store_serves_the_same_interface(
     assert _states(report) == [("present", "flight.ulg")]
     assert "s3://bucket/runs/2026/" in report.checks[0].detail
     assert (empty.gets, bucket.gets) == (1, 1)
+
+
+class _Endless(io.RawIOBase):
+    """An object far larger than stated, counting the bytes handed out."""
+
+    def __init__(self) -> None:
+        self.served = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: Any) -> int:
+        size = len(buffer)
+        buffer[:size] = b"\0" * size
+        self.served += size
+        return size
+
+
+def test_an_object_larger_than_stated_is_read_one_byte_past_its_size(
+    catalog: PostgresCatalog, tmp_path: Path
+) -> None:
+    """PR #68 review: an oversized object is ``changed`` without being read to its end."""
+    drone = materialise("drone", tmp_path / "drone")
+    catalog.register(drone.root)
+    stated = drone.manifest["sources"][0]["size"]
+    streams: list[_Endless] = []
+
+    class Huge:
+        def describe(self) -> str:
+            return "huge"
+
+        def open(self, path: bytes) -> BinaryIO | None:
+            streams.append(_Endless())
+            return io.BufferedReader(streams[-1], buffer_size=16)
+
+    report = catalog.verify_sources(drone.package_id, [Huge()])
+    assert _states(report) == [("changed", "flight.ulg")]
+    assert f"more than the stated {stated} bytes" in report.checks[0].detail
+    assert streams and all(s.served <= stated + 1 + 16 for s in streams)
 
 
 def test_a_local_store_never_reads_outside_its_root(

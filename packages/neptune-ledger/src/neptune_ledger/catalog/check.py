@@ -5,7 +5,8 @@ Every path is opened component by component relative to the root's directory des
 run in ADR 0006 §1's order and each stage reports every problem it finds before the next stage is
 skipped:
 
-1. ``unsafe_entry``: an entry at any depth that is not a regular file or a directory.
+1. ``unsafe_entry``: an entry at any depth that is not a regular file or a directory;
+   ``package_unreadable``: a directory the Ledger may not read (permission denied).
 2. ``manifest.json``: absent or not a file (``package_unreadable`` on register, ``file_missing``
    on verify), not a manifest (``manifest_invalid``), a schema version this Ledger does not read
    (``unsupported_schema_version``: one its schema-version registry does not hold, so a package
@@ -109,19 +110,37 @@ def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> C
     """
     entries = dict(_walk(root_fd))
     unsafe = sorted(path for path, kind in entries.items() if kind == "unsafe")
-    if unsafe:
+    unreadable = sorted(path for path, kind in entries.items() if kind == "unreadable")
+    if unsafe or unreadable:
+        detail = "not a regular file or directory; it was not followed"
         return Checked(
-            tuple(
-                CatalogFinding(
-                    "unsafe_entry", path, "not a regular file or directory; it was not followed"
-                )
-                for path in unsafe
+            (
+                *(CatalogFinding("unsafe_entry", path, detail) for path in unsafe),
+                *(
+                    CatalogFinding("package_unreadable", path, "permission to read it is denied")
+                    for path in unreadable
+                ),
             )
         )
 
     if entries.get(MANIFEST) != "file":
         code: FindingCode = "file_missing" if mode == "verify" else "package_unreadable"
         return Checked((CatalogFinding(code, MANIFEST, "the package has no readable manifest"),))
+    if mode == "verify":  # hashed as a stream first: a hostile large manifest is never held
+        streamed = _digest(root_fd, MANIFEST)
+        if streamed is None:
+            return Checked((CatalogFinding("package_unreadable", MANIFEST, "cannot read it"),))
+        if streamed != expected_id:
+            return Checked(
+                (
+                    CatalogFinding(
+                        "manifest_digest_mismatch",
+                        MANIFEST,
+                        "it no longer hashes to the package id",
+                    ),
+                ),
+                package_id=streamed,
+            )
     manifest_bytes = _read_small(root_fd, MANIFEST)
     if manifest_bytes is None:
         return Checked((CatalogFinding("package_unreadable", MANIFEST, "cannot read it"),))
@@ -262,15 +281,16 @@ def _walk(root_fd: int) -> Iterator[tuple[str, str]]:
 
     A directory is opened only when it is listed, component by component from the root with
     ``O_NOFOLLOW`` (``_open_dir``), so at most two descriptors are held whatever the tree's width,
-    and a directory replaced by a link after it was seen is reported, not entered.
+    and a directory replaced by a link after it was seen is reported, not entered. A directory
+    that may not be opened or listed (EACCES, EPERM) is ``"unreadable"``, not unsafe.
     """
     stack = [""]
     while stack:
         prefix = stack.pop()
         try:
             fd = _open_dir(root_fd, prefix) if prefix else os.dup(root_fd)
-        except OSError:
-            yield prefix, "unsafe"
+        except OSError as exc:
+            yield prefix, _failure(exc)
             continue
         try:
             with os.scandir(fd) as found:
@@ -289,10 +309,16 @@ def _walk(root_fd: int) -> Iterator[tuple[str, str]]:
                     stack.append(path)
                 else:
                     yield path, "unsafe"  # symlink, FIFO, socket, device
-        except OSError:
-            yield prefix or ".", "unsafe"
+        except OSError as exc:
+            yield prefix or ".", _failure(exc)
         finally:
             os.close(fd)
+
+
+def _failure(exc: OSError) -> str:
+    """Why a directory could not be walked: a permission (``unreadable``), or anything else, a
+    link or a directory swapped for another entry included (``unsafe``)."""
+    return "unreadable" if exc.errno in (errno.EACCES, errno.EPERM) else "unsafe"
 
 
 def _open_dir(root_fd: int, path: str) -> int:
@@ -333,6 +359,22 @@ def _read_small(root_fd: int, path: str) -> bytes | None:
             return stream.read()
     except OSError:
         return None
+
+
+def _digest(root_fd: int, path: str) -> str | None:
+    """The sha256 of the file, read as a stream, or None if it cannot be read."""
+    try:
+        descriptor = open_below(root_fd, path)
+    except OSError:
+        return None
+    digest = hashlib.sha256()
+    try:
+        with os.fdopen(descriptor, "rb") as stream:
+            while block := stream.read(_READ_SIZE):
+                digest.update(block)
+    except OSError:
+        return None
+    return "sha256:" + digest.hexdigest()
 
 
 def _hash(root_fd: int, path: str, size: int, *, keep: bool) -> tuple[str, bytes | None] | None:
