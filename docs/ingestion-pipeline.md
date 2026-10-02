@@ -47,7 +47,7 @@ state machine over the stages above, in nine phases (ADR 0028):
 | `plan` | 6 | reuses the workspace's saved plan for (source, transform) or calls `plan`, checks it, saves it |
 | `parse` | 7 | `ingest` on one chunk the workspace has not committed; `attempts` tries (default 2) |
 | `normalize` | 7–8 | `check_chunk_output` plus `seq` unique within the chunk; commit, whole or not at all |
-| `assemble` | 8 | admits each source whose chunks all committed and pass the cross-chunk laws (each run checked against its stream and agreeing on columns, disjoint `seq` ranges, no duplicate ids, every run has its stream); stages the package beside its destination |
+| `assemble` | 8 | admits each source whose chunks all committed and pass the cross-chunk laws (each run checked against its stream and agreeing on columns, disjoint `seq` ranges, no duplicate ids, every run has its stream); stages the package beside its destination; before staging, it introspects the admitted sources' streams: each cited schema definition is read once, bounded, and parsed into one `definition_layout` line per distinct definition (within name, pointer, per-layout and per-package output limits) that each stream's `stream_layout` line names, and `stream_semantic` lines infer what each stream carries (ADR 0049) |
 | `validate` | 9 | `read_package` over the staged package; MVL-41's validators go here |
 | `commit` | 10 | writes the envelope into the staged package and renames it into place |
 
