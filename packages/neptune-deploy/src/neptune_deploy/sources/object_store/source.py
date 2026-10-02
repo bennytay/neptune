@@ -61,6 +61,11 @@ MAX_PAGES: Final = 100_000
 MAX_EXAMPLES: Final = 10  # keys a finding about many keys cites
 MAX_EXAMPLE_BYTES: Final = 256  # of each key a finding cites
 MAX_SKIPPED_KEY_BYTES: Final = 256  # of a key the source does not use, kept with length and digest
+# What one listing entry, used or not, holds besides its key and token or reason bytes: the entry
+# object, its set or dict slot, its digest and the string and int headers. tracemalloc measures
+# 226 B for an unused key and 176 B for a used one (CPython 3.12, slotted entries, short keys);
+# rounded up with margin, so ``max_listing_bytes`` bounds what the listing holds, not just its keys.
+_ENTRY_OVERHEAD_BYTES: Final = 320
 MIN_WINDOW: Final = 64 * 1024
 MAX_WINDOW: Final = 8 * 1024 * 1024  # the most one ranged GET of a stream asks for
 READER_CACHE: Final = 4  # checked chunks an ObjectReader keeps
@@ -164,7 +169,7 @@ class ObjectReadError(OSError):
         self.location = location
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ObjectEntry:
     """One object to read: where it is (with its revision), its key and listed size.
 
@@ -189,7 +194,7 @@ def _sha256(key: str | bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SkippedObject:
     """A listed entry the source does not use, and the finding code saying why.
 
@@ -212,6 +217,14 @@ class SkippedObject:
     def order(self) -> KeyOrder:
         """How unused keys are listed: by their kept prefix, then length and digest."""
         return self.raw_key, self.length, self.sha256
+
+
+def _arrival_order(pair: tuple[bytes, Listed | SkippedObject]) -> tuple[bytes, int, str]:
+    """Entries of a page in byte order of their keys; one key's entries by kind, then reason."""
+    raw, entry = pair
+    if isinstance(entry, SkippedObject):
+        return raw, 0, entry.reason
+    return raw, 1, ""
 
 
 @dataclass(frozen=True)
@@ -330,7 +343,7 @@ class ObjectStoreSource:
         kept: dict[str, Listed] = {}
         duplicated: set[str] = set()
         skipped: set[SkippedObject] = set()
-        held = 0  # bytes the listing holds: used keys and tokens whole, unused keys capped
+        held = 0  # bytes the listing holds: each entry's overhead, plus its key and token or reason
         cursors: set[bytes] = set()  # digests of the cursors seen, never the cursors themselves
         cursor: Cursor | None = None
         complete = False
@@ -365,25 +378,29 @@ class ObjectStoreSource:
                     arrived.append((raw, SkippedObject(raw, "key_too_long")))
                 else:
                     arrived.append((raw, item))
-            for raw, entry in sorted(arrived, key=lambda pair: pair[0]):
+            for raw, entry in sorted(arrived, key=_arrival_order):
                 if isinstance(entry, SkippedObject):
-                    cost = 0 if entry in skipped else len(entry.raw_key) + len(entry.reason)
+                    if entry in skipped:
+                        continue
+                    cost = len(entry.raw_key) + len(entry.reason)
                 elif entry.key in kept:
-                    cost = 0
                     if kept[entry.key] != entry:
                         duplicated.add(entry.key)
+                    continue
                 else:
-                    if len(kept) >= limit:
-                        stopped = {"max_objects": limit}
-                        break
                     cost = len(raw) + len(entry.token)
+                # A new entry, used or not: it counts against both limits, and costs what it holds.
+                if len(kept) + len(skipped) >= limit:
+                    stopped = {"max_objects": limit}
+                    break
+                cost += _ENTRY_OVERHEAD_BYTES
                 if held + cost > budget:
                     stopped = {"max_listing_bytes": budget}
                     break
                 held += cost
                 if isinstance(entry, SkippedObject):
                     skipped.add(entry)
-                elif entry.key not in kept:
+                else:
                     kept[entry.key] = entry
             if stopped is not None:
                 break
@@ -397,8 +414,8 @@ class ObjectStoreSource:
             cursors.add(digest.digest())
             cursor = page.cursor
         if stopped is not None:
-            # Covered: every key up to the last one kept, in byte order. Unused keys are reported
-            # as findings and play no part in the marker or in the object limit.
+            # Covered: every key up to the last one kept, in byte order. Unused keys count against
+            # both limits, are reported as findings, and play no part in the marker.
             last = max((key.encode("utf-8") for key in kept), default=b"")
             self.report(
                 "listing_limit", self.listing_ref, {**stopped, "covered_through_hex": last.hex()}
