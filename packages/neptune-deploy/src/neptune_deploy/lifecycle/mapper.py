@@ -583,12 +583,14 @@ class _Values:
             spec: Any = specs.get(shape.name)
             at = f"{path}/{shape.name}"
             match shape.shape:
+                # Lists are Known states inheriting the record's provenance (root ADR 0061 §4),
+                # so they stay the version 4 bare arrays.
                 case Shape.IDS:
-                    out[shape.name] = self.ids(spec, at) if spec else ()
+                    out[shape.name] = Known(self.ids(spec, at) if spec else ())
                 case Shape.STATEMENTS:
-                    out[shape.name] = self.statements(spec, at) if spec else ()
+                    out[shape.name] = Known(self.statements(spec, at) if spec else ())
                 case Shape.ITEMS:
-                    out[shape.name] = self.items(spec or (), at)
+                    out[shape.name] = Known(self.items(spec or (), at))
                 case Shape.PART:
                     assert shape.part is not None
                     out[shape.name] = self.part(
@@ -892,7 +894,8 @@ class _Mapper(_Clocks):
         """Two records of this mapping stating one identifier: both kept, one finding."""
         holders: dict[LogicalId, list[Any]] = defaultdict(list)
         for record in records:
-            for identifier in record.identifiers:
+            ids = record.identifiers  # a Known list from this mapper (root ADR 0061 §4)
+            for identifier in ids.value if isinstance(ids, Known) else ():
                 if isinstance(identifier, Known):
                     holders[identifier.value].append(record)
         rows = {
