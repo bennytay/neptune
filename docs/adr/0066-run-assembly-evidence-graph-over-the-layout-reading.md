@@ -34,8 +34,10 @@ grouping through `Grouping` (snapshot binding, MVL-38; clocks, MVL-36), so the i
    Its id is ADR 0017's evidence id under the grouping transform. Copies of one bag share their
    metadata's bytes, so its `Run` and this record: the record lists every copy's files, and each
    copy keeps its own session reading. Listed paths resolve lexically against the metadata's
-   directory; an empty, absolute, backslashed or escaping path is never resolved (the adapter's
-   `unsafe_part_path` already says why). Each `Run` the sources declare stays as declared: the
+   directory; a path the adapter calls unsafe (empty, NUL, absolute or drive letter, backslash,
+   any `..` segment: `unsafe_part_path`) is never resolved. Bags of metadata version 3 and
+   earlier list `rec/rec_0.db3` for a part of `rec/`, as rosbag2's reader resolves them; such a
+   path is read against the bag's parent when only that reading names a file the scan saw. Each `Run` the sources declare stays as declared: the
    statement joins them, nothing merges them.
 2. **Listed versus present.** Per copy: a listed file this scan did not see is
    `neptune.grouping.listed_part_missing` (missing, warning, the missing paths and their rows); a
@@ -52,7 +54,9 @@ grouping through `Grouping` (snapshot binding, MVL-38; clocks, MVL-36), so the i
    | `times_overlap` / `times_apart` | runs on clocks of one family (below) form one span / several spans with `gap_seconds` tolerance | support / contradiction | 1/2 |
    | `same_software` / `software_differs` | one software name with one / several declared commits (else releases); not scored when machines are mixed | support / contradiction | 1/5, 3/10 |
 
-   Ids in different namespaces are never compared. Times are compared only when both domains state
+   Ids in different namespaces are never compared, and a file naming several ids in one namespace
+   (a fleet log) is left out of that namespace's comparison. Software compares commits with
+   commits and releases with releases, never across. Times are compared only when both domains state
    a known epoch in {`unix`, `gps`} and the same known civil timescale (`utc`, `tai`, `gps`,
    `posix`): that pair makes them one clock. A boot, monotonic, first-sample or unknown epoch is its
    own clock until a clock mapping (MVL-36) relates it; today's MCAP, rosbag and ULog clocks are of
@@ -71,11 +75,13 @@ grouping through `Grouping` (snapshot binding, MVL-38; clocks, MVL-36), so the i
      clock family are offered as one `machine_time_merge` reading, unless a reading already holds
      them together.
    - *documents*: an unassigned document whose text names a recording's file name or stem, or a
-     session or bag directory's name (words of at least six characters; at most 100,000 words read
-     per document), joins that reading (`named_in_document`); naming readings that share no file,
+     session or bag directory's name (identifier-shaped names only: at least six characters and a
+     digit, `_`, `-` or `.`, so prose such as `camera` never joins; at most 100,000 words read per
+     document), joins that reading (`named_in_document`); naming readings that share no file,
      it is unassigned, ambiguous (`several_named`). A document naming nothing stays as v0 left it.
    - *shared configuration*: a source holding a `configuration_snapshot`, unassigned for want of
-     a session in its directory, with two or more readings in directories below it, stays
+     a session in its directory and held by no declaration, with readings of two or more separate
+     sessions below it (readings that share a file are one session), stays
      unassigned with reason `shared_reference`, placement `ambiguous` and every such reading as a
      candidate (more than 64: `unknown`, `too_many_sessions`), and each candidate gains a
      `shared_reference` reason naming it. It is a reference all of them share, never a member, so
