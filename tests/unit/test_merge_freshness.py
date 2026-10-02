@@ -93,9 +93,11 @@ def test_members_are_read_at_a_git_ref() -> None:
     assert "_template" not in members
 
 
+# ``conformance`` (with the ``harness`` and ``check`` it runs) imports no format subpackage, and a
+# change to it is outside ci_plan's ADAPTER_DIR, so it reaches every member's job.
 ADAPTER_IMPORT = re.compile(
-    r"neptune\.adapters\.(?!contract\b|registry\b)\w+"
-    r"|from\s+neptune\.adapters\s+import\s+(?!contract\b|registry\b)"
+    r"neptune\.adapters\.(?!contract\b|registry\b|conformance\b)\w+"
+    r"|from\s+neptune\.adapters\s+import\s+(?!contract\b|registry\b|conformance\b)"
     r"|neptune\.(sdk|runtime|discovery)\b"
     r"|from\s+neptune\s+import\s+[^\n]*\b(sdk|runtime|discovery|adapters)\b"
 )

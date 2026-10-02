@@ -4,6 +4,7 @@
 - ``registry``: the adapters a job may use, and the rule that picks one for a source.
 - ``check``: the contract's laws as checks, run by ``harness`` and by every adapter's tests.
 - ``harness``: one adapter over one source, in process: plan, ingest every chunk, check.
+- ``conformance``: the contract as one reusable check, for adapters outside the compiler.
 - ``builtin``: the adapters Neptune ships. ``text`` is the reference adapter to copy.
 
 A format subpackage imports only ``neptune.model``, ``neptune.identity`` and
