@@ -1,0 +1,14 @@
+calibration_id: CAL-ARM3A-0415
+robot: ARM-3A
+performed: '2026-04-15T10:05:00+02:00'
+reason: scheduled recalibration
+method: hand-eye, 24 poses, ChArUco board
+eye_on_hand: true
+robot_effector_frame: tool0
+tracking_base_frame: wrist_camera
+translation:
+  x: 0.0321
+  y: -0.0108
+  z: 0.0712
+  unit: m
+reprojection_error_px: 0.39

@@ -1,0 +1,91 @@
+{
+  "schema": "neptune-deploy.document-template/1",
+  "id": "maintenance.cell_sop_record",
+  "version": "1",
+  "description": "A cell SOP as it was carried out: the procedure's steps as the actions stated, and a work record naming the work order, the machine, when it was done, the diagnosis and the parts swapped. Plant 2 writes dates on its wall clock.",
+  "kind": "maintenance_event",
+  "zone": "Europe/Berlin",
+  "tables": {
+    "parts": [
+      "Part",
+      "Removed",
+      "Installed"
+    ]
+  },
+  "requires": {
+    "labels": [
+      "Work order",
+      "Performed on"
+    ],
+    "headings": [
+      "Procedure",
+      "Parts replaced"
+    ],
+    "tables": [
+      "parts"
+    ]
+  },
+  "ignore": {
+    "labels": [
+      "Performed by"
+    ],
+    "headings": [
+      "SOP-CELL-014 Gripper finger set change",
+      "Work record",
+      "Parts replaced"
+    ]
+  },
+  "fields": {
+    "identifiers": [
+      {
+        "label": "Work order",
+        "namespace": "plant2.work_order"
+      }
+    ],
+    "related": [
+      {
+        "label": "Procedure",
+        "namespace": "plant2.sop"
+      }
+    ],
+    "machines": [
+      {
+        "label": "Machine",
+        "namespace": "plant2.robot"
+      }
+    ],
+    "performed": {
+      "label": "Performed on",
+      "format": "%Y-%m-%d",
+      "required": true
+    },
+    "diagnosis": {
+      "label": "Diagnosis"
+    },
+    "actions": [
+      {
+        "section": "Procedure"
+      }
+    ],
+    "parts": {
+      "rows": "parts",
+      "each": {
+        "part": {
+          "column": "Part"
+        },
+        "removed": [
+          {
+            "column": "Removed",
+            "namespace": "plant2.part"
+          }
+        ],
+        "installed": [
+          {
+            "column": "Installed",
+            "namespace": "plant2.part"
+          }
+        ]
+      }
+    }
+  }
+}

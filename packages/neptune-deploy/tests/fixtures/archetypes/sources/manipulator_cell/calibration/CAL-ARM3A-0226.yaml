@@ -1,0 +1,14 @@
+calibration_id: CAL-ARM3A-0226
+robot: ARM-3A
+performed: '2026-02-26T15:10:00+01:00'
+reason: commissioning
+method: hand-eye, 24 poses, ChArUco board
+eye_on_hand: true
+robot_effector_frame: tool0
+tracking_base_frame: wrist_camera
+translation:
+  x: 0.032
+  y: -0.011
+  z: 0.071
+  unit: m
+reprojection_error_px: 0.42
