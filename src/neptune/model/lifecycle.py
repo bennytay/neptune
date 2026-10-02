@@ -68,7 +68,7 @@ from neptune.model.units import Unit, unit_from_json
 from neptune.model.versions import VersionPrimitive, version_from_json, version_to_json
 
 # The schema version that added these kinds (ADR 0037 §1, ADR 0051).
-LIFECYCLE_SINCE: Final = 3
+LIFECYCLE_SINCE: Final = 4
 
 # Stated texts in source order, each ``Known`` or ``Ambiguous`` and non-empty: commands issued,
 # corrective actions, mitigations. Order is the declaration's; a text may repeat (two resets).

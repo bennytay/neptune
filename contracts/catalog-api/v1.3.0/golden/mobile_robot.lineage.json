@@ -11,35 +11,35 @@
   "findings": [],
   "kind": {
     "knowledge": "known",
-    "value": "authorisation_envelope"
+    "value": "image"
   },
   "nodes": [
     {
       "transform": {
         "knowledge": "known",
         "value": {
-          "adapter_id": "deployment_json",
+          "adapter_id": "png",
           "adapter_version": "1.0.0",
           "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
           "libraries": {}
         }
       },
-      "transform_id": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      "transform_id": "rec:sha256:98cfc802e3995d08422acf0ddd6f309c2c1bd639906a759bd34704571f699bfb"
     }
   ],
-  "record_id": "rec:sha256:cd83aea97e78dbc95d6a6e3a3ba9b5110caeb5ff1477079cc44d45b07e414290",
+  "record_id": "rec:sha256:deec240cd3f458123c480eb7794a21c41facef5588f32c45e3dcd8888fe26006",
   "registered_by": [
     {
-      "kind": "authorisation_envelope",
+      "kind": "image",
       "line": 1,
-      "package_id": "sha256:41048ca51b55770281f886e2a9c1e240765500e6b9de07b90911d2526386bab4",
-      "record_id": "rec:sha256:cd83aea97e78dbc95d6a6e3a3ba9b5110caeb5ff1477079cc44d45b07e414290"
+      "package_id": "sha256:c804f5687845a7958966de0b52d46916240c8b307defa9d1c2cfbfc9efe89f3c",
+      "record_id": "rec:sha256:deec240cd3f458123c480eb7794a21c41facef5588f32c45e3dcd8888fe26006"
     }
   ],
   "siblings": [],
   "status": "found",
   "transform_id": {
     "knowledge": "known",
-    "value": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    "value": "rec:sha256:98cfc802e3995d08422acf0ddd6f309c2c1bd639906a759bd34704571f699bfb"
   }
 }

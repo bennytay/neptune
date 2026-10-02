@@ -2,8 +2,8 @@
 
 A ``Timestamp`` is ``(ticks, domain_id)``. Nothing here converts ticks to seconds, UTC, another
 timescale or another resolution. Ordering and arithmetic are defined only within one domain;
-mixing domains raises ``DomainMismatchError``. Relating two domains is a ``ClockAlignment``
-record (MVL-36), never an operator.
+mixing domains raises ``DomainMismatchError``. Relating two domains is a ``ClockMapping``
+record (``neptune.model.alignment``, ADR 0050), never an operator.
 
 The ``TimestampDomain`` record that names a clock and says what its ticks mean is in
 ``neptune.model.reference``: a record carries provenance, and provenance's locators use these types.
@@ -34,7 +34,7 @@ class DomainMismatchError(TypeError):
     def __init__(self, left: RecordId, right: RecordId) -> None:
         super().__init__(
             f"cannot compare or combine times from different domains ({left} vs {right});"
-            " relate them through a ClockAlignment record"
+            " relate them through a ClockMapping record"
         )
 
 
