@@ -251,13 +251,14 @@ def test_check_cli_unions_packages_and_runs_each_owner_once(
         return 0
 
     monkeypatch.setattr(tool, "run_pytest", runner)
-    for contract in ("package-schema", "catalog-api"):  # every contract the lock pins
+    pinned = sorted({contract for pins in registry.lock().values() for contract in pins})
+    for contract in pinned:  # every contract the lock pins
         for target in registry.contract(contract).owner.contract_tests:  # the CLI's repo
             (registry.root.parent / target).parent.mkdir(parents=True, exist_ok=True)
             (registry.root.parent / target).touch()
     argv = ["--root", str(registry.root), "check", "--all", "--package", "neptune-ledger"]
     assert tool.main([*argv, "--package", "neptune-ledger"]) == 0
-    assert len(calls) == 2  # the compiler's and neptune-ledger's owner tests, once each
+    assert len(calls) == len(pinned)  # each pinned contract's owner tests, once each
     assert tool.main(["--root", str(registry.root), "check", "--package", "demo"]) == 1
 
 
@@ -608,10 +609,10 @@ def test_register_regenerates_the_matrix(registry: Any) -> None:
     """A planned consumer's scaffold turns `not declared (no package yet)` into `not declared`,
     and `new-package.sh` stays green because register writes the matrix."""
     root = ["--root", str(registry.root)]
-    assert tool.register(registry, "neptune-deploy") == [
+    assert tool.register(registry, "neptune-learn") == [
         "contracts/lock.toml",
         "contracts/compatibility.md",
     ]
     assert tool.main([*root, "matrix", "--check"]) == 0
-    assert "| `neptune-deploy` | not declared |" in _text(registry.root / "compatibility.md")
-    assert tool.register(registry, "neptune-deploy") == []
+    assert "| `neptune-learn` | not declared |" in _text(registry.root / "compatibility.md")
+    assert tool.register(registry, "neptune-learn") == []
