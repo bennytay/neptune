@@ -11,10 +11,25 @@ authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 dependencies = ["neptune"]
 
 # The compiler's plugin entry points (ADR 0001 §1). `neptune.adapters`: name = the adapter id,
-# value = a zero-argument callable returning the adapter. `neptune.sources` is reserved for
-# read-only connectors and stays empty until the first one lands.
+# value = a zero-argument callable returning the adapter. `neptune.sources`: name = the connector
+# id; value = a factory `(url, *, network, ledger, options, credentials, environ)` returning a
+# read-only Source (ADR 0006 §1).
 [project.entry-points."neptune.adapters"]
 deploy_lifecycle = "neptune_deploy.adapters.lifecycle:LifecycleAdapter"
+
+[project.entry-points."neptune.sources"]
+deploy_azure_blob = "neptune_deploy.sources.object_store:azure_source"
+deploy_gcs = "neptune_deploy.sources.object_store:gcs_source"
+deploy_rerun = "neptune_deploy.sources.rerun:rerun_source"
+deploy_roboto = "neptune_deploy.sources.roboto:roboto_source"
+deploy_s3 = "neptune_deploy.sources.object_store:s3_source"
+deploy_confluence = "neptune_deploy.sources.records:confluence_source"
+deploy_gdrive = "neptune_deploy.sources.records:gdrive_source"
+deploy_jira = "neptune_deploy.sources.records:jira_source"
+deploy_linear = "neptune_deploy.sources.records:linear_source"
+deploy_onedrive = "neptune_deploy.sources.records:onedrive_source"
+deploy_rest = "neptune_deploy.sources.records:rest_source"
+deploy_servicenow = "neptune_deploy.sources.records:servicenow_source"
 
 [tool.uv.sources]
 neptune = { workspace = true }

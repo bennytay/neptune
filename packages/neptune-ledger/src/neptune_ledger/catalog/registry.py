@@ -7,7 +7,8 @@ holds the ``tx_clock`` row lock from before the package lookup to commit (ADR 00
 ``resolve`` reads the source and record indexes registration wrote (ADR 0006 §5). ``thread``,
 ``threads_of`` and ``lineage`` read the derived thread index registration writes in the same
 transaction (ADR 0003, ADR 0010). ``query`` belongs to MVL-98 and raises ``NotImplementedError``
-until it lands.
+until it lands. With a ``manifest`` path, every registration rewrites the registry manifest, and
+``replay`` re-registers a package at its logged tick on a rebuild (ADR 0012).
 """
 
 import hashlib
@@ -24,7 +25,7 @@ from psycopg import sql
 import neptune_ledger
 from neptune.identity import canonical_json
 from neptune.model.knowledge import Knowledge, Known, NotApplicable, NotCovered, Unknown
-from neptune.store.package import blob_path
+from neptune.store.package import MANIFEST, blob_path
 from neptune_ledger.api import codec
 from neptune_ledger.api.protocol import CatalogUnavailable
 from neptune_ledger.api.types import (
@@ -52,8 +53,16 @@ from neptune_ledger.api.types import (
     VerifyReport,
 )
 from neptune_ledger.catalog.check import Checked, check_package, open_root
-from neptune_ledger.catalog.index import PackageRows, RecordRow, package_rows, projection_columns
+from neptune_ledger.catalog.index import (
+    PackageRows,
+    RecordRow,
+    UnindexedVersion,
+    package_rows,
+    projection_columns,
+)
+from neptune_ledger.catalog.manifest import ManifestNotWritten, write_manifest
 from neptune_ledger.catalog.migrate import tenant_schema
+from neptune_ledger.catalog.projection import SchemaVersion, shipped_registry
 from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, check_sources
 from neptune_ledger.lineage.graph import read_lineage, unknown_record
 from neptune_ledger.threads.alignment import clock_mapping
@@ -148,6 +157,11 @@ class PostgresCatalog:
     ``None`` means no limit; it is for single-tenant hosts and tests, and ``access/`` (MVL-99)
     configures roots before any multi-tenant deployment. One connection is opened lazily and
     reused; ``close`` (or ``with``) releases it.
+
+    ``manifest`` names the tenant's registry manifest, rewritten after every registration that
+    adds a package (ADR 0012 §1). ``connection`` is for a rebuild: an open connection inside the
+    caller's transaction, which the catalog borrows, writes through with savepoints, and never
+    opens again or closes.
     """
 
     def __init__(
@@ -158,6 +172,8 @@ class PostgresCatalog:
         package_roots: Sequence[str | os.PathLike[str]] | None,
         ledger_version: str = neptune_ledger.__version__,
         attempts: int = 5,
+        manifest: str | os.PathLike[str] | None = None,
+        connection: Conn | None = None,
     ) -> None:
         self._conninfo = conninfo
         self._tenant = tenant_id
@@ -165,6 +181,8 @@ class PostgresCatalog:
         self._roots = None if package_roots is None else tuple(Path(root) for root in package_roots)
         self._ledger_version = ledger_version
         self._attempts = attempts
+        self._manifest = manifest
+        self._borrowed = connection
         self._conn: Conn | None = None
 
     def __enter__(self) -> "PostgresCatalog":
@@ -176,12 +194,45 @@ class PostgresCatalog:
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()
-            self._conn = None
+            self._conn = None  # a borrowed connection is never closed here: its owner ends it
 
     # --- register ------------------------------------------------------------------------------
 
     def register(self, package_root: str | os.PathLike[str]) -> Registration:
-        """Catalogue the package at ``package_root``; see ``CatalogApi.register``."""
+        """Catalogue the package at ``package_root``; see ``CatalogApi.register``.
+
+        With a manifest path, a registration that is not refused then rewrites the manifest, so
+        registering a package again repairs a manifest an earlier failure left stale. A failure
+        writing it raises ``ManifestNotWritten``, which carries the committed registration.
+        """
+        registration = self._register(package_root, None)
+        if self._manifest is not None and registration.outcome != "refused":
+            try:
+                write_manifest(self._connection(), self._tenant, self._manifest)
+            except (OSError, psycopg.Error) as exc:
+                raise ManifestNotWritten(registration, exc) from exc
+        return registration
+
+    def replay(self, package_root: str, tick: TransactionKey, package_id: str) -> Registration:
+        """Register ``package_root`` at ``tick``, a registration-log entry, on a rebuild.
+
+        The clock is advanced with ``replay_tx`` instead of ``next_tx`` (ADR 0002 §4), so the
+        rebuilt log holds the logged transaction key. A logged root that now resolves elsewhere
+        (a link put on one of its directories) is refused, since the rebuilt log would record
+        another root; the manifest names the new root if the package really moved. A root that
+        now holds a package other than the logged ``package_id``, however intact, is refused with
+        ``manifest_digest_mismatch``: the rebuilt log would record another package at that tick.
+        """
+        if os.path.realpath(package_root) != package_root:
+            return self._unreadable(package_root)
+        return self._register(package_root, tick, package_id)
+
+    def _register(
+        self,
+        package_root: str | os.PathLike[str],
+        tick: TransactionKey | None,
+        expected: str | None = None,
+    ) -> Registration:
         raw = Path(package_root)
         given = str(raw.absolute())  # as named, unresolved: a refusal reveals nothing more
         # Every link and ".." resolved in order (ADR 0006 §3); realpath, unlike Path.resolve on
@@ -198,8 +249,15 @@ class PostgresCatalog:
             os.close(root_fd)
         if checked.findings:
             return self._refusal(root, checked, list(checked.findings))
+        if expected is not None and checked.package_id != expected:
+            detail = f"it hashes to {checked.package_id}, not the logged package {expected}"
+            finding = CatalogFinding("manifest_digest_mismatch", MANIFEST, detail)
+            return self._refusal(root, checked, [finding])
         try:
             rows = package_rows(str(checked.package_id), checked.manifest, checked.lines)
+        except UnindexedVersion as exc:
+            finding = CatalogFinding("record_invalid", str(checked.package_id), str(exc))
+            return self._refusal(root, checked, [finding])
         except (RecursionError, MemoryError) as exc:  # hostile depth or size the readers let by
             detail = f"the record index cannot be built: {type(exc).__name__}"
             finding = CatalogFinding("record_invalid", str(checked.package_id), detail)
@@ -211,7 +269,7 @@ class PostgresCatalog:
             return self._refusal(root, checked, [finding])
         try:
             outcome, key, locator, version = self._run(
-                lambda conn: self._write(conn, rows, threads, root), refuse_as=rows.package_id
+                lambda conn: self._write(conn, rows, threads, root, tick), refuse_as=rows.package_id
             )
         except _Refused as refused:
             return self._refusal(root, checked, refused.findings)
@@ -260,9 +318,17 @@ class PostgresCatalog:
         )
 
     def _write(
-        self, conn: Conn, rows: PackageRows, threads: ThreadRows, root: str
+        self,
+        conn: Conn,
+        rows: PackageRows,
+        threads: ThreadRows,
+        root: str,
+        replayed: TransactionKey | None,
     ) -> tuple[Literal["already_registered", "registered"], TransactionKey, str, str]:
-        """The registration transaction body (ADR 0002 §4, §6; ADR 0004 §4; ADR 0005 §2)."""
+        """The registration transaction body (ADR 0002 §4, §6; ADR 0004 §4; ADR 0005 §2).
+
+        ``replayed`` is the logged tick a rebuild replays; otherwise the clock allocates one.
+        """
         conn.execute("SELECT 1 FROM tx_clock FOR UPDATE")  # held to commit: serialises the tenant
         stored = conn.execute(
             "SELECT tx_seq, tx_time, root_locator, ledger_version FROM package"
@@ -273,11 +339,16 @@ class PostgresCatalog:
             seq, at, locator, version = stored
             return "already_registered", TransactionKey(int(seq), str(at)), locator, version
         conflicts, new_sources, new_transforms = self._compare(conn, rows)
-        if conflicts:
-            raise _Refused(conflicts)
-        tick = conn.execute("SELECT tx_seq, tx_time FROM next_tx()").fetchone()
-        assert tick is not None
-        seq, at = int(tick[0]), str(tick[1])
+        unseen, remapped = self._schema_versions(conn, rows)
+        if conflicts or remapped:
+            raise _Refused([*remapped, *conflicts])
+        if replayed is None:
+            tick = conn.execute("SELECT tx_seq, tx_time FROM next_tx()").fetchone()
+            assert tick is not None
+            seq, at = int(tick[0]), str(tick[1])
+        else:
+            seq, at = replayed.tx_seq, replayed.tx_time
+            conn.execute("SELECT replay_tx(%s, %s)", (seq, at))
         t, p = self._tenant, rows.package_id
         conn.execute(
             "INSERT INTO registration_log VALUES (%s, %s, %s, %s, %s, %s)",
@@ -288,6 +359,7 @@ class PostgresCatalog:
             " VALUES (%s, %s, %s, %s)",
             (t, p, rows.schema_version, rows.receipt_id),
         )
+        self._write_schema_versions(conn, unseen, seq)
         with conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO source VALUES (%s, %s, %s)",
@@ -463,6 +535,69 @@ class PostgresCatalog:
             set(sizes) - set(stored_sizes),
             {x.transform_id for x in rows.transforms} - set(stored),
         )
+
+    def _schema_versions(
+        self, conn: Conn, rows: PackageRows
+    ) -> tuple[list[SchemaVersion], list[CatalogFinding]]:
+        """The package's schema versions this catalog has not seen, and any it indexed with
+        another projection mapping (ADR 0011 §2): a catalog built by a Ledger whose mapping of a
+        version differs is rebuilt, never extended with rows indexed two ways."""
+        registry = shipped_registry()
+        stored: dict[int, str] = {
+            int(version): str(digest)
+            for version, digest in conn.execute(
+                "SELECT schema_version, mapping_digest FROM schema_version"
+                " WHERE tenant_id = %s AND schema_version = ANY(%s)",
+                (self._tenant, list(rows.schema_versions)),
+            ).fetchall()
+        }
+        unseen: list[SchemaVersion] = []
+        remapped: list[CatalogFinding] = []
+        for version in rows.schema_versions:
+            entry = registry.entry(version)
+            assert entry is not None  # package_rows refused every version the registry lacks
+            digest = stored.get(version)
+            if digest is None:
+                unseen.append(entry)
+            elif digest != entry.mapping_digest:
+                detail = (
+                    f"this catalog indexed schema version {version} with projection mapping"
+                    f" {digest}, this Ledger with {entry.mapping_digest}; rebuild the catalog"
+                    " from its packages and registration log (ADR 0011)"
+                )
+                remapped.append(CatalogFinding("unsupported_schema_version", MANIFEST, detail))
+        return unseen, remapped
+
+    def _write_schema_versions(self, conn: Conn, unseen: list[SchemaVersion], seq: int) -> None:
+        """Record each version first seen in this registration, with its mapping (ADR 0011 §1)."""
+        t = self._tenant
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO schema_version VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    (
+                        t,
+                        e.version,
+                        e.spec.schema_id,
+                        e.contract_version,
+                        e.schema_sha256,
+                        list(e.spec.kinds),
+                        e.mapping,
+                        e.mapping_digest,
+                        seq,
+                    )
+                    for e in unseen
+                ],
+            )
+            cur.executemany(
+                "INSERT INTO schema_version_projection VALUES (%s, %s, %s, %s, %s)",
+                [
+                    (t, e.version, p.kind, p.field, column)
+                    for e in unseen
+                    for p in e.spec.projections
+                    for column in p.columns
+                ],
+            )
 
     def _stored_transforms(
         self, conn: Conn, ids: list[str]
@@ -845,6 +980,10 @@ class PostgresCatalog:
     # --- transactions --------------------------------------------------------------------------
 
     def _connection(self) -> Conn:
+        if self._borrowed is not None:  # never replaced: a write must not escape the rebuild
+            if self._borrowed.closed:
+                raise CatalogUnavailable("the rebuild's connection is closed")
+            return self._borrowed
         if self._conn is None or self._conn.closed:
             conn: Conn = psycopg.connect(self._conninfo, autocommit=True)
             conn.isolation_level = psycopg.IsolationLevel.READ_COMMITTED

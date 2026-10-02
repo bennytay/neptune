@@ -117,7 +117,14 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
 7. **Schema version 5.** It adds `civil_time_zone` and the list states.
    - Package-schema is published at **5.0.0**, because `SCHEMA_VERSION` is the registry major
      (platform ADR 0002 §3).
-   - Catalog-api takes a minor bump: it adds a kind and accepts every earlier document.
+   - Catalog-api does not move and stays at 1.6.0. Since 1.6.0 it names record kinds by the
+     package-schema contract instead of listing them (Ledger ADR 0011 §4), so a new compiler kind
+     changes no catalog-api file.
+   - The Ledger's schema-version registry (`catalog/projections.json`) gains version 5, generated
+     by `python -m neptune_ledger.catalog.projection contracts/package-schema/v5.0.0/schema.json`.
+     No migration is needed: `civil_time_zone` states no hot filter, and list states add no
+     projection. Without the entry the Ledger would refuse every version 5 package with
+     `unsupported_schema_version`.
    - No worked example or golden package changes, because none uses a zone or a list state.
 8. **Every value on a lifecycle record is stated, not only the record** (enforces ADR 0051 §1).
    A state may cite its own evidence, but any explicit provenance anywhere in a lifecycle record
