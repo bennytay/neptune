@@ -275,7 +275,8 @@ class _Hit:
     block: RecordId | None = None
     row: tuple[RecordId, int] | None = None
     lines: tuple[int, ...] = ()  # the lines of the block this label and its value took
-    cited: tuple[EvidenceRef, ...] = ()  # the span of each line of a value that took several
+    cited: tuple[EvidenceRef, ...] = ()  # the spans of the first NAMED lines of a wrapped value
+    wrapped: int = 0  # how many lines a value of several lines takes
 
 
 def _lines(text: str) -> list[tuple[int, str]]:
@@ -355,14 +356,17 @@ class _View:
 
     # Lookups (pure: nothing is marked read) ------------------------------------------------
 
-    def labels(self, name: str, template: DocumentTemplate) -> list[_Hit]:
+    def labels(
+        self, name: str, template: DocumentTemplate, *, own_line: bool = False
+    ) -> list[_Hit]:
         """Every place the document shows ``name`` with a value: an inline ``name: value`` line of a
         paragraph, or a row of a headerless table whose first cell is ``name``.
 
         An extractor wraps a paragraph into one block of several lines, and a form may put a value
         under its label. A label's value is the rest of its line and every following line of the
         block up to the next line of a label the template knows, joined by one space (ADR 0003 §4);
-        a value that goes on in another block or on another page is not followed."""
+        a value that goes on in another block or on another page is not followed. An identifier
+        (``own_line``: the form's id and version) is only the rest of its own line."""
         hits = []
         lead = name + template.separator
         for block in self.blocks:
@@ -379,7 +383,7 @@ class _View:
                     continue
                 taken = [index]
                 pieces: list[tuple[int, int, str]] = []  # (start, end, text) in the block's text
-                for at in range(index, len(lines)):
+                for at in range(index, index + 1 if own_line else len(lines)):
                     start, rest = lines[at]
                     if at > index and any(rest.startswith(k) for k in template.leads):
                         break
@@ -406,7 +410,7 @@ class _View:
                     )
                     cited = tuple(
                         EvidenceRef(evidence.source, (*inner, Span(span.start + a, span.start + b)))
-                        for a, b, _ in pieces
+                        for a, b, _ in pieces[:NAMED]
                     )
                 value = " ".join(piece[2] for piece in pieces)
                 hits.append(
@@ -416,6 +420,7 @@ class _View:
                         block=block.id,
                         lines=tuple(taken),
                         cited=cited if len(pieces) > 1 else (),
+                        wrapped=len(pieces) if len(pieces) > 1 else 0,
                     )
                 )
         for kv in self.kv:
@@ -555,13 +560,13 @@ class _DocRow(_Values):
             )
             return _Cell(Unknown(self.provenance(self.evidence)), self.evidence)
         hit = hits[0]
-        if len(hit.cited) > 1:
+        if hit.wrapped:
             self.mapper.direct.append(
                 _finding(
                     "label_value_wrapped",
                     hit.place,
                     self.mapper.transform,
-                    {"reference": column},
+                    {"reference": column, "lines": hit.wrapped},
                     related=hit.cited,
                     records=[self.record_id],
                 )
@@ -728,12 +733,12 @@ def _judge(view: _View, template: DocumentTemplate) -> _Verdict:
     seen: list[EvidenceRef] = []
     if template.form is not None:
         form = template.form
-        named = view.labels(form.label, template)
+        named = view.labels(form.label, template, own_line=True)
         # A form shown more than once (say, on every page) is that form if every statement agrees.
         if not named or any(_text(hit.state) != form.value for hit in named):
             return _Verdict(template, "other")
         seen.append(named[0].place)
-        versions = view.labels(form.version_label, template)
+        versions = view.labels(form.version_label, template, own_line=True)
         states = sorted({text for hit in versions if (text := _text(hit.state)) is not None})
         found = states[0] if len(states) == 1 and len(versions) >= 1 else None
         if found != form.version or any(_text(hit.state) is None for hit in versions):
@@ -899,11 +904,11 @@ class _TemplateMapper(_Clocks):
                 if hit.row is not None:
                     rows.add(hit.row)
 
-        labels = [*template.require_labels, *template.ignore_labels]
-        if template.form is not None:
-            labels += [template.form.label, template.form.version_label]
-        for label in labels:
+        for label in (*template.require_labels, *template.ignore_labels):
             mark(view.labels(label, template))
+        if template.form is not None:
+            for label in (template.form.label, template.form.version_label):
+                mark(view.labels(label, template, own_line=True))
         for name in (*template.require_headings, *template.ignore_headings):
             read.update(heading.id for heading in view.headings(name))
         for header in template.tables.values():

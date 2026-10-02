@@ -47,6 +47,8 @@ another. Forces:
    - if the template declares a `form`: the document shows the form's id label with its value, and the
      version label with the declared version, exactly, as text (a label shown on every page counts once
      if every statement agrees; one that disagrees is not the form, and two versions are a mismatch).
+     The form's id and version labels are identifiers, not prose: each reads only the rest of its own
+     line (§4's wrapped values do not apply), and the lines after it stay for other labels or `text_unread`.
      The same id with another version is not a match and never a near one: it is `template_version_mismatch`, no record, naming the version found;
    - every `requires` label, heading and table is present: a label by its text, a heading by its text, a
      table by its exact header cells. A template with a form that lacks structure is
@@ -65,7 +67,8 @@ another. Forces:
      line of the same block up to the next line that starts with a label the template names** (a
      field's, a required or ignored one, the form's), joined by one space. The value cites one span
      from its first line's text to its last line's; one citation cannot hold text joined that way, so a
-     value of several lines also gets a `label_value_wrapped` finding listing each line's span. A value
+     value of several lines also gets a `label_value_wrapped` finding with the line count and the spans of
+     its first lines (capped like every finding's list, so a block of thousands of lines stays small). A value
      that goes on in another block or on another page is not followed (§9). Reads are tracked per
      line: a line no label took (before the first label of its block, say) is `text_unread` with its
      own span. A label shown twice is `label_repeated` and `Unknown`, unless every statement is the same
