@@ -25,6 +25,7 @@ rules name, decodes nothing (the adapters did, ADR 0068 §1), never composes a t
 writes no source value: every line is a new record beside the evidence.
 """
 
+import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -121,6 +122,16 @@ def _topic(stream: Stream) -> str:
 def is_static_topic(topic: str) -> bool:
     """tf2 publishes static transforms on ``tf_static``, under any namespace."""
     return topic.rstrip("/").split("/")[-1] == "tf_static"
+
+
+def _same(a: tuple[object, ...], b: tuple[object, ...]) -> bool:
+    """Two transforms' values are one statement: equal numbers, NaN counted equal to NaN (a
+    restated NaN is the same statement, not a change)."""
+
+    def norm(value: object) -> object:
+        return "nan" if isinstance(value, float) and math.isnan(value) else value
+
+    return [norm(x) for x in a] == [norm(x) for x in b]
 
 
 def _key(ref: FrameRef) -> tuple[str, str]:
@@ -311,22 +322,22 @@ class _Pass:
                     continue
                 if parent == child:
                     continue
+                if not isinstance(tick, int) or isinstance(tick, bool):
+                    tree.untimed += 1  # no instant to place it at: no sample of any edge
+                    continue
                 edge = tree.edges.setdefault(
                     (stream.id, parent, child), _Edge(stream, parent, child)
                 )
                 edge.samples += 1
-                if isinstance(tick, int) and not isinstance(tick, bool):
-                    edge.first = tick if edge.first is None else min(edge.first, tick)
-                    edge.last = tick if edge.last is None else max(edge.last, tick)
-                else:
-                    tree.untimed += 1
+                edge.first = tick if edge.first is None else min(edge.first, tick)
+                edge.last = tick if edge.last is None else max(edge.last, tick)
                 if static:
                     value = tuple(
                         v[k] if isinstance(v, list | tuple) and k < len(v) else None for v in values
                     )
                     if edge.value is None:
                         edge.value = value
-                    elif value != edge.value:
+                    elif not _same(value, edge.value):
                         edge.changed = True
                 tree.frames.update((parent, child))
 
@@ -579,9 +590,10 @@ def _tree_edges(
         parents[child].add(parent)
         if not static:
             dynamic.update((parent, child))
-        pair = tuple(sorted((edge.parent, edge.child)))
-        if pair not in joined:
-            joined.add(pair)  # type: ignore[arg-type]
+        if (edge.child, edge.parent) in joined:
+            loops.append([edge.parent, edge.child])  # stated both ways: a loop of two
+        elif (edge.parent, edge.child) not in joined:
+            joined.add((edge.parent, edge.child))
             if not union.union(parent, child):
                 loops.append([edge.parent, edge.child])
         if edge.changed:
@@ -650,8 +662,8 @@ def _tree_findings(
             FindingCategory.MISSING,
             Severity.INFO,
             subject,
-            f"{tree.untimed} transform(s) are in rows whose clock-0 time is unknown; they count"
-            " as samples but set no edge's first or last instant",
+            f"{tree.untimed} transform(s) are in rows whose clock-0 time is unknown; with no"
+            " instant to place them at, they are no edge's samples",
             {"count": tree.untimed},
             records,
         )

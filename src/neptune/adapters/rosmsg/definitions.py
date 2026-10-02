@@ -449,7 +449,9 @@ class _Idl:
             if element.array is not None:
                 raise DefinitionError("unsupported", "a sequence of arrays is not read")
             kind = ArrayKind.UNBOUNDED if bound is None else ArrayKind.BOUNDED
-            return FieldDef("", element.type, element.wire, element.declared, kind, bound)
+            return FieldDef(
+                "", element.type, element.wire, element.declared, kind, bound, element.bound
+            )
         if token in ("string", "wstring"):
             bound = None
             if self.peek() == "<":

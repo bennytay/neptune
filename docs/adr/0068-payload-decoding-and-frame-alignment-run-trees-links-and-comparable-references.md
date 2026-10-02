@@ -41,7 +41,8 @@ why. Forces:
      `payload_not_decoded` with its `reason`. Every type is decoded, not a list of types.
    - Columns are `value/<field path>`, the path as ADR 0049's layouts write it (`header.stamp.sec`,
      `transforms[].child_frame_id`). A path under one array level is a list column; a byte array
-     (`uint8`, `byte`, `char`, `octet`) and a path under two array levels are walked without a
+     (`uint8`, `byte`, `char`, `octet`), a path under two array levels and a field named as the
+     adapter's own value column (MCAP's `sequence`, rosbag2's `message_id`) are walked without a
      column (`payload_partly_decoded` lists them); ROS 1 `time` and `duration` are `<path>.secs`
      and `<path>.nsecs`. Each value column has its state column: `unknown` where the payload does
      not hold its layout (CDR encapsulation and XCDR1 alignment, either byte order; ROS 1 packed

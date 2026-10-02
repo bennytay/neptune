@@ -6,6 +6,7 @@ and a mobile manipulator (ROS 1 bag). The pass reads the adapters' records and d
 rows, as the job hands them over; nothing here decodes a payload.
 """
 
+import math
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
@@ -429,3 +430,50 @@ def test_declared_transforms_carry_their_own_caveats() -> None:
     assert isinstance(answer, Comparable)
     assert Caveat.TRANSLATION_UNIT_UNKNOWN in answer.caveats  # Kalibr states no unit
     assert answer.path[0].kind is StepKind.TRANSFORM
+
+
+def test_transforms_with_no_instant_are_no_edge_and_join_nothing() -> None:
+    corpus = Corpus("arm")
+    tf = corpus.stream("/tf")
+
+    def rows(of: Stream, columns: Sequence[str]) -> Iterator[Mapping[str, object]]:
+        for row in corpus.rows(of, columns):
+            if of.id == tf.id:
+                row = {**row, "time/0": None, "state/time/0": "unknown"}
+            yield row
+
+    found = align_frames(corpus.records, rows)
+    assert found is not None
+    untimed = next(f for f in found.findings if f.code.endswith("untimed_transforms"))
+    assert untimed.details["count"] == 4 * 5  # four messages of five transforms
+    assert not [e for e in found.edges if e.stream == tf.id]
+    disconnected = next(f for f in found.findings if f.code.endswith("disconnected"))
+    names = {n for group in disconnected.details["groups"] for n in group}  # type: ignore[union-attr]
+    assert "shoulder_link" not in names  # named only by untimed transforms: no frame of the tree
+
+
+def test_a_static_transform_restated_with_the_same_nan_is_not_a_change() -> None:
+    corpus = Corpus("arm")
+    static = corpus.stream("/tf_static")
+    column = "value/transforms[].transform.translation.z"
+
+    def rows(of: Stream, columns: Sequence[str]) -> Iterator[Mapping[str, object]]:
+        found = [dict(row) for row in corpus.rows(of, columns)]
+        if of.id == static.id and found:
+            found[0][column] = [math.nan for _ in found[0][column]]  # type: ignore[attr-defined]
+            again = dict(found[0])
+            again["time/0"] = int(again["time/0"]) + 1  # type: ignore[call-overload]
+            found.append(again)
+        yield from found
+
+    result = align_frames(corpus.records, rows)
+    assert result is not None and "static_changed" not in codes(result)
+
+
+def test_a_pair_stated_both_ways_is_a_loop() -> None:
+    corpus = Corpus("arm")
+    tf = corpus.stream("/tf")
+    found = align_frames(corpus.records, _with_extra(corpus, tf, [("shoulder_link", "base_link")]))
+    assert found is not None
+    loop = next(f for f in found.findings if f.code.endswith(".loop"))
+    assert ["shoulder_link", "base_link"] in loop.details["pairs"]  # type: ignore[operator]

@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 from neptune.adapters.contract import AdapterConfig, Chunk, ChunkOutput, SourceReader
 from neptune.adapters.rosbag1.ingest import (
-    HEADER_TIME,
+    HEADER_CLOCK,
     TIME,
     Cite,
     ConnectionReader,
@@ -53,12 +53,11 @@ from neptune.adapters.rosbag1.scan import (
     whole,
 )
 from neptune.adapters.rosmsg.streams import (
-    KNOWN,
-    LIMIT_REASONS,
-    UNKNOWN,
     Decoding,
     Undecoded,
+    add_cells,
     decode_row,
+    undecoded_report,
 )
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
@@ -69,7 +68,6 @@ from neptune.model.series import (
     SeriesBatch,
     SeriesColumn,
     locator_column,
-    state_column,
 )
 
 _CHUNK_PROBLEMS = {
@@ -705,12 +703,7 @@ class Data:
         header_length = int.from_bytes(data[offset : offset + 4], "little")
         start = offset + 8 + header_length
         decoded = decode_row(slot.decoding, memoryview(data)[start : offset + length])
-        rows = slot.rows
-        for name, cell in decoded.cells.items():
-            rows[name].append(cell)
-        if slot.decoding.has_header:
-            rows[HEADER_TIME].append(decoded.stamp)
-            rows[state_column(HEADER_TIME)].append(KNOWN if decoded.stamp is not None else UNKNOWN)
+        add_cells(slot.rows, slot.decoding, decoded, HEADER_CLOCK)
         if decoded.problem is not None:
             slot.undecoded.add(decoded.problem.reason, place)
 
@@ -719,20 +712,18 @@ class Data:
     def _payload_findings(self) -> None:
         """One finding per stream whose payloads this chunk could not all decode."""
         for conn, slot in sorted(self.slots.items()):
-            undecoded = slot.undecoded
-            if not undecoded.total or not isinstance(undecoded.first, Place):
+            first = slot.undecoded.first
+            report = undecoded_report(slot.undecoded, f"connection {conn}", {"id": conn})
+            if report is None or not isinstance(first, Place):
                 continue
-            limit = set(undecoded.counts) <= LIMIT_REASONS
             self.findings.append(
                 self.reporter.finding(
-                    "payload_undecodable",
-                    FindingCategory.LIMIT if limit else FindingCategory.CORRUPT,
-                    Severity.WARNING,
-                    undecoded.first,
-                    f"{undecoded.total} payload(s) of connection {conn} here do not decode by its"
-                    " definition; their values are unknown (not covered past a limit), each row"
-                    " still cites its message",
-                    {"counts": dict(sorted(undecoded.counts.items())), "id": conn},
+                    report.code,
+                    report.category,
+                    report.severity,
+                    first,
+                    report.message,
+                    report.details,
                     records=(slot.stream,),
                 )
             )

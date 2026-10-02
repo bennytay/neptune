@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:472d399601d119ec7ce5899d528dfc5e133ab8a8d723bad23a64b710255bd5dd`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:527584215936167bdce6bcefcfcca00500b191a1cbb20312a1a6be64430caa21`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -62,8 +62,8 @@ Receipt `rec:sha256:472d399601d119ec7ce5899d528dfc5e133ab8a8d723bad23a64b710255b
 ## Findings
 
 - **info** `mcap.attachment_not_extracted` (unsupported): an attachment of 50 bytes is an embedded file no record kind holds yet; it is cited here, its name and media type in the details · `rec:2e81c72ba19e`
-- **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded (message encoding 'json' is not ROS 1 or CDR); each row cites its message's bytes · `rec:2b19967bac9f`
-- **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded (message encoding 'json' is not ROS 1 or CDR); each row cites its message's bytes · `rec:c4834fbc688f`
+- **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded (message encoding 'json' is not ROS 1 or CDR); each row cites its message · `rec:8c94312891e8`
+- **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded (message encoding 'json' is not ROS 1 or CDR); each row cites its message · `rec:edb8807841c4`
 - **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:092721c2cc0d`
 - **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:b3d2298c7e9d`
 - **info** `neptune.clocks.latency_unbounded` (missing): 4 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:c717a7b0cdc0`

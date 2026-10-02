@@ -93,7 +93,7 @@ class Column:
 @dataclass(frozen=True)
 class LeftOut:
     path: str
-    reason: str  # byte_array, nested_array
+    reason: str  # byte_array, nested_array, name_taken
 
 
 @dataclass(frozen=True)
@@ -324,16 +324,22 @@ class Layout:
 
 
 class _Compiler:
-    def __init__(self, definition: Definition, limits: DecodeLimits, ros1: bool) -> None:
+    def __init__(
+        self, definition: Definition, limits: DecodeLimits, ros1: bool, reserved: frozenset[str]
+    ) -> None:
         self.types = definition.types
         self.limits = limits
         self.ros1 = ros1
+        self.reserved = reserved
         self.columns: list[Column] = []
         self.left_out: list[LeftOut] = []
 
     def column(self, path: str, wire: str, arrays: int) -> int | None:
         if arrays > 1:
             self.left_out.append(LeftOut(path, "nested_array"))
+            return None
+        if path in self.reserved:
+            self.left_out.append(LeftOut(path, "name_taken"))
             return None
         if len(self.columns) >= self.limits.max_columns:
             raise DefinitionError(
@@ -415,15 +421,21 @@ def header_field(definition: Definition) -> FieldDef | None:
 
 
 def compile_layout(
-    definition: Definition, limits: DecodeLimits, *, header_only: bool = False
+    definition: Definition,
+    limits: DecodeLimits,
+    *,
+    header_only: bool = False,
+    reserved: frozenset[str] = frozenset(),
 ) -> Layout:
     """The layout of ``definition``'s root; ``header_only`` reads only a leading header.
 
+    ``reserved`` are paths the adapter's own columns already use (MCAP's ``sequence``): a field at
+    one of them is walked without a column (``name_taken``), never a second column of one name.
     Raises ``DefinitionError`` (``column_limit``, ``nesting_limit``, ``unsupported``) where the
     layout cannot be built; a caller may then try ``header_only``.
     """
     ros1 = definition.encoding == "ros1msg"
-    compiler = _Compiler(definition, limits, ros1)
+    compiler = _Compiler(definition, limits, ros1, reserved)
     header = header_field(definition)
     root = definition.root_type
     if header_only:
@@ -435,11 +447,13 @@ def compile_layout(
     stamp = None
     if header is not None:
         index = {column.path: i for i, column in enumerate(compiler.columns)}
-        if ros1:
-            seconds, nanos = index["header.stamp.secs"], index["header.stamp.nsecs"]
-        else:
-            seconds, nanos = index["header.stamp.sec"], index["header.stamp.nanosec"]
-        stamp = HeaderStamp(seconds, nanos, index["header.frame_id"])
+        stamp_field = next(f for f in definition.types[header.type].fields if f.name == "stamp")
+        # ROS 1's primitive ``time`` is two columns, ``secs`` and ``nsecs``; a Time message's
+        # fields are its own (``sec``, ``nanosec``), whichever dialect declares it.
+        names = ("secs", "nsecs") if stamp_field.wire == "time" else ("sec", "nanosec")
+        wanted = (f"header.stamp.{names[0]}", f"header.stamp.{names[1]}", "header.frame_id")
+        if all(path in index for path in wanted):
+            stamp = HeaderStamp(index[wanted[0]], index[wanted[1]], index[wanted[2]])
     return Layout(
         root.name,
         tuple(compiler.columns),

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Final
 
 from neptune.adapters.contract import AdapterConfig, Chunk, ChunkOutput, SourceReader, read_pieces
 from neptune.adapters.mcap.ingest import (
-    HEADER_TIME,
+    HEADER_CLOCK,
     KNOWN,
     LOG_TIME,
     PUBLISH_TIME,
@@ -65,7 +65,13 @@ from neptune.adapters.mcap.scan import (
     read_exact,
     scan,
 )
-from neptune.adapters.rosmsg.streams import LIMIT_REASONS, Decoding, Undecoded, decode_row
+from neptune.adapters.rosmsg.streams import (
+    Decoding,
+    Undecoded,
+    add_cells,
+    decode_row,
+    undecoded_report,
+)
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonValue
@@ -360,6 +366,7 @@ class Data:
         head: tuple[int, int, int, int],
         steps: tuple[tuple[int, int], ...],
         payload: "Callable[[], bytes | memoryview] | None" = None,
+        size: int | None = None,
     ) -> None:
         _, sequence, log_time, publish_time = head
         if not self.selection.admits(log_time):
@@ -375,14 +382,8 @@ class Data:
             rows[locator_column(step, "length")].append(size)
             rows[locator_column(step, "offset")].append(offset)
         if slot.decoding is not None and payload is not None:
-            decoded = decode_row(slot.decoding, payload())
-            for name, cell in decoded.cells.items():
-                rows[name].append(cell)
-            if slot.decoding.has_header:
-                rows[HEADER_TIME].append(decoded.stamp)
-                rows[state_column(HEADER_TIME)].append(
-                    KNOWN if decoded.stamp is not None else UNKNOWN
-                )
+            decoded = decode_row(slot.decoding, payload, size)
+            add_cells(rows, slot.decoding, decoded, HEADER_CLOCK)
             if decoded.problem is not None:
                 slot.undecoded.add(decoded.problem.reason, Place(steps))
 
@@ -402,7 +403,10 @@ class Data:
             def payload() -> bytes:
                 return content_of(self.source, record, MESSAGE_FIELDS)
 
-            self._row(slot, seq, _MESSAGE_HEAD.unpack_from(head), record.place.steps, payload)
+            # The payload is read from the source only when its size is within the limit.
+            size = record.length - MESSAGE_FIELDS
+            fields = _MESSAGE_HEAD.unpack_from(head)
+            self._row(slot, seq, fields, record.place.steps, payload, size)
 
     def _advance(self, counts: Counter[int]) -> None:
         for channel, slot in self.slots.items():
@@ -852,20 +856,18 @@ class Data:
     def _payload_findings(self) -> None:
         """One finding per stream whose payloads this chunk could not all decode."""
         for channel, slot in sorted(self.slots.items()):
-            undecoded = slot.undecoded
-            if not undecoded.total or not isinstance(undecoded.first, Place):
+            first = slot.undecoded.first
+            report = undecoded_report(slot.undecoded, f"channel {channel}", {"id": channel})
+            if report is None or not isinstance(first, Place):
                 continue
-            limit = set(undecoded.counts) <= LIMIT_REASONS
             self.findings.append(
                 self.reporter.finding(
-                    "payload_undecodable",
-                    FindingCategory.LIMIT if limit else FindingCategory.CORRUPT,
-                    Severity.WARNING,
-                    undecoded.first,
-                    f"{undecoded.total} payload(s) of channel {channel} here do not decode by its"
-                    " definition; their values are unknown (not covered past a limit), each row"
-                    " still cites its message",
-                    {"counts": dict(sorted(undecoded.counts.items())), "id": channel},
+                    report.code,
+                    report.category,
+                    report.severity,
+                    first,
+                    report.message,
+                    report.details,
                     records=(slot.stream,),
                 )
             )

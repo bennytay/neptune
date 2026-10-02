@@ -21,7 +21,15 @@ from neptune.adapters.rosbag1.scan import (
     read_exact,
     scan,
 )
-from neptune.adapters.rosmsg.streams import HEADER_STAMP, Decoding, NotDecoded, plan_stream
+from neptune.adapters.rosmsg.streams import (
+    HEADER_STAMP,
+    Decoding,
+    NotDecoded,
+    decoded_columns,
+    decoding_report,
+    header_domain,
+    plan_stream,
+)
 from neptune.identity.provenance import EvidenceRecord, evidence_record_id
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
@@ -37,7 +45,6 @@ from neptune.model.series import (
     SeriesColumn,
     SeriesProvenance,
     locator_column,
-    state_column,
     step_template,
     time_column,
 )
@@ -46,7 +53,7 @@ from neptune.model.time import NANOSECOND, ClockRole, Timestamp
 TIME_FIELD: Final = "rosbag1:time_field"
 MAGIC_PLACE: Final = Place(((0, len(MAGIC)),))
 TIME: Final = time_column(0)
-HEADER_TIME: Final = time_column(1)
+HEADER_CLOCK: Final = 1  # a leading header's stamp, where the payload decodes
 SCHEMA_ENCODING: Final = "ros1msg"  # the MCAP registry's names for the bag's own formats
 MESSAGE_ENCODING: Final = "ros1"
 # Connection header fields the stream holds elsewhere; every other field is its metadata.
@@ -68,13 +75,7 @@ def columns(
             (locator_column(step, "length"), ColumnType.INT64, False),
             (locator_column(step, "offset"), ColumnType.INT64, False),
         ]
-    if isinstance(decoding, Decoding):
-        found += decoding.series_columns()
-        if decoding.has_header:
-            found += [
-                (HEADER_TIME, ColumnType.INT64, False),
-                (state_column(HEADER_TIME), ColumnType.STRING, False),
-            ]
+    found += decoded_columns(decoding, HEADER_CLOCK)
     return tuple(sorted(found))
 
 
@@ -383,53 +384,28 @@ class Declarations:
     def _header_clock(
         self, place: Place, topic: Knowledge[str], conn: int, definition: EvidenceRef
     ) -> TimestampDomain:
-        """The clock a leading ``Header``'s stamp reads (ADR 0068 §2): nanosecond ticks, as the
-        definition's ``time`` declares them; role, epoch and timescale are the publisher's and
-        unstated."""
-        cite = self.cite
-        where = (time_field(HEADER_STAMP),)
-        scope = (topic.value,) if isinstance(topic, Known) else ("connection", str(conn))
-        stated = Provenance(definition, cite.transform.id, AssertionKind.STATED)
-        return TimestampDomain(
-            id=cite.record_id(TimestampDomain.kind, place, *where),
+        """The clock a leading ``Header``'s stamp reads (ADR 0068 §2)."""
+        cite, where = self.cite, (time_field(HEADER_STAMP),)
+        return header_domain(
+            record_id=cite.record_id(TimestampDomain.kind, place, *where),
             provenance=cite.provenance(place, *where),
-            field=HEADER_STAMP,
-            scope=scope,
-            role=Unknown(),
-            resolution=Known(NANOSECOND, stated),
-            epoch=Unknown(),
-            timescale=Unknown(),
-            declared_monotonic=Unknown(),
+            scope=(topic.value,) if isinstance(topic, Known) else ("connection", str(conn)),
+            definition=Provenance(definition, cite.transform.id, AssertionKind.STATED),
         )
 
     def _decoding_findings(
         self, conn: int, place: Place, stream: RecordId, decoding: Decoding | NotDecoded
     ) -> None:
-        if isinstance(decoding, NotDecoded):
+        details: dict[str, JsonValue] = {"id": conn, "message_encoding": MESSAGE_ENCODING}
+        report = decoding_report(decoding, f"connection {conn}", details)
+        if report is not None:
             self.finding(
-                "payload_not_decoded",
-                FindingCategory.UNSUPPORTED,
-                Severity.INFO,
+                report.code,
+                report.category,
+                report.severity,
                 place,
-                f"connection {conn}'s message payloads are not decoded ({decoding.detail}); each"
-                " row cites its message's bytes",
-                {"id": conn, "message_encoding": MESSAGE_ENCODING, "reason": decoding.reason},
-                records=(stream,),
-            )
-        elif decoding.mode != "full":
-            what = (
-                f"only its header is decoded ({decoding.detail})"
-                if decoding.mode == "header_only"
-                else f"{len(decoding.left_out)} field path(s) are walked without a column"
-            )
-            self.finding(
-                "payload_partly_decoded",
-                FindingCategory.UNSUPPORTED,
-                Severity.INFO,
-                place,
-                f"connection {conn}'s payloads are decoded, but {what}; each row still cites its"
-                " message's bytes",
-                {"id": conn, **decoding.details()},  # type: ignore[dict-item]
+                report.message,
+                report.details,
                 records=(stream,),
             )
 

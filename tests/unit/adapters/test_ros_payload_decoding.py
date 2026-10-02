@@ -8,6 +8,7 @@ payload the official reader refuses must have every value ``unknown`` and a find
 """
 
 import json
+import struct
 from pathlib import Path
 from typing import Any, Final
 
@@ -20,7 +21,7 @@ from neptune.adapters.rosbag1 import Rosbag1Adapter
 from neptune.adapters.rosbag2 import Rosbag2Adapter
 from neptune.adapters.rosmsg.codec import DecodeLimits, Decoder, Malformed, compile_layout
 from neptune.adapters.rosmsg.definitions import DefinitionError, parse_definition
-from neptune.adapters.rosmsg.streams import Decoding, NotDecoded, plan_stream
+from neptune.adapters.rosmsg.streams import Decoding, NotDecoded, decode_row, plan_stream
 from neptune.discovery.reader import BytesReader
 from neptune.model.knowledge import Known
 from neptune.model.run import Stream
@@ -318,3 +319,71 @@ def test_a_stream_is_decoded_only_by_what_it_declares() -> None:
     ):
         found = plan(**kwargs)
         assert isinstance(found, NotDecoded) and found.reason == reason
+
+
+def test_a_field_named_like_an_adapter_column_gets_no_second_column() -> None:
+    found = plan_stream(
+        config=config(),
+        message_encoding="cdr",
+        schema_encoding="ros2msg",
+        schema_name="pkg/msg/Counter",
+        definition=b"uint32 sequence\nfloat64 value\n",
+        reserved=frozenset({"sequence"}),
+    )
+    assert isinstance(found, Decoding) and found.mode == "partial"
+    assert [(i.path, i.reason) for i in found.left_out] == [("sequence", "name_taken")]
+    assert [name for name, _, _ in found.series_columns()] == [
+        "state/value/value",
+        "value/value",
+    ]
+    cells = found.decoder.decode(cdr(b"\x07\x00\x00\x00", b"\x00" * 4, struct.pack("<d", 2.5)))
+    assert cells == [2.5]
+
+
+def test_a_ros1_header_whose_stamp_is_a_time_message_reads_sec_and_nanosec() -> None:
+    text = (
+        b"Header header\n"
+        + b"=" * 80
+        + b"\nMSG: std_msgs/Header\nbuiltin_interfaces/Time stamp\nstring frame_id\n"
+        + b"=" * 80
+        + b"\nMSG: builtin_interfaces/Time\nint32 sec\nuint32 nanosec\n"
+    )
+    found = plan_stream(
+        config=config(),
+        message_encoding="ros1",
+        schema_encoding="ros1msg",
+        schema_name="pkg/Stamped",
+        definition=text,
+    )
+    assert isinstance(found, Decoding) and found.has_header
+    payload = struct.pack("<iI", 3, 5) + struct.pack("<I", 1) + b"x"
+    cells = found.decoder.decode(payload)
+    assert found.decoder.stamp(cells) == 3 * 10**9 + 5
+
+
+def test_a_payload_past_the_message_limit_is_never_read() -> None:
+    found = plan_stream(
+        config=config(max_message_bytes=8),
+        message_encoding="cdr",
+        schema_encoding="ros2msg",
+        schema_name="pkg/msg/Values",
+        definition=b"float64 x\n",
+    )
+    assert isinstance(found, Decoding)
+
+    def unread() -> bytes:
+        raise AssertionError("the payload is read")
+
+    row = decode_row(found, unread, size=1 << 30)
+    assert row.problem is not None and row.problem.reason == "message_limit"
+    assert row.cells["state/value/x"] == "not_covered"
+
+
+def test_a_bounded_string_in_an_idl_sequence_keeps_its_bound() -> None:
+    text = b"module pkg { module msg { struct Names { sequence<string<2>> names; }; }; };"
+    definition = parse_definition(text, "ros2idl", "pkg/msg/Names")
+    decoder = Decoder(compile_layout(definition, DecodeLimits()), True, DecodeLimits())
+    assert decoder.decode(cdr(b"\x01\x00\x00\x00", b"\x03\x00\x00\x00ab\x00")) == [("ab",)]
+    with pytest.raises(Malformed) as caught:
+        decoder.decode(cdr(b"\x01\x00\x00\x00", b"\x04\x00\x00\x00abc\x00"))
+    assert caught.value.reason == "string_bound"
