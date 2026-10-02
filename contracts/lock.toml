@@ -6,7 +6,7 @@
 [neptune-deploy]
 catalog-api = "1.4.0"
 graph-schema = "1.0.0"
-package-schema = "4.0.0"
+package-schema = "5.0.0"
 
 [neptune-ledger]
 package-schema = "5.0.0"
