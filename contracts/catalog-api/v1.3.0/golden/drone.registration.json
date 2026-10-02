@@ -5,7 +5,7 @@
   "outcome": "registered",
   "package_id": {
     "knowledge": "known",
-    "value": "sha256:757f33c0c11dfcda68478d0c6909e18c6f17eddbc9afae61a9f77c3b53762b5c"
+    "value": "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25"
   },
   "record_counts": [
     {
@@ -31,6 +31,14 @@
     {
       "count": 1,
       "kind": "run"
+    },
+    {
+      "count": 1,
+      "kind": "run_assembly"
+    },
+    {
+      "count": 3,
+      "kind": "snapshot_binding"
     },
     {
       "count": 1,
@@ -67,6 +75,6 @@
   "root_locator": "/srv/neptune/packages/drone",
   "schema_version": {
     "knowledge": "known",
-    "value": 1
+    "value": 3
   }
 }

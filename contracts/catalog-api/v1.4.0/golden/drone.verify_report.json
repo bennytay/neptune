@@ -1,0 +1,25 @@
+{
+  "api_version": "1.4.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "files_checked": 34,
+  "findings": [],
+  "package_id": "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25",
+  "registration_key": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 1,
+      "tx_time": "2026-10-02T00:00:01.000000Z"
+    }
+  },
+  "root_locator": {
+    "knowledge": "known",
+    "value": "/srv/neptune/packages/drone"
+  },
+  "verdict": "intact"
+}

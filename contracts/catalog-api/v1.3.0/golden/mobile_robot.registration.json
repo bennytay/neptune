@@ -5,51 +5,31 @@
   "outcome": "registered",
   "package_id": {
     "knowledge": "known",
-    "value": "sha256:41048ca51b55770281f886e2a9c1e240765500e6b9de07b90911d2526386bab4"
+    "value": "sha256:c804f5687845a7958966de0b52d46916240c8b307defa9d1c2cfbfc9efe89f3c"
   },
   "record_counts": [
-    {
-      "count": 1,
-      "kind": "authorisation_envelope"
-    },
-    {
-      "count": 1,
-      "kind": "change_record"
-    },
-    {
-      "count": 1,
-      "kind": "commissioning_baseline"
-    },
     {
       "count": 1,
       "kind": "image"
     },
     {
       "count": 1,
-      "kind": "incident_record"
-    },
-    {
-      "count": 1,
-      "kind": "intervention"
-    },
-    {
-      "count": 1,
-      "kind": "risk_assessment"
-    },
-    {
-      "count": 1,
       "kind": "run"
+    },
+    {
+      "count": 1,
+      "kind": "run_assembly"
     },
     {
       "count": 2,
       "kind": "site"
     },
     {
-      "count": 4,
+      "count": 3,
       "kind": "source_artifact"
     },
     {
-      "count": 4,
+      "count": 3,
       "kind": "source_revision"
     },
     {
@@ -65,11 +45,11 @@
       "kind": "structured_table"
     },
     {
-      "count": 4,
+      "count": 3,
       "kind": "timestamp_domain"
     },
     {
-      "count": 4,
+      "count": 3,
       "kind": "transform_record"
     }
   ],
@@ -83,6 +63,6 @@
   "root_locator": "/srv/neptune/packages/mobile_robot",
   "schema_version": {
     "knowledge": "known",
-    "value": 1
+    "value": 3
   }
 }

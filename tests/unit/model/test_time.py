@@ -57,7 +57,7 @@ def test_no_conversion_api_exists() -> None:
 )
 def test_cross_domain_ordering_and_subtraction_raise(operation: object) -> None:
     log, publish = Timestamp(5, LOG_TIME), Timestamp(5, PUBLISH_TIME)
-    with pytest.raises(DomainMismatchError, match="ClockAlignment"):
+    with pytest.raises(DomainMismatchError, match="ClockMapping"):
         operation(log, publish)  # type: ignore[operator]
     assert issubclass(DomainMismatchError, TypeError)
 

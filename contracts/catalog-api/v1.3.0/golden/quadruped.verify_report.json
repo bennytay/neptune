@@ -7,9 +7,9 @@
       "tx_time": "2026-10-02T00:00:04.000000Z"
     }
   },
-  "files_checked": 27,
+  "files_checked": 34,
   "findings": [],
-  "package_id": "sha256:44b4309877e2ce74d1a82d2c872eaafec8f07325b299637dae59d8f07dfa76b1",
+  "package_id": "sha256:4ef25575cf89858d879dedec24ea4ef2dced9235de0450966c2cf890b1fd7b51",
   "registration_key": {
     "knowledge": "known",
     "value": {
