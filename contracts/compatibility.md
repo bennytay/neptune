@@ -11,10 +11,10 @@ statement.
 
 | Contract | Owner package | Status | Latest stable | Latest draft | Consumers |
 |---|---|---|---|---|---|
-| `package-schema` | `neptune` | active | 2.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
+| `package-schema` | `neptune` | active | 3.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
 | `alignment-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-memory` |
 | `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
-| `catalog-api` | `neptune-ledger` | active | 1.2.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
+| `catalog-api` | `neptune-ledger` | active | 1.3.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
 | `graph-schema` | `neptune-memory` | active | 1.0.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
 | `query-packet` | `neptune-context` | planned | — | — | `neptune-deploy`, `neptune-learn` |
 | `dataset-manifest` | `neptune-learn` | planned | — | — | none in this repository |
@@ -29,7 +29,7 @@ is part of another rides on its version and has no column.
 
 | Consumer | `package-schema` | `catalog-api` | `graph-schema` | `query-packet` |
 |---|---|---|---|---|
-| `neptune-ledger` | 2.0.0 current |  |  |  |
+| `neptune-ledger` | 3.0.0 current |  |  |  |
 | `neptune-memory` |  | 1.1.0 behind |  |  |
 | `neptune-context` |  | not declared (no package yet) | not declared (no package yet) |  |
 | `neptune-deploy` | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) | no stable |
