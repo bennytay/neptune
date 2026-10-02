@@ -3,8 +3,10 @@
 - Status: Accepted
 - Date: 2026-10-03
 - Issue: MVL-37
+- Amends: ADR 0034 §4, ADR 0045 §4 and ADR 0046 §3 (payloads are not decoded: now they are, by the
+  stream's declared definition, and a leading header's stamp is a clock)
 - Extends: ADR 0007 §6 (frame-graph assembly and cross-source alignment), ADR 0018 §4 (value
-  columns), ADR 0034, 0045, 0046 (the stream adapters), ADR 0050 §6, ADR 0060 §2 (more anchors)
+  columns), ADR 0050 §6 (bindings join frame groups), ADR 0060 §2 (header stamps as anchors)
 
 ## Context
 

@@ -42,7 +42,7 @@ header).
 | [0031](0031-cache-keys-invalidation-lazy-derivatives-and-collection.md) | The cache: chunk ids as keys, named invalidation rules, lazy derivatives, a report and collection | Accepted; amended by 0033 |
 | [0032](0032-probe-listing-and-archive-inspection-stay-two-passes.md) | The probe's container listing and the archive inspector stay two passes | Accepted |
 | [0033](0033-m2-gate-probing-scratch-short-reads-and-reuse.md) | The M2 gate: the job probes in the sandbox, calls get scratch, short reads are the source's | Accepted |
-| [0034](0034-mcap-adapter-container-reading-planning-and-citations.md) | The MCAP adapter: our own container reader, planning from the summary, exact citations | Accepted |
+| [0034](0034-mcap-adapter-container-reading-planning-and-citations.md) | The MCAP adapter: our own container reader, planning from the summary, exact citations | Accepted; amended by 0068 |
 | [0035](0035-python-sdk-one-surface-dry-runs-results-and-errors.md) | The Python SDK: one sync and async surface over the job, dry runs, results and a stable error taxonomy | Accepted |
 | [0036](0036-session-grouping-v0-observed-layout-and-derived-proposals.md) | Session grouping v0: an observed layout, inferred proposals, derived tables in the package | Accepted |
 | [0037](0037-configuration-snapshots-and-additive-schema-versions.md) | Configuration snapshots, the config adapter, and schema versions that add without rewriting | Accepted |
@@ -52,8 +52,8 @@ header).
 | [0042](0042-tabular-adapter-csv-json-parquet-as-cited-cells.md) | The tabular adapter: CSV, JSON and Parquet as tables of cited cells | Accepted |
 | [0043](0043-neptune-ingest-cli-exit-codes-ignore-rules-and-file-sources.md) | `neptune ingest`: a thin CLI over the SDK, fixed exit codes, declared ignore rules and single-file sources | Accepted |
 | [0044](0044-explain-dry-runs-inspect-and-return-a-bounded-typed-explanation.md) | Explain: the dry run inspects and returns a bounded, typed explanation | Accepted |
-| [0045](0045-rosbag2-adapter-metadata-sqlite3-reader-and-mcap-delegation.md) | rosbag2: one adapter for `metadata.yaml` and sqlite3 storage, MCAP left to the MCAP adapter, a SQLite reader over bytes | Accepted |
-| [0046](0046-ros1-bag-adapter-connections-as-streams-planning-from-the-index.md) | The ROS 1 bag adapter: connections as streams, planning from the index, the same Run and Stream as MCAP | Accepted |
+| [0045](0045-rosbag2-adapter-metadata-sqlite3-reader-and-mcap-delegation.md) | rosbag2: one adapter for `metadata.yaml` and sqlite3 storage, MCAP left to the MCAP adapter, a SQLite reader over bytes | Accepted; amended by 0068 |
+| [0046](0046-ros1-bag-adapter-connections-as-streams-planning-from-the-index.md) | The ROS 1 bag adapter: connections as streams, planning from the index, the same Run and Stream as MCAP | Accepted; amended by 0068 |
 | [0047](0047-optional-manifest-stated-declarations-set-against-evidence.md) | The optional manifest: a source in the folder, stated declarations set against the evidence, generated as commented choices | Accepted |
 | [0048](0048-flight-log-adapter-px4-ulog-and-ardupilot-dataflash.md) | The flight-log adapter: PX4 ULog and ArduPilot DataFlash as runs, decoded streams and cited tables | Accepted |
 | [0049](0049-stream-introspection-declared-layouts-and-inferred-semantics.md) | Stream introspection: declared layouts and inferred semantics as derived tables | Accepted |
