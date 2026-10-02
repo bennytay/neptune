@@ -16,7 +16,8 @@ flowchart LR
     CAN["Canonical model<br/>records + provenance"]
     PKG[("Ingest package")]
     VAL["Validation &amp; alignment"]
-    DER["Derived annotations<br/>session proposals<br/>stream layouts · semantics"]
+    DER["Derived annotations<br/>session proposals<br/>stream layouts · semantics<br/>context candidates"]
+    CTX["Context records<br/>sites · assets · briefs<br/>requirements · SOP steps"]
     MAN["Optional manifest<br/>neptune.yaml · init-manifest"]
   end
 
@@ -37,6 +38,9 @@ flowchart LR
   PKG <--> VAL
   DISC -->|layout| DER
   RT -->|streams · definitions| DER
+  RT -->|documents · tables · configs| CTX
+  CTX -->|stated records| PKG
+  CTX -->|candidates| DER
   RAW -.->|neptune.yaml| MAN
   CLI -->|init-manifest| MAN
   MAN -->|stated declarations| RT
@@ -56,7 +60,7 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class CAN,WS,K1 built
-  class DISC,RT,AD,PKG,DER,MAN,VAL,K2 partial
+  class DISC,RT,AD,PKG,DER,MAN,VAL,CTX,K2 partial
   class K3 todo
   class SB built
   class SDK,CLI built

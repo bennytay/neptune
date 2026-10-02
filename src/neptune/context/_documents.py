@@ -54,7 +54,8 @@ _LIST_LABELS: Final = frozenset({"assets", "machines"})
 # Bounded quantifiers only: a hostile line costs time linear in its length.
 _LABEL: Final = re.compile(r"(?P<label>[A-Za-z][A-Za-z ._\-]{0,30}?)[ \t]*:[ \t]+(?P<value>\S.*)")
 _REQUIREMENT: Final = re.compile(
-    r"(?i:requirement|req)[ \t]+(?P<id>[A-Za-z0-9][A-Za-z0-9._/\-]{0,63})[ \t]*:(?P<text>.*)"
+    r"(?i:requirement|req)[ \t]+(?!(?i:id|no|number)[ \t]*:)"  # "Requirement ID:" names no id
+    r"(?P<id>[A-Za-z0-9][A-Za-z0-9._/\-]{0,63})[ \t]*:(?P<text>.*)"
 )
 _STEP: Final = re.compile(
     r"(?i:step)[ \t]+(?P<number>\d{1,9}(?:\.\d{1,9}){0,8})[ \t]*"
@@ -62,6 +63,9 @@ _STEP: Final = re.compile(
 )
 _NUMBERED: Final = re.compile(r"\d{1,9}(?:\.\d{1,9}){0,8}[.)][ \t]+\S")
 _MODAL: Final = re.compile(r"\b(?:shall|must)\b", re.IGNORECASE)
+# Blocks never read line by line: code is not prose, and a table's cells are its
+# ``StructuredTable``'s, read as a register.
+_UNREAD: Final = frozenset({BlockRole.CODE, BlockRole.TABLE})
 # Blocks whose lines are not sentences: a heading names, a table's rows are its cells' (read as
 # a ``StructuredTable``), a figure has no text.
 _NOT_PROSE: Final = frozenset({BlockRole.HEADING, BlockRole.TABLE, BlockRole.FIGURE})
@@ -89,7 +93,7 @@ class _Label:
 
 
 def _lines(block: DocumentBlock) -> Iterator[_Line]:
-    if not isinstance(block.text, Known) or _role(block) is BlockRole.CODE:
+    if not isinstance(block.text, Known) or _role(block) in _UNREAD:
         return
     text = block.text.value
     offset = 0

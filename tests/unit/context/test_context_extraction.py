@@ -274,7 +274,12 @@ def test_malformed_labels_are_findings_and_never_failures() -> None:
         [
             (BlockRole.PARAGRAPH, None, "Task ID: ORCH-5\nSite: NORTH\nSite: SOUTH\nSite: NORTH"),
             (BlockRole.PARAGRAPH, None, "Requirement AG-1:"),
-            (BlockRole.PARAGRAPH, None, "Requirement: no id here\nNot a label: at all"),
+            (
+                BlockRole.PARAGRAPH,
+                None,
+                "Requirement: no id here\nRequirement ID: R-9\nNot a label: at all",
+            ),
+            (BlockRole.TABLE, None, "| Requirement R-7: in a table | Site: X |"),
         ]
     )
     found = extract_context(records)
