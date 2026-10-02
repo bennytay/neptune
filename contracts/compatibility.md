@@ -13,8 +13,8 @@ statement.
 |---|---|---|---|---|---|
 | `package-schema` | `neptune` | active | 3.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
 | `alignment-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-memory` |
-| `lifecycle-records` | `neptune` (part of `package-schema`; kinds ship in 3.0.0, ADR 0051) | planned | — | — | `neptune-deploy`, `neptune-memory` |
-| `catalog-api` | `neptune-ledger` | active | 1.2.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
+| `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
+| `catalog-api` | `neptune-ledger` | active | 1.3.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
 | `graph-schema` | `neptune-memory` | active | 1.0.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
 | `query-packet` | `neptune-context` | planned | — | — | `neptune-deploy`, `neptune-learn` |
 | `dataset-manifest` | `neptune-learn` | planned | — | — | none in this repository |

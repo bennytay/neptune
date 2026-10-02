@@ -1,0 +1,14 @@
+{
+  "assertion_kind": "observed",
+  "kind": "run",
+  "line": 1,
+  "package_id": "sha256:e2d6d834f64229ce5d913159ff209f23d3913cbd9ab468e34c3069602b2017df",
+  "record_id": "rec:sha256:0cf852d4efcbb869553993f8644de9e5c9cc319cd584b51cd5a00b29b4a9170b",
+  "registration_seq": 2,
+  "source_content_id": "sha256:d6bebd2e8559a3b41e661de1efb79ea3dbbc183a8c4992b615726606c315a840",
+  "source_locator": "[{\"kind\":\"byte_range\",\"length\":38,\"offset\":8}]",
+  "transform_id": "rec:sha256:67b6d9921ecc2b3eddbacd46995215202cf549ce5d088600652a661391837b58",
+  "world_clock": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
+  "world_first": 1790762401000000000,
+  "world_last": 1790762401020000000
+}

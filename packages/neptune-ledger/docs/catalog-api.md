@@ -10,11 +10,12 @@ bodies, clock checks, collation, scale) and
 sources, tenant roots, paging, merge order). The gate's review is
 [reviews/l1-stress-test.md](reviews/l1-stress-test.md).
 
-- **Version:** `1.2.0`, `neptune_ledger.api.CATALOG_API_VERSION`, **stable**, in
-  `contracts/catalog-api/v1.2.0/`. 1.0.0 was the pre-gate draft; 1.1.0 adds the `unsafe_entry`
+- **Version:** `1.3.0`, `neptune_ledger.api.CATALOG_API_VERSION`, **stable**, in
+  `contracts/catalog-api/v1.3.0/`. 1.0.0 was the pre-gate draft; 1.1.0 adds the `unsafe_entry`
   finding, the `unreachable` verdict and `QuerySpec.after`, and accepts every 1.0.0 document;
   1.2.0 adds package schema 2's `configuration_snapshot` and `configuration_value` record kinds
-  (root ADR 0037) and accepts every 1.1.0 document.
+  (root ADR 0037) and accepts every 1.1.0 document; 1.3.0 adds package schema 3's eight deployment
+  lifecycle record kinds (root ADR 0051) and accepts every 1.2.0 document.
 - **Code:** `neptune_ledger.api`. It holds the `CatalogApi` protocol, the request and response
   records, `catalog_schema()` (JSON Schema 2020-12, one `$defs` entry per record),
   `QUERY_RESULT_SCHEMA` (Arrow), `to_json` / `from_json` / `dumps` / `loads`, and `StubCatalog`.
@@ -123,5 +124,5 @@ Clock-merge and `mapping_out_of_range` tests are deferred to MVL-92. They need M
 
 This package runs the suite against `StubCatalog` as strict expected failures
 (`tests/contract/`): each test must fail with `NotImplementedError`. The registry goldens in
-`contracts/catalog-api/v1.2.0/golden/` come from `contract_tests/goldens.py`. They are example
+`contracts/catalog-api/v1.3.0/golden/` come from `contract_tests/goldens.py`. They are example
 documents valued from the worked examples, with fixed illustrative transaction keys.

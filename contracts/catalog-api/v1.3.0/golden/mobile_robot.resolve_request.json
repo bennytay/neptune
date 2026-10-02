@@ -1,0 +1,16 @@
+{
+  "evidence_ref": {
+    "locator": [
+      {
+        "kind": "byte_range",
+        "length": 4903,
+        "offset": 0
+      },
+      {
+        "kind": "json_pointer",
+        "pointer": "/authorisations/0"
+      }
+    ],
+    "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+  }
+}
