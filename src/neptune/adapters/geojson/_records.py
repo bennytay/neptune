@@ -80,23 +80,30 @@ _METRE: Final = unit_from_json("m")
 
 
 class Offsets:
-    """Byte offsets in a source of the characters of one feature's decoded text."""
+    """Byte offsets in a source of the characters of one feature's decoded text.
+
+    A non-ASCII text keeps the byte offset of every ``_BLOCK``-th character, so a lookup, in any
+    order, encodes at most one block: a cost that does not grow with the feature."""
+
+    _BLOCK: Final = 4096
 
     def __init__(self, text: str, base: int) -> None:
         self._text = text
         self._base = base
         self._ascii = text.isascii()
-        self._char = 0
-        self._byte = 0
+        self._marks: list[int] = []
+        if not self._ascii:
+            total = 0
+            for first in range(0, len(text), self._BLOCK):
+                self._marks.append(total)
+                total += len(text[first : first + self._BLOCK].encode("utf-8"))
 
     def at(self, char: int) -> int:
         if self._ascii:
             return self._base + char
-        if char < self._char:
-            self._char = self._byte = 0
-        self._byte += len(self._text[self._char : char].encode("utf-8"))
-        self._char = char
-        return self._base + self._byte
+        block = min(char // self._BLOCK, len(self._marks) - 1)
+        first = block * self._BLOCK
+        return self._base + self._marks[block] + len(self._text[first:char].encode("utf-8"))
 
 
 def text_ok(value: str) -> bool:
