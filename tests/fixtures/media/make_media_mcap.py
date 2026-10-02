@@ -60,7 +60,10 @@ CLOUD_MSG: Final = (
     f"{_SEP}\nMSG: sensor_msgs/PointField\nstring name\nuint32 offset\nuint8 datatype\n"
     f"uint32 count\n{_SEP}\n{HEADER}"
 )
-VIDEO_MSG: Final = f"builtin_interfaces/Time timestamp\nstring frame_id\nuint8[] data\nstring format\n{_SEP}\n{TIME}"
+VIDEO_MSG: Final = (
+    "builtin_interfaces/Time timestamp\nstring frame_id\nuint8[] data\nstring format\n"
+    f"{_SEP}\n{TIME}"
+)
 JOINTS_MSG: Final = (
     "std_msgs/Header header\nstring[] name\nfloat64[] position\nfloat64[] velocity\n"
     f"float64[] effort\n{_SEP}\n{HEADER}"

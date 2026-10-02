@@ -96,10 +96,7 @@ class Derivative:
     reason: str | None = None
 
     def to_json(self) -> JsonObject:
-        found: JsonObject = {"state": str(self.state)}
-        if self.reason is not None:
-            found["reason"] = self.reason
-        return found
+        return _present({"reason": self.reason, "state": str(self.state)})
 
 
 def _derivative_from_json(data: JsonValue) -> Derivative:
@@ -109,6 +106,11 @@ def _derivative_from_json(data: JsonValue) -> Derivative:
     if reason is not None and not isinstance(reason, str):
         raise ValueError(f"a derivative's reason is text, got {reason!r}")
     return Derivative(DerivativeState(json_str(data["state"], "state")), reason)
+
+
+def _present(obj: Mapping[str, "JsonValue | None"]) -> JsonObject:
+    """``obj`` without its absent (``None``) members: canonical JSON has no null (ADR 0004)."""
+    return {key: value for key, value in obj.items() if value is not None}
 
 
 def media_id(transform: RecordId, stream: RecordId) -> RecordId:
@@ -158,28 +160,29 @@ class MediaStream:
         return InferredProvenance(self.evidence, self.transform)
 
     def to_json(self) -> JsonObject:
-        found: JsonObject = {
-            "assertion_kind": INFERRED,
-            "basis": self.basis,
-            "counts": dict(sorted(self.counts.items())),
-            "evidence": [ref.to_json() for ref in self.evidence],
-            "frames": self.frames,
-            "hydrator": self.hydrator,
-            "id": self.id,
-            "keyframe": self.keyframe.to_json(),
-            "kind": MEDIA_KIND,
-            "media": str(self.media),
-            "message_encoding": self.message_encoding,
-            "schema_version": DERIVED_SCHEMA_VERSION,
-            "state": str(self.state),
-            "stream": self.stream,
-            "thumbnail": self.thumbnail.to_json(),
-            "transform": self.transform,
-        }
-        return {key: value for key, value in found.items() if value is not None}
+        return _present(
+            {
+                "assertion_kind": INFERRED,
+                "basis": self.basis,
+                "counts": dict(sorted(self.counts.items())),
+                "evidence": [ref.to_json() for ref in self.evidence],
+                "frames": self.frames,
+                "hydrator": self.hydrator,
+                "id": self.id,
+                "keyframe": self.keyframe.to_json(),
+                "kind": MEDIA_KIND,
+                "media": str(self.media),
+                "message_encoding": self.message_encoding,
+                "schema_version": DERIVED_SCHEMA_VERSION,
+                "state": str(self.state),
+                "stream": self.stream,
+                "thumbnail": self.thumbnail.to_json(),
+                "transform": self.transform,
+            }
+        )
 
 
-def _optional_text(value: JsonValue, name: str) -> str | None:
+def _optional_text(value: "JsonValue | None", name: str) -> str | None:
     return None if value is None else json_str(value, name)
 
 
@@ -373,7 +376,7 @@ def index_media(
                     ("derivative_not_covered", f"{name}:{made.reason}"),
                     (
                         f"no {name} is made for these streams ({made.reason})",
-                        {"derivative": name, "reason": made.reason},
+                        {"derivative": name, "reason": made.reason or ""},
                         [],
                     ),
                 )[2].append(stream)

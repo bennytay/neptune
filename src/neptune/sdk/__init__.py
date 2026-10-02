@@ -17,6 +17,8 @@ workspace allows it.
 - ``client``: ``Neptune`` and ``AsyncNeptune`` (one surface), ``Ingestion`` and
   ``AsyncIngestion`` (a job on its own thread), and the shorthands ``ingest`` and ``dry_run``.
 - ``result``: ``IngestResult``, ``read_package``, and ``committed_result`` (ADR 0035 §3).
+- ``media``: ``media_window``, ``Hydrator`` and the payload readers: the media frames around an event
+  on a named clock, their bytes read lazily (ADR 0056).
 - ``contents``: ``run_contents``, ``RunContents`` and ``StreamContents``: what each run of a
   package contains (streams, declared field paths, inferred semantics) without decoding a
   message (ADR 0049).

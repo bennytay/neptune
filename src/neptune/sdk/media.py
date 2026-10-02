@@ -47,12 +47,12 @@ from neptune.derived.media import (
 )
 from neptune.derived.sessions import read_derived
 from neptune.identity.provenance import transform_record
-from neptune.model.ids import ContentId, RecordId
+from neptune.model.ids import ContentId, ExternalObjectRef, RecordId
 from neptune.model.knowledge import KnowledgeState
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
 from neptune.model.reference import TimestampDomain
 from neptune.model.run import Stream
-from neptune.model.series import cell_state, state_column, ticks_of, time_column
+from neptune.model.series import cell_state, ticks_of, time_column
 from neptune.sdk.errors import InvalidRequestError, PackageInvalidError, UnsupportedError
 from neptune.store.package import IngestPackage
 
@@ -303,11 +303,17 @@ def media_window(
 # --- Hydration ---------------------------------------------------------------------------------
 
 
+class HydrationError(UnsupportedError):
+    """A frame's bytes cannot be read: no hydrator, another source, or a malformed record."""
+
+
 class FileSource:
     """A source file read in place, counting the bytes it serves (``bytes_read``)."""
 
-    def __init__(self, path: Path | str, content: ContentId) -> None:
-        self._file: BinaryIO = open(path, "rb")  # noqa: SIM115 - closed by ``close``
+    def __init__(self, path: Path | str, content: ContentId | ExternalObjectRef) -> None:
+        if not isinstance(content, str):
+            raise HydrationError("a frame in an external object is not read from a file")
+        self._file: BinaryIO = Path(path).open("rb")  # noqa: SIM115 - closed by ``close``
         self._content = content
         self._size = self._file.seek(0, 2)
         self.bytes_read = 0
@@ -338,10 +344,6 @@ class FileSource:
         self, kind: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None
     ) -> None:
         self.close()
-
-
-class HydrationError(UnsupportedError):
-    """A frame's bytes cannot be read: no hydrator, another source, or a malformed record."""
 
 
 @dataclass
@@ -488,7 +490,7 @@ MAX_POINT_FIELDS: Final = 1024
 
 
 def point_cloud_ref(payload: bytes, message_encoding: str | None) -> PointCloudRef:
-    """Read a ``sensor_msgs/PointCloud2`` payload's declared fields (``ValueError`` if it cannot)."""
+    """A ``sensor_msgs/PointCloud2`` payload's declared fields; ``ValueError`` if unreadable."""
     cursor = _Cursor(payload, message_encoding)
     header = HeaderStamp(*cursor.header())
     height, width = cursor.take("I"), cursor.take("I")
@@ -599,4 +601,4 @@ def image_thumbnail(
     else:
         magic, top, kind = b"P6", 255, "image/x-portable-pixmap"
     data = magic + f"\n{out_w} {out_h}\n{top}\n".encode() + bytes(out)
-    return Thumbnail(DerivativeState.ON_REQUEST, data, kind, out_w, out_h, frame.handle, transform)
+    return Thumbnail(KnowledgeState.KNOWN, data, kind, out_w, out_h, frame.handle, transform)
