@@ -1,0 +1,45 @@
+{
+  "api_version": "1.6.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "edges": [],
+  "findings": [],
+  "kind": {
+    "knowledge": "known",
+    "value": "clock_mapping"
+  },
+  "nodes": [
+    {
+      "transform": {
+        "knowledge": "known",
+        "value": {
+          "adapter_id": "rosbag2",
+          "adapter_version": "1.0.0",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "libraries": {}
+        }
+      },
+      "transform_id": "rec:sha256:3b71f1d5e3ff1d93422c9779e890a374547b3412ea02c7ace78100729e6dd526"
+    }
+  ],
+  "record_id": "rec:sha256:63aa1aa4ccdc1469a5dcbd8761cec32cb1f890ace83b17cabb17d7151d84bd1b",
+  "registered_by": [
+    {
+      "kind": "clock_mapping",
+      "line": 1,
+      "package_id": "sha256:4ef25575cf89858d879dedec24ea4ef2dced9235de0450966c2cf890b1fd7b51",
+      "record_id": "rec:sha256:63aa1aa4ccdc1469a5dcbd8761cec32cb1f890ace83b17cabb17d7151d84bd1b"
+    }
+  ],
+  "siblings": [],
+  "status": "found",
+  "transform_id": {
+    "knowledge": "known",
+    "value": "rec:sha256:3b71f1d5e3ff1d93422c9779e890a374547b3412ea02c7ace78100729e6dd526"
+  }
+}

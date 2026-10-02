@@ -333,10 +333,18 @@ def write_series(stream: Stream, batches: Sequence[SeriesBatch], destination: Pa
 # --- Reading and checking ----------------------------------------------------------------------
 
 
-def read_rows(source: Source) -> Iterator[dict[str, object]]:
-    """Every row of a series file, in file order, as column name to cell."""
-    for batch in _open(source).iter_batches(batch_size=READ_ROWS):
+def read_rows(source: Source, columns: Sequence[str] | None = None) -> Iterator[dict[str, object]]:
+    """Every row of a series file, in file order, as column name to cell; only ``columns`` (those
+    of them the file has) when given, so a reader of two columns does not decode the rest."""
+    parquet = _open(source)
+    names = None if columns is None else [c for c in columns if c in parquet.schema_arrow.names]
+    for batch in parquet.iter_batches(batch_size=READ_ROWS, columns=names):
         yield from batch.to_pylist()
+
+
+def count_rows(source: Source) -> int:
+    """A series file's row count, from its footer: no row is read."""
+    return int(_open(source).metadata.num_rows)
 
 
 def read_run(run: Path) -> SeriesBatch:

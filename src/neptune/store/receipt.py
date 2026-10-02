@@ -37,6 +37,10 @@ from neptune.model.time import Timestamp
 
 RECEIPT_KIND: Final = "ingest_receipt"
 _LEDGER: Final = frozenset({"source_artifact", "source_revision", "source_absence"})
+# Producers that cite sources without reading them: validation judges the stored package, never
+# a source's bytes (ADR 0054), and clock alignment reads committed series columns (ADR 0060), so
+# their findings never make them readers in ``read_by``.
+NON_READERS: Final = frozenset({"neptune.validate", "neptune.clocks"})
 
 
 def _walk(value: JsonValue, pointer: str = "") -> Iterator[tuple[str, JsonValue]]:
@@ -122,6 +126,7 @@ def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestR
     revisions, absences = by_kind["source_revision"], by_kind["source_absence"]
     superseded = {previous for entry in (*revisions, *absences) for previous in entry.supersedes}
 
+    judges = {t.id for t in by_kind["transform_record"] if t.adapter_id in NON_READERS}
     read_by: dict[str, set[str]] = defaultdict(set)
     ambiguous: list[AmbiguousField] = []
     for kind, members in by_kind.items():
@@ -130,7 +135,8 @@ def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestR
         for record in members:
             data = record.to_json()
             for source, transform in _read_by(record, data):
-                read_by[source].add(transform)
+                if transform not in judges:
+                    read_by[source].add(transform)
             for pointer, value in _walk(data):
                 if isinstance(value, dict) and value.get("knowledge") == "ambiguous":
                     ambiguous.append(AmbiguousField(record.id, pointer))

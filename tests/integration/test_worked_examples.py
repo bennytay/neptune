@@ -27,8 +27,17 @@ from neptune.identity import canonical_json
 from neptune.identity.findings import check_ingest_finding
 from neptune.identity.hashing import content_id
 from neptune.identity.provenance import check_evidence_record_id, check_transform_record
+from neptune.model.alignment import (
+    clock_mapping_from_json,
+    frame_binding_from_json,
+    identity_link_from_json,
+    run_assembly_from_json,
+    snapshot_binding_from_json,
+)
 from neptune.model.finding import ingest_finding_from_json
 from neptune.model.jsonvalue import JsonValue
+from neptune.model.kinds import RECORD_KINDS
+from neptune.model.lifecycle import LIFECYCLE_KINDS
 from neptune.model.machine import (
     calibration_from_json,
     hardware_component_from_json,
@@ -71,19 +80,27 @@ from neptune.model.world import (
 pytestmark = pytest.mark.integration
 
 FIXTURES: Final = Path(__file__).parents[1] / "fixtures" / "model"
-EXAMPLES: Final = ("drone", "quadruped", "manipulator", "mobile_robot")
+PLATFORMS: Final = ("drone", "quadruped", "manipulator", "mobile_robot")
+# Two deployments' records (ADR 0051): an AMR in a warehouse and a manipulator cell.
+DEPLOYMENTS: Final = ("warehouse_amr", "manipulator_cell")
+EXAMPLES: Final = (*PLATFORMS, *DEPLOYMENTS)
 READERS: Final[dict[str, Callable[[JsonValue], Any]]] = {
     "calibration": calibration_from_json,
+    "clock_mapping": clock_mapping_from_json,
     "frame": frame_from_json,
+    "frame_binding": frame_binding_from_json,
     "frame_graph": frame_graph_from_json,
     "frame_transform": frame_transform_from_json,
     "hardware_component": hardware_component_from_json,
     "hardware_configuration": hardware_configuration_from_json,
+    "identity_link": identity_link_from_json,
     "image": image_from_json,
     "ingest_finding": ingest_finding_from_json,
     "machine": machine_from_json,
     "run": run_from_json,
+    "run_assembly": run_assembly_from_json,
     "site": site_from_json,
+    "snapshot_binding": snapshot_binding_from_json,
     "software_configuration": software_configuration_from_json,
     "source_artifact": source_artifact_from_json,
     "source_revision": source_revision_from_json,
@@ -93,6 +110,7 @@ READERS: Final[dict[str, Callable[[JsonValue], Any]]] = {
     "structured_table": structured_table_from_json,
     "timestamp_domain": timestamp_domain_from_json,
     "transform_record": transform_record_from_json,
+    **{cls.kind: RECORD_KINDS[cls.kind][1] for cls in LIFECYCLE_KINDS},
 }
 
 
@@ -149,7 +167,7 @@ def test_the_committed_examples_are_exactly_what_the_builder_writes() -> None:
 
 def test_the_examples_cover_the_four_platforms_each_with_a_run() -> None:
     assert set(BUILDER.EXAMPLE_BUILDERS) == set(EXAMPLES)
-    for example in EXAMPLES:
+    for example in PLATFORMS:
         assert len(tables(example)["run"]) == 1, example
 
 
@@ -286,25 +304,57 @@ REPRESENTED_AS: Final = {
         "hardware_configuration",
         "machine",
         "run",
+        "run_assembly",
+        "snapshot_binding",
         "software_configuration",
         "stream",
         "timestamp_domain",
     },
-    ("quadruped", "bag/metadata.yaml"): {"run", "software_configuration", "timestamp_domain"},
+    ("quadruped", "bag/metadata.yaml"): {
+        "clock_mapping",
+        "run",
+        "run_assembly",
+        "snapshot_binding",
+        "software_configuration",
+        "timestamp_domain",
+    },
     ("quadruped", "bag/walk_0.mcap"): {"stream", "timestamp_domain"},
     ("quadruped", "robot.urdf"): {
         "frame",
+        "frame_binding",
         "frame_graph",
         "frame_transform",
         "hardware_component",
         "hardware_configuration",
     },
     ("quadruped", "meshes/body.stl"): {"spatial_artifact"},
-    ("manipulator", "session.mcap"): {"run", "stream", "timestamp_domain"},
-    ("manipulator", "handeye.yaml"): {"calibration", "frame", "frame_graph", "frame_transform"},
-    ("mobile_robot", "drive.bag"): {"run", "stream", "timestamp_domain"},
+    ("manipulator", "session.mcap"): {"run", "run_assembly", "stream", "timestamp_domain"},
+    ("manipulator", "handeye.yaml"): {
+        "calibration",
+        "frame",
+        "frame_binding",
+        "frame_graph",
+        "frame_transform",
+    },
+    ("mobile_robot", "drive.bag"): {"run", "run_assembly", "stream", "timestamp_domain"},
     ("mobile_robot", "sites.csv"): {"site", "structured_record", "structured_table"},
     ("mobile_robot", "photos/dock.png"): {"image", "timestamp_domain"},
+    ("manipulator_cell", "records.json"): {
+        "commissioning_baseline",
+        "maintenance_event",
+        "requalification_record",
+        "risk_assessment",
+        "timestamp_domain",
+    },
+    ("warehouse_amr", "records.json"): {
+        "authorisation_envelope",
+        "change_record",
+        "commissioning_baseline",
+        "incident_record",
+        "intervention",
+        "risk_assessment",
+        "timestamp_domain",
+    },
 }
 
 
@@ -381,3 +431,34 @@ def test_declared_times_are_what_the_bytes_say() -> None:
     assert match is not None
     fields = [int(group) for group in match.groups()]
     assert image.capture.time.value.ticks == calendar.timegm((*fields, 0, 0, 0))
+
+
+# --- Deployment lifecycle records (ADR 0051) ---------------------------------------------------
+
+
+def test_the_two_deployments_hold_every_lifecycle_kind_as_stated() -> None:
+    found = {
+        kind: example
+        for example in DEPLOYMENTS
+        for kind, _, record in records(example)
+        if kind in {cls.kind for cls in LIFECYCLE_KINDS}
+        and record.provenance.assertion_kind.value == "stated"
+    }
+    assert set(found) == {cls.kind for cls in LIFECYCLE_KINDS}
+
+
+def test_lifecycle_values_are_what_the_forms_say() -> None:
+    export = json.loads(source_files("warehouse_amr")["records.json"])
+    incident = _record("warehouse_amr", "incident_record")
+    assert incident.severity.value == export["incidents"][0]["severity"] == "S3"
+    envelope = _record("warehouse_amr", "authorisation_envelope")
+    limit = envelope.zones[0].speed_limit
+    assert (limit.value.value, limit.unit.value.symbol) == (1.5, "m.s^-1")  # as declared, m/s
+    occurred = calendar.timegm((2026, 9, 24, 18, 12, 0, 0, 0, 0))  # 04:12 at +10:00
+    assert incident.occurred.value.ticks == occurred
+    cell = json.loads(source_files("manipulator_cell")["records.json"])
+    risk = _record("manipulator_cell", "risk_assessment")
+    hazard = cell["risk_assessment"]["hazards"][0]
+    assert [(s.name, s.value.value) for s in risk.hazards[0].scores] == [
+        (name, hazard[name]) for name in ("severity", "exposure", "avoidance", "PLr")
+    ]

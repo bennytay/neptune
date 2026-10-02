@@ -24,12 +24,13 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, BinaryIO, Final, Protocol
+from typing import Any, BinaryIO, Final, Protocol
 
 from neptune.identity import canonical_json
 from neptune.identity.hashing import digest_stream
 from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
+from neptune.model.jsonvalue import JsonObject
 from neptune.model.package import package_manifest_from_json
 from neptune.model.run import Stream
 from neptune.model.source import LocalPath, RawLocalPath, SourceAbsence, SourceRevision
@@ -37,6 +38,7 @@ from neptune.store.durable import fsync_directory, fsync_tree
 from neptune.store.package import (
     MANIFEST,
     Content,
+    IngestPackage,
     PackageError,
     copy_file,
     open_file,
@@ -47,9 +49,6 @@ from neptune.store.package import (
 from neptune.store.receipt import cited_sources
 from neptune.store.series import SERIES_SETTINGS, merge_runs
 from neptune.store.workspace import DerivativeKey, Held, Owner, Workspace, WorkspaceError
-
-if TYPE_CHECKING:
-    from neptune.model.jsonvalue import JsonObject
 
 _COPY_SIZE: Final = 1024 * 1024
 # A stream's series file, as a derivative of the runs of the chunks it merges (ADR 0031 §4). The
@@ -210,7 +209,7 @@ def _staged(destination: Path) -> Iterator[Path]:
 def _lay_out(
     staging: Path, contents: Mapping[str, Content], *, movable: Path | None = None
 ) -> list[str]:
-    """Write ``contents`` under ``staging``: bytes as given, paths under ``movable`` moved, the
+    """Write ``contents`` under ``staging``: bytes as given, paths beneath ``movable`` moved, the
     rest copied as streams (``copy_file``: no symlink followed, no special file opened). Returns
     the paths it copied: a copied file can have changed since it was hashed, so what landed must
     be checked (``_check_copies``).
@@ -221,7 +220,7 @@ def _lay_out(
         target.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(data, bytes):
             target.write_bytes(data)
-        elif movable is not None and data.parent == movable:
+        elif movable is not None and data.is_relative_to(movable):
             data.rename(target)
         else:
             copy_file(data, target)
@@ -275,6 +274,7 @@ def stage(
     materialise: Iterable[ContentId] = (),
     source: SourceOpener | None = None,
     extra: Iterable[Any] = (),
+    derived: Mapping[str, Iterable[JsonObject]] | None = None,
 ) -> StagedPackage:
     """Build the package of ``ingested`` sources, each a (content id, transform id) pair.
 
@@ -283,7 +283,8 @@ def stage(
     hashed into the package and its receipt.
     Every ingested source must be in ``ledger``, since the package lists the sources it cites,
     and every chunk of its plan must be committed in ``workspace``. ``extra`` adds records that
-    are no adapter's output: the runtime's own transform and findings. ``materialise`` names
+    are no adapter's output: the runtime's own transform and findings, and the transforms that
+    ``derived`` tables (session proposals, ADR 0036) name. ``materialise`` names
     sources to copy into the package. Each is read as ``export`` reads one: from the head of a
     location chain in ``ledger`` that holds it, opened through ``source`` so its policy applies,
     and hashed where it lands. Every other source is referenced. ``destination`` must not exist.
@@ -349,6 +350,7 @@ def stage(
             series=series,
             blobs=_land(scratch, locations, source) if source is not None else {},
             store={"series": SERIES_SETTINGS} if series else {},
+            derived=derived,
         )
         copied = _lay_out(staging, contents, movable=scratch)
         scratch.rmdir()  # every merged series and landed source was moved into place
@@ -357,6 +359,37 @@ def stage(
         shutil.rmtree(staging, ignore_errors=True)
         raise
     return StagedPackage(staging, destination, package_id(contents), tuple(uses))
+
+
+def amend(staged: StagedPackage, package: IngestPackage, extra: Iterable[Any]) -> StagedPackage:
+    """Stage ``package`` again with ``extra`` records added: validation's transform and findings.
+
+    ``package`` is ``staged`` as ``read_package`` read it. The new package is built in a fresh
+    sibling: its tables, receipt and manifest are rewritten, and its series and blobs are moved
+    (never copied) out of ``staged``, which is then removed. ``package_contents`` verifies the
+    whole (``read_files``) before anything moves, so the result needs no second read. On failure
+    the new sibling is removed and ``staged`` may have lost files; the caller discards it.
+    """
+    contents = package_contents(
+        [*package.records, *extra],
+        series=package.series,
+        blobs=package.blobs,
+        store=package.manifest.store,
+        derived=package.derived,
+    )
+    staging = _sibling(staged.destination)
+    try:
+        copied = _lay_out(staging, contents, movable=staged.path)
+        _check_copies(staging, contents, copied)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    try:
+        staged.discard()
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)  # the caller still holds ``staged`` only
+        raise
+    return StagedPackage(staging, staged.destination, package_id(contents), staged.derivatives)
 
 
 def publish(staged: StagedPackage) -> ContentId:
@@ -378,6 +411,7 @@ def assemble(
     materialise: Iterable[ContentId] = (),
     source: SourceOpener | None = None,
     extra: Iterable[Any] = (),
+    derived: Mapping[str, Iterable[JsonObject]] | None = None,
 ) -> ContentId:
     """``stage`` then ``publish``: write the package of ``ingested`` sources at ``destination``.
 
@@ -391,6 +425,7 @@ def assemble(
         materialise=materialise,
         source=source,
         extra=extra,
+        derived=derived,
     )
     try:
         return publish(staged)
@@ -459,7 +494,11 @@ def export(package_root: Path, destination: Path, source: SourceOpener) -> Conte
         scratch.mkdir()
         blobs = {**package.blobs, **_land(scratch, locations, source)}
         contents = package_contents(
-            package.records, series=package.series, blobs=blobs, store=package.manifest.store
+            package.records,
+            series=package.series,
+            blobs=blobs,
+            store=package.manifest.store,
+            derived=package.derived,
         )
         copied = _lay_out(staging, contents, movable=scratch)
         scratch.rmdir()  # every landed source was moved into place

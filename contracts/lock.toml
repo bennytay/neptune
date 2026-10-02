@@ -1,0 +1,17 @@
+# The contract versions each package in this repository is built against (platform ADR 0002).
+# `scripts/contracts.py check --package <name>` warns while an entry lags the registry's latest
+# stable version by a minor or patch release and fails when it lags by a major release. A major
+# `bump` raises every entry here in the same PR. Draft versions need not be declared.
+
+[neptune-deploy]
+catalog-api = "1.4.0"
+graph-schema = "1.0.0"
+package-schema = "4.0.0"
+
+[neptune-ledger]
+package-schema = "4.0.0"
+
+[neptune-memory]
+catalog-api = "1.1.0"
+
+[neptune-platform]

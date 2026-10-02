@@ -1,0 +1,92 @@
+{
+  "api_version": "1.3.0",
+  "findings": [],
+  "ledger_version": "0.0.1",
+  "outcome": "registered",
+  "package_id": {
+    "knowledge": "known",
+    "value": "sha256:4ef25575cf89858d879dedec24ea4ef2dced9235de0450966c2cf890b1fd7b51"
+  },
+  "record_counts": [
+    {
+      "count": 1,
+      "kind": "clock_mapping"
+    },
+    {
+      "count": 3,
+      "kind": "frame"
+    },
+    {
+      "count": 2,
+      "kind": "frame_binding"
+    },
+    {
+      "count": 1,
+      "kind": "frame_graph"
+    },
+    {
+      "count": 2,
+      "kind": "frame_transform"
+    },
+    {
+      "count": 6,
+      "kind": "hardware_component"
+    },
+    {
+      "count": 1,
+      "kind": "hardware_configuration"
+    },
+    {
+      "count": 1,
+      "kind": "run"
+    },
+    {
+      "count": 1,
+      "kind": "run_assembly"
+    },
+    {
+      "count": 1,
+      "kind": "snapshot_binding"
+    },
+    {
+      "count": 1,
+      "kind": "software_configuration"
+    },
+    {
+      "count": 4,
+      "kind": "source_artifact"
+    },
+    {
+      "count": 4,
+      "kind": "source_revision"
+    },
+    {
+      "count": 1,
+      "kind": "spatial_artifact"
+    },
+    {
+      "count": 2,
+      "kind": "stream"
+    },
+    {
+      "count": 5,
+      "kind": "timestamp_domain"
+    },
+    {
+      "count": 3,
+      "kind": "transform_record"
+    }
+  ],
+  "registration_key": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "root_locator": "/srv/neptune/packages/quadruped",
+  "schema_version": {
+    "knowledge": "known",
+    "value": 3
+  }
+}

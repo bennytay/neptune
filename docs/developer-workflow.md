@@ -28,7 +28,7 @@ Todo ──(branch created, first commit)──▶ In Progress ──(PR open, a
 
 ## Branching and merging
 
-- Trunk-based. `main` is protected: PR required, CI (`check`) green, up to date with `main` (strict), linear
+- Trunk-based. `main` is protected: PR required, CI (`check`) green, linear
   history, no force-push, no deletion. Merged branches are deleted automatically.
 - One branch per issue. PR title = issue title. Keep the branch current with `git merge origin/main`; never
   rebase or force-push a branch that has been pushed (a reviewer may be reading it).
@@ -99,8 +99,35 @@ each its own agent session:
 | Implementer (≤ cap) | one issue in one worktree: branch → implement → `make check` → PR → In Review → stop | merges, approves, touches another issue's branch |
 | Reviewer (≤2 at once) | reads one PR cold against the checklist above and the non-negotiables; returns a verdict | edits the branch; merges |
 
-**Caps.** 3 implementers during M2, 5 once the MVL-57 gate is Done; 2 reviewers. CI runs in under a minute,
-so the strict up-to-date refresh is cheap; the cap is set by the conflict rate on the hotspots below.
+**Caps.** 5 implementers in total once the MVL-57 gate is Done (3 before), adapter issues included; 2
+reviewers at once. The machine is RAM and CPU bound, so the cap does not rise for adapter work, though
+adapter PRs get one review round (below).
+
+### Model policy and review rounds
+
+| Work | Implementer and reviewer model | Review rounds |
+|---|---|---|
+| ADRs, contracts, milestone gates, `model/`, `store/`, `schema`, `runtime/`, `discovery/` | Opus | two: REVISE goes back to the implementer and the new head is re-reviewed |
+| Adapters (`src/neptune/adapters/<format>/` plus their tests and fixtures), connectors, fixtures, docs | Sonnet | one: the reviewer's blockers are fixed in place and the coordinator merges once CI is green on the fixed head and the reviewer confirms each blocker; a second full review is only for a REJECT |
+
+A PR that touches both kinds follows the stricter row. A parser bug found after merge is a new issue, not a
+reason to add a round.
+
+### Rules every PR follows
+
+- **Schema changes.** A package-schema change bumps `SCHEMA_VERSION` and the package-schema contract with its
+  goldens under `contracts/`. The consumer pin rows in `packages/*/docs/contracts.md` and `contracts/lock.toml`
+  move in the same PR, and `make contracts-check` passes. Accepted ADRs are never edited in place: a changed
+  decision is a new ADR that supersedes or amends the old one (the index shows "amended by").
+- **Expected outcomes.** The PR whose change alters an expected outcome (a golden, a count, a finding code, a
+  documented behaviour) updates that expectation and says so; a later PR never "fixes" a test it did not break.
+- **Test scratch space.** Tests write under a `TMPDIR` on disk, e.g.
+  `TMPDIR=$HOME/.cache/neptune-tmp/mvl-N make test-fast`; `/tmp` is a small tmpfs and fills under parallel
+  runs. Delete the directory when the issue is done. With many agents on one machine run targeted tests
+  locally and let CI run the full suite.
+- **`ARCHITECTURE.md`.** `scripts/factory-merge.sh` already refuses a PR that edits it without a filled
+  **Architecture change** section in the body (`architecture_change_filled` in `factory-merge.jq`), so there is
+  no separate CI guard.
 
 ### Coordinator loop
 
@@ -111,14 +138,17 @@ so the strict up-to-date refresh is cheap; the cap is set by the conflict rate o
    Progress. Prompt: issue id, base branch, "Follow AGENTS.md", and the implementer report format below.
 3. **Review.** When the implementer reports, spawn a reviewer with the PR number and head SHA. Post the
    verdict as a PR comment (`Review: MERGE|REVISE|REJECT @ <sha>` plus the findings) so a resumed session can
-   find it. REVISE goes back to the same implementer and the new head is re-reviewed. REJECT closes the PR.
-4. **Refresh.** After every merge, bring each open PR up to date on its own branch: `git merge origin/main`,
+   find it. REVISE goes back to the same implementer and the new head is re-reviewed (adapter PRs: one round, see
+   *Model policy*). REJECT closes the PR.
+4. **Refresh only when asked.** `factory-merge.sh` merges a PR that is behind `main` when nothing `main`
+   changed reaches it (packages/neptune-platform/docs/adr/0005-merge-without-a-queue.md). When it refuses with
+   "needs a refresh", bring that PR up to date on its own branch: `git merge origin/main`,
    resolve conflicts (hotspots below), push, `gh pr checks <n> --watch`. A clean auto-merge keeps the verdict
    valid for the new head; a hand-resolved conflict needs a re-review. When a PR's base branch has just
    merged: `gh api -X PATCH repos/bennytay/neptune/pulls/<n> -f base=main`, then merge `origin/main`
    (`git merge -s ours origin/main` is safe only while `git diff origin/main <old-base-tip>` is empty).
 5. **Merge** with `scripts/factory-merge.sh <pr> <reviewed-head-sha>`. It refuses unless the base is `main`,
-   `mergeable_state` is `clean`, the `check` run on that head succeeded and the head is the reviewed SHA; it
+   the PR has no conflicts, main's latest `check` is green (or the PR is labelled `fix-main`), the PR is fresh, the `check` run on that head succeeded and the head is the reviewed SHA; it
    squash-merges pinned to that SHA with the PR title as commit title and the PR body as the message.
 6. **Linear.** The integration moves the issue to Done on merge; the coordinator comments the merge SHA, sets
    Done if the integration did not, and removes the worktree (`git worktree remove <path>`).
@@ -151,9 +181,12 @@ non-negotiable broken, work outside the issue's scope) and is rare.
 Files most PRs touch; conflicts here are about ordering, not semantics:
 
 - `ARCHITECTURE.md`: one Mermaid diagram. Keep both sides' boxes, arrows and status styling.
-- `docs/adr/README.md` (the ADR index) and ADR numbers. Implementers take the next free number after checking
-  `main` and every open PR; when two PRs collide, the coordinator renumbers the later one at refresh time
-  (file name, title, index row, every `ADR 00NN` reference) and tells its implementer.
+- ADR numbers. Implementers take the next free number after checking `main` and every open PR; when two PRs
+  collide, the coordinator renumbers the later one at refresh time (file name, title, every `ADR 00NN`
+  reference) and tells its implementer.
+- `docs/adr/README.md` is generated, not a hotspot: `make fmt` (or `make adr-index`) rebuilds it from the ADR
+  files' headings, `Status:` and `Amends:` lines, and `make check` fails when it is stale. A refresh conflict on
+  it is resolved by `make adr-index`, never by hand; the same holds for each package's `docs/adr/README.md`.
 - `src/neptune/adapters/builtin.py`: the built-in adapter list (lands with MVL-7). Keep the union of entries.
 - Generated files (`docs/schema/`, golden packages): never hand-merge; run `make schema` / `make examples`
   after merging `origin/main` and commit the result.

@@ -5,7 +5,8 @@ the same parameters and results; the async ones are awaited. Both build the runt
 ``IngestJob`` and nothing else decides what is ingested:
 
 - ``ingest(source, destination)`` runs the whole job and returns an ``IngestResult``;
-- ``dry_run(source)`` runs it up to and including ``plan`` (``IngestJob.dry_run``);
+- ``dry_run(source)`` runs it up to and including ``plan``, reads the sources only and
+  returns its ``Explanation`` on the result (``IngestJob.dry_run``, ADR 0044);
 - ``start(source, destination)`` and ``start_dry_run(source)`` run it on a thread of its own and
   return a handle to iterate its events, wait for its result, or cancel it.
 
@@ -30,20 +31,33 @@ import re
 import threading
 import urllib.parse
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
-from typing import Final, TypeAlias
+from typing import Final, Literal, TypeAlias
 
-from neptune.adapters.builtin import default_registry
+from neptune.adapters.builtin import builtin_adapters
 from neptune.adapters.contract import Adapter, ConfigError, ContractError, configure
 from neptune.adapters.registry import AdapterRegistry
+from neptune.discovery.source import LocalSource
+from neptune.manifest import LoadedManifest, ManifestError, discover, locate, read
 from neptune.runtime import EventSink, IngestJob, JobError, JobEvent, JobOptions
+from neptune.runtime.plugins import (
+    ADAPTERS_GROUP,
+    ALL_PLUGINS,
+    NO_PLUGINS,
+    SOURCES_GROUP,
+    PluginPolicy,
+    Plugins,
+    load_plugins,
+)
 from neptune.sdk.errors import (
     ConfigurationError,
     DestinationExistsError,
     InvalidDestinationError,
     InvalidSourceError,
     NetworkRefusedError,
+    NothingToResumeError,
     UnsupportedError,
     WorkspaceUnusableError,
     from_job_error,
@@ -52,7 +66,13 @@ from neptune.sdk.result import IngestResult, attach_committed
 from neptune.store.workspace import LocalOnlyError, Workspace, WorkspaceError
 
 StrPath: TypeAlias = str | os.PathLike[str]
+# Which manifest a call uses (ADR 0047): ``None`` finds ``neptune.yaml`` (or ``.yml``, ``.json``)
+# at the root, a path names a manifest file inside the root, ``False`` uses none.
+ManifestChoice: TypeAlias = StrPath | Literal[False] | None
 Adapters: TypeAlias = AdapterRegistry | Iterable[Adapter]
+# Which installed plugins a client reads (ADR 0058): ``None`` or ``True`` every one, ``False``
+# none, a ``PluginPolicy`` an allowlist of distributions.
+PluginChoice: TypeAlias = PluginPolicy | bool | None
 
 _URI: Final = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://")
 _LOCAL_HOSTS: Final = ("", "localhost")
@@ -70,7 +90,7 @@ def _require_network(workspace: Workspace, purpose: str) -> None:
 
 
 def _local_root(source: StrPath, workspace: Workspace) -> Path:
-    """The local directory ``source`` names: a path, or a ``file:`` URI on this host.
+    """The local directory or file ``source`` names: a path, or a ``file:`` URI on this host.
 
     Any other scheme names something only a connector can read over the network: refused while
     the workspace is local-only, and unsupported until a connector lands (MVL-45, MVL-46).
@@ -84,14 +104,14 @@ def _local_root(source: StrPath, workspace: Workspace) -> Path:
         if parts.netloc.lower() not in _LOCAL_HOSTS:
             raise UnsupportedError(f"{source} names another host; a file URI names this one")
         if parts.query or parts.fragment or not parts.path:
-            raise InvalidSourceError(f"{source} is not a file URI of a directory")
+            raise InvalidSourceError(f"{source} is not a file URI of a directory or a file")
         root = Path(os.fsdecode(urllib.parse.unquote_to_bytes(parts.path)))
     else:
         root = Path(source)
     if not root.exists():
         raise InvalidSourceError(f"{root} does not exist")
-    if not root.is_dir():
-        raise InvalidSourceError(f"{root} is not a directory; ingest the folder that holds it")
+    if not root.is_dir() and not root.is_file():  # one regular file is a source too (ADR 0043)
+        raise InvalidSourceError(f"{root} is neither a directory nor a regular file")
     return root
 
 
@@ -111,6 +131,24 @@ def _destination(destination: StrPath, root: Path) -> Path:
     return path
 
 
+def _manifest(root: Path, manifest: ManifestChoice) -> LoadedManifest | None:
+    """The manifest a call uses, read and checked now, before anything is walked (ADR 0047)."""
+    if manifest is False:
+        return None
+    if isinstance(manifest, bool) or not (
+        manifest is None or isinstance(manifest, str | os.PathLike)
+    ):
+        raise ConfigurationError(f"manifest must be a path, None or False, got {manifest!r}")
+    source = LocalSource(root)
+    try:
+        location = discover(source) if manifest is None else locate(source, manifest)
+        return read(source, location) if location is not None else None
+    except ManifestError as exc:
+        raise ConfigurationError(f"the manifest cannot be used: {exc}") from exc
+    except OSError:  # the root cannot be opened: the job reports it as the root's failure
+        return None
+
+
 def _workspace(workspace: Workspace | StrPath | None) -> Workspace:
     if isinstance(workspace, Workspace):
         return workspace
@@ -120,15 +158,48 @@ def _workspace(workspace: Workspace | StrPath | None) -> Workspace:
         raise WorkspaceUnusableError(f"the workspace cannot be opened: {exc}") from exc
 
 
-def _registry(adapters: Adapters | None) -> AdapterRegistry:
-    if adapters is None:
-        return default_registry()
-    if isinstance(adapters, AdapterRegistry):
-        return adapters
-    try:
-        return AdapterRegistry(adapters)
-    except (ContractError, TypeError) as exc:
-        raise ConfigurationError(f"the adapters cannot be registered: {exc}") from exc
+def _policy(plugins: PluginChoice) -> PluginPolicy:
+    if plugins is None or plugins is True:
+        return ALL_PLUGINS
+    if plugins is False:
+        return NO_PLUGINS
+    if isinstance(plugins, PluginPolicy):
+        return plugins
+    raise ConfigurationError(f"plugins must be a PluginPolicy, a bool or None, got {plugins!r}")
+
+
+def _registry(adapters: Adapters | None, plugins: PluginChoice) -> tuple[AdapterRegistry, Plugins]:
+    """The registry a client's jobs select from, and the plugins it read (ADR 0058).
+
+    With no ``adapters``, the built-ins and every plugin adapter the policy admits; given
+    ``adapters``, exactly those, and plugins add only their Sources.
+    """
+    policy = _policy(plugins)
+    if adapters is not None:
+        loaded = _admitted(load_plugins(policy, groups=(SOURCES_GROUP,)))
+        if isinstance(adapters, AdapterRegistry):
+            return adapters, loaded
+        try:
+            return AdapterRegistry(adapters), loaded
+        except (ContractError, TypeError) as exc:
+            raise ConfigurationError(f"the adapters cannot be registered: {exc}") from exc
+    builtins = builtin_adapters()
+    reserved = [adapter.descriptor.id for adapter in builtins]
+    loaded = _admitted(
+        load_plugins(policy, reserved=reserved, groups=(ADAPTERS_GROUP, SOURCES_GROUP))
+    )
+    return AdapterRegistry([*builtins, *loaded.adapters]), loaded
+
+
+def _admitted(loaded: Plugins) -> Plugins:
+    """``loaded``, unless an allowlist names a distribution that registers no plugin here: a
+    typo must not become a run without the plugin it meant (ADR 0058 §8)."""
+    if loaded.unmatched:
+        raise ConfigurationError(
+            "plugins are allowed from distributions that are not installed or register no"
+            f" plugin: {list(loaded.unmatched)}"
+        )
+    return loaded
 
 
 def _check_config(registry: AdapterRegistry, options: JobOptions) -> None:
@@ -327,7 +398,11 @@ class Neptune:
       (``$NEPTUNE_HOME``, else ``$XDG_CACHE_HOME/neptune``, else ``~/.cache/neptune``). New
       workspaces are local-only.
     - ``adapters``: the adapters a job may select from, as a registry or any iterable of
-      adapters; ``None`` for the ones Neptune ships (``builtin_adapters()``).
+      adapters; ``None`` for the ones Neptune ships (``builtin_adapters()``) and the plugin
+      adapters installed distributions register (``neptune.adapters`` entry points, ADR 0058).
+    - ``plugins``: which installed distributions' plugins to read: ``None`` (or ``True``) every
+      one, ``False`` none, a ``PluginPolicy(allow=(...))`` only those it names. A plugin that
+      cannot be used is a finding in every job's result and package, never an error.
     - ``options``: the runtime's own ``JobOptions`` (attempts, isolation, limits, each adapter's
       config by id, a job name); ``None`` for the defaults, which sandbox every adapter call.
     - ``remote``: the URL of a Neptune service to run jobs on, or ``None`` to run them here. The
@@ -345,9 +420,10 @@ class Neptune:
         adapters: Adapters | None = None,
         options: JobOptions | None = None,
         remote: str | None = None,
+        plugins: PluginChoice = None,
     ) -> None:
         self._workspace = _workspace(workspace)
-        self._registry = _registry(adapters)
+        self._registry, self._plugins = _registry(adapters, plugins)
         if options is not None and not isinstance(options, JobOptions):
             raise ConfigurationError(f"options must be JobOptions, got {options!r}")
         self._options = options if options is not None else JobOptions()
@@ -363,13 +439,35 @@ class Neptune:
         return self._registry
 
     @property
+    def plugins(self) -> Plugins:
+        """The plugins this client read: admitted adapters and Sources, and the findings about
+        those it refused, which every job of this client records."""
+        return self._plugins
+
+    @property
     def options(self) -> JobOptions:
         return self._options
 
-    def _builder(self, source: StrPath, destination: StrPath | None) -> Build:
+    def _builder(
+        self,
+        source: StrPath,
+        destination: StrPath | None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
+    ) -> Build:
         """Resolve and check the call now; return what builds its job around a sink and event."""
         root = _local_root(source, self._workspace)
+        options = self._options
+        if manifest is False:  # none, even one the client's options carry
+            options = replace(options, manifest=None)
+        elif manifest is not None or options.manifest is None:
+            options = replace(options, manifest=_manifest(root, manifest))
         target = _destination(destination, root) if destination is not None else None
+        if resume and not self._workspace.has_ledger(root):
+            raise NothingToResumeError(
+                f"the workspace {self._workspace.home} holds no earlier work on {root}; "
+                "a resume continues a job that scanned it here"
+            )
 
         def build(on_event: EventSink | None, cancel: threading.Event | None) -> IngestJob:
             try:
@@ -378,9 +476,10 @@ class Neptune:
                     target,
                     self._workspace,
                     self._registry,
-                    self._options,
+                    options,
                     on_event=on_event,
                     cancel=cancel,
+                    plugins=self._plugins,
                 )
             except JobError as exc:
                 raise from_job_error(exc, target) from exc
@@ -394,13 +493,19 @@ class Neptune:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> IngestResult:
-        """Ingest the folder ``source`` (a path or a ``file:`` URI) into a package at
+        """Ingest the folder or file ``source`` (a path or a ``file:`` URI) into a package at
         ``destination``, on this thread. ``on_event`` gets every ``JobEvent`` as it happens; an
         exception it raises stops the job and propagates. Setting ``cancel`` stops the job at its
         next checkpoint: the result is ``cancelled`` and the workspace keeps the work. Run it
-        again to resume: committed chunks are reused, not redone."""
-        job = self._builder(source, destination)(on_event, cancel)
+        again to resume: committed chunks are reused, not redone. ``resume=True`` insists on it:
+        ``NothingToResumeError`` if the workspace holds no earlier work on ``source``.
+        ``manifest``: ``None`` uses the root's ``neptune.yaml`` if it has one, a path names a
+        manifest file inside the root, ``False`` uses none (ADR 0047); one that cannot be used
+        is a ``ConfigurationError`` before anything runs."""
+        job = self._builder(source, destination, resume, manifest)(on_event, cancel)
         return _execute(job, dry=False)
 
     def dry_run(
@@ -409,23 +514,39 @@ class Neptune:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> IngestResult:
         """What ``ingest`` would do with ``source``, without parsing anything or writing a
         package: the job's ``discover``, ``fingerprint``, ``inspect`` and ``plan`` phases. The
         result is ``planned``; its findings say what is unsupported or ambiguous and its cache
         report what each source's adapter planned and what the workspace already holds."""
-        job = self._builder(source, None)(on_event, cancel)
+        job = self._builder(source, None, resume, manifest)(on_event, cancel)
         return _execute(job, dry=True)
 
     def start(
-        self, source: StrPath, destination: StrPath, *, cancel: threading.Event | None = None
+        self,
+        source: StrPath,
+        destination: StrPath,
+        *,
+        cancel: threading.Event | None = None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> Ingestion:
         """``ingest`` on a thread of its own: iterate the handle for events, then ``result()``."""
-        return Ingestion(self._builder(source, destination), dry=False, cancel=cancel)
+        build = self._builder(source, destination, resume, manifest)
+        return Ingestion(build, dry=False, cancel=cancel)
 
-    def start_dry_run(self, source: StrPath, *, cancel: threading.Event | None = None) -> Ingestion:
+    def start_dry_run(
+        self,
+        source: StrPath,
+        *,
+        cancel: threading.Event | None = None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
+    ) -> Ingestion:
         """``dry_run`` on a thread of its own."""
-        return Ingestion(self._builder(source, None), dry=True, cancel=cancel)
+        return Ingestion(self._builder(source, None, resume, manifest), dry=True, cancel=cancel)
 
 
 class AsyncNeptune:
@@ -445,8 +566,11 @@ class AsyncNeptune:
         adapters: Adapters | None = None,
         options: JobOptions | None = None,
         remote: str | None = None,
+        plugins: PluginChoice = None,
     ) -> None:
-        self._sync = Neptune(workspace, adapters=adapters, options=options, remote=remote)
+        self._sync = Neptune(
+            workspace, adapters=adapters, options=options, remote=remote, plugins=plugins
+        )
 
     @property
     def workspace(self) -> Workspace:
@@ -455,6 +579,10 @@ class AsyncNeptune:
     @property
     def registry(self) -> AdapterRegistry:
         return self._sync.registry
+
+    @property
+    def plugins(self) -> Plugins:
+        return self._sync.plugins
 
     @property
     def options(self) -> JobOptions:
@@ -467,9 +595,12 @@ class AsyncNeptune:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> IngestResult:
         """``Neptune.ingest``, awaited."""
-        return await _drive(self.start(source, destination, cancel=cancel), on_event)
+        run = self.start(source, destination, cancel=cancel, resume=resume, manifest=manifest)
+        return await _drive(run, on_event)
 
     async def dry_run(
         self,
@@ -477,22 +608,37 @@ class AsyncNeptune:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> IngestResult:
         """``Neptune.dry_run``, awaited."""
-        return await _drive(self.start_dry_run(source, cancel=cancel), on_event)
+        run = self.start_dry_run(source, cancel=cancel, resume=resume, manifest=manifest)
+        return await _drive(run, on_event)
 
     def start(
-        self, source: StrPath, destination: StrPath, *, cancel: threading.Event | None = None
+        self,
+        source: StrPath,
+        destination: StrPath,
+        *,
+        cancel: threading.Event | None = None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> AsyncIngestion:
         """``ingest`` on a thread of its own: ``async for`` its events, ``await`` its result."""
-        builder = self._sync._builder(source, destination)
+        builder = self._sync._builder(source, destination, resume, manifest)
         return AsyncIngestion(builder, dry=False, cancel=cancel)
 
     def start_dry_run(
-        self, source: StrPath, *, cancel: threading.Event | None = None
+        self,
+        source: StrPath,
+        *,
+        cancel: threading.Event | None = None,
+        resume: bool = False,
+        manifest: ManifestChoice = None,
     ) -> AsyncIngestion:
         """``dry_run`` on a thread of its own."""
-        return AsyncIngestion(self._sync._builder(source, None), dry=True, cancel=cancel)
+        builder = self._sync._builder(source, None, resume, manifest)
+        return AsyncIngestion(builder, dry=True, cancel=cancel)
 
 
 async def _drive(run: AsyncIngestion, on_event: EventSink | None) -> IngestResult:
@@ -548,10 +694,15 @@ def ingest(
     options: JobOptions | None = None,
     on_event: EventSink | None = None,
     cancel: threading.Event | None = None,
+    resume: bool = False,
+    manifest: ManifestChoice = None,
+    plugins: PluginChoice = None,
 ) -> IngestResult:
-    """``Neptune(workspace, adapters=..., options=...).ingest(source, destination, ...)``."""
-    client = Neptune(workspace, adapters=adapters, options=options)
-    return client.ingest(source, destination, on_event=on_event, cancel=cancel)
+    """``Neptune(workspace, adapters=..., options=..., plugins=...).ingest(source, ...)``."""
+    client = Neptune(workspace, adapters=adapters, options=options, plugins=plugins)
+    return client.ingest(
+        source, destination, on_event=on_event, cancel=cancel, resume=resume, manifest=manifest
+    )
 
 
 def dry_run(
@@ -562,7 +713,12 @@ def dry_run(
     options: JobOptions | None = None,
     on_event: EventSink | None = None,
     cancel: threading.Event | None = None,
+    resume: bool = False,
+    manifest: ManifestChoice = None,
+    plugins: PluginChoice = None,
 ) -> IngestResult:
-    """``Neptune(workspace, adapters=..., options=...).dry_run(source, ...)``."""
-    client = Neptune(workspace, adapters=adapters, options=options)
-    return client.dry_run(source, on_event=on_event, cancel=cancel)
+    """``Neptune(workspace, adapters=..., options=..., plugins=...).dry_run(source, ...)``."""
+    client = Neptune(workspace, adapters=adapters, options=options, plugins=plugins)
+    return client.dry_run(
+        source, on_event=on_event, cancel=cancel, resume=resume, manifest=manifest
+    )

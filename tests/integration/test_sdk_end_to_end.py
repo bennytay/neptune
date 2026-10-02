@@ -20,6 +20,7 @@ from typing import Any, Final
 
 import pytest
 
+from neptune.adapters.builtin import builtin_adapters
 from neptune.identity import canonical_json
 from neptune.model.finding import Severity
 from neptune.model.jsonvalue import JsonObject
@@ -91,7 +92,11 @@ def test_a_sync_ingest_of_the_text_fixtures_runs_every_call_in_the_sandbox(
     assert result.cache.calls.ingest == sum(len(s.chunks) for s in result.cache.sources)
     receipt = result.read_receipt()
     assert receipt.id == result.receipt
-    assert {t.adapter_id for t in receipt.transforms} == {"text"}
+    # README.md is Markdown; session grouping's tables are in every package (ADR 0036), and the
+    # plugin loader's transform names the plugins the workspace installs (ADR 0058 §5). A plugin
+    # that loads cleanly is no finding (``result.findings == ()`` above).
+    adapters = {t.adapter_id for t in receipt.transforms} - {"neptune.grouping", "neptune.plugins"}
+    assert "text" in adapters and adapters <= {a.descriptor.id for a in builtin_adapters()}
     # The truncated and the corrupted file each lose one block, and say so.
     assert [(f.code, f.severity) for f in receipt.findings] == [
         ("text.invalid_utf8", Severity.WARNING)

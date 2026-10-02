@@ -1,0 +1,110 @@
+{
+  "id": "rec:sha256:d58311a8b201fe4ec72d731ae135c51e962ae3e77ab7796541476727a24a5539",
+  "kind": "software_configuration",
+  "machine": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "observed",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 53,
+            "offset": 365
+          }
+        ],
+        "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+      },
+      "transform": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+    },
+    "value": {
+      "namespace": "px4.sys_uuid",
+      "value": "000200000000343233345117003a0027"
+    }
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 59,
+          "offset": 306
+        }
+      ],
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+    },
+    "transform": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+  },
+  "schema_version": 1,
+  "software": [
+    {
+      "build": {
+        "knowledge": "not_covered"
+      },
+      "commit": {
+        "knowledge": "known",
+        "value": {
+          "kind": "git_commit",
+          "sha": "2a7d3f1ce8b5f0a9d61c2e7b4f8a3d5c6e9b1f07"
+        }
+      },
+      "device": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 30,
+                "offset": 276
+              }
+            ],
+            "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+          },
+          "transform": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+        },
+        "value": "PX4_FMU_V5X"
+      },
+      "digest": {
+        "knowledge": "not_covered"
+      },
+      "name": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 23,
+                "offset": 253
+              }
+            ],
+            "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+          },
+          "transform": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+        },
+        "value": "PX4"
+      },
+      "release": {
+        "knowledge": "unknown",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 165,
+                "offset": 253
+              }
+            ],
+            "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+          },
+          "transform": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+        }
+      }
+    }
+  ]
+}

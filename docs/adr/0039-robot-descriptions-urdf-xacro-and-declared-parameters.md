@@ -4,7 +4,7 @@
 - Date: 2026-10-02
 - Issue: MVL-24
 - Extends: ADR 0019 §4 (the extension rule), ADR 0023 §1 and ADR 0037 §1 (growth by addition);
-  schema version 3
+  schema version 5
 
 ## Context
 
@@ -170,10 +170,10 @@ The forces:
   specification (type, axis, limits), and a sensor's placement from its component's frame and its
   specification, with no XML. `tests/unit/adapters/test_urdf_adapter.py` checks this against
   `urdf_parser_py` and real xacro on three robots.
-- Schema version 3: three kinds (`since` 3, after ADR 0037's configuration kinds at 2), and one
+- Schema version 5: three kinds (`since` 5, after ADR 0051's lifecycle kinds at 4), and one
   locator step of the adapter's own. As ADR 0037 §1 has it, their records are written at version
-  3 and every other record at its own kind's version, so no existing record, worked example or
-  golden document changes; a package holding description records is a version 3 package.
+  5 and every other record at its own kind's version, so no existing record, worked example or
+  golden document changes; a package holding description records is a version 5 package.
 - SDF and MJCF (MVL-25) reuse `hardware_specification`, `description_extension` and
   `description_expansion` with their own parameter names.
 - A Xacro robot split across files is partly `NotCovered` until includes can be followed.

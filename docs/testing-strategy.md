@@ -38,7 +38,9 @@ the gate's review.
 - Fixtures **grow with the milestone that needs them**: security fixtures (path traversal, symlink loop,
   archive bomb, truncation) landed with MVL-75 in `tests/fixtures/hostile/` (generator plus committed
   archives; the symlink tree is built at test time); per-format corruption fixtures land with each
-  adapter; MVL-50 consolidates and audits coverage, it does not start from zero.
+  adapter (`tests/fixtures/text/`, `tests/fixtures/tabular/` with its generator, whose Parquet files are
+  validated by the official reader; `tests/fixtures/geometry/`, one mesh per robot kind in every format, checked against `trimesh`, `usd-core` and `json` in `oracle.json`; `tests/fixtures/rosbag2/`, one recording written as an sqlite3 bag, an
+  MCAP bag and a split bag, checked against `rosbags` and `mcap` in `oracle.json`); MVL-50 consolidates and audits coverage, it does not start from zero.
 - Every adversarial fixture has an expected structured outcome: salvage, explicit ambiguity, unsupported,
   or safe rejection.
 

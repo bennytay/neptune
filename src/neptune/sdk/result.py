@@ -13,11 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+import neptune.sdk.contents as _contents
 from neptune.identity import canonical_json
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.package import IngestReceipt, ingest_receipt_from_json
-from neptune.runtime import CacheReport, JobOutcome, JobState
+from neptune.runtime import CacheReport, Explanation, JobOutcome, JobState
 from neptune.sdk.errors import InvalidRequestError, PackageInvalidError
 from neptune.store.package import RECEIPT, IngestPackage, open_file
 from neptune.store.package import read_package as _read_package
@@ -90,6 +91,12 @@ class IngestResult:
         return self.outcome.cache
 
     @property
+    def explanation(self) -> Explanation | None:
+        """A planned dry run's explanation of what an ingest would do, and why (ADR 0044):
+        ``to_json``/``dumps`` for programs, ``render`` for people. ``None`` for any other job."""
+        return self.outcome.explanation
+
+    @property
     def durations(self) -> tuple[tuple[str, float], ...]:
         """Seconds per phase: volatile, never in the package's identity."""
         return self.outcome.durations
@@ -115,6 +122,11 @@ class IngestResult:
     def read_package(self) -> IngestPackage:
         """The committed package, read back and verified."""
         return read_package(self._committed())
+
+    def contents(self) -> tuple[_contents.RunContents, ...]:
+        """What each run of the committed package contains: streams, declared field paths and
+        inferred semantics, read from its records and derived tables (ADR 0049)."""
+        return _contents.run_contents(self.read_package())
 
 
 # The attribute an interruption carries its job's committed result under (``committed_result``).

@@ -1,0 +1,15 @@
+title = "Graph schema and claim model of bi-temporal deployment memory (memory ADR 0002, 0005, 0006)"
+status = "active"
+consumers = ["neptune-context", "neptune-deploy", "neptune-learn"]
+
+[owner]
+package = "neptune-memory"
+module = "neptune_memory.schema"
+schema_export = "neptune_memory.schema.export:graph_schema"
+# An integer constant is the registry major: raise it for a breaking change.
+version_constant = "neptune_memory.schema:GRAPH_SCHEMA_VERSION"
+golden_generator = "contracts/graph-schema/goldens.py"
+contract_tests = [
+  "packages/neptune-memory/tests/test_reader_contract_memory.py",
+  "packages/neptune-memory/tests/test_golden_graph_memory.py",
+]

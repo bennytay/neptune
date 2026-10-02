@@ -2,13 +2,14 @@
 
 Status: **authoritative**; frozen at `SCHEMA_VERSION` 1 by the M1 gate (MVL-56, ADR 0023; review:
 `docs/reviews/m1-stress-test.md`) and grown only by addition since: version 2 adds configuration snapshots
-(MVL-23, ADR 0037), version 3 robot descriptions (MVL-24, ADR 0039). Primitives are specified by
+(MVL-23, ADR 0037), version 3 alignment records (MVL-82, ADR 0050), version 4 deployment lifecycle records
+(MVL-83, ADR 0051), version 5 robot descriptions (MVL-24, ADR 0039). Primitives are specified by
 MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66 (ADR 0017), runs, streams and series by MVL-67
 (ADR 0018), machine context by MVL-68 (ADR 0019) and world context by MVL-69 (ADR 0020). The JSON Schema
 (`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). Any change here needs
 an ADR and a schema-version bump, and must be an addition (ADR 0023 §1).
 
-## Record kinds (schema version 3)
+## Record kinds (schema version 5)
 
 Every record kind belongs to one family (ADR 0017 §4). The last four families are the design contract's source
 domains.
@@ -20,9 +21,10 @@ domains.
 | `finding` | `IngestFinding` | `model/finding.py` |
 | `reference` | `TimestampDomain`, `FrameGraph`, `Frame`, `FrameTransform` | `model/reference.py` |
 | `run` | `Run`, `Stream` | `model/run.py`, series contract in `model/series.py` (ADR 0018) |
-| `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration`; since version 2 `ConfigurationSnapshot`, `ConfigurationValue`; since version 3 `HardwareSpecification`, `DescriptionExtension`, `DescriptionExpansion` | `model/machine.py` (ADRs 0019, 0039), `model/configuration.py` (ADR 0037) |
-| `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord` | `model/world.py` (ADR 0020) |
+| `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration`; since version 2 `ConfigurationSnapshot`, `ConfigurationValue`; since version 5 `HardwareSpecification`, `DescriptionExtension`, `DescriptionExpansion` | `model/machine.py` (ADRs 0019, 0039), `model/configuration.py` (ADR 0037) |
+| `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord`; since version 4 `CommissioningBaseline`, `AuthorisationEnvelope`, `Intervention`, `MaintenanceEvent`, `RequalificationRecord`, `IncidentRecord`, `ChangeRecord`, `RiskAssessment` | `model/world.py` (ADR 0020), `model/lifecycle.py` (ADR 0051) |
 | `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
+| `alignment` | `IdentityLink`, `ClockMapping`, `FrameBinding`, `RunAssembly`, `SnapshotBinding` (since 3) | `model/alignment.py` (ADR 0050) |
 
 `IngestReceipt` is the package-level account of an ingest run, not a record table: one document per package,
 beside `PackageManifest` and the volatile `ReceiptEnvelope` (`model/package.py`, ADR 0022).
@@ -46,8 +48,10 @@ boundary to the memory learner.
 - A value defined by a format specification (MCAP `log_time` is ns) cites the bytes that establish the format
   plus the transform that applies the spec. When the source carries the definition itself (a ROS message
   definition in an MCAP schema record), it cites that instead.
-- `SCHEMA_VERSION` is 3. It became 1 at the M1 gate (ADR 0023), 2 with the configuration kinds (ADR 0037) and 3
-  with the robot-description kinds (ADR 0039); a record kind's fields never change from version 1 on. The model grows only by addition (new record kinds, including companion kinds naming the record they
+- `SCHEMA_VERSION` is 5 (2: configuration, ADR 0037; 3: alignment, ADR 0050; 4: deployment lifecycle, ADR 0051;
+  5: robot descriptions, ADR 0039).
+  It became 1 at the M1 gate (ADR 0023), and a record kind's fields never change from then on. The model grows
+  only by addition (new record kinds, including companion kinds naming the record they
   extend, new enum members, new locator steps), each through an ADR and a version bump. So every record from
   version 1 on stays valid, readers read versions 1 to their own unchanged, and ids never move. Version 0
   drafts are refused. Stored packages are never rewritten. Anything that is not an addition is a new kind and
@@ -108,8 +112,11 @@ a bug, not a value.
   `scope` (where the ticks are read, verbatim) and `Knowledge`-wrapped `role` (receive / publish / sample /
   document), `resolution` (exact `Fraction` seconds per tick), `epoch`, `timescale` and `declared_monotonic`.
 - MCAP `log_time` and `publish_time`, ROS `header.stamp` and receive time, PX4 boot-time and GPS time are
-  separate domains. Mappings between domains are `ClockAlignment` records produced in MVL-36 with method,
-  evidence and error bounds.
+  separate domains. Mappings between domains are `ClockMapping` records (ADR 0050, below): stated ones are
+  canonical, estimated ones derived (ADR 0060: an exact fit over sync anchors, valid only between its first
+  and last anchor, its `residual_bound` `Unknown` unless the latency between paired readings is stated).
+  `neptune.derived.clocks.ClockGraph.align` gives an instant on another clock with its bound, or says why
+  not (`unsynchronised`, `outside_validity`, `rate_unknown`); no stored tick changes.
 - Civil date-times (ADR 0023 §2): with a stated offset, ticks are POSIX seconds of the exact instant (epoch
   `unix`, timescale `posix`); with no zone, POSIX-style seconds on the source's own civil clock (epoch `unix`,
   timescale `Unknown`); a date alone counts days.
@@ -152,7 +159,8 @@ a bug, not a value.
 
 - `Run`: a session one piece of evidence declares (a recording, a rosbag2 `metadata.yaml`, a manifest entry).
   `logical_id` and `machine` are declared ids; `first` / `last` are inclusive and separate, because a source
-  may state only one. Heuristic groupings are derived (MVL-13 / MVL-34).
+  may state only one. Heuristic groupings are derived: `session_proposal` records in the package's `derived/`
+  tables (MVL-13, ADR 0036; MVL-34 next), never `Run`s.
 - `Stream`: one channel as declared. It holds `run`, `topic`, `schema_name` / `schema_encoding` /
   `schema_definition`, `message_encoding`, `metadata`, `clocks`, and the source's declared `message_count` /
   `first` / `last`, plus `series`. A topic split across files is several streams of one run.
@@ -196,16 +204,17 @@ a bug, not a value.
 - `SoftwareConfiguration`: the software one declaration says ran: `machine` plus items. Each item has
   `name`, `device` (firmware per device) and one field per identity: `commit`, `release`, `build`,
   `digest`. A missing identity is `Unknown` or `NotCovered` plus a finding, never blank.
-- `HardwareSpecification` (ADR 0039): what a declaration states about one `subject` (a component or a
-  configuration) beyond its name, category and frame: a joint's type, axis and limits, a link's inertia and
-  geometry, a sensor's settings. `parameters` are `DeclaredParameter`s (`CalibrationParameter`'s generalisation):
-  path-named, numbers or text as declared, each with its unit and citation. Only what the file states; format
-  defaults are never written.
-- `DescriptionExtension` (ADR 0039): a block a robot description declares for another tool (`<gazebo>`,
-  `<ros2_control>`), kept opaque: its `configuration`, `element` and own attributes and plugin names as text.
-- `DescriptionExpansion` (ADR 0039): the document a macro source (Xacro) expands to, by `digest` and `size`,
-  with the declared `arguments` and the values used. Records read from it cite into it through the adapter's
-  expansion step.
+- `HardwareSpecification` (since version 5, ADR 0039): what a declaration states about one `subject` (a
+  component or a configuration) beyond its name, category and frame: a joint's type, axis and limits, a link's
+  inertia and geometry, a sensor's settings. `parameters` are `DeclaredParameter`s (`CalibrationParameter`'s
+  generalisation): path-named, numbers or text as declared, each with its unit and citation. Only what the file
+  states; format defaults are never written.
+- `DescriptionExtension` (since version 5, ADR 0039): a block a robot description declares for another tool
+  (`<gazebo>`, `<ros2_control>`), kept opaque: its `configuration`, `element` and own attributes and plugin
+  names as text.
+- `DescriptionExpansion` (since version 5, ADR 0039): the document a macro source (Xacro) expands to, by
+  `digest` and `size`, with the declared `arguments` and the values used. Records read from it cite into it
+  through the adapter's expansion step.
 - `Calibration`: what one declaration states about one `subject`, for which `machine` and
   `hardware_revision`, and when (`performed`, `valid_from`, `valid_until`). `parameters` are declared
   names with their numbers in source order (or a setting's text) and units; `extrinsics` lists the
@@ -221,17 +230,39 @@ a bug, not a value.
   (verbatim, each citing its span, never attached to a value), `values` (how many value records it has) and
   `digest`.
 - `ConfigurationValue` (since version 2): one node, naming its `snapshot`: `path` (keys verbatim, positions as
-  integers), `order` among its parent's entries, YAML `tag` (`NotCovered` in JSON and TOML), `text` (a
-  scalar as written) and `value`: a `ConfigCollection`, a `ConfigAlias` (a reference, never expanded) or a
-  `ConfigScalar` in the format's own type, citing its span. A format-defined null is `KnownAbsent` citing
+  integers), `occurrence` (per step, which of the entries sharing that key it passes through; `(path,
+  occurrence)` is unique in a snapshot), `order` among its parent's entries, `key_tag` (a YAML key's type
+  where it is not a string, else `NotApplicable`), YAML `tag` (`NotCovered` in JSON and TOML), `text` (a
+  scalar as written) and `value`: a `ConfigCollection`, a `ConfigAlias` (a reference, never expanded, to a
+  node, or with `key` to an anchored key's entry) or a `ConfigScalar` in the format's own type, citing its span. A format-defined null is `KnownAbsent` citing
   the document; YAML 1.1 and 1.2 readings that differ in an undeclared document are `Ambiguous`.
 - A value's locator is a `JsonPointer` into the document as parsed, after a `config:document` step in YAML;
   each entry of a repeated key is addressed by position (`config:entry`) instead.
-- Identity: the bytes by their content id, the values by `digest`, the sha256 of every value's path and
-  `comparison_key`. `compare_configurations(left, right)` lists the paths whose declared values differ;
+- Identity: the bytes by their content id, the values by `digest`, the sha256 of every value's path, occurrence
+  and `comparison_key`, in that order. `compare_configurations(left, right)` lists the paths whose declared values differ;
   equal digests exactly when it lists none. Spelling, quoting, comments, key order and format never count.
 - Nothing is inferred: a key named `wheel_radius` is a declared number, with no unit unless the document
   states one in a value of its own.
+
+## Alignment (ADR 0050; `model/alignment.py`)
+
+- Relations between records other families declare, only as far as cited evidence states them. An
+  exact join of declared values (two declarations giving one id) is evidence; anything estimated is
+  `inferred` and lives in `derived/<kind>.jsonl` with the same fields. Nothing merges or re-times.
+- `validity`: `Knowledge[ValidityWindow]`, `{clock, start, end}` on one `TimestampDomain`, start
+  inclusive and end exclusive; `KnownAbsent` bound = stated open, `Unknown` = not stated.
+- `IdentityLink {left, right, basis, identifier, evidence}`: `right` `Known` or `Ambiguous`, never `left`;
+  `co_declared` (one declaration, two ids) or `shared_identifier` (two declarations, one `identifier`).
+  Never a merge: both ids stay keys.
+- `ClockMapping {source, target, method, anchor, rate, residual_bound}`:
+  `target(t) = anchor.target + rate * (t - anchor.source)` in ticks, `rate` an exact positive fraction,
+  `residual_bound` a `Duration` on the target clock, `validity` on the source clock.
+- `FrameBinding {parent, child, transform, basis, calibration}`: the `FrameTransform` that gives one graph
+  edge its value (`robot_description`, `calibration`, `transform_message`).
+- `RunAssembly {run, rule, members}`: each member a `SourceRevision` id, a role (`recording`,
+  `description`, `context`) and the `EvidenceRef` that places it in the run.
+- `SnapshotBinding {run, snapshot, snapshot_kind}`: the hardware, software, calibration or configuration
+  snapshot a run ran with, over a window on one of its clocks (MVL-38).
 
 ## World and record context (ADR 0020; `model/world.py`)
 
@@ -254,12 +285,28 @@ a bug, not a value.
   "none" is `KnownAbsent` citing the definition. A row cited as `Row(r)` hoists its cells' citations:
   cell `c` is `RowCell(r, c, header[c])` (`cell_evidence`).
 
+## Deployment lifecycle records (ADR 0051; `model/lifecycle.py`)
+
+- Eight `world` kinds from schema version 4, each `stated` by one form, ticket, work order or register
+  row: `CommissioningBaseline`, `AuthorisationEnvelope`, `Intervention`, `MaintenanceEvent`,
+  `RequalificationRecord`, `IncidentRecord`, `ChangeRecord`, `RiskAssessment`.
+- Shared fields, all declared ids: `identifiers` (the record's own), `site`, `machines`, `configuration`
+  (a maintenance event's is the as-maintained one it states) and `related` (records and evidence it
+  names). Never record ids: MVL-35 links them.
+- Stored as declared: severities, results, decisions, authorities, methods and scores are verbatim text
+  (`Score(name, value)` keeps the source's label); a `Quantity` is a declared number and declared unit;
+  times are `Timestamp`s on the clock the record names; versions are the kind the source names.
+- Parts: `Quantity`, `Decision` (decision, authority, time), `InventoryItem`, `TestResult`, `ZoneLimit`,
+  `PartReplacement`, `TimelineEntry`, `ChangeItem`, `Score`, `Hazard`. Statement lists keep source order and
+  may repeat; id lists are sorted and unique; an empty list states none.
+- No lifecycle logic: nothing orders stages, checks one record against another or ranks a severity.
+
 ## The package and its receipt (ADR 0022; `model/package.py`, `store/`)
 
 - A package is a directory: `manifest.json`, `receipt.json`, `receipt.md`, `records/<kind>.jsonl` (every kind of
-  the package's schema version; empty file = none), `series/<stream hex>.parquet`, `blobs/sha256/<2>/<64>`, and
-  `volatile/receipt-envelope.json`. The manifest and receipt carry the package's version: the lowest that holds
-  its records (ADR 0037 §1).
+  the package's schema version; empty file = none), `derived/<kind>.jsonl` (inferred tables, below),
+  `series/<stream hex>.parquet`, `blobs/sha256/<2>/<64>`, and `volatile/receipt-envelope.json`. The manifest and
+  receipt carry the package's version: the lowest that holds its records (ADR 0037 §1).
 - `PackageManifest`: the receipt's id, record counts per kind, a handle per source (content id, size, referenced
   or materialised), every file's size and sha256, and the store's settings. The package id is the manifest's
   sha256.
@@ -270,8 +317,18 @@ a bug, not a value.
   time.
 - `ReceiptEnvelope` holds the job id, wall clock, host, ingest root and durations, outside the manifest, so it
   never changes the package id. Sources are referenced by default; materialising is opt-in.
-- `derived/` is reserved for derived records, apart from `records/`; readers refuse it until the derived
-  layer's schema lands (ADR 0023 §5).
+- `derived/<kind>.jsonl` holds derived tables apart from `records/` (ADR 0036, amending ADR 0023 §5):
+  canonical lines sorted by id, each `assertion_kind` `inferred` (`stated` for a session the user declared,
+  `observed` for a stream's parsed definition) and naming a transform in the package, listed in the manifest.
+  The store checks their structure; `neptune.derived` reads their meaning and refuses kinds it does not define.
+  The kinds are `session_proposal` and `session_unassigned` (run/session grouping), and `definition_layout`,
+  `stream_layout` and `stream_semantic` (a distinct definition's declared field paths and types, written once;
+  each stream's line naming it; and what the stream carries, inferred; ADR 0049), `media_stream` (a stream
+  carrying images, video or point clouds: its media kind, frame count, hydrator and derivative states; its
+  frames are its series rows, queried and hydrated lazily by `neptune.sdk.media`; ADR 0056), and
+  `timestamp_domain` and `clock_mapping` (a clock found in a stream's values, and a mapping fitted from sync
+  anchors; ADR 0060). Present and empty means the producer ran and inferred nothing, absent means it did not
+  run.
 
 ## Serialization (ADR 0002)
 
@@ -295,10 +352,12 @@ a bug, not a value.
 
 | Example | Sources | Records |
 |---|---|---|
-| drone | PX4 ULog | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings |
-| quadruped | ROS 2 bag, URDF, STL mesh | run from bag metadata, joint and trajectory streams with three clocks each, URDF frames, transforms and components, the mesh as geometry |
-| manipulator | MCAP, hand-eye YAML | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit |
-| mobile robot | ROS 1 bag, site register CSV, PNG photo | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture |
+| drone | PX4 ULog | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings; the log as its run's member and three snapshot bindings |
+| quadruped | ROS 2 bag, URDF, STL mesh | run from bag metadata, joint and trajectory streams with three clocks each, URDF frames, transforms and components, the mesh as geometry; the bag's file list, its stated `starting_time` → `log_time` clock mapping, URDF edge bindings |
+| manipulator | MCAP, hand-eye YAML | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit; the calibration's edge binding |
+| mobile robot | ROS 1 bag, site register CSV, PNG photo | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture; the bag as its run's one member |
+| warehouse AMR | deployment records JSON | commissioning, authorisation envelope, intervention, incident, change and risk assessment (ADR 0051) |
+| manipulator cell | deployment records JSON | commissioning, risk assessment, maintenance event and requalification (ADR 0051) |
 
 Every source is a real file, and every record resolves back to it: citations land on real records, pointers,
 rows and cells resolve, and every id a record names is in the example.

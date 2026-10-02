@@ -1,0 +1,5 @@
+[
+  {"key": "INC-0007", "fields": {"issuetype": {"name": "Incident"}, "summary": "AMR-07 stopped after pallet contact", "priority": {"name": "S2"}, "created": "2026-03-01T13:42:10.000+0100", "environment": "Aisle 14, outbound dock", "description": "AMR-07 made low-speed contact with a pallet overhanging the marked lane and stopped on its bumper.", "status": {"name": "Resolved"}, "labels": ["safety", "amr"], "customfield_10040": "DOCK-1"}},
+  {"key": "INC-0008", "fields": {"issuetype": {"name": "Incident"}, "summary": "AMR-12 emergency stop during charging", "priority": {"name": "near miss"}, "created": "2026-03-04T07:05:00.000+0100", "environment": "Charging bay 2", "description": "Operator pressed the e-stop when AMR-12 approached the charger off-axis.", "status": {"name": "Open"}, "labels": [], "customfield_10040": "CHG-BAY"}},
+  {"key": "OPS-0311", "fields": {"issuetype": {"name": "Task"}, "summary": "Re-mark lane 14 floor tape", "priority": {"name": "Low"}, "created": "2026-03-02T09:00:00.000+0100", "environment": null, "description": "Floor tape worn at the dock entry.", "status": {"name": "Done"}, "labels": ["facilities"], "customfield_10040": null}}
+]

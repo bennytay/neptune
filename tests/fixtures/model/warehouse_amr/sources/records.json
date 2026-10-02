@@ -1,0 +1,199 @@
+{
+  "site": "S-007",
+  "commissioning": [
+    {
+      "form": "COM-0042",
+      "machine": "AMR-07",
+      "configuration": "CFG-AMR07-r3",
+      "commissioned": "2026-09-21T09:00:00+10:00",
+      "hardware": [
+        {
+          "item": "drive unit",
+          "model": "DU-200",
+          "serial": "DU2-55120",
+          "revision": "C"
+        },
+        {
+          "item": "safety lidar",
+          "model": "microScan3",
+          "serial": "23110457",
+          "revision": "1.4"
+        }
+      ],
+      "software": [
+        {
+          "item": "navigation stack",
+          "version": "2.4.1"
+        },
+        {
+          "item": "safety controller firmware",
+          "version": "V01.03.02"
+        }
+      ],
+      "calibrations": [
+        "CAL-LIDAR-0912"
+      ],
+      "tests": [
+        {
+          "test": "emergency stop",
+          "result": "PASS",
+          "date": "2026-09-21T10:15:00+10:00"
+        },
+        {
+          "test": "braking distance at 1.5 m/s",
+          "result": "0.92 m",
+          "date": "2026-09-21T10:40:00+10:00"
+        }
+      ],
+      "constraints": [
+        "no operation in aisle 14 during forklift shift change",
+        "ambient temperature at most 35 C"
+      ],
+      "signed_off_by": "Site safety lead",
+      "signed_off": "2026-09-21T16:00:00+10:00",
+      "acceptance": "accepted"
+    }
+  ],
+  "authorisations": [
+    {
+      "authorisation": "AUTH-0042-1",
+      "commissioning": "COM-0042",
+      "machine": "AMR-07",
+      "configuration": "CFG-AMR07-r3",
+      "missions": [
+        "tote transport",
+        "empty pallet return"
+      ],
+      "payload": {
+        "min": 0,
+        "max": 150,
+        "unit": "kg"
+      },
+      "zones": [
+        {
+          "zone": "PICK-A",
+          "speed_limit": 1.5,
+          "unit": "m/s"
+        },
+        {
+          "zone": "DOCK-1",
+          "speed_limit": 0.8,
+          "unit": "m/s"
+        }
+      ],
+      "supervision": "remote supervision, 1 operator : 6 robots",
+      "dependencies": [
+        "Wi-Fi coverage AP-3 to AP-9",
+        "fire door interlock FD-2"
+      ],
+      "valid_from": "2026-09-22T00:00:00+10:00",
+      "valid_until": "2027-03-22T00:00:00+10:00",
+      "decision": "approved with conditions",
+      "approved_by": "Operations manager",
+      "approved": "2026-09-21T17:30:00+10:00"
+    }
+  ],
+  "interventions": [
+    {
+      "ticket": "INT-1187",
+      "machine": "AMR-07",
+      "mode": "remote assist",
+      "authority": "level 2 remote operator",
+      "reason": "blocked by a pallet in aisle 12",
+      "commands": [
+        "pause",
+        "set waypoint W-12-3",
+        "resume"
+      ],
+      "start": "2026-09-24T14:02:10+10:00",
+      "end": "2026-09-24T14:05:41+10:00",
+      "outcome": "mission completed"
+    }
+  ],
+  "incidents": [
+    {
+      "incident": "INC-0007",
+      "severity": "S3",
+      "occurred": "2026-09-25T04:12:00+10:00",
+      "zone": "DOCK-1",
+      "location": "dock door 4",
+      "machines": [
+        "AMR-07"
+      ],
+      "assets": [
+        "RACK-R12"
+      ],
+      "timeline": [
+        {
+          "time": "2026-09-25T04:12:00+10:00",
+          "entry": "AMR-07 touched rack upright R12"
+        },
+        {
+          "time": "2026-09-25T04:12:01+10:00",
+          "entry": "bumper stop; robot halted"
+        }
+      ],
+      "description": "low-speed contact with a rack upright while docking",
+      "root_cause": "map offset after rack R12 was moved",
+      "evidence": [
+        "VID-20260925-0412",
+        "drive.bag"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "change": "CHG-0031",
+      "incident": "INC-0007",
+      "machines": [
+        "AMR-07"
+      ],
+      "configuration": "CFG-AMR07-r4",
+      "items": [
+        {
+          "type": "map",
+          "target": "warehouse map",
+          "from": "r12",
+          "to": "r13"
+        },
+        {
+          "type": "zone",
+          "target": "DOCK-1 speed limit",
+          "from": "0.8 m/s",
+          "to": "0.5 m/s"
+        }
+      ],
+      "decision": "approved",
+      "approved_by": "Site safety lead",
+      "approved": "2026-09-26T11:00:00+10:00",
+      "effective": "2026-09-27T06:00:00+10:00",
+      "rollback": "map r12"
+    }
+  ],
+  "risk_assessments": [
+    {
+      "assessment": "RA-0042",
+      "machines": [
+        "AMR-07"
+      ],
+      "configuration": "CFG-AMR07-r3",
+      "method": "ISO 3691-4 Annex A risk matrix",
+      "assessed": "2026-09-18T10:00:00+10:00",
+      "hazards": [
+        {
+          "hazard": "collision with a pedestrian in PICK-A",
+          "severity": "high",
+          "likelihood": "unlikely",
+          "risk": "12",
+          "mitigations": [
+            "safety lidar protective field",
+            "speed limit 1.5 m/s"
+          ]
+        }
+      ],
+      "decision": "accepted",
+      "approved_by": "Site safety lead",
+      "approved": "2026-09-19T09:00:00+10:00"
+    }
+  ]
+}

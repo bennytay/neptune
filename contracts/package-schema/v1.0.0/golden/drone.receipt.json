@@ -1,0 +1,190 @@
+{
+  "absent": [],
+  "ambiguous": [],
+  "clocks": [
+    {
+      "field": "time_utc_usec",
+      "id": "rec:sha256:2cc49276ad09ca7f401000c838f09649480b62e881be9954925ffd76f3b06b9e",
+      "scope": [
+        "vehicle_gps_position"
+      ]
+    },
+    {
+      "field": "timestamp_sample",
+      "id": "rec:sha256:54affe4921915bef92a30a65aef80ead1d42b95ed34d41f722fb326a63e7e3b0",
+      "scope": [
+        "sensor_accel"
+      ]
+    },
+    {
+      "field": "timestamp",
+      "id": "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31",
+      "scope": []
+    }
+  ],
+  "entities": [
+    {
+      "id": "rec:sha256:534181a799ceed2d15c376e7865ed0a504e5f1dee8873c7e28d0862f9c6d128d",
+      "identifiers": [
+        {
+          "namespace": "px4.sys_uuid",
+          "value": "000200000000343233345117003a0027"
+        }
+      ],
+      "record_kind": "machine"
+    }
+  ],
+  "findings": [
+    {
+      "category": "missing",
+      "code": "ulog.dropout",
+      "id": "rec:sha256:ef085d03756005cd233e7214b2d7183cea5a0a0dad846393adb903ea3a4cc650",
+      "message": "the logger dropped 120 ms of data, so every series has a gap",
+      "severity": "warning"
+    },
+    {
+      "category": "missing",
+      "code": "ulog.software_identity_missing",
+      "id": "rec:sha256:4a7d4fd664185f86af44dab72fad094ce0f7a1044eede9125a0a34815ea76d2a",
+      "message": "the log states no ver_sw_release, so the PX4 release that ran is unknown",
+      "severity": "warning"
+    }
+  ],
+  "id": "rec:sha256:c0beebc8288c96775757b3d192400e73b0016237c4932926c9d3523b9723da29",
+  "kind": "ingest_receipt",
+  "records": {
+    "asset": 0,
+    "calibration": 1,
+    "document_block": 0,
+    "document_record": 0,
+    "frame": 0,
+    "frame_graph": 0,
+    "frame_transform": 0,
+    "hardware_component": 2,
+    "hardware_configuration": 1,
+    "image": 0,
+    "ingest_finding": 2,
+    "machine": 1,
+    "run": 1,
+    "site": 0,
+    "software_configuration": 1,
+    "source_absence": 0,
+    "source_artifact": 1,
+    "source_revision": 1,
+    "spatial_artifact": 0,
+    "stream": 2,
+    "structured_record": 0,
+    "structured_table": 0,
+    "timestamp_domain": 3,
+    "transform_record": 1,
+    "video": 0
+  },
+  "runs": [
+    {
+      "first": {
+        "knowledge": "known",
+        "value": {
+          "domain_id": "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31",
+          "ticks": 12000000
+        }
+      },
+      "id": "rec:sha256:bbe0a997b0284bd7a1f3982de3dbddf3abcd70485034c4d1af9fe1709da3401b",
+      "last": {
+        "knowledge": "not_covered"
+      },
+      "logical_id": {
+        "knowledge": "not_covered"
+      },
+      "machine": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 53,
+                "offset": 365
+              }
+            ],
+            "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+          },
+          "transform": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+        },
+        "value": {
+          "namespace": "px4.sys_uuid",
+          "value": "000200000000343233345117003a0027"
+        }
+      },
+      "streams": 2
+    }
+  ],
+  "schema_version": 1,
+  "sources": [
+    {
+      "content_id": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+      "location": {
+        "kind": "local",
+        "path": "flight.ulg"
+      },
+      "read_by": [
+        "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+      ],
+      "size": 744
+    }
+  ],
+  "streams": [
+    {
+      "clocks": [
+        "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31",
+        "rec:sha256:54affe4921915bef92a30a65aef80ead1d42b95ed34d41f722fb326a63e7e3b0"
+      ],
+      "first": {
+        "knowledge": "not_covered"
+      },
+      "id": "rec:sha256:0e2ade545b7592c1503fb26042b630c78b9b32f0a3908a774859a47d1d05414c",
+      "last": {
+        "knowledge": "not_covered"
+      },
+      "message_count": {
+        "knowledge": "not_covered"
+      },
+      "run": "rec:sha256:bbe0a997b0284bd7a1f3982de3dbddf3abcd70485034c4d1af9fe1709da3401b",
+      "topic": {
+        "knowledge": "known",
+        "value": "sensor_accel"
+      }
+    },
+    {
+      "clocks": [
+        "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31",
+        "rec:sha256:2cc49276ad09ca7f401000c838f09649480b62e881be9954925ffd76f3b06b9e"
+      ],
+      "first": {
+        "knowledge": "not_covered"
+      },
+      "id": "rec:sha256:6a0ff7acdbaf3d37820af80b6d43641dc30d4509918761ddb8e6fea4a7de5619",
+      "last": {
+        "knowledge": "not_covered"
+      },
+      "message_count": {
+        "knowledge": "not_covered"
+      },
+      "run": "rec:sha256:bbe0a997b0284bd7a1f3982de3dbddf3abcd70485034c4d1af9fe1709da3401b",
+      "topic": {
+        "knowledge": "known",
+        "value": "vehicle_gps_position"
+      }
+    }
+  ],
+  "transforms": [
+    {
+      "adapter_id": "ulog",
+      "adapter_version": "1.0.0",
+      "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "id": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a",
+      "libraries": {},
+      "upstream": []
+    }
+  ]
+}

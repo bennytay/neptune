@@ -60,6 +60,7 @@ from neptune.runtime import IngestJob, JobEvent, JobOptions, JobOutcome, JobStat
 from neptune.runtime.sandbox import Codec, Returned, Subprocess
 from neptune.store.package import read_package
 from neptune.store.workspace import Workspace
+from neptune.validate import RULE_FAILED
 
 pytestmark = pytest.mark.integration
 
@@ -294,7 +295,12 @@ def test_findings_on_half_the_chunks_land_with_everything_else(tmp_path: Path) -
     (root / "half.tally").write_bytes(TALLY_MAGIC + rows)
     adapters = registry(tally=TALLY.TallyAdapter(rows_per_chunk=1))
     first = Job(root, tmp_path / "home", tmp_path / "first", adapters)
-    found = [r for r in first.package.records if isinstance(r, IngestFinding)]
+    found = [
+        r
+        for r in first.package.records
+        if isinstance(r, IngestFinding) and not r.code.startswith("neptune.validate.")
+    ]
+    assert not [r for r in first.package.records if getattr(r, "code", "") == RULE_FAILED]
     assert sorted(f.code for f in found) == ["tally.bad_row"] * 5 and first.codes() == []
     assert len({f.subject for f in found}) == 5  # each cites its own line
     assert len(first.outcome.ingested) == 1
@@ -636,7 +642,7 @@ def test_a_large_sparse_source_is_inspected_cheaply_and_planned_small(tmp_path: 
     assert measured["plan_bytes"] < 64 * 1024 and measured["chunks"] == 17
     assert measured["parent_peak_rss_mib"] < 512 and measured["child_peak_rss_mib"] < 512
     rerun = measured["rerun"]
-    # One probe call per registered adapter: the shipped ones and the frame log adapter.
+    # A probe call per registered adapter for the one source: the built-ins and the frame log.
     probes = len(builtin_adapters()) + 1
     assert rerun["calls"] == {"ingest": 0, "plan": 0, "probe": probes} and rerun["same_package"]
 

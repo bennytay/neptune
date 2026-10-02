@@ -1,0 +1,14 @@
+{
+  "contract": "catalog-api",
+  "goldens": {
+    "manipulator.current_view.json": "#/$defs/CurrentView",
+    "manipulator.lineage.json": "#/$defs/Lineage",
+    "quadruped.catalog_package.json": "#/$defs/CatalogPackage",
+    "quadruped.entity_thread.json": "#/$defs/EntityThread"
+  },
+  "note": "Platform-authored draft (MVL-121) from the programme document; superseded by the Ledger's first export from neptune_ledger.api.",
+  "owner_version": null,
+  "schema_sha256": "sha256:7e21c06dba9ee96f085b952ade38b78a00b466132236125414ca7e65252cdadd",
+  "status": "draft",
+  "version": "0.0.0"
+}

@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:480cfa8dfd65beff452f6bebd1ce7d322ac7fb597a8fbec6edb7f1c709219884`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:1793c5c4814161ce25b1d26613f8ebea0def2e17ceae2fcd609750d6b8560e95`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 

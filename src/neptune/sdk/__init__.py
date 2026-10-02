@@ -17,13 +17,32 @@ workspace allows it.
 - ``client``: ``Neptune`` and ``AsyncNeptune`` (one surface), ``Ingestion`` and
   ``AsyncIngestion`` (a job on its own thread), and the shorthands ``ingest`` and ``dry_run``.
 - ``result``: ``IngestResult``, ``read_package``, and ``committed_result`` (ADR 0035 §3).
+- ``media``: ``media_window``, ``Hydrator`` and the payload readers: the media frames around an
+  event on a named clock, their bytes read lazily (ADR 0056).
+- ``contents``: ``run_contents``, ``RunContents`` and ``StreamContents``: what each run of a
+  package contains (streams, declared field paths, inferred semantics) without decoding a
+  message (ADR 0049).
 - ``errors``: ``NeptuneError`` and its subclasses, each with a stable ``code``.
+- ``PluginPolicy`` and ``Plugins``: which installed plugins a client reads, and what it read
+  (``neptune.runtime.plugins``, ADR 0058).
 
 Imports the runtime, the store and the adapters; the CLI (MVL-11) wraps this.
 """
 
 from neptune.adapters.builtin import builtin_adapters
-from neptune.runtime import EventSink, Isolation, JobEvent, JobOptions, JobState, Limits, Phase
+from neptune.discovery.ignore import DEFAULT_PATTERNS, IgnorePolicy
+from neptune.runtime import (
+    EventSink,
+    Explanation,
+    Isolation,
+    JobError,
+    JobEvent,
+    JobOptions,
+    JobState,
+    Limits,
+    Phase,
+)
+from neptune.runtime.plugins import PluginPolicy, Plugins
 from neptune.sdk.client import (
     AsyncIngestion,
     AsyncNeptune,
@@ -32,6 +51,7 @@ from neptune.sdk.client import (
     dry_run,
     ingest,
 )
+from neptune.sdk.contents import RunContents, StreamContents, run_contents
 from neptune.sdk.errors import (
     ERRORS,
     ConfigurationError,
@@ -42,6 +62,7 @@ from neptune.sdk.errors import (
     JobFailedError,
     NeptuneError,
     NetworkRefusedError,
+    NothingToResumeError,
     PackageInvalidError,
     PublishIncompleteError,
     SandboxUnavailableError,
@@ -52,18 +73,22 @@ from neptune.sdk.result import IngestResult, committed_result, read_package
 from neptune.store.workspace import Workspace
 
 __all__ = [
+    "DEFAULT_PATTERNS",
     "ERRORS",
     "AsyncIngestion",
     "AsyncNeptune",
     "ConfigurationError",
     "DestinationExistsError",
     "EventSink",
+    "Explanation",
+    "IgnorePolicy",
     "IngestResult",
     "Ingestion",
     "InvalidDestinationError",
     "InvalidRequestError",
     "InvalidSourceError",
     "Isolation",
+    "JobError",
     "JobEvent",
     "JobFailedError",
     "JobOptions",
@@ -72,10 +97,15 @@ __all__ = [
     "Neptune",
     "NeptuneError",
     "NetworkRefusedError",
+    "NothingToResumeError",
     "PackageInvalidError",
     "Phase",
+    "PluginPolicy",
+    "Plugins",
     "PublishIncompleteError",
+    "RunContents",
     "SandboxUnavailableError",
+    "StreamContents",
     "UnsupportedError",
     "Workspace",
     "WorkspaceUnusableError",
@@ -84,4 +114,5 @@ __all__ = [
     "dry_run",
     "ingest",
     "read_package",
+    "run_contents",
 ]

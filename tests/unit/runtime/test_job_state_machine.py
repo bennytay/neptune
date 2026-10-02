@@ -183,7 +183,7 @@ def test_options_are_checked_before_any_work(root: Path, tmp_path: Path) -> None
     with pytest.raises(JobError, match="non-empty text"):
         JobOptions(job="")
     with pytest.raises(JobError, match="not registered"):
-        IngestJob(root, tmp_path / "p", home, registry, JobOptions(config={"mcap": {}}))
+        IngestJob(root, tmp_path / "p", home, registry, JobOptions(config={"no_such_adapter": {}}))
     with pytest.raises(JobError, match="no options"):
         IngestJob(root, tmp_path / "p", home, registry, JobOptions(config={"text": {"x": 1}}))
     with pytest.raises(JobError, match="block_rule"):
@@ -192,11 +192,10 @@ def test_options_are_checked_before_any_work(root: Path, tmp_path: Path) -> None
     assert not (tmp_path / "p").exists()
 
 
-def test_the_root_must_be_a_directory_and_the_destination_free(root: Path, tmp_path: Path) -> None:
+def test_the_root_must_exist_and_the_destination_be_free(root: Path, tmp_path: Path) -> None:
     home, registry = Workspace(tmp_path / "home"), default_registry()
-    with pytest.raises(JobError, match="not a directory"):
-        IngestJob(root / "notes.txt", tmp_path / "p", home, registry)
-    with pytest.raises(JobError, match="not a directory"):
+    IngestJob(root / "notes.txt", tmp_path / "p", home, registry)  # one file is a root (ADR 0043)
+    with pytest.raises(JobError, match="neither a directory nor a regular file"):
         IngestJob(tmp_path / "missing", tmp_path / "p", home, registry)
     (tmp_path / "taken").mkdir()
     with pytest.raises(JobError, match="written once"):
@@ -427,7 +426,10 @@ def test_an_empty_root_gives_an_empty_package(tmp_path: Path) -> None:
     (tmp_path / "empty").mkdir()
     seen = run(tmp_path / "empty", tmp_path)
     package = read_package(tmp_path / "package")
-    assert package.receipt.sources == () and package.receipt.transforms == ()
+    assert package.receipt.sources == ()
+    # Grouping ran over nothing: its transform, and its two tables present and empty (ADR 0036).
+    assert [t.adapter_id for t in package.receipt.transforms] == ["neptune.grouping"]
+    assert package.derived == {"session_proposal": (), "session_unassigned": ()}
     summaries = {e.phase: e.details for e in seen if e.kind == "phase_finished"}
     assert summaries[Phase.PARSE] == {"chunks": 0, "failed": 0, "skipped": 0}
     assert [e.phase for e in seen if e.kind == "phase_started"] == list(PHASES)

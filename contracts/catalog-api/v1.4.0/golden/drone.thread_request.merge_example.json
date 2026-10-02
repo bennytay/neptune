@@ -1,0 +1,19 @@
+{
+  "key": {
+    "key": {
+      "namespace": "px4.sys_uuid",
+      "value": "000200000000343233345117003a0027"
+    },
+    "kind": "machine"
+  },
+  "merge": {
+    "mappings": [
+      "rec:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "reference_clock": "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31"
+  },
+  "order": "world",
+  "preference": {
+    "preference": "history"
+  }
+}

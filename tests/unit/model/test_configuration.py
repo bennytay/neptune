@@ -83,6 +83,8 @@ def value(
     text: Any = None,
     *,
     order: int = 0,
+    occurrence: tuple[int, ...] | None = None,
+    key_tag: Any = None,
     tag: Any = None,
     snapshot: RecordId = SNAPSHOT_ID,
     provenance: Provenance | None = None,
@@ -103,7 +105,9 @@ def value(
         provenance=provenance,
         snapshot=snapshot,
         path=path,
+        occurrence=occurrence if occurrence is not None else (0,) * len(path),
         order=order if path else 0,
+        key_tag=key_tag if key_tag is not None else NotApplicable(),
         tag=tag if tag is not None else NotCovered(),
         text=text,
         value=state,
@@ -148,7 +152,7 @@ def test_both_kinds_are_machine_records_added_in_schema_version_2() -> None:
     for kind in (ConfigurationSnapshot, ConfigurationValue):
         assert kind.family is Family.MACHINE and kind.since == 2
         assert KIND_SINCE[kind.kind] == 2
-    assert SCHEMA_VERSION >= 2  # later additions raise it (3: ADR 0039)
+    assert SCHEMA_VERSION >= 2  # later versions add other kinds (ADR 0050)
 
 
 @pytest.mark.parametrize(
@@ -206,6 +210,12 @@ def test_every_value_shape_round_trips_and_validates() -> None:
         ({"path": ("a", True)}, "keys and positions"),
         ({"path": ("a", -1)}, "keys and positions"),
         ({"order": -1}, "position"),
+        ({"occurrence": ()}, "one rank per step"),
+        ({"occurrence": (-1,)}, "ranks"),
+        ({"occurrence": [0]}, "must be a tuple"),
+        ({"path": (0,), "occurrence": (1,)}, "occurs once"),
+        ({"path": (0,), "key_tag": Known("tag:yaml.org,2002:int")}, "root and sequence items"),
+        ({"key_tag": Known("")}, "non-empty"),
         ({"text": NotApplicable()}, "collections and aliases"),
         ({"value": NotApplicable()}, "every node has a value"),
         ({"tag": Known("")}, "non-empty"),
@@ -372,10 +382,89 @@ def test_a_collection_compares_by_its_type_and_an_alias_by_its_target() -> None:
 
 def test_repeated_keys_compare_in_source_order() -> None:
     first = value(("k",), scalar("int", 1), order=0)
-    second = value(("k",), scalar("int", 2), order=1, provenance=at("/k2"))
-    swapped = [other(replace(first, order=1)), other(replace(second, order=0))]
+    second = value(("k",), scalar("int", 2), order=1, occurrence=(1,), provenance=at("/k2"))
+    swapped = [
+        other(replace(first, order=1, occurrence=(1,))),
+        other(replace(second, order=0, occurrence=(0,))),
+    ]
     assert changes([first, second], swapped) == [(("k",), ChangeKind.CHANGED)]
     assert changes([first, second], [other(first)]) == [(("k",), ChangeKind.CHANGED)]
+
+
+def test_values_under_repeated_keys_order_by_occurrence_whatever_order_they_come_in() -> None:
+    # The YAML "a: {x: 1}" then "a: {x: 2}": both x values are at path (a, x), order 0, and only
+    # their occurrence tells them apart.
+    document = [
+        value((), mapping(2)),
+        value(("a",), mapping(1), provenance=at("/a/0")),
+        value(("a", "x"), scalar("int", 1), provenance=at("/a/0/x")),
+        value(("a",), mapping(1), order=1, occurrence=(1,), provenance=at("/a/1")),
+        value(("a", "x"), scalar("int", 2), occurrence=(1, 0), provenance=at("/a/1/x")),
+    ]
+    digest = configuration_digest(document)
+    for ordering in (document[::-1], sorted(document, key=lambda r: r.id)):
+        assert configuration_digest(ordering) == digest
+        assert compare_configurations(document, [other(r) for r in ordering]) == ()
+    flipped = [
+        *document[:2],
+        replace(document[2], value=Known(scalar("int", 2))),
+        document[3],
+        replace(document[4], value=Known(scalar("int", 1))),
+    ]
+    assert configuration_digest(flipped) != digest
+    assert changes(document, [other(r) for r in flipped]) == [(("a", "x"), ChangeKind.CHANGED)]
+
+
+def test_a_key_that_is_not_a_string_is_part_of_what_is_declared() -> None:
+    # YAML 1.2 "m: {1: x, '1': y}" against "m: {'1': x, 1: y}": one path, two keys each.
+    int_key = Known("tag:yaml.org,2002:int")
+
+    def document(first: str, second: str) -> list[ConfigurationValue]:
+        return [
+            value((), mapping(1)),
+            value(("m",), mapping(2), provenance=at("/m")),
+            value(("m", "1"), scalar("string", first), key_tag=int_key, provenance=at("/m/0")),
+            value(
+                ("m", "1"),
+                scalar("string", second),
+                order=1,
+                occurrence=(0, 1),
+                provenance=at("/m/1"),
+            ),
+        ]
+
+    left, right = document("x", "y"), [other(r) for r in document("x", "y")]
+    assert configuration_digest(left) == configuration_digest(right)
+    assert changes(left, right) == []
+    swapped = [other(r) for r in document("x", "y")]
+    swapped[2], swapped[3] = (
+        replace(swapped[2], key_tag=NotApplicable()),
+        replace(swapped[3], key_tag=int_key),
+    )
+    assert configuration_digest(left) != configuration_digest(swapped)
+    assert changes(left, swapped) == [(("m", "1"), ChangeKind.CHANGED)]
+    # A string key adds nothing: JSON's keys and YAML's quoted ones compare alike.
+    assert comparison_key(DOCUMENT[1]) == comparison_key(replace(DOCUMENT[1], tag=Known("!")))
+
+
+def test_an_alias_to_a_key_is_a_reference_to_its_entry() -> None:
+    alias = ConfigAlias("k", ("defaults", "rate"), key=True)
+    record = value(("again",), alias)
+    data = canonical_json.loads(canonical_json.dumps(record.to_json()))
+    assert configuration_value_from_json(data) == record
+    assert list(VALIDATOR.iter_errors(data)) == []
+    node = value(("again",), ConfigAlias("k", ("defaults", "rate")))
+    assert changes([record], [other(node)]) == [(("again",), ChangeKind.CHANGED)]
+    with pytest.raises(ValueError, match="targets the entry"):
+        ConfigAlias("k", ("list", 0), key=True)
+    with pytest.raises(TypeError, match="key must be a bool"):
+        ConfigAlias("k", ("a",), key=1)  # type: ignore[arg-type]
+
+
+def test_two_values_at_one_address_are_refused() -> None:
+    twin = value(("rate",), scalar("int", 1), provenance=at("/twin"))
+    with pytest.raises(ValueError, match="two values at path"):
+        configuration_digest([*DOCUMENT, twin])
 
 
 def test_values_of_two_snapshots_are_never_compared_as_one() -> None:

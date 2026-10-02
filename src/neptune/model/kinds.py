@@ -12,6 +12,18 @@ each kind of ``kinds_at(v)``, and no other (ADR 0037 §1).
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Final
 
+from neptune.model.alignment import (
+    ClockMapping,
+    FrameBinding,
+    IdentityLink,
+    RunAssembly,
+    SnapshotBinding,
+    clock_mapping_from_json,
+    frame_binding_from_json,
+    identity_link_from_json,
+    run_assembly_from_json,
+    snapshot_binding_from_json,
+)
 from neptune.model.configuration import (
     ConfigurationSnapshot,
     ConfigurationValue,
@@ -20,6 +32,24 @@ from neptune.model.configuration import (
 )
 from neptune.model.finding import IngestFinding, ingest_finding_from_json
 from neptune.model.jsonvalue import JsonValue
+from neptune.model.lifecycle import (
+    AuthorisationEnvelope,
+    ChangeRecord,
+    CommissioningBaseline,
+    IncidentRecord,
+    Intervention,
+    MaintenanceEvent,
+    RequalificationRecord,
+    RiskAssessment,
+    authorisation_envelope_from_json,
+    change_record_from_json,
+    commissioning_baseline_from_json,
+    incident_record_from_json,
+    intervention_from_json,
+    maintenance_event_from_json,
+    requalification_record_from_json,
+    risk_assessment_from_json,
+)
 from neptune.model.machine import (
     Calibration,
     DescriptionExpansion,
@@ -116,6 +146,19 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (DocumentBlock, document_block_from_json),
         (StructuredTable, structured_table_from_json),
         (StructuredRecord, structured_record_from_json),
+        (IdentityLink, identity_link_from_json),
+        (ClockMapping, clock_mapping_from_json),
+        (FrameBinding, frame_binding_from_json),
+        (RunAssembly, run_assembly_from_json),
+        (SnapshotBinding, snapshot_binding_from_json),
+        (CommissioningBaseline, commissioning_baseline_from_json),
+        (AuthorisationEnvelope, authorisation_envelope_from_json),
+        (Intervention, intervention_from_json),
+        (MaintenanceEvent, maintenance_event_from_json),
+        (RequalificationRecord, requalification_record_from_json),
+        (IncidentRecord, incident_record_from_json),
+        (ChangeRecord, change_record_from_json),
+        (RiskAssessment, risk_assessment_from_json),
     )
 }
 

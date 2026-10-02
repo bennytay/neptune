@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:0fea82520e36573dee0a259b8e81732bf927a4204d0e10a3136bc28f0d210da2`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:c3a892ef418704e6f1841290833a61112bddfc0261950e4dbcba0975cb896950`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -18,7 +18,7 @@ Receipt `rec:sha256:0fea82520e36573dee0a259b8e81732bf927a4204d0e10a3136bc28f0d21
 
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
-| `config` | `0.1.0` | `sha256:3b6cd0357a16` | python 3.12, pyyaml 6.0.3 | `rec:03ab66ea622a` |
+| `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
 
 ## Records
 

@@ -48,7 +48,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -66,6 +66,7 @@ from neptune.adapters.contract import (
     ChunkOutput,
     ConfigError,
     ContractError,
+    InspectResult,
     Plan,
     ProbeHints,
     ProbeResult,
@@ -73,7 +74,13 @@ from neptune.adapters.contract import (
     chunk_from_json,
     configure,
 )
-from neptune.adapters.registry import AdapterRegistry, SelectionStatus
+from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatus
+from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
+from neptune.derived.introspection import Introspection, introspect
+from neptune.derived.media import MediaIndex, index_media
+from neptune.derived.temporal import ClockAlignment, align_clocks, clock_records
+from neptune.discovery.ignore import IgnoreError, IgnorePolicy
+from neptune.discovery.layout import Layout, layout_from_scan
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
 from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe
 from neptune.discovery.reader import LocalReader, SourceChangedError
@@ -91,10 +98,11 @@ from neptune.discovery.source import (
 from neptune.discovery.verify import short_read_finding, verify_artifact
 from neptune.identity import canonical_json
 from neptune.identity.revisions import Observation, SourceLedger
+from neptune.manifest import LoadedManifest, ManifestError
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.package import ReceiptEnvelope
+from neptune.model.package import ReceiptEnvelope, package_manifest_from_json
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
 from neptune.model.run import Stream
 from neptune.model.series import SEQ, SeriesBatch
@@ -104,7 +112,7 @@ from neptune.model.source import (
     SourceArtifact,
     local_location,
 )
-from neptune.runtime import events, lineage, sandbox, wire
+from neptune.runtime import events, explain, lineage, sandbox, wire
 from neptune.runtime.cache import (
     VERDICT_FILE,
     CacheReport,
@@ -118,8 +126,10 @@ from neptune.runtime.cache import (
     chunk_laws_key,
     explain_plan,
 )
+from neptune.runtime.declared import Declarations
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
 from neptune.runtime.lineage import Failure, Law, Step, failure_from_json, type_name
+from neptune.runtime.plugins import Plugins
 from neptune.runtime.sandbox import (
     DEFAULT_LIMITS,
     Crashed,
@@ -130,14 +140,23 @@ from neptune.runtime.sandbox import (
     Returned,
     SandboxError,
 )
-from neptune.store.assemble import NotDurableError, StagedPackage, publish, stage
+from neptune.store.assemble import NotDurableError, StagedPackage, amend, publish, stage
 from neptune.store.package import (
+    MANIFEST,
     PackageError,
     read_package,
     write_cache_report,
     write_envelope,
 )
-from neptune.store.series import RunCheck, SeriesError, SeriesReadError, check_run, read_run
+from neptune.store.series import (
+    RunCheck,
+    SeriesError,
+    SeriesReadError,
+    check_run,
+    count_rows,
+    read_rows,
+    read_run,
+)
 from neptune.store.workspace import (
     Collected,
     Derivative,
@@ -146,9 +165,11 @@ from neptune.store.workspace import (
     Workspace,
     WorkspaceError,
 )
+from neptune.validate import validate_package
 
 DEFAULT_ATTEMPTS: Final = 2
 ADAPTER_FAILED: Final = f"{PROBE_ID}.adapter_failed"
+PROBE_AMBIGUOUS: Final = f"{PROBE_ID}.ambiguous"
 # What the runtime's own reads of a source raise: opening it, its size, its head. An adapter's
 # reads are the adapter's: anything but ``SourceChangedError`` from ``plan`` or ``ingest`` is its
 # failure (``plan_failed``, ``chunk_failed``).
@@ -190,7 +211,14 @@ class JobOptions:
     receipt and ``sandbox_ready`` event record exactly which guarantees were lost. These are the
     runtime transform's config, so a package's runtime findings name the policy they were made
     under. ``config`` gives each adapter, by id, the option values to configure it with. ``job``
-    names the job in its envelope; by default a fresh random token.
+    names the job in its envelope; by default a fresh random token. ``grouping`` configures
+    session grouping (ADR 0036): its gap, and the sessions the user declares, stated and set
+    against the rules' readings; it is the grouping transform's config. ``ignore`` says which
+    ignore rules the walk applies (ADR 0043): by default version-control internals, OS metadata
+    and the root's ``.neptune-ignore``; whatever they leave unread is a finding naming the rule.
+    ``manifest`` is the root's manifest, read (ADR 0047): its runs are the declared sessions (so
+    ``grouping`` stays default), its adapter options join ``config`` (never the same key twice),
+    and its source rules choose adapters, each set against the probe engine's observations.
     """
 
     attempts: int = DEFAULT_ATTEMPTS
@@ -199,8 +227,15 @@ class JobOptions:
     isolation: Isolation = Isolation.SUBPROCESS
     limits: Limits = DEFAULT_LIMITS
     allow_degraded_sandbox: bool = False
+    grouping: GroupingConfig = field(default_factory=GroupingConfig)
+    ignore: IgnorePolicy = field(default_factory=IgnorePolicy)
+    manifest: LoadedManifest | None = None
 
     def __post_init__(self) -> None:
+        if self.manifest is not None and not isinstance(self.manifest, LoadedManifest):
+            raise JobError(f"manifest must be a LoadedManifest, got {self.manifest!r}")
+        if not isinstance(self.ignore, IgnorePolicy):
+            raise JobError(f"ignore must be an IgnorePolicy, got {self.ignore!r}")
         if isinstance(self.attempts, bool) or not isinstance(self.attempts, int):
             raise JobError(f"attempts must be an integer, got {self.attempts!r}")
         if self.attempts < 1:
@@ -219,6 +254,8 @@ class JobOptions:
             raise JobError("limits bound sandboxed calls; in-process calls have none to set")
         if self.isolation is Isolation.IN_PROCESS and self.allow_degraded_sandbox:
             raise JobError("allow_degraded_sandbox is a sandbox policy; in-process calls have none")
+        if not isinstance(self.grouping, GroupingConfig):
+            raise JobError(f"grouping must be a GroupingConfig, got {self.grouping!r}")
 
 
 @dataclass(frozen=True)
@@ -226,7 +263,8 @@ class JobOutcome:
     """How a job ended: committed with a package, cancelled at a checkpoint without one, or
     planned (a dry run, ADR 0035): stopped after ``plan``, without one.
 
-    ``cache`` says what the job reused and recomputed, and why (ADR 0031 §5).
+    ``cache`` says what the job reused and recomputed, and why (ADR 0031 §5). ``explanation`` is
+    what a planned dry run found a run would do, and why (ADR 0044); ``None`` otherwise.
     """
 
     state: JobState
@@ -237,6 +275,7 @@ class JobOutcome:
     findings: tuple[IngestFinding, ...]
     durations: tuple[tuple[str, float], ...]
     cache: CacheReport = field(default_factory=CacheReport)
+    explanation: explain.Explanation | None = None
 
 
 @dataclass
@@ -254,6 +293,10 @@ class _Source:
     plan_cache: PlanCache | None = None  # set once the job decides to plan or reuse
     hits: set[str] = field(default_factory=set)  # chunks the workspace had committed
     intact: tuple[int, ...] | None = None  # the file's state when last verified intact
+    locations: list[LocalPath | RawLocalPath] = field(default_factory=list)  # every one, walk order
+    probe: SourceProbe | None = None  # what the probe engine found, once probed
+    inspection: explain.Inspection | None = None  # the adapter's ``inspect``, in a dry run
+    pin: explain.Pin | None = None  # the manifest rule that chose its adapter (ADR 0047)
 
     @property
     def content_id(self) -> ContentId:
@@ -457,7 +500,8 @@ class IngestJob:
     Build it, then ``run`` it once, or ``dry_run`` it once to see what ``run`` would ingest
     (ADR 0035); a dry run needs no destination. ``on_event`` receives every ``JobEvent`` as it
     happens; ``cancel`` is checked at every checkpoint. Problems with one source become findings
-    in the package; problems with the job raise ``JobError``.
+    in the package; problems with the job raise ``JobError``. ``plugins`` are the plugins the
+    registry was built from (ADR 0058): the findings about those refused join the job's.
     """
 
     def __init__(
@@ -470,17 +514,20 @@ class IngestJob:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        plugins: Plugins | None = None,
     ) -> None:
         self.root = Path(root)
         self.destination = Path(destination) if destination is not None else None
-        if not self.root.is_dir():
-            raise JobError(f"{self.root} is not a directory")
+        if not self.root.is_dir() and not self.root.is_file():  # one file is a root too (ADR 0043)
+            raise JobError(f"{self.root} is neither a directory nor a regular file")
         if self.destination is not None and self.destination.exists():
             raise JobError(f"{self.destination} exists; a package is written once")
         self.workspace = workspace
         self.registry = registry
         self.options = options if options is not None else JobOptions()
-        self._configs = self._configure(registry, self.options.config)
+        self._declared = self._declarations(registry, self.options)
+        config = self._declared.config if self._declared is not None else self.options.config
+        self._configs = self._configure(registry, config)
         self._on_event: EventSink = on_event if on_event is not None else (lambda event: None)
         self._cancel = cancel
         self.job = self.options.job if self.options.job is not None else uuid.uuid4().hex
@@ -517,11 +564,46 @@ class IngestJob:
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
         self._calls: dict[str, int] = {"ingest": 0, "plan": 0, "probe": 0}
-        self._engine = ProbeEngine(registry)
+        self._plugins = plugins if plugins is not None else Plugins()
+        self._engine = ProbeEngine(
+            registry,
+            distributions={
+                adapter.descriptor.id: f"{adapter.origin.distribution} {adapter.origin.version}"
+                for adapter in self._plugins.adapters
+            },
+        )
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
-        self._dry = False  # a dry run: stops after plan (ADR 0035)
+        self._grouper = (
+            self._declared.grouper()
+            if self._declared is not None
+            else LayoutGrouper(self.options.grouping)
+        )
+        if self._declared is not None:  # the manifest's own findings name it
+            manifest = self._declared.loaded.transform
+            self._producers[manifest.id] = manifest
+        # The plugins the registry was built from (ADR 0058): the findings about those refused,
+        # and, when any was admitted, the loader's transform naming every one, in every package.
+        self._producers[self._plugins.transform.id] = self._plugins.transform
+        for finding in self._plugins.findings:
+            self._record(finding, self._plugins.transform)
+        self._layout = Layout(())
+        self._grouping: Grouping | None = None
+        self._dry = False  # a dry run: stops after plan and explains (ADR 0035, 0044)
+        self._inventory = explain.Inventory.of((), (), ())
+        self._inspected = 0  # adapter ``inspect`` calls, in a dry run
+        self._explanation: explain.Explanation | None = None
         self._published: ContentId | None = None  # the package, once renamed into place
+
+    @staticmethod
+    def _declarations(registry: AdapterRegistry, options: JobOptions) -> Declarations | None:
+        """The manifest made ready for this job, checked before any work (ADR 0047 §5)."""
+        if options.manifest is None:
+            return None
+        try:
+            return Declarations.build(options.manifest, registry, options.config, options.grouping)
+        except (ManifestError, ConfigError) as exc:
+            raise JobError(f"the manifest cannot be used: {exc}") from exc
 
     @staticmethod
     def _configure(
@@ -548,13 +630,15 @@ class IngestJob:
         return self._execute(dry=False)
 
     def dry_run(self) -> JobOutcome:
-        """Run ``discover``, ``fingerprint``, ``inspect`` and ``plan``, then stop (ADR 0035).
+        """Run ``discover``, ``fingerprint``, ``inspect`` and ``plan``, then stop (ADR 0035, 0044).
 
         What ``run`` would ingest: every source's selection, its plan and which of its chunks
-        the workspace already holds (``JobOutcome.cache``), and the findings so far. No chunk is
-        parsed, nothing is assembled and no package is written, so the outcome is ``planned``
-        (or ``cancelled``) with no package. The ledger and plans it saves are the ones ``run``
-        saves, so a later ``run`` reuses them. MVL-15 adds adapters' ``inspect`` and grouping.
+        the workspace already holds (``JobOutcome.cache``), the findings so far, and the
+        ``Explanation`` of all of it (``JobOutcome.explanation``). Each selected source is also
+        given to its adapter's ``inspect``. No chunk is parsed, nothing is assembled and no
+        package is written, so the outcome is ``planned`` (or ``cancelled``) with no package.
+        The ledger and plans it saves are the ones ``run`` saves, so a later ``run`` reuses them;
+        the sources are only read, and no package id depends on the workspace (ADR 0035 §9).
         """
         return self._execute(dry=True)
 
@@ -623,12 +707,13 @@ class IngestJob:
         self._emit(events.WORKSPACE_SWEPT, {"scratch": scratch, "staging": staging})
 
     def _phases(self, started: str, *, dry: bool) -> ContentId | None:
-        source = self._local = LocalSource(self.root)
+        source = self._local = self._source()
         entries = self._discover(source)
         scanned = self._fingerprint(source, entries)
         self._inspect(source)
         self._plan(source)
         if dry:
+            self._explanation = self._explain_job()
             return None
         self._ingest(source)
         self._assemble(scanned)
@@ -645,6 +730,7 @@ class IngestJob:
             findings=tuple(sorted(self._findings.values(), key=lambda f: f.id)),
             durations=self._durations_pairs(),
             cache=self._cache_report(),
+            explanation=self._explanation,
         )
 
     def _cache_report(self) -> CacheReport:
@@ -675,6 +761,82 @@ class IngestJob:
             calls=Calls(**self._calls),
             receipt=self._receipt,
         )
+
+    def _explain_job(self) -> explain.Explanation:
+        """What a run would do, from what this dry run saw (ADR 0044): no clock, no job id."""
+        assert self._grouping is not None  # inspect, which groups, ran
+        descriptors = self.registry.descriptors()
+        limits = None if self.options.isolation is Isolation.IN_PROCESS else self.options.limits
+        sources = []
+        selected: dict[str, list[ContentId]] = {adapter_id: [] for adapter_id in descriptors}
+        for item in self._sources:
+            plan: explain.PlanEstimate | None = None
+            heavy: tuple[explain.Heavy, ...] = ()
+            if item.planned and not item.quarantined:
+                assert item.config is not None and item.plan_cache is not None
+                left = [chunk for chunk in item.chunks if chunk.id not in item.hits]
+                plan = explain.PlanEstimate(
+                    item.config.transform.id,
+                    item.plan_cache.rule,
+                    len(item.chunks),
+                    len(item.chunks) - len(left),
+                    sum(chunk.cost for chunk in item.chunks),
+                    sum(chunk.cost for chunk in left),
+                )
+                descriptor = descriptors[item.config.transform.adapter_id]
+                heavy = explain.heavy_reasons(item.artifact.size, plan, descriptor, limits)
+            if item.probe is None:  # quarantined before it could be probed
+                status = explain.SourceStatus.UNREADABLE
+            elif item.quarantined:
+                status = explain.SourceStatus.QUARANTINED
+            elif plan is not None:
+                status = explain.SourceStatus.PLANNED
+            elif item.probe.selection.status is SelectionStatus.AMBIGUOUS:
+                status = explain.SourceStatus.AMBIGUOUS
+            else:
+                status = explain.SourceStatus.UNSUPPORTED
+            adapter = item.adapter.descriptor.id if item.adapter is not None else None
+            if adapter is not None and status is explain.SourceStatus.PLANNED:
+                selected[adapter].append(item.content_id)
+            sources.append(
+                explain.SourceExplanation(
+                    source=item.content_id,
+                    size=item.artifact.size,
+                    locations=tuple(sorted(item.locations, key=lambda loc: loc.raw)),
+                    status=status,
+                    probe=item.probe,
+                    adapter=adapter,
+                    verdicts=(
+                        explain.adapter_verdicts(item.probe, descriptors, item.pin)
+                        if item.probe
+                        else ()
+                    ),
+                    pin=item.pin,
+                    inspection=item.inspection,
+                    plan=plan,
+                    heavy=heavy,
+                    quarantined=tuple(item.quarantined),
+                )
+            )
+        sources.sort(key=lambda s: (s.locations[0].raw, s.source))
+        calls: JsonObject = {
+            "inspect": self._inspected,
+            "plan": self._calls["plan"],
+            "probe": self._calls["probe"],
+        }
+        whole = explain.Explanation(
+            inventory=self._inventory,
+            sources=tuple(sources),
+            adapters=tuple(
+                explain.AdapterUse(descriptors[adapter_id], tuple(sorted(selected[adapter_id])))
+                for adapter_id in sorted(descriptors)
+            ),
+            grouping=explain.GroupingExplanation.of(self._grouping),
+            work=explain.work_estimate(sources, calls),
+            left_out=explain.left_out(sources, self._inventory),
+            findings=tuple(sorted(self._findings.values(), key=lambda f: f.id)),
+        )
+        return explain.bounded(whole)  # ADR 0044 §8
 
     # --- Phases, events, checkpoints -----------------------------------------------------------
 
@@ -772,9 +934,13 @@ class IngestJob:
     def _skip(self, entry: SkippedEntry) -> None:
         """A walk entry that was not read: discovery's finding says why; this is its event."""
         location = local_location(entry.raw_path)
-        self._emit(
-            events.ENTRY_SKIPPED, {"location": location.to_json(), "reason": str(entry.reason)}
-        )
+        details: dict[str, JsonValue] = {
+            "location": location.to_json(),
+            "reason": str(entry.reason),
+        }
+        if entry.rule is not None:  # left unread by an ignore rule: which one (ADR 0043)
+            details["rule"] = entry.rule.to_json()
+        self._emit(events.ENTRY_SKIPPED, details)
 
     def _unreadable(self, source: _Source, exc: Exception) -> None:
         """A source could not be read when the job came to it: changed, refused, or an I/O error.
@@ -829,7 +995,7 @@ class IngestJob:
         for finding in self._differences(item) or ():
             self._record(finding, DISCOVERY_TRANSFORM)
 
-    def _read_short(self, item: _Source, raised: Raised, step: Step, chunk: Chunk | None) -> bool:
+    def _read_short(self, item: _Source, raised: Raised, step: str, chunk: Chunk | None) -> bool:
         """Whether a call that raised is the source's short read; if so, it is recorded.
 
         ``LocalReader`` cannot serve a short read: a piece that is not all there fails its hash
@@ -870,6 +1036,21 @@ class IngestJob:
         return True
 
     # --- discover ------------------------------------------------------------------------------
+
+    def _source(self) -> LocalSource:
+        """The root as a source, walked under the job's ignore rules (ADR 0043).
+
+        The rules are the policy's and the root's ``.neptune-ignore``; one that cannot be used
+        fails the job as a configuration error, before anything is walked.
+        """
+        with self._enter(Phase.DISCOVER):
+            try:
+                rules = self.options.ignore.rules(LocalSource(self.root))
+            except IgnoreError as exc:
+                raise JobError(f"the ignore rules cannot be used: {exc}") from exc
+            except OSError as exc:
+                raise JobError(f"{self.root} cannot be read: {exc}") from exc
+            return LocalSource(self.root, ignore=rules)
 
     def _discover(self, source: LocalSource) -> tuple[WalkEntry, ...]:
         with self._enter(Phase.DISCOVER):
@@ -915,8 +1096,9 @@ class IngestJob:
             except OSError as exc:
                 message = f"the ledger of {self.root} cannot be saved: {exc}"
                 raise JobError(message) from _unusable(exc)
+            producers = result.producers  # discovery's, and the ignore rules' (ADR 0043)
             for finding in result.findings:  # what the walk saw and did not read (ADR 0029 §1)
-                self._record(finding, result.transform)
+                self._record(finding, producers[finding.transform])
             walked = {
                 (e.raw_path, e.reason, e.detail) for e in entries if isinstance(e, SkippedEntry)
             }
@@ -925,6 +1107,8 @@ class IngestJob:
                     self._skip(entry)
             by_content: dict[ContentId, _Source] = {}
             scanned = SourceLedger()
+            listed: list[Observation] = []
+            files: list[explain.InventoryFile] = []
             new_artifacts = new_revisions = 0
             replaced = _replaced(ledger, result.observations)
             for observation in result.observations:
@@ -937,7 +1121,8 @@ class IngestJob:
                 artifact = ledger.artifact(revision.content_id)
                 if artifact is None:
                     raise JobError(f"the ledger lost artifact {revision.content_id}")
-                scanned.observe(location, artifact)
+                listed.append(scanned.observe(location, artifact))
+                files.append(explain.InventoryFile(location, revision.content_id, artifact.size))
                 self._emit(
                     events.SOURCE_HASHED,
                     {
@@ -952,9 +1137,25 @@ class IngestJob:
                     by_content[revision.content_id] = _Source(
                         artifact, location, replaced=replaced.get(revision.content_id)
                     )
+                by_content[revision.content_id].locations.append(location)
             for absence in result.absences:
                 self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
             self._sources = list(by_content.values())
+            self._check_manifest(result.observations)
+            # Grouping reads the revisions the package lists, so it recomputes from the package.
+            self._layout = layout_from_scan(listed, result.symlinks)
+            skipped = {
+                (entry.raw_path, entry.reason): explain.InventorySkipped(
+                    local_location(entry.raw_path), entry.reason
+                )
+                for entry in result.skipped
+                if entry.raw_path != b"."
+            }
+            self._inventory = explain.Inventory.of(
+                files,
+                (explain.InventoryLink(link.location, link.target) for link in result.symlinks),
+                skipped.values(),
+            )
             self._finish(
                 Phase.FINGERPRINT,
                 {
@@ -966,6 +1167,18 @@ class IngestJob:
                 },
             )
         return scanned
+
+    def _check_manifest(self, observations: Iterable[Observation]) -> None:
+        """The manifest the job was given is the one this scan hashed: same place, same bytes."""
+        if self._declared is None:
+            return
+        loaded = self._declared.loaded
+        seen = {o.revision.location: o.revision.content_id for o in observations}
+        if loaded.location not in seen:
+            problem = f"the manifest {loaded.location.path} was not read by the walk (ignored?)"
+            raise JobError(problem) from ManifestError(problem)
+        if seen[loaded.location] != loaded.content_id:
+            raise JobError(f"the manifest {loaded.location.path} changed while the job read it")
 
     # --- inspect -------------------------------------------------------------------------------
 
@@ -1029,33 +1242,122 @@ class IngestJob:
                         counts["unreadable"] += 1
                         continue
                     probed = self._probe(item, reader, head)
+                    if probed is not None:
+                        self._select(item, probed, counts)
+                        if self._dry and item.adapter is not None:
+                            self._inspect_source(item, reader)
                 if probed is None:
                     counts["unreadable"] += 1
-                    continue
-                selection = probed.selection
-                details: dict[str, JsonValue] = {
-                    "location": item.location.to_json(),
-                    "source": item.content_id,
-                }
-                if selection.status is SelectionStatus.SELECTED:
-                    best = selection.candidates[0]
-                    item.adapter = self.registry.get(best.adapter)
-                    item.config = self._configs[best.adapter]
-                    counts["selected"] += 1
-                    details |= {
-                        "adapter": best.adapter,
-                        "confidence": best.confidence,
-                        "version": best.version,
-                    }
-                    self._emit(events.SOURCE_SELECTED, details)
-                elif selection.status is SelectionStatus.AMBIGUOUS:
-                    counts["ambiguous"] += 1
-                    details["adapters"] = [c.adapter for c in selection.tied]
-                    self._emit(events.SOURCE_AMBIGUOUS, details)
-                else:
-                    counts["unsupported"] += 1
-                    self._emit(events.SOURCE_UNSUPPORTED, details)
+            if self._declared is not None:
+                every = (location for item in self._sources for location in item.locations)
+                for finding in self._declared.unmatched(every):
+                    self._record(finding, self._declared.loaded.transform)
+            self._group()
             self._finish(Phase.INSPECT, dict(counts))
+
+    def _select(self, item: _Source, probed: SourceProbe, counts: dict[str, int]) -> None:
+        """Apply the probe engine's selection to ``item``: its adapter and config, if one won."""
+        item.probe = probed
+        selection = probed.selection
+        details: dict[str, JsonValue] = {
+            "location": item.location.to_json(),
+            "source": item.content_id,
+        }
+        if (pinned := self._choose(item, probed)) is not None:  # the manifest's (ADR 0047)
+            counts["selected"] += 1
+            details |= {
+                "adapter": pinned.adapter,
+                "confidence": pinned.confidence,
+                "manifest": True,
+                "version": pinned.version,
+            }
+            self._emit(events.SOURCE_SELECTED, details)
+        elif selection.status is SelectionStatus.SELECTED:
+            best = selection.candidates[0]
+            item.adapter = self.registry.get(best.adapter)
+            item.config = self._configs[best.adapter]
+            counts["selected"] += 1
+            details |= {
+                "adapter": best.adapter,
+                "confidence": best.confidence,
+                "version": best.version,
+            }
+            self._emit(events.SOURCE_SELECTED, details)
+        elif selection.status is SelectionStatus.AMBIGUOUS:
+            counts["ambiguous"] += 1
+            details["adapters"] = [c.adapter for c in selection.tied]
+            self._emit(events.SOURCE_AMBIGUOUS, details)
+        else:
+            counts["unsupported"] += 1
+            self._emit(events.SOURCE_UNSUPPORTED, details)
+
+    def _inspect_source(self, item: _Source, reader: LocalReader) -> None:
+        """A dry run's ``inspect`` of a selected source, through the runner (ADR 0044 §3).
+
+        What it says is the explanation's alone: a summary, or why there is none. Its findings
+        are shown, never recorded, and a failure never quarantines the source, since a run never
+        calls ``inspect``; only a source that changed under it is the source's problem, as for
+        any call.
+        """
+        assert item.adapter is not None and item.config is not None
+        adapter, config = item.adapter, item.config
+        self._inspected += 1
+        outcome = self._call(partial(adapter.inspect, reader, config), wire.INSPECT, reader)
+        if isinstance(outcome, Returned):
+            result: InspectResult = outcome.value
+            item.inspection = explain.Inspection(result.summary, result.findings)
+        elif isinstance(outcome, Raised):
+            # As for ``plan``: a source that changed, or whose bytes are no longer all there, is
+            # the source's problem; any other raise is the adapter's, shown (ADR 0033 §3).
+            if outcome.changed:
+                self._unreadable(item, SourceChangedError(item.content_id))
+                return
+            if self._read_short(item, outcome, "inspect", None):  # the event's step only
+                return
+            failure: JsonObject = {"error": outcome.error}
+            item.inspection = explain.Inspection(None, (), failure)
+        else:
+            item.inspection = explain.Inspection(None, (), outcome.cause())
+
+    def _choose(self, item: _Source, probed: SourceProbe) -> Candidate | None:
+        """Apply the manifest's source rules to ``item``; the adapter they selected, if any."""
+        if self._declared is None:
+            return None
+        choice = self._declared.choose(
+            item.content_id, item.artifact.size, item.locations, probed.selection
+        )
+        for finding in choice.findings:
+            self._record(finding, self._declared.loaded.transform)
+        if choice.candidate is None or choice.config is None:
+            return None
+        if choice.answers_tie:  # the tie is answered: the manifest's finding says how
+            whole = EvidenceRef(item.content_id, (ByteRange(0, item.artifact.size),))
+            for finding in probed.findings:
+                if finding.code == PROBE_AMBIGUOUS and finding.subject == whole:
+                    self._findings.pop(finding.id, None)
+        item.adapter = self.registry.get(choice.candidate.adapter)
+        item.config = choice.config
+        if choice.rule is not None:
+            loaded = self._declared.loaded
+            item.pin = explain.Pin(
+                choice.candidate.adapter,
+                choice.rule.pointer,
+                loaded.location.path,
+                loaded.content_id,
+            )
+        return choice.candidate
+
+    def _group(self) -> None:
+        """Stage 5, at the end of inspect so a dry run sees it too: propose sessions from this
+        scan's layout (ADR 0036). Names and directories only, no adapter call; the proposals
+        reach the package as derived tables and the findings under the grouping's transform."""
+        self._check_cancel()
+        grouping = self._grouper.propose(self._layout)
+        self._producers[grouping.transform.id] = grouping.transform
+        for finding in grouping.findings:
+            self._record(finding, grouping.transform)
+        self._grouping = grouping
+        self._emit(events.SESSIONS_PROPOSED, grouping.summary())
 
     # --- plan ----------------------------------------------------------------------------------
 
@@ -1688,8 +1990,26 @@ class IngestJob:
             # always names the guarantees it could not give; a sound run adds a transform only to
             # carry a finding, keeping its lineage unchanged (ADR 0030).
             cited = {finding.transform for finding in self._findings.values()}
+            if self._declared is not None:  # a package made under a manifest names it
+                cited.add(self._declared.loaded.transform.id)
             if self._lost_guarantees:
                 cited.add(self.transform.id)
+            if self._plugins.loaded:  # which plugins could change this package (ADR 0058 §5)
+                cited.add(self._plugins.transform.id)
+            derived: dict[str, Iterable[JsonObject]] | None = None
+            if self._grouping is not None:  # its derived tables name its transform
+                cited.add(self._grouping.transform.id)
+                derived = dict(self._grouping.tables())
+            streams, frames = self._streams()
+            if (introspection := self._introspect(streams)) is not None:
+                cited.add(introspection.transform.id)
+                derived = {**(derived or {}), **introspection.tables()}
+                if (media := self._index_media(streams, introspection, frames)) is not None:
+                    cited.add(media.transform.id)
+                    derived = {**derived, **media.tables()}
+            if (clocks := self._align_clocks()) is not None:
+                cited.add(clocks.transform.id)
+                derived = {**(derived or {}), **clocks.tables()}
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
@@ -1697,7 +2017,12 @@ class IngestJob:
             assert self.destination is not None  # ``run`` refuses to start without one
             try:
                 self._staged = stage(
-                    self.destination, self.workspace, scanned, self._ingested, extra=extra
+                    self.destination,
+                    self.workspace,
+                    scanned,
+                    self._ingested,
+                    extra=extra,
+                    derived=derived,
                 )
             except (PackageError, WorkspaceError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the package cannot be assembled: {exc}") from exc
@@ -1711,26 +2036,146 @@ class IngestJob:
                 Phase.ASSEMBLE, {"quarantined": quarantined, "sources": len(self._ingested)}
             )
 
+    def _streams(self) -> tuple[list[Stream], dict[RecordId, int]]:
+        """The admitted sources' streams, and each stream's series rows, counted from its runs'
+        footers (no row is read)."""
+        streams: list[Stream] = []
+        frames: dict[RecordId, int] = {}
+        try:
+            for content, transform in sorted(set(self._ingested)):
+                plan = self.workspace.load_plan(content, transform)
+                if plan is None:
+                    continue  # staging refuses the package and says why
+                for chunk in plan.chunks:
+                    output = self.workspace.load(str(chunk["id"]))
+                    streams.extend(r for r in output.records if isinstance(r, Stream))
+                    for stream, run in output.runs.items():
+                        frames[stream] = frames.get(stream, 0) + count_rows(run)
+        except (WorkspaceError, SeriesError, ValueError, OSError) as exc:
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+        return streams, frames
+
+    def _introspect(self, streams: list[Stream]) -> Introspection | None:
+        """Stage 9a, before the package is staged: read the admitted sources' streams' declared
+        definitions into layouts and infer what each stream carries (ADR 0049). Only cited byte
+        ranges are read, each through a verified reader; no message is decoded and no adapter
+        called. A package with no stream gets no introspection, so no tables and no transform."""
+        if not streams:
+            return None
+        items = {item.content_id: item for item in self._sources}
+        readers: dict[ContentId, LocalReader] = {}
+
+        def read(ref: EvidenceRef) -> bytes | None:
+            item = items.get(ref.source) if isinstance(ref.source, str) else None
+            step = ref.locator[0]
+            if item is None or self._local is None or not isinstance(step, ByteRange):
+                return None
+            try:
+                if item.content_id not in readers:
+                    readers[item.content_id] = LocalReader(
+                        self._local, item.location, item.artifact
+                    )
+                return readers[item.content_id].read(step.offset, step.length)
+            except (SourceChangedError, SourceAccessError, OSError, ValueError):
+                return None
+
+        try:
+            found = introspect(streams, read)
+        finally:
+            for reader in readers.values():
+                reader.close()
+        self._producers[found.transform.id] = found.transform
+        for finding in found.findings:
+            self._record(finding, found.transform)
+        self._emit(events.STREAMS_INTROSPECTED, found.summary())
+        return found
+
+    def _align_clocks(self) -> ClockAlignment | None:
+        """Stage 9c, before the package is staged: relate the admitted sources' clocks (ADR 0060).
+        Reads only the time and value columns of the committed runs its rules name; writes no
+        tick. A package with fewer than two clocks gets no alignment: no tables, no transform."""
+        records: list[object] = []
+        runs: dict[RecordId, list[Path]] = defaultdict(list)
+        try:
+            for content, transform in sorted(set(self._ingested)):
+                plan = self.workspace.load_plan(content, transform)
+                if plan is None:
+                    continue  # staging refuses the package and says why
+                for chunk in plan.chunks:
+                    output = self.workspace.load(str(chunk["id"]))
+                    records.extend(clock_records(output.records))  # the rest is dropped here
+                    for stream, run in sorted(output.runs.items()):
+                        runs[stream].append(run)
+        except (WorkspaceError, ValueError, OSError) as exc:
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+
+        def rows(stream: Stream, columns: Sequence[str]) -> Iterator[Mapping[str, object]]:
+            for run in runs.get(stream.id, ()):
+                yield from read_rows(run, columns)
+
+        try:
+            found = align_clocks(records, rows)
+        except (SeriesError, OSError) as exc:  # the runs were checked when committed
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+        if found is None:
+            return None
+        self._producers[found.transform.id] = found.transform
+        for finding in found.findings:
+            self._record(finding, found.transform)
+        self._emit(events.CLOCKS_ALIGNED, found.summary())
+        return found
+
+    def _index_media(
+        self, streams: list[Stream], introspection: Introspection, frames: dict[RecordId, int]
+    ) -> MediaIndex | None:
+        """Stage 9b: one ``media_stream`` line per stream carrying images, video or point clouds
+        (ADR 0056). Reads the streams, their inferred semantics and their row counts: no row, no
+        source byte. A package without media gets no transform and no table."""
+        adapters = {
+            item.key[1]: item.adapter.descriptor.id
+            for item in self._sources
+            if item.adapter is not None and item.config is not None
+        }
+        found = index_media(streams, introspection.semantics, frames, adapters)
+        if found is None:
+            return None
+        self._producers[found.transform.id] = found.transform
+        for finding in found.findings:
+            self._record(finding, found.transform)
+        self._emit(events.MEDIA_INDEXED, found.summary())
+        return found
+
     # --- validate ------------------------------------------------------------------------------
 
     def _validate(self) -> RecordId:
-        """Read the staged package back and verify every file, id, series and the receipt."""
+        """Read the staged package back and verify it; run the integrity and data-quality rules
+        over it (ADR 0054) and, if they find anything, stage it again with their findings."""
         with self._enter(Phase.VALIDATE):
             self._check_cancel()
             assert self._staged is not None
             try:
                 package = read_package(self._staged.path)
+                report = validate_package(package)
+                receipt, identity = package.manifest.receipt, package.id
+                if report.findings:  # amend verifies the whole before it moves anything
+                    self._staged = amend(self._staged, package, report.records())
+                    manifest = package_manifest_from_json(
+                        canonical_json.loads((self._staged.path / MANIFEST).read_bytes())
+                    )
+                    receipt, identity = manifest.receipt, self._staged.id
             except (PackageError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the assembled package does not verify: {exc}") from exc
+            added = report.records()
             summary: dict[str, JsonValue] = {
-                "findings": len(package.receipt.findings),
-                "package": package.id,
-                "records": len(package.records),
+                "findings": len(package.receipt.findings) + len(report.findings),
+                "package": identity,
+                "records": len(package.records) + len(added),
                 "series": len(package.series),
+                "validation": report.summary(),
             }
             self._emit(events.PACKAGE_VERIFIED, summary)
             self._finish(Phase.VALIDATE, summary)
-        return package.manifest.receipt
+        return receipt
 
     # --- commit --------------------------------------------------------------------------------
 
@@ -1779,8 +2224,13 @@ def collect(
     Removes the rest. Refused (``JobError``) while a job holds the workspace, or when the
     workspace cannot be read well enough to tell what is reachable.
     """
-    configs = IngestJob._configure(registry, (options or JobOptions()).config)
+    options = options or JobOptions()
+    declared = IngestJob._declarations(registry, options)
+    config = declared.config if declared is not None else options.config
+    live = {c.transform.id for c in IngestJob._configure(registry, config).values()}
+    if declared is not None:
+        live |= {c.transform.id for c in declared.configs()}
     try:
-        return workspace.collect({config.transform.id for config in configs.values()})
+        return workspace.collect(live)
     except (WorkspaceError, ValueError, TypeError, OSError) as exc:
         raise JobError(f"the workspace cannot be collected: {exc}") from exc

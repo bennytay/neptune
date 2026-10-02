@@ -320,7 +320,8 @@ def _non_finite(builder: _Builder) -> JsonObject:
 
 def _config_alias(builder: _Builder) -> JsonObject:
     target: JsonObject = {"items": {"type": ["string", "integer"]}, "type": "array"}
-    return _obj({"anchor": dict(_STRING), "target": target, "type": _const("alias")})
+    alias: JsonObject = {"anchor": dict(_STRING), "key": {"type": "boolean"}, "target": target}
+    return _obj({**alias, "type": _const("alias")})
 
 
 _OVERRIDES: Final[Mapping[type, Callable[[_Builder], JsonObject]]] = {

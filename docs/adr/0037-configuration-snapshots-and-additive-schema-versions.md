@@ -43,8 +43,10 @@ Forces:
      (`kinds_at`) and no other, and its receipt counts those kinds. A package with no
      configuration records is a version 1 package, byte for byte what a version 1 writer wrote.
    - Readers read every version from 1 to their own: a record must be at least its kind's `since`
-     (`record_object(..., since)`), a package's tables are those of its manifest's version, and
-     its receipt is recomputed at the version it says. A version 1 reader refuses a version 2
+     (`record_object(..., since)`), a package's tables are those of its manifest's version, that
+     version is exactly the one its non-empty tables need (a version 2 manifest over version 1
+     records is refused: the same records have one package), and its receipt is recomputed at
+     the version it says. A version 1 reader refuses a version 2
      package with "schema version 2 is newer", never a key error.
    - ADR 0017 §7's note that a bump regenerates every golden file no longer holds: an addition
      regenerates nothing that does not use it. The schema's `schema_version` is a constant per
@@ -64,33 +66,49 @@ Forces:
    document (a mapping, a sequence, a YAML alias or a scalar), naming its `snapshot`.
    - `path`: keys verbatim (a string's decoded content; a YAML key's scalar text) and sequence
      positions as integers, `()` for the root. `order`: its position among its parent's entries,
-     so key order survives. Two values share a path only where a key repeats.
+     so key order survives. Two values share a path only where a key repeats, so `occurrence`
+     holds one rank per step of the path: which of its parent's entries with that key the step
+     passes through (0 for the first and for every sequence position). `(path, occurrence)` is
+     unique in a snapshot: values sort, compare and hash in one order, however they are listed
+     (a package's tables are sorted by id).
+   - `key_tag`: the type of the entry's key where it is not a string: the tag a YAML key
+     resolves to (`tag:yaml.org,2002:int` for `1`, an application's `!tag`), `Ambiguous` where
+     the YAML versions disagree (`on`), `Unknown` where a pattern matches and no version reads
+     a value (`0x_`). `NotApplicable` for string keys (every JSON and TOML
+     key, a quoted or plain-text YAML key), the root and sequence items. So `1` and `"1"` share
+     a path and still declare two keys.
    - `tag`: a YAML node's tag, the explicit one expanded or YAML's non-specific `?` (plain
      scalars, collections) or `!` (quoted and block scalars); `NotCovered` in JSON and TOML, and
      for an alias, which has none of its own.
    - `text`: a scalar as written (a string's content; any other scalar's token verbatim, so
      `0x1F`, `1.0` and `1_000` keep their spelling). `NotApplicable` for collections and aliases.
    - `value`: the reading the format's own schema gives the node: `ConfigCollection(type,
-     length)`, `ConfigAlias(anchor, target path)` or `ConfigScalar(type, value)` (bool, exact int,
+     length)`, `ConfigAlias(anchor, target path, key)` (`key`: the anchor marks the key of the
+     entry at `target`, which is no node; still a reference, never a copy) or `ConfigScalar(type, value)` (bool, exact int,
      binary64 float or `NonFinite`, string, YAML binary, and TOML's four date-time kinds as ISO
      8601). A null the format defines (JSON `null`, YAML `null`, `~`, empty) is `KnownAbsent`
      citing the document. Readings that differ by YAML version are `Ambiguous`, YAML 1.1's first.
      A value no record can hold (beyond binary64, over 14,000 bits, an unpaired surrogate, an
      application's tag, a text not of its tag's type) is `Unknown` with a finding.
 4. **Citations.** A value's record-level locator is an RFC 6901 `JsonPointer` into the document
-   as parsed, after a `config:document {index}` step in YAML. Where a key repeats in a mapping,
-   each of its entries is addressed by position instead: the mapping's pointer, then
+   as parsed, after a `config:document {index}` step in YAML. Where a key's text repeats in a
+   mapping, each of its entries is addressed by position instead (in YAML, `1` and `"1"` are two
+   keys of one text, so one path: addressed by position, but no `duplicate_key`, which needs the
+   same text and type: a plain key's type is what the document's YAML versions read it as, a
+   quoted or `!!str` key a string, any other tag its own): the mapping's pointer, then
    `config:entry {order}`, then a pointer into that entry's value, so no two values share a
    citation and none is a counter. A value's state cites the `Span` it is written at, in code
    points of the decoded text (the text adapter's convention); a TOML table cites its `[header]`,
    and a table with no one place (an array of tables, a dotted-key table) its pointer alone.
 5. **Snapshot identity and comparison.** A snapshot's bytes are identified by their content id; a
    run is bound to them, and through them to its snapshot. Its values are identified by `digest`:
-   the sha256 of every value's path and `comparison_key` in path order
-   (`neptune.identity.configuration`). `compare_configurations` joins two snapshots' values by
-   path and reports each added, removed or changed path with the records on each side. They
+   the sha256 of every value's path, occurrence and `comparison_key`, in path then occurrence
+   order (`neptune.identity.configuration`). `compare_configurations` joins two snapshots' values
+   by path, compares a repeated key's entries by occurrence, and reports each added, removed or changed path with the records on each side. They
    agree: equal digests exactly when no path changed. What a value declares counts: its reading,
-   or for one with no reading its text and tag; a collection's type, not its length (its entries
+   or for one with no reading its text and tag; its `key_tag` when it is not `NotApplicable`
+   (so string keys compare alike across formats, and YAML's `{1: x, '1': y}` differs from
+   `{'1': x, 1: y}`); a collection's type, not its length (its entries
    count themselves); an alias's target. Spelling, quoting, comments, key order, anchors' names,
    encoding and format do not: run A's parameters in UTF-16, with CR LF, or as JSON, have run A's
    digest.
@@ -105,7 +123,8 @@ Forces:
      snapshot. A scanner over the accepted text finds spans and comments, which `tomllib` drops.
    - YAML: PyYAML's pure-Python parser, events only. Nothing is ever constructed, so no tag runs
      code; aliases are references, never expanded, so a billion-laughs document is 91 values;
-     merge keys (`<<`) stay keys. Plain scalars are typed by the version the document declares;
+     an anchor on a key, which is no node, makes an alias to it a reference to that key's entry
+     (`key` true); merge keys (`<<`) stay keys. Plain scalars are typed by the version the document declares;
      without one, by option `yaml_version`: `declared` (default) reads both 1.1 (the type
      repository) and 1.2 (the core schema) and keeps both readings where they differ, with one
      `config.yaml_version_undeclared` finding per document; `1.1` or `1.2` assume that version.
@@ -118,8 +137,19 @@ Forces:
    YAML, since `["base_link"]` is both; `key =`: TOML; otherwise YAML), and the first that
    accepts the whole text reads it. If none does, the error reported is that of the reader that
    got furthest by lines. The probe claims `STRUCTURE` (0.7) only for a document whose grammar
-   holds to its end (or to its cut, for a truncated file or a 64 KiB head) and whose every
-   document root is a mapping or sequence. YAML's grammar also holds for many notes
+   holds to its end (or to its cut, for a truncated file or a 64 KiB head), whose every
+   document root is a mapping or sequence, and whose shape is settings, not data:
+   - A sequence at the root (JSON's `[{"t": 0.0}, ...]`, YAML's `- 1`) is rows of data, never
+     named settings: 0.0 with `config.shape_not_configuration`.
+   - A JSON object is data when a root key is not a setting's name (`[$@]?[A-Za-z_]` then
+     letters, digits and `_-.:/`: keys such as `2024-01-01` or `max speed` are content), when it
+     is GeoJSON (a root `"type"` naming an RFC 7946 type), or when every root member is a list
+     of objects (`{"rows": [...]}`). Those score `NAME_ONLY` (0.1) with the same reason: the
+     text adapter reads them, the probe engine reports a `.json` read as text as
+     `name_mismatch`, and a dialect adapter (GeoJSON, tables) claims them when it lands. A
+     manifest naming this adapter still ingests them. One table among settings
+     (`{"joints": [{...}], "base": "base_link"}`, PX4's `parameters`) is configuration.
+   YAML's grammar also holds for many notes
    (`Robot: spot-12` lines, a Markdown list), so a YAML head must also show configuration: a
    `%YAML` directive or explicit `---`, a tag, a closed nested or flow collection, or a plain
    scalar both versions read as a boolean or a number. A flat file of text values is left to the
@@ -127,7 +157,11 @@ Forces:
    breaks mid-way (the probe engine reports a `.toml` read as text as `name_mismatch`).
 8. **Hostile input costs findings** (`config.*`, all documented in the descriptor): `too_large`
    (`max_bytes`, 8 MiB), `too_deep` (`max_depth`, 200), `scalar_too_large`
-   (`max_scalar_length`, 1 Mi code points), `invalid_encoding`, `syntax_error`,
+   (`max_scalar_length`, 1 Mi code points), `paths_too_long` (`max_path_ratio`, 64: every
+   value repeats its path, and an alias its target's, so a 20,000-character key above 4,000
+   values is 80 million code points of output from 28 KB; a document whose paths and alias
+   targets total more than 64 times its size, at least 4 KiB, is not read, keeping output linear
+   in input; real parameter files are near 2), `invalid_encoding`, `syntax_error`,
    `duplicate_key`, `unsupported_key` (a collection or alias to one as a key), `undefined_alias`,
    `unrepresentable_value`, `unresolved_tag`, `invalid_value`, `nonstandard_json`,
    `byte_order_mark`, `mixed_line_endings`, `no_document`, `yaml_version_unsupported`. A

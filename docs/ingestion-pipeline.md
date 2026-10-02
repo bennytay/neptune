@@ -12,11 +12,11 @@ together — M2's runtime is complete.
 | 2 | fingerprint | size, magic bytes, streaming sha256 + per-chunk hashes; emit `SourceArtifact` / `SourceRevision` | identity | MVL-2 |
 | 3 | probe | done: `discovery.probe.ProbeEngine` sniffs the head, asks every adapter (crashes isolated), applies the registry's rule, opens zip/tar/gzip/bzip2/xz within `ProbePolicy`, and reports ties, unclaimed sources and container problems as `neptune.probe.*` findings (ADR 0027); the job runs it in one sandboxed call per source and re-derives its reply (ADR 0033 §1) | discovery + adapters | MVL-8, MVL-57 |
 | 4 | inspect | cheap per-source summary (streams, extents, counts) without full parse | adapters | MVL-7 |
-| 5 | group | propose run/session groupings from filesystem signals (v0) and later from evidence (M7) | discovery | MVL-13, MVL-34 |
+| 5 | group | v0 done: `derived.grouping.LayoutGrouper` proposes sessions from the scan's observed layout (`discovery.layout`: locations, links, what names state; never contents or mtimes) by named rules with confidence bands; conflicting readings are contested, never chosen; nested session directories include the inner reading by id, at most 16 deep; every file lies in a proposal or is unassigned; findings `neptune.grouping.*`; proposals reach the package as derived tables (ADR 0036). MVL-34 swaps in the evidence-graph assembler behind the same `Grouper` interface | discovery (layout) + derived (rules) | MVL-13, MVL-34 |
 | 6 | plan | adapters emit chunks with deterministic ids and cost estimates | adapters | MVL-7 |
 | 7 | ingest | done: per-chunk pure parse → canonical records + findings; the job (ADR 0028) reuses every committed chunk by its id, across jobs and roots (ADR 0031), retries a chunk that raises and quarantines its source with a `neptune.runtime.*` finding | runtime + adapters | MVL-6, MVL-9 |
 | 8 | store | done: each chunk's records, findings and sorted series runs are committed to the workspace atomically; each stream's runs are merged once into its series file, kept as a derivative and copied into every package that holds it (ADRs 0025, 0026, 0031) | store | MVL-5, MVL-16, MVL-9 |
-| 9 | validate | cross-source integrity checks over the store; findings, not exceptions | validate | MVL-41 |
+| 9 | validate | done: `neptune.validate` runs versioned integrity and data-quality rules over the verified package (truncation roll-up, counts, time order, reversed intervals, missing metadata, schema and id conflicts, dangling references, unresolved frames, stale calibrations, software conflicts); findings are cited, capped, `warning`, and added to the package so the receipt lists them; rules whose kinds are not on main are off and listed as not covered (ADR 0054) | validate | MVL-41 |
 | 10 | receipt | done: core computed from the package's records (store); the job writes the volatile envelope (job id, clocks, host, root, seconds per phase) into the package before publishing it | store + runtime | MVL-5, MVL-6 |
 
 Alignment (clocks, frames, identities, bindings) is a separate pass after ingestion (M7); it produces new
@@ -41,14 +41,14 @@ state machine over the stages above, in nine phases (ADR 0028):
 
 | Phase | Stages above | Does |
 |---|---|---|
-| `discover` | 1 | sweeps the workspace's scratch and staging debris; walks the root; every symlink, special or unreadable entry is discovery's finding (ADR 0029 §1) |
+| `discover` | 1 | sweeps the workspace's scratch and staging debris; walks the root (a directory, or one regular file: ADR 0043) under the job's ignore rules; every symlink, special, unreadable or ignored entry is discovery's finding (ADR 0029 §1, ADR 0043 §6) |
 | `fingerprint` | 2 | hashes every file into the root's persisted ledger, reconciles absences, saves the ledger; a size that changed while hashing is a finding |
-| `inspect` | 3 | reads each distinct source's head once and runs the probe engine over it in one sandboxed call (every adapter's probe, the container listing); selects and configures; a tie, an unclaimed source or a container problem is a `neptune.probe.*` finding (ADR 0033 §1) |
+| `inspect` | 3 | reads each distinct source's head once and runs the probe engine over it in one sandboxed call (every adapter's probe, the container listing); selects and configures; a tie, an unclaimed source or a container problem is a `neptune.probe.*` finding (ADR 0033 §1); then groups the scan's layout into session proposals (stage 5, no adapter call; `JobOptions.grouping` declares sessions, stated and set against the rules' readings; ADR 0036) |
 | `plan` | 6 | reuses the workspace's saved plan for (source, transform) or calls `plan`, checks it, saves it |
 | `parse` | 7 | `ingest` on one chunk the workspace has not committed; `attempts` tries (default 2) |
 | `normalize` | 7–8 | `check_chunk_output` plus `seq` unique within the chunk; commit, whole or not at all |
-| `assemble` | 8 | admits each source whose chunks all committed and pass the cross-chunk laws (each run checked against its stream and agreeing on columns, disjoint `seq` ranges, no duplicate ids, every run has its stream); stages the package beside its destination |
-| `validate` | 9 | `read_package` over the staged package; MVL-41's validators go here |
+| `assemble` | 8 | admits each source whose chunks all committed and pass the cross-chunk laws (each run checked against its stream and agreeing on columns, disjoint `seq` ranges, no duplicate ids, every run has its stream); stages the package beside its destination; before staging, it introspects the admitted sources' streams: each cited schema definition is read once, bounded, and parsed into one `definition_layout` line per distinct definition (within name, pointer, per-layout and per-package output limits) that each stream's `stream_layout` line names, and `stream_semantic` lines infer what each stream carries (ADR 0049); then each stream carrying images, video or point clouds gets a `media_stream` line from its semantic and its runs' row counts (no row read), within a per-package frame budget (ADR 0056); then, when the package holds two or more clocks, the `neptune.clocks` pass reads the time and value columns its rules name, fits `clock_mapping` lines from sync anchors, writes `timestamp_domain` lines for clocks found in values, and reports clocks it cannot relate (ADR 0060) |
+| `validate` | 9 | `read_package` over the staged package, then `validate_package`; any findings are added with the validator's transform (`amend`: restaged, verified again); `package_verified` carries the rules' coverage (ADR 0054) |
 | `commit` | 10 | writes the envelope into the staged package and renames it into place |
 
 - **Resume.** A new job over the same root and workspace is the resume: it hashes again (bytes may
@@ -88,7 +88,7 @@ state machine over the stages above, in nine phases (ADR 0028):
   (skipped, parsed, retried, committed, failed), `probe_failed` (the source's probe call, then
   each adapter that fails on its own), and `sandbox_ready` (the isolation, the limits, the host's
   Landlock ABI, and on a degraded host a `degraded` list of the guarantees it could not give) as
-  `inspect` starts. A sandboxed chunk stopped by a limit is a `limit_exceeded` finding naming the
+  `inspect` starts, and `sessions_proposed` (grouping's counts) as it ends. A sandboxed chunk stopped by a limit is a `limit_exceeded` finding naming the
   limit (`cpu_seconds`, `wall_seconds`, `memory_bytes` or `reply_bytes`). Canonical JSON, no clock:
   the consumer adds one.
 - **Job failure** (`JobError`) is reserved for the job itself: an unreadable root, a destination that
@@ -134,11 +134,30 @@ needs, and nothing else decides: no clock, file time or flag.
 
 ## Dry-run
 
-`IngestJob.dry_run()` (ADR 0035) runs `discover`, `fingerprint`, `inspect` and `plan`, then stops:
-state `planned`, a `job_planned` event, no package, never an `ingest` call. It needs no destination;
-the ledger and plans it saves are the ones `run` reuses, and its cache report marks the chunks the
-workspace already holds. The SDK's `dry_run` calls it (`sdk.md`); `explain` (MVL-15) adds adapters'
-`inspect`, grouping and the rendered plan on top. It must never call `ingest`.
+`IngestJob.dry_run()` (ADR 0035, ADR 0044) runs `discover`, `fingerprint`, `inspect` and `plan`, then
+stops: state `planned`, a `job_planned` event, no package, never an `ingest` call. It needs no
+destination and only reads the sources; the ledger and plans it saves are the ones `run` reuses (the
+workspace is the cache; no package id depends on it, ADR 0035 §9), and its cache report marks the
+chunks the workspace already holds. Each selected source is also given to its adapter's `inspect`,
+sandboxed; a failed `inspect` is shown and never quarantines (a short read or a change is the
+source's, as for `plan`). The outcome carries an `Explanation` (`neptune.runtime.explain`):
+
+- inventory (files, links, skipped entries), and per distinct source its status, detected format,
+  every adapter's verdict (`selected`/`tied`/`outranked`/`declined`/`failed`, or `pinned` with
+  the manifest rule as `pin`, ADR 0047; confidence, reasons, why), `inspect` summary, and plan (rule, chunks, committed, bytes left to read);
+- the session grouping (proposals with reasons, contested readings, unassigned files);
+- work left (chunks, bytes, `ingest` calls) and heavy sources (≥ 256 MiB or ≥ 1024 chunks left,
+  non-streaming memory growth, declared memory above the sandbox limit);
+- everything left out (unsupported, ambiguous, quarantined, unreadable, skipped, links) and the
+  ambiguity findings.
+
+It is bounded (`Bounds`): every list ≤ 10,000 entries, per source ≤ 64 locations, ≤ 16 reasons per
+verdict, ≤ 256 container members, an `inspect` summary ≤ 16 KiB and ≤ 64 `inspect` findings, and
+≤ 64 entries in every list of a session proposal or unassigned file, nested ones included; each cut
+is a `*_omitted` count beside its list and one `neptune.explain.truncated` finding. Totals are over
+everything. `dumps()` is canonical JSON (`neptune.explanation/1`), byte-identical for the same root,
+adapters, config and workspace contents; `render()` is the same for people. The SDK's `dry_run`
+returns it as `IngestResult.explanation` (`sdk.md`); `neptune ingest --explain` prints it (`cli.md`).
 
 ## Determinism contract
 

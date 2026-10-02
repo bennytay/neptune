@@ -7,7 +7,8 @@ What it emits for a configuration file:
   the file's encoding, byte-order mark and line endings, its comments verbatim, how many values
   it has and their digest;
 - one ``ConfigurationValue`` per node of the document, in document order: mappings, sequences,
-  YAML aliases and scalars, each with its path, its position in its parent, its YAML tag, its
+  YAML aliases and scalars, each with its path, which repeated keys it passes through, its
+  position in its parent, its YAML tag, its
   text as written and its reading in the format's own schema, citing the exact span it is
   written at.
 
@@ -23,7 +24,8 @@ The rules, also in the descriptor's conventions:
   step in YAML. An entry whose key repeats in its mapping is addressed by its position instead
   (``config:entry``), so no two values share a citation.
 - **Hostile input** costs findings, never exceptions: undecodable bytes, a file over
-  ``max_bytes``, nesting past ``max_depth``, a scalar past ``max_scalar_length``, repeated keys,
+  ``max_bytes``, nesting past ``max_depth``, a scalar past ``max_scalar_length``, paths that
+  would repeat long keys past ``max_path_ratio`` times the document, repeated keys,
   aliases (never expanded), application tags, numbers beyond binary64.
 
 Planning reads and parses the whole file and plans one chunk per ``chunk_values`` values of a
@@ -34,34 +36,13 @@ parses the file again, so its output depends only on the bytes, never on another
 import sys
 from collections import defaultdict
 from collections.abc import Iterator
-from dataclasses import dataclass
 from typing import Final
 
 import yaml
 
-from neptune.adapters.config._read import read_text, sniff
-from neptune.adapters.config._text import (
-    InvalidEncoding,
-    decode,
-    detect,
-    line_and_column,
-    line_endings,
-)
-from neptune.adapters.config._tree import (
-    Alias,
-    Collection,
-    Document,
-    Issue,
-    Limits,
-    Node,
-    Null,
-    Parse,
-    Spot,
-    Value,
-    pointer_token,
-)
 from neptune.adapters.contract import (
     ABI_VERSION,
+    NAME_ONLY,
     PROBE_HEAD_SIZE,
     STRUCTURE,
     AdapterConfig,
@@ -79,8 +60,27 @@ from neptune.adapters.contract import (
     Resources,
     SourceReader,
     make_chunk,
-    read_pieces,
 )
+from neptune.adapters.structured.load import Loaded, Settings, load, problem_finding, problems
+from neptune.adapters.structured.reader import sniff
+from neptune.adapters.structured.text import (
+    InvalidEncoding,
+    decode,
+    detect,
+    line_endings,
+)
+from neptune.adapters.structured.tree import (
+    Alias,
+    Collection,
+    Document,
+    Issue,
+    Node,
+    Null,
+    Spot,
+    Value,
+    pointer_token,
+)
+from neptune.adapters.structured.yaml_reader import UNREADABLE_TYPE
 from neptune.identity.configuration import configuration_digest
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import evidence_record_id
@@ -91,8 +91,6 @@ from neptune.model.configuration import (
     ConfigNode,
     ConfigurationSnapshot,
     ConfigurationValue,
-    LineEndings,
-    TextEncoding,
 )
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.jsonvalue import JsonObject, JsonValue
@@ -110,7 +108,6 @@ from neptune.model.knowledge import (
     Unknown,
 )
 from neptune.model.provenance import (
-    ByteRange,
     EvidenceRef,
     JsonPointer,
     Locator,
@@ -153,6 +150,12 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "max_depth", 200, "a document nested deeper than this is not read (config.too_deep)"
         ),
         ConfigOption(
+            "max_path_ratio",
+            64,
+            "a document whose values' paths (and alias targets) total more code points than this"
+            " many times its own (at least 4 KiB) is not read (config.paths_too_long)",
+        ),
+        ConfigOption(
             "max_scalar_length",
             MIB,
             "a scalar or key of more code points than this is not read (config.scalar_too_large)",
@@ -174,8 +177,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         Documented(
             _code("duplicate_key"),
-            "entries repeat a key of their mapping; every one is kept in source order and"
-            " addressed by its position (inconsistent, warning)",
+            "entries repeat a key of their mapping (YAML: same text and type, so 1 and '1' are"
+            " two keys); every one is kept in source order and addressed by its position, as is"
+            " every entry whose key's text repeats (inconsistent, warning)",
         ),
         Documented(
             _code("invalid_encoding"),
@@ -199,6 +203,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
             _code("nonstandard_json"),
             "JSON values spelled NaN or Infinity, which RFC 8259 does not define; read as the"
             " non-finite numbers they name (inconsistent, info)",
+        ),
+        Documented(
+            _code("paths_too_long"),
+            "a document whose values' paths total more than max_path_ratio times its size: a"
+            " long key above many values is copied into each; it is not read (limit, error)",
         ),
         Documented(
             _code("scalar_too_large"),
@@ -299,6 +308,12 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " positions as integers; () is the root. The pointer escapes them per RFC 6901",
         ),
         Documented(
+            "probing",
+            "claims valid (or cut-short) settings: a mapping at every root, named by identifier"
+            " keys. A root sequence (0.0), GeoJSON, content keys or tables only (NAME_ONLY) are"
+            " data: config.shape_not_configuration, left to the text or a dialect adapter",
+        ),
+        Documented(
             "spans",
             "code points of the text: the bytes after a byte-order mark, decoded as UTF-8 or as"
             " the mark names. A value cites its node's span (a YAML node's tag and anchor"
@@ -314,8 +329,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "yaml",
             "PyYAML's events: tags as written (expanded) or the non-specific ? (plain scalars,"
             " collections) and ! (quoted and block scalars); quoted and block scalars are"
-            " strings; aliases are references to their anchor's node, never expanded; merge"
-            " keys (<<) are kept as keys",
+            " strings; aliases are references to their anchor's node, never expanded (an alias"
+            " to an anchored key refers to that key's entry, key true); a key that is not a"
+            " string keeps its tag in key_tag; merge keys (<<) are kept as keys",
         ),
     ),
     resources=Resources(max_memory=1024 * MIB, streaming=False),
@@ -332,29 +348,18 @@ DESCRIPTOR: Final = AdapterDescriptor(
 # --- Reading a source --------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class _Loaded:
-    """A source as text, read in a format; what stopped it, if it was not."""
-
-    size: int
-    too_large: bool = False
-    invalid: InvalidEncoding | None = None
-    text: str = ""
-    encoding: TextEncoding = TextEncoding.UTF_8
-    bom: int = 0
-    parse: Parse | None = None
+def _settings(config: AdapterConfig) -> Settings:
+    return Settings(
+        config.integer("max_bytes"),
+        config.integer("max_depth"),
+        config.integer("max_path_ratio"),
+        config.integer("max_scalar_length"),
+        config.text("yaml_version"),
+    )
 
 
-def _load(source: SourceReader, config: AdapterConfig, only: ConfigFormat | None) -> _Loaded:
-    if source.size > config.integer("max_bytes"):
-        return _Loaded(source.size, too_large=True)
-    data = b"".join(read_pieces(source, 0, source.size))
-    decoded = decode(data)
-    if isinstance(decoded, InvalidEncoding):
-        return _Loaded(source.size, invalid=decoded)
-    limits = Limits(config.integer("max_depth"), config.integer("max_scalar_length"))
-    parse = read_text(decoded.text, decoded.encoding, limits, config.text("yaml_version"), only)
-    return _Loaded(source.size, False, None, decoded.text, decoded.encoding, decoded.bom, parse)
+def _load(source: SourceReader, config: AdapterConfig, only: ConfigFormat | None) -> Loaded:
+    return load(source, _settings(config), only)
 
 
 def _int(context: JsonObject, key: str) -> int:
@@ -372,133 +377,12 @@ def _path_pointer(node: Node) -> str:
     return _pointer(tuple(pointer_token(segment) for segment in node.path))
 
 
-def _shorten(message: str) -> str:
-    message = " ".join(message.split())
-    return message if len(message) <= _MESSAGE else message[: _MESSAGE - 1] + "…"
-
-
-# --- Findings about the source -----------------------------------------------------------------
-
-
 def _source_findings(
-    source: SourceReader, config: AdapterConfig, loaded: _Loaded
+    source: SourceReader, config: AdapterConfig, loaded: Loaded
 ) -> Iterator[IngestFinding]:
     """What planning finds: problems with the file as a whole, or with whole documents."""
-
-    def finding(
-        name: str,
-        category: FindingCategory,
-        severity: Severity,
-        where: Locator,
-        message: str,
-        details: dict[str, JsonValue],
-    ) -> IngestFinding:
-        return ingest_finding(
-            code=_code(name),
-            category=category,
-            severity=severity,
-            subject=EvidenceRef(source.content_id, (where,)),
-            transform=config.transform,
-            message=message,
-            details=details,
-        )
-
-    whole = ByteRange(0, source.size)
-    if loaded.too_large:
-        limit = config.integer("max_bytes")
-        yield finding(
-            "too_large",
-            FindingCategory.LIMIT,
-            Severity.ERROR,
-            whole,
-            f"the file holds {source.size} bytes, over max_bytes ({limit}); it is not read",
-            {"bytes": source.size, "max_bytes": limit},
-        )
-        return
-    if loaded.invalid is not None:
-        bad = loaded.invalid
-        yield finding(
-            "invalid_encoding",
-            FindingCategory.CORRUPT,
-            Severity.ERROR,
-            ByteRange(bad.offset, source.size - bad.offset),
-            f"byte {bad.offset} is not valid {bad.encoding} ({bad.reason}); the file is not read",
-            {"encoding": str(bad.encoding), "first_invalid_byte": bad.offset},
-        )
-        return
-    text, parse = loaded.text, loaded.parse
-    endings = line_endings(text)
-    if endings is LineEndings.MIXED:
-        yield finding(
-            "mixed_line_endings",
-            FindingCategory.INCONSISTENT,
-            Severity.INFO,
-            whole,
-            "the file mixes line breaks (LF, CR LF, CR); spans and text keep them as written",
-            {},
-        )
-    if parse is None or (not parse.documents and not parse.too_deep and parse.problem is None):
-        yield finding(
-            "no_document",
-            FindingCategory.MISSING,
-            Severity.INFO,
-            whole,
-            "the file is empty, blank or only comments: it declares no configuration",
-            {},
-        )
-        return
-    if loaded.bom and parse.format is not ConfigFormat.YAML:
-        yield finding(
-            "byte_order_mark",
-            FindingCategory.INCONSISTENT,
-            Severity.INFO,
-            ByteRange(0, loaded.bom),
-            f"{parse.format} defines no byte-order mark; it was read past",
-            {"bytes": loaded.bom},
-        )
-    if parse.problem is not None:
-        problem = parse.problem
-        line, column = line_and_column(text, problem.offset)
-        lost = (
-            "the file is not read"
-            if problem.start == 0
-            else f"documents from {problem.document} on are not read"
-        )
-        yield finding(
-            "syntax_error",
-            FindingCategory.CORRUPT,
-            Severity.ERROR,
-            Span(problem.start, len(text)),
-            f"not {parse.format} at line {line}, column {column}:"
-            f" {_shorten(problem.message)}; {lost}",
-            {
-                "column": column,
-                "document": problem.document,
-                "format": str(parse.format),
-                "line": line,
-                "offset": problem.offset,
-            },
-        )
-    limit = config.integer("max_depth")
-    for deep in parse.too_deep:
-        yield finding(
-            "too_deep",
-            FindingCategory.LIMIT,
-            Severity.ERROR,
-            Span(*deep.extent),
-            f"document {deep.document} nests deeper than max_depth ({limit}); it is not read",
-            {"document": deep.document, "max_depth": limit},
-        )
-    for document, version, spot in parse.unsupported_version:
-        yield finding(
-            "yaml_version_unsupported",
-            FindingCategory.UNSUPPORTED,
-            Severity.WARNING,
-            Span(*spot),
-            f"document {document} declares YAML {version}; it is typed as yaml_version"
-            f" ({config.text('yaml_version')}) says",
-            {"document": document, "version": version},
-        )
+    for problem in problems(source.size, loaded, _settings(config)):
+        yield problem_finding(ADAPTER_ID, source.content_id, config.transform, problem)
 
 
 # --- Records of a document ---------------------------------------------------------------------
@@ -549,6 +433,16 @@ _ISSUES: Final[dict[Issue, tuple[FindingCategory, Severity, str]]] = {
 }
 
 
+def _key_tag(key_type: tuple[str, ...] | None) -> Knowledge[str]:
+    if key_type is None:
+        return NotApplicable()
+    if any(kind.startswith(UNREADABLE_TYPE) for kind in key_type):
+        return Unknown()  # a pattern matched, but no version reads a value: no type is held
+    if len(key_type) == 1:
+        return Known(key_type[0])
+    return Ambiguous(tuple(Candidate(tag) for tag in key_type))
+
+
 class _Records:
     """The records of one document: its values, its snapshot and its findings."""
 
@@ -556,7 +450,7 @@ class _Records:
         self,
         source: SourceReader,
         config: AdapterConfig,
-        loaded: _Loaded,
+        loaded: Loaded,
         fmt: ConfigFormat,
         document: Document,
     ) -> None:
@@ -576,6 +470,7 @@ class _Records:
         self.snapshot_id = evidence_record_id(ConfigurationSnapshot.kind, self.root, self.transform)
         self.document_provenance = self._provenance(self.root)
         self._steps, self._tokens = self._locators()
+        self._occurrence = self._occurrences()
 
     def _provenance(self, evidence: EvidenceRef) -> Provenance:
         return Provenance(evidence, self.transform.id, AssertionKind.OBSERVED)
@@ -603,6 +498,19 @@ class _Records:
                 tokens.append((*tokens[node.parent], pointer_token(node.path[-1])))
         return steps, tokens
 
+    def _occurrences(self) -> list[tuple[int, ...]]:
+        """Each node's rank per step: which of its parent's entries with its key it is."""
+        ranks: list[tuple[int, ...]] = []
+        seen: dict[tuple[int, str | int], int] = defaultdict(int)
+        for node in self.nodes:
+            if node.parent < 0:
+                ranks.append(())
+                continue
+            key = (node.parent, node.path[-1])
+            ranks.append((*ranks[node.parent], seen[key]))
+            seen[key] += 1
+        return ranks
+
     def evidence(self, index: int) -> EvidenceRef:
         locator = (*self._steps[index], JsonPointer(_pointer(self._tokens[index])))
         return EvidenceRef(self.source.content_id, locator)
@@ -616,8 +524,8 @@ class _Records:
         match node.value:
             case Collection(type=kind, length=length):
                 value, text = Known(ConfigCollection(kind, length), cited), NotApplicable()
-            case Alias(anchor=anchor, target=target) if target is not None:
-                value, text = Known(ConfigAlias(anchor, target), cited), NotApplicable()
+            case Alias(anchor=anchor, target=target, key=key) if target is not None:
+                value, text = Known(ConfigAlias(anchor, target, key), cited), NotApplicable()
             case Null():
                 value = KnownAbsent(self.document_provenance)
             case Value(readings=(single,)):
@@ -631,7 +539,9 @@ class _Records:
             provenance=self._provenance(evidence),
             snapshot=self.snapshot_id,
             path=node.path,
+            occurrence=self._occurrence[index],
             order=node.order,
+            key_tag=_key_tag(node.key_type),
             tag=Known(node.tag) if node.tag is not None else NotCovered(),
             text=text,
             value=value,
@@ -738,10 +648,15 @@ class ConfigAdapter:
         if found is None:
             message = "no JSON, TOML or YAML document with a mapping or sequence at its root"
             return ProbeResult(0.0, (ProbeReason(_code("not_config"), message),))
-        fmt, version = found
         read = "the source" if complete else f"the first {len(head)} bytes"
-        message = f"{read} read as {fmt} with a mapping or sequence at the root"
-        return ProbeResult(STRUCTURE, (ProbeReason(_code(str(fmt)), message),), version)
+        if found.data is not None:
+            # Valid, but shaped as data: left to the text adapter or a dialect adapter. Rows are
+            # never settings; an object might be, so the name may still suggest this adapter.
+            reason = ProbeReason(_code("shape_not_configuration"), f"{read}: {found.data}")
+            return ProbeResult(0.0 if found.sequence else NAME_ONLY, (reason,), found.version)
+        message = f"{read} read as {found.format} with a mapping at the root"
+        reason = ProbeReason(_code(str(found.format)), message)
+        return ProbeResult(STRUCTURE, (reason,), found.version)
 
     def inspect(self, source: SourceReader, config: AdapterConfig) -> InspectResult:
         head = source.read(0, min(source.size, PROBE_HEAD_SIZE))
@@ -756,7 +671,7 @@ class ConfigAdapter:
             {
                 "bom": bom > 0,
                 "encoding": str(encoding),
-                "format": str(found[0]) if found else "unknown",
+                "format": str(found.format) if found else "unknown",
                 "size": source.size,
             }
         )

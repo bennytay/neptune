@@ -146,7 +146,7 @@ def test_bytes_decide_what_reads_each_source_and_what_is_left_unread(corpus: Pat
         "archive.tgz": None,
         "blob.bin": None,
         "bundle": None,
-        "logs/flight_log": None,
+        "logs/flight_log": "flightlog",  # a ULog header: read by bytes, whatever the name
         "logs/renamed": None,  # tally and rival tie: nobody is guessed
         "notes.txt": "text",
         "operator_log": "text",
@@ -162,7 +162,7 @@ def test_bytes_decide_what_reads_each_source_and_what_is_left_unread(corpus: Pat
         "archive.tgz": [(PROBE_ID, PROBE_VERSION)],
         "blob.bin": [(PROBE_ID, PROBE_VERSION)],
         "bundle": [(PROBE_ID, PROBE_VERSION)],
-        "logs/flight_log": [(PROBE_ID, PROBE_VERSION)],
+        "logs/flight_log": [("flightlog", "0.1.0")],
         "logs/renamed": [(PROBE_ID, PROBE_VERSION)],
         "notes.txt": [("text", "0.1.0")],
         "operator_log": [("text", "0.1.0")],
@@ -174,7 +174,6 @@ def test_bytes_decide_what_reads_each_source_and_what_is_left_unread(corpus: Pat
     }
     messages = sorted(f.message for f in receipt.findings)
     assert any("rival, tally" in m for m in messages)
-    assert any("ULog signature" in m for m in messages)
     assert any("zip container holding 6 members" in m for m in messages)
     assert any("tar container holding 5 members" in m for m in messages)
     assert any("gzip container holding 1 member" in m for m in messages)
@@ -200,10 +199,10 @@ def test_without_the_rival_the_renamed_tally_is_read_and_the_zip_members_are_rep
         b"logs/lift.tally": "tally",
         b"logs/renamed": "tally",
         b"notes.txt": "text",
-        b"recording.mcap": None,
+        b"recording.mcap": "mcap",  # claimed by its magic
     }
     # The tar's members, and the same tar's inside a gzip, are probed by their bytes alike.
-    in_tar = {b"drive.bag": None, b"logs/lift.tally": "tally", b"notes.txt": "text"}
+    in_tar = {b"drive.bag": "rosbag1", b"logs/lift.tally": "tally", b"notes.txt": "text"}
     archive, compressed = probes["archive"], probes["archive.tgz"]
     assert archive.container is not None and compressed.container is not None
     assert _probed_members(archive.container) == in_tar
