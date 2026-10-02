@@ -27,7 +27,7 @@ from collections import OrderedDict, defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import cached_property
-from typing import BinaryIO, Final, cast
+from typing import BinaryIO, Final
 
 from neptune.identity.findings import ingest_finding
 from neptune.identity.hashing import content_id
@@ -57,7 +57,7 @@ LISTING_TOKEN: Final = "listing"  # the revision token of a finding about the li
 MAX_PAGES: Final = 100_000
 MAX_EXAMPLES: Final = 10  # keys a finding about many keys cites
 MIN_WINDOW: Final = 64 * 1024
-MAX_WINDOW: Final = 8 * 1024 * 1024
+MAX_WINDOW: Final = 8 * 1024 * 1024  # the most one ranged GET of a stream asks for
 READER_CACHE: Final = 4  # checked chunks an ObjectReader keeps
 
 # Finding codes, each prefixed with the connector id. Category and severity are fixed per code.
@@ -443,8 +443,12 @@ class ObjectStoreSource:
         return {entry.key: entry for entry in self.listing().entries}
 
     def open(self, location: SourceLocation) -> BinaryIO:
-        """A seekable, read-only stream over the listed revision, fetched in ranges as read."""
-        return cast("BinaryIO", _ObjectIO(self, self.entry(location)))
+        """A seekable, read-only stream over the listed revision, fetched in ranges as read.
+
+        Buffered, so ``read(n)`` returns ``n`` bytes unless the object ends first, as a local
+        file's stream does; no single request asks for more than 8 MiB.
+        """
+        return io.BufferedReader(_ObjectIO(self, self.entry(location)), MIN_WINDOW)
 
     def reader(self, location: SourceLocation, artifact: SourceArtifact) -> "ObjectReader":
         """An adapter's reader over ``location``, whose bytes were fingerprinted as ``artifact``."""
@@ -517,7 +521,7 @@ class _ObjectIO(io.RawIOBase):
             return 0
         offset = self._pos - self._buffer_start
         if not 0 <= offset < len(self._buffer):
-            length = min(max(want, self._window), self._entry.size - self._pos)
+            length = min(max(want, self._window), MAX_WINDOW, self._entry.size - self._pos)
             self._buffer = self._source.fetch(self._entry, self._pos, length)
             self._buffer_start, offset = self._pos, 0
             self._window = min(self._window * 2, MAX_WINDOW)

@@ -73,6 +73,8 @@ class FakeStore:
     shuffle: random.Random | None = None  # random page sizes, entries shuffled within a page
     rewrite: Callable[[int, list[Entry]], list[Entry]] | None = None  # (page number, entries)
     sas_required: bool = False  # Azure: refuse a request without a SAS signature
+    drop_idle: bool = False  # close every connection after its response, without saying so
+    wrong_range: bool = False  # a 206 whose Content-Range starts one byte later than asked
     _counter: int = 0
     _pages_served: int = 0
     _cache: tuple[object, list[Entry]] = (None, [])
@@ -199,6 +201,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+        if self.fake.drop_idle:  # a keep-alive connection the server then closes while idle
+            self.close_connection = True
 
     def _refuse(self) -> None:
         self._record()
@@ -244,7 +248,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(416, b"")
                 return
             status = 206
-            headers["Content-Range"] = f"bytes {start}-{end}/{len(data)}"
+            shift = 1 if self.fake.wrong_range else 0
+            headers["Content-Range"] = f"bytes {start + shift}-{end}/{len(data)}"
             data = data[start : end + 1]
         if self.fake.truncate_after is not None:
             self.send_response(status)

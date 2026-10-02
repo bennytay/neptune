@@ -264,6 +264,51 @@ def test_a_version_deleted_after_listing_is_object_gone(tmp_path: Path) -> None:
     assert codes(source) == ["deploy_s3.object_gone"]
 
 
+def test_a_large_read_is_whole_and_no_request_asks_for_more_than_8_mib(tmp_path: Path) -> None:
+    fake = FakeStore()
+    data = random.Random(5).randbytes(10 * 1024 * 1024)
+    fake.put("vehicle/drive.mcap", data)
+    with connect(fake, tmp_path) as source:
+        (entry,) = source.listing().entries
+        fake.requests.clear()
+        with source.open(entry.location) as stream:
+            assert stream.read(9 * 1024 * 1024 + 1) == data[: 9 * 1024 * 1024 + 1]
+    spans = [r.headers["range"].removeprefix("bytes=").split("-") for r in fake.object_requests()]
+    assert len(spans) >= 2
+    assert all(int(last) - int(first) + 1 <= 8 * 1024 * 1024 for first, last in spans)
+
+
+def test_a_wrong_content_range_fails_that_read_only(tmp_path: Path) -> None:
+    fake = FakeStore()
+    fake.put("arm/cal.yaml", b"0123456789")
+    with connect(fake, tmp_path) as source:
+        (entry,) = source.listing().entries
+        fake.wrong_range = True
+        with pytest.raises(ObjectReadError) as raised, source.open(entry.location) as stream:
+            stream.read()
+        assert raised.value.code == "read_failed"
+        fake.wrong_range = False
+        with source.open(entry.location) as stream:  # the unread body did not poison the next
+            assert stream.read() == b"0123456789"
+    (finding,) = source.findings()
+    assert finding.details == {"cause": "range_invalid", "length": 10, "offset": 0}
+
+
+def test_a_kept_alive_connection_closed_while_idle_is_reopened_once(tmp_path: Path) -> None:
+    fake = FakeStore()
+    for index in range(4):
+        fake.put(f"legged/{index}.mcap", bytes([index]) * 10)
+    fake.drop_idle = True
+    with connect(fake, tmp_path, page_size=1) as source:
+        listing = source.listing()
+        for entry in listing.entries:
+            with source.open(entry.location) as stream:
+                assert len(stream.read()) == 10
+    assert listing.complete and len(listing.entries) == 4
+    assert source.findings() == ()
+    assert source.client.transport.requests > len(fake.requests) == 8  # the retries
+
+
 def test_a_store_that_ignores_ranges_is_read_from_zero_only(tmp_path: Path) -> None:
     fake = FakeStore()
     fake.put("marine/sonar.bin", b"0123456789" * 20_000)

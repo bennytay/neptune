@@ -188,7 +188,11 @@ def read_range(response: Response, start: int, length: int) -> Range:
     ``length`` asked for are read, and the connection is dropped before the rest arrives.
     """
     if response.status == 206:
-        total = _content_range(response, start, length)
+        try:
+            total = _content_range(response, start, length)
+        except RangeInvalid:
+            response.discard()  # its body is unread: the connection cannot be reused
+            raise
         return Range(response.exact(length), total)
     if response.status == 200 and start == 0:
         declared = response.headers.get("content-length", "")

@@ -222,6 +222,28 @@ class Transport:
             self._connection.close()
             self._connection = None
 
+    def _send(self, target: str, headers: Mapping[str, str]) -> http.client.HTTPResponse:
+        """One request; sent again, once, on a new connection if a kept-alive one was closed by
+        the server while idle (``GET`` is idempotent, and nothing was received)."""
+        for attempt in (0, 1):
+            reused = self._connection is not None
+            connection = self._connect()
+            self.requests += 1
+            try:
+                connection.putrequest("GET", target, skip_host=True, skip_accept_encoding=True)
+                for name, value in headers.items():
+                    connection.putheader(name, value)
+                connection.endheaders()
+                return connection.getresponse()
+            except (ConnectionResetError, BrokenPipeError) as exc:  # RemoteDisconnected too
+                self.drop()
+                if not (reused and attempt == 0):
+                    raise TransportError(type(exc).__name__) from exc
+            except (OSError, http.client.HTTPException) as exc:
+                self.drop()
+                raise TransportError(type(exc).__name__) from exc
+        raise AssertionError("unreachable")
+
     def get(
         self, path: str, query: Sequence[tuple[str, str]] = (), headers: Mapping[str, str] = {}
     ) -> Response:
@@ -235,17 +257,7 @@ class Transport:
         pairs = [(quote(k), quote(v)) for k, v in query]
         target = path + ("?" + "&".join(f"{k}={v}" if v else k for k, v in pairs) if pairs else "")
         sent = {"Host": self.endpoint.authority, "User-Agent": USER_AGENT, **headers}
-        connection = self._connect()
-        self.requests += 1
-        try:
-            connection.putrequest("GET", target, skip_host=True, skip_accept_encoding=True)
-            for name, value in sent.items():
-                connection.putheader(name, value)
-            connection.endheaders()
-            raw = connection.getresponse()
-        except (OSError, http.client.HTTPException) as exc:
-            self.drop()
-            raise TransportError(type(exc).__name__) from exc
+        raw = self._send(target, sent)
         response = Response(
             raw.status, {k.lower(): v for k, v in raw.getheaders()}, raw, _transport=self
         )
