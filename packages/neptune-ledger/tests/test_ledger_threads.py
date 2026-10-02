@@ -653,7 +653,13 @@ def test_thread_rows_do_not_depend_on_registration_order(pg_server: str, tmp_pat
                 assert catalog.register(package.root).outcome == "registered"
         with psycopg.connect(uri) as conn:
             full = dump(conn, "tenant_acme", ("registration_key",))
-        derived = ("thread", "thread_member", "thread_unresolved", "thread_clock_mapping")
+        derived = (
+            "thread",
+            "thread_member",
+            "thread_unresolved",
+            "thread_clock_mapping",
+            "thread_identity_link",
+        )
         dumps.append({t: full[t] for t in derived})
     assert dumps[0] == dumps[1]
     assert len(dumps[0]["thread_member"]) > 20

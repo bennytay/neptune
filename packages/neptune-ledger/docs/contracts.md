@@ -7,7 +7,7 @@ interface under `contracts/`, its version, and the ADR that fixed it. Nothing el
 
 | Contract | Version | Version constant | Registry | Reference | Fixed by |
 |---|---|---|---|---|---|
-| `catalog-api` (register, verify, resolve, thread, threads_of, lineage, query) | **1.5.0** (stable since the L1 gate, MVL-89; 1.2.0 adds package-schema 2's record kinds, MVL-23; 1.3.0 package-schema 3's, MVL-82; 1.4.0 package-schema 4's, MVL-83; 1.5.0 names record kinds by the package-schema contract instead of listing them, MVL-93) | `neptune_ledger.api.CATALOG_API_VERSION` | `contracts/catalog-api/v1.5.0/` | [catalog-api.md](catalog-api.md) | [ADR 0004](adr/0004-catalog-api-error-model-and-versioning.md), [0006](adr/0006-l1-gate-catalog-api-amendments.md), [0002](adr/0002-catalog-data-model.md), [0005](adr/0005-l1-gate-catalog-data-model-amendments.md), [0003](adr/0003-entity-threads-and-the-lineage-current-view.md), [0011](adr/0011-schema-version-registry-and-record-kinds-by-package-schema-version.md) |
+| `catalog-api` (register, verify, resolve, thread, threads_of, lineage, query) | **1.6.0** (stable since the L1 gate, MVL-89; 1.2.0 adds package-schema 2's record kinds, MVL-23; 1.3.0 package-schema 3's, MVL-82; 1.4.0 package-schema 4's, MVL-83; 1.5.0 `ThreadLink.entity_kind`, MVL-92; 1.6.0 names record kinds by the package-schema contract instead of listing them, MVL-93) | `neptune_ledger.api.CATALOG_API_VERSION` | `contracts/catalog-api/v1.6.0/` | [catalog-api.md](catalog-api.md) | [ADR 0004](adr/0004-catalog-api-error-model-and-versioning.md), [0006](adr/0006-l1-gate-catalog-api-amendments.md), [0002](adr/0002-catalog-data-model.md), [0005](adr/0005-l1-gate-catalog-data-model-amendments.md), [0003](adr/0003-entity-threads-and-the-lineage-current-view.md), [0011](adr/0011-schema-version-registry-and-record-kinds-by-package-schema-version.md) |
 
 Lakehouse table contracts are listed here when they land.
 
@@ -24,7 +24,7 @@ Rules:
   deployment lifecycle kinds; none changes an earlier record). Packages of every version are indexed side
   by side, each record with its own version's projections. Any other version is refused with
   `unsupported_schema_version`; the Ledger does not guess at its shape.
-- catalog-api does not list record kinds (1.5.0, ADR 0011 §4). A compiler PR that raises `SCHEMA_VERSION`
+- catalog-api does not list record kinds (1.6.0, ADR 0011 §4). A compiler PR that raises `SCHEMA_VERSION`
   changes no catalog-api file. Instead it runs
   `uv run python -m neptune_ledger.catalog.projection contracts/package-schema/v<N>.0.0/schema.json`,
   which appends version N to the registry and writes the next migration when a kind gains a projection

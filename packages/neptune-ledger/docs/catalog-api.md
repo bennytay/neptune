@@ -13,16 +13,17 @@ sources, tenant roots, paging, merge order). The gate's review is
 `ClockMapping` records become links and merges) is
 [ADR 0010](adr/0010-entity-thread-index-and-lineage-reads.md).
 
-- **Version:** `1.5.0`, `neptune_ledger.api.CATALOG_API_VERSION`, **stable**, in
-  `contracts/catalog-api/v1.5.0/`. 1.0.0 was the pre-gate draft; 1.1.0 adds the `unsafe_entry`
+- **Version:** `1.6.0`, `neptune_ledger.api.CATALOG_API_VERSION`, **stable**, in
+  `contracts/catalog-api/v1.6.0/`. 1.0.0 was the pre-gate draft; 1.1.0 adds the `unsafe_entry`
   finding, the `unreachable` verdict and `QuerySpec.after`, and accepts every 1.0.0 document;
   1.2.0 adds package schema 2's `configuration_snapshot` and `configuration_value` record kinds
   (root ADR 0037) and accepts every 1.1.0 document; 1.3.0 adds package schema 3's alignment
   record kinds (root ADR 0050) and accepts every 1.2.0 document; 1.4.0 adds package schema 4's
-  eight deployment lifecycle record kinds (root ADR 0051) and accepts every 1.3.0 document; 1.5.0
+  eight deployment lifecycle record kinds (root ADR 0051) and accepts every 1.3.0 document;
+  1.5.0 adds `ThreadLink.entity_kind` (ADR 0010 §8) and accepts every 1.4.0 document; 1.6.0
   stops listing record kinds and references the package-schema contract for them instead (below,
   [ADR 0011](adr/0011-schema-version-registry-and-record-kinds-by-package-schema-version.md)),
-  and accepts every 1.4.0 document. A package-schema version that adds kinds changes no
+  and accepts every 1.5.0 document. A package-schema version that adds kinds changes no
   catalog-api version.
 - **Code:** `neptune_ledger.api`. It holds the `CatalogApi` protocol, the request and response
   records, `catalog_schema()` (JSON Schema 2020-12, one `$defs` entry per record),
@@ -75,7 +76,9 @@ ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 
 - **Merge.** It never merges identities, threads, clocks or packages. Two identical URDFs are two
   packages, and co-declared keys are two threads. An `IdentityLink` is reported as an edge
-  (`ThreadLink`) on the thread of each id it names, never as entries.
+  (`ThreadLink`) on the thread of each id it names, never as entries. A link states no entity
+  kind, so `entity_kind` is `Unknown`; the kind in `from_key` and `to_key` is the listing
+  thread's (the caller's lookup), not the link's (ADR 0010 §8).
 - **Mutate.** It never edits a package or a catalog row. Registration only appends, and
   supersession is computed when the catalog is read (ADR 0003 §5).
 - **Infer.** It never stores or returns an inferred meaning. Membership comes only from `Known`
@@ -155,5 +158,5 @@ contract, because catalog-api has no finding code for a source location
 ([ADR 0007](adr/0007-registration-implementation-boundaries-and-source-checks.md)). The `ledger`
 command (`ledger register <root>`, `ledger verify <id> [--source-root DIR]`) is a thin front end
 over it. The registry goldens in
-`contracts/catalog-api/v1.5.0/golden/` come from `contract_tests/goldens.py`. They are example
+`contracts/catalog-api/v1.6.0/golden/` come from `contract_tests/goldens.py`. They are example
 documents valued from the worked examples, with fixed illustrative transaction keys.

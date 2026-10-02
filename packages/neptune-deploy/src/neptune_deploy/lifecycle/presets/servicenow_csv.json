@@ -1,0 +1,33 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "ticketing.servicenow-csv",
+  "version": "1",
+  "description": "ServiceNow change_request table exported as CSV, one change per row; u_before and u_after are the common custom fields for the changed value. ServiceNow writes times in the exporting user's zone: declare it in a copy.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "change_request",
+      "kind": "change_record",
+      "requires": ["number", "cmdb_ci"],
+      "ignore": ["short_description", "description", "type", "assignment_group", "end_date"],
+      "fields": {
+        "identifiers": [{"column": "number", "namespace": "servicenow.change"}],
+        "machines": [{"column": "cmdb_ci", "namespace": "servicenow.ci"}],
+        "site": {"column": "u_site", "namespace": "servicenow.location"},
+        "changes": [
+          {
+            "category": {"column": "category"},
+            "target": {"column": "cmdb_ci"},
+            "before": {"column": "u_before"},
+            "after": {"column": "u_after"}
+          }
+        ],
+        "approval": {
+          "decision": {"column": "approval"},
+          "time": {"column": "approval_set", "format": "%Y-%m-%d %H:%M:%S"}
+        },
+        "effective": {"column": "start_date", "format": "%Y-%m-%d %H:%M:%S", "required": true}
+      }
+    }
+  ]
+}

@@ -40,10 +40,11 @@
     "quadruped.verify_report.json": "#/$defs/VerifyReport",
     "query_meta.json": "#/$defs/QueryMeta",
     "query_spec.page.json": "#/$defs/QuerySpec",
-    "query_spec.window.json": "#/$defs/QuerySpec"
+    "query_spec.window.json": "#/$defs/QuerySpec",
+    "thread_link.example.json": "#/$defs/ThreadLink"
   },
   "owner_version": "1.5.0",
-  "schema_sha256": "sha256:adec5ad91b2421a7f431eb8396657049064665f49548a70590d92ba3bb8fbb19",
+  "schema_sha256": "sha256:bf100d5f5b2d9f458570137f22bb0caebd904e5b9bf6f6d75359103f3ca0ad30",
   "status": "stable",
   "version": "1.5.0"
 }

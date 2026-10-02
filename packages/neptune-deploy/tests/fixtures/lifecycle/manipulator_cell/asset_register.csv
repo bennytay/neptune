@@ -1,0 +1,2 @@
+Baseline ID,Cell,Robot,Commissioned,Controller,Controller Serial,Controller Software,Gripper,Gripper Serial,Calibration,Acceptance Test,Acceptance Result,Constraints,Signed Off By,Signed Off On
+CB-CELL3-2026,CELL-3,ARM-3A,2026-02-26,Arm controller CR-7,CR7-55102,5.4.2,Parallel gripper PG-80,PG80-0931,CAL-ARM3A-0226,Stop distance at rated speed,198 mm,No operation above 35 °C; Manual loading only with light curtain active,Plant safety officer,2026-02-27

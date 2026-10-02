@@ -106,8 +106,16 @@ issue. Four facts shape it:
    §9's reading of a mapping (slope, offset, bound, half-open validity window, and why it is
    unusable, if it is). It uses exact rationals, ranks simple paths by total bound then by
    mapping-id bytes, checks each hop's window against the interval as it stands, and reports
-   `unsupported_mapping` and `mapping_out_of_range` with the paths tried. Property test P7
-   exercises it on synthetic mappings; the catalog contract merges the quadruped worked
+   `unsupported_mapping` and `mapping_out_of_range` with the paths tried. It never lists every
+   path: per entry (and per distinct start tick of a clock) it walks depth first, following a
+   hop only when the hop's window holds the interval as it stands, which is what makes a path
+   usable, and keeps the best-ranked complete walk. The result is the one ranking every path
+   gives. The walk is bounded: 10 000 window checks per entry and 1 000 000 per merge. An entry
+   whose walk reaches either bound stays on its clock with a `mapping_out_of_range` finding
+   saying so; a finding names at most 16 tried path prefixes (each ending at the hop whose window
+   failed) and says how many there were. Property test P7 checks the walk against the full
+   ranking on synthetic mappings; regression tests cover piecewise mappings (one per sync
+   window) and a chain with 3¹² open paths; the catalog contract merges the quadruped worked
    example's stated mapping.
 7. **Clocks are never interleaved.** ADR 0003's "records on another clock" are the contract's
    per-clock `Partition(kind="clock", clock_key=…)`. Each partition names its clock and is ordered
@@ -119,8 +127,13 @@ issue. Four facts shape it:
    `{namespace, value}`, the state (`known` or `ambiguous`) and the record's `assertion_kind`. A
    thread whose kind is keyed by a `LogicalId` (`machine`, `sensor`, `site`, `asset`, `run`) and
    whose declared key equals either side lists the link as a `ThreadLink` from the left id to the
-   right id, both in the thread's own kind: a link says one thing has two names, so the kind does
-   not change. Edges are listed by `(registration key, link record id, package id, right id)`,
+   right id. **A link states no entity kind** (schema 3's `IdentityLink` has no such field), so
+   the edge's `entity_kind` is `Unknown` (catalog-api 1.5.0), never the kind of the thread that
+   lists it. `from_key` and `to_key` carry the listing thread's kind only because they are keys
+   of the lookup the caller made: they say "this link names the id you asked about", not "this
+   link is about a machine". ADR 0003 §1.6 (an equal key of another kind is another thread)
+   stands: the link is listed on each of those threads separately, each listing joins nothing,
+   and none of them gains a kind from the link. Edges are listed by `(registration key, link record id, package id, right id)`,
    at the catalog point, in every preference: a link is not an entry and has no lineage set. A
    thread with no members still lists its links. Nothing is joined: no other thread's record is
    read, and `threads_of` is unchanged. `software_version` keys are version tokens, not logical
@@ -167,6 +180,12 @@ issue. Four facts shape it:
   declared "none".
 - **Use a mapping whose window is not stated as valid everywhere.** Rejected. That extrapolates,
   which ADR 0003 §3.4 forbids; only a stated open side or a timeless relation is unbounded.
+- **Rank every simple path first, then scan the list per entry.** Rejected: exponential in the
+  length of a chain of parallel mappings (piecewise sync windows over sensor → host → PTP →
+  GPS), so an ordinary merge could stall a read. Pruning by window gives the same answer.
+- **Drop the kind from a link's keys.** Not possible in 1.x: `from_key` and `to_key` are
+  required `ThreadKey`s, and removing or retyping a field is a major version (ADR 0004
+  Consequences). 1.5.0 adds `entity_kind` instead; a 2.0.0 may replace the keys with bare ids.
 - **List a link only on its left thread, or add the linked thread's entries.** Rejected. A
   consumer reaching either name must find the edge; adding entries is the merge ADR 0003 §1.5
   forbids.
