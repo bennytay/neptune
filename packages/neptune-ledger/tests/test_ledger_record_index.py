@@ -16,9 +16,11 @@ import pytest
 from conftest import new_database
 from ledger_catalog_rows import add_package
 from neptune.identity import canonical_json
+from neptune.identity.findings import finding_id
+from neptune.model.finding import ingest_finding_from_json
 from neptune.model.kinds import RECORD_KINDS
 from neptune.model.knowledge import Known, NotCovered
-from neptune.store.package import package_files
+from neptune.store.package import PackageError, package_files, read_files
 from neptune_ledger.api.types import EvidenceAnchor
 from neptune_ledger.catalog import registry
 from neptune_ledger.catalog.check import kinds_of
@@ -57,6 +59,12 @@ ORDER_COLUMNS: Final = (*TX_COLUMNS, "tx_seq", "last_seq", "registration_key")
 @pytest.fixture
 def packages(tmp_path: Path) -> dict[str, WorkedPackage]:
     return {name: materialise(name, tmp_path / name) for name in EXAMPLES}
+
+
+@pytest.fixture
+def catalog(pg_uri: str) -> Iterator[PostgresCatalog]:
+    with fresh(pg_uri) as made:
+        yield made
 
 
 @pytest.fixture
@@ -291,6 +299,60 @@ def test_a_body_holding_u0000_is_indexed_without_a_body(pg_uri: str, tmp_path: P
     assert row[0] is None
     assert row[2] == [stream["run"]]
     assert b"\\u0000" in canonical_json.dumps(stream)
+
+
+def _nested(depth: int) -> Any:
+    value: Any = "leaf"
+    for _ in range(depth):
+        value = {"k": value}
+    return value
+
+
+def _deep_finding(depth: int) -> Any:
+    def change(record: Any) -> Any:
+        record = {**record, "details": {"deep": _nested(depth)}}
+        return {**record, "id": finding_id(ingest_finding_from_json(record))}
+
+    return change
+
+
+def test_a_finding_nested_to_the_compilers_limit_registers(pg_uri: str, tmp_path: Path) -> None:
+    """Free-form ``details`` may nest as deep as the compiler's readers accept; indexing must not
+    run out of stack where they did not (a rebuild from main would otherwise fail)."""
+    depth = 1000
+    while depth > 0:  # the deepest finding the compiler writes and reads back, from here
+        try:
+            files = with_changed_body("drone", "ingest_finding", _deep_finding(depth))
+            read_files(files)
+            break
+        except (PackageError, canonical_json.CanonicalJsonError, RecursionError):
+            depth -= 5
+    assert depth > 900
+    package = write("deep", tmp_path / "deep", files)
+    with fresh(pg_uri) as catalog:
+        result = catalog.register(package.root)
+    assert (result.outcome, result.findings) == ("registered", ())
+    with psycopg.connect(pg_uri) as conn:
+        row = conn.execute(
+            "SELECT body IS NOT NULL, unknown_pointers FROM tenant_acme.record"
+            " WHERE kind = 'ingest_finding'"
+        ).fetchone()
+    assert row == (True, [])
+
+
+def test_an_index_that_runs_out_of_stack_or_memory_is_a_finding(
+    catalog: PostgresCatalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = materialise("drone", tmp_path / "drone")
+    for error in (RecursionError, MemoryError):
+
+        def boom(*_: Any, error: type[BaseException] = error) -> Any:
+            raise error
+
+        monkeypatch.setattr(registry, "package_rows", boom)
+        result = catalog.register(package.root)
+        assert result.outcome == "refused"
+        assert [f.code for f in result.findings] == ["record_invalid"]
 
 
 def test_knowledge_shaped_values_in_a_free_form_config_are_not_fields(

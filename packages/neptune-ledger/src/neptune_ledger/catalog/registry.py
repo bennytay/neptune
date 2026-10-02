@@ -196,7 +196,12 @@ class PostgresCatalog:
             os.close(root_fd)
         if checked.findings:
             return self._refusal(root, checked, list(checked.findings))
-        rows = package_rows(str(checked.package_id), checked.manifest, checked.lines)
+        try:
+            rows = package_rows(str(checked.package_id), checked.manifest, checked.lines)
+        except (RecursionError, MemoryError) as exc:  # hostile depth or size the readers let by
+            detail = f"the record index cannot be built: {type(exc).__name__}"
+            finding = CatalogFinding("record_invalid", str(checked.package_id), detail)
+            return self._refusal(root, checked, [finding])
         try:
             threads = thread_rows(checked.lines)
         except MembershipError as exc:  # a thread key the catalog API cannot express

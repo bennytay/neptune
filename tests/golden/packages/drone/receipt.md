@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:c0beebc8288c96775757b3d192400e73b0016237c4932926c9d3523b9723da29`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:cbab6b725ea574c83314e370c56fbec29e02f2e25cccf1c6cf1890d0c754f525`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -30,6 +30,8 @@ Receipt `rec:sha256:c0beebc8288c96775757b3d192400e73b0016237c4932926c9d3523b9723
 | `ingest_finding` | 2 |
 | `machine` | 1 |
 | `run` | 1 |
+| `run_assembly` | 1 |
+| `snapshot_binding` | 3 |
 | `software_configuration` | 1 |
 | `source_artifact` | 1 |
 | `source_revision` | 1 |
