@@ -36,12 +36,21 @@ from pathlib import Path
 from types import TracebackType
 from typing import Final, Literal, TypeAlias
 
-from neptune.adapters.builtin import default_registry
+from neptune.adapters.builtin import builtin_adapters
 from neptune.adapters.contract import Adapter, ConfigError, ContractError, configure
 from neptune.adapters.registry import AdapterRegistry
 from neptune.discovery.source import LocalSource
 from neptune.manifest import LoadedManifest, ManifestError, discover, locate, read
 from neptune.runtime import EventSink, IngestJob, JobError, JobEvent, JobOptions
+from neptune.runtime.plugins import (
+    ADAPTERS_GROUP,
+    ALL_PLUGINS,
+    NO_PLUGINS,
+    SOURCES_GROUP,
+    PluginPolicy,
+    Plugins,
+    load_plugins,
+)
 from neptune.sdk.errors import (
     ConfigurationError,
     DestinationExistsError,
@@ -61,6 +70,9 @@ StrPath: TypeAlias = str | os.PathLike[str]
 # at the root, a path names a manifest file inside the root, ``False`` uses none.
 ManifestChoice: TypeAlias = StrPath | Literal[False] | None
 Adapters: TypeAlias = AdapterRegistry | Iterable[Adapter]
+# Which installed plugins a client reads (ADR 0058): ``None`` or ``True`` every one, ``False``
+# none, a ``PluginPolicy`` an allowlist of distributions.
+PluginChoice: TypeAlias = PluginPolicy | bool | None
 
 _URI: Final = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://")
 _LOCAL_HOSTS: Final = ("", "localhost")
@@ -146,15 +158,48 @@ def _workspace(workspace: Workspace | StrPath | None) -> Workspace:
         raise WorkspaceUnusableError(f"the workspace cannot be opened: {exc}") from exc
 
 
-def _registry(adapters: Adapters | None) -> AdapterRegistry:
-    if adapters is None:
-        return default_registry()
-    if isinstance(adapters, AdapterRegistry):
-        return adapters
-    try:
-        return AdapterRegistry(adapters)
-    except (ContractError, TypeError) as exc:
-        raise ConfigurationError(f"the adapters cannot be registered: {exc}") from exc
+def _policy(plugins: PluginChoice) -> PluginPolicy:
+    if plugins is None or plugins is True:
+        return ALL_PLUGINS
+    if plugins is False:
+        return NO_PLUGINS
+    if isinstance(plugins, PluginPolicy):
+        return plugins
+    raise ConfigurationError(f"plugins must be a PluginPolicy, a bool or None, got {plugins!r}")
+
+
+def _registry(adapters: Adapters | None, plugins: PluginChoice) -> tuple[AdapterRegistry, Plugins]:
+    """The registry a client's jobs select from, and the plugins it read (ADR 0058).
+
+    With no ``adapters``, the built-ins and every plugin adapter the policy admits; given
+    ``adapters``, exactly those, and plugins add only their Sources.
+    """
+    policy = _policy(plugins)
+    if adapters is not None:
+        loaded = _admitted(load_plugins(policy, groups=(SOURCES_GROUP,)))
+        if isinstance(adapters, AdapterRegistry):
+            return adapters, loaded
+        try:
+            return AdapterRegistry(adapters), loaded
+        except (ContractError, TypeError) as exc:
+            raise ConfigurationError(f"the adapters cannot be registered: {exc}") from exc
+    builtins = builtin_adapters()
+    reserved = [adapter.descriptor.id for adapter in builtins]
+    loaded = _admitted(
+        load_plugins(policy, reserved=reserved, groups=(ADAPTERS_GROUP, SOURCES_GROUP))
+    )
+    return AdapterRegistry([*builtins, *loaded.adapters]), loaded
+
+
+def _admitted(loaded: Plugins) -> Plugins:
+    """``loaded``, unless an allowlist names a distribution that registers no plugin here: a
+    typo must not become a run without the plugin it meant (ADR 0058 §8)."""
+    if loaded.unmatched:
+        raise ConfigurationError(
+            "plugins are allowed from distributions that are not installed or register no"
+            f" plugin: {list(loaded.unmatched)}"
+        )
+    return loaded
 
 
 def _check_config(registry: AdapterRegistry, options: JobOptions) -> None:
@@ -353,7 +398,11 @@ class Neptune:
       (``$NEPTUNE_HOME``, else ``$XDG_CACHE_HOME/neptune``, else ``~/.cache/neptune``). New
       workspaces are local-only.
     - ``adapters``: the adapters a job may select from, as a registry or any iterable of
-      adapters; ``None`` for the ones Neptune ships (``builtin_adapters()``).
+      adapters; ``None`` for the ones Neptune ships (``builtin_adapters()``) and the plugin
+      adapters installed distributions register (``neptune.adapters`` entry points, ADR 0058).
+    - ``plugins``: which installed distributions' plugins to read: ``None`` (or ``True``) every
+      one, ``False`` none, a ``PluginPolicy(allow=(...))`` only those it names. A plugin that
+      cannot be used is a finding in every job's result and package, never an error.
     - ``options``: the runtime's own ``JobOptions`` (attempts, isolation, limits, each adapter's
       config by id, a job name); ``None`` for the defaults, which sandbox every adapter call.
     - ``remote``: the URL of a Neptune service to run jobs on, or ``None`` to run them here. The
@@ -371,9 +420,10 @@ class Neptune:
         adapters: Adapters | None = None,
         options: JobOptions | None = None,
         remote: str | None = None,
+        plugins: PluginChoice = None,
     ) -> None:
         self._workspace = _workspace(workspace)
-        self._registry = _registry(adapters)
+        self._registry, self._plugins = _registry(adapters, plugins)
         if options is not None and not isinstance(options, JobOptions):
             raise ConfigurationError(f"options must be JobOptions, got {options!r}")
         self._options = options if options is not None else JobOptions()
@@ -387,6 +437,12 @@ class Neptune:
     @property
     def registry(self) -> AdapterRegistry:
         return self._registry
+
+    @property
+    def plugins(self) -> Plugins:
+        """The plugins this client read: admitted adapters and Sources, and the findings about
+        those it refused, which every job of this client records."""
+        return self._plugins
 
     @property
     def options(self) -> JobOptions:
@@ -423,6 +479,7 @@ class Neptune:
                     options,
                     on_event=on_event,
                     cancel=cancel,
+                    plugins=self._plugins,
                 )
             except JobError as exc:
                 raise from_job_error(exc, target) from exc
@@ -509,8 +566,11 @@ class AsyncNeptune:
         adapters: Adapters | None = None,
         options: JobOptions | None = None,
         remote: str | None = None,
+        plugins: PluginChoice = None,
     ) -> None:
-        self._sync = Neptune(workspace, adapters=adapters, options=options, remote=remote)
+        self._sync = Neptune(
+            workspace, adapters=adapters, options=options, remote=remote, plugins=plugins
+        )
 
     @property
     def workspace(self) -> Workspace:
@@ -519,6 +579,10 @@ class AsyncNeptune:
     @property
     def registry(self) -> AdapterRegistry:
         return self._sync.registry
+
+    @property
+    def plugins(self) -> Plugins:
+        return self._sync.plugins
 
     @property
     def options(self) -> JobOptions:
@@ -632,9 +696,10 @@ def ingest(
     cancel: threading.Event | None = None,
     resume: bool = False,
     manifest: ManifestChoice = None,
+    plugins: PluginChoice = None,
 ) -> IngestResult:
-    """``Neptune(workspace, adapters=..., options=...).ingest(source, destination, ...)``."""
-    client = Neptune(workspace, adapters=adapters, options=options)
+    """``Neptune(workspace, adapters=..., options=..., plugins=...).ingest(source, ...)``."""
+    client = Neptune(workspace, adapters=adapters, options=options, plugins=plugins)
     return client.ingest(
         source, destination, on_event=on_event, cancel=cancel, resume=resume, manifest=manifest
     )
@@ -650,9 +715,10 @@ def dry_run(
     cancel: threading.Event | None = None,
     resume: bool = False,
     manifest: ManifestChoice = None,
+    plugins: PluginChoice = None,
 ) -> IngestResult:
-    """``Neptune(workspace, adapters=..., options=...).dry_run(source, ...)``."""
-    client = Neptune(workspace, adapters=adapters, options=options)
+    """``Neptune(workspace, adapters=..., options=..., plugins=...).dry_run(source, ...)``."""
+    client = Neptune(workspace, adapters=adapters, options=options, plugins=plugins)
     return client.dry_run(
         source, on_event=on_event, cancel=cancel, resume=resume, manifest=manifest
     )

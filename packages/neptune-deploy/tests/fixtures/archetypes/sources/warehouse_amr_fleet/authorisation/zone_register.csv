@@ -1,0 +1,5 @@
+Envelope ID,Site,Robots,Zone,Speed Limit,Speed Unit,Payload Max,Payload Unit,Missions,Supervision,Depends On,Valid From,Valid Until,Approved By,Approved On
+ENV-S007-03,S-007,AMR-05; AMR-06; AMR-07,DOCK-1,0.8,m/s,600,kg,Pallet transfer; Charging,"remote, 1 operator : 6 robots",Wi-Fi AP-3; Door interlock D2,2026-03-09,2026-09-09,Site safety lead,2026-03-06
+ENV-S007-04,S-007,AMR-07,PICK-A,1.5,m/s,450,kg,Tote picking,on-site spotter,Wi-Fi AP-4,2026-03-09,2026-09-09,Site safety lead,2026-03-06
+ENV-S012-01,S-012,AMR-08; AMR-09; AMR-10,CROSS-2,0.6,m/s,500,kg,Pallet transfer,on-site spotter,Door interlock D5,2026-03-16,2026-09-16,Site safety lead,2026-03-12
+ENV-S012-02,S-012,AMR-09; AMR-10,PICK-C,1.2,m/s,450,kg,Tote picking; Charging,,Wi-Fi AP-2,2026-03-16,,Site safety lead,2026-03-12

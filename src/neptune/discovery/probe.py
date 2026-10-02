@@ -28,7 +28,7 @@ each adapter again, one call each, and leaves the container unopened with an
 ``inspection_failed`` finding.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Final, TypeAlias
 
@@ -206,8 +206,18 @@ class SourceProbe:
 class ProbeEngine:
     """Probes sources against one registry under one policy. Build one per job."""
 
-    def __init__(self, registry: AdapterRegistry, policy: ProbePolicy | None = None) -> None:
+    def __init__(
+        self,
+        registry: AdapterRegistry,
+        policy: ProbePolicy | None = None,
+        *,
+        distributions: Mapping[str, str] | None = None,
+    ) -> None:
+        """``distributions`` names, by adapter id, the installed distribution (``"<name>
+        <version>"``) each plugin adapter came from (ADR 0058): an ``ambiguous`` finding names
+        it beside the adapter, so a tie a plugin caused is traced to the plugin."""
         self.registry = registry
+        self.distributions = dict(distributions or {})
         self.policy = policy if policy is not None else ProbePolicy()
         self.transform: TransformRecord = transform_record(
             adapter_id=PROBE_ID, adapter_version=PROBE_VERSION, config=self.policy.to_json()
@@ -487,21 +497,33 @@ class ProbeEngine:
         suggests = self._name_suggests(name)
         if selection.status is SelectionStatus.AMBIGUOUS:
             tied = selection.tied
+            plugins = {
+                c.adapter: self.distributions[c.adapter]
+                for c in tied
+                if c.adapter in self.distributions
+            }
+            named = ", ".join(
+                f"{c.adapter} (plugin {plugins[c.adapter]})" if c.adapter in plugins else c.adapter
+                for c in tied
+            )
+            tie: dict[str, JsonValue] = {
+                "adapters": [c.adapter for c in tied],
+                "confidence": tied[0].confidence,
+                "reasons": {c.adapter: [r.code for r in c.result.reasons] for c in tied},
+                "signatures": [s.to_json() for s in sniffed.signatures],
+                "text": str(sniffed.text),
+            }
+            if plugins:  # only then, so a tie among built-ins reads as it always has
+                tie["plugins"] = dict(sorted(plugins.items()))
             self._report(
                 findings,
                 "ambiguous",
                 FindingCategory.AMBIGUOUS,
                 Severity.ERROR,
                 whole,
-                f"adapters {', '.join(c.adapter for c in tied)} all claim the source at"
-                f" confidence {tied[0].confidence}; none is chosen until a manifest names one",
-                {
-                    "adapters": [c.adapter for c in tied],
-                    "confidence": tied[0].confidence,
-                    "reasons": {c.adapter: [r.code for r in c.result.reasons] for c in tied},
-                    "signatures": [s.to_json() for s in sniffed.signatures],
-                    "text": str(sniffed.text),
-                },
+                f"adapters {named} all claim the source at confidence {tied[0].confidence};"
+                " none is chosen until a manifest names one",
+                tie,
             )
         elif selection.status is SelectionStatus.UNSUPPORTED:
             message = f"no adapter claims the source ({sniffed.describe()})"
