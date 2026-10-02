@@ -1,0 +1,40 @@
+{
+  "id": "rec:sha256:2149c90d71cf5983010bf95dbdc60485f511e3965132fc7f273f514cdd505bb0",
+  "kind": "run_assembly",
+  "members": [
+    {
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 16,
+            "offset": 0
+          }
+        ],
+        "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+      },
+      "revision": "rec:sha256:6b5f36e361ff0dd53574eafa8d5eb36f277cef37c52f530aec78fb601d871b61",
+      "role": "recording"
+    }
+  ],
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 16,
+          "offset": 0
+        }
+      ],
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+    },
+    "transform": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+  },
+  "rule": "recording",
+  "run": "rec:sha256:bbe0a997b0284bd7a1f3982de3dbddf3abcd70485034c4d1af9fe1709da3401b",
+  "schema_version": 3,
+  "validity": {
+    "knowledge": "not_applicable"
+  }
+}

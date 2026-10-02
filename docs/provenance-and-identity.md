@@ -80,8 +80,9 @@ Provenance
   assertion_kind: observed | stated
 ```
 
-- `observed`: directly decoded from the source (a message field, a URDF joint).
-- `stated`: the source explicitly asserts it about something else (a register row says asset A has defect D).
+- `observed`: directly decoded or measured from the source (a message field, a count the adapter made).
+- `stated`: the source explicitly asserts it about something else (a register row says asset A has defect D;
+  a URDF joint declares a robot's axis and limits).
 - `inferred`: produced by a model or heuristic. Only `derived.provenance.InferredProvenance` can say so, and
   neither mypy nor the runtime lets it onto a canonical `Knowledge` state.
 

@@ -20,6 +20,7 @@ from neptune.adapters.rosbag2 import Rosbag2Adapter
 from neptune.adapters.software import SoftwareAdapter
 from neptune.adapters.tabular import TabularAdapter
 from neptune.adapters.text import TextAdapter
+from neptune.adapters.urdf import UrdfAdapter
 
 
 def builtin_adapters() -> tuple[Adapter, ...]:
@@ -39,6 +40,7 @@ def builtin_adapters() -> tuple[Adapter, ...]:
         SoftwareAdapter(),
         TabularAdapter(),
         TextAdapter(),
+        UrdfAdapter(),
     )
 
 

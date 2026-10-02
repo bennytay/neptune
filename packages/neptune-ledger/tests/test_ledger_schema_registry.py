@@ -523,10 +523,11 @@ def test_a_package_of_a_version_the_registry_lacks_is_refused_and_writes_nothing
 def test_the_newest_version_is_read_and_the_next_is_refused(
     catalog: PostgresCatalog, tmp_path: Path
 ) -> None:
-    """Boundary: the registry's newest version (the schema-4 manipulator cell) registers; the same
-    package one version past it is a future version."""
+    """Boundary: the newest worked package (the schema-4 manipulator cell) registers; the same
+    package one version past the registry's newest is a future version. Version 5 (robot
+    descriptions) has no worked package of its own."""
     cell = materialise("manipulator_cell", tmp_path / "manipulator_cell")
-    assert cell.schema_version == shipped_registry().latest.version
+    assert cell.schema_version <= shipped_registry().latest.version
     manifest = dict(cell.manifest)
     manifest["schema_version"] = shipped_registry().latest.version + 1
     future = tmp_path / "manipulator_cell-next"
