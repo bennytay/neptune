@@ -83,9 +83,10 @@ Forces:
    applied (`recording`: a recording is its own run; `rosbag2.metadata`: the files
    `relative_file_paths` lists); its version and config are the producer's `TransformRecord`.
 8. **`SnapshotBinding {run, snapshot, snapshot_kind, validity}`**: the run ran with a machine-context
-   snapshot of kind `hardware_configuration`, `software_configuration` or `calibration`
-   (`configuration_snapshot` joins when MVL-38 needs it, by ADR), for the window on one of the run's
-   clocks that the evidence states. A mid-run change is two bindings with adjacent windows.
+   snapshot of kind `hardware_configuration`, `software_configuration`, `calibration` or
+   `configuration_snapshot` (ADR 0037: the parameter file a run was launched with, so MVL-38 binds
+   configuration to runs without a new kind), for the window on one of the run's clocks that the
+   evidence states. A mid-run change is two bindings with adjacent windows.
 9. **Version.** The kinds are `since` 3, so `SCHEMA_VERSION` is 3 and the package-schema contract
    publishes **3.0.0**: platform ADR 0002 §3 makes an integer owner constant the registry major,
    so a new kind cannot be a minor version even though every earlier golden still validates. A

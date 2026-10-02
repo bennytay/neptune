@@ -47,8 +47,8 @@ boundary to the memory learner.
 - A value defined by a format specification (MCAP `log_time` is ns) cites the bytes that establish the format
   plus the transform that applies the spec. When the source carries the definition itself (a ROS message
   definition in an MCAP schema record), it cites that instead.
-- `SCHEMA_VERSION` is 3 (2: configuration, ADR 0037; 3: alignment, ADR 0050). It became 1 at the M1 gate (ADR 0023), and a record kind's fields never change from
-  then on. The model grows only by addition (new record kinds, including companion kinds naming the record they
+- `SCHEMA_VERSION` is 3 (2: configuration, ADR 0037; 3: alignment, ADR 0050). It became 1 at the M1
+  gate (ADR 0023), and a record kind's fields never change from then on. The model grows only by addition (new record kinds, including companion kinds naming the record they
   extend, new enum members, new locator steps), each through an ADR and a version bump. So every record from
   version 1 on stays valid, readers read versions 1 to their own unchanged, and ids never move. Version 0
   drafts are refused. Stored packages are never rewritten. Anything that is not an addition is a new kind and
@@ -244,8 +244,8 @@ a bug, not a value.
   edge its value (`robot_description`, `calibration`, `transform_message`).
 - `RunAssembly {run, rule, members}`: each member a `SourceRevision` id, a role (`recording`,
   `description`, `context`) and the `EvidenceRef` that places it in the run.
-- `SnapshotBinding {run, snapshot, snapshot_kind}`: the hardware, software or calibration snapshot a run
-  ran with, over a window on one of its clocks (MVL-38).
+- `SnapshotBinding {run, snapshot, snapshot_kind}`: the hardware, software, calibration or configuration
+  snapshot a run ran with, over a window on one of its clocks (MVL-38).
 
 ## World and record context (ADR 0020; `model/world.py`)
 

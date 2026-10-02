@@ -13,7 +13,7 @@ consumers may traverse.
 - ``ClockMapping``: an affine map from one clock's ticks to another's, with a residual bound.
 - ``FrameBinding``: which ``FrameTransform`` record gives one edge of a frame graph its value.
 - ``RunAssembly``: which source files form one run, each with the evidence for its membership.
-- ``SnapshotBinding``: which machine-context snapshot a run ran with.
+- ``SnapshotBinding``: which machine-context or configuration snapshot a run ran with.
 
 Each carries ``validity``: the half-open world-time window ``[start, end)`` on one named clock in
 which the relation holds, as the evidence states it.
@@ -587,6 +587,9 @@ class SnapshotKind(StrEnum):
     HARDWARE_CONFIGURATION = "hardware_configuration"
     SOFTWARE_CONFIGURATION = "software_configuration"
     CALIBRATION = "calibration"
+    # One configuration document as its bytes declare it (since version 2, ADR 0037): the
+    # parameter file a run was launched with. Its values compare by the snapshot's digest.
+    CONFIGURATION_SNAPSHOT = "configuration_snapshot"
 
 
 @dataclass(frozen=True)

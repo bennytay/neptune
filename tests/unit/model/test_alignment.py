@@ -357,3 +357,18 @@ def test_a_snapshot_binding_names_a_machine_context_kind() -> None:
         snapshot_binding_from_json({**data, "snapshot_kind": "stream"})
     with pytest.raises(TypeError, match="SnapshotKind"):
         snapshot(snapshot_kind="calibration")
+
+
+def test_a_run_binds_to_a_configuration_snapshot() -> None:
+    """MVL-38 binds runs to configuration documents (ADR 0037) as well as machine context."""
+    bound = snapshot(snapshot_kind=SnapshotKind.CONFIGURATION_SNAPSHOT)
+    data = bound.to_json()
+    assert data["snapshot_kind"] == "configuration_snapshot"
+    assert snapshot_binding_from_json(canonical_json.loads(canonical_json.dumps(data))) == bound
+    VALIDATOR.validate(data)
+    assert {kind.value for kind in SnapshotKind} == {
+        "hardware_configuration",
+        "software_configuration",
+        "calibration",
+        "configuration_snapshot",
+    }

@@ -6705,7 +6705,8 @@
       "enum": [
         "hardware_configuration",
         "software_configuration",
-        "calibration"
+        "calibration",
+        "configuration_snapshot"
       ]
     },
     "SoftwareConfiguration": {
