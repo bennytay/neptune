@@ -31,6 +31,8 @@ from ledger_thread_packages import (
     subset,
     timestamp,
 )
+from neptune.model.ids import parse_record_id
+from neptune.model.kinds import RECORD_KINDS
 from neptune.model.knowledge import (
     Ambiguous,
     Candidate,
@@ -39,7 +41,10 @@ from neptune.model.knowledge import (
     NotApplicable,
     NotCovered,
 )
-from neptune.store.package import write_package
+from neptune.model.run import Stream
+from neptune.model.series import ColumnType, SeriesBatch, SeriesColumn
+from neptune.store.package import package_contents, series_path, write_package
+from neptune.store.series import SERIES_SETTINGS, write_series
 from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
     AsRegisteredBy,
@@ -648,6 +653,73 @@ def test_thread_rows_do_not_depend_on_registration_order(pg_server: str, tmp_pat
                 assert catalog.register(package.root).outcome == "registered"
         with psycopg.connect(uri) as conn:
             full = dump(conn, "tenant_acme", ("registration_key",))
-        dumps.append({t: full[t] for t in ("thread", "thread_member", "thread_unresolved")})
+        derived = ("thread", "thread_member", "thread_unresolved", "thread_clock_mapping")
+        dumps.append({t: full[t] for t in derived})
     assert dumps[0] == dumps[1]
     assert len(dumps[0]["thread_member"]) > 20
+    assert dumps[0]["thread_clock_mapping"], "the quadruped states a clock mapping"
+
+
+# --- a stream's thread reaches its series file in every package ----------------------------------
+
+
+def _with_series(rows: list[Record], root: Path) -> str:
+    """The package of ``rows`` with a typed, empty series file for each stream (ADR 0018 §4)."""
+    streams = [_read_stream(r) for r in rows if r["kind"] == "stream"]
+    series = {}
+    for stream in streams:
+        columns = tuple(
+            SeriesColumn(
+                name,
+                ColumnType.INT64
+                if name.endswith(("seq", "length", "offset")) or name.startswith("time/")
+                else ColumnType.STRING,
+                (),
+            )
+            for name in stream.series_columns()
+        )
+        path = root.parent / f"{root.name}-{stream.id[-12:]}.parquet"
+        write_series(stream, [SeriesBatch(stream.id, columns)], path)
+        series[stream.id] = path
+    contents = package_contents(
+        [_read(r) for r in rows], series=series, store={"series": SERIES_SETTINGS}
+    )
+    return write_package(root, contents)
+
+
+def _read_stream(record: Record) -> Stream:
+    made = _read(record)
+    assert isinstance(made, Stream)
+    return made
+
+
+def _read(record: Record) -> Any:
+    _, read = RECORD_KINDS[record["kind"]]
+    return read(record)
+
+
+def test_a_streams_thread_names_its_series_file_in_every_package(
+    catalog: PostgresCatalog, tmp_path: Path
+) -> None:
+    """The issue's "a stream's thread links to its series files in every package": a stream and
+    its 2.0.0 re-parse are one anchored stream thread, each entry names the packages that
+    registered it, and each of those packages holds ``series/<record id>.parquet`` (the store's
+    naming, root ADR 0018), verified at registration with every other file."""
+    v1 = subset("mobile_robot", "rosbag1")
+    v2 = reparsed(v1, "2.0.0")
+    roots = {}
+    for name, rows in (("v1", v1), ("v2", v2)):
+        package_id = _with_series(rows, tmp_path / name)
+        assert catalog.register(tmp_path / name).outcome == "registered"
+        roots[package_id] = tmp_path / name
+    stream = next(r for r in v1 if r["kind"] == "stream")
+    thread = catalog.thread(ThreadKey("stream", anchor(stream)), "world", History())
+    validate(thread)
+    found = [(e.record_id, e.packages) for p in thread.partitions for e in p.entries]
+    assert {packages for _, packages in found} == {(p,) for p in roots}, "both packages"
+    for record_id, (package_id,) in found:
+        assert (roots[package_id] / series_path(parse_record_id(record_id))).is_file()
+    current = catalog.thread(ThreadKey("stream", anchor(stream)), "world", LatestTransform())
+    (latest,) = [e for p in current.partitions for e in p.entries]
+    v2_package = next(p for p, root in roots.items() if root.name == "v2")
+    assert latest.packages == (v2_package,)
