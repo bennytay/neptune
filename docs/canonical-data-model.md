@@ -253,10 +253,12 @@ a bug, not a value.
   `description`, `context`) and the `EvidenceRef` that places it in the run.
 - `SnapshotBinding {run, snapshot, snapshot_kind}`: the hardware, software, calibration or configuration
   snapshot a run ran with, over a window on one of its clocks. The `neptune.bindings` pass (ADR 0064) writes
-  a canonical one where the run's own source names the snapshot (content id, path, commit, digest or firmware
-  version, verbatim), a derived one for the nearest snapshot of its kind and file name in the run's sessions,
-  and a finding for every tie (`conflicting_snapshots`) and every kind left unbound (`snapshot_unresolved`;
-  `no_software_identity` for software).
+  a canonical one where the run's own source names the snapshot by content id, full commit or digest
+  (verbatim), and derived ones where it names it by a path relative to the recording or a firmware version,
+  or for the nearest of the run's own snapshots of its kind and file name (its recording unit's: by run
+  assembly, recording stem or the one recording below; never another recording's sidecar). It adds a
+  finding for every tie (`conflicting_snapshots`), every file as near to several runs (`shared_snapshot`)
+  and every kind left unbound (`snapshot_unresolved`; `no_software_identity` for software).
 
 ## World and record context (ADR 0020; `model/world.py`)
 
