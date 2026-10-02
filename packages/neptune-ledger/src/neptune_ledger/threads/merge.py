@@ -22,13 +22,18 @@ from neptune_ledger.api.types import (
 )
 from neptune_ledger.threads.order import native_key, partition_key, timed
 
+# A validity window in one clock's ticks: ``(start, end)``, start inclusive and end exclusive
+# (root ADR 0050 §3), ``None`` on an open side. A window of ``None`` cannot be checked, so no
+# interval lies inside it.
+Window = tuple[Fraction | int | None, Fraction | int | None] | None
+
 
 @dataclass(frozen=True)
 class ClockMapping:
     """A ``ClockMapping`` as the merge reads it: ``f(t) = slope·t + offset`` from ``source``
-    ticks to ``target`` ticks, valid for source ticks in ``window`` (inclusive), with a declared
-    residual ``bound`` in target ticks (0 when none is declared). ``affine`` is False for any
-    other function shape, which makes the mapping unusable."""
+    ticks to ``target`` ticks, valid for source ticks in ``window``, with a residual ``bound`` in
+    target ticks. ``unsupported`` says why the record cannot be read as such a function (a field
+    that is not Known), which makes the mapping unusable; so does a slope that is not positive."""
 
     mapping_id: str
     source: str
@@ -36,12 +41,17 @@ class ClockMapping:
     slope: Fraction
     offset: Fraction
     bound: Fraction
-    window: tuple[int, int]
-    affine: bool = True
+    window: Window
+    unsupported: str | None = None
 
     @property
     def usable(self) -> bool:
-        return self.affine and self.slope > 0 and self.bound >= 0 and self.source != self.target
+        return (
+            self.unsupported is None
+            and self.slope > 0
+            and self.bound >= 0
+            and self.source != self.target
+        )
 
 
 @dataclass(frozen=True)
@@ -54,7 +64,7 @@ class Hop:
     slope: Fraction
     offset: Fraction
     bound: Fraction
-    window: tuple[Fraction, Fraction]  # on ``source``
+    window: Window  # on ``source``
 
     def apply(self, t: Fraction) -> Fraction:
         return self.slope * t + self.offset
@@ -62,26 +72,17 @@ class Hop:
 
 def hops(mapping: ClockMapping) -> tuple[Hop, Hop]:
     """The forward hop and its inverse ``f⁻¹(t) = (t - b) / a``, bound ``bound / a``, whose
-    window is the forward window's image under ``f`` (ADR 0003 §3.2)."""
+    window is the forward window's image under ``f`` (ADR 0003 §3.2). ``f`` is increasing, so
+    the image of a half-open window is half-open and an open side stays open."""
     a, b = mapping.slope, mapping.offset
-    lo, hi = mapping.window
-    forward = Hop(
-        mapping.mapping_id,
-        mapping.source,
-        mapping.target,
-        a,
-        b,
-        mapping.bound,
-        (Fraction(lo), Fraction(hi)),
-    )
+    window = mapping.window
+    image: Window = None
+    if window is not None:
+        lo, hi = window
+        image = (None if lo is None else a * lo + b, None if hi is None else a * hi + b)
+    forward = Hop(mapping.mapping_id, mapping.source, mapping.target, a, b, mapping.bound, window)
     backward = Hop(
-        mapping.mapping_id,
-        mapping.target,
-        mapping.source,
-        1 / a,
-        -b / a,
-        mapping.bound / a,
-        (a * lo + b, a * hi + b),
+        mapping.mapping_id, mapping.target, mapping.source, 1 / a, -b / a, mapping.bound / a, image
     )
     return forward, backward
 
@@ -111,10 +112,18 @@ class Path:
         outside a hop's validity window (no extrapolation, no clipping; ADR 0003 §3.4)."""
         lo = hi = Fraction(s)
         for hop in self.hops:
-            if lo < hop.window[0] or hi > hop.window[1]:
+            if not _inside(lo, hi, hop.window):
                 return None
             lo, hi = hop.apply(lo) - hop.bound, hop.apply(hi) + hop.bound
         return math.floor(lo), math.ceil(hi)
+
+
+def _inside(lo: Fraction, hi: Fraction, window: Window) -> bool:
+    """``[lo, hi]`` lies entirely inside the half-open ``window`` (ADR 0050 §3)."""
+    if window is None:
+        return False
+    start, end = window
+    return (start is None or lo >= start) and (end is None or hi < end)
 
 
 def paths(clock: str, reference: str, mappings: Sequence[ClockMapping]) -> list[Path]:
@@ -152,7 +161,7 @@ def merge(
         CatalogFinding(
             "unsupported_mapping",
             m.mapping_id,
-            "not an affine, monotone increasing mapping between two clocks; not used",
+            f"{m.unsupported or 'not an affine, increasing map between two clocks'}; not used",
         )
         for m in sorted(mappings, key=lambda m: m.mapping_id.encode("utf-8"))
         if not m.usable

@@ -56,7 +56,9 @@ from neptune_ledger.catalog.index import PackageRows, RecordRow, package_rows, p
 from neptune_ledger.catalog.migrate import tenant_schema
 from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, check_sources
 from neptune_ledger.lineage.graph import read_lineage, unknown_record
+from neptune_ledger.threads.alignment import clock_mapping
 from neptune_ledger.threads.membership import MembershipError, ThreadRows, thread_rows
+from neptune_ledger.threads.merge import ClockMapping
 from neptune_ledger.threads.read import (
     empty_thread,
     read_thread,
@@ -383,6 +385,32 @@ class PostgresCatalog:
             cur.executemany(
                 "INSERT INTO thread_unresolved VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 [(t, u.thread_id, package, u.record_id, u.kind, u.pointer, seq) for u in named],
+            )
+        for links in _batches(threads.links):
+            cur.executemany(
+                "INSERT INTO thread_identity_link VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    (
+                        t,
+                        package,
+                        x.record_id,
+                        "identity_link",
+                        seq,
+                        x.left,
+                        x.right,
+                        x.state,
+                        x.assertion_kind,
+                    )
+                    for x in links
+                ],
+            )
+        for mappings in _batches(threads.mappings):
+            cur.executemany(
+                "INSERT INTO thread_clock_mapping VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    (t, package, x.record_id, "clock_mapping", seq, x.source, x.target, x.mapping)
+                    for x in mappings
+                ],
             )
 
     def _compare(
@@ -715,11 +743,11 @@ class PostgresCatalog:
             limit = point.value.tx_seq if isinstance(point, Known) else 0
             if beyond:
                 return empty_thread(thread_id, key, order, point, (_beyond(as_of),), chosen, echo)
-            findings = self._thread_request(conn, key, order, preference, merge, limit)
+            findings, mappings = self._thread_request(conn, key, order, preference, merge, limit)
             if findings:
                 return empty_thread(thread_id, key, order, point, findings, chosen, echo)
             assert chosen is not None
-            return read_thread(conn, self._tenant, key, order, chosen, echo, (), limit, point)
+            return read_thread(conn, self._tenant, key, order, chosen, echo, mappings, limit, point)
 
         return self._run(body)
 
@@ -731,23 +759,25 @@ class PostgresCatalog:
         preference: object,
         merge: ClockMerge | None,
         limit: int,
-    ) -> tuple[CatalogFinding, ...]:
-        """Why a ``thread`` call is rejected, or nothing (ADR 0004 §2; ADR 0010 §5)."""
+    ) -> tuple[tuple[CatalogFinding, ...], tuple[ClockMapping, ...]]:
+        """Why a ``thread`` call is rejected, or nothing, and the clock mappings its merge names
+        (ADR 0004 §2; ADR 0010 §5, §9)."""
         if preference is None:
             detail = "a thread call names its preference; there is no default (ADR 0003 §4.4)"
-            return (CatalogFinding("preference_required", "preference", detail),)
+            return (CatalogFinding("preference_required", "preference", detail),), ()
         if not isinstance(preference, _PREFERENCES) or not _valid(preference):
-            return (CatalogFinding("invalid_request", "preference", "not a thread preference"),)
+            return (CatalogFinding("invalid_request", "preference", "not a thread preference"),), ()
         if order not in ("world", "transaction"):
             detail = "order is world or transaction"
-            return (CatalogFinding("invalid_request", str(order)[:200] or "order", detail),)
+            return (CatalogFinding("invalid_request", str(order)[:200] or "order", detail),), ()
         if not isinstance(key, ThreadKey) or not _valid(key):
-            return (CatalogFinding("invalid_request", "key", "not a thread key of the contract"),)
+            bad = CatalogFinding("invalid_request", "key", "not a thread key of the contract")
+            return (bad,), ()
         if merge is None:
-            return ()
+            return (), ()
         if not isinstance(merge, ClockMerge) or not _valid(merge) or order != "world":
             detail = "a merge is a reference clock and mapping ids, on world order only"
-            return (CatalogFinding("invalid_request", "merge", detail),)
+            return (CatalogFinding("invalid_request", "merge", detail),), ()
         found: list[CatalogFinding] = []
         if not conn.execute(
             "SELECT 1 FROM clock c JOIN package p USING (tenant_id, package_id)"
@@ -756,11 +786,26 @@ class PostgresCatalog:
         ).fetchone():
             detail = "no registered package holds this clock"
             found.append(CatalogFinding("unknown_clock", merge.reference_clock, detail))
-        # No package schema this Ledger reads has a ClockMapping record kind yet (MVL-82), so the
-        # catalog holds no mapping and every named one is unknown (ADR 0010 §5).
+        # A record id names one body in every package that holds it (ADR 0002 §6), so the
+        # first registration's row is the mapping.
+        held = {
+            str(record): clock_mapping(str(record), str(source), str(target), str(text))
+            for record, source, target, text in conn.execute(
+                "SELECT DISTINCT ON (record_id) record_id, source_clock, target_clock, mapping"
+                " FROM thread_clock_mapping WHERE tenant_id = %s AND record_id = ANY(%s)"
+                "   AND registration_key <= %s ORDER BY record_id, registration_key",
+                (self._tenant, list(merge.mappings), limit),
+            ).fetchall()
+        }
         detail = "no registered package holds a ClockMapping with this id"
-        found += [CatalogFinding("unknown_mapping", m, detail) for m in sorted(merge.mappings)]
-        return tuple(found)
+        found += [
+            CatalogFinding("unknown_mapping", m, detail)
+            for m in sorted(merge.mappings, key=lambda m: m.encode("utf-8"))
+            if m not in held
+        ]
+        if found:
+            return tuple(found), ()
+        return (), tuple(held[m] for m in sorted(held, key=lambda m: m.encode("utf-8")))
 
     def threads_of(self, record_id: str, *, as_of: int | None = None) -> ThreadsOf:
         """Every thread a record id is a member of, per registering package (ADR 0003 §1.4)."""

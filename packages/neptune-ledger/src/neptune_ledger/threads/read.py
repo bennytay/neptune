@@ -8,7 +8,7 @@ whole (ADR 0006 §7).
 import json
 from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any, Final
+from typing import Any, Final, cast
 
 import psycopg
 
@@ -18,6 +18,7 @@ from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
     CatalogFinding,
     ClockMerge,
+    DeclaredKey,
     History,
     Membership,
     Order,
@@ -25,6 +26,7 @@ from neptune_ledger.api.types import (
     StatedProvenance,
     Thread,
     ThreadKey,
+    ThreadLink,
     ThreadPreference,
     ThreadsOf,
     TimePoint,
@@ -35,6 +37,7 @@ from neptune_ledger.api.types import (
 )
 from neptune_ledger.lineage.graph import transform_graph, unknown_record_finding
 from neptune_ledger.threads import merge as merging
+from neptune_ledger.threads.alignment import LINKED_KINDS, declared_json, link_key
 from neptune_ledger.threads.order import (
     Member,
     SetKey,
@@ -150,7 +153,7 @@ def read_thread(
         lineage_sets=resolved,
         revisions=revisions(conn, tenant, set(sets), limit),
         unresolved=unresolved(conn, tenant, thread_id, limit),
-        links=(),
+        links=links(conn, tenant, key, limit),
         findings=tuple(findings),
         preference=preference,
         merge=merge,
@@ -191,6 +194,34 @@ def revisions(conn: Conn, tenant: str, sets: set[SetKey], limit: int) -> tuple[R
                 for part in (e.kind, e.source, e.revises, e.source_revision, e.revised_revision)
             ),
         )
+    )
+
+
+def links(conn: Conn, tenant: str, key: ThreadKey, limit: int) -> tuple[ThreadLink, ...]:
+    """The identity links that name this thread's declared id on either side (ADR 0003 §1.5,
+    ADR 0010 §8), registered by ``limit``: one edge per link, package and right-side id, from the
+    link's left id to that right id, both in this thread's kind. Listed by ``(registration key,
+    link record id, package id, right id)``. Never a merge: no other thread's record is read."""
+    if key.kind not in LINKED_KINDS or not isinstance(key.key, DeclaredKey):
+        return ()
+    stated = declared_json(key.key)
+    rows = conn.execute(
+        "SELECT package_id, record_id, registration_key, left_id, right_id, state, assertion_kind"
+        " FROM thread_identity_link WHERE tenant_id = %s AND registration_key <= %s"
+        "   AND (left_id = %s OR right_id = %s)",
+        (tenant, limit, stated, stated),
+    ).fetchall()
+    rows.sort(key=lambda r: (int(r[2]), str(r[1]).encode(), str(r[0]).encode(), str(r[4]).encode()))
+    return tuple(
+        ThreadLink(
+            link_record_id=str(record),
+            package_id=str(package),
+            from_key=link_key(key.kind, str(left)),
+            to_key=link_key(key.kind, str(right)),
+            assertion_kind=cast("Any", str(assertion)),
+            state=cast("Any", str(state)),
+        )
+        for package, record, _, left, right, state, assertion in rows
     )
 
 

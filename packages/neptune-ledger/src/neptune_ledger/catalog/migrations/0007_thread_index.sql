@@ -1,6 +1,6 @@
--- 0006 the derived entity-thread index and ordered transform upstream (Ledger ADRs 0003, 0010).
+-- 0007 the derived entity-thread index and ordered transform upstream (Ledger ADRs 0003, 0010).
 --
--- Applied after 0005 in the same tenant schema, with search_path set to that schema alone.
+-- Applied after 0006 in the same tenant schema, with search_path set to that schema alone.
 -- Thread membership needs record bodies (Stream.run, a component's category, a software item's
 -- commit, Ambiguous candidates), so registration computes it from the verified lines and writes
 -- it here in the same transaction as the record rows (ADR 0010 §1). Every row is a function of
@@ -13,7 +13,7 @@
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM package) THEN
-    RAISE EXCEPTION 'packages registered before migration 0006 have no thread index; rebuild'
+    RAISE EXCEPTION 'packages registered before migration 0007 have no thread index; rebuild'
       ' this catalog from its packages and registration log (ADR 0010)';
   END IF;
 END
@@ -88,6 +88,48 @@ CREATE TABLE thread_unresolved (
 CREATE INDEX thread_unresolved_by_thread ON thread_unresolved (thread_id, registration_key);
 CREATE INDEX thread_unresolved_by_record ON thread_unresolved (record_id);
 
+-- 5. One row per id an IdentityLink's right side states (package schema 3, root ADR 0050 §4):
+-- one when Known, one per candidate when Ambiguous. A thread keyed by either id lists the link
+-- as an edge (ADR 0003 §1.5); nothing is joined through it. left_id and right_id are canonical
+-- JSON of {"namespace", "value"}, so equal text means equal ids (ADR 0010 §8).
+CREATE TABLE thread_identity_link (
+  tenant_id text NOT NULL REFERENCES tenant (tenant_id),
+  package_id content_id NOT NULL,
+  record_id record_id NOT NULL,
+  kind text NOT NULL CHECK (kind = 'identity_link'),
+  registration_key bigint NOT NULL,
+  left_id text NOT NULL CHECK (left_id LIKE '{%}'),
+  right_id text NOT NULL CHECK (right_id LIKE '{%}' AND right_id <> left_id),
+  state text NOT NULL CHECK (state IN ('ambiguous', 'known')),
+  assertion_kind text NOT NULL CHECK (assertion_kind IN ('observed', 'stated')),
+  PRIMARY KEY (tenant_id, record_id, package_id, right_id),
+  FOREIGN KEY (tenant_id, kind, record_id, package_id)
+    REFERENCES record (tenant_id, kind, record_id, package_id),
+  FOREIGN KEY (tenant_id, package_id, registration_key)
+    REFERENCES package (tenant_id, package_id, tx_seq)
+);
+CREATE INDEX thread_identity_link_by_left ON thread_identity_link (left_id, registration_key);
+CREATE INDEX thread_identity_link_by_right ON thread_identity_link (right_id, registration_key);
+
+-- 6. A ClockMapping (package schema 3, root ADR 0050 §5) as the cross-clock merge reads it:
+-- slope, offset, bound and the half-open source-clock window as canonical JSON, or why the merge
+-- cannot use it (ADR 0010 §9). A thread merge names mappings by record id.
+CREATE TABLE thread_clock_mapping (
+  tenant_id text NOT NULL REFERENCES tenant (tenant_id),
+  package_id content_id NOT NULL,
+  record_id record_id NOT NULL,
+  kind text NOT NULL CHECK (kind = 'clock_mapping'),
+  registration_key bigint NOT NULL,
+  source_clock record_id NOT NULL,
+  target_clock record_id NOT NULL CHECK (target_clock <> source_clock),
+  mapping text NOT NULL CHECK (mapping LIKE '{%}'),
+  PRIMARY KEY (tenant_id, record_id, package_id),
+  FOREIGN KEY (tenant_id, kind, record_id, package_id)
+    REFERENCES record (tenant_id, kind, record_id, package_id),
+  FOREIGN KEY (tenant_id, package_id, registration_key)
+    REFERENCES package (tenant_id, package_id, tx_seq)
+);
+
 -- Append-only, like every table registration writes (ADR 0002 §6, ADR 0003 §5).
 CREATE TRIGGER thread_append_only BEFORE UPDATE OR DELETE ON thread
   FOR EACH ROW EXECUTE FUNCTION refuse_change();
@@ -100,4 +142,12 @@ CREATE TRIGGER thread_member_no_truncate BEFORE TRUNCATE ON thread_member
 CREATE TRIGGER thread_unresolved_append_only BEFORE UPDATE OR DELETE ON thread_unresolved
   FOR EACH ROW EXECUTE FUNCTION refuse_change();
 CREATE TRIGGER thread_unresolved_no_truncate BEFORE TRUNCATE ON thread_unresolved
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER thread_identity_link_append_only BEFORE UPDATE OR DELETE ON thread_identity_link
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER thread_identity_link_no_truncate BEFORE TRUNCATE ON thread_identity_link
+  FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER thread_clock_mapping_append_only BEFORE UPDATE OR DELETE ON thread_clock_mapping
+  FOR EACH ROW EXECUTE FUNCTION refuse_change();
+CREATE TRIGGER thread_clock_mapping_no_truncate BEFORE TRUNCATE ON thread_clock_mapping
   FOR EACH STATEMENT EXECUTE FUNCTION refuse_change();

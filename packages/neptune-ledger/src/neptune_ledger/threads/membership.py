@@ -15,6 +15,13 @@ from neptune.identity import canonical_json
 from neptune_ledger.api import codec
 from neptune_ledger.api.types import DeclaredKey, EvidenceAnchor, ThreadKey, ThreadKind
 from neptune_ledger.catalog.index import WORLD_TIME, world_time
+from neptune_ledger.threads.alignment import (
+    AlignmentError,
+    LinkRow,
+    MappingRow,
+    link_rows,
+    mapping_rows,
+)
 
 # The record kinds ADR 0003 §2's table reads; every other kind is in no thread.
 THREAD_RECORD_KINDS: Final = frozenset(
@@ -104,6 +111,8 @@ class ThreadRows:
     threads: tuple[ThreadRow, ...]
     members: tuple[MemberRow, ...]
     unresolved: tuple[UnresolvedRow, ...]
+    links: tuple[LinkRow, ...] = ()
+    mappings: tuple[MappingRow, ...] = ()
 
 
 def thread_rows(lines: Mapping[str, tuple[bytes, ...]]) -> ThreadRows:
@@ -172,7 +181,21 @@ def thread_rows(lines: Mapping[str, tuple[bytes, ...]]) -> ThreadRows:
         ),
         members=members,
         unresolved=tuple(UnresolvedRow(*row) for row in sorted(unresolved)),
+        **_alignment(lines),
     )
+
+
+def _alignment(lines: Mapping[str, tuple[bytes, ...]]) -> dict[str, Any]:
+    """The package's identity-link and clock-mapping rows (ADR 0010 §8, §9)."""
+    try:
+        return {
+            "links": link_rows(canonical_json.loads(x) for x in lines.get("identity_link", ())),
+            "mappings": mapping_rows(
+                canonical_json.loads(x) for x in lines.get("clock_mapping", ())
+            ),
+        }
+    except AlignmentError as exc:
+        raise MembershipError(exc.record_id, exc.pointer, exc.cause) from exc
 
 
 def _member(

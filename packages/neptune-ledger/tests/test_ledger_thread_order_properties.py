@@ -34,7 +34,7 @@ from neptune_ledger.api.types import (
     TransactionKey,
     WorldTime,
 )
-from neptune_ledger.threads.merge import ClockMapping, hops, merge, paths
+from neptune_ledger.threads.merge import ClockMapping, Window, hops, merge, paths
 from neptune_ledger.threads.merge import Path as MergePath
 from neptune_ledger.threads.order import (
     Chain,
@@ -397,6 +397,13 @@ def mapping_sets(draw: Any) -> list[ClockMapping]:
         # Mostly wide windows, so entries merge (often through two hops); some narrow ones, so
         # intervals fall partly outside and paths become unusable.
         width = draw(st.one_of(st.integers(0, 4), st.integers(30, 80)))
+        # Half-open, as root ADR 0050 §3 states windows; some sides open, some windows unknown.
+        window: Window = (
+            None if draw(st.integers(0, 9)) == 0 else lo,
+            None if draw(st.integers(0, 9)) == 0 else lo + width,
+        )
+        if draw(st.integers(0, 14)) == 0:
+            window = None
         out.append(
             ClockMapping(
                 mapping_id=f"rec:sha256:{n + 900:064x}",
@@ -405,8 +412,8 @@ def mapping_sets(draw: Any) -> list[ClockMapping]:
                 slope=Fraction(draw(st.integers(-1, 4)), draw(st.integers(1, 3))),
                 offset=Fraction(draw(st.integers(-6, 6)), draw(st.integers(1, 4))),
                 bound=Fraction(draw(st.integers(0, 3)), draw(st.integers(1, 2))),
-                window=(lo, lo + width),
-                affine=draw(st.integers(0, 4)) > 0,
+                window=window,
+                unsupported=None if draw(st.integers(0, 4)) > 0 else "rate is unknown",
             )
         )
     return out
@@ -473,11 +480,12 @@ def test_p7_inverting_a_mapping_returns_the_instant_exactly(
         if mapping.usable:
             forward, backward = hops(mapping)
             assert backward.apply(forward.apply(Fraction(t))) == t
-            assert forward.window[0] <= forward.window[1]
-            assert backward.window == (
-                forward.apply(forward.window[0]),
-                forward.apply(forward.window[1]),
-            )
+            if forward.window is None:
+                assert backward.window is None, "an unknown window stays unknown"
+                continue
+            assert backward.window == tuple(
+                None if side is None else forward.apply(Fraction(side)) for side in forward.window
+            ), "the image of a half-open window; an open side stays open"
 
 
 def test_p7_a_partly_covered_interval_makes_the_path_unusable() -> None:
