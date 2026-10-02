@@ -1,0 +1,16 @@
+%YAML 1.1
+---
+# Document 0: YAML 1.1 declared.
+gripper: on
+mode: 0755
+...
+%YAML 1.2
+---
+# Document 1: YAML 1.2 declared.
+gripper: on
+mode: 0755
+---
+# Document 2: no version declared.
+- on
+- 0755
+- plain

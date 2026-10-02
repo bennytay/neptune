@@ -1,0 +1,45 @@
+{
+  "api_version": "1.2.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "edges": [],
+  "findings": [],
+  "kind": {
+    "knowledge": "known",
+    "value": "calibration"
+  },
+  "nodes": [
+    {
+      "transform": {
+        "knowledge": "known",
+        "value": {
+          "adapter_id": "ulog",
+          "adapter_version": "1.0.0",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "libraries": {}
+        }
+      },
+      "transform_id": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+    }
+  ],
+  "record_id": "rec:sha256:cb6e8583121408782d115b87542894f9fbc326484373ddb29cd9232c14fb102c",
+  "registered_by": [
+    {
+      "kind": "calibration",
+      "line": 1,
+      "package_id": "sha256:757f33c0c11dfcda68478d0c6909e18c6f17eddbc9afae61a9f77c3b53762b5c",
+      "record_id": "rec:sha256:cb6e8583121408782d115b87542894f9fbc326484373ddb29cd9232c14fb102c"
+    }
+  ],
+  "siblings": [],
+  "status": "found",
+  "transform_id": {
+    "knowledge": "known",
+    "value": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+  }
+}

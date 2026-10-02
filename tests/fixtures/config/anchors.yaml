@@ -1,0 +1,14 @@
+defaults: &defaults
+  rate: 50.0
+  frame: base_link
+left_arm:
+  <<: *defaults
+  joint_count: 6
+right_arm:
+  <<: *defaults
+  rate: 25.0
+same: *defaults
+dangling: *nowhere
+? [a, b]
+: complex key
+*defaults : alias of a mapping as a key

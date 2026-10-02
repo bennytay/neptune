@@ -30,16 +30,13 @@ def test_catalog_pin_is_pending() -> None:
 
 
 def test_docs_state_the_same_pins() -> None:
+    # docs/contracts.md is the live mirror of pins.py; accepted ADRs keep the pins as written.
     contracts = (ROOT / "docs" / "contracts.md").read_text(encoding="utf-8")
-    adr = (ROOT / "docs" / "adr" / "0001-place-in-the-programme-and-contract-pins.md").read_text(
-        encoding="utf-8"
-    )
     graph_adr = (
         ROOT / "docs" / "adr" / "0006-graph-schema-v1-contract-surface-and-memory-reader.md"
     ).read_text(encoding="utf-8")
-    for text in (contracts, adr):
-        assert f"SCHEMA_VERSION = {pins.COMPILER_SCHEMA_VERSION}" in text
-        assert 'CATALOG_API_VERSION = "pending' in text
+    assert f"SCHEMA_VERSION = {pins.COMPILER_SCHEMA_VERSION}" in contracts
+    assert 'CATALOG_API_VERSION = "pending' in contracts
     # ADR 0001 recorded the graph pin as 0 before v1; ADR 0006 sets it, and ADRs are not edited.
     for text in (contracts, graph_adr):
         assert f"GRAPH_SCHEMA_VERSION = {pins.GRAPH_SCHEMA_VERSION}" in text

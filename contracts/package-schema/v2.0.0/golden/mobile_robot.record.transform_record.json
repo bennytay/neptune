@@ -1,0 +1,11 @@
+{
+  "adapter_id": "rosbag1",
+  "adapter_version": "1.0.0",
+  "config": {},
+  "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "id": "rec:sha256:266373f75daf7a7272bd6c7ee44c44b22cb7be1d2d2c14ebaf8b0c5848bc11de",
+  "kind": "transform_record",
+  "libraries": {},
+  "schema_version": 1,
+  "upstream": []
+}

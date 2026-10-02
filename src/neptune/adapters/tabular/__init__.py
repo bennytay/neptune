@@ -57,6 +57,9 @@ if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonObject
 
 _TABULAR_EXTENSIONS: Final = frozenset({".csv", ".tsv"})
+# Names that declare YAML or TOML: delimiter agreement there is a coincidence of flow sequences
+# or inline arrays, not a table, so a sniffed CSV under such a name is no claim.
+_NOT_DELIMITED_EXTENSIONS: Final = (".toml", ".yaml", ".yml")
 # C0 controls that text uses; any other control byte (or a NUL) means the head is not text.
 _TEXT_CONTROLS: Final = frozenset(b"\t\n\x0b\x0c\r\x1b")
 _BINARY: Final = bytes(b for b in range(0x20) if b not in _TEXT_CONTROLS)
@@ -267,6 +270,11 @@ def _probe_json(shape: _json.Shape) -> ProbeResult:
 
 
 def _probe_csv(text: bytes, hints: ProbeHints, complete: bool) -> ProbeResult:
+    if hints.name.lower().endswith(_NOT_DELIMITED_EXTENSIONS):
+        reason = ProbeReason(
+            "tabular.not_delimited_name", f"the name {hints.name!r} declares YAML or TOML"
+        )
+        return ProbeResult(0.0, (reason,))
     dialect = _csv.sniff(text, complete)
     if dialect is None:
         reason = ProbeReason(
