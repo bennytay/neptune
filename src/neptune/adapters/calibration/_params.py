@@ -116,6 +116,8 @@ class Flattener:
                     if item.count > self.max_array:
                         self._add(name, Unknown(self.cite(item.where)), item, large=item.count)
                     elif values is not None:
+                        if any(isinstance(n, NonFinite) for n in values):
+                            self.tally.non_finite.append(name)
                         self._add(name, Known(values, self.cite(item.where)), item)
                     else:
                         stack.extend(reversed(item.children))

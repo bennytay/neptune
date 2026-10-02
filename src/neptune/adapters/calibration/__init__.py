@@ -63,7 +63,6 @@ from neptune.adapters.structured.reader import read_text
 from neptune.adapters.structured.text import InvalidEncoding, decode, detect
 from neptune.adapters.structured.tree import Limits
 from neptune.identity.findings import ingest_finding
-from neptune.model.configuration import TextEncoding
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.machine import Calibration
 from neptune.model.provenance import ByteRange, EvidenceRef, Span
@@ -213,8 +212,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         Documented(
             _code("invalid_encoding"),
-            "the bytes are not valid UTF-8 (or the encoding their mark names), or an XML file"
-            " is in a wide encoding; nothing is read (corrupt, error)",
+            "the bytes are not valid UTF-8 (or the encoding their mark names); nothing is read"
+            " (corrupt, error)",
         ),
         Documented(
             _code("mixed_line_endings"),
@@ -444,18 +443,6 @@ def _read_xml(
         )
         return
     data = b"".join(read_pieces(source, 0, size))
-    encoding, _ = detect(data)
-    if encoding is not TextEncoding.UTF_8 and data[:2] in (b"\xff\xfe", b"\xfe\xff", b"\x00\x00"):
-        found.problems.append(
-            _problem(
-                "invalid_encoding",
-                FindingCategory.UNSUPPORTED,
-                Severity.ERROR,
-                size,
-                f"XML in {encoding} is not read: only ASCII-compatible encodings are",
-            )
-        )
-        return
     try:
         root = read_xml(
             data,
