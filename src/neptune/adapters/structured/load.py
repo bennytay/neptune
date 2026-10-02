@@ -6,8 +6,8 @@ as a whole or with whole documents, as names an adapter turns into findings with
 Both are what the ``config`` adapter did inline before ADR 0055; its behaviour is unchanged.
 """
 
-from collections.abc import Iterator
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field, replace
 from typing import Final
 
 from neptune.adapters.contract import SourceReader, read_pieces
@@ -55,8 +55,17 @@ class Loaded:
     parse: Parse | None = None
 
 
-def load(source: SourceReader, settings: Settings, only: ConfigFormat | None) -> Loaded:
-    """The whole source, decoded and read in ``only`` its format or the first that accepts it."""
+def load(
+    source: SourceReader,
+    settings: Settings,
+    only: ConfigFormat | None,
+    rewrite: Callable[[str], str] | None = None,
+) -> Loaded:
+    """The whole source, decoded and read in ``only`` its format or the first that accepts it.
+
+    ``rewrite`` may change the decoded text before it is read, as long as it keeps its length:
+    every span stays exact in the file's own text (OpenCV's ``%YAML:1.0`` header is not YAML).
+    """
     if source.size > settings.max_bytes:
         return Loaded(source.size, too_large=True)
     data = b"".join(read_pieces(source, 0, source.size))
@@ -64,6 +73,11 @@ def load(source: SourceReader, settings: Settings, only: ConfigFormat | None) ->
     if isinstance(decoded, InvalidEncoding):
         return Loaded(source.size, invalid=decoded)
     limits = Limits(settings.max_depth, settings.max_scalar_length)
+    if rewrite is not None:
+        rewritten = rewrite(decoded.text)
+        if len(rewritten) != len(decoded.text):
+            raise ValueError("a rewrite keeps the text's length")
+        decoded = replace(decoded, text=rewritten)
     parse = read_text(decoded.text, decoded.encoding, limits, settings.yaml_version, only)
     if parse is not None:
         budget_paths(parse, settings.max_path_ratio)
