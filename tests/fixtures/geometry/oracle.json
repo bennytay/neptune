@@ -1,0 +1,143 @@
+{
+  "_how": "trimesh 5.1 (OBJ, STL, PLY, GLB, process=False), usd-core pxr (USD), json (glTF); see make_geometry.py",
+  "gltf_json": {
+    "marine_hull.gltf": {
+      "count": 8,
+      "max": [
+        1.5,
+        0.5,
+        0.75
+      ],
+      "min": [
+        -1.5,
+        -0.5,
+        0.0
+      ]
+    }
+  },
+  "trimesh": {
+    "agv_fork.ply": {
+      "bounds": [
+        [
+          0.0,
+          -0.0625,
+          0.0
+        ],
+        [
+          1.0,
+          0.0625,
+          0.0625
+        ]
+      ],
+      "faces": 12,
+      "vertices": 8
+    },
+    "arm_link.obj": {
+      "bounds": [
+        [
+          0.0,
+          -0.0625,
+          -0.0625
+        ],
+        [
+          0.5,
+          0.0625,
+          0.0625
+        ]
+      ],
+      "faces": 12,
+      "vertices": 8
+    },
+    "av_lidar_scan.ply": {
+      "bounds": [
+        [
+          -3.0,
+          -4.0,
+          0.5
+        ],
+        [
+          10.0,
+          2.0,
+          2.0
+        ]
+      ],
+      "faces": 0,
+      "vertices": 5
+    },
+    "humanoid_torso.glb": {
+      "bounds": [
+        [
+          -1.5,
+          -0.5,
+          0.0
+        ],
+        [
+          1.5,
+          0.5,
+          0.75
+        ]
+      ],
+      "faces": 12,
+      "vertices": 8
+    },
+    "mobile_base_chassis.ply": {
+      "bounds": [
+        [
+          -0.25,
+          -0.1875,
+          0.0
+        ],
+        [
+          0.25,
+          0.1875,
+          0.125
+        ]
+      ],
+      "faces": 12,
+      "vertices": 8
+    },
+    "quadruped_foot.stl": {
+      "bounds": [
+        [
+          -0.0625,
+          -0.0625,
+          0.0
+        ],
+        [
+          0.0625,
+          0.0625,
+          0.125
+        ]
+      ],
+      "faces": 12,
+      "vertices": 36
+    },
+    "quadruped_hip.stl": {
+      "bounds": [
+        [
+          -0.125,
+          -0.0625,
+          -0.0625
+        ],
+        [
+          0.125,
+          0.0625,
+          0.0625
+        ]
+      ],
+      "faces": 12,
+      "vertices": 36
+    }
+  },
+  "usd": {
+    "amr_chassis.usda": {
+      "default_prim": "chassis",
+      "meters_per_unit": 0.01,
+      "sublayers": [
+        "./materials/steel.usda",
+        "../shared/wheels.usda"
+      ],
+      "up_axis": "Z"
+    }
+  }
+}
