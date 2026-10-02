@@ -1,0 +1,12 @@
+# Field trial 2026-09-28, run A.
+controller_server:
+  ros__parameters:
+    use_sim_time: False
+    controller_frequency: 20.0
+    FollowPath:
+      plugin: "dwb_core::DWBLocalPlanner"
+      max_vel_x: 0.26
+      max_vel_theta: 1.0
+      sim_time: 1.7
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle"]
+      debug_trajectory_details: True

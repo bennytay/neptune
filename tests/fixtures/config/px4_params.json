@@ -1,0 +1,301 @@
+{
+  "vehicle": {
+    "autopilot": "PX4",
+    "airframe": 4001,
+    "firmware": "v1.14.3",
+    "sys_id": 1,
+    "comp_id": 1
+  },
+  "parameters": [
+    {
+      "name": "BAT1_N_CELLS",
+      "type": "INT32",
+      "value": 4
+    },
+    {
+      "name": "BAT1_V_CHARGED",
+      "type": "FLOAT",
+      "value": 4.05
+    },
+    {
+      "name": "BAT1_V_EMPTY",
+      "type": "FLOAT",
+      "value": 3.5
+    },
+    {
+      "name": "CAL_ACC0_ID",
+      "type": "INT32",
+      "value": 1310988
+    },
+    {
+      "name": "CAL_ACC0_XOFF",
+      "type": "FLOAT",
+      "value": 0.0123
+    },
+    {
+      "name": "CAL_ACC0_YOFF",
+      "type": "FLOAT",
+      "value": -0.0071
+    },
+    {
+      "name": "CAL_ACC0_ZOFF",
+      "type": "FLOAT",
+      "value": 0.1432
+    },
+    {
+      "name": "CAL_GYRO0_ID",
+      "type": "INT32",
+      "value": 2359306
+    },
+    {
+      "name": "CAL_MAG0_ID",
+      "type": "INT32",
+      "value": 396825
+    },
+    {
+      "name": "CAL_MAG0_ROT",
+      "type": "INT32",
+      "value": 0
+    },
+    {
+      "name": "COM_ARM_WO_GPS",
+      "type": "INT32",
+      "value": 1
+    },
+    {
+      "name": "COM_DISARM_LAND",
+      "type": "FLOAT",
+      "value": 2.0
+    },
+    {
+      "name": "COM_OBL_RC_ACT",
+      "type": "INT32",
+      "value": 0
+    },
+    {
+      "name": "COM_RC_LOSS_T",
+      "type": "FLOAT",
+      "value": 0.5
+    },
+    {
+      "name": "EKF2_BARO_DELAY",
+      "type": "FLOAT",
+      "value": 0.0
+    },
+    {
+      "name": "EKF2_GPS_DELAY",
+      "type": "FLOAT",
+      "value": 110.0
+    },
+    {
+      "name": "EKF2_HGT_REF",
+      "type": "INT32",
+      "value": 1
+    },
+    {
+      "name": "EKF2_IMU_POS_X",
+      "type": "FLOAT",
+      "value": 0.0
+    },
+    {
+      "name": "EKF2_IMU_POS_Y",
+      "type": "FLOAT",
+      "value": 0.0
+    },
+    {
+      "name": "EKF2_IMU_POS_Z",
+      "type": "FLOAT",
+      "value": 0.0
+    },
+    {
+      "name": "MC_PITCHRATE_P",
+      "type": "FLOAT",
+      "value": 0.15
+    },
+    {
+      "name": "MC_PITCH_P",
+      "type": "FLOAT",
+      "value": 6.5
+    },
+    {
+      "name": "MC_ROLLRATE_P",
+      "type": "FLOAT",
+      "value": 0.15
+    },
+    {
+      "name": "MC_ROLL_P",
+      "type": "FLOAT",
+      "value": 6.5
+    },
+    {
+      "name": "MC_YAWRATE_P",
+      "type": "FLOAT",
+      "value": 0.2
+    },
+    {
+      "name": "MPC_TILTMAX_AIR",
+      "type": "FLOAT",
+      "value": 45.0
+    },
+    {
+      "name": "MPC_XY_VEL_MAX",
+      "type": "FLOAT",
+      "value": 12.0
+    },
+    {
+      "name": "MPC_Z_VEL_MAX_DN",
+      "type": "FLOAT",
+      "value": 1.5
+    },
+    {
+      "name": "MPC_Z_VEL_MAX_UP",
+      "type": "FLOAT",
+      "value": 3.0
+    },
+    {
+      "name": "NAV_DLL_ACT",
+      "type": "INT32",
+      "value": 0
+    },
+    {
+      "name": "NAV_RCL_ACT",
+      "type": "INT32",
+      "value": 2
+    },
+    {
+      "name": "RTL_RETURN_ALT",
+      "type": "FLOAT",
+      "value": 60.0
+    },
+    {
+      "name": "SENS_BOARD_ROT",
+      "type": "INT32",
+      "value": 0
+    },
+    {
+      "name": "SYS_AUTOSTART",
+      "type": "INT32",
+      "value": 4001
+    },
+    {
+      "name": "PWM_MAIN_FUNC1",
+      "type": "INT32",
+      "value": 101
+    },
+    {
+      "name": "PWM_MAIN_FUNC2",
+      "type": "INT32",
+      "value": 102
+    },
+    {
+      "name": "PWM_MAIN_FUNC3",
+      "type": "INT32",
+      "value": 103
+    },
+    {
+      "name": "PWM_MAIN_FUNC4",
+      "type": "INT32",
+      "value": 104
+    },
+    {
+      "name": "PWM_MAIN_FUNC5",
+      "type": "INT32",
+      "value": 105
+    },
+    {
+      "name": "PWM_MAIN_FUNC6",
+      "type": "INT32",
+      "value": 106
+    },
+    {
+      "name": "PWM_MAIN_FUNC7",
+      "type": "INT32",
+      "value": 107
+    },
+    {
+      "name": "PWM_MAIN_FUNC8",
+      "type": "INT32",
+      "value": 108
+    },
+    {
+      "name": "PWM_MAIN_MIN1",
+      "type": "INT32",
+      "value": 1000
+    },
+    {
+      "name": "PWM_MAIN_MIN2",
+      "type": "INT32",
+      "value": 1000
+    },
+    {
+      "name": "PWM_MAIN_MIN3",
+      "type": "INT32",
+      "value": 1000
+    },
+    {
+      "name": "PWM_MAIN_MIN4",
+      "type": "INT32",
+      "value": 1000
+    },
+    {
+      "name": "PWM_MAIN_MIN5",
+      "type": "INT32",
+      "value": 1000
+    },
+    {
+      "name": "PWM_MAIN_MIN6",
+      "type": "INT32",
+      "value": 1000
+    },
+    {
+      "name": "PWM_MAIN_MIN7",
+      "type": "INT32",
+      "value": 1000
+    },
+    {
+      "name": "PWM_MAIN_MIN8",
+      "type": "INT32",
+      "value": 1000
+    },
+    {
+      "name": "PWM_MAIN_MAX1",
+      "type": "INT32",
+      "value": 2000
+    },
+    {
+      "name": "PWM_MAIN_MAX2",
+      "type": "INT32",
+      "value": 2000
+    },
+    {
+      "name": "PWM_MAIN_MAX3",
+      "type": "INT32",
+      "value": 2000
+    },
+    {
+      "name": "PWM_MAIN_MAX4",
+      "type": "INT32",
+      "value": 2000
+    },
+    {
+      "name": "PWM_MAIN_MAX5",
+      "type": "INT32",
+      "value": 2000
+    },
+    {
+      "name": "PWM_MAIN_MAX6",
+      "type": "INT32",
+      "value": 2000
+    },
+    {
+      "name": "PWM_MAIN_MAX7",
+      "type": "INT32",
+      "value": 2000
+    },
+    {
+      "name": "PWM_MAIN_MAX8",
+      "type": "INT32",
+      "value": 2000
+    }
+  ]
+}

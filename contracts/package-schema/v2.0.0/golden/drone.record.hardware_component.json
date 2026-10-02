@@ -1,0 +1,39 @@
+{
+  "category": "sensor",
+  "configuration": "rec:sha256:69495ee3bb39fc2ba4d9d1eace573c8bda557b6615027eef080e73cf603064e2",
+  "frame": {
+    "knowledge": "not_covered"
+  },
+  "id": "rec:sha256:bcf9de6b09e17c8bbdc318a10a7c0fa86be5ad96a8b47f22ee18f0016930feec",
+  "identifiers": [
+    {
+      "knowledge": "known",
+      "value": {
+        "namespace": "px4.device_id",
+        "value": "1310988"
+      }
+    }
+  ],
+  "kind": "hardware_component",
+  "model": {
+    "knowledge": "not_covered"
+  },
+  "name": {
+    "knowledge": "not_covered"
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 27,
+          "offset": 418
+        }
+      ],
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b"
+    },
+    "transform": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+  },
+  "schema_version": 1
+}
