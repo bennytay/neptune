@@ -57,8 +57,10 @@ def _entry(table: StructuredTable, row: StructuredRecord) -> dict[str, Value]:
         evidence = row.cell_evidence(table, column)
         if header is not None:
             name: str | None = header[column] if column < len(header) else None
-        else:
-            name = _pointer_key(evidence)
+        else:  # a JSON row's cell names its key in its own citation (a null's cites itself)
+            grounding = getattr(state, "provenance", None)
+            own = grounding.evidence if isinstance(grounding, Provenance) else evidence
+            name = _pointer_key(own)
         if name:
             entry.setdefault(field_key(name), _cell_value(state, evidence))
     return entry
