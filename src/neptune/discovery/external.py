@@ -7,9 +7,12 @@ compiler reads from them.
 
 - ``discover(ledger)`` lists every object under the URI against the root's ledger: new, changed,
   unchanged (with the ledger's revision), and ``gone`` (revisions the listing no longer holds,
-  only when it was ``complete``). The compiler takes the listing from it, never the
-  classification: every listed object is classified again here against the ledger, which knows
-  every revision token seen over each revision's bytes (``SourceLedger.recognise``).
+  only when it was ``complete``). The compiler takes the listed objects from it, never their
+  classification: every one is classified again here against the ledger, which knows every
+  revision token seen over each revision's bytes (``SourceLedger.recognise``). ``gone`` is the
+  connector's, because only it knows which keys it saw and could not use (a key listed twice,
+  one too long), where nothing may be asserted; each is checked against the ledger and the
+  listing.
 - An object whose token the ledger recognises, at the size it was hashed at, is **carried
   forward**: observed again under that token, never fetched, never hashed.
 - Any other object is **fetched once**: streamed through ``open`` into the job's spool while it is
@@ -23,6 +26,7 @@ hashed against the artifact before a byte is served; a sandboxed call, which may
 network, is given the spooled copy's descriptor instead (``fileno``), read under the same checks.
 """
 
+import contextlib
 import os
 import shutil
 import stat
@@ -48,6 +52,11 @@ _READ: Final = 1024 * 1024  # what one read of a connector's stream asks for
 
 class ExternalSourceError(Exception):
     """A connector broke the protocol: the job cannot trust what it listed (``JobError``)."""
+
+
+class SpoolError(Exception):
+    """The job's spool could not be written (a full disk): the workspace's failure, never the
+    store's, so it is no ``OSError`` a fetch's handling could take for an unreadable object."""
 
 
 class NetworkGate(Protocol):
@@ -185,30 +194,46 @@ class Spool:
         more, never a disk. ``expected``: the bytes must be that artifact's, else
         ``SourceChangedError`` and nothing is kept.
         """
-        handle, name = tempfile.mkstemp(dir=self.directory, prefix=".fill-")
         try:
-            with os.fdopen(handle, "wb") as out:
+            handle, name = tempfile.mkstemp(dir=self.directory, prefix=".fill-")
+            out = os.fdopen(handle, "wb")
+        except OSError as exc:
+            raise SpoolError(f"the spool cannot be written: {exc}") from exc
+        try:
+            with out:
                 copying = _Copying(stream, out, size + 1)
                 artifact = digest_stream(cast("BinaryIO", copying), chunk_size=chunk_size)
-                out.flush()
+                _spooling(out.flush)
             if expected is not None and artifact.content_id != expected.content_id:
                 raise SourceChangedError(
                     f"{expected.content_id}: the store now serves other bytes under its token"
                 )
             if artifact.size == size:
-                Path(name).replace(self._path(artifact.content_id))
+                _spooling(lambda: Path(name).replace(self._path(artifact.content_id)))
                 name = ""
             return artifact
         finally:
             if name:
-                Path(name).unlink(missing_ok=True)
+                with contextlib.suppress(OSError):
+                    Path(name).unlink(missing_ok=True)
 
     def remove(self) -> None:
         shutil.rmtree(self.directory, ignore_errors=True)
 
 
+def _spooling(write: Callable[[], object]) -> None:
+    """``write`` to the spool: an ``OSError`` there is the spool's (``SpoolError``)."""
+    try:
+        write()
+    except OSError as exc:
+        raise SpoolError(f"the spool cannot be written: {exc}") from exc
+
+
 class _Copying:
-    """A stream that writes what is read from it to ``out``, and ends after ``limit`` bytes."""
+    """A stream that writes what is read from it to ``out``, and ends after ``limit`` bytes.
+
+    A failed read is the store's (an ``OSError``); a failed write the spool's (``SpoolError``).
+    """
 
     def __init__(self, stream: BinaryIO, out: BinaryIO, limit: int) -> None:
         self._stream, self._out, self._left = stream, out, limit
@@ -221,7 +246,7 @@ class _Copying:
         if not isinstance(block, bytes):
             raise OSError(f"the connector's stream returned {type(block).__name__}, not bytes")
         self._left -= len(block)
-        self._out.write(block)
+        _spooling(lambda: self._out.write(block))
         return block
 
 
@@ -290,14 +315,6 @@ class ExternalReader(VerifiedReader):
         return b"".join(pieces)
 
 
-def open_spooled_or_listed(
-    source: ExternalSource, location: SourceLocation, content: ContentId, spool: Spool
-) -> BinaryIO:
-    """A stream over an object's bytes: the job's spooled copy, else the connector's."""
-    spooled = spool.open(content)
-    return spooled if spooled is not None else source.open(location)
-
-
 # --- Fingerprinting ------------------------------------------------------------------------------
 
 
@@ -360,11 +377,11 @@ def fingerprint_external(
     spool: Spool,
     *,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
-    on_fetch: Callable[[ExternalEntry], None] | None = None,
 ) -> ExternalScan:
     """Observe every listed object into ``ledger``, fetching only what it cannot recognise.
 
-    ``on_fetch`` is told before each fetch (the job's checkpoint and progress).
+    A fetch that fails is the store's: a finding, and the object is left unobserved. The spool
+    failing to write (``SpoolError``) is the workspace's, and propagates.
     """
     entries = listed_entries(source, discovery)
     listed: list[Listed] = []
@@ -377,8 +394,6 @@ def fingerprint_external(
         if artifact is not None and artifact.size == entry.size:
             listed.append(Listed(location, ledger.observe(location, artifact), fetched=False))
             continue
-        if on_fetch is not None:
-            on_fetch(entry)
         try:
             with source.open(location) as stream:
                 artifact = spool.fill(stream, size=entry.size, chunk_size=chunk_size)

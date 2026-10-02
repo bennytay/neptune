@@ -15,6 +15,7 @@ and sandboxed (the default), so adapters read the job's spool by descriptor. Wha
 
 import io
 import json
+import shutil
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
@@ -25,6 +26,7 @@ from neptune.cli import exit_codes, run
 from neptune.discovery.policy import UNREADABLE
 from neptune.model.ids import ExternalObjectRef
 from neptune.model.source import SourceAbsence, SourceRevision
+from neptune.runtime.lineage import SOURCE_UNREADABLE
 from neptune.sdk import JobEvent, Neptune, RemoteSource
 from neptune.store.workspace import Workspace
 
@@ -278,3 +280,21 @@ def test_the_sdk_takes_a_remote_source_and_reports_progress(
     assert "fake_store:fleet-logs/arm-cell/episode-7/joints.csv@etag-joints-1" in rendered
     result = client.ingest(remote, tmp_path / "pkg", resume=True)  # the dry run left its ledger
     assert result.committed
+
+
+def test_an_object_carried_forward_that_cannot_be_fetched_when_needed_is_quarantined(
+    fake: ModuleType, store: Path, tmp_path: Path
+) -> None:
+    """Recognised, so never spooled; then a plan is needed (here: the plans were collected) and
+    the store fails the fetch. One source is quarantined; the job commits (non-negotiable 7)."""
+    Workspace(tmp_path / "ws").allow_network(True)
+    ingest(store, tmp_path / "ws", tmp_path / "pkg-1")
+    shutil.rmtree(tmp_path / "ws" / "plans")
+    fake.put(store, "arm-cell/episode-7/notes.md", NOTE, "etag-notes-1", fail=True)
+    result, events = ingest(store, tmp_path / "ws", tmp_path / "pkg-2")
+    assert kinds(events, "source_hashed") == [] and result["sources"] == 2
+    (unreadable,) = kinds(events, "source_unreadable")
+    assert unreadable["location"]["object_id"].endswith("notes.md")
+    receipt = json.loads((tmp_path / "pkg-2" / "receipt.json").read_bytes())
+    codes = {f["code"] for f in receipt["findings"]}
+    assert {SOURCE_UNREADABLE, "fake_store.read_failed"} <= codes

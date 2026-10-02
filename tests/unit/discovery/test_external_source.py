@@ -18,6 +18,7 @@ from neptune.discovery.external import (
     ExternalSource,
     ExternalSourceError,
     Spool,
+    SpoolError,
     fingerprint_external,
     listed_entries,
 )
@@ -264,3 +265,12 @@ def test_a_spool_reads_no_more_than_one_byte_past_the_listing(tmp_path: Path) ->
     artifact = spool.fill(endless, size=10)
     assert artifact.size == 11 and not spool.holds(artifact.content_id)
     assert endless.tell() == 11
+
+
+def test_a_spool_that_cannot_be_written_is_the_workspaces_failure_not_the_stores(
+    tmp_path: Path,
+) -> None:
+    gone = Spool(tmp_path / "missing")  # a spool directory that is not there
+    with pytest.raises(SpoolError):
+        gone.fill(io.BytesIO(b"bytes"), size=5)
+    assert not issubclass(SpoolError, OSError)  # a fetch's handling cannot take it for the store's

@@ -1055,6 +1055,7 @@ def _tokens(path: Path) -> dict[RecordId, list[str]]:
     if not path.exists():
         return {}
     tokens: dict[RecordId, list[str]] = {}
+    previous: RecordId | None = None
     for line in path.read_bytes().splitlines():
         value = canonical_json.loads(line)
         if not isinstance(value, dict) or value.keys() != {"revision", "tokens"}:
@@ -1063,8 +1064,9 @@ def _tokens(path: Path) -> dict[RecordId, list[str]]:
         if not isinstance(revision, str) or not isinstance(seen, list) or not seen:
             raise WorkspaceError(f"a tokens line names a revision and its tokens: {line[:80]!r}")
         identifier = parse_record_id(revision)
-        if tokens and identifier <= max(tokens):
+        if previous is not None and identifier <= previous:
             raise WorkspaceError(f"tokens lines are sorted by revision, each once: {revision}")
+        previous = identifier
         if not all(isinstance(t, str) for t in seen) or seen != sorted(set(map(str, seen))):
             raise WorkspaceError(f"the tokens of {revision} are sorted text, each once")
         tokens[identifier] = [str(t) for t in seen]

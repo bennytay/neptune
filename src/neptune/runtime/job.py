@@ -92,9 +92,8 @@ from neptune.discovery.external import (
     ExternalSource,
     ExternalSourceError,
     Spool,
+    SpoolError,
     fingerprint_external,
-    listed_entries,
-    open_spooled_or_listed,
 )
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.layout import Layout, layout_from_scan
@@ -363,7 +362,12 @@ class _ExternalOrigin:
         return ExternalReader(self.source, item.location, item.artifact, self.spool)
 
     def open(self, item: "_Source") -> BinaryIO:
-        return open_spooled_or_listed(self.source, item.location, item.content_id, self.spool)
+        """The spooled copy, exact by construction; an object never spooled is not fetched whole
+        again only to describe how it differs (``FileNotFoundError``: nothing is said)."""
+        spooled = self.spool.open(item.content_id)
+        if spooled is None:
+            raise FileNotFoundError(f"{item.content_id} is not spooled")
+        return spooled
 
 
 class _Opener:
@@ -637,6 +641,7 @@ class IngestJob:
         # discovery and probe transforms whose findings it records for them (ADR 0033 §1, §3).
         self._producers: dict[RecordId, TransformRecord] = {self.transform.id: self.transform}
         self._origin: _Origin | None = None  # set by discover
+        self._probe_inputs: JsonObject | None = None  # a kept probe's key, but the source's
         self._sources: list[_Source] = []
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
@@ -1086,6 +1091,20 @@ class IngestJob:
         for finding in self._differences(item) or ():
             self._record(finding, DISCOVERY_TRANSFORM)
 
+    def _spooled(self, item: _Source, reader: Reader) -> bool:
+        """Whether ``reader`` has the descriptor a sandboxed call keeps. A connector's object the
+        job holds no copy of is fetched now (ADR 0067): one that cannot be, or whose store serves
+        other bytes, is unreadable (quarantined), and ``False``. A spool that cannot be written
+        fails the job, as the workspace's failure."""
+        try:
+            reader.fileno()
+        except SpoolError as exc:
+            raise JobError(f"the workspace cannot hold the job's spool: {exc}") from _unusable(exc)
+        except _UNREADABLE as exc:
+            self._unreadable(item, exc)
+            return False
+        return True
+
     def _read_short(self, item: _Source, raised: Raised, step: str, chunk: Chunk | None) -> bool:
         """Whether a call that raised is the source's short read; if so, it is recorded.
 
@@ -1282,7 +1301,6 @@ class IngestJob:
                     events.SOURCE_RECOGNISED,
                     {
                         "location": location.to_json(),
-                        "new_token": observation.new_token,
                         "size": artifact.size,
                         "source": revision.content_id,
                     },
@@ -1321,8 +1339,12 @@ class IngestJob:
             self._origin = _ExternalOrigin(root.source, spool)
             ledger = self._load_ledger()
             discovery = self._connector(root, "list", lambda: root.source.discover(ledger))
-            entries = self._connector(root, "list", lambda: listed_entries(root.source, discovery))
-            self._finish(Phase.DISCOVER, {"files": len(entries), "skipped": 0, "symlinks": 0})
+            listed = self._connector(
+                root,
+                "list",
+                lambda: len(discovery.new) + len(discovery.changed) + len(discovery.unchanged),
+            )
+            self._finish(Phase.DISCOVER, {"files": listed, "skipped": 0, "symlinks": 0})
         with self._enter(Phase.FINGERPRINT):
             result = self._connector(
                 root, "fetch", lambda: fingerprint_external(root.source, ledger, discovery, spool)
@@ -1362,8 +1384,8 @@ class IngestJob:
             raise JobError(f"connector {root.connector} needs the network: {exc}") from exc
         except ExternalSourceError as exc:
             raise JobError(f"connector {root.connector} broke the Source protocol: {exc}") from exc
-        except (ScratchError, WorkspaceError) as exc:
-            raise JobError(f"the workspace cannot hold the job's spool: {exc}") from exc
+        except (ScratchError, WorkspaceError, SpoolError) as exc:
+            raise JobError(f"the workspace cannot hold the job's spool: {exc}") from _unusable(exc)
         except Exception as exc:
             message = (
                 f"connector {root.connector} failed to {step} {root.uri}: {type(exc).__name__}"
@@ -1448,18 +1470,22 @@ class IngestJob:
         """What a connector's object's probe is a function of: its bytes (content id and size),
         its name, the probe engine's policy, and every registered adapter as described, plugin
         distributions included (ADR 0067)."""
-        adapters: list[JsonValue] = [
-            {
-                "descriptor": canonical_json.dumps(descriptor.to_json()).decode("utf-8"),
-                "id": adapter_id,
+        if self._probe_inputs is None:  # the same for every source of the job
+            adapters: list[JsonValue] = [
+                {
+                    "descriptor": canonical_json.dumps(descriptor.to_json()).decode("utf-8"),
+                    "id": adapter_id,
+                }
+                for adapter_id, descriptor in sorted(self.registry.descriptors().items())
+            ]
+            distributions: JsonObject = dict(sorted(self._engine.distributions.items()))
+            self._probe_inputs = {
+                "adapters": adapters,
+                "distributions": distributions,
+                "engine": self._engine.transform.id,
             }
-            for adapter_id, descriptor in sorted(self.registry.descriptors().items())
-        ]
-        distributions: JsonObject = dict(sorted(self._engine.distributions.items()))
         inputs: JsonObject = {
-            "adapters": adapters,
-            "distributions": distributions,
-            "engine": self._engine.transform.id,
+            **self._probe_inputs,
             "name": _hint_name(item.location),
             "size": item.artifact.size,
         }
@@ -1534,6 +1560,9 @@ class IngestJob:
                         self._unreadable(item, exc)
                         counts["unreadable"] += 1
                         continue
+                    if not self._spooled(item, reader):
+                        counts["unreadable"] += 1
+                        continue
                     probing = self._probe(item, reader, head)
                     if probing is not None:
                         probed, clean = probing
@@ -1601,6 +1630,8 @@ class IngestJob:
         any call.
         """
         assert item.adapter is not None and item.config is not None
+        if not self._spooled(item, reader):
+            return
         adapter, config = item.adapter, item.config
         self._inspected += 1
         outcome = self._call(partial(adapter.inspect, reader, config), wire.INSPECT, reader)
@@ -1700,7 +1731,9 @@ class IngestJob:
                         failed += 1
                         continue
                     with reader:
-                        plan = self._make_plan(item, reader)
+                        plan = (
+                            self._make_plan(item, reader) if self._spooled(item, reader) else None
+                        )
                     if plan is None:
                         failed += 1
                         continue
@@ -1873,6 +1906,8 @@ class IngestJob:
                             reader = opener.open()
                         except _UNREADABLE as exc:
                             self._unreadable(item, exc)
+                        if reader is not None and not self._spooled(item, reader):
+                            reader = None
                     if reader is None:
                         failed += 1
                         break
@@ -2315,6 +2350,7 @@ class IngestJob:
             if (clocks := self._align_clocks()) is not None:
                 cited.add(clocks.transform.id)
                 derived = {**(derived or {}), **clocks.tables()}
+            self._connector_findings()  # and what introspection's reads found
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
