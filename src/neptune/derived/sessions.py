@@ -41,6 +41,7 @@ from neptune.derived.schemas import (
     definition_layout_from_json,
     stream_layout_from_json,
 )
+from neptune.derived.media import MEDIA_KIND, media_stream_from_json
 from neptune.derived.semantics import SEMANTIC_KIND, stream_semantic_from_json
 from neptune.discovery.layout import ROOT
 from neptune.identity.ids import record_id
@@ -582,6 +583,7 @@ DERIVED_KINDS: Final[Mapping[str, Callable[[JsonValue], Any]]] = {
     DEFINITION_KIND: definition_layout_from_json,  # ADR 0049
     LAYOUT_KIND: stream_layout_from_json,
     SEMANTIC_KIND: stream_semantic_from_json,
+    MEDIA_KIND: media_stream_from_json,  # ADR 0056
 }
 
 

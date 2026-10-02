@@ -339,6 +339,11 @@ def read_rows(source: Source) -> Iterator[dict[str, object]]:
         yield from batch.to_pylist()
 
 
+def count_rows(source: Source) -> int:
+    """A series file's row count, from its footer: no row is read."""
+    return int(_open(source).metadata.num_rows)
+
+
 def read_run(run: Path) -> SeriesBatch:
     """One chunk's run of a stream back as one batch: its columns and rows, in run order.
 
