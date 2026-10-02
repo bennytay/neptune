@@ -32,5 +32,5 @@ is part of another rides on its version and has no column.
 | `neptune-ledger` | 5.0.0 current |  |  |  |
 | `neptune-memory` |  | 1.1.0 behind |  |  |
 | `neptune-context` |  | not declared (no package yet) | not declared (no package yet) |  |
-| `neptune-deploy` | 4.0.0 current | 1.4.0 current | 1.0.0 current | no stable |
+| `neptune-deploy` | 5.0.0 current | 1.5.0 current | 1.0.0 current | no stable |
 | `neptune-learn` | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) | no stable |

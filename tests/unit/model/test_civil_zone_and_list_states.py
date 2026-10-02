@@ -211,6 +211,8 @@ def test_a_well_spelled_name_no_tz_database_knows_is_kept_as_declared() -> None:
         "Europe/./Berlin",
         "Europe/Berlin\n",
         "x" * 256,
+        "-Europe/Berlin",
+        "Europe/-Berlin",
     ],
 )
 def test_names_not_spelled_as_iana_zones_are_refused(name: str) -> None:
@@ -365,3 +367,24 @@ def test_the_schema_describes_both_list_shapes_and_the_new_kind() -> None:
     assert isinstance(properties, dict)
     assert properties["schema_version"] == {"enum": [LIFECYCLE_SINCE, LIST_STATES_SINCE]}
     assert properties["parts"] == {"$ref": "#/$defs/Listed_PartReplacement"}
+
+
+@pytest.mark.parametrize(
+    "zone_json",
+    [
+        {"knowledge": "known_absent", "provenance": HEADER.to_json()},
+        {"knowledge": "not_applicable"},
+    ],
+    ids=["known_absent", "not_applicable"],
+)
+def test_the_schema_refuses_zone_states_the_reader_refuses(zone_json: Any) -> None:
+    data = {**line(zone(Known("UTC"))), "zone": zone_json}
+    assert list(VALIDATOR.iter_errors(data)) != []
+    with pytest.raises(ValueError):
+        civil_time_zone_from_json(data)
+
+
+def test_a_lifecycle_line_declares_exactly_the_version_its_content_needs() -> None:
+    bare = line(work_order(related=Known(()), actions=Known(()), parts=Known(())))
+    with pytest.raises(SchemaVersionError):
+        MaintenanceEvent.from_json({**bare, "schema_version": LIST_STATES_SINCE})

@@ -11,4 +11,4 @@ __version__ = "0.0.1"
 
 # The package schema Deploy is built against: version 4 holds the lifecycle kinds (root ADR 0051).
 # contracts/lock.toml declares the same version as package-schema 4.0.0 (ADR 0001 §3).
-PACKAGE_SCHEMA_VERSION: Final = 4
+PACKAGE_SCHEMA_VERSION: Final = 5

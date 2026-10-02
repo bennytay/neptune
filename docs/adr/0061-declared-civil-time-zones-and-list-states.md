@@ -72,6 +72,10 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
        (ADR 0037 §6).
    - An adapter writes at most one companion per domain from what it reads. Disagreeing
      declarations are `Ambiguous`.
+   - The validator checks a package's zones (ADR 0054). `dangling_reference` (version 2) flags a
+     zone whose domain the package does not hold. `civil_zone_repeated` flags several zones on
+     one domain, which leaves its zone in doubt even when they agree. Validator 0.2.0 therefore
+     gives packages with findings a new lineage.
 4. **Lists that can be blank: `Listed[T] = Knowledge[tuple[T, ...]]`** (`neptune.model.lists`).
    This applies to every list on the lifecycle kinds and their parts:
    - `identifiers`, `machines`, `related`, `calibrations` and `assets`;

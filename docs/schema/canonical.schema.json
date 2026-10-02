@@ -466,7 +466,77 @@
           "const": 5
         },
         "zone": {
-          "$ref": "#/$defs/Knowledge_string"
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "const": "known"
+                },
+                "provenance": {
+                  "$ref": "#/$defs/Provenance"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "knowledge",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "knowledge": {
+                  "enum": [
+                    "unknown",
+                    "not_covered"
+                  ]
+                },
+                "provenance": {
+                  "$ref": "#/$defs/Provenance"
+                }
+              },
+              "required": [
+                "knowledge"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "candidates": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "provenance": {
+                        "$ref": "#/$defs/Provenance"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "value"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "knowledge": {
+                  "const": "ambiguous"
+                }
+              },
+              "required": [
+                "candidates",
+                "knowledge"
+              ],
+              "type": "object"
+            }
+          ]
         }
       },
       "required": [

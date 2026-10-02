@@ -107,8 +107,10 @@ class _Oracle:
 
 
 def _states(value: Any) -> Iterator[Any]:
-    """Every Knowledge state inside a record's fields."""
-    if isinstance(value, Known | Unknown | KnownAbsent | NotCovered):
+    """Every Knowledge state inside a record's fields; a Known list is structure, not a value."""
+    if isinstance(value, Known) and isinstance(value.value, tuple):
+        yield from _states(value.value)
+    elif isinstance(value, Known | Unknown | KnownAbsent | NotCovered):
         yield value
     elif isinstance(value, tuple):
         for item in value:
@@ -194,36 +196,36 @@ def test_the_oracle_agrees_with_every_block_the_compiler_cut() -> None:
 def test_the_amr_risk_assessment_is_parsed_as_declared() -> None:
     package = _mapped(_base("warehouse_amr"))
     risk = _one(package, "risk_assessment")
-    assert [i.value for i in risk.identifiers] == [_id("hh.risk_assessment", "RA-AMR-0417")]
+    assert [i.value for i in risk.identifiers.value] == [_id("hh.risk_assessment", "RA-AMR-0417")]
     assert risk.site.value.value == "HH-DC2"
-    assert [m.value.value for m in risk.machines] == ["AMR-07", "AMR-08"]
+    assert [m.value.value for m in risk.machines.value] == ["AMR-07", "AMR-08"]
     assert risk.method.value == "ISO 3691-4 risk estimation (severity, exposure, avoidance)"
     assert risk.assessed.value.ticks == _days("2026-03-12")
     assert risk.approval.decision.value == "Accepted with conditions"
     assert risk.approval.authority.value == "Site safety lead"
     assert risk.approval.time.value.ticks == _days("2026-03-14")
-    assert isinstance(risk.configuration, NotCovered) and isinstance(risk.related, tuple)
-    assert risk.related == ()
-    hazards = risk.hazards
+    assert isinstance(risk.configuration, NotCovered) and isinstance(risk.related.value, tuple)
+    assert risk.related.value == ()
+    hazards = risk.hazards.value
     assert [h.hazard.value for h in hazards] == [
         "Collision with a pedestrian in a shared aisle",
         "Fork contact with a rack during pallet pick",
         "Battery thermal event while charging",
     ]
     for hazard in hazards:
-        assert [s.name for s in hazard.scores] == [
+        assert [s.name for s in hazard.scores.value] == [
             "Severity",
             "Exposure",
             "Avoidance",
             "Risk reduction",
         ]
     # Scores are the table's own text: never ranked, never converted.
-    assert [[s.value.value for s in h.scores] for h in hazards] == [
+    assert [[s.value.value for s in h.scores.value] for h in hazards] == [
         ["S3", "E2", "A2", "PLr d"],
         ["S2", "E2", "A1", "PLr c"],
         ["S3", "E1", "A2", "PLr c"],
     ]
-    assert [m.value for m in hazards[0].mitigations] == [
+    assert [m.value for m in hazards[0].mitigations.value] == [
         "Personnel-detecting scanner",
         "speed limited to 1.2 m/s in aisle zones",
     ]
@@ -238,22 +240,22 @@ def _id(namespace: str, value: str) -> Any:
 def test_the_cell_risk_assessment_reads_a_headerless_table_and_its_own_column_names() -> None:
     package = _mapped(_base("manipulator_cell"))
     risk = _one(package, "risk_assessment")
-    assert risk.identifiers[0].value.value == "CELL3-RA-009"
+    assert risk.identifiers.value[0].value.value == "CELL3-RA-009"
     assert risk.site.value.value == "Cell 3, Line 2"
-    assert [m.value.value for m in risk.machines] == ["R1 6-axis", "R2 6-axis"]
+    assert [m.value.value for m in risk.machines.value] == ["R1 6-axis", "R2 6-axis"]
     # Day-first, as the template declares: 12 March 2026, not 3 December.
     assert risk.assessed.value.ticks == _days("12/03/2026", "%d/%m/%Y")
     assert risk.approval.decision.value == "Approved"
     assert risk.approval.time.value.ticks == _days("14/03/2026", "%d/%m/%Y")
-    names = [[s.name for s in h.scores] for h in risk.hazards]
+    names = [[s.name for s in h.scores.value] for h in risk.hazards.value]
     assert names == [["Severity of injury", "Exposure", "Avoidance", "Risk level"]] * 3
-    assert [s.value.value for s in risk.hazards[1].scores] == [
+    assert [s.value.value for s in risk.hazards.value[1].scores.value] == [
         "Serious",
         "Seldom",
         "Possible",
         "Medium",
     ]
-    assert [m.value for m in risk.hazards[2].mitigations] == [
+    assert [m.value for m in risk.hazards.value[2].mitigations.value] == [
         "Reduced speed 250 mm/s",
         "enabling switch",
     ]
@@ -275,7 +277,9 @@ def test_the_two_risk_formats_make_the_same_kind_from_different_structure() -> N
     amr = _one(_mapped(_base("warehouse_amr")), "risk_assessment")
     cell = _one(_mapped(_base("manipulator_cell")), "risk_assessment")
     assert type(amr) is type(cell)
-    assert [s.name for s in amr.hazards[0].scores] != [s.name for s in cell.hazards[0].scores]
+    assert [s.name for s in amr.hazards.value[0].scores.value] != [
+        s.name for s in cell.hazards.value[0].scores.value
+    ]
 
 
 # --- Commissioning, incident, SOP ------------------------------------------------------------
@@ -287,33 +291,33 @@ def test_the_commissioning_report_maps_inventories_tests_constraints_and_sign_of
     commissioning = _one(_mapped(base), "commissioning_baseline")
     assert commissioning.commissioned.value.ticks == _seconds("2026-02-20 16:30")
     assert commissioning.configuration.value.value == "cfg-c3-1.4"
-    assert [i.name.value for i in commissioning.hardware] == [
+    assert [i.name.value for i in commissioning.hardware.value] == [
         "Manipulator R1",
         "Controller R1",
         "Gripper",
     ]
-    controller = commissioning.hardware[1]
+    controller = commissioning.hardware.value[1]
     assert controller.model.value == "OmniCore C30"
-    assert controller.identifiers[0].value.value == "SN-C30-552"
+    assert controller.identifiers.value[0].value.value == "SN-C30-552"
     assert controller.version.value == FirmwareVersion("7.8.1")
-    assert [(i.name.value, i.version.value) for i in commissioning.software] == [
+    assert [(i.name.value, i.version.value) for i in commissioning.software.value] == [
         ("Palletising application", DeclaredVersion("1.4.0")),
         ("Safety configuration", DeclaredVersion("2026.02-a")),
     ]
-    assert [c.value.value for c in commissioning.calibrations] == ["CAL-C3-001", "CAL-C3-002"]
-    assert [(t.name.value, t.result.value) for t in commissioning.tests] == [
+    assert [c.value.value for c in commissioning.calibrations.value] == ["CAL-C3-001", "CAL-C3-002"]
+    assert [(t.name.value, t.result.value) for t in commissioning.tests.value] == [
         ("Safety-rated monitored stop", "PASS"),
         ("Light curtain response", "PASS 142 ms"),
         ("Palletising cycle, 50 pallets", "PASS"),
     ]
-    assert commissioning.tests[2].performed.value.ticks == _seconds("2026-02-20 14:15")
-    assert [c.value for c in commissioning.constraints] == [
+    assert commissioning.tests.value[2].performed.value.ticks == _seconds("2026-02-20 14:15")
+    assert [c.value for c in commissioning.constraints.value] == [
         "Payload not above 35 kg",
         "Pallet gate closed during automatic mode",
     ]
     # Each statement cites its own list item.
-    assert [oracle.text(c.provenance.evidence) for c in commissioning.constraints] == [
-        c.value for c in commissioning.constraints
+    assert [oracle.text(c.provenance.evidence) for c in commissioning.constraints.value] == [
+        c.value for c in commissioning.constraints.value
     ]
     assert commissioning.sign_off.decision.value == "Accepted"
     assert commissioning.sign_off.time.value.ticks == _seconds("2026-02-21 09:10")
@@ -326,10 +330,10 @@ def test_the_incident_report_keeps_free_text_as_cited_spans_and_reads_its_timeli
     assert incident.severity.value == "Minor, no injury"
     assert incident.zone.value.value == "Z3"
     assert incident.location.value == "Aisle 14, rack face B"
-    assert [a.value.value for a in incident.assets] == ["PAL-5521", "RACK-14B"]
-    assert incident.related[0].value.value == "RA-AMR-0417"
+    assert [a.value.value for a in incident.assets.value] == ["PAL-5521", "RACK-14B"]
+    assert incident.related.value[0].value.value == "RA-AMR-0417"
     assert incident.occurred.value.ticks == _seconds("2026-04-02 14:07")
-    assert [(e.time.value.ticks, e.text.value) for e in incident.timeline] == [
+    assert [(e.time.value.ticks, e.text.value) for e in incident.timeline.value] == [
         (_seconds("2026-04-02 14:05"), "AMR-07 starts pallet pick in aisle 14"),
         (_seconds("2026-04-02 14:07"), "Fork contacts rack upright; protective stop"),
         (_seconds("2026-04-02 14:09"), "Fleet manager flags AMR-07 as blocked"),
@@ -369,24 +373,27 @@ def _block_of(blocks: dict[EvidenceRef, str], evidence: EvidenceRef) -> Evidence
 def test_the_sop_becomes_a_maintenance_event_from_a_pdf_and_from_markdown() -> None:
     package = _mapped(_base("inspection_quadruped"))
     events = _of(package, "maintenance_event")
-    by_wo = {e.identifiers[0].value.value: e for e in events}
+    by_wo = {e.identifiers.value[0].value.value: e for e in events}
     assert set(by_wo) == {"WO-QD-5521", "WO-QD-6107"}
     pdf, markdown = by_wo["WO-QD-5521"], by_wo["WO-QD-6107"]
     for event in (pdf, markdown):
-        assert event.actions[0].value == "Power the robot down and place it on the service stand"
-        assert len(event.actions) == 4
-        assert event.related[0].value.value == "SOP-MP-031"
+        assert (
+            event.actions.value[0].value == "Power the robot down and place it on the service stand"
+        )
+        assert len(event.actions.value) == 4
+        assert event.related.value[0].value.value == "SOP-MP-031"
         assert isinstance(event.site, NotCovered)
     assert pdf.performed.value.ticks == _days("2026-05-08")
     assert markdown.performed.value.ticks == _days("2026-05-19")
-    assert [p.part.value for p in pdf.parts] == ["Foot pad FL", "Retaining screw set"]
-    assert pdf.parts[0].removed[0].value.value == "FP-0183"
-    assert pdf.parts[0].installed[0].value.value == "FP-0291"
-    assert [p.part.value for p in markdown.parts] == ["Foot pad RR"]
+    assert [p.part.value for p in pdf.parts.value] == ["Foot pad FL", "Retaining screw set"]
+    assert pdf.parts.value[0].removed.value[0].value.value == "FP-0183"
+    assert pdf.parts.value[0].installed.value[0].value.value == "FP-0291"
+    assert [p.part.value for p in markdown.parts.value] == ["Foot pad RR"]
     assert markdown.diagnosis.value == "Foot pad cracked on leg RR"
     # Markdown cites byte-for-byte spans of the file itself: no page.
     assert all(
-        not isinstance(s.provenance.evidence.locator[0], Page) for s in _states(markdown.actions)
+        not isinstance(s.provenance.evidence.locator[0], Page)
+        for s in _states(markdown.actions.value)
     )
 
 

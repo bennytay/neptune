@@ -156,11 +156,12 @@ def timestamp_domain_from_json(data: JsonValue) -> TimestampDomain:
 # The schema version that added ``CivilTimeZone`` (ADR 0061, ADR 0037 §1).
 CIVIL_ZONE_SINCE: Final = 5
 
-# An IANA time zone database name, by syntax only: components of letters, digits and ``._+-``
-# joined by ``/`` (``Europe/Berlin``, ``America/Argentina/Buenos_Aires``, ``Etc/GMT-5``, ``UTC``).
+# An IANA time zone database name, by syntax only: components of letters, digits and ``._+-``,
+# none starting with ``.`` or ``-``, joined by ``/``: ``Europe/Berlin``, ``Etc/GMT-5``, ``UTC``,
+# ``America/Argentina/Buenos_Aires``.
 # Whether the name is in a tz database is never checked here: that depends on the database's
 # release, and a record's bytes may not (ADR 0061 §1).
-_ZONE_PART: Final = r"[A-Za-z0-9_+\-][A-Za-z0-9._+\-]*"
+_ZONE_PART: Final = r"[A-Za-z0-9_+][A-Za-z0-9._+\-]*"
 _IANA_ZONE: Final = re.compile(f"{_ZONE_PART}(?:/{_ZONE_PART})*")
 _IANA_ZONE_MAX: Final = 255
 
@@ -169,11 +170,7 @@ def check_iana_zone(field: str, name: str) -> None:
     """``name`` is spelled as an IANA zone name; it is not looked up in any tz database."""
     if not isinstance(name, str):
         raise TypeError(f"{field} must be a str, got {type(name).__name__}")
-    if (
-        len(name) > _IANA_ZONE_MAX
-        or not _IANA_ZONE.fullmatch(name)
-        or any(part in {".", ".."} for part in name.split("/"))
-    ):
+    if len(name) > _IANA_ZONE_MAX or not _IANA_ZONE.fullmatch(name):
         raise ValueError(f"{field} is not spelled as an IANA time zone name: {name!r}")
 
 

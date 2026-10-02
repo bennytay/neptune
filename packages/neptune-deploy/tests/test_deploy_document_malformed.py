@@ -117,13 +117,13 @@ def test_a_rotated_page_changes_neither_the_values_nor_their_citations_only_the_
     (risk,) = _of(package, "risk_assessment")
     (reference,) = _of(clean, "risk_assessment")
     assert risk.provenance.evidence != reference.provenance.evidence  # another file's bytes
-    assert [[s.value.value for s in h.scores] for h in risk.hazards] == [
-        [s.value.value for s in h.scores] for h in reference.hazards
+    assert [[s.value.value for s in h.scores.value] for h in risk.hazards.value] == [
+        [s.value.value for s in h.scores.value] for h in reference.hazards.value
     ]
 
     # Spans are the extracted text's, so a rotation moves none of them.
     def spans(record: Any) -> list[Any]:
-        return [h.hazard.provenance.evidence.locator for h in record.hazards]
+        return [h.hazard.provenance.evidence.locator for h in record.hazards.value]
 
     assert spans(risk) == spans(reference)
 
@@ -275,13 +275,13 @@ def test_two_documents_stating_one_identifier_are_both_kept_with_a_finding() -> 
 def test_list_findings_are_one_per_value_and_name_the_record_and_the_field() -> None:
     blank = _mapped(_with(_base("warehouse_amr"), _retext("Assets: PAL-5521; RACK-14B", "Assets:")))
     (incident,) = _of(blank, "incident_record")
-    assert incident.assets == ()
+    assert incident.assets.value == ()
     (finding,) = _codes(blank)["list_cell_blank"]
     assert finding.details["field"] == "/assets" and finding.records == (incident.id,)
     edits = _retext("Assets: PAL-5521; RACK-14B", "Assets: PAL-5521; ; PAL-5521")
     package = _mapped(_with(_base("warehouse_amr"), edits))
     (incident,) = _of(package, "incident_record")
-    assert [a.value.value for a in incident.assets] == ["PAL-5521"]
+    assert [a.value.value for a in incident.assets.value] == ["PAL-5521"]
     codes = _codes(package)
     (empty,) = codes["list_part_empty"]
     (again,) = codes["list_id_repeated"]
@@ -301,7 +301,7 @@ def test_a_table_with_no_rows_gives_an_empty_list_and_a_statement_with_none_give
     )
     package = _mapped(replace(base, records=kept))
     (risk,) = _of(package, "risk_assessment")
-    assert risk.hazards == ()
+    assert risk.hazards.value == ()
     assert isinstance(risk.configuration, NotCovered)
 
 
@@ -468,7 +468,7 @@ def test_a_table_of_a_matched_document_is_not_read_again_by_a_mapping_file() -> 
         json.dumps(
             {
                 "schema": "neptune-deploy.lifecycle-mapping/1",
-                "id": "pdf.tests",
+                "id": "pdf.tests.value",
                 "version": "1",
                 "rules": [
                     {
@@ -546,7 +546,7 @@ def test_a_changed_template_is_new_lineage_beside_the_old() -> None:
     (a,) = _of(old, "risk_assessment")
     (b,) = _of(new, "risk_assessment")
     assert a.id != b.id and a.provenance.transform != b.provenance.transform
-    assert [h.hazard.value for h in a.hazards] == [h.hazard.value for h in b.hazards]
+    assert [h.hazard.value for h in a.hazards.value] == [h.hazard.value for h in b.hazards.value]
 
 
 def test_each_time_field_has_a_clock_and_the_declared_zone_is_in_the_config_never_applied() -> None:

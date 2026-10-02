@@ -498,14 +498,15 @@ class _Lifecycle(_Declared):
     def from_json(cls: type[R], data: JsonValue) -> R:
         """Parse strictly: unexpected or missing keys and wrongly typed values are errors.
 
-        A line declaring a version older than its content needs is refused by version.
+        A line must declare exactly the version its content needs: an older one is refused by
+        version, and a newer one would be a second encoding of the same record.
         """
         obj, record_id, provenance = evidence_record_object(
             data, cls.kind, set(cls._CODECS), cls.since
         )
         record = cls(id=record_id, provenance=provenance, **cls._fields_from_json(obj))
         declared = obj["schema_version"]
-        if not isinstance(declared, int) or declared < record.schema_version:
+        if not isinstance(declared, int) or declared != record.schema_version:
             raise SchemaVersionError(
                 f"this {cls.kind} uses schema version {record.schema_version}, not {declared}"
             )

@@ -43,7 +43,7 @@ from neptune.model.provenance import (
     VideoFrame,
 )
 from neptune.model.record import OLDEST_READABLE_VERSION, SCHEMA_VERSION
-from neptune.model.reference import FrameTransform
+from neptune.model.reference import CivilTimeZone, FrameTransform
 from neptune.model.scalars import NonFinite
 from neptune.model.source import LocalPath, RawLocalPath
 from neptune.model.time import Timestamp
@@ -394,7 +394,33 @@ def _validity(builder: _Builder) -> JsonObject:
     }
 
 
+def _civil_zone(builder: _Builder) -> JsonObject:
+    """A declared zone's states: never ``known_absent`` or ``not_applicable`` (ADR 0061 §1)."""
+    provenance = builder.schema(Provenance)
+    name: JsonObject = {"type": "string"}
+    candidate = _obj({"provenance": provenance, "value": name}, optional=("provenance",))
+    return {
+        "anyOf": [
+            _obj(
+                {"knowledge": _const("known"), "provenance": provenance, "value": name},
+                optional=("provenance",),
+            ),
+            _obj(
+                {"knowledge": {"enum": ["unknown", "not_covered"]}, "provenance": provenance},
+                optional=("provenance",),
+            ),
+            _obj(
+                {
+                    "candidates": {"items": candidate, "minItems": 2, "type": "array"},
+                    "knowledge": _const("ambiguous"),
+                }
+            ),
+        ]
+    }
+
+
 _FIELD_OVERRIDES: Final[Mapping[tuple[type, str], Callable[[_Builder], JsonObject]]] = {
+    (CivilTimeZone, "zone"): _civil_zone,
     (IngestFinding, "subject"): _finding_subject,
     (FrameTransform, "validity"): _validity,
 }
