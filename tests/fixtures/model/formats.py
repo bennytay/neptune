@@ -106,8 +106,8 @@ def mcap(
     for i, m in enumerate(messages):
         fields = struct.pack("<HIQQ", m.channel_id, m.sequence, m.log_time, m.publish_time)
         out.add(f"message:{i}", _mcap_record(0x05, fields + m.data))
-    for i, (name, entries) in enumerate(metadata):
-        pairs = b"".join(_mcap_string(k) + _mcap_string(v) for k, v in entries)
+    for i, (name, declared) in enumerate(metadata):
+        pairs = b"".join(_mcap_string(k) + _mcap_string(v) for k, v in declared)
         out.add(f"metadata:{i}", _mcap_record(0x0C, _mcap_string(name) + _mcap_bytes(pairs)))
     out.add("data_end", _mcap_record(0x0F, struct.pack("<I", 0)))
     summary_start = len(out.data)
