@@ -62,10 +62,10 @@ test-fast: ## Test suite excluding tests marked slow
 check: lint type test ## Everything CI runs; must pass before opening a PR (PKG=<name> for one)
 
 adr-index: ## Regenerate docs/adr/README.md (compiler and each member); `make fmt` runs it
-> python3 .github/scripts/adr_index.py $(COMPILER_ADR) $(ADR_DIRS)
+> $(if $(strip $(COMPILER_ADR) $(ADR_DIRS)),python3 .github/scripts/adr_index.py $(COMPILER_ADR) $(ADR_DIRS),@true)
 
 adr-index-check: ## Fail if an ADR index is stale
-> python3 .github/scripts/adr_index.py --check $(COMPILER_ADR) $(ADR_DIRS)
+> $(if $(strip $(COMPILER_ADR) $(ADR_DIRS)),python3 .github/scripts/adr_index.py --check $(COMPILER_ADR) $(ADR_DIRS),@true)
 
 schema: ## Regenerate docs/schema/canonical.schema.json from the model's types
 > $(UV) run python -m neptune.model.schema docs/schema/canonical.schema.json
