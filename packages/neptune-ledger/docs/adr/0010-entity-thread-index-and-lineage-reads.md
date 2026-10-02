@@ -181,6 +181,8 @@ issue. Four facts shape it:
   decides how the Ledger catalogs derived records.
 - MVL-97's per-clock interval index can reuse `thread_clock_mapping`'s reading rather than parse
   mappings again.
+- Package schema 4's lifecycle kinds (root ADR 0051's commissioning, maintenance, incident and the
+  rest) name machines in `machines`, but join no thread: they are not in ADR 0003 §2's table.
 - A new thread kind, membership field or world-time field still needs a superseding ADR to 0003.
   It also needs a membership change here, and a catalog rebuild, because the index holds the old
   membership.
