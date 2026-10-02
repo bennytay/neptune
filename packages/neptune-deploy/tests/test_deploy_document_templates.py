@@ -71,14 +71,17 @@ def test_two_versions_of_one_template_coexist_and_one_version_twice_does_not() -
         TemplateRegistry([load_template(RISK), load_template(RISK)])
 
 
-def _edit(change: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+def _edit(change: Callable[[dict[str, Any]], object]) -> dict[str, Any]:
     document = copy.deepcopy(_document())
     change(document)
     return document
 
 
-BAD: dict[str, tuple[Callable[[dict[str, Any]], None], str]] = {
-    "wrong schema": (lambda d: d.update(schema="neptune-deploy.document-template/2"), "schema must"),
+BAD: dict[str, tuple[Callable[[dict[str, Any]], object], str]] = {
+    "wrong schema": (
+        lambda d: d.update(schema="neptune-deploy.document-template/2"),
+        "schema must",
+    ),
     "unknown kind": (lambda d: d.update(kind="inspection"), "not a lifecycle kind"),
     "no fields": (lambda d: d.pop("fields"), "missing"),
     "unexpected key": (lambda d: d.update(extra=1), "unexpected"),
@@ -186,5 +189,5 @@ def test_a_template_directory_reads_only_its_json_files(tmp_path: Path) -> None:
     (tmp_path / "notes.txt").write_text("not a template")
     assert len(TemplateRegistry.from_paths([tmp_path])) == 1
     (tmp_path / "broken.json").write_text("{}")
-    with pytest.raises(MappingError, match="broken.json"):
+    with pytest.raises(MappingError, match=r"broken\.json"):
         TemplateRegistry.from_paths([tmp_path])
