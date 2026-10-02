@@ -312,6 +312,26 @@ def test_documents_and_their_blocks() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "authorisation_envelope",
+        "change_record",
+        "commissioning_baseline",
+        "incident_record",
+        "intervention",
+        "maintenance_event",
+        "requalification_record",
+        "risk_assessment",
+    ],
+)
+def test_lifecycle_records_join_no_thread_until_an_adr_adds_them(kind: str) -> None:
+    """Package schema 4's lifecycle kinds name machines, but ADR 0003 §2's table is the only
+    source of membership: a new kind or field needs a superseding ADR (ADR 0010 Consequences)."""
+    found = rows(record(kind, 1, machines=[known("serial", "AMR-0011")]))
+    assert found == ThreadRows((), (), ())
+
+
 def test_records_without_a_record_level_anchor_are_in_no_thread() -> None:
     bare = {"id": rid(), "kind": "stream"}
     empty = record("stream", 1)
