@@ -136,7 +136,7 @@ from neptune.runtime.sandbox import (
     Returned,
     SandboxError,
 )
-from neptune.store.assemble import NotDurableError, StagedPackage, publish, stage
+from neptune.store.assemble import NotDurableError, StagedPackage, amend, publish, stage
 from neptune.store.package import (
     PackageError,
     read_package,
@@ -152,6 +152,7 @@ from neptune.store.workspace import (
     Workspace,
     WorkspaceError,
 )
+from neptune.validate import validate_package
 
 DEFAULT_ATTEMPTS: Final = 2
 ADAPTER_FAILED: Final = f"{PROBE_ID}.adapter_failed"
@@ -1999,12 +2000,17 @@ class IngestJob:
     # --- validate ------------------------------------------------------------------------------
 
     def _validate(self) -> RecordId:
-        """Read the staged package back and verify every file, id, series and the receipt."""
+        """Read the staged package back and verify it; run the integrity and data-quality rules
+        over it (ADR 0054) and, if they find anything, stage it again with their findings."""
         with self._enter(Phase.VALIDATE):
             self._check_cancel()
             assert self._staged is not None
             try:
                 package = read_package(self._staged.path)
+                report = validate_package(package)
+                if report.findings:
+                    self._staged = amend(self._staged, package, report.records())
+                    package = read_package(self._staged.path)
             except (PackageError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the assembled package does not verify: {exc}") from exc
             summary: dict[str, JsonValue] = {
@@ -2012,6 +2018,7 @@ class IngestJob:
                 "package": package.id,
                 "records": len(package.records),
                 "series": len(package.series),
+                "validation": report.summary(),
             }
             self._emit(events.PACKAGE_VERIFIED, summary)
             self._finish(Phase.VALIDATE, summary)

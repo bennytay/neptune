@@ -38,6 +38,7 @@ from neptune.store.durable import fsync_directory, fsync_tree
 from neptune.store.package import (
     MANIFEST,
     Content,
+    IngestPackage,
     PackageError,
     copy_file,
     open_file,
@@ -358,6 +359,39 @@ def stage(
         shutil.rmtree(staging, ignore_errors=True)
         raise
     return StagedPackage(staging, destination, package_id(contents), tuple(uses))
+
+
+def amend(staged: StagedPackage, package: IngestPackage, extra: Iterable[Any]) -> StagedPackage:
+    """Stage ``package`` again with ``extra`` records added: validation's transform and findings.
+
+    ``package`` is ``staged`` as ``read_package`` read it. The new package is built in a fresh
+    sibling: its tables, receipt and manifest are rewritten, and its series and blobs are moved
+    (never copied) out of ``staged``, which is then removed. On failure the new sibling is removed
+    and ``staged`` may have lost files; the caller discards it.
+    """
+    contents = package_contents(
+        [*package.records, *extra],
+        series=package.series,
+        blobs=package.blobs,
+        store=package.manifest.store,
+        derived=package.derived,
+    )
+    staging = _sibling(staged.destination)
+    try:
+        for relative, data in sorted(contents.items()):
+            target = staging / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(data, bytes):
+                target.write_bytes(data)
+            elif data.is_relative_to(staged.path):
+                data.rename(target)
+            else:
+                raise PackageError(f"{relative} is not a file of the staged package")
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    staged.discard()
+    return StagedPackage(staging, staged.destination, package_id(contents), staged.derivatives)
 
 
 def publish(staged: StagedPackage) -> ContentId:
