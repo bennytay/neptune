@@ -52,6 +52,7 @@ from neptune.sdk import (
     JobOptions,
     Neptune,
     NeptuneError,
+    PluginPolicy,
     PublishIncompleteError,
     committed_result,
 )
@@ -174,6 +175,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="run on a host that cannot apply every sandbox guarantee; the receipt says which "
         "were lost",
     )
+    _plugin_arguments(ingest)
     ingest.add_argument("--job", metavar="NAME", help="name the job in the package's envelope")
     ingest.add_argument(
         "--json",
@@ -210,6 +212,33 @@ def _init_manifest_parser(commands: "argparse._SubParsersAction[argparse.Argumen
         help="where adapter probes run, as for ingest",
     )
     init.add_argument("--allow-degraded-sandbox", action="store_true", help="as for ingest")
+    _plugin_arguments(init)
+
+
+def _plugin_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--no-plugins",
+        action="store_true",
+        help="use only the adapters Neptune ships: read no installed plugin's entry points",
+    )
+    parser.add_argument(
+        "--plugin",
+        action="append",
+        default=None,
+        metavar="DIST",
+        help="read only the plugins of the installed distribution DIST (repeatable); default: "
+        "every installed plugin",
+    )
+
+
+def _plugins(args: argparse.Namespace) -> PluginPolicy:
+    """The plugin policy the flags name (``run`` refuses both flags together)."""
+    if args.no_plugins:
+        return PluginPolicy(enabled=False)
+    try:
+        return PluginPolicy(allow=None if args.plugin is None else tuple(args.plugin))
+    except ValueError as exc:
+        raise ConfigurationError(f"--plugin: {exc}") from exc
 
 
 _INIT_DESCRIPTION: Final = """\
@@ -264,6 +293,8 @@ def run(
     if args.command is None:
         parser.print_usage(stderr)
         return exit_codes.USAGE
+    if args.no_plugins and args.plugin is not None:
+        return _usage(stderr, "--plugin and --no-plugins contradict each other", args.command)
     if args.command == "init-manifest":
         return _InitManifest(args, stdout, stderr).run()
     if args.manifest is not None and args.no_manifest:
@@ -278,8 +309,8 @@ def run(
     return _Ingest(args, stdout, stderr, cancel).run()
 
 
-def _usage(stderr: TextIO, message: str) -> int:
-    stderr.write(f"neptune ingest: error: {message}\n")
+def _usage(stderr: TextIO, message: str, command: str = "ingest") -> int:
+    stderr.write(f"neptune {command}: error: {message}\n")
     return exit_codes.USAGE
 
 
@@ -301,7 +332,7 @@ class _Ingest:
     def run(self) -> int:
         args = self.args
         try:
-            client = Neptune(args.workspace, options=self._options())
+            client = Neptune(args.workspace, options=self._options(), plugins=_plugins(args))
             manifest: str | Literal[False] | None = False if args.no_manifest else args.manifest
             if args.dry_run:
                 result = client.dry_run(
@@ -540,7 +571,8 @@ class _InitManifest:
                 isolation=Isolation(args.isolation),
                 allow_degraded_sandbox=args.allow_degraded_sandbox,
             )
-            text = generate(folder, Neptune(args.workspace, options=options))
+            client = Neptune(args.workspace, options=options, plugins=_plugins(args))
+            text = generate(folder, client)
             parse_bytes(text.encode("utf-8"), MANIFEST_NAMES[0])  # what it writes, it reads
         except JobError as exc:
             return self._fail("invalid_configuration", str(exc))
