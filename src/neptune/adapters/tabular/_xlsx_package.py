@@ -203,12 +203,13 @@ class GapBudget:
     """How many blank cells a row may make for its real cells (``xlsx_max_gap_ratio``).
 
     A row's cells are by column, so a real cell far to the right of the others is a run of blank
-    cells before it. Before each real cell the gap since the last one may be at most ``ratio``
-    times the real cells kept so far plus one; the first real cell that would exceed it, and every
-    one after it, is not covered. ``add`` takes the columns in order and says whether the cell is
-    kept; ``width`` is the cells the row makes (its blanks, its kept cells, and one not-covered
-    cell where the rest was cut). The scan in ``plan`` and the reader in ``ingest`` both use it,
-    so a block's cell count is exact.
+    cells before it. The blanks a row makes up to and including the gap before a real cell may be
+    at most ``ratio`` times the real cells kept so far plus one (the whole row's, not each gap's,
+    so the allowance does not compound): a row makes at most ``(ratio + 1) * real + ratio`` cells.
+    The first real cell that would exceed it, and every one after it, is not covered. ``add``
+    takes the columns in order and says whether the cell is kept; ``width`` is the cells the row
+    makes (its blanks, its kept cells, and one not-covered cell where the rest was cut). The scan
+    in ``plan`` and the reader in ``ingest`` both use it, so a block's cell count is exact.
     """
 
     def __init__(self, ratio: int) -> None:
@@ -218,7 +219,7 @@ class GapBudget:
         self.cut = False
 
     def add(self, column: int) -> bool:
-        if self.cut or column - self.next > self.ratio * (self.real + 1):
+        if self.cut or column - self.real > self.ratio * (self.real + 1):
             self.cut = True
             return False
         self.real += 1

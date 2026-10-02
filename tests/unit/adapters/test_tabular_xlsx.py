@@ -857,22 +857,70 @@ def test_a_cell_far_from_the_others_is_not_covered_not_a_run_of_blanks(gen: Modu
     assert fields(cell_step(records[0].cells[0]))["ref"] == "A1"  # the place after the last kept
 
 
-def test_the_gap_budget_is_per_real_cell_and_its_boundary_reads(gen: ModuleType) -> None:
+def test_the_gap_budget_is_per_row_and_its_boundary_reads(gen: ModuleType) -> None:
     rows = [
-        gen.row(1, gen.n("D1", 1), gen.n("I1", 2), gen.n("N1", 3)),  # gaps 3, 4, 4
-        gen.row(2, gen.n("E2", 1)),  # gap 4
+        gen.row(1, gen.n("D1", 1), gen.n("I1", 2), gen.n("N1", 3)),  # blanks 3, 7, 11
+        gen.row(2, gen.n("E2", 1)),  # blanks 4
     ]
     data = build(gen, [("S", gen.worksheet(rows))], styles=False)
     at = run(data, xlsx_max_gap_ratio=4)
     first, second = rows_of(at, named(at, "S"))
-    # 3 <= 4*1; 4 <= 4*2; 4 <= 4*3: all kept, and E2 (gap 4 <= 4*1) too
+    # 3 <= 4*1; 7 <= 4*2; 11 <= 4*3: all kept, and E2 (4 <= 4*1) too
     assert [state(c) for c in first.cells].count("Known") == 3 and len(first.cells) == 14
     assert len(second.cells) == 5 and codes(at) == []
     over = run(data, xlsx_max_gap_ratio=3)
     first, second = rows_of(over, named(over, "S"))
-    # D1 is gap 3 <= 3; I1 is gap 4 > 3*2? no, 4 <= 6: kept; N1 is 4 <= 9: kept. E2: 4 > 3
-    assert len(first.cells) == 14 and [state(c) for c in second.cells] == ["NotCovered"]
+    # D1: 3 <= 3 kept; I1: 7 > 3*2 cut, and so is N1; E2: 4 > 3 cut
+    assert [state(c) for c in first.cells] == ["Unknown"] * 3 + ["Known", "NotCovered"]
+    assert [state(c) for c in second.cells] == ["NotCovered"]
     assert codes(over) == ["tabular.xlsx_limit"]
+
+
+def sparse_row(gen: ModuleType, number: int, count: int, ratio: int, *, compound: bool) -> str:
+    """``count`` cells each placed as far right as a budget allows: a gap of ``ratio * (k + 1)``
+    after k cells (what a budget on each gap alone permits, so the row grows quadratically), or
+    the farthest the whole row's budget permits."""
+    cells, column = [], -1
+    for k in range(count):
+        column = column + 1 + ratio * (k + 1) if compound else k + ratio * (k + 1)
+        cells.append(gen.n(f"{_xlsx._letters(column)}{number}", 1))
+    return str(gen.row(number, *cells))
+
+
+def test_a_rows_blanks_are_bounded_by_its_real_cells_not_by_each_gap(gen: ModuleType) -> None:
+    ratio = 4
+    rows = [sparse_row(gen, r, 12, ratio, compound=True) for r in range(1, 4)]
+    data = build(gen, [("S", gen.worksheet(rows))], styles=False)
+    output = run(data, xlsx_max_gap_ratio=ratio)
+    records = rows_of(output, named(output, "S"))
+    assert len(records) == 3
+    for record in records:
+        made = [c for c in record.cells if not isinstance(c, NotCovered)]
+        real = sum(isinstance(c, Known) for c in record.cells)
+        assert real < 12  # the row was cut: each gap fits its own budget, the row's does not
+        assert len(made) <= (ratio + 1) * real + ratio
+        assert isinstance(record.cells[-1], NotCovered)
+    assert codes(output) == ["tabular.xlsx_limit"]
+    # the farthest placement the row's own budget permits is all kept: ratio + 1 cells per real
+    exact = [sparse_row(gen, 1, 12, ratio, compound=False)]
+    kept = run(build(gen, [("S", gen.worksheet(exact))], styles=False), xlsx_max_gap_ratio=ratio)
+    (record,) = rows_of(kept, named(kept, "S"))
+    assert sum(isinstance(c, Known) for c in record.cells) == 12
+    assert len(record.cells) == 11 + ratio * 12 + 1  # 12 cells, the last at column 11 + 4 * 12
+    assert codes(kept) == []
+
+
+def test_the_default_budget_bounds_a_cumulative_sparse_row_at_small_scale(
+    gen: ModuleType,
+) -> None:
+    rows = [sparse_row(gen, r, 6, 64, compound=True) for r in range(1, 6)]
+    data = build(gen, [("S", gen.worksheet(rows))], styles=False)
+    output = run(data)
+    for record in rows_of(output, named(output, "S")):
+        real = sum(isinstance(c, Known) for c in record.cells)
+        made = [c for c in record.cells if not isinstance(c, NotCovered)]
+        assert len(made) <= 65 * real + 64
+    assert sum(len(r.cells) for r in rows_of(output, named(output, "S"))) < 5 * (65 * 3 + 65)
 
 
 def test_gap_cuts_do_not_depend_on_the_blocks(

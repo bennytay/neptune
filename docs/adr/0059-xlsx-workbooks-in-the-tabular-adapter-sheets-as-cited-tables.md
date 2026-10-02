@@ -117,7 +117,7 @@ its name.
     | `xlsx_max_shared_strings`, `xlsx_max_shared_string_bytes` | 1,000,000, 32 MiB | strings past it are not covered: a cell naming one is `NotCovered`, not `Unknown` |
     | `xlsx_max_styles` | 100,000 | formats past it are not read: cells keep their values, without a `numfmt` |
     | `xlsx_max_cells` | 1,000,000 | per sheet, counting the cells made (a kept gap is a blank cell): rows from the one that crosses it are not read |
-    | `xlsx_max_gap_ratio` | 64 | blank cells a row makes before a real cell: at most this many per real cell kept before it, plus one. The first real cell past it and all after it are not covered: the row ends with one `NotCovered` cell (content `not_covered`, at the column after the last kept cell) and `xlsx_limit` says so. A 2 KB sheet of cells in column XFD would otherwise make 16,383 blanks each |
+    | `xlsx_max_gap_ratio` | 64 | blank cells a row makes before a real cell: at most this many per real cell kept before it, plus one, counted over the whole row (a row makes at most `(ratio + 1) * real + ratio` cells, so the allowance does not compound from gap to gap). The first real cell past it and all after it are not covered: the row ends with one `NotCovered` cell (content `not_covered`, at the column after the last kept cell) and `xlsx_limit` says so. A 2 KB sheet of cells in column XFD would otherwise make 16,383 blanks each |
     | `xlsx_max_sheets` | 256 | sheets past it have no table; `sheet_count` says how many there were |
 
     The existing `max_rows`, `max_row_bytes` (a row's XML, and so a cell's text) and `max_columns`
