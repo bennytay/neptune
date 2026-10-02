@@ -1,0 +1,39 @@
+{
+  "schema": "neptune-deploy.document-template/1",
+  "id": "risk.robot_cell",
+  "version": "1",
+  "description": "A manipulator cell's risk assessment: a headerless Field | Value table up front, then one row per hazard with severity of injury, exposure, avoidance and a risk level. Dates are day-first on the plant's wall clock. The Task column has no place in the model's hazard and is left unread.",
+  "kind": "risk_assessment",
+  "formats": ["pdf"],
+  "zone": "America/Detroit",
+  "tables": {
+    "hazards": ["Task", "Hazard", "Severity of injury", "Exposure", "Avoidance", "Risk level", "Risk reduction measures"]
+  },
+  "requires": {"labels": ["Document no", "Assessment date"], "headings": ["Hazards"], "tables": ["hazards"]},
+  "ignore": {"headings": ["Robot cell risk assessment", "Hazards", "Approval"]},
+  "fields": {
+    "identifiers": [{"label": "Document no", "namespace": "plant2.risk_assessment"}],
+    "site": {"label": "Cell", "namespace": "plant2.cell"},
+    "machines": [{"label": "Robots", "namespace": "plant2.robot", "split": ";"}],
+    "assessed": {"label": "Assessment date", "format": "%d/%m/%Y", "required": true},
+    "method": {"label": "Method"},
+    "hazards": {
+      "rows": "hazards",
+      "each": {
+        "hazard": {"column": "Hazard"},
+        "scores": [
+          {"column": "Severity of injury"},
+          {"column": "Exposure"},
+          {"column": "Avoidance"},
+          {"column": "Risk level"}
+        ],
+        "mitigations": [{"column": "Risk reduction measures", "split": ";"}]
+      }
+    },
+    "approval": {
+      "decision": {"label": "Decision"},
+      "authority": {"label": "Approved by"},
+      "time": {"label": "Approval date", "format": "%d/%m/%Y"}
+    }
+  }
+}

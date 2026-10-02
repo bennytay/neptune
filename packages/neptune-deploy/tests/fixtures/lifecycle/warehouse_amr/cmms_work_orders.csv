@@ -1,0 +1,7 @@
+WO Number,WO Type,Asset ID,Site,Completed,Problem,Work Performed,Component,Removed Serial,Installed Serial,Firmware After,Related,Technician,Downtime h
+WO-26-0311,PM,AMR-07,WH-EAST,2026-03-02 09:40,Scheduled 500 h service,Replace drive wheel; Clean lidar window,Drive wheel assembly,DW-11873,DW-12990,4.2.0,,J. Ortiz,1.5
+WO-26-0312,CM,AMR-12,WH-EAST,2026-03-03 14:05,Charging contacts worn,Replace charge contact plate,Charge contact plate,CC-0091,CC-0144,4.2.0,INC-0007,M. Chen,3
+WO-26-0313,CM,AMR-07,WH-EAST,2026-03-05 11:20,Localisation drift after map update,Flash controller firmware; Re-run lidar calibration,,,,4.3.1,INC-0007; CHG-0042,J. Ortiz,0.75
+WO-26-0313,CM,AMR-09,WH-EAST,,Bumper switch intermittent,Replace bumper switch,Bumper switch,BS-2201,BS-2307,4.3.1,,M. Chen,2
+WO-26-0314,INSP,AMR-11,WH-EAST,2026-03-06 08:00,Monthly inspection,Visual check,,,,4.3.1,,J. Ortiz,0.5
+WO-26-0315,PM,AMR-12,WH-EAST,03/07/2026,Scheduled 500 h service,Replace drive wheel,Drive wheel assembly,DW-11902,DW-13004,4.3.1,,M. Chen,1.25

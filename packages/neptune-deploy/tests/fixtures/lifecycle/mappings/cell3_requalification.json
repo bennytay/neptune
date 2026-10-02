@@ -1,0 +1,35 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "site.plant2.requalification",
+  "version": "1",
+  "description": "Plant 2's requalification sheet: up to three regression tests per row. Its times are written on the plant's wall clock.",
+  "zone": "Europe/Berlin",
+  "rules": [
+    {
+      "id": "requalification",
+      "kind": "requalification_record",
+      "requires": ["Requal ID", "Performed"],
+      "ignore": ["Inspector"],
+      "fields": {
+        "identifiers": [{"column": "Requal ID", "namespace": "plant2.requalification"}],
+        "site": {"column": "Cell", "namespace": "plant2.cell"},
+        "machines": [{"column": "Robot", "namespace": "plant2.robot"}],
+        "related": [{"column": "Work Order", "namespace": "plant2.work_order"}],
+        "performed": {"column": "Performed", "format": "%Y-%m-%d %H:%M", "required": true},
+        "cause": {"column": "Cause"},
+        "corrective_actions": [{"column": "Corrective Actions", "split": ";"}],
+        "tests": [
+          {"name": {"column": "Test 1"}, "result": {"column": "Result 1"}},
+          {"name": {"column": "Test 2"}, "result": {"column": "Result 2"}},
+          {"name": {"column": "Test 3"}, "result": {"column": "Result 3"}}
+        ],
+        "result": {"column": "Result"},
+        "return_to_service": {
+          "decision": {"column": "Decision"},
+          "authority": {"column": "Decided By"},
+          "time": {"column": "Decided On", "format": "%Y-%m-%d %H:%M", "required": true}
+        }
+      }
+    }
+  ]
+}

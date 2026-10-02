@@ -1,0 +1,4 @@
+# Read every CSV here with its first row as the header (root ADR 0042 section 2).
+neptune: 1
+adapters:
+  tabular: {options: {csv_header: first_row}}
