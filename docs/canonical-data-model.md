@@ -159,7 +159,9 @@ a bug, not a value.
 - `Run`: a session one piece of evidence declares (a recording, a rosbag2 `metadata.yaml`, a manifest entry).
   `logical_id` and `machine` are declared ids; `first` / `last` are inclusive and separate, because a source
   may state only one. Heuristic groupings are derived: `session_proposal` records in the package's `derived/`
-  tables (MVL-13, ADR 0036; MVL-34 next), never `Run`s.
+  tables (MVL-13, ADR 0036; assembled over evidence by MVL-34, ADR 0066), never `Run`s. The files one
+  `Run` is made of, where a source states them (rosbag2's `relative_file_paths`), are a canonical
+  `run_assembly` (ADR 0050 §7, ADR 0066 §1); each file's own `Run` stays as declared.
 - `Stream`: one channel as declared. It holds `run`, `topic`, `schema_name` / `schema_encoding` /
   `schema_definition`, `message_encoding`, `metadata`, `clocks`, and the source's declared `message_count` /
   `first` / `last`, plus `series`. A topic split across files is several streams of one run.

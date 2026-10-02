@@ -1,0 +1,4 @@
+[
+  {"name": "tinyRobot", "robots": {"AMR-07": {"name": "AMR-07", "status": "working", "task_id": "delivery.dispatch-12", "unix_millis_time": 1772372700000, "location": {"map": "L1", "x": 12.5, "y": -3.25, "yaw": 0.1}, "battery": 0.62}, "AMR-09": {"name": "AMR-09", "status": "idle", "task_id": "", "unix_millis_time": 1772372700000, "location": {"map": "L1", "x": 4.0, "y": 1.5, "yaw": 3.1}, "battery": 0.91}}},
+  {"name": "tinyRobot", "robots": {"AMR-07": {"name": "AMR-07", "status": "charging", "task_id": "", "unix_millis_time": 1772373500000, "location": {"map": "L1", "x": 0.5, "y": 0.5, "yaw": 0.0}, "battery": 0.58}}}
+]

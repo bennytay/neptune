@@ -1,12 +1,12 @@
 # Ingest receipt
 
-Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8bd5f`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:8d04a358930057cb79e7700558b592398dc959b1fa788b1b2676504da978f9b4`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 25 seen, 25 read, 0 not read, 0 gone
 - Runs: 8; streams: 21; entities: 0
-- Findings: 1 errors, 6 warnings, 27 info; ambiguous fields: 0
+- Findings: 1 errors, 6 warnings, 41 info; ambiguous fields: 0
 
 ## Sources
 
@@ -32,7 +32,7 @@ Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8
 | `runs/S-007/amr-07_2026-04-02.mcap` | 17516 | `sha256:34bb6772f2fd` | mcap 0.1.0 |
 | `runs/S-007/amr-07_2026-04-15.mcap` | 17400 | `sha256:e1987a0b1303` | mcap 0.1.0 |
 | `runs/S-012/amr-08_2026-05-19/amr-08_2026-05-19_0.mcap` | 10088 | `sha256:9ce9e303f7db` | mcap 0.1.0, neptune.introspection 0.1.0 |
-| `runs/S-012/amr-08_2026-05-19/metadata.yaml` | 1940 | `sha256:6a01ea04e416` | rosbag2 0.1.0 |
+| `runs/S-012/amr-08_2026-05-19/metadata.yaml` | 1940 | `sha256:6a01ea04e416` | neptune.grouping 0.2.0, rosbag2 0.1.0 |
 | `runs/S-012/amr-09_2026-03-05.mcap` | 17400 | `sha256:e7e0782cb047` | mcap 0.1.0 |
 | `runs/S-012/amr-10_2026-03-06.mcap` | 17515 | `sha256:a217da2d2bc6` | mcap 0.1.0 |
 | `urdf/lift_150.urdf` | 1757 | `sha256:4ed9c552ac68` | text 0.1.0 |
@@ -45,7 +45,8 @@ Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
 | `geojson` | `0.1.0` | `sha256:542c42fe020a` | none | `rec:2c0e605ea2be` |
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
-| `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:d268e329090f` |
+| `neptune.clocks` | `0.1.0` | `sha256:8abe788c243b` | none | `rec:df2d141afe03` |
+| `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:09b4728ef397` |
 | `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:e29bd75e0779` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
 | `neptune.validate` | `0.1.0` | `sha256:0a0d08ccf4b7` | none | `rec:c712df3eb7ab` |
@@ -62,8 +63,9 @@ Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8
 | `configuration_value` | 115 |
 | `document_block` | 34 |
 | `document_record` | 4 |
-| `ingest_finding` | 34 |
+| `ingest_finding` | 48 |
 | `run` | 8 |
+| `run_assembly` | 1 |
 | `source_artifact` | 25 |
 | `source_revision` | 25 |
 | `spatial_artifact` | 2 |
@@ -71,7 +73,7 @@ Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8
 | `structured_record` | 60 |
 | `structured_table` | 14 |
 | `timestamp_domain` | 29 |
-| `transform_record` | 11 |
+| `transform_record` | 12 |
 
 ## Runs
 
@@ -149,6 +151,20 @@ Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8
 - **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded; each row cites its message's bytes · `rec:cee68bfcba62`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:e765b4253ec8`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:ee43ce9237a6`
+- **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:11a213294207`
+- **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:5af2ba6e6e9b`
+- **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:7426d93d7124`
+- **info** `neptune.clocks.latency_unbounded` (missing): 2 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:497362597115`
+- **info** `neptune.clocks.latency_unbounded` (missing): 3 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:681ab53c56b7`
+- **info** `neptune.clocks.latency_unbounded` (missing): 3 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:7757d0c598d0`
+- **info** `neptune.clocks.latency_unbounded` (missing): 2 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:8214d7f12d81`
+- **info** `neptune.clocks.latency_unbounded` (missing): 3 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:c26efbdd9671`
+- **info** `neptune.clocks.latency_unbounded` (missing): 3 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:e49d70f8a046`
+- **info** `neptune.clocks.latency_unbounded` (missing): 2 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:f288077e6408`
+- **info** `neptune.clocks.single_instant` (missing): every anchor is one instant of the source clock: the offset holds there only and the rate is unknown · `rec:46ef7cd5e2cb`
+- **info** `neptune.clocks.single_instant` (missing): every anchor is one instant of the source clock: the offset holds there only and the rate is unknown · `rec:8bec563ded3c`
+- **info** `neptune.clocks.single_instant` (missing): every anchor is one instant of the source clock: the offset holds there only and the rate is unknown · `rec:a228e86af018`
+- **info** `neptune.clocks.unsynchronised` (missing): the package's clocks form 11 groups that no clock mapping joins; times in different groups cannot be compared · `rec:6b610dac8b82`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:100048fd4ac5`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:2f08528c577c`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:7ba4868308e1`

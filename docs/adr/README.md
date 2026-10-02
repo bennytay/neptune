@@ -68,3 +68,4 @@ header).
 | [0059](0059-xlsx-workbooks-in-the-tabular-adapter-sheets-as-cited-tables.md) | XLSX workbooks in the tabular adapter: sheets as tables of cited cells | Accepted |
 | [0060](0060-clock-alignment-fitted-mappings-found-clocks-and-bounded-instants.md) | Clock alignment: fitted mappings, found clocks and bounded instants | Accepted |
 | [0063](0063-task-and-world-context-records-from-declared-structure.md) | Task and world context records from declared structure: a pass over parsed records | Accepted |
+| [0066](0066-run-assembly-evidence-graph-over-the-layout-reading.md) | Run assembly: an evidence graph over the layout reading | Accepted |

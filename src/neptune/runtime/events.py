@@ -74,6 +74,7 @@ DERIVATIVE_REUSED: Final = "derivative_reused"
 DERIVATIVE_BUILT: Final = "derivative_built"
 SOURCE_ADMITTED: Final = "source_admitted"
 SOURCE_QUARANTINED: Final = "source_quarantined"
+RUNS_ASSEMBLED: Final = "runs_assembled"  # the assembler's counts, over records (ADR 0066)
 STREAMS_INTROSPECTED: Final = "streams_introspected"  # introspection's counts (ADR 0049)
 DECLARED_EXTRACTED: Final = "declared_extracted"  # the declared-records pass's counts (ADR 0063)
 MEDIA_INDEXED: Final = "media_indexed"  # media streams indexed (ADR 0056)
