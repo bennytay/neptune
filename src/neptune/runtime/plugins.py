@@ -385,9 +385,11 @@ class _Loader:
                 adapter=descriptor.id,
             )
             return None
-        libraries = dict(descriptor.libraries)
-        pinned = libraries.get(origin.distribution)
-        if pinned is not None and pinned != origin.version:
+        # Its own distribution, however it spells it, is listed once: as installed.
+        own = {name for name, _ in descriptor.libraries if normalise(name) == origin.distribution}
+        libraries = {k: v for k, v in descriptor.libraries if k not in own}
+        if others := sorted({v for k, v in descriptor.libraries if k in own} - {origin.version}):
+            pinned = others[0]
             self.refused(
                 origin,
                 LIBRARY_CONFLICT,

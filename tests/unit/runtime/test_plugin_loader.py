@@ -213,12 +213,11 @@ def test_an_inadmissible_plugin_is_refused_with_its_reason(
     assert _codes(plugins) == [(REFUSED, name, reason)]
 
 
+@pytest.mark.parametrize("spelling", ["neptune-test-tally", "Neptune_Test.Tally"])
 def test_a_library_pin_that_contradicts_the_distribution_is_refused(
-    plugin_dists: ModuleType, plugin_site: Path
+    plugin_dists: ModuleType, plugin_site: Path, spelling: str
 ) -> None:
-    module = plugin_dists.TALLY.replace(
-        "libraries=()", 'libraries=(("neptune-test-tally", "9.9.9"),)'
-    )
+    module = plugin_dists.TALLY.replace("libraries=()", f'libraries=(("{spelling}", "9.9.9"),)')
     plugin_dists.install(
         plugin_site,
         "neptune-test-tally",
@@ -229,6 +228,23 @@ def test_a_library_pin_that_contradicts_the_distribution_is_refused(
     plugins = _load(plugin_site)
     assert _codes(plugins) == [(REFUSED, "tally", "library_conflict")]
     assert plugins.findings[0].details["pinned"] == "9.9.9"
+
+
+def test_a_library_pin_that_agrees_is_listed_once(
+    plugin_dists: ModuleType, plugin_site: Path
+) -> None:
+    module = plugin_dists.TALLY.replace(
+        "libraries=()", 'libraries=(("Neptune_Test_Tally", "1.0.0"), ("numpy", "2.1.0"))'
+    )
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-tally",
+        "1.0.0",
+        adapters={"tally": ":TallyAdapter"},
+        module=module,
+    )
+    (adapter,) = _load(plugin_site).adapters
+    assert adapter.descriptor.libraries == (("neptune-test-tally", "1.0.0"), ("numpy", "2.1.0"))
 
 
 def test_a_plugin_never_takes_a_built_in_id(plugin_dists: ModuleType, plugin_site: Path) -> None:
