@@ -41,6 +41,7 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0034](0034-mcap-adapter-container-reading-planning-and-citations.md) | The MCAP adapter: our own container reader, planning from the summary, exact citations | Accepted |
 | [0035](0035-python-sdk-one-surface-dry-runs-results-and-errors.md) | The Python SDK: one sync and async surface over the job, dry runs, results and a stable error taxonomy | Accepted |
 | [0036](0036-session-grouping-v0-observed-layout-and-derived-proposals.md) | Session grouping v0: an observed layout, inferred proposals, derived tables in the package | Accepted |
+| [0037](0037-configuration-snapshots-and-additive-schema-versions.md) | Configuration snapshots, the config adapter, and schema versions that add without rewriting | Accepted |
 | [0038](0038-layout-preserving-pdf-and-markdown-adapters.md) | Layout-preserving PDF and Markdown adapters: pypdf, markdown-it-py, declared order and exact spans | Accepted |
 | [0041](0041-standalone-image-ingestion-as-declared-with-region-citations.md) | Standalone image ingestion: containers read as declared, no pixel decoded, regions cited | Accepted |
 | [0040](0040-software-identity-declared-per-file-bound-later.md) | Software identity: read as each file declares it, bound to runs later | Accepted |
@@ -50,4 +51,5 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0045](0045-rosbag2-adapter-metadata-sqlite3-reader-and-mcap-delegation.md) | rosbag2: one adapter for `metadata.yaml` and sqlite3 storage, MCAP left to the MCAP adapter, a SQLite reader over bytes | Accepted |
 | [0046](0046-ros1-bag-adapter-connections-as-streams-planning-from-the-index.md) | The ROS 1 bag adapter: connections as streams, planning from the index, the same Run and Stream as MCAP | Accepted |
 | [0047](0047-optional-manifest-stated-declarations-set-against-evidence.md) | The optional manifest: a source in the folder, stated declarations set against the evidence, generated as commented choices | Accepted |
+| [0048](0048-flight-log-adapter-px4-ulog-and-ardupilot-dataflash.md) | The flight-log adapter: PX4 ULog and ArduPilot DataFlash as runs, decoded streams and cited tables | Accepted |
 | [0054](0054-integrity-and-data-quality-rules-over-the-stored-package.md) | Integrity and data-quality rules run over the stored package: versioned, cited, bounded findings in the receipt | Accepted |

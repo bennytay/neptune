@@ -18,6 +18,7 @@ from neptune.identity.provenance import (
     transform_record,
 )
 from neptune.model.ids import LogicalId, RecordId, logical_id_from_json
+from neptune.model.kinds import KIND_SINCE
 from neptune.model.knowledge import (
     Ambiguous,
     AssertionKind,
@@ -192,7 +193,7 @@ def test_runs_and_streams_round_trip_byte_identically(record: Any, read: Any) ->
     assert read(canonical_json.loads(line)) == record
     data = canonical_json.loads(line)
     assert isinstance(data, dict)
-    assert (data["kind"], data["schema_version"]) == (record.kind, SCHEMA_VERSION)
+    assert (data["kind"], data["schema_version"]) == (record.kind, KIND_SINCE[record.kind])
     assert record.family is Family.RUN
     check_evidence_record_id(record, TRANSFORMS[record.provenance.transform])
 
