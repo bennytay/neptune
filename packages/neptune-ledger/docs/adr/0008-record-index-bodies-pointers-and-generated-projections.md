@@ -31,16 +31,26 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
 
 ## Decision
 
-1. **`record.body jsonb`** (migration 0003) holds the record's canonical line, for projection
+1. **`record.body jsonb`** (migration 0004) holds the record's canonical line, for projection
    only. The package line stays authoritative, `body_digest` (ADR 0005 §2) pins it, and a caller
    who needs bytes reads the package. `body` is NULL only when a string or key in the record holds
    U+0000, which `jsonb` cannot store. The body is then read from the package; it is never
-   altered to fit. Like every `record` column, it is append-only.
+   altered to fit. Like every `record` column, it is append-only. Rows registered before 0004
+   would have no body and no Unknown pointers: a blank that reads as "no Unknown field". Since
+   `record` refuses `UPDATE`, 0004 refuses to apply to a catalog that already holds records. Such
+   a catalog is rebuilt from its packages and registration log (ADR 0002 §4).
 2. **Pointer lists.** `unknown_pointers text[]` (GIN, partial) lists every field whose state is
    `Unknown`, except one inside an `Ambiguous` field's candidates, since candidates are not
-   fields. The `ambiguous_pointers`, `unknown_pointers` and logical-id walks skip the record's
-   free-form objects. The schema declares those as a top-level property `{"type": "object"}`;
-   they are listed in the spec (`opaque`, §3). The worked examples' rows are unchanged.
+   fields. One walk yields all three lists (`ambiguous_pointers`, `unknown_pointers`, logical
+   ids), and it tightens what counts as a field's state:
+   - It skips the record's free-form objects. The schema declares those as a top-level property
+     `{"type": "object"}`; the spec lists them (`opaque`, §3).
+   - It counts an object as a Knowledge value only if its keys are a subset of `knowledge`,
+     `value`, `provenance` and `candidates`. An adapter locator step may carry a `knowledge`
+     property (`AdapterLocator` admits any extra scalar), and it is not a field.
+   - It does not enter an `Ambiguous` value, so no logical id inside the candidates becomes a key.
+
+   The worked examples' rows are unchanged.
    `NotCovered`, `KnownAbsent` and `NotApplicable` are not listed: the issue names Ambiguous and
    Unknown, and `NotCovered` marks most fields of most records, so a list of them would index
    noise.
@@ -66,21 +76,32 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
      Ledger version only, and a kind cannot be indexed before its migration exists.
    - `python -m neptune_ledger.catalog.projection <schema.json>` rewrites the spec and writes
      the next migration from the difference: a partition for each new kind, and columns,
-     constraint and index for each new column group. Migration 0004 is its output for package
+     constraint and index for each new column group. Migration 0005 is its output for package
      schema 1 (baseline: 0001's partitions). A test pins 0004 and `projections.json` to the
      generator's output over the v1.0.0 export.
-   - A hot-filter field in an unknown shape, or a kind or projection that disappears, raises
-     `ProjectionError`. A new shape or a removal needs an ADR.
+   - A hot-filter field in an unknown shape, or a kind, projection or free-form field that
+     disappears, raises `ProjectionError`. A new shape or a removal needs an ADR. A free-form
+     field that gains a `description` stops matching, so it fails loudly instead of being walked
+     again.
+   - A generated migration that adds a projection to a kind already partitioned refuses to
+     apply if that kind holds rows of the new schema version or later. Those rows state the
+     field, but they would read as not Known. Rows of older versions do not state it, so NULL is
+     their truth.
+   - The compiler's kind list is not closed. A package table of a kind the spec does not name is
+     indexed with the common columns and no projections. Where it is filed is the partition rule
+     of migration 0003 (the default/on-demand partition hotfix); its projections arrive with the
+     generated migration for its schema.
 4. **Order and batches.** `package_rows` orders records by `(kind, record_id, line)`.
    Registration writes `record` and `record_logical_id` in batches of `BATCH_ROWS = 1000` rows per
-   `executemany`. Every column except `registration_key` is a function of the package and the
+   `executemany`, each batch built when it is sent. Every column except `registration_key` is a function of the package and the
    Ledger version. Registering the same packages in any order gives the same rows apart from
    `registration_key` and the transaction columns. Registering them in the same order into two
    empty Ledgers gives identical tables apart from host times (ADR 0007 §5).
 5. **`resolve`** reads `package_source`, `source`, `source_location`, `location_absence` and
    `record` at one catalog point (`registration_key <= as_of`). `fetch` is in registration order.
    Each referenced package's locations are its revisions of the content that no revision or
-   absence in the same package supersedes, in `source_revision` line order (ADR 0006 §5).
+   absence in the same package supersedes, in `source_revision` line order (ADR 0006 §5). A
+   materialised package's route is its `blob_path`, with no locations (catalog-api.md).
    `cited_by` lists records whose `(source_content_id, source_locator)` equals the anchor's
    canonical JSON exactly. Ingest findings are left out: their row's anchor is their subject, not
    a record-level `EvidenceRef` (the contract's `evidence_anchor`). `region.addressing` is the

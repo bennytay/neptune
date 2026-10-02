@@ -12,7 +12,7 @@ calls (``thread``, ``threads_of``, ``lineage``, ``query``) belong to MVL-92 and 
 import os
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final, Literal, TypeVar
 
@@ -294,18 +294,16 @@ class PostgresCatalog:
                 "INSERT INTO clock VALUES (%s, %s, %s, %s, %s)",
                 [(t, clock, p, field, list(scope)) for clock, field, scope in rows.clocks],
             )
-            records = [_record_values(t, p, seq, r) for r in rows.records]
-            for start in range(0, len(records), BATCH_ROWS):
-                cur.executemany(_INSERT_RECORD, records[start : start + BATCH_ROWS])
-            logical = [
-                (t, r.kind, r.record_id, p, pointer, namespace, value)
-                for r in rows.records
-                for pointer, namespace, value in r.logical_ids
-            ]
-            for start in range(0, len(logical), BATCH_ROWS):
+            for batch in _batches(rows.records):
+                cur.executemany(_INSERT_RECORD, [_record_values(t, p, seq, r) for r in batch])
+            for batch in _batches(rows.records):
                 cur.executemany(
                     "INSERT INTO record_logical_id VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                    logical[start : start + BATCH_ROWS],
+                    [
+                        (t, r.kind, r.record_id, p, pointer, namespace, value)
+                        for r in batch
+                        for pointer, namespace, value in r.logical_ids
+                    ],
                 )
         return "registered", TransactionKey(seq, at), root, self._ledger_version
 
@@ -454,16 +452,7 @@ class PostgresCatalog:
             (self._tenant, contents, limit),
         ).fetchall()
         packages = sorted({str(row[1]) for row in rows})
-        superseded = {
-            (str(pid), str(rid))
-            for pid, rid in conn.execute(
-                "SELECT package_id, unnest(supersedes)::text FROM source_location"
-                " WHERE tenant_id = %s AND package_id = ANY(%s)"
-                " UNION ALL SELECT package_id, unnest(supersedes)::text FROM location_absence"
-                " WHERE tenant_id = %s AND package_id = ANY(%s)",
-                (self._tenant, packages, self._tenant, packages),
-            ).fetchall()
-        }
+        superseded = self._superseded(conn, packages)
         current = [
             (str(pid), str(content), str(location))
             for _, pid, rid, content, location in rows
@@ -477,6 +466,20 @@ class PostgresCatalog:
             )
             out.append(Stated(str(content), int(size), mine, others))
         return out
+
+    def _superseded(self, conn: Conn, packages: list[str]) -> set[tuple[str, str]]:
+        """``(package id, record id)`` of every revision a revision or an absence in the same
+        package supersedes: not a current location (ADR 0006 §5)."""
+        return {
+            (str(pid), str(rid))
+            for pid, rid in conn.execute(
+                "SELECT package_id, unnest(supersedes)::text FROM source_location"
+                " WHERE tenant_id = %s AND package_id = ANY(%s)"
+                " UNION ALL SELECT package_id, unnest(supersedes)::text FROM location_absence"
+                " WHERE tenant_id = %s AND package_id = ANY(%s)",
+                (self._tenant, packages, self._tenant, packages),
+            ).fetchall()
+        }
 
     def _lookup(
         self, conn: Conn, package_id: str, as_of: int | None
@@ -550,7 +553,8 @@ class PostgresCatalog:
             detail = "no registered package holds this source"
             finding = CatalogFinding("unresolvable_evidence", anchor.source, detail)
             return _unresolved(anchor, region, point, finding)
-        stated = self._locations(conn, anchor.source, [str(h[0]) for h in holders])
+        referenced = [str(h[0]) for h in holders if h[1] == "referenced"]
+        stated = self._locations(conn, anchor.source, referenced) if referenced else {}
         fetch = tuple(
             SourceLocation(
                 package_id=str(package_id),
@@ -589,16 +593,7 @@ class PostgresCatalog:
     ) -> dict[str, tuple[dict[str, Any], ...]]:
         """Per package, its revisions of ``content_id`` that no revision or absence in the same
         package supersedes, in table order (ADR 0006 §5)."""
-        superseded = {
-            (str(pid), str(rid))
-            for pid, rid in conn.execute(
-                "SELECT package_id, unnest(supersedes)::text FROM source_location"
-                " WHERE tenant_id = %s AND package_id = ANY(%s)"
-                " UNION ALL SELECT package_id, unnest(supersedes)::text FROM location_absence"
-                " WHERE tenant_id = %s AND package_id = ANY(%s)",
-                (self._tenant, packages, self._tenant, packages),
-            ).fetchall()
-        }
+        superseded = self._superseded(conn, packages)
         out: dict[str, list[dict[str, Any]]] = {}
         for package_id, revision_id, location in conn.execute(
             "SELECT l.package_id, l.revision_id, l.location FROM source_location l"
@@ -697,6 +692,12 @@ def _report(
     )
 
 
+def _batches(rows: Sequence[T]) -> Iterator[Sequence[T]]:
+    """``rows`` in consecutive slices of ``BATCH_ROWS`` (ADR 0008 §4)."""
+    for start in range(0, len(rows), BATCH_ROWS):
+        yield rows[start : start + BATCH_ROWS]
+
+
 def _bad_as_of(as_of: object) -> bool:
     """An ``as_of`` outside the contract: not a tx_seq of at least 1. A bool is not a tx_seq."""
     return as_of is not None and (
@@ -707,7 +708,7 @@ def _bad_as_of(as_of: object) -> bool:
 def _region(step: Any) -> Region:
     """The innermost locator step and how it addresses the source (``Region``)."""
     kind = step.get("kind") if isinstance(step, Mapping) else None
-    addressing = kind if kind in _CORE_STEPS else "adapter"
+    addressing = kind if isinstance(kind, str) and kind in _CORE_STEPS else "adapter"
     return Region(addressing, step if isinstance(step, Mapping) else {})  # type: ignore[arg-type]
 
 

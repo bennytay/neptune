@@ -16,7 +16,6 @@ import psycopg
 import pytest
 
 from ledger_catalog_rows import add_package
-from neptune.model.kinds import RECORD_KINDS
 from neptune_ledger.catalog import projection
 from neptune_ledger.catalog.index import projected, projection_columns
 from neptune_ledger.catalog.migrate import Migration, apply_migrations, migrations
@@ -85,10 +84,10 @@ def test_the_shipped_spec_is_generated_from_package_schema_1() -> None:
     assert shipped_spec() == projection_spec(schema_v1())
 
 
-def test_migration_0004_is_the_generated_migration_for_package_schema_1() -> None:
-    (path,) = sorted((CATALOG / "migrations").glob("0004_*.sql"))
-    assert path.name == "0004_projections_schema_1.sql"
-    expected = render_migration(BASELINE, projection_spec(schema_v1()), 4)
+def test_migration_0005_is_the_generated_migration_for_package_schema_1() -> None:
+    (path,) = sorted((CATALOG / "migrations").glob("*_projections_schema_1.sql"))
+    assert path.name == "0005_projections_schema_1.sql"
+    expected = render_migration(BASELINE, projection_spec(schema_v1()), 5)
     assert path.read_text(encoding="utf-8") == expected
 
 
@@ -98,9 +97,12 @@ def test_the_baseline_kinds_are_migration_0001s_partitions() -> None:
     assert tuple(sorted(partitions)) == BASELINE_KINDS
 
 
-def test_the_shipped_spec_covers_exactly_the_compilers_kinds() -> None:
-    """A canary: a kind the compiler adds must arrive through a regenerated spec and migration."""
-    assert set(shipped_spec().kinds) == set(RECORD_KINDS)
+def test_the_shipped_spec_knows_the_compilers_schema_1_kinds() -> None:
+    """The spec covers every kind of the schema it was read from; a kind outside it (a newer
+    compiler's) is still indexed, without projections (ADR 0008 §3)."""
+    assert set(shipped_spec().kinds) == set(BASELINE_KINDS)
+    record = {"machine": {"knowledge": "known", "value": {"namespace": "a", "value": "b"}}}
+    assert projected(shipped_spec(), "contact_event", record) == (None,) * len(projection_columns())
 
 
 def test_package_schema_1_projects_the_hot_filters_by_name_and_shape() -> None:
@@ -152,23 +154,30 @@ def test_a_bump_that_adds_a_kind_renders_its_partition_and_new_columns_only() ->
     assert "--   contact_event.machine -> machine_namespace, machine_value" in text
     assert "ADD COLUMN machine_" not in text  # machine columns already exist
     assert "ADD COLUMN clock_ids" not in text
+    assert "DO $$" not in text  # only a new kind gains projections: nothing filed can miss them
 
 
-@pytest.mark.parametrize(
-    "change",
-    [
-        "drop_kind",
-        "drop_projection",
-    ],
-)
+@pytest.mark.parametrize("change", ["drop_kind", "drop_projection", "drop_opaque"])
 def test_a_removal_needs_an_adr(change: str) -> None:
     old = projection_spec(schema_v1())
     if change == "drop_kind":
         new = Spec(old.schema_id, old.kinds[1:], old.projections, old.opaque)
-    else:
+    elif change == "drop_projection":
         new = Spec(old.schema_id, old.kinds, old.projections[1:], old.opaque)
+    else:
+        new = Spec(old.schema_id, old.kinds, old.projections, old.opaque[1:])
     with pytest.raises(ProjectionError, match="removals need an ADR"):
         render_migration(old, new, 5)
+
+
+def test_a_free_form_field_that_gains_a_description_stops_being_free_form_loudly() -> None:
+    schema = schema_v1()
+    schema["$defs"]["TransformRecord"]["properties"]["config"] = {
+        "description": "adapter options",
+        "type": "object",
+    }
+    with pytest.raises(ProjectionError, match=r"free-form fields \['transform_record\.config'\]"):
+        render_migration(projection_spec(schema_v1()), projection_spec(schema), 6)
 
 
 def test_a_hot_filter_in_an_unknown_shape_is_refused() -> None:
@@ -182,6 +191,14 @@ def test_a_hot_filter_in_an_unknown_shape_is_refused() -> None:
     ("damage", "message"),
     [
         (lambda s: s.pop("$defs"), "not a package-schema export"),
+        (
+            lambda s: s.update({"$id": "urn:neptune:schema:canonical:x"}),
+            "does not name a package-schema version",
+        ),
+        (
+            lambda s: s.update({"$id": "urn:neptune:schema:canonical:0"}),
+            "does not name a package-schema version",
+        ),
         (lambda s: s.pop("anyOf"), "not a package-schema export"),
         (lambda s: s["anyOf"].append({"$ref": "#/$defs/Nowhere"}), "does not resolve"),
         (lambda s: s["anyOf"].append({"$ref": "https://elsewhere/x"}), "does not resolve"),
@@ -210,6 +227,15 @@ def test_the_longest_kind_name_still_makes_a_partition_name() -> None:
     spec = projection_spec(schema)
     assert "r" * 56 in spec.kinds
     assert len("record_" + "r" * 56) <= 63
+
+
+def test_a_projection_added_to_an_existing_kind_guards_its_filed_rows() -> None:
+    schema = schema_v1()
+    schema["$id"] = "urn:neptune:schema:canonical:2"
+    schema["$defs"]["Image"]["properties"]["stream"] = {"$ref": "#/$defs/RecordId"}
+    text = render_migration(projection_spec(schema_v1()), projection_spec(schema), 6)
+    assert "IF EXISTS (SELECT 1 FROM record WHERE schema_version >= 2 AND kind IN (" in text
+    assert "      'image')) THEN" in text
 
 
 def test_generate_writes_the_spec_and_numbers_the_next_migration(tmp_path: Path) -> None:

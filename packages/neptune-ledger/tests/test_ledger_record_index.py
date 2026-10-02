@@ -14,22 +14,27 @@ import psycopg
 import pytest
 
 from conftest import new_database
+from ledger_catalog_rows import add_package
 from neptune.identity import canonical_json
 from neptune.model.kinds import RECORD_KINDS
 from neptune.model.knowledge import Known, NotCovered
+from neptune.store.package import package_files
 from neptune_ledger.api.types import EvidenceAnchor
 from neptune_ledger.catalog import registry
 from neptune_ledger.catalog.index import (
     ambiguous_pointers,
+    fields,
     package_rows,
     projection_columns,
     unknown_pointers,
 )
+from neptune_ledger.catalog.migrate import apply_migrations, migrations
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.contract_tests.examples import (
     EXAMPLES,
     WorkedPackage,
     evidence_anchor,
+    examples_dir,
     materialise,
     record_key,
     reparse,
@@ -313,6 +318,18 @@ def test_knowledge_shaped_values_in_a_free_form_config_are_not_fields(
     assert row == ([], [], "forged")  # kept in the body as data, never indexed as a field
 
 
+def test_an_adapter_locator_step_with_a_knowledge_property_is_not_a_field() -> None:
+    """``AdapterLocator`` admits any extra scalar property, ``knowledge`` included; a Knowledge
+    value has only knowledge, value, provenance and candidates."""
+    step = {"kind": "mcap:chunk", "knowledge": "unknown"}
+    record = {
+        "provenance": {"evidence": {"locator": [step], "source": "sha256:" + "0" * 64}},
+        "machine": {"knowledge": "unknown", "provenance": {"evidence": {"locator": [step]}}},
+        "site": {"knowledge": "known", "value": {"namespace": "n", "value": "v"}, "kind": "x"},
+    }
+    assert fields(record) == ([], ["/machine"], [])
+
+
 def test_unknown_inside_ambiguous_candidates_is_not_a_field() -> None:
     record = {
         "a": {"knowledge": "unknown"},
@@ -326,6 +343,28 @@ def test_unknown_inside_ambiguous_candidates_is_not_a_field() -> None:
     assert unknown_pointers(record) == ["/a", "/c/0/d", "/e~1f~0"]
     assert ambiguous_pointers(record) == ["/b"]
     assert unknown_pointers(record, frozenset({"a", "c"})) == ["/e~1f~0"]
+
+
+# --- migrations over rows registered before them ----------------------------------------------
+
+
+@pytest.mark.parametrize("before", [4, 5])
+def test_a_migration_refuses_rows_it_would_leave_blank(pg: Conn, before: int) -> None:
+    """ADR 0008 §1, §3: rows filed before 0004 (bodies) or 0005 (projections) would read as "no
+    Unknown field" or "no Known machine"; the migration refuses, and the catalog is rebuilt."""
+    shipped = migrations()
+    apply_migrations(pg, "acme", shipped=shipped[: before - 1])
+    package = add_package(pg, "tenant_acme", "sha256:" + "e" * 64, 1)
+    pg.execute(
+        "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
+        " registration_key, line, schema_version, body_digest)"
+        " VALUES ('acme', 'run', %s, %s, 1, 1, 1, %s)",
+        ("rec:sha256:" + "a" * 64, package, "sha256:" + "0" * 64),
+    )
+    with pytest.raises(psycopg.errors.RaiseException, match="rebuild this catalog"):
+        apply_migrations(pg, "acme")
+    applied = pg.execute("SELECT max(version) FROM tenant_acme.schema_migration").fetchone()
+    assert applied == (before - 1,)
 
 
 # --- resolve beyond the contract ---------------------------------------------------------------
@@ -350,6 +389,29 @@ def test_resolve_at_an_earlier_point_leaves_out_later_packages(
     assert isinstance(then.as_of, Known) and then.as_of.value.tx_seq == 1
 
 
+def test_resolve_routes_a_materialised_source_to_its_blob_only(pg_uri: str, tmp_path: Path) -> None:
+    """ADR 0006 §5: locations are a referenced source's routes; a materialised one is its blob."""
+    root = examples_dir() / "drone"
+    records: list[Any] = []
+    for path in sorted((root / "records").glob("*.jsonl")):
+        _, read = RECORD_KINDS[path.stem]
+        records += [read(canonical_json.loads(line)) for line in path.read_bytes().splitlines()]
+    (revision,) = [r for r in records if r.kind == "source_revision"]
+    data = (root / "sources" / revision.location.to_json()["path"]).read_bytes()
+    files = package_files(records, blobs={revision.content_id: data})
+    package = write("blob", tmp_path / "blob", files)
+    (entry,) = package.manifest["sources"]
+    assert entry["storage"] == "materialised"
+    anchor = evidence_anchor(package.records("run")[0])
+    assert anchor is not None
+    with fresh(pg_uri) as catalog:
+        assert catalog.register(package.root).outcome == "registered"
+        result = catalog.resolve(anchor)
+    (route,) = result.fetch
+    assert (route.storage, route.locations) == ("materialised", ())
+    assert route.blob_path == Known(package.blob(anchor.source))
+
+
 ANCHOR: Final = EvidenceAnchor("sha256:" + "f" * 64, ({"kind": "byte_range"},))
 
 
@@ -364,6 +426,8 @@ ANCHOR: Final = EvidenceAnchor("sha256:" + "f" * 64, ({"kind": "byte_range"},))
         (EvidenceAnchor("sha256:" + "f" * 64, ({"kind": float("nan")},)), None, "invalid_request"),
         (EvidenceAnchor("sha256:" + "f" * 64, ("step",)), None, "invalid_request"),  # type: ignore[arg-type]
         (ANCHOR, None, "unresolvable_evidence"),
+        (EvidenceAnchor("sha256:" + "f" * 64, ({"kind": ["row"]},)), None, "unresolvable_evidence"),
+        (EvidenceAnchor("sha256:" + "f" * 64, ({"kind": {}},)), None, "unresolvable_evidence"),
     ],
 )
 def test_resolve_refuses_requests_outside_the_contract(

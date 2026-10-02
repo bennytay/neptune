@@ -84,6 +84,7 @@ _KIND: Final = re.compile(r"[a-z][a-z0-9_]{0,55}")
 _FREE_FORM: Final = {"type": "object"}
 SPEC_FILE: Final = "projections.json"
 _MIGRATION: Final = re.compile(r"(\d{4})_[a-z0-9_]+\.sql")
+_SCHEMA_ID: Final = re.compile(r"urn:neptune:schema:canonical:([1-9][0-9]{0,8})")
 
 
 class ProjectionError(ValueError):
@@ -149,6 +150,14 @@ class Spec:
     def opaque_fields(self, kind: str) -> frozenset[str]:
         return frozenset(field for k, field in self.opaque if k == kind)
 
+    @property
+    def major(self) -> int:
+        """The package-schema version the spec was read from."""
+        match = _SCHEMA_ID.fullmatch(self.schema_id)
+        if match is None:
+            raise ProjectionError(f"spec {self.schema_id!r} names no package-schema version")
+        return int(match.group(1))
+
 
 BASELINE: Final = Spec("baseline: migration 0001", BASELINE_KINDS, (), ())
 
@@ -172,6 +181,8 @@ def projection_spec(schema: Mapping[str, Any]) -> Spec:
         schema_id = schema["$id"]
     except (KeyError, TypeError) as exc:
         raise ProjectionError(f"not a package-schema export: {exc!r} is missing") from exc
+    if not isinstance(schema_id, str) or not _SCHEMA_ID.fullmatch(schema_id):
+        raise ProjectionError(f"schema id {schema_id!r} does not name a package-schema version")
     kinds: list[str] = []
     projections: list[Projection] = []
     opaque: list[tuple[str, str]] = []
@@ -209,10 +220,12 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
     """
     gone_kinds = sorted(set(old.kinds) - set(new.kinds))
     gone = sorted(set(old.projections) - set(new.projections))
-    if gone_kinds or gone:
+    gone_opaque = sorted(set(old.opaque) - set(new.opaque))
+    if gone_kinds or gone or gone_opaque:
         raise ProjectionError(
-            f"the new schema drops kinds {gone_kinds} or projections"
-            f" {[f'{p.kind}.{p.field}' for p in gone]}; removals need an ADR"
+            f"the new schema drops kinds {gone_kinds}, projections"
+            f" {[f'{p.kind}.{p.field}' for p in gone]} or free-form fields"
+            f" {[f'{kind}.{field}' for kind, field in gone_opaque]}; removals need an ADR"
         )
     added_kinds = sorted(set(new.kinds) - set(old.kinds))
     added = sorted(set(new.projections) - set(old.projections))
@@ -234,6 +247,25 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
         "-- Hot-filter projections this migration adds (kind.field -> columns):",
     ]
     out += [f"--   {p.kind}.{p.field} -> {', '.join(p.columns)}" for p in added]
+    # Rows already filed for a kind that gains a projection would read as "not Known": a blank
+    # turned into a fact. Records of an older schema version do not state the field, so only
+    # rows of this version or later make the migration refuse; the catalog is then rebuilt from
+    # its packages and registration log (ADR 0002 §4) by a Ledger that ships this migration.
+    existing = sorted({p.kind for p in added} & set(old.kinds))
+    if existing:
+        out += [
+            "",
+            "DO $$",
+            "BEGIN",
+            f"  IF EXISTS (SELECT 1 FROM record WHERE schema_version >= {new.major} AND kind IN (",
+            ",\n".join(f"      '{kind}'" for kind in existing) + ")) THEN",
+            "    RAISE EXCEPTION 'record rows of a kind gaining a projection would read as not'",
+            "      ' Known; rebuild this catalog from its packages and registration log"
+            " (ADR 0008)';",
+            "  END IF;",
+            "END",
+            "$$;",
+        ]
     for kind in added_kinds:
         out += ["", f"CREATE TABLE record_{kind} PARTITION OF record FOR VALUES IN ('{kind}');"]
     for filter_name, columns in groups:
@@ -289,16 +321,19 @@ def generate(schema_path: Path, catalog_dir: Path) -> Path | None:
     )
     version = (existing[-1] if existing else 0) + 1
     text = render_migration(old, new, version)
+    target = catalog_dir / "migrations" / f"{version:04d}_projections_schema_{new.major}.sql"
+    if text:
+        # The migration first, never over an existing file: a spec naming columns no migration
+        # creates would make every registration fail.
+        with target.open("x", encoding="utf-8") as out:
+            out.write(text)
     (catalog_dir / SPEC_FILE).write_bytes(spec_bytes(new))
-    if not text:
-        return None
-    major = new.schema_id.rsplit(":", 1)[-1]
-    target = catalog_dir / "migrations" / f"{version:04d}_projections_schema_{major}.sql"
-    target.write_text(text, encoding="utf-8")
-    return target
+    return target if text else None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run from the source tree (the workspace's editable install), never from an installed
+    wheel: it writes into this package's directory."""
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) != 1:
         sys.stderr.write("usage: python -m neptune_ledger.catalog.projection SCHEMA_JSON\n")
