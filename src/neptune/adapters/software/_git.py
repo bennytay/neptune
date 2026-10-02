@@ -106,6 +106,7 @@ def _read_packed(reading: Reading) -> list[Draft]:
     drafts: list[Draft] = []
     peeled = False
     pending: _Ref | None = None
+    skipped = False  # the last ref line was skipped, so its peel line is too
 
     def close() -> None:
         nonlocal pending
@@ -147,16 +148,26 @@ def _read_packed(reading: Reading) -> list[Draft]:
             close()
             name_start, name_end = ref.span("name")
             name_at = reading.span(start + name_start, name_end - name_start)
+            try:  # git allows any non-control bytes in a refname; only UTF-8 is a text value
+                name = ref["name"].decode("utf-8")
+            except UnicodeDecodeError:
+                reading.malformed_entry(name_at, "has a ref name that is not UTF-8")
+                skipped = True
+                continue
+            skipped = False
             draft = Draft(entry=reading.span(start, len(content)))
-            draft.name = Known(ref["name"].decode("ascii"), reading.provenance(name_at))
+            draft.name = Known(name, reading.provenance(name_at))
             tag = ref["name"].startswith(b"refs/tags/")
             pending = _Ref(draft, start, end, ref["sha"], start + ref.start("sha"), tag)
+        elif peel is not None and skipped:
+            skipped = False  # the peel line of a ref that was skipped
         elif peel is not None and pending is not None:
             pending.end, pending.tag = end, False
             pending.sha, pending.sha_at = peel["sha"], start + peel.start("sha")
             close()
         elif content:
             close()
+            skipped = False
             reading.malformed_entry(
                 reading.span(start, len(content)), "is not a ref or a peel line"
             )
