@@ -418,7 +418,19 @@ def commissioning() -> bytes:
     return tagged_pdf("Commissioning report CR-C3-2026-02", [first, second])
 
 
-def incident() -> bytes:
+def incident(split: bool = False) -> bytes:
+    """The incident report. With ``split`` the description's second paragraph starts page 2, so the
+    section crosses a page and no single span can cite it."""
+    description = [
+        Heading("Description"),
+        Para(
+            [
+                "While lifting pallet PAL-5521 the left fork touched the rack upright and the",
+                "mast stopped. The pallet stayed on the forks.",
+            ]
+        ),
+    ]
+    more = [Para(["No person was in the aisle. The aisle was closed for 24 minutes."])]
     first = PageSpec(
         [
             Heading("Incident report INC-HH-0092", 1),
@@ -442,17 +454,13 @@ def incident() -> bytes:
                 ],
                 (150, 540),
             ),
+            *(description if split else []),
         ]
     )
     second = PageSpec(
         [
-            Heading("Description"),
-            Para(
-                [
-                    "While lifting pallet PAL-5521 the left fork touched the rack upright and the",
-                    "mast stopped. The pallet stayed on the forks. No person was in the aisle.",
-                ]
-            ),
+            *([] if split else description),
+            *more,
             Heading("Root cause"),
             Para(
                 [
@@ -496,6 +504,32 @@ def sop() -> bytes:
     return tagged_pdf("SOP-MP-031", [first])
 
 
+def sop_markdown() -> bytes:
+    """The same SOP kept as a Markdown runbook, for a second legged robot: the compiler's Markdown
+    adapter gives spans in the file's text and GFM tables, and the same template reads both."""
+    text = (
+        "# SOP-MP-031 Foot pad replacement\n\n"
+        "Procedure: SOP-MP-031\n\n"
+        "Revision: C\n\n"
+        "## Work record\n\n"
+        "Work order: WO-QD-6107\n\n"
+        "Machine: QD-05\n\n"
+        "Performed on: 2026-05-19\n\n"
+        "Diagnosis: Foot pad cracked on leg RR\n\n"
+        "## Procedure\n\n"
+        "- Power the robot down and place it on the service stand\n"
+        "- Remove the two retaining screws from the foot pad on leg RR\n"
+        "- Fit the new foot pad and torque the screws to 2.5 N.m\n"
+        "- Power up and run the stance self-test\n\n"
+        "## Parts replaced\n\n"
+        "| Part | Removed | Installed |\n"
+        "|---|---|---|\n"
+        "| Foot pad RR | FP-0210 | FP-0305 |\n\n"
+        "Performed by: T. Nakamura\n"
+    )
+    return text.encode()
+
+
 # One folder per embodiment; each becomes one compiler package.
 SOURCES: dict[str, dict[str, bytes]] = {
     "warehouse_amr": {
@@ -506,10 +540,14 @@ SOURCES: dict[str, dict[str, bytes]] = {
         "risk_cell_arm.pdf": risk_cell(),
         "commissioning_cell3.pdf": commissioning(),
     },
-    "inspection_quadruped": {"sop_foot_pad.pdf": sop()},
+    "inspection_quadruped": {
+        "sop_foot_pad.pdf": sop(),
+        "sop_foot_pad_runbook.md": sop_markdown(),
+    },
     "malformed": {
         "risk_amr_rotated.pdf": risk_amr(rotate=90),
         "risk_amr_revision3.pdf": risk_amr(revision="3"),
+        "incident_amr_split.pdf": incident(split=True),
         "scan_0042.pdf": scanned_pdf(),
     },
 }

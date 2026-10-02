@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:99e64a22c74a724be7a666374d77f37e7ce25cd6e7700ed8b45a3ed6f69d7b83`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:58704ba2dd4e6f7a2b2451955999f07fe85e993556a55f2ef0b82447593c1a87`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -12,7 +12,7 @@ Receipt `rec:sha256:99e64a22c74a724be7a666374d77f37e7ce25cd6e7700ed8b45a3ed6f69d
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `incident_amr_collision.pdf` | 6913 | `sha256:857204dd5ee9` | pdf 0.1.0 |
+| `incident_amr_collision.pdf` | 7108 | `sha256:acf79ced9467` | pdf 0.1.0 |
 | `risk_amr_iso3691_4.pdf` | 8846 | `sha256:f0e0ff53f96b` | pdf 0.1.0 |
 
 ## Adapters
@@ -26,7 +26,7 @@ Receipt `rec:sha256:99e64a22c74a724be7a666374d77f37e7ce25cd6e7700ed8b45a3ed6f69d
 
 | Kind | Records |
 |---|---|
-| `document_block` | 31 |
+| `document_block` | 32 |
 | `document_record` | 2 |
 | `source_artifact` | 2 |
 | `source_revision` | 2 |
