@@ -52,6 +52,16 @@ SOFTWARE_VALUE: Final = {
 _GROUNDED: Final = frozenset({"observed", "stated"})
 
 
+class MembershipError(ValueError):
+    """A record states a thread key the catalog API cannot express; registration refuses the
+    package with ``record_invalid`` naming the record (ADR 0010 §1)."""
+
+    def __init__(self, record_id: str, pointer: str, cause: Exception) -> None:
+        self.record_id = record_id
+        self.detail = f"the thread key at {pointer} is outside the catalog API: {str(cause)[:300]}"
+        super().__init__(self.detail)
+
+
 @dataclass(frozen=True)
 class ThreadRow:
     """A thread key, once per thread id: ``key`` is the canonical JSON ``thread_id`` hashes."""
@@ -128,12 +138,20 @@ def thread_rows(lines: Mapping[str, tuple[bytes, ...]]) -> ThreadRows:
             if anchor is None:
                 continue
             for thread_kind, role, pointer, field in _declared(kind, record):
-                for key in _keys(thread_kind, field, record):
-                    join(key, kind, record, role)
-                for key in _candidate_keys(thread_kind, field):
-                    named(key, kind, record, pointer)
+                try:
+                    for key in _keys(thread_kind, field, record):
+                        join(key, kind, record, role)
+                    for key in _candidate_keys(thread_kind, field):
+                        named(key, kind, record, pointer)
+                except (ValueError, TypeError) as exc:
+                    raise MembershipError(record["id"], pointer, exc) from exc
             for thread_kind in _anchored(kind, record):
-                join(ThreadKey(cast("ThreadKind", thread_kind), anchor), kind, record, "subject")
+                try:
+                    join(
+                        ThreadKey(cast("ThreadKind", thread_kind), anchor), kind, record, "subject"
+                    )
+                except (ValueError, TypeError) as exc:
+                    raise MembershipError(record["id"], "/provenance/evidence", exc) from exc
     for kind, (field, target_kind, thread_kind) in sorted(PART_OF.items()):
         targets = {r["id"] for r in records.get(target_kind, [])}
         for record in records.get(kind, []):

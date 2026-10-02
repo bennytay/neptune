@@ -6,7 +6,7 @@ robots are deliberately varied: a humanoid, an AUV, a field rover, a warehouse f
 """
 
 import random
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -14,9 +14,10 @@ from neptune.identity import canonical_json
 from neptune.model.knowledge import Knowledge, Known
 from neptune_ledger.api import codec
 from neptune_ledger.api.types import DeclaredKey, EvidenceAnchor, ThreadKey, WorldTime
-from neptune_ledger.threads.membership import ThreadRows, thread_rows, world_json
+from neptune_ledger.threads.membership import MembershipError, ThreadRows, thread_rows, world_json
 from neptune_ledger.threads.read import _world
 
+WORLD: Any = cast("Any", Knowledge)[WorldTime]
 T1 = "rec:sha256:" + "1" * 64
 SOURCE = "sha256:" + "a" * 64
 OTHER = "sha256:" + "b" * 64
@@ -370,7 +371,7 @@ def test_world_time_restates_the_end_field(
     assert world_json(kind, fields) == expected
     # The read path's direct decoder agrees with the contract's codec on what registration wrote.
     text = canonical_json.dumps(expected).decode()
-    assert _world(text) == codec.decode_as(Knowledge[WorldTime], expected)  # type: ignore[valid-type]
+    assert _world(text) == codec.decode_as(WORLD, expected)
 
 
 def test_the_direct_world_decoder_keeps_stated_provenance_and_other_states() -> None:
@@ -380,12 +381,12 @@ def test_the_direct_world_decoder_keeps_stated_provenance_and_other_states() -> 
         {"knowledge": "not_covered"},
         {"knowledge": "unknown", "provenance": provenance(2)},
     ):
-        value = {
+        value: dict[str, Any] = {
             "knowledge": "known",
             "value": {"end": end, "start": {"domain_id": CLOCK, "ticks": 1}},
         }
         text = canonical_json.dumps(value).decode()
-        assert _world(text) == codec.decode_as(Knowledge[WorldTime], value)  # type: ignore[valid-type]
+        assert _world(text) == codec.decode_as(WORLD, value)
         decoded = _world(text)
         assert isinstance(decoded, Known)
         assert codec.to_json(decoded.value) == value["value"], "round-trips byte for byte"
@@ -407,6 +408,8 @@ def test_the_rows_do_not_depend_on_line_or_table_order() -> None:
 
 
 def test_a_key_outside_the_contract_raises_for_registration_to_refuse() -> None:
-    hostile = record("machine", 1, identifiers=[known("Not A Token", "x")])
-    with pytest.raises(ValueError):
+    hostile = record("machine", 1, identifiers=[known("ok", "x"), known("Not A Token", "x")])
+    with pytest.raises(MembershipError) as raised:
         rows(hostile)
+    assert raised.value.record_id == hostile["id"]
+    assert "/identifiers/1" in raised.value.detail

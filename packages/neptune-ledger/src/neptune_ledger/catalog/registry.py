@@ -56,7 +56,7 @@ from neptune_ledger.catalog.index import PackageRows, RecordRow, package_rows, p
 from neptune_ledger.catalog.migrate import tenant_schema
 from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, check_sources
 from neptune_ledger.lineage.graph import read_lineage, unknown_record
-from neptune_ledger.threads.membership import ThreadRows, thread_rows
+from neptune_ledger.threads.membership import MembershipError, ThreadRows, thread_rows
 from neptune_ledger.threads.read import (
     empty_thread,
     read_thread,
@@ -199,9 +199,8 @@ class PostgresCatalog:
         rows = package_rows(str(checked.package_id), checked.manifest, checked.lines)
         try:
             threads = thread_rows(checked.lines)
-        except (ValueError, TypeError) as exc:  # a key the catalog API cannot express
-            detail = f"a thread key of it is outside the catalog API: {str(exc)[:300]}"
-            finding = CatalogFinding("record_invalid", rows.package_id, detail)
+        except MembershipError as exc:  # a thread key the catalog API cannot express
+            finding = CatalogFinding("record_invalid", exc.record_id, exc.detail)
             return self._refusal(root, checked, [finding])
         try:
             outcome, key, locator, version = self._run(
@@ -346,10 +345,12 @@ class PostgresCatalog:
                 (t, [x.thread_id for x in threads.threads]),
             ).fetchall()
         }
-        cur.executemany(
-            "INSERT INTO thread VALUES (%s, %s, %s, %s)",
-            [(t, x.thread_id, x.kind, x.key) for x in threads.threads if x.thread_id not in stored],
-        )
+        new = [x for x in threads.threads if x.thread_id not in stored]
+        for keys in _batches(new):
+            cur.executemany(
+                "INSERT INTO thread VALUES (%s, %s, %s, %s)",
+                [(t, x.thread_id, x.kind, x.key) for x in keys],
+            )
         for members in _batches(threads.members):
             cur.executemany(
                 "INSERT INTO thread_member VALUES"
@@ -694,22 +695,26 @@ class PostgresCatalog:
     ) -> Thread:
         """One thread at one catalog point (ADR 0003 §3-§5): history or a current view."""
         thread_id = _thread_id(key)
-        chosen = preference if isinstance(preference, _PREFERENCES) else None
+        # A rejection echoes the optional request parts only when they are inside the contract,
+        # so it still encodes. A key or order outside it is echoed as given: such a request never
+        # decodes from the wire, only an in-process caller can make one (ADR 0010 §5).
+        chosen = preference if isinstance(preference, _PREFERENCES) and _valid(preference) else None
+        echo = merge if isinstance(merge, ClockMerge) and _valid(merge) else None
         if _bad_as_of(as_of):
             point, _, _ = self._run(lambda conn: self._lookup(conn, "", None))
             finding = CatalogFinding("invalid_request", str(as_of), "as_of is a tx_seq, at least 1")
-            return empty_thread(thread_id, key, order, point, (finding,), chosen, merge)
+            return empty_thread(thread_id, key, order, point, (finding,), chosen, echo)
 
         def body(conn: Conn) -> Thread:
             point, _, beyond = self._lookup(conn, "", as_of)
             limit = point.value.tx_seq if isinstance(point, Known) else 0
             if beyond:
-                return empty_thread(thread_id, key, order, point, (_beyond(as_of),), chosen, merge)
+                return empty_thread(thread_id, key, order, point, (_beyond(as_of),), chosen, echo)
             findings = self._thread_request(conn, key, order, preference, merge, limit)
             if findings:
-                return empty_thread(thread_id, key, order, point, findings, chosen, merge)
+                return empty_thread(thread_id, key, order, point, findings, chosen, echo)
             assert chosen is not None
-            return read_thread(conn, self._tenant, key, order, chosen, merge, (), limit, point)
+            return read_thread(conn, self._tenant, key, order, chosen, echo, (), limit, point)
 
         return self._run(body)
 

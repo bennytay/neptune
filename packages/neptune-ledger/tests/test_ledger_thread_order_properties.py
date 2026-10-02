@@ -39,6 +39,7 @@ from neptune_ledger.threads.merge import Path as MergePath
 from neptune_ledger.threads.order import (
     Chain,
     Member,
+    chain_of,
     collapse,
     history_entries,
     lineage_sets,
@@ -359,6 +360,28 @@ def test_p8_latest_transform_examples() -> None:
     assert Ambiguous((Candidate(v1a), Candidate(v1b))) == Ambiguous(
         (Candidate(v1a), Candidate(v1b))
     )
+
+
+def test_chains_flatten_a_diamond_once_per_path_and_refuse_cycles() -> None:
+    """A fusion transform whose two upstreams share an ancestor (ADR 0003 §4.4)."""
+    adapters = {
+        "a": ("mcap", "1.0.0"),
+        "b": ("imu", "1.0.0"),
+        "c": ("gps", "2.0.0"),
+        "d": ("fuse", "0.1.0"),
+    }
+    upstream = {"b": ["a"], "c": ["a"], "d": ["b", "c"]}
+    memo: dict[str, Chain | None] = {}
+    assert chain_of("d", adapters, upstream, memo) == (
+        ("mcap", "1.0.0"),
+        ("imu", "1.0.0"),
+        ("mcap", "1.0.0"),
+        ("gps", "2.0.0"),
+        ("fuse", "0.1.0"),
+    )
+    assert memo["b"] == (("mcap", "1.0.0"), ("imu", "1.0.0")), "shared work is kept"
+    assert chain_of("d", adapters, {**upstream, "a": ["d"]}) is None, "a cycle has no chain"
+    assert chain_of("d", {k: v for k, v in adapters.items() if k != "a"}, upstream) is None
 
 
 # --- P7: merge ---------------------------------------------------------------------------------

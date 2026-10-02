@@ -35,9 +35,11 @@ class TransformGraph:
     info: dict[str, TransformInfo]
     upstream: dict[str, tuple[str, ...]]  # in consumed order (``position``)
 
-    def chain(self, transform_id: str) -> Chain | None:
+    def chains(self, transform_ids: Iterable[str]) -> dict[str, Chain | None]:
+        """Each transform's chain (``order.chain_of``), sharing work across them."""
         adapters = {tid: (i.adapter_id, i.adapter_version) for tid, i in self.info.items()}
-        return chain_of(transform_id, adapters, self.upstream)
+        memo: dict[str, Chain | None] = {}
+        return {tid: chain_of(tid, adapters, self.upstream, memo) for tid in transform_ids}
 
 
 def transform_graph(conn: Conn, tenant: str, start: Iterable[str], limit: int) -> TransformGraph:
@@ -131,13 +133,15 @@ def read_lineage(
     )
 
 
+def unknown_record_finding(record_id: str) -> CatalogFinding:
+    return CatalogFinding("unknown_record", record_id, "no registered package holds this record id")
+
+
 def unknown_record(
     record_id: str, point: Knowledge[TransactionKey], finding: CatalogFinding | None = None
 ) -> LineageGraph:
     """A rejected or unknown-record ``lineage``: every collection empty (ADR 0004 §2)."""
-    found = finding or CatalogFinding(
-        "unknown_record", record_id, "no registered package holds this record id"
-    )
+    found = finding or unknown_record_finding(record_id)
     return LineageGraph(
         record_id=record_id,
         status="unknown_record",

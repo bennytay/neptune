@@ -7,9 +7,10 @@ clocks with no mapping. Then Ambiguous candidates, the other thread kinds over t
 worked examples, an unregistered upstream, requests outside the contract, and determinism.
 """
 
+import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import psycopg
 import pytest
@@ -30,7 +31,14 @@ from ledger_thread_packages import (
     subset,
     timestamp,
 )
-from neptune.model.knowledge import Ambiguous, Candidate, Known, NotApplicable, NotCovered
+from neptune.model.knowledge import (
+    Ambiguous,
+    Candidate,
+    Knowledge,
+    Known,
+    NotApplicable,
+    NotCovered,
+)
 from neptune.store.package import write_package
 from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
@@ -48,11 +56,13 @@ from neptune_ledger.api.types import (
     ThreadPreference,
     TransformInfo,
     UnresolvedMember,
+    WorldTime,
 )
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.contract_tests.examples import EXAMPLES, materialise
 from test_ledger_registration import dump, fresh
 
+WORLD: Any = cast("Any", Knowledge)[WorldTime]
 Conn = psycopg.Connection[tuple[object, ...]]
 UNKNOWN_MAPPING = "rec:sha256:" + "4" * 64
 
@@ -540,6 +550,46 @@ def test_a_thread_request_outside_the_contract_is_invalid(
     assert [f.code for f in thread.findings] == ["invalid_request"]
     assert (thread.partitions, thread.lineage_sets, thread.unresolved) == ((), (), ())
     assert thread.thread_id.startswith("sha256:")
+    if "key" not in call and "order" not in call:
+        validate(thread)  # the rejection itself is inside the contract, and encodes
+        assert thread.preference in (None, History())
+
+
+def test_thread_rows_copy_their_records_world_time(
+    catalog: PostgresCatalog, split_run: dict[str, Any], pg_uri: str
+) -> None:
+    """thread_member's interval and clock are the record's own (ADR 0010 §1), and its world
+    JSON's start and closed end agree with them."""
+    with psycopg.connect(pg_uri) as conn:
+        rows = conn.execute(
+            "SELECT m.world_clock IS NOT DISTINCT FROM r.world_clock"
+            "   AND m.world_first IS NOT DISTINCT FROM r.world_first"
+            "   AND m.world_last IS NOT DISTINCT FROM r.world_last"
+            "   AND m.transform_id = r.transform_id"
+            "   AND m.source_content_id = r.source_content_id,"
+            "  m.world, m.world_clock, m.world_first, m.world_last"
+            " FROM tenant_acme.thread_member m JOIN tenant_acme.record r"
+            "  USING (tenant_id, kind, record_id, package_id)"
+        ).fetchall()
+    assert rows and all(row[0] for row in rows)
+    for _, world, clock, first, last in rows:
+        decoded = codec.decode_as(WORLD, json.loads(str(world)))
+        if clock is None:
+            assert not isinstance(decoded, Known)
+        else:
+            assert isinstance(decoded, Known)
+            value = decoded.value
+            assert (value.clock, value.start.ticks, value.closed_end) == (clock, first, last)
+
+
+def test_a_rejected_merge_or_preference_is_not_echoed(
+    catalog: PostgresCatalog, split_run: dict[str, Any]
+) -> None:
+    bad_merge = ClockMerge("not-a-clock", ())
+    thread = catalog.thread(split_run["key"], "world", Pinned("nope"), merge=bad_merge, as_of=99)
+    validate(thread)
+    assert [f.code for f in thread.findings] == ["as_of_out_of_range"]
+    assert (thread.preference, thread.merge) == (None, None)
 
 
 @pytest.mark.parametrize("call", ["threads_of", "lineage"])

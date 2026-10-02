@@ -33,7 +33,7 @@ from neptune_ledger.api.types import (
     UnresolvedMembership,
     WorldTime,
 )
-from neptune_ledger.lineage.graph import transform_graph
+from neptune_ledger.lineage.graph import transform_graph, unknown_record_finding
 from neptune_ledger.threads import merge as merging
 from neptune_ledger.threads.order import (
     Member,
@@ -134,7 +134,7 @@ def read_thread(
     else:
         start = {m.transform_id for m in found}
         graph = transform_graph(conn, tenant, start, limit)
-        chains = {tid: graph.chain(tid) for tid in start}
+        chains = graph.chains(start)
         resolved, selected = resolve(sets, preference, chains)
         entries = collapse(selected)
     partitions = ordered(entries, order)
@@ -239,10 +239,7 @@ def read_threads_of(
         (tenant, record_id, limit),
     ).fetchone()
     if held is None:
-        finding = CatalogFinding(
-            "unknown_record", record_id, "no registered package holds this record id"
-        )
-        return unknown_threads_of(record_id, point, finding)
+        return unknown_threads_of(record_id, point, unknown_record_finding(record_id))
     memberships = sorted(
         (
             Membership(str(tid), _key(str(key)), str(package), tuple(roles))

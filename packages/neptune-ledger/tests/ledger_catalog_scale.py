@@ -271,10 +271,16 @@ SELECT %(tenant)s, 'sha256:' || encode(sha256(convert_to({MACHINE_KEY}, 'UTF8'))
        r.package_id, r.record_id, r.kind, r.registration_key,
        CASE WHEN r.kind = 'machine' THEN ARRAY['subject'] ELSE ARRAY['cites'] END,
        r.transform_id, r.source_content_id, r.world_clock, r.world_first, r.world_last,
-       CASE WHEN r.world_clock IS NULL THEN '{{"knowledge":"not_applicable"}}'
-            ELSE '{{"knowledge":"known","value":{{"end":{{"knowledge":"known","value":'
-                 || '{{"domain_id":"' || r.world_clock || '","ticks":' || r.world_last
-                 || '}}}},"start":{{"domain_id":"' || r.world_clock || '","ticks":'
+       -- ThreadEntry.world as membership.world_json writes it: not_applicable for kinds
+       -- without world time, unknown when no bound is Known, an open end as Unknown.
+       CASE WHEN r.kind NOT IN ('run', 'stream', 'calibration')
+              THEN '{{"knowledge":"not_applicable"}}'
+            WHEN r.world_clock IS NULL THEN '{{"knowledge":"unknown"}}'
+            ELSE '{{"knowledge":"known","value":{{"end":'
+                 || COALESCE('{{"knowledge":"known","value":{{"domain_id":"' || r.world_clock
+                             || '","ticks":' || r.world_last || '}}}}',
+                             '{{"knowledge":"unknown"}}')
+                 || ',"start":{{"domain_id":"' || r.world_clock || '","ticks":'
                  || r.world_first || '}}}}}}' END
 FROM record_logical_id l
 JOIN record r ON r.tenant_id = l.tenant_id AND r.kind = l.kind

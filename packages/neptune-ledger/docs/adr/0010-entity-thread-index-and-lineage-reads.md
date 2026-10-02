@@ -37,7 +37,8 @@ issue. Four facts shape it:
    rebuilds the index byte for byte (ADR 0003 §8). 0006 refuses to apply to a catalog that already
    holds packages, as 0004 and 0005 do: append-only tables cannot be backfilled, so such a
    catalog is rebuilt. A package whose membership cannot be expressed in the catalog API (a key
-   the API's schema refuses) is refused with `record_invalid` and writes nothing.
+   the API's schema refuses) is refused with `record_invalid` naming the record and the pointer,
+   and writes nothing.
 2. **Membership details** (ADR 0003 §2, which stays the only field table):
    - A field's grounding is its own provenance, or the record's when the field carries none. Only
      `observed` or `stated` counts. The same holds for each `Ambiguous` candidate, so an inferred
@@ -69,7 +70,8 @@ issue. Four facts shape it:
    - **Chains.** A transform is registered at a point when a `transform_record` row for it has a
      registration key at or before the point. A chain that reaches a transform not registered by
      then, or a cycle, is unknown. An unknown chain, like one holding a version that is not SemVer,
-     compares with nothing, so it is never dominated and dominates nothing.
+     compares with nothing, so it is never dominated and dominates nothing. A shared ancestor
+     (a diamond) appears once per path that consumed it, as flattening depth first gives.
    - **Revisions** (ADR 0003 §5) are computed at read time from `source_location` rows registered
      by the point. There is one edge per superseding/superseded revision pair whose two contents
      are different lineage sets of the same kind in this thread. A revision that supersedes a
@@ -90,7 +92,9 @@ issue. Four facts shape it:
    until a package schema carries `ClockMapping` (MVL-82)**, and the call is rejected. A thread of
    a reserved kind (`zone`, `task`, `person`) is empty, like any unknown key. `links` is always
    empty for the same reason as mappings. `threads_of` and `lineage` reject an empty record id or
-   a bad `as_of` with `invalid_request`.
+   a bad `as_of` with `invalid_request`. A rejection echoes `preference` and `merge` only when
+   they are inside the contract, so it encodes. A key or order outside the contract is echoed as
+   given: no such request decodes from the wire, so only an in-process caller can make one.
 6. **The merge engine is built and tested now.** `threads.merge` implements ADR 0003 §3.1-§3.5
    and ADR 0006 §8 over a `ClockMapping` value (slope, offset, bound, validity window, and whether
    the function is affine). It uses exact rationals, ranks simple paths by total bound then by

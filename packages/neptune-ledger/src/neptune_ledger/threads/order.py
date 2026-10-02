@@ -259,20 +259,31 @@ def chain_of(
     transform_id: str,
     adapters: Mapping[str, tuple[str, str]],
     upstream: Mapping[str, Sequence[str]],
+    memo: dict[str, Chain | None] | None = None,
 ) -> Chain | None:
     """The transform's chain: upstream flattened depth first in consumed order, then itself
-    (root ADR 0016 §4). ``None`` when a transform on it is not registered, or on a cycle."""
+    (ADR 0003 §4.4); a shared ancestor appears once per path that consumed it. ``None`` when a
+    transform on it is not registered, or on a cycle. ``memo`` shares work across calls."""
+    done = {} if memo is None else memo
+    active: set[str] = set()
 
-    def walk(tid: str, seen: frozenset[str]) -> Chain | None:
-        if tid in seen or tid not in adapters:
+    def walk(tid: str) -> Chain | None:
+        if tid in done:
+            return done[tid]
+        if tid in active or tid not in adapters:
             return None
+        active.add(tid)
         out: list[tuple[str, str]] = []
+        result: Chain | None = None
         for parent in upstream.get(tid, ()):
-            above = walk(parent, seen | {tid})
+            above = walk(parent)
             if above is None:
-                return None
+                break
             out += above
-        out.append(adapters[tid])
-        return tuple(out)
+        else:
+            result = (*out, adapters[tid])
+        active.discard(tid)
+        done[tid] = result
+        return result
 
-    return walk(transform_id, frozenset())
+    return walk(transform_id)
