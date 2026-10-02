@@ -40,6 +40,11 @@ and needs what the catalog says about the objects without turning it into interp
    `POST` path. Bytes are one ranged `GET` of the signed URL. Reading a file first fetches its record and
    compares `file_id` and `version` with the listed token, so a file that moved on is `object_changed`
    before any URL is asked for. An expired signed URL is asked for again once.
+   The files query documents no order, and ADR 0006 §4's limits keep the first entries they meet. So the
+   connector reads every page of the query on the first request, sorts the files by path and serves them
+   in `page_size` slices. What a limit keeps and its `covered_through_hex` then never depend on Roboto's
+   order or paging. The read is bounded by `max_listing_bytes` and the page limit; a failure part-way
+   serves what was read and then reports where it stopped.
 3. **Declared, closed options and a declared token.** Unknown options are refused. Roboto: `endpoint`,
    `content_hosts`, `api_version` (sent as `X-Roboto-Api-Version`, so the shape does not move under stored
    documents), `events`, `comments`, `max_records`, `event_clock`, plus the object-store limits. The token
@@ -55,11 +60,16 @@ and needs what the catalog says about the objects without turning it into interp
      the document's content id as evidence source. A cell is the value as given: text stays text, numbers
      and booleans keep their type, an object or array is its own sorted JSON as text. `null`, an absent
      key and `""` are `Unknown`. Nothing is parsed, converted or normalised: a time stays the integer the
-     catalog wrote, `"kind": "timestamp"` stays text.
+     catalog wrote, `"kind": "timestamp"` stays text. A key that is not valid Unicode or starts with
+     `@clock:` (the companion columns' prefix) is not a column and its value is not stored, and an element
+     of a response that is not an object is a row of `Unknown`; both are `value_unrepresentable` findings,
+     and every `/items/<i>` pointer names the element at that index of the stored document.
    - A time a catalog names (`start_time` and `end_time` of an event; an index of a Rerun dataset) becomes
      a `TimestampDomain` with `field` the catalog's name and `scope` the dataset. Its epoch, timescale,
      resolution and role are `Unknown` unless the operator declared them (`event_clock`,
-     `timeline_clocks`). An event row carries a `@clock:<field>` cell citing that domain, so an annotation
+     `timeline_clocks`). A declared part is the operator's word, not the catalog's: it is in the transform
+     config the record's provenance names, and the record's evidence cites only the catalog value that
+     names the clock. An event row carries a `@clock:<field>` cell citing that domain, so an annotation
      over a time range says which named clock it is on, and which one is not known. Declared clocks are
      part of the transform config.
    - Roboto's catalog is the dataset record, the files the source listed (its prefix and revision), events
@@ -70,24 +80,29 @@ and needs what the catalog says about the objects without turning it into interp
    from one JSON file with a Neptune envelope (`neptune.rerun_catalog_export` version 1; `catalog`, a name
    for the Hub that is part of every id; `dataset`, `segments`, `schema`, `indexes`). It does not speak
    gRPC. Only the three documented segment columns are read; every other key is carried through as stated
-   metadata. The file is strict JSON, a regular file the operator named (no symlink, no FIFO wait),
+   metadata. A segment's row in the stated `segments` table (sorted by bytes, identical rows once) is the
+   row every finding and `objects_of` names, whatever order the export listed segments in. The file is
+   strict JSON, a regular file the operator named (no symlink, no FIFO wait),
    bounded (`max_export_bytes`, 64 MiB).
    - Each distinct storage URL (`s3://`, `gs://`, `az://`) is resolved with one exact-key listing on its
      own store, in byte order of `(provider, bucket, key)`, up to `max_objects`. Per-provider object-store
-     options (`storage.s3.endpoint` with `store`, `region`, `anonymous`) and credentials are ADR 0006's.
+     options (`storage.s3.endpoint` with `store`, `region`, `anonymous`) and credentials are ADR 0006's; those that decide a revision token
+     (`store`, `region`, `versions`, `addressing`, `anonymous`, not the endpoint) are in the transform
+     config.
      The key is never decoded.
    - Entity paths, archetypes, components and timelines are the catalog's word. Nothing reads the `.rrd`.
    - A single-layer segment whose stated size differs from the store's is `catalog_size_differs`; the
      store's is used. A catalog that stops naming an object never makes it `gone`: only the object-store
      connector asserts that, of its own prefix.
 6. **Hostile input.**
-   - Responses are strict UTF-8 JSON: no duplicate keys, no `NaN`, nesting bounded, a page limited to
+   - Responses are strict UTF-8 JSON: no duplicate keys, no `NaN`, `Infinity` or overflowing number such as
+     `1e999`, nesting bounded, a page limited to
      8 MiB, a next token to 4 KiB. A number a response states is checked as 1 to 19 digits before `int`
      sees it. A malformed files page is `response_invalid` and stops the listing; a malformed events or
      comments page is `catalog_invalid` for that part only.
    - A signed URL must be https or loopback http, no longer than 8 KiB, with no user information,
      fragment, space, dot segment, backslash, `+` or empty name in its query, and on the API's own host or
-     one in `content_hosts` (at most eight). The token is never sent to it. A refused URL is `read_failed`
+     one in `content_hosts` (at most eight; `host:443` names `host` under https). The token is never sent to it. A refused URL is `read_failed`
      for that object and no request is made.
    - No redirect is followed (`redirect_refused`). Every request has a deadline. A short or shifted
      `Content-Range`, a failing content host, or a range ignored after offset 0 is a read finding. Findings
