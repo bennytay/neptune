@@ -26,7 +26,7 @@ flowchart LR
   STORE -->|tables and documents of a package| MAP
   MAP -->|new package of lifecycle records| STORE
   MODEL -->|record kinds| MAP
-  CON -->|package-schema 4.0.0| PACKS
+  CON -->|package-schema 5.0.0| PACKS
   PACKS --> CONSOLE
 
   subgraph KEY[" "]
