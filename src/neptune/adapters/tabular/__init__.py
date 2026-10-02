@@ -165,6 +165,12 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " not read",
         ),
         ConfigOption(
+            "xlsx_max_gap_ratio",
+            64,
+            "a row's blank cells before a real cell may be at most this many per real cell before"
+            " it, plus one; the cells from the first that would exceed it are not covered",
+        ),
+        ConfigOption(
             "xlsx_max_part_bytes",
             128 * 1024 * 1024,
             "a part of a workbook declaring, or inflating to, more bytes is not read",
@@ -289,9 +295,10 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " checks); a JSON array of records or JSON Lines whose head rows all parse as"
             " records: VERIFIED; damaged JSON tables: STRUCTURE; CSV with a consistent delimiter"
             " over 3+ fields, or 2 fields named .csv/.tsv: STRUCTURE, else NAME_ONLY; JSON"
-            " objects, arrays of scalars, empty files and binary: declined; a zip with parts under"
-            " xl/: SIGNATURE (VERIFIED when the whole file is in the head and holds"
-            " [Content_Types].xml and xl/workbook.xml)",
+            " objects, arrays of scalars, empty files and binary: declined; a zip naming"
+            " xl/workbook.xml: VERIFIED when the whole file is in the head and its directory holds"
+            " [Content_Types].xml too, else (a larger or cut-off file) SIGNATURE if its leading"
+            " parts name it; any other zip is declined",
         ),
         Documented(
             "xlsx",
@@ -304,7 +311,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " sheet's formulas table; the workbook table holds the date system (1900 or 1904) when"
             " the workbook states it and Unknown when it does not, the sheet count and each"
             " sheet's name and declared state; the first row is the header under csv_header"
-            " first_row; blocks of 4,096 rows, 32,768 cells or 1 MiB",
+            " first_row; blocks of 4,096 rows, 32,768 cells or 1 MiB; a row's blank cells are"
+            " bounded by xlsx_max_gap_ratio, the cells past the first run too long are one"
+            " NotCovered cell",
         ),
     ),
     resources=Resources(max_memory=512 * 1024 * 1024, streaming=True),

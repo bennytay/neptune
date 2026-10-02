@@ -16,7 +16,7 @@ from xml.etree import ElementTree
 
 import pytest
 
-from neptune.adapters.contract import SIGNATURE, STRUCTURE, VERIFIED, ProbeHints
+from neptune.adapters.contract import SIGNATURE, VERIFIED, ProbeHints
 from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.tabular import TabularAdapter, _xlsx
 from neptune.discovery.reader import BytesReader
@@ -144,15 +144,32 @@ def test_a_larger_workbook_is_claimed_by_the_parts_the_head_shows() -> None:
     assert probe(fixture("truncated_workorders.xlsx"), "no_name") == SIGNATURE
 
 
-def test_a_zip_that_only_looks_like_ooxml_is_claimed_by_name_alone() -> None:
+def test_a_zip_that_only_looks_like_ooxml_is_never_claimed_by_its_name(gen: ModuleType) -> None:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", "<doc/>")
+    small = out.getvalue()  # a renamed word-processor file: its whole directory is in the head
+    assert probe(small, "report.xlsx") == 0.0
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as archive:
         archive.writestr("[Content_Types].xml", "<Types/>")
         archive.writestr("word/document.xml", "<doc/>" + "x" * 70000)
-    data = out.getvalue()
-    assert probe(data, "report.xlsx") == STRUCTURE
-    assert probe(data, "report.docx") == 0.0
-    assert probe(data, "no_name") == 0.0
+    assert probe(out.getvalue(), "report.xlsx") == 0.0  # larger than the head: still no name
+    assert probe(out.getvalue(), "report.docx") == 0.0
+
+
+def test_a_plain_zip_with_an_xl_folder_does_not_score(gen: ModuleType) -> None:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        archive.writestr("xl/notes.txt", "hello")
+        archive.writestr("data.csv", "a,b")
+    assert probe(out.getvalue(), "xl.zip") == 0.0
+    # a directory with a workbook part but no content types is no workbook either
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        archive.writestr("xl/workbook.xml", "<workbook/>")
+    assert probe(out.getvalue(), "x.xlsx") == 0.0
 
 
 def test_other_zips_and_an_empty_zip_are_declined() -> None:
@@ -826,15 +843,120 @@ def test_digit_strings_too_long_for_a_number_are_not_numbers_not_crashes(gen: Mo
     assert all(f.severity.value != "failed" for f in odd.findings())
 
 
-def test_a_sparse_row_counts_the_cells_it_makes_not_the_cells_it_declares(gen: ModuleType) -> None:
+def test_a_cell_far_from_the_others_is_not_covered_not_a_run_of_blanks(gen: ModuleType) -> None:
     rows = [gen.row(r, gen.n(f"XFD{r}", r)) for r in range(1, 41)]
     data = build(gen, [("S", gen.worksheet(rows))], styles=False)
-    output = run(data, xlsx_max_cells=40_000)  # 40 declared cells, 655,360 made
-    table = named(output, "S")
-    assert len(rows_of(output, table)) == 2  # 2 rows x 16,384 cells
-    assert all(len(r.cells) == 16384 for r in rows_of(output, table))
+    output = run(data)
+    records = rows_of(output, named(output, "S"))
+    assert len(records) == 40
+    assert all([state(c) for c in r.cells] == ["NotCovered"] for r in records)  # one cell each
     (finding,) = output.findings()
-    assert finding.code == "tabular.xlsx_limit" and finding.details["limit"] == "xlsx_max_cells"
+    assert finding.code == "tabular.xlsx_limit" and finding.details["limit"] == "xlsx_max_gap_ratio"
+    assert finding.details["count"] == 40
+    assert fields(cell_step(records[0].cells[0]))["content"] == "not_covered"
+    assert fields(cell_step(records[0].cells[0]))["ref"] == "A1"  # the place after the last kept
+
+
+def test_the_gap_budget_is_per_real_cell_and_its_boundary_reads(gen: ModuleType) -> None:
+    rows = [
+        gen.row(1, gen.n("D1", 1), gen.n("I1", 2), gen.n("N1", 3)),  # gaps 3, 4, 4
+        gen.row(2, gen.n("E2", 1)),  # gap 4
+    ]
+    data = build(gen, [("S", gen.worksheet(rows))], styles=False)
+    at = run(data, xlsx_max_gap_ratio=4)
+    first, second = rows_of(at, named(at, "S"))
+    # 3 <= 4*1; 4 <= 4*2; 4 <= 4*3: all kept, and E2 (gap 4 <= 4*1) too
+    assert [state(c) for c in first.cells].count("Known") == 3 and len(first.cells) == 14
+    assert len(second.cells) == 5 and codes(at) == []
+    over = run(data, xlsx_max_gap_ratio=3)
+    first, second = rows_of(over, named(over, "S"))
+    # D1 is gap 3 <= 3; I1 is gap 4 > 3*2? no, 4 <= 6: kept; N1 is 4 <= 9: kept. E2: 4 > 3
+    assert len(first.cells) == 14 and [state(c) for c in second.cells] == ["NotCovered"]
+    assert codes(over) == ["tabular.xlsx_limit"]
+
+
+def test_gap_cuts_do_not_depend_on_the_blocks(
+    gen: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        gen.row(r, gen.n(f"A{r}", r), gen.n(f"Z{r}", r), gen.n(f"XFD{r}", r)) for r in range(1, 9)
+    ]
+    data = build(gen, [("S", gen.worksheet(rows))], styles=False)
+    whole = run(data, xlsx_max_gap_ratio=24)
+    monkeypatch.setattr(_xlsx, "BLOCK_CELLS", 30)
+    cut = run(data, xlsx_max_gap_ratio=24)
+    assert len(cut.plan.chunks) > len(whole.plan.chunks)
+    assert {r.id for r in whole.records()} == {r.id for r in cut.records()}
+    records = rows_of(whole, named(whole, "S"))
+    assert [state(c) for c in records[0].cells].count("Known") == 2  # A and Z; XFD is cut
+    assert state(records[0].cells[-1]) == "NotCovered" and len(records[0].cells) == 27
+
+
+def test_a_sparse_workbook_is_small_and_quick_to_read(gen: ModuleType) -> None:
+    rows = [gen.row(r, gen.n(f"XFD{r}", r)) for r in range(1, 3001)]
+    data = build(gen, [("S", gen.worksheet(rows))], styles=False)
+    output = run(data)  # the default budget: nothing like 3,000 x 16,384 cells
+    assert sum(len(r.cells) for r in rows_of(output, named(output, "S"))) == 3000
+
+
+def test_xml_nested_in_the_workbook_or_its_relationships_is_a_limit(gen: ModuleType) -> None:
+    noise = random.Random(5)  # varied, so the ratio is not what stops it
+    deep = "".join(f"<a>{noise.randbytes(4).hex()}" for _ in range(100_000))
+    for part, marker in (
+        ("xl/workbook.xml", b"<sheets>"),
+        ("xl/_rels/workbook.xml.rels", b"<Relationship "),
+        ("_rels/.rels", b"<Relationship "),
+    ):
+        parts = gen.workorders_amr_fleet()
+        parts[part] = parts[part].replace(marker, deep.encode() + marker, 1)
+        output = run(gen.zipped(parts), **HEADED)
+        limits = [f for f in output.findings() if f.details.get("limit") == "depth"]
+        assert limits and limits[0].details["part"] == part, part
+
+
+def test_the_header_formulas_reference_follows_an_empty_row_with_no_row_number(
+    gen: ModuleType,
+) -> None:
+    rows = [
+        "<row/>",
+        '<row><c t="str"><f>"a"</f><v>a</v></c><c t="inlineStr"><is><t>b</t></is></c></row>',
+        "<row><c><v>1</v></c><c><v>2</v></c></row>",
+    ]
+    output = run(build(gen, [("S", gen.worksheet(rows))], styles=False), **HEADED)
+    (formulas,) = [
+        t for t in tables(output) if _step(t.provenance.evidence.locator[-1]) == "formulas"
+    ]
+    (record,) = rows_of(output, formulas)
+    assert values(record)[:2] == ["A2", '"a"']
+    assert [r.row for r in rows_of(output, named(output, "S"))] == [2]
+
+
+def test_a_minus_zero_stays_as_declared(gen: ModuleType) -> None:
+    rows = [
+        gen.row(1, '<c r="A1"><v>-0</v></c>', '<c r="B1"><v>-0.0</v></c>', '<c r="C1"><v>0</v></c>')
+    ]
+    output = run(build(gen, [("S", gen.worksheet(rows))], styles=False))
+    (record,) = rows_of(output, named(output, "S"))
+    assert values(record) == ["-0", -0.0, 0]
+    assert str(values(record)[1]) == "-0.0" and codes(output) == ["tabular.xlsx_number_text"]
+
+
+def test_a_sheet_tag_too_long_to_cite_is_a_limit_not_a_zero_length_citation(
+    gen: ModuleType,
+) -> None:
+    parts = gen.workorders_amr_fleet()
+    parts["xl/workbook.xml"] = parts["xl/workbook.xml"].replace(
+        b'name="Work Orders"', b'name="' + random.Random(6).randbytes(100_000).hex().encode() + b'"'
+    )
+    output = run(gen.zipped(parts), **HEADED)
+    assert [f.details["limit"] for f in output.findings() if f.code == "tabular.xlsx_limit"] == [
+        "tag"
+    ]
+    for table in tables(output):
+        assert all(
+            not isinstance(step, ByteRange) or step.length > 0
+            for step in table.provenance.evidence.locator
+        )
 
 
 def test_a_header_over_max_row_bytes_is_not_replaced_by_the_next_row(gen: ModuleType) -> None:

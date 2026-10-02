@@ -49,7 +49,7 @@ its name.
 3. **Cells as declared (ADR 0020 §5, non-negotiable 4).** A number is the stored number: an int
    when an int64 or uint64 holds the literal, a double when the double's shortest digits equal it
    (`INF`, `-INF` and `NaN` are the non-finite reals), else its literal text with an info finding
-   (`xlsx_number_text`). A boolean is a boolean; a string, an inline string and a shared string
+   (`xlsx_number_text`; a `-0` integer literal is such a case, not an int 0). A boolean is a boolean; a string, an inline string and a shared string
    are text (rich-text runs concatenated, phonetic runs excluded); an error (`#N/A`) is its text,
    marked `error`; an ISO 8601 date cell (`t="d"`) is its text. **A date is its serial, a number,
    with no conversion, no zone and no date detection.** A cell's `numFmtId` and, when the
@@ -88,11 +88,13 @@ its name.
    table cites the workbook part's `<sheet>` tag under `tabular:xlsx_sheet` (formulas:
    `tabular:xlsx_formulas`; the workbook table `tabular:xlsx_workbook`). Offsets are bytes of the
    inflated part, whatever the part's encoding declares.
-8. **Probing.** A zip whose leading local headers name parts under `xl/` is `SIGNATURE`; a whole
-   file in the head that holds `[Content_Types].xml` and `xl/workbook.xml` is `VERIFIED`; a zip whose
-   first part is `[Content_Types].xml` and whose name ends `.xlsx`, `.xlsm`, `.xltx` or `.xltm` is
-   `STRUCTURE` (that is all a word-processor's package shows); every other zip is declined, a
-   binary workbook (`xl/workbook.bin`, XLSB) included. The probe never inflates.
+
+8. **Probing.** The probe never inflates and a file name never counts. A whole file in the head
+   whose central directory holds `[Content_Types].xml` and `xl/workbook.xml` is `VERIFIED`; a
+   whole file whose directory does not (a renamed word-processor file, a plain zip with an `xl/`
+   folder) is declined. A zip too large for the head, or cut off so its directory does not read,
+   is `SIGNATURE` only when its leading local headers name `xl/workbook.xml` or a worksheet part;
+   every other zip is declined, a binary workbook (`xl/workbook.bin`, XLSB) included.
 9. **Blocks.** `plan` parses each worksheet once and streams it: it only counts and bounds rows,
    and cuts blocks between rows: 4,096 rows, 32,768 cells or about 1 MiB of the part, whichever
    comes first. `ingest` reads one block: deflate cannot seek, so it inflates the part from its
@@ -114,12 +116,16 @@ its name.
     | `xlsx_max_part_bytes` | 128 MiB | declared and, counted while inflating, actual bytes of one part: it is not read; the inflated bytes are counted because a declared size can lie |
     | `xlsx_max_shared_strings`, `xlsx_max_shared_string_bytes` | 1,000,000, 32 MiB | strings past it are not covered: a cell naming one is `NotCovered`, not `Unknown` |
     | `xlsx_max_styles` | 100,000 | formats past it are not read: cells keep their values, without a `numfmt` |
-    | `xlsx_max_cells` | 1,000,000 | per sheet, counting the cells made (a gap in a row up to its last cell is a blank cell): rows from the one that crosses it are not read |
+    | `xlsx_max_cells` | 1,000,000 | per sheet, counting the cells made (a kept gap is a blank cell): rows from the one that crosses it are not read |
+    | `xlsx_max_gap_ratio` | 64 | blank cells a row makes before a real cell: at most this many per real cell kept before it, plus one. The first real cell past it and all after it are not covered: the row ends with one `NotCovered` cell (content `not_covered`, at the column after the last kept cell) and `xlsx_limit` says so. A 2 KB sheet of cells in column XFD would otherwise make 16,383 blanks each |
     | `xlsx_max_sheets` | 256 | sheets past it have no table; `sheet_count` says how many there were |
 
     The existing `max_rows`, `max_row_bytes` (a row's XML, and so a cell's text) and `max_columns`
-    apply to sheets (`row_limit`, `row_too_large`, `too_many_columns`). XML nesting past 64 is a
-    limit finding. An encrypted part, a compression other than stored or deflate, or a part that is
+    apply to sheets (`row_limit`, `row_too_large`, `too_many_columns`). XML nesting past 64 elements, in
+    every part this reader parses (the package and workbook relationships, the workbook part, shared
+    strings, styles and sheets), is a limit finding at that element; expat holds nothing of the
+    rest. A sheet tag too long to cite (longer than a read piece) is a limit finding too, never a
+    zero-length citation. An encrypted part, a compression other than stored or deflate, or a part that is
     not UTF-8 is `xlsx_part_refused`. **XML is read by expat with every document type declaration
     refused**, so no entity is declared, expanded or fetched and no external DTD is loaded; nothing
     in a part names a file Neptune opens. A relationship that leaves the package is never

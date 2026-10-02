@@ -34,7 +34,6 @@ from xml.parsers import expat
 
 from neptune.adapters.contract import (
     SIGNATURE,
-    STRUCTURE,
     VERIFIED,
     AdapterConfig,
     Chunk,
@@ -60,6 +59,7 @@ from neptune.adapters.tabular._json import INT_LIMIT, INT_MIN
 from neptune.adapters.tabular._xlsx_package import (
     MAX_DEPTH,
     MAX_PROLOGUE,
+    GapBudget,
     Package,
     Problem,
     Refused,
@@ -152,35 +152,36 @@ def _local_names(head: bytes) -> list[str]:
 
 
 def probe(head: bytes, hints: ProbeHints) -> ProbeResult:
-    """A zip whose parts say it is a workbook: ``SIGNATURE`` for parts under ``xl/``, ``VERIFIED``
-    when the whole file is in the head and holds the content types and the workbook part. A zip
-    that only looks OOXML (``[Content_Types].xml``) is claimed by name alone."""
+    """A zip that holds ``xl/workbook.xml``. ``VERIFIED`` when the whole file is in the head and
+    its central directory names ``[Content_Types].xml`` and ``xl/workbook.xml``; a whole file whose
+    directory does not is declined (a renamed word-processor file, a plain zip with an ``xl/``
+    folder). A zip too large for the head, or whose directory does not read (cut off), is
+    ``SIGNATURE`` only if its leading parts name ``xl/workbook.xml`` or a worksheet part. The
+    probe never inflates, and a file name never counts."""
     names = _local_names(head)
-    if len(head) == hints.size:
+    whole = len(head) == hints.size
+    if whole:
         try:
             with zipfile.ZipFile(io.BytesIO(head)) as archive:
-                names = archive.namelist()[:10_000]
+                listed = archive.namelist()[:10_000]
         except (zipfile.BadZipFile, ValueError, OSError, EOFError, NotImplementedError):
-            pass
+            pass  # cut off: the leading parts are all there is to go on
         else:
-            if "[Content_Types].xml" in names and "xl/workbook.xml" in names:
+            if "[Content_Types].xml" in listed and "xl/workbook.xml" in listed:
                 reason = ProbeReason(
                     "tabular.xlsx_workbook",
-                    "the zip holds [Content_Types].xml and a workbook part under xl/",
+                    "the zip's directory holds [Content_Types].xml and xl/workbook.xml",
                 )
                 return ProbeResult(VERIFIED, (reason,))
+            names = []
     if "xl/workbook.bin" in names:
         binary = ProbeReason("tabular.xlsx_binary", "a binary workbook (XLSB) is not read")
         return ProbeResult(0.0, (binary,))
-    if any(name.startswith("xl/") for name in names):
-        reason = ProbeReason("tabular.xlsx_parts", "the zip's leading parts are under xl/")
-        return ProbeResult(SIGNATURE, (reason,))
-    named = hints.name.lower().endswith((".xlsx", ".xlsm", ".xltx", ".xltm"))
-    if named and names[:1] == ["[Content_Types].xml"]:
+    if "xl/workbook.xml" in names or any(n.startswith("xl/worksheets/") for n in names):
         reason = ProbeReason(
-            "tabular.xlsx_named", "an OOXML package named as a workbook, its parts not yet seen"
+            "tabular.xlsx_parts", "the zip's leading parts are a workbook's (xl/workbook.xml)"
         )
-        return ProbeResult(STRUCTURE, (reason,))
+        return ProbeResult(SIGNATURE, (reason,))
     return ProbeResult(
         0.0, (ProbeReason("tabular.not_xlsx", "the zip's parts do not say it is a workbook"),)
     )
@@ -552,6 +553,7 @@ class _Scan:
     blocks: list[_Block] = field(default_factory=list)
     header: tuple[int, int] | None = None
     header_formulas: int = 0  # the formulas before the header row
+    header_numbers: tuple[int, int] = (0, 0)  # the row numbers seen and accepted before it
     formulas: int = 0
     findings: list[IngestFinding] = field(default_factory=list)
 
@@ -575,6 +577,7 @@ def _scan(
     # one row at a time: [start, cells, formulas, empty, width, last column, cell has a formula]
     row: list[list[int]] = []
     row_numbers: list[tuple[int, bool, int, int]] = []
+    budgets: list[GapBudget] = []
     totals = {"rows": 0, "cells": 0, "header": 0}
     block: list[_Block] = []
 
@@ -646,6 +649,7 @@ def _scan(
             if not too_large:
                 found.header = (start, end)
                 found.header_formulas = before
+                found.header_numbers = (seen_before, accepted_before)
             return
         if too_large:
             return
@@ -686,13 +690,26 @@ def _scan(
             number, accepted = numbers.step(attrs.get("r"))
             row[:] = [[at, 0, 0, 1 if empty else 0, 0, -1, 0]]
             row_numbers[:] = [(number, accepted, seen_before, accepted_before)]
+            budgets[:] = [GapBudget(xl.max_gap_ratio)]
         elif kind == "c" and parent == "row" and row:
             counts = row[0]
             counts[1] += 1
-            reference = _CELL_REF.fullmatch(attrs.get("r", ""))
-            column = _column(reference.group(1)) if reference else counts[5] + 1
-            counts[4] = max(counts[4], min(column, limits.max_columns) + 1)
-            counts[5], counts[6] = column, 0
+            # the column the reader will place this cell in, if it keeps it (see _row_cells)
+            if "r" not in attrs:
+                column, valid = counts[5] + 1, True
+            else:
+                reference = _CELL_REF.fullmatch(attrs["r"])
+                column = _column(reference.group(1)) if reference else -1
+                valid = (
+                    reference is not None
+                    and int(reference.group(2)) == row_numbers[0][0]
+                    and column > counts[5]
+                )
+            if valid:
+                counts[5] = column
+                if column < limits.max_columns:
+                    budgets[0].add(column)
+            counts[6] = 0
         elif kind == "f" and parent == "c" and row and not row[0][6]:
             row[0][2] += 1  # a cell holds one formula: a second <f> is not another
             row[0][6] = 1
@@ -703,7 +720,8 @@ def _scan(
         here = parser.CurrentByteIndex
         parent = stack[-1] if stack else None
         if kind == "row" and parent == "sheetData" and row:
-            start, declared, formulas, empty, width, _, _ = row[0]
+            start, declared, formulas, empty, _, _, _ = row[0]
+            width = budgets[0].width
             numbered = row_numbers[0]
             row.clear()
             if empty:
@@ -910,6 +928,7 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
             "formulas": scan.formulas > 0,
             "header": list(scan.header) if scan.header else [],
             "header_formulas": scan.header_formulas,
+            "header_numbers": list(scan.header_numbers),
             "layout": "xlsx",
             "part": "sheet_table",
             "prologue": scan.prologue,
@@ -945,6 +964,8 @@ def _number(text: str) -> tuple[CellValue, bool] | None:
     if _INTEGER.fullmatch(text):
         if len(text) <= 21:
             as_int = int(text)
+            if as_int == 0 and text.startswith("-"):
+                return text, False  # a minus zero is not an int zero: kept as declared
             if INT_MIN <= as_int < INT_LIMIT:
                 return as_int, True
         return text, False
@@ -1043,6 +1064,7 @@ class _Context:
     shared: SharedStrings
     styles: Styles
     limits: Limits
+    gap_ratio: int
 
 
 def _open(package: Package, sheet: Sheet, rows: list[_Row]) -> tuple[SharedStrings, Styles]:
@@ -1106,6 +1128,17 @@ def _row_cells(
         last = column
     if not placed:
         return [], []
+    budget = GapBudget(ctx.gap_ratio)
+    kept: dict[int, _Cell] = {}
+    uncovered: list[int] = []
+    for column in sorted(placed):
+        if budget.add(column):
+            kept[column] = placed[column]
+        else:
+            uncovered.append(column)
+    cut = placed[uncovered[0]] if uncovered else None
+    last = max(kept, default=-1)
+    placed = kept
     cells: list[Knowledge[CellValue]] = []
     formulas: list[tuple[int, _Cell, str]] = []
     for column in range(last + 1):
@@ -1135,6 +1168,23 @@ def _row_cells(
         cells.append(_state(decoded, cites.provenance(evidence)))
         if decoded.issue:
             _cell_issue(issues, decoded.issue, cell, ref, number, record)
+    if cut is not None:
+        # The rest of the row is a run of blank cells too long for the real cells before it: the
+        # cell after the last one kept stands for all of it, not covered.
+        ref = f"{_letters(last + 1)}{number}"
+        evidence = cites.at(raw.start, raw.end, cites.cell_step(ref, "not_covered"))
+        cells.append(NotCovered(cites.provenance(evidence)))
+        issues.add(
+            "xlsx_limit",
+            cut.start,
+            cut.end,
+            number,
+            f"row {number} has cells after a run of blanks over xlsx_max_gap_ratio"
+            f" ({ctx.gap_ratio}) per real cell; the row's cells from {ref} on are not covered",
+            label="xlsx_max_gap_ratio",
+            details={"limit": "xlsx_max_gap_ratio", "max": ctx.gap_ratio},
+            record=record,
+        )
     return cells, formulas
 
 
@@ -1246,7 +1296,10 @@ def _context(
     rows: list[_Row],
 ) -> _Context:
     shared, styles = _open(package, sheet, rows)
-    return _Context(source, config, sheet, _Cites(source, config, sheet), shared, styles, limits)
+    ratio = XlsxLimits.of(config).max_gap_ratio
+    return _Context(
+        source, config, sheet, _Cites(source, config, sheet), shared, styles, limits, ratio
+    )
 
 
 def _workbook(source: SourceReader, config: AdapterConfig, context: JsonObject) -> ChunkOutput:
@@ -1347,7 +1400,8 @@ def _sheet_table(
         if problem is not None:
             findings.append(_problem(source, config, problem))
         if rows and rows[0].cells:
-            number, _ = RowNumbers().step(rows[0].r)
+            before = _ints(context["header_numbers"])
+            number, _ = RowNumbers(before[0], before[1]).step(rows[0].r)
             issues = Issues(source, config, (ctx.cites.member,))
             names = _header_names(ctx, rows[0], number, issues)
             at = ctx.cites.at(rows[0].start, rows[0].end)

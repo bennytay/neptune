@@ -51,6 +51,7 @@ class XlsxLimits:
 
     max_cells: int
     max_compression_ratio: int
+    max_gap_ratio: int
     max_part_bytes: int
     max_parts: int
     max_shared_string_bytes: int
@@ -64,6 +65,7 @@ class XlsxLimits:
         return XlsxLimits(
             max_cells=config.integer("xlsx_max_cells"),
             max_compression_ratio=config.integer("xlsx_max_compression_ratio"),
+            max_gap_ratio=config.integer("xlsx_max_gap_ratio"),
             max_part_bytes=config.integer("xlsx_max_part_bytes"),
             max_parts=config.integer("xlsx_max_parts"),
             max_shared_string_bytes=config.integer("xlsx_max_shared_string_bytes"),
@@ -195,6 +197,37 @@ def _walk(stream: IO[bytes], directory: _Directory, stop: int) -> int:
         walked += _CENTRAL_FIXED + variable
         count += 1
     return count
+
+
+class GapBudget:
+    """How many blank cells a row may make for its real cells (``xlsx_max_gap_ratio``).
+
+    A row's cells are by column, so a real cell far to the right of the others is a run of blank
+    cells before it. Before each real cell the gap since the last one may be at most ``ratio``
+    times the real cells kept so far plus one; the first real cell that would exceed it, and every
+    one after it, is not covered. ``add`` takes the columns in order and says whether the cell is
+    kept; ``width`` is the cells the row makes (its blanks, its kept cells, and one not-covered
+    cell where the rest was cut). The scan in ``plan`` and the reader in ``ingest`` both use it,
+    so a block's cell count is exact.
+    """
+
+    def __init__(self, ratio: int) -> None:
+        self.ratio = ratio
+        self.real = 0
+        self.next = 0
+        self.cut = False
+
+    def add(self, column: int) -> bool:
+        if self.cut or column - self.next > self.ratio * (self.real + 1):
+            self.cut = True
+            return False
+        self.real += 1
+        self.next = column + 1
+        return True
+
+    @property
+    def width(self) -> int:
+        return self.next + (1 if self.cut else 0)
 
 
 def small_int(text: str | None, digits: int = 9) -> int | None:
@@ -455,6 +488,34 @@ def new_parser() -> expat.XMLParserType:
     return parser
 
 
+def guarded(
+    package: Package,
+    name: str,
+    parser: expat.XMLParserType,
+    start: Callable[[str, dict[str, str]], None],
+) -> None:
+    """Install ``start`` as the parser's element handler with a nesting bound: a part nested past
+    ``MAX_DEPTH`` is a limit ``Problem`` at that element, before expat holds any more of it."""
+    depth = [0]
+
+    def opened(tag: str, attrs: dict[str, str]) -> None:
+        depth[0] += 1
+        if depth[0] > MAX_DEPTH:
+            raise Problem(
+                "xlsx_limit",
+                f"part {name!r} nests deeper than {MAX_DEPTH} elements; it is not read further",
+                {"limit": "depth", "part": name, "max": MAX_DEPTH},
+                (package.span(name),),
+            )
+        start(tag, attrs)
+
+    def closed(tag: str) -> None:
+        depth[0] -= 1
+
+    parser.StartElementHandler = opened
+    parser.EndElementHandler = closed
+
+
 def local(name: str) -> str | None:
     """The local name of a SpreadsheetML element, or ``None`` for any other namespace."""
     namespace, _, tail = name.rpartition(" ")
@@ -581,7 +642,7 @@ def read_relationships(package: Package, name: str) -> list[Relationship]:
         if len(found) > 100_000:
             raise Stop
 
-    parser.StartElementHandler = start
+    guarded(package, name, parser, start)
     drive(package, name, parser, window)
     return found
 
@@ -626,17 +687,24 @@ def read_workbook(package: Package, name: str) -> Workbook:
             book.sheet_total += 1
             if len(book.sheets) < cap:
                 end = window.tag_end(at)
+                if end is None:  # a tag longer than a read piece cannot be cited
+                    raise Problem(
+                        "xlsx_limit",
+                        f"a sheet tag of {name!r} is longer than a read piece; not read",
+                        {"limit": "tag", "part": name, "max": PIECE},
+                        (package.span(name),),
+                    )
                 book.sheets.append(
                     SheetDecl(
                         attrs.get("name", ""),
                         attrs.get("state"),
                         relationship_id(attrs),
                         at,
-                        0 if end is None else end - at,
+                        end - at,
                     )
                 )
 
-    parser.StartElementHandler = start
+    guarded(package, name, parser, start)
     drive(package, name, parser, window)
     return book
 
