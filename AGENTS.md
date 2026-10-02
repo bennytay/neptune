@@ -105,8 +105,8 @@ during M2, 5 once the MVL-57 gate is Done; see `docs/developer-workflow.md` § S
 ## Git
 
 - `main` is protected: PR required, CI green, linear history, no force-push. Never commit to `main`.
-- Branch per issue (name above). PR title = issue title. Keep a PR current with `git merge origin/main`
-  (`main` requires up-to-date branches); never rebase or force-push a branch that has been pushed.
+- Branch per issue (name above). PR title = issue title. Refresh with `git merge origin/main` only when
+  `scripts/factory-merge.sh` says the PR needs it; never rebase or force-push a branch that has been pushed.
 - Implementers never merge, approve, or enable auto-merge; the coordinator squash-merges.
 - Conventional commits with package scope: `feat(model): add TimestampDomain`, `docs(adr): 0005 timestamps`,
   `test(identity): chunked hash determinism`. Trailer line: `Refs: MVL-N`.
