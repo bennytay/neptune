@@ -1,12 +1,12 @@
 # Ingest receipt
 
-Receipt `rec:sha256:8c1ee4479e543abaf7156dd3399b914f0c011b2bfc30365905aa31388c898811`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:e0f244a8b5b82c46058ebb55671e9190df3d6378f38a754396fbe239e1e343f8`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 1 seen, 1 read, 0 not read, 0 gone
 - Runs: 1; streams: 4; entities: 0
-- Findings: 0 errors, 0 warnings, 6 info; ambiguous fields: 0
+- Findings: 0 errors, 0 warnings, 9 info; ambiguous fields: 0
 
 ## Sources
 
@@ -19,6 +19,7 @@ Receipt `rec:sha256:8c1ee4479e543abaf7156dd3399b914f0c011b2bfc30365905aa31388c89
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
+| `neptune.clocks` | `0.1.0` | `sha256:8abe788c243b` | none | `rec:c63eb19977e6` |
 | `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:e338a1172927` |
 | `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:e29bd75e0779` |
 | `neptune.validate` | `0.1.0` | `sha256:0a0d08ccf4b7` | none | `rec:c712df3eb7ab` |
@@ -27,7 +28,7 @@ Receipt `rec:sha256:8c1ee4479e543abaf7156dd3399b914f0c011b2bfc30365905aa31388c89
 
 | Kind | Records |
 |---|---|
-| `ingest_finding` | 6 |
+| `ingest_finding` | 9 |
 | `run` | 1 |
 | `source_artifact` | 1 |
 | `source_revision` | 1 |
@@ -35,7 +36,7 @@ Receipt `rec:sha256:8c1ee4479e543abaf7156dd3399b914f0c011b2bfc30365905aa31388c89
 | `structured_record` | 3 |
 | `structured_table` | 1 |
 | `timestamp_domain` | 5 |
-| `transform_record` | 4 |
+| `transform_record` | 5 |
 
 ## Runs
 
@@ -64,6 +65,9 @@ Receipt `rec:sha256:8c1ee4479e543abaf7156dd3399b914f0c011b2bfc30365905aa31388c89
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:2a04449178fd`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 4's message payloads are not decoded; each row cites its message's bytes · `rec:542c3cbcba95`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:5e30cda4992d`
+- **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:048955c70ef7`
+- **info** `neptune.clocks.latency_unbounded` (missing): 3 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:de7fea67ff46`
+- **info** `neptune.clocks.unsynchronised` (missing): the package's clocks form 2 groups that no clock mapping joins; times in different groups cannot be compared · `rec:ab32b6b269d2`
 - **info** `neptune.validate.time_out_of_order` (inconsistent): stream rec:f6ee7d482736 is not in time order on clock 0 in source order · `rec:e756366c5877`
 
 ## Ambiguous fields

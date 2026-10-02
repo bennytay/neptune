@@ -1,12 +1,12 @@
 # Ingest receipt
 
-Receipt `rec:sha256:6d595154688b504cdb22c9e95a43d070b8965bc614f579d728a8130dc7177ab2`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:6067703d45023c54d1bad35f98829ffa678133d8852c2fadc79fb404c80b7185`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 15 seen, 15 read, 0 not read, 0 gone
 - Runs: 2; streams: 2; entities: 0
-- Findings: 0 errors, 0 warnings, 5 info; ambiguous fields: 4
+- Findings: 0 errors, 0 warnings, 7 info; ambiguous fields: 4
 
 ## Sources
 
@@ -34,6 +34,7 @@ Receipt `rec:sha256:6d595154688b504cdb22c9e95a43d070b8965bc614f579d728a8130dc717
 |---|---|---|---|---|
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
+| `neptune.clocks` | `0.1.0` | `sha256:8abe788c243b` | none | `rec:df2d141afe03` |
 | `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:09b4728ef397` |
 | `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:e29bd75e0779` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
@@ -50,7 +51,7 @@ Receipt `rec:sha256:6d595154688b504cdb22c9e95a43d070b8965bc614f579d728a8130dc717
 | `configuration_value` | 66 |
 | `document_block` | 43 |
 | `document_record` | 4 |
-| `ingest_finding` | 5 |
+| `ingest_finding` | 7 |
 | `run` | 2 |
 | `run_assembly` | 1 |
 | `source_artifact` | 15 |
@@ -59,7 +60,7 @@ Receipt `rec:sha256:6d595154688b504cdb22c9e95a43d070b8965bc614f579d728a8130dc717
 | `structured_record` | 46 |
 | `structured_table` | 15 |
 | `timestamp_domain` | 4 |
-| `transform_record` | 9 |
+| `transform_record` | 10 |
 
 ## Runs
 
@@ -84,6 +85,8 @@ Receipt `rec:sha256:6d595154688b504cdb22c9e95a43d070b8965bc614f579d728a8130dc717
 
 - **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded; each row cites its message's bytes · `rec:09e5a12ecc04`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:9d5585a08e16`
+- **info** `neptune.clocks.latency_unbounded` (missing): 2 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:95337d7c3bea`
+- **info** `neptune.clocks.unsynchronised` (missing): the package's clocks form 2 groups that no clock mapping joins; times in different groups cannot be compared · `rec:4c9f3369ebd4`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:182da7bcdc08`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:250acb73c5ee`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:ba08f3bb74a9`

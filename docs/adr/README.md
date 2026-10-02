@@ -57,7 +57,7 @@ header).
 | [0047](0047-optional-manifest-stated-declarations-set-against-evidence.md) | The optional manifest: a source in the folder, stated declarations set against the evidence, generated as commented choices | Accepted |
 | [0048](0048-flight-log-adapter-px4-ulog-and-ardupilot-dataflash.md) | The flight-log adapter: PX4 ULog and ArduPilot DataFlash as runs, decoded streams and cited tables | Accepted |
 | [0049](0049-stream-introspection-declared-layouts-and-inferred-semantics.md) | Stream introspection: declared layouts and inferred semantics as derived tables | Accepted |
-| [0050](0050-alignment-record-contract-identity-links-clock-mappings-frame-and-run-bindings.md) | The alignment record contract: identity links, clock mappings, frame and run bindings | Accepted |
+| [0050](0050-alignment-record-contract-identity-links-clock-mappings-frame-and-run-bindings.md) | The alignment record contract: identity links, clock mappings, frame and run bindings | Accepted; amended by 0060 |
 | [0051](0051-deployment-lifecycle-records-stated-as-declared.md) | Deployment lifecycle records, stated as declared | Accepted |
 | [0052](0052-geometry-adapter-meshes-and-scenes-as-referenced-objects.md) | The geometry adapter: meshes and scenes as referenced objects, nothing copied, nothing guessed | Accepted |
 | [0054](0054-integrity-and-data-quality-rules-over-the-stored-package.md) | Integrity and data-quality rules run over the stored package | Accepted |
@@ -65,4 +65,5 @@ header).
 | [0056](0056-media-streams-indexed-by-the-series-hydrated-lazily.md) | Media streams: indexed by their series, hydrated lazily | Accepted |
 | [0057](0057-geojson-adapter-crs-never-invented.md) | The GeoJSON adapter: features, bounds and a CRS that is stated, defaulted by the RFC or Unknown | Accepted |
 | [0059](0059-xlsx-workbooks-in-the-tabular-adapter-sheets-as-cited-tables.md) | XLSX workbooks in the tabular adapter: sheets as tables of cited cells | Accepted |
+| [0060](0060-clock-alignment-fitted-mappings-found-clocks-and-bounded-instants.md) | Clock alignment: fitted mappings, found clocks and bounded instants | Accepted |
 | [0066](0066-run-assembly-evidence-graph-over-the-layout-reading.md) | Run assembly: an evidence graph over the layout reading | Accepted |

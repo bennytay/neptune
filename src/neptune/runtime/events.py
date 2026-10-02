@@ -77,6 +77,7 @@ SOURCE_QUARANTINED: Final = "source_quarantined"
 RUNS_ASSEMBLED: Final = "runs_assembled"  # the assembler's counts, over records (ADR 0066)
 STREAMS_INTROSPECTED: Final = "streams_introspected"  # introspection's counts (ADR 0049)
 MEDIA_INDEXED: Final = "media_indexed"  # media streams indexed (ADR 0056)
+CLOCKS_ALIGNED: Final = "clocks_aligned"  # the clock-alignment pass's counts (ADR 0060)
 PACKAGE_STAGED: Final = "package_staged"
 PACKAGE_VERIFIED: Final = "package_verified"
 JOB_COMMITTED: Final = "job_committed"
