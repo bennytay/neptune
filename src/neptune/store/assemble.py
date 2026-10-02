@@ -384,7 +384,11 @@ def amend(staged: StagedPackage, package: IngestPackage, extra: Iterable[Any]) -
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    staged.discard()
+    try:
+        staged.discard()
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)  # the caller still holds ``staged`` only
+        raise
     return StagedPackage(staging, staged.destination, package_id(contents), staged.derivatives)
 
 

@@ -8,6 +8,7 @@ unit, or reads a limit the evidence does not declare.
 from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 from collections.abc import Iterator
+from itertools import islice
 from typing import TYPE_CHECKING, Any, Final
 
 from neptune.identity import canonical_json
@@ -19,7 +20,16 @@ from neptune.model.provenance import EvidenceRef
 from neptune.model.time import Timestamp
 from neptune.model.versions import version_to_json
 from neptune.validate import pending
-from neptune.validate.engine import Context, Draft, Rule, evidence_of, plural, short, source_of
+from neptune.validate.engine import (
+    Context,
+    Draft,
+    Omitted,
+    Rule,
+    evidence_of,
+    plural,
+    short,
+    source_of,
+)
 from neptune.validate.series import count_mismatch, time_out_of_order, time_regression
 
 if TYPE_CHECKING:
@@ -409,37 +419,60 @@ def _known(state: Any) -> Any:
     return state.value if isinstance(state, Known) else None
 
 
-def calibration_revision_mismatch(context: Context) -> Iterator[Draft]:
-    """A calibration states a hardware revision none of its machine's configurations declares."""
+def calibration_revision_mismatch(context: Context) -> Iterator[Draft | Omitted]:
+    """A calibration states a hardware revision none of its machine's configurations declares.
+
+    Each machine's declared revisions and the configurations a finding cites are built once and
+    shared by its calibrations; mismatches past the cap are counted, never drafted.
+    """
     revisions: dict[LogicalId, dict[str, list[Any]]] = defaultdict(lambda: defaultdict(list))
     for config in context.records("hardware_configuration"):
         machine, revision = _known(config.machine), _known(config.revision)
         if machine is not None and revision is not None:
             revisions[machine][revision.value].append(config)
+    mismatched: list[tuple[Any, LogicalId, Any]] = []
     for calibration in context.records("calibration"):
         machine, revision = _known(calibration.machine), _known(calibration.hardware_revision)
         if machine is None or revision is None or machine not in revisions:
             continue
-        declared = revisions[machine]
-        if revision.value in declared:
-            continue
-        configs = [c for key in sorted(declared) for c in declared[key]]
+        if revision.value not in revisions[machine]:
+            mismatched.append((calibration, machine, revision))
+    cite = context.bounds.records_per_finding - 1
+    shown: dict[LogicalId, tuple[list[str], list[Any], int]] = {}
+
+    def summary(machine: LogicalId) -> tuple[list[str], list[Any], int]:
+        if machine not in shown:
+            declared = revisions[machine]
+            keys = sorted(declared)
+            cited = list(islice((c for key in keys for c in declared[key]), cite))
+            shown[machine] = (keys, cited, sum(len(v) for v in declared.values()))
+        return shown[machine]
+
+    budget = context.bounds.findings_per_rule
+    for calibration, machine, revision in mismatched[:budget]:
+        keys, cited, total = summary(machine)
         yield Draft(
             subject=evidence_of(calibration, calibration.hardware_revision),
             message=f"calibration {short(calibration.id)} is for hardware revision"
             f" {revision.value!r}; its machine's configurations declare"
-            f" {plural(len(declared), 'other revision')}"[:900],
+            f" {plural(len(keys), 'other revision')}",
             details={
-                "declared": sorted(declared)[: context.bounds.values_per_detail],
+                "configurations": total,
+                "declared": keys[: context.bounds.values_per_detail],
                 "machine": _value_key(machine),
                 "revision": revision.value,
             },
-            related=[evidence_of(c, c.revision) for c in configs],
-            records=[calibration.id, *(c.id for c in configs)],
+            related=[
+                evidence_of(c, c.revision) for c in cited[: context.bounds.related_per_finding]
+            ],
+            records=[calibration.id, *(c.id for c in cited)],
         )
+    if len(mismatched) > budget:
+        first = mismatched[budget][0]
+        yield Omitted(len(mismatched) - budget, evidence_of(first, first.hardware_revision))
 
 
-def calibration_out_of_window(context: Context) -> Iterator[Draft]:
+def calibration_out_of_window(context: Context) -> Iterator[Draft | Omitted]:
     """A run of a machine lies outside every stated window of one calibrated subject: it starts
     after the last window ends, or ends before the first begins, all on one clock. A newer
     calibration of the subject covers what an older one's window no longer does."""
@@ -471,35 +504,43 @@ def calibration_out_of_window(context: Context) -> Iterator[Draft]:
         for entries in index.values():
             entries.sort(key=lambda entry: (entry[0], entry[1]))
     limit = context.bounds.records_per_finding
+    budget, made = context.bounds.findings_per_rule, 0
     for (machine, subject, domain), calibrations in sorted(
         groups.items(), key=lambda item: (_value_key(item[0][0]), item[0][1], item[0][2])
     ):
         untils = [_known(c.valid_until) for c in calibrations]
         froms = [_known(c.valid_from) for c in calibrations]
+        # Counted by index arithmetic; only the first ``limit`` runs are ever sliced, to cite.
         late: list[tuple[int, str, Any]] = []
         early: list[tuple[int, str, Any]] = []
+        after = before = 0
         if all(stamp is not None for stamp in untils):  # an open-ended window covers what follows
             last = max(stamp.ticks for stamp in untils if stamp is not None)
             entries = starts.get((machine, domain), [])
-            late = entries[bisect_right(entries, last, key=lambda e: e[0]) :]
+            cut = bisect_right(entries, last, key=lambda e: e[0])
+            after = len(entries) - cut
+            late = entries[cut : cut + limit] if made < budget else []
         if all(stamp is not None for stamp in froms):
             first = min(stamp.ticks for stamp in froms if stamp is not None)
             entries = ends.get((machine, domain), [])
-            early = entries[: bisect_left(entries, first, key=lambda e: e[0])]
-        if not late and not early:
+            before = bisect_left(entries, first, key=lambda e: e[0])
+            early = entries[: min(before, limit)] if made < budget else []
+        if not after and not before:
             continue
-        runs = {e[1] for e in (*late, *early)}
-        named = sorted(
-            {e[1]: e[2] for e in (*late[:limit], *early[:limit])}.values(), key=lambda r: r.id
-        )[:limit]
         ordered = sorted(calibrations, key=lambda c: c.id)
+        if made >= budget:
+            yield Omitted(1, evidence_of(ordered[-1]))
+            continue
+        made += 1
+        named = sorted({e[1]: e[2] for e in (*late, *early)}.values(), key=lambda r: r.id)[:limit]
+        # A run is both late and early only if it ends before it starts; the sum counts runs.
         yield Draft(
             subject=evidence_of(ordered[-1]),
-            message=f"{plural(len(runs), 'run')} of the machine lie outside every stated window"
-            f" of its {plural(len(ordered), 'calibration')} of {subject!r}",
+            message=f"{plural(after + before, 'run')} of the machine lie outside every stated"
+            f" window of its {plural(len(ordered), 'calibration')} of {subject!r}",
             details={
-                "after_valid_until": len(late),
-                "before_valid_from": len(early),
+                "after_valid_until": after,
+                "before_valid_from": before,
                 "machine": _value_key(machine),
                 "subject": subject,
             },

@@ -570,15 +570,17 @@ def test_frames_a_graph_never_declares_or_a_graph_that_is_missing(tmp_path: Path
 # --- Stale configuration -------------------------------------------------------------------------
 
 
-def calibration(kit: Kit, clock: TimestampDomain, revision: str, since: int, until: int) -> Any:
-    at = kit.cite(f"calibration:{revision}")
+def calibration(
+    kit: Kit, clock: TimestampDomain, revision: str, since: int, until: int, subject: str = "cam0"
+) -> Any:
+    at = kit.cite(f"calibration:{revision}:{subject}")
     return kit.add(
         Calibration(
             id=kit.id_of("calibration", at),
             provenance=at,
             machine=Known(MACHINES[kit.name]),
             hardware_revision=Known(DeclaredVersion(revision)),
-            subject=Known("cam0"),
+            subject=Known(subject),
             performed=NotCovered(),
             valid_from=Known(Timestamp(since, clock.id)),
             valid_until=Known(Timestamp(until, clock.id)),
@@ -856,5 +858,51 @@ def test_rows_left_out_on_request_and_limits_are_not_damage(tmp_path: Path) -> N
             records=[stream.id],
         )
     )
-    kit.finding("mcap.record_too_large", FindingCategory.LIMIT)
+    cut = kit.stream(kit.run(clock), [clock], [[0, 1]], count=9, topic="/cut")
+    kit.finding("mcap.record_too_large", FindingCategory.LIMIT, [cut.id])  # cut by policy
     assert codes(build(tmp_path, kit)) == []
+
+
+def calibrations_against(n: int, directory: Path) -> IngestPackage:
+    """One machine: ``n`` hardware configurations no calibration matches, ``n`` calibrations of
+    ``n`` subjects whose windows all end before ``n`` runs start."""
+    kit = Kit("arm")
+    clock = kit.clock()
+    for index in range(n):
+        at = kit.cite(f"hardware:{index}")
+        kit.add(
+            HardwareConfiguration(
+                id=kit.id_of("hardware_configuration", at),
+                provenance=at,
+                machine=Known(MACHINES["arm"]),
+                name=Known("ur5e"),
+                revision=Known(DeclaredVersion(f"rev-{index}")),
+            )
+        )
+        calibration(kit, clock, "rev-old", 0, 1, subject=f"cam{index}")
+        kit.run(clock, first=10 + index, last=20 + index)
+    return build(directory, kit)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("name", ["calibration_revision_mismatch", "calibration_out_of_window"])
+def test_calibration_rules_scale_n_log_n_on_hostile_counts(tmp_path: Path, name: str) -> None:
+    """Every calibration mismatches every configuration and misses every run: 4x the records
+    costs at most ~5x the CPU (quadratic would be 16x), and the output stays capped."""
+    (rule,) = [r for r in DEFAULT_RULES if r.code.endswith(name)]
+    seconds = []
+    for n in (2_000, 8_000):
+        package = calibrations_against(n, tmp_path / str(n))
+        best = float("inf")
+        for _ in range(3):  # the least of three runs: the machine is shared
+            started = time.process_time()
+            report = validate_package(package, rules=(rule,))
+            best = min(best, time.process_time() - started)
+        seconds.append(max(best, 0.01))
+        outcome = {o.code: o for o in report.rules}[rule.code]
+        assert (
+            outcome.findings == Bounds().findings_per_rule
+            and outcome.omitted == n - outcome.findings
+        )
+        assert all(len(f.records) <= Bounds().records_per_finding for f in report.findings)
+    assert seconds[1] / seconds[0] <= 5.5, seconds

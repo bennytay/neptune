@@ -34,7 +34,7 @@ not by re-parsing. The checks must not become a second parser, must not guess un
    | Rule | Checks | Category |
    |---|---|---|
    | `source_incomplete` | per source, roll up every `corrupt` finding about the bytes of a source the package holds records from; name those records (a quarantined source is its producer's to report; a `limit` stopped an intact file and is not damage) | corrupt |
-   | `count_mismatch` | a stream's `Known` declared message count against its series' rows, unless a `skipped` finding names the stream (rows left out on request, as `mcap.not_selected`) | inconsistent |
+   | `count_mismatch` | a stream's `Known` declared message count against its series' rows, unless a `skipped` or `limit` finding names the stream (rows left out on request, as `mcap.not_selected`, or by policy: a limit is not damage) | inconsistent |
    | `snapshot_incomplete` | a configuration snapshot's declared value count against the `configuration_value` records naming it | inconsistent |
    | `time_regression` | per stream and clock, samples out of time order in source order (below), on a clock that declares itself monotonic | inconsistent |
    | `time_out_of_order` | the same, on a clock that does not declare it (`info`: an observation, not a contradiction) | inconsistent |
@@ -75,10 +75,12 @@ not by re-parsing. The checks must not become a second parser, must not guess un
    may interleave) and the cap notice. A clock that declares itself monotonic and is not gives
    `time_regression`, a `warning`.
 6. **Bounds.** Every rule is linear or `n log n` in the records it reads (grouping by sorted
-   keys; calibrations against runs by bisection); series are read `batch_rows` (65,536) rows at a
+   keys; each machine's revisions summarised once; calibrations against runs by bisection,
+   counted by index arithmetic and sliced only to cite); series are read `batch_rows` (65,536) rows at a
    time, `seq` and time columns only, and one row group to cite a row. Output is capped:
    `findings_per_rule` 256, `records_per_finding` 256, `related_per_finding` 16,
-   `values_per_detail` 16. A cut is counted in the finding (`records_omitted`,
+   `values_per_detail` 16. A rule past its cap may count the rest without drafting them
+   (`Omitted`). A cut is counted in the finding (`records_omitted`,
    `related_omitted`) or reported once per rule as `neptune.validate.findings_capped` (info).
    Bounds are in the transform's config, so changing them is a new lineage. A rule that raises
    costs nothing else: its drafts are dropped, `neptune.validate.rule_failed` (failed, warning)

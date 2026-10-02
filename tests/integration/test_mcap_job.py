@@ -24,6 +24,7 @@ from neptune.runtime import IngestJob, JobOptions, JobOutcome, JobState
 from neptune.store.package import read_package
 from neptune.store.series import read_rows
 from neptune.store.workspace import Workspace
+from neptune.validate import RULE_FAILED
 
 pytestmark = pytest.mark.integration
 
@@ -100,6 +101,7 @@ def test_every_recording_lands_read_by_mcap_inside_the_sandbox(
     }
     # session grouping may say a recording's session is ambiguous; introspection, that a schema's
     # encoding is not parsed
+    assert RULE_FAILED not in codes  # every validation rule ran
     assert not quarantined
     assert {"mcap.truncated", "mcap.crc_mismatch", "mcap.message_count_mismatch"} <= codes
 

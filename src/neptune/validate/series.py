@@ -38,12 +38,13 @@ def _named(stream: Stream, details: dict[str, JsonValue]) -> dict[str, JsonValue
 
 def count_mismatch(context: Context) -> Iterator[Draft]:
     """A stream declares a message count its series does not hold (a cut or padded recording)."""
-    # A stream the adapter was told to read only part of says so (a ``skipped`` finding naming
-    # it, such as ``mcap.not_selected``); its rows are short by request, not by loss.
+    # A stream the adapter was told to read only part of (a ``skipped`` finding naming it, such as
+    # ``mcap.not_selected``), or that a limit cut short (a ``limit`` finding naming it), is short
+    # by request or by policy, not by loss: that finding already says so (ADR 0054).
     chosen = {
         record
         for finding in context.findings
-        if finding.category is FindingCategory.SKIPPED
+        if finding.category in (FindingCategory.SKIPPED, FindingCategory.LIMIT)
         for record in finding.records
     }
     for stream in context.records("stream"):

@@ -84,6 +84,18 @@ class Draft:
 
 
 @dataclass(frozen=True)
+class Omitted:
+    """``count`` more findings a rule did not draft, past its cap; ``subject`` is the first's.
+
+    A rule yields it after ``findings_per_rule`` drafts when counting the rest is cheaper than
+    drafting them, so the engine never builds a draft only to count it.
+    """
+
+    count: int
+    subject: FindingSubject
+
+
+@dataclass(frozen=True)
 class Inputs:
     """Inputs a rule needs that no record kind on main carries yet (ADR 0054 §4).
 
@@ -174,7 +186,7 @@ class Rule:
     category: FindingCategory
     severity: Severity
     summary: str
-    check: Callable[[Context], Iterable[Draft]]
+    check: Callable[[Context], Iterable[Draft | Omitted]]
     not_covered: str | None = None
 
     @property
@@ -327,7 +339,7 @@ def _failed(
     )
 
 
-def _drafts(rule: Rule, context: Context) -> Iterator[Draft]:
+def _drafts(rule: Rule, context: Context) -> Iterator[Draft | Omitted]:
     yield from rule.check(context)
 
 
@@ -363,7 +375,10 @@ def validate_package(
         mine: dict[RecordId, IngestFinding] = {}
         try:
             for draft in _drafts(rule, context):
-                if made < bounds.findings_per_rule:
+                if isinstance(draft, Omitted):
+                    omitted += draft.count
+                    first_omitted = first_omitted or draft.subject
+                elif made < bounds.findings_per_rule:
                     finding = _finding(rule, draft, transform, bounds)
                     if finding.id not in mine and finding.id not in findings:
                         mine[finding.id] = finding
