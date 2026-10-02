@@ -12,11 +12,12 @@ flowchart LR
     RT["Ingestion runtime"]
     WS[("Local workspace + cache<br/>ledgers · plans · chunks<br/>derivatives · scratch")]
     AD["Format adapters"]
+    PLG["Plugins<br/>entry points · adapters · Sources"]
     SB["Parser sandbox<br/>confined process per call"]
     CAN["Canonical model<br/>records + provenance"]
     PKG[("Ingest package")]
     VAL["Validation &amp; alignment"]
-    DER["Derived annotations<br/>session proposals<br/>stream layouts · semantics<br/>media streams · clock mappings<br/>snapshot bindings"]
+    DER["Derived annotations<br/>run assembly · session proposals<br/>stream layouts · semantics<br/>media streams · clock mappings<br/>snapshot bindings"]
     MAN["Optional manifest<br/>neptune.yaml · init-manifest"]
   end
 
@@ -31,18 +32,19 @@ flowchart LR
   DEV -->|one command| CLI -->|wraps| SDK
   RT <-->|probes / chunks / records| SB
   SB <-->|one call, limits| AD
+  PLG -->|admitted, in fixed order| AD
   AD -.->|conforms to| CAN
   RT <-->|commit / reuse by key| WS
   WS --> PKG
   PKG <--> VAL
   DISC -->|layout| DER
-  RT -->|streams · definitions · row counts · series times · runs · snapshots| DER
+  RT -->|runs · machines · file lists<br/>streams · definitions · row counts · series times · snapshots| DER
   SDK -->|media window by clock| PKG
   SDK -.->|lazy frame bytes| RAW
   RAW -.->|neptune.yaml| MAN
   CLI -->|init-manifest| MAN
   MAN -->|stated declarations| RT
-  DER <-->|derived tables| PKG
+  DER <-->|derived tables · stated run assemblies| PKG
   PKG ==> MEM --> RET --> USE
   DER -.-> MEM
 
@@ -58,7 +60,7 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class CAN,WS,K1 built
-  class DISC,RT,AD,PKG,DER,MAN,VAL,K2 partial
+  class DISC,RT,AD,PKG,DER,MAN,VAL,PLG,K2 partial
   class K3 todo
   class SB built
   class SDK,CLI built

@@ -75,6 +75,7 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatus
+from neptune.derived.assembly import EvidenceBuilder, RunAssembler
 from neptune.derived.bindings import Bindings, bind_snapshots, binding_inputs
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
@@ -131,6 +132,7 @@ from neptune.runtime.cache import (
 from neptune.runtime.declared import Declarations
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
 from neptune.runtime.lineage import Failure, Law, Step, failure_from_json, type_name
+from neptune.runtime.plugins import Plugins
 from neptune.runtime.sandbox import (
     DEFAULT_LIMITS,
     Crashed,
@@ -160,7 +162,6 @@ from neptune.store.series import (
 )
 from neptune.store.workspace import (
     Collected,
-    CommittedChunk,
     Derivative,
     DerivativeKey,
     Held,
@@ -502,7 +503,8 @@ class IngestJob:
     Build it, then ``run`` it once, or ``dry_run`` it once to see what ``run`` would ingest
     (ADR 0035); a dry run needs no destination. ``on_event`` receives every ``JobEvent`` as it
     happens; ``cancel`` is checked at every checkpoint. Problems with one source become findings
-    in the package; problems with the job raise ``JobError``.
+    in the package; problems with the job raise ``JobError``. ``plugins`` are the plugins the
+    registry was built from (ADR 0058): the findings about those refused join the job's.
     """
 
     def __init__(
@@ -515,6 +517,7 @@ class IngestJob:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        plugins: Plugins | None = None,
     ) -> None:
         self.root = Path(root)
         self.destination = Path(destination) if destination is not None else None
@@ -564,7 +567,14 @@ class IngestJob:
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
         self._calls: dict[str, int] = {"ingest": 0, "plan": 0, "probe": 0}
-        self._engine = ProbeEngine(registry)
+        self._plugins = plugins if plugins is not None else Plugins()
+        self._engine = ProbeEngine(
+            registry,
+            distributions={
+                adapter.descriptor.id: f"{adapter.origin.distribution} {adapter.origin.version}"
+                for adapter in self._plugins.adapters
+            },
+        )
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
         self._grouper = (
@@ -575,8 +585,16 @@ class IngestJob:
         if self._declared is not None:  # the manifest's own findings name it
             manifest = self._declared.loaded.transform
             self._producers[manifest.id] = manifest
+        # The plugins the registry was built from (ADR 0058): the findings about those refused,
+        # and, when any was admitted, the loader's transform naming every one, in every package.
+        self._producers[self._plugins.transform.id] = self._plugins.transform
+        for finding in self._plugins.findings:
+            self._record(finding, self._plugins.transform)
         self._layout = Layout(())
         self._grouping: Grouping | None = None
+        # What ``_assemble_runs`` keeps for snapshot binding from its one pass (ADR 0064 §1).
+        self._binding_inputs: list[object] = []
+        self._statements: list[StructuredRecord | StructuredTable] = []
         self._dry = False  # a dry run: stops after plan and explains (ADR 0035, 0044)
         self._inventory = explain.Inventory.of((), (), ())
         self._inspected = 0  # adapter ``inspect`` calls, in a dry run
@@ -1974,6 +1992,7 @@ class IngestJob:
                 else:
                     self._ingested.append(item.key)
                     self._emit(events.SOURCE_ADMITTED, details)
+            assembled = self._assemble_runs()
             # A degraded run records its runtime transform even with no findings, so the receipt
             # always names the guarantees it could not give; a sound run adds a transform only to
             # carry a finding, keeping its lineage unchanged (ADR 0030).
@@ -1982,6 +2001,8 @@ class IngestJob:
                 cited.add(self._declared.loaded.transform.id)
             if self._lost_guarantees:
                 cited.add(self.transform.id)
+            if self._plugins.loaded:  # which plugins could change this package (ADR 0058 §5)
+                cited.add(self._plugins.transform.id)
             derived: dict[str, Iterable[JsonObject]] | None = None
             bound: tuple[object, ...] = ()
             if self._grouping is not None:  # its derived tables name its transform
@@ -1999,7 +2020,7 @@ class IngestJob:
                 derived = {**(derived or {}), **clocks.tables()}
             if (
                 self._grouping is not None
-                and (bindings := self._bind_snapshots(self._grouping)) is not None
+                and (bindings := self._bind_snapshots(self._grouping, assembled)) is not None
             ):
                 cited.add(bindings.transform.id)
                 derived = {**(derived or {}), **bindings.tables()}
@@ -2007,6 +2028,7 @@ class IngestJob:
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
+                *assembled,
                 *bound,
             ]
             assert self.destination is not None  # ``run`` refuses to start without one
@@ -2031,32 +2053,66 @@ class IngestJob:
                 Phase.ASSEMBLE, {"quarantined": quarantined, "sources": len(self._ingested)}
             )
 
-    def _bind_snapshots(self, grouping: Grouping) -> Bindings | None:
-        """Bind each admitted run to the configuration, software, hardware and calibration
-        snapshots evidence relates it to (ADR 0064), over the grouping's sessions. Reads committed
-        records only: runs and snapshots, then the declared rows of the sources that hold a run.
-        A package with no run gets no binding: no table, no transform, no finding."""
-        inputs: list[object] = []
-        keys = sorted(set(self._ingested))
-        with_runs: set[tuple[ContentId, RecordId]] = set()
+    def _assemble_runs(self) -> tuple[object, ...]:
+        """Stage 9, over the admitted sources' committed records: assemble runs and sessions
+        from the evidence as well as the layout (ADR 0066). The assembly replaces inspect's
+        layout-only grouping in the package (the dry run's explanation keeps that one), so the
+        layout grouping's findings leave with it. Returns the canonical run assemblies the
+        evidence states, for the package's records."""
+        self._check_cancel()
+        evidence = EvidenceBuilder()
+        self._binding_inputs, self._statements = [], []
         try:
-            for key in keys:
-                for output in self._outputs(key):
-                    for record in binding_inputs(output.records):
-                        inputs.append(record)
-                        if isinstance(record, Run):
-                            with_runs.add(key)
-            statements = [
-                record
-                for key in keys
-                if key in with_runs
-                for output in self._outputs(key)
-                for record in output.records
-                if isinstance(record, StructuredRecord | StructuredTable)
-            ]
+            for content, transform in sorted(set(self._ingested)):
+                self._check_cancel()  # each source's records are read whole: a checkpoint between
+                plan = self.workspace.load_plan(content, transform)
+                if plan is None:
+                    continue  # staging refuses the package and says why
+                # One read serves assembly and snapshot binding (ADR 0064 §1): binding keeps runs
+                # and snapshots, and the declared rows of a source only once it holds a run.
+                rows: list[StructuredRecord | StructuredTable] = []
+                holds_run = False
+                for chunk in plan.chunks:
+                    records = self.workspace.load(str(chunk["id"])).records
+                    evidence.add(records)
+                    for record in records:
+                        if isinstance(record, StructuredRecord | StructuredTable):
+                            rows.append(record)
+                    for record in binding_inputs(records):
+                        self._binding_inputs.append(record)
+                        holds_run = holds_run or isinstance(record, Run)
+                if holds_run:
+                    self._statements.extend(rows)
         except (WorkspaceError, ValueError, OSError) as exc:
             raise JobError(f"the package cannot be assembled: {exc}") from exc
-        found = bind_snapshots(inputs, statements, self._layout, grouping)
+        upstream = (self._declared.loaded.transform.id,) if self._declared is not None else ()
+        assembler = RunAssembler(self._grouper.config, evidence.build(), upstream=upstream)
+        assembly = assembler.assemble(self._layout)
+        if self._grouping is not None:
+            layout = self._grouping.transform.id
+            for finding in [f for f in self._findings.values() if f.transform == layout]:
+                del self._findings[finding.id]
+        grouping = assembly.grouping
+        self._producers[grouping.transform.id] = grouping.transform
+        for finding in grouping.findings:
+            self._record(finding, grouping.transform)
+        self._grouping = grouping
+        self._emit(
+            events.RUNS_ASSEMBLED, {**grouping.summary(), "run_assemblies": len(assembly.records)}
+        )
+        return assembly.records
+
+    def _bind_snapshots(self, grouping: Grouping, assembled: Sequence[object]) -> Bindings | None:
+        """Bind each admitted run to the configuration, software, hardware and calibration
+        snapshots evidence relates it to (ADR 0064), over the assembled grouping and run
+        assemblies. Reads what ``_assemble_runs`` kept in its one pass over the committed records:
+        runs, snapshots and canonical bindings, and the declared rows of the sources that hold a
+        run. A package with no run gets no binding: no table, no transform, no finding."""
+        self._check_cancel()
+        found = bind_snapshots(
+            [*self._binding_inputs, *assembled], self._statements, self._layout, grouping
+        )
+        self._binding_inputs, self._statements = [], []
         if found is None:
             return None
         self._producers[found.transform.id] = found.transform
@@ -2064,14 +2120,6 @@ class IngestJob:
             self._record(finding, found.transform)
         self._emit(events.SNAPSHOTS_BOUND, found.summary())
         return found
-
-    def _outputs(self, key: tuple[ContentId, RecordId]) -> Iterator[CommittedChunk]:
-        """The committed outputs of one admitted source's chunks, in plan order."""
-        plan = self.workspace.load_plan(*key)
-        if plan is None:
-            return  # staging refuses the package and says why
-        for chunk in plan.chunks:
-            yield self.workspace.load(str(chunk["id"]))
 
     def _streams(self) -> tuple[list[Stream], dict[RecordId, int]]:
         """The admitted sources' streams, and each stream's series rows, counted from its runs'

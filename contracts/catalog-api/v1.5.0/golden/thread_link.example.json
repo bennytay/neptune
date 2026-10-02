@@ -1,0 +1,23 @@
+{
+  "assertion_kind": "stated",
+  "entity_kind": {
+    "knowledge": "not_covered"
+  },
+  "from_key": {
+    "key": {
+      "namespace": "fleet.asset_tag",
+      "value": "D-17"
+    },
+    "kind": "machine"
+  },
+  "link_record_id": "rec:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "package_id": "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25",
+  "state": "known",
+  "to_key": {
+    "key": {
+      "namespace": "px4.sys_uuid",
+      "value": "0011223344556677"
+    },
+    "kind": "machine"
+  }
+}

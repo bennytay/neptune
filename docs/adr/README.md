@@ -32,7 +32,7 @@ header).
 | [0021](0021-schema-export-and-worked-examples.md) | The canonical JSON Schema and the worked examples | Accepted |
 | [0022](0022-ingest-package-and-receipt.md) | The ingest package and its receipt | Accepted; amended by 0023, 0031, 0037 |
 | [0023](0023-m1-gate-freeze-and-growth.md) | The M1 gate: the model freezes, grows only by addition, and fixes four gaps | Accepted; amended by 0036, 0037 |
-| [0024](0024-adapter-abi-types-selection-and-reference-adapter.md) | The adapter ABI's exact types, adapter selection, and the reference adapter | Accepted |
+| [0024](0024-adapter-abi-types-selection-and-reference-adapter.md) | The adapter ABI's exact types, adapter selection, and the reference adapter | Accepted; amended by 0058 |
 | [0025](0025-series-files-sorted-merged-and-pinned.md) | Series files: one sorted Parquet file per stream, merged from runs, written with pinned settings | Accepted |
 | [0026](0026-local-workspace-in-place-reads-and-assembly.md) | The local workspace, reading sources in place, and assembling packages | Accepted; amended by 0031 |
 | [0027](0027-probe-engine-sniffing-containers-and-selection-findings.md) | The probe engine: sniffing, bounded container inspection, and selection as findings | Accepted; amended by 0033 |
@@ -64,6 +64,8 @@ header).
 | [0055](0055-calibration-adapter-ros-kalibr-opencv-and-shared-structured-readers.md) | The calibration adapter: ROS, Kalibr and OpenCV files as calibrations, extrinsics and a file-local frame graph, over shared structured readers | Accepted |
 | [0056](0056-media-streams-indexed-by-the-series-hydrated-lazily.md) | Media streams: indexed by their series, hydrated lazily | Accepted |
 | [0057](0057-geojson-adapter-crs-never-invented.md) | The GeoJSON adapter: features, bounds and a CRS that is stated, defaulted by the RFC or Unknown | Accepted |
+| [0058](0058-plugin-adapters-and-sources-from-entry-points.md) | Plugin adapters and Sources from entry points, in a fixed order, refused as findings | Accepted |
 | [0059](0059-xlsx-workbooks-in-the-tabular-adapter-sheets-as-cited-tables.md) | XLSX workbooks in the tabular adapter: sheets as tables of cited cells | Accepted |
 | [0060](0060-clock-alignment-fitted-mappings-found-clocks-and-bounded-instants.md) | Clock alignment: fitted mappings, found clocks and bounded instants | Accepted |
 | [0064](0064-snapshot-binding-stated-joins-nearest-session-candidates-and-explicit-gaps.md) | Snapshot binding: stated joins, nearest session candidates, explicit gaps | Accepted |
+| [0066](0066-run-assembly-evidence-graph-over-the-layout-reading.md) | Run assembly: an evidence graph over the layout reading | Accepted |

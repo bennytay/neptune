@@ -1,0 +1,115 @@
+{
+  "data": {
+    "items": [
+      {
+        "association_id": "ds_shift_0914",
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_ops_bot",
+        "description": null,
+        "device_id": null,
+        "file_id": "fl_amr07_am",
+        "fs_type": "file",
+        "ingestion_status": "ingested",
+        "metadata": {
+          "robot": "amr07"
+        },
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_ops_bot",
+        "name": "run_0914_am.mcap",
+        "org_id": "og_acme_robotics",
+        "origination": "upload-agent",
+        "parent_id": null,
+        "relative_path": "amr07/run_0914_am.mcap",
+        "size": 300,
+        "status": "available",
+        "storage_type": "uploaded",
+        "tags": [],
+        "upload_id": "tx_0914",
+        "uri": "s3://roboto-acme-uploads/og_acme_robotics/ds_shift_0914/amr07/run_0914_am.mcap",
+        "version": 2
+      },
+      {
+        "association_id": "ds_shift_0914",
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_ops_bot",
+        "description": null,
+        "device_id": null,
+        "file_id": "fl_amr07_cal",
+        "fs_type": "file",
+        "ingestion_status": "ingested",
+        "metadata": {
+          "robot": "amr07"
+        },
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_ops_bot",
+        "name": "calibration.yaml",
+        "org_id": "og_acme_robotics",
+        "origination": "upload-agent",
+        "parent_id": null,
+        "relative_path": "amr07/calibration.yaml",
+        "size": 120,
+        "status": "available",
+        "storage_type": "uploaded",
+        "tags": [],
+        "upload_id": "tx_0914",
+        "uri": "s3://roboto-acme-uploads/og_acme_robotics/ds_shift_0914/amr07/calibration.yaml",
+        "version": 1
+      },
+      {
+        "association_id": "ds_shift_0914",
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_ops_bot",
+        "description": null,
+        "device_id": null,
+        "file_id": "fl_dir_amr07",
+        "fs_type": "directory",
+        "ingestion_status": "ingested",
+        "metadata": {
+          "robot": "amr07"
+        },
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_ops_bot",
+        "name": "amr07",
+        "org_id": "og_acme_robotics",
+        "origination": "upload-agent",
+        "parent_id": null,
+        "relative_path": "amr07",
+        "size": 0,
+        "status": "available",
+        "storage_type": "directory",
+        "tags": [],
+        "upload_id": "tx_0914",
+        "uri": "s3://roboto-acme-uploads/og_acme_robotics/ds_shift_0914/amr07",
+        "version": 1
+      },
+      {
+        "association_id": "ds_shift_0914",
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_ops_bot",
+        "description": null,
+        "device_id": null,
+        "file_id": "fl_old",
+        "fs_type": "file",
+        "ingestion_status": "ingested",
+        "metadata": {
+          "robot": "amr07"
+        },
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_ops_bot",
+        "name": "old_run.mcap",
+        "org_id": "og_acme_robotics",
+        "origination": "upload-agent",
+        "parent_id": null,
+        "relative_path": "amr07/old_run.mcap",
+        "size": 99,
+        "status": "deleted",
+        "storage_type": "uploaded",
+        "tags": [],
+        "upload_id": "tx_0914",
+        "uri": "s3://roboto-acme-uploads/og_acme_robotics/ds_shift_0914/amr07/old_run.mcap",
+        "version": 1
+      }
+    ],
+    "next_token": "tok_files_2"
+  }
+}

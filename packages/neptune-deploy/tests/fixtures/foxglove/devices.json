@@ -1,0 +1,64 @@
+[
+  {
+    "id": "dev_ur5e_cell1",
+    "name": "ur5e-cell-1",
+    "projectId": "prj_plant_a",
+    "enabled": true,
+    "remoteAccessEnabled": false,
+    "autoDeleteAfterImport": false,
+    "properties": {
+      "asset_tag": "CELL1-ARM",
+      "embodiment": "manipulator"
+    },
+    "updatedAt": "2026-09-01T00:00:00Z"
+  },
+  {
+    "id": "dev_amr_07",
+    "name": "amr-fleet-07",
+    "projectId": "prj_plant_a",
+    "enabled": true,
+    "remoteAccessEnabled": true,
+    "autoDeleteAfterImport": false,
+    "properties": {
+      "asset_tag": "AMR-0007",
+      "embodiment": "mobile base"
+    },
+    "updatedAt": "2026-09-02T00:00:00Z"
+  },
+  {
+    "id": "dev_quad_02",
+    "name": "quadruped-02",
+    "projectId": "prj_plant_a",
+    "enabled": true,
+    "remoteAccessEnabled": false,
+    "autoDeleteAfterImport": false,
+    "properties": {
+      "embodiment": "legged"
+    },
+    "updatedAt": "2026-09-03T00:00:00Z"
+  },
+  {
+    "id": "dev_asv_01",
+    "name": "asv-harbour-1",
+    "projectId": "prj_plant_a",
+    "enabled": true,
+    "remoteAccessEnabled": false,
+    "autoDeleteAfterImport": false,
+    "properties": {
+      "embodiment": "marine"
+    },
+    "updatedAt": "2026-09-04T00:00:00Z"
+  },
+  {
+    "id": "dev_ugv_04",
+    "name": "ugv-depot-4",
+    "projectId": "prj_plant_a",
+    "enabled": true,
+    "remoteAccessEnabled": false,
+    "autoDeleteAfterImport": false,
+    "properties": {
+      "embodiment": "vehicle"
+    },
+    "updatedAt": "2026-09-05T00:00:00Z"
+  }
+]

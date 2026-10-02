@@ -1,0 +1,78 @@
+{
+  "_recorded": "Shape of GET /rest/api/2/search/jql?jql=project=OPS&fields=... (Atlassian Jira Cloud REST API); values synthetic.",
+  "issues": [
+    {
+      "id": "10001",
+      "key": "OPS-1",
+      "fields": {
+        "summary": "AMR-14 lidar fault at dock 3",
+        "issuetype": {"name": "Incident"},
+        "status": {"name": "Resolved"},
+        "priority": {"name": "High"},
+        "labels": ["amr", "lidar"],
+        "environment": "Warehouse B, aisle 4",
+        "description": "AMR-14 stopped at dock 3 with a lidar timeout; operator reset the safety scanner.",
+        "created": "2026-08-03T09:15:00.000+0200",
+        "updated": "2026-08-03T11:40:00.000+0200",
+        "attachment": [
+          {"id": "20001", "filename": "incident-report.pdf", "size": 38, "created": "2026-08-03T09:20:00.000+0200", "mimeType": "application/pdf", "content": "https://evil.example/rest/api/2/attachment/content/20001"},
+          {"id": "20002", "filename": "dock3.png", "size": 29, "created": "2026-08-03T09:21:00.000+0200", "mimeType": "image/png", "content": "https://evil.example/rest/api/2/attachment/content/20002"},
+          {"id": "20003", "filename": "../../etc/lidar.log", "size": 31, "created": "2026-08-03T09:22:00.000+0200", "mimeType": "text/plain", "content": "https://evil.example/rest/api/2/attachment/content/20003"}
+        ]
+      }
+    },
+    {
+      "id": "10002",
+      "key": "OPS-2",
+      "fields": {
+        "summary": "Re-teach pick frame on arm cell 2",
+        "issuetype": {"name": "Task"},
+        "status": {"name": "Done"},
+        "priority": {"name": "Medium"},
+        "labels": [],
+        "environment": "Cell 2",
+        "description": "Pick frame re-taught after fixture swap.",
+        "created": "2026-08-10T08:00:00.000+0200",
+        "updated": "2026-08-10T08:30:00.000+0200",
+        "attachment": []
+      }
+    },
+    {
+      "id": "10003",
+      "key": "OPS-3",
+      "fields": {
+        "summary": "Quadruped Q-3 fell on stairwell B",
+        "issuetype": {"name": "Incident"},
+        "status": {"name": "Open"},
+        "priority": {"name": "Highest"},
+        "labels": ["legged"],
+        "environment": "Plant 2 stairwell B",
+        "description": null,
+        "created": "2026-08-12T14:05:00.000+0200",
+        "updated": "2026-08-12T14:45:00.000+0200",
+        "attachment": []
+      }
+    },
+    {
+      "id": "10004",
+      "key": "OPS-4",
+      "fields": {
+        "summary": "ASV Heron thruster stall during harbour survey",
+        "issuetype": {"name": "Incident"},
+        "status": {"name": "Open"},
+        "priority": {"name": "Medium"},
+        "labels": ["marine"],
+        "environment": "Harbour north basin",
+        "description": "Port thruster stalled at 12:10; vehicle held position on starboard only.",
+        "created": "2026-08-20T12:20:00.000+0200",
+        "updated": "2026-08-20T12:50:00.000+0200",
+        "attachment": []
+      }
+    }
+  ],
+  "attachment_bytes": {
+    "20001": "%PDF-1.4 incident report AMR-14 dock3",
+    "20002": "PNG-ish bytes of the dock 3 photo",
+    "20003": "lidar timeout at 09:14:58 ack 09:15"
+  }
+}

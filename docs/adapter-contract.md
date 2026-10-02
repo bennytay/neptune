@@ -285,3 +285,28 @@ fifteen bespoke checkpoint formats — was judged worse.
    failure), determinism (ingest twice, byte-identical), output independent of chunk size, lineage
    (another version or config gives new ids, the old output untouched).
 5. No changes to `runtime/`, `store/` or `model/`. If you need one, stop and write an ADR.
+
+## Adapters from other distributions (ADR 0058)
+
+A distribution outside the compiler (a workspace member such as `neptune-deploy`, or a third party)
+registers adapters as entry points instead of a line in `builtin.py`:
+
+```toml
+[project.entry-points."neptune.adapters"]
+deploy_lifecycle = "neptune_deploy.adapters.lifecycle:LifecycleAdapter"   # name = the adapter id
+[project.entry-points."neptune.sources"]                                    # connectors (MVL-153)
+```
+
+- A default client (`Neptune()`, `neptune ingest`) reads both groups, sorted by distribution and
+  entry-point name, so install order never matters. `--no-plugins` / `plugins=False` reads none;
+  `--plugin DIST` / `PluginPolicy(allow=(...))` only the named distributions.
+- The plugin's distribution and version are added to the descriptor's `libraries`, so they are in
+  the transform, its records' provenance and every cache key. Bump the adapter version for output
+  changes as usual; a new distribution version alone is already a new lineage.
+- A plugin that does not import, does not build, is not an adapter of this ABI, is named by its entry
+  point as another id, or shares an id with a built-in or another plugin is not used: a
+  `neptune.plugins.*` finding (warning) in every job's receipt says why. Duplicates are never
+  resolved by order. Every package of a job that had a plugin names it (the `neptune.plugins`
+  transform's libraries). Print nothing at import: it is captured into a finding.
+- It runs under the same sandbox and laws as a built-in. Test it from its own suite through
+  `neptune.adapters.harness.ingest_source`, which runs every law, as a built-in's tests do.

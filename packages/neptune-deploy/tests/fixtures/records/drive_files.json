@@ -1,0 +1,14 @@
+{
+  "_recorded": "Shape of GET /drive/v3/files and /drive/v3/changes (Google Drive API v3); values synthetic.",
+  "files": [
+    {"id": "file_requal_report", "name": "requalification-report.pdf", "mimeType": "application/pdf", "content": "%PDF-1.4 requalification report arm cell 2", "version": "3", "trashed": false},
+    {"id": "file_sop_dock", "name": "SOP dock charging.pdf", "mimeType": "application/pdf", "content": "%PDF-1.4 SOP dock charging v7", "version": "7", "trashed": false},
+    {"id": "file_risk_xlsx", "name": "risk-assessment.xlsx", "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content": "PK-risk-assessment-sheet", "version": "2", "trashed": false}
+  ],
+  "native": [
+    {"id": "native_doc_1", "name": "Commissioning notes", "mimeType": "application/vnd.google-apps.document", "version": "5", "trashed": false}
+  ],
+  "folders": [
+    {"id": "folder_site_docs", "name": "Site docs", "mimeType": "application/vnd.google-apps.folder", "version": "1", "trashed": false}
+  ]
+}

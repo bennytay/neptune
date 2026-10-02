@@ -1,0 +1,12 @@
+{
+  "_recorded": "Shape of GET /v1.0/drives/{id}/root/delta driveItems and the /content redirect (Microsoft Graph v1.0); values synthetic.",
+  "drive": "b!siteA_lib01",
+  "items": [
+    {"id": "01ROOT00000000001", "name": "root", "folder": {"childCount": 3}},
+    {"id": "01FOLDER000000001", "name": "Commissioning", "folder": {"childCount": 2}},
+    {"id": "01REQUAL000000001", "name": "requalification-report.pdf", "content": "%PDF-1.4 requalification report AMR fleet 3", "ctag": "\"c:{6D0B1E4F-3A5B-4C41-9F70-0F3E2D1A9B01},3\"", "etag": "\"{6D0B1E4F-3A5B-4C41-9F70-0F3E2D1A9B01},4\""},
+    {"id": "01SOPDOCK00000001", "name": "SOP dock charging.pdf", "content": "%PDF-1.4 SOP dock charging v7", "ctag": "\"c:{6D0B1E4F-3A5B-4C41-9F70-0F3E2D1A9B02},7\"", "etag": "\"{6D0B1E4F-3A5B-4C41-9F70-0F3E2D1A9B02},8\""},
+    {"id": "01RISKXLS00000001", "name": "risk-assessment.xlsx", "content": "PK-risk-assessment-sheet", "ctag": "\"c:{6D0B1E4F-3A5B-4C41-9F70-0F3E2D1A9B03},2\"", "etag": "\"{6D0B1E4F-3A5B-4C41-9F70-0F3E2D1A9B03},2\""}
+  ],
+  "shortcut": {"id": "01SHORTCUT0000001", "name": "Shared with me", "remoteItem": {"id": "01OTHER"}}
+}

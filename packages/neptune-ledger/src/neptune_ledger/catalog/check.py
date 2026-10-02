@@ -5,11 +5,13 @@ Every path is opened component by component relative to the root's directory des
 run in ADR 0006 §1's order and each stage reports every problem it finds before the next stage is
 skipped:
 
-1. ``unsafe_entry``: an entry at any depth that is not a regular file or a directory.
+1. ``unsafe_entry``: an entry at any depth that is not a regular file or a directory;
+   ``package_unreadable``: a directory the Ledger may not read (permission denied).
 2. ``manifest.json``: absent or not a file (``package_unreadable`` on register, ``file_missing``
    on verify), not a manifest (``manifest_invalid``), a schema version this Ledger does not read
-   (``unsupported_schema_version``), or tables other than exactly the record kinds of its schema
-   version (``manifest_invalid``; Ledger ADR 0008 §2).
+   (``unsupported_schema_version``: one its schema-version registry does not hold, so a package
+   from a future version is refused; Ledger ADR 0011 §2), or tables other than exactly the record
+   kinds of its schema version (``manifest_invalid``; Ledger ADR 0008 §2).
 3. Files: ``file_missing``, ``unexpected_file``, ``file_digest_mismatch``. A listed path that is
    absolute or escapes the root can never equal a walked entry, so it is ``file_missing`` and
    nothing outside the root is opened. A file whose size differs is never read.
@@ -28,12 +30,12 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 from neptune.identity import canonical_json
-from neptune.model import kinds as model_kinds
-from neptune.model.kinds import RECORD_KINDS
+from neptune.model.kinds import kinds_at
 from neptune.model.package import package_manifest_from_json
 from neptune.model.record import OLDEST_READABLE_VERSION, SCHEMA_VERSION
 from neptune.store.package import MANIFEST, VOLATILE, IngestPackage, PackageError, read_files
 from neptune_ledger.api.types import CatalogFinding, FindingCode
+from neptune_ledger.catalog.projection import shipped_registry
 
 # Files the compiler streams instead of holding in memory (neptune.store.package): series and
 # blobs. They are hashed here as streams and handed to the compiler's checks by path.
@@ -46,21 +48,18 @@ Mode = Literal["register", "verify"]
 
 
 def kinds_of(version: int) -> frozenset[str]:
-    """The record kinds a package of schema ``version`` holds a table for (Ledger ADR 0008 §2).
-
-    The compiler's ``neptune.model.kinds.kinds_at``. A compiler with one schema version has no
-    ``kinds_at``, and every kind is then of that version. The fallback goes once package schema 2
-    (compiler PR #37, which adds ``kinds_at``) is on main.
-    """
-    kinds_at = getattr(model_kinds, "kinds_at", None)
-    if kinds_at is None:
-        return frozenset(RECORD_KINDS)
+    """The record kinds a package of schema ``version`` holds a table for (Ledger ADR 0008 §2):
+    the compiler's ``kinds_at``. A test holds the registry's kinds of each version to it."""
     return frozenset(kinds_at(version))
 
 
-def readable_versions() -> str:
-    """The package schema versions this Ledger reads, as text for a finding."""
-    return ", ".join(str(v) for v in range(OLDEST_READABLE_VERSION, SCHEMA_VERSION + 1))
+def readable_versions() -> tuple[int, ...]:
+    """The package-schema versions this Ledger reads (ADR 0011 §2): those its schema-version
+    registry holds a projection for, within the range the compiler's readers read. A newer
+    version is refused until a Ledger version adds its projection; it is never guessed at."""
+    return tuple(
+        v for v in shipped_registry().numbers if OLDEST_READABLE_VERSION <= v <= SCHEMA_VERSION
+    )
 
 
 @dataclass(frozen=True)
@@ -111,20 +110,40 @@ def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> C
     """
     entries = dict(_walk(root_fd))
     unsafe = sorted(path for path, kind in entries.items() if kind == "unsafe")
-    if unsafe:
+    unreadable = sorted(path for path, kind in entries.items() if kind == "unreadable")
+    if unsafe or unreadable:
+        detail = "not a regular file or directory; it was not followed"
         return Checked(
-            tuple(
-                CatalogFinding(
-                    "unsafe_entry", path, "not a regular file or directory; it was not followed"
-                )
-                for path in unsafe
+            (
+                *(CatalogFinding("unsafe_entry", path, detail) for path in unsafe),
+                *(
+                    CatalogFinding("package_unreadable", path, "permission to read it is denied")
+                    for path in unreadable
+                ),
             )
         )
 
     if entries.get(MANIFEST) != "file":
         code: FindingCode = "file_missing" if mode == "verify" else "package_unreadable"
         return Checked((CatalogFinding(code, MANIFEST, "the package has no readable manifest"),))
-    manifest_bytes = _read_small(root_fd, MANIFEST)
+    limit: int | None = None
+    if mode == "verify":  # hashed as a stream first: a hostile large manifest is never held
+        hashed = _digest(root_fd, MANIFEST)
+        if hashed is None:
+            return Checked((CatalogFinding("package_unreadable", MANIFEST, "cannot read it"),))
+        streamed, limit = hashed
+        if streamed != expected_id:
+            return Checked(
+                (
+                    CatalogFinding(
+                        "manifest_digest_mismatch",
+                        MANIFEST,
+                        "it no longer hashes to the package id",
+                    ),
+                ),
+                package_id=streamed,
+            )
+    manifest_bytes = _read_small(root_fd, MANIFEST, limit)  # verify: no more than was hashed
     if manifest_bytes is None:
         return Checked((CatalogFinding("package_unreadable", MANIFEST, "cannot read it"),))
     package_id = "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
@@ -145,7 +164,8 @@ def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> C
             "unsupported_schema_version" if problem == "version" else "manifest_invalid"
         )
         detail = (
-            f"schema version {version}; this Ledger reads {readable_versions()}"
+            f"schema version {version}; this Ledger reads"
+            f" {', '.join(str(v) for v in readable_versions())}"
             if problem == "version"
             else problem
         )
@@ -173,7 +193,12 @@ def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> C
         for path in sorted(set(listed) & present):
             size, digest = listed[path]
             large = bool(_LARGE.fullmatch(path))
-            got = _hash(root_fd, path, size, keep=mode == "register" and not large)
+            try:
+                got = _hash(root_fd, path, size, keep=mode == "register" and not large)
+            except PermissionError:
+                denied = "permission to read it is denied"
+                findings.append(CatalogFinding("package_unreadable", path, denied))
+                continue
             if got is None or got[0] != digest:
                 detail = "size or sha256 differs from the manifest"
                 findings.append(CatalogFinding("file_digest_mismatch", path, detail))
@@ -233,7 +258,7 @@ def _manifest(data: bytes) -> tuple[dict[str, Any], str | None]:
     version = value.get("schema_version")
     if not isinstance(version, int) or isinstance(version, bool):
         return value, "no integer schema_version"
-    if not OLDEST_READABLE_VERSION <= version <= SCHEMA_VERSION:
+    if version not in readable_versions():
         return value, "version"
     tables = value.get("tables")
     if not isinstance(tables, dict) or set(tables) != kinds_of(version):
@@ -263,15 +288,16 @@ def _walk(root_fd: int) -> Iterator[tuple[str, str]]:
 
     A directory is opened only when it is listed, component by component from the root with
     ``O_NOFOLLOW`` (``_open_dir``), so at most two descriptors are held whatever the tree's width,
-    and a directory replaced by a link after it was seen is reported, not entered.
+    and a directory replaced by a link after it was seen is reported, not entered. A directory
+    that may not be opened or listed (EACCES, EPERM) is ``"unreadable"``, not unsafe.
     """
     stack = [""]
     while stack:
         prefix = stack.pop()
         try:
             fd = _open_dir(root_fd, prefix) if prefix else os.dup(root_fd)
-        except OSError:
-            yield prefix, "unsafe"
+        except OSError as exc:
+            yield prefix, _failure(exc)
             continue
         try:
             with os.scandir(fd) as found:
@@ -290,10 +316,16 @@ def _walk(root_fd: int) -> Iterator[tuple[str, str]]:
                     stack.append(path)
                 else:
                     yield path, "unsafe"  # symlink, FIFO, socket, device
-        except OSError:
-            yield prefix or ".", "unsafe"
+        except OSError as exc:
+            yield prefix or ".", _failure(exc)
         finally:
             os.close(fd)
+
+
+def _failure(exc: OSError) -> str:
+    """Why a directory could not be walked: a permission (``unreadable``), or anything else, a
+    link or a directory swapped for another entry included (``unsafe``)."""
+    return "unreadable" if exc.errno in (errno.EACCES, errno.EPERM) else "unsafe"
 
 
 def _open_dir(root_fd: int, path: str) -> int:
@@ -328,21 +360,43 @@ def open_below(root_fd: int, path: str) -> int:
     return target
 
 
-def _read_small(root_fd: int, path: str) -> bytes | None:
+def _read_small(root_fd: int, path: str, limit: int | None = None) -> bytes | None:
+    """The file's bytes, or None if it cannot be read or holds more than ``limit`` bytes."""
     try:
         with os.fdopen(open_below(root_fd, path), "rb") as stream:
-            return stream.read()
+            data = stream.read() if limit is None else stream.read(limit + 1)
     except OSError:
         return None
+    return None if limit is not None and len(data) > limit else data
+
+
+def _digest(root_fd: int, path: str) -> tuple[str, int] | None:
+    """The sha256 and size of the file, read as a stream, or None if it cannot be read."""
+    try:
+        descriptor = open_below(root_fd, path)
+    except OSError:
+        return None
+    digest, size = hashlib.sha256(), 0
+    try:
+        with os.fdopen(descriptor, "rb") as stream:
+            while block := stream.read(_READ_SIZE):
+                digest.update(block)
+                size += len(block)
+    except OSError:
+        return None
+    return "sha256:" + digest.hexdigest(), size
 
 
 def _hash(root_fd: int, path: str, size: int, *, keep: bool) -> tuple[str, bytes | None] | None:
     """``(sha256, bytes if keep)`` of the file, or None if it cannot be read or has another size.
 
-    The size is compared before reading, so a hostile file of another size is never read.
+    The size is compared before reading, so a hostile file of another size is never read. A
+    file the Ledger may not open raises ``PermissionError``: it is unreadable, not changed.
     """
     try:
         descriptor = open_below(root_fd, path)
+    except PermissionError:
+        raise
     except OSError:
         return None
     with os.fdopen(descriptor, "rb") as stream:

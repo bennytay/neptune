@@ -148,9 +148,9 @@ def _check(source: Stated, location: str, stores: Sequence[SourceStore]) -> Sour
     if path is None:
         detail = "not a root-relative location; its connector resolves it, not the Ledger"
         return SourceCheck(source.content_id, location, "unsupported", detail)
-    other: tuple[SourceStore, tuple[int, str]] | None = None
+    other: tuple[SourceStore, tuple[int, str | None]] | None = None
     for store in stores:
-        found = _digest(store, path)
+        found = _digest(store, path, source.size)
         if found == (source.size, source.content_id):
             return SourceCheck(
                 source.content_id, location, "present", f"intact in {store.describe()}"
@@ -159,14 +159,18 @@ def _check(source: Stated, location: str, stores: Sequence[SourceStore]) -> Sour
             other = store, found
     if other is not None:
         store, (size, digest) = other
-        detail = f"in {store.describe()} with size {size} and {digest}, not the stated bytes"
+        detail = (
+            f"in {store.describe()} with size {size} and {digest}, not the stated bytes"
+            if digest is not None
+            else f"in {store.describe()} with more than the stated {source.size} bytes"
+        )
         return SourceCheck(source.content_id, location, "changed", detail)
     for candidate in source.elsewhere:
         candidate_path = _path(candidate)
         if candidate_path is None or candidate == location:
             continue
         for store in stores:
-            if _digest(store, candidate_path) == (source.size, source.content_id):
+            if _digest(store, candidate_path, source.size) == (source.size, source.content_id):
                 detail = f"not at this location; intact at another stated one in {store.describe()}"
                 return SourceCheck(source.content_id, location, "moved", detail, found_at=candidate)
     detail = f"in none of {len(stores)} source store(s)"
@@ -194,13 +198,20 @@ def _path(location: str) -> bytes | None:
     return raw
 
 
-def _digest(store: SourceStore, path: bytes) -> tuple[int, str] | None:
+def _digest(store: SourceStore, path: bytes, stated: int) -> tuple[int, str | None] | None:
+    """``(size, sha256)`` of the object at ``path``, or None when there is none.
+
+    Reading stops one byte past the ``stated`` size: a larger object is not the stated bytes, so
+    it is reported as ``(stated + 1, None)`` without being read to its end.
+    """
     stream = store.open(path)
     if stream is None:
         return None
     digest, size = hashlib.sha256(), 0
     with stream:
-        while block := stream.read(_READ_SIZE):
+        while block := stream.read(min(_READ_SIZE, stated + 1 - size)):
             digest.update(block)
             size += len(block)
+            if size > stated:
+                return size, None
     return size, "sha256:" + digest.hexdigest()
