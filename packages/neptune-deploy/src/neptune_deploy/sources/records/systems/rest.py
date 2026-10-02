@@ -430,6 +430,8 @@ class RestSystem:
 def _build(api: Api, what: str, options: Options) -> tuple[RestSystem, dict[str, JsonValue]]:
     profile: Profile = options.extra["profile"]
     attachments = bool(options.extra.get("attachments", True))
+    if options.since is not None and profile.since is None:
+        raise RecordConfigError("the profile declares no since parameter: it has no change feed")
     system = RestSystem(api, profile, options.page_size or MAX_PAGE_SIZE, attachments)
     return system, {"attachments": attachments, "profile": profile.raw, "system": "rest"}
 

@@ -175,6 +175,7 @@ def test_incomplete_search_is_partial_and_asserts_nothing_gone(tmp_path: Path) -
     with gdrive(server, tmp_path) as source:
         assert source.discover(ledger).gone == ()
         assert "deploy_gdrive.listing_partial" in codes(source)
+        assert source.cursor is None  # a cursor from the feed's end would skip what was missed
 
 
 def test_the_mime_type_option_limits_what_is_exported_without_findings(tmp_path: Path) -> None:

@@ -206,7 +206,7 @@ class ServiceNowSystem:
             writer.writerow(self.columns)
             writer.writerow([jsontext.cell(record.get(name)) for name in self.columns])
             body = out.getvalue().encode("utf-8")
-        except UnicodeEncodeError:
+        except (UnicodeEncodeError, jsontext.JsonTextError):
             rejected.append(Rejected(item_id, "record_unrepresentable"))
             return None
         items.append(
@@ -217,6 +217,7 @@ class ServiceNowSystem:
                 len(body),
                 body=body,
                 children=f"{item_id}/attachment/" if self.attachments else None,
+                later_wins=True,  # ordered by sys_updated_on: a row seen twice is its later state
             )
         )
         return updated
@@ -225,7 +226,7 @@ class ServiceNowSystem:
         parents = [item for item in items if item.parent is None]
         for start in range(0, len(parents), BATCH):
             batch = {item.id.rsplit("/", 1)[1]: item.id for item in parents[start : start + BATCH]}
-            query = f"table_name={self.table}^table_sys_idIN{','.join(sorted(batch))}"
+            query = f"table_name={self.table}^table_sys_idIN{','.join(sorted(batch))}^ORDERBYsys_id"
             for row in self._rows(
                 "/api/now/attachment",
                 query,

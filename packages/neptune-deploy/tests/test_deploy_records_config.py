@@ -59,7 +59,7 @@ def make(kind: str, tmp_path: Path, url: str | None = None, **kwargs: Any) -> An
             "servicenow://acme.service-now.com/change_request",
             SERVICENOW_CREDENTIALS,
         ),
-        "gdrive": (gdrive_source, "gdrive://my-drive", DRIVE_CREDENTIALS),
+        "gdrive": (gdrive_source, "gdrive://0AExampleSharedDrive", DRIVE_CREDENTIALS),
         "confluence": (
             confluence_source,
             "confluence://acme.atlassian.net/5001",
@@ -295,9 +295,9 @@ def test_the_process_environment_is_used_only_when_no_environ_is_given(
 ) -> None:
     monkeypatch.setenv("NEPTUNE_DRIVE_ACCESS_TOKEN", SECRET)
     with pytest.raises(RecordConfigError):  # not this connector's variable
-        gdrive_source("gdrive://my-drive", network=online(tmp_path))
+        gdrive_source("gdrive://0AExampleSharedDrive", network=online(tmp_path))
     monkeypatch.setenv("NEPTUNE_GDRIVE_ACCESS_TOKEN", SECRET)
-    gdrive_source("gdrive://my-drive", network=online(tmp_path))
+    gdrive_source("gdrive://0AExampleSharedDrive", network=online(tmp_path))
 
 
 @pytest.mark.parametrize(
@@ -390,3 +390,41 @@ def test_credentials_never_appear_in_a_repr_a_transform_or_a_finding(tmp_path: P
 def test_record_source_refuses_an_unknown_connector(tmp_path: Path) -> None:
     with pytest.raises(KeyError):
         record_source("deploy_nothing", "x://y", network=online(tmp_path))
+
+
+def test_my_drive_is_one_users_so_it_needs_a_declared_instance(tmp_path: Path) -> None:
+    """Two users' My Drives share a host and the name ``my-drive``: without a declared instance a
+    complete snapshot of one would call every file of the other gone."""
+    with pytest.raises(RecordConfigError, match="declare an instance name"):
+        gdrive_source("gdrive://my-drive", network=online(tmp_path), credentials=DRIVE_CREDENTIALS)
+    source = gdrive_source(
+        "gdrive://my-drive",
+        network=online(tmp_path),
+        credentials=DRIVE_CREDENTIALS,
+        options={"instance": "alice"},
+    )
+    assert source.location.scope == "@alice/my-drive/"
+
+
+def test_a_declared_endpoints_base_path_is_where_every_request_goes(tmp_path: Path) -> None:
+    server = FakeServer(JiraBackend())
+    with server.serve() as host:
+        source = gdrive_source(
+            "gdrive://0AExampleSharedDrive",
+            network=online(tmp_path),
+            credentials=DRIVE_CREDENTIALS,
+            options={"endpoint": f"http://{host}/gateway/google", "instance": "site-a"},
+        )
+        source.listing()
+    assert server.log and all(r.path.startswith("/gateway/google/drive/v3/") for r in server.log)
+
+
+def test_a_since_that_cannot_work_is_a_config_error_not_a_corrupt_response(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(RecordConfigError, match="not a time"):
+        make("jira", tmp_path, options={"since": "deploy_jira/1:2024-13-45T00:00:00Z"})
+    no_feed = cmms_profile()
+    del no_feed["since"]
+    with pytest.raises(RecordConfigError, match="no since parameter"):
+        make("rest", tmp_path, options={"profile": no_feed, "since": "deploy_rest/1:2026-01-01"})

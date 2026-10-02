@@ -236,6 +236,9 @@ class JiraSystem:
 
 def _build(api: Api, what: str, options: Options) -> tuple[JiraSystem, dict[str, JsonValue]]:
     attachments = bool(options.extra.get("attachments", True))
+    payload = cursor_payload(CONNECTOR_ID, options.since, _CURSOR)
+    if payload is not None and _instant(payload) is None:
+        raise RecordConfigError("since is not a time")
     fields = {*(options.extra.get("fields") or DEFAULT_FIELDS), "updated"}
     fields = fields | {"attachment"} if attachments else fields - {"attachment"}
     version = str(options.extra.get("api_version", "2"))

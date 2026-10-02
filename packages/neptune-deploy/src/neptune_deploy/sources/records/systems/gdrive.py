@@ -71,6 +71,11 @@ def _endpoint(value: Any) -> str:
 def _plan(authority: str, path: str, options: Options) -> Plan:
     if path or not _DRIVE.fullmatch(authority):
         raise RecordConfigError("a Drive source is gdrive://<shared drive id> or gdrive://my-drive")
+    if authority == MY_DRIVE and options.instance is None:
+        raise RecordConfigError(
+            "my-drive is one user's drive, not a name others share: declare an instance name,"
+            " which is part of every object's identity"
+        )
     declared = options.extra.get("endpoint")
     return Plan(Endpoint.parse(declared or DEFAULT_ENDPOINT), authority, declared is not None)
 
@@ -203,9 +208,11 @@ class DriveSystem:
         ):
             removed.append(f"file/{file_id}")
         elif isinstance(file, dict):
-            self._file(file, items, rejected)
+            self._file(file, items, rejected, later_wins=True)  # the feed is in time order
 
-    def _file(self, entry: Any, items: list[Item], rejected: list[Rejected]) -> None:
+    def _file(
+        self, entry: Any, items: list[Item], rejected: list[Rejected], *, later_wins: bool = False
+    ) -> None:
         record = entry if isinstance(entry, dict) else {}
         raw = text(record.get("id"))
         item_id = f"file/{raw or ''}"
@@ -241,6 +248,7 @@ class DriveSystem:
                     size,
                     md5.lower(),
                 ),
+                later_wins=later_wins,
             )
         )
 

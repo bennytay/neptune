@@ -625,6 +625,7 @@ class _Collect:
         if partial:
             source.report("listing_partial", source.listing_ref, {"pages": pages})
             complete = False
+            resume = None  # pages were missed: a cursor taken from the end would skip them
         return self._finish(mode, complete, resume)
 
     def _limit(self, details: dict[str, JsonValue]) -> None:
@@ -678,8 +679,10 @@ class _Collect:
                 self.removed[removed] = None
                 self.held += len(removed.encode("utf-8", "replace"))
             self.kept.pop(removed, None)
+            self.duplicated.discard(removed)  # the system says it is gone: no longer ambiguous
             for child in self.children.pop(removed, ()):  # what hung under it goes too
                 self.kept.pop(child, None)
+                self.duplicated.discard(child)
         for item in page.items:
             if self._full():
                 return False
@@ -689,10 +692,15 @@ class _Collect:
                 continue
             self.removed.pop(item.id, None)
             held = self.kept.get(item.id)
-            if (
-                held is not None and held != item and item.later_wins and held.later_wins
-            ):  # fetch-only
-                self.kept[item.id] = item  # an ordered feed's later statement replaces the earlier
+            if held is not None and held != item and item.later_wins and held.later_wins:
+                # an ordered feed's later statement replaces the earlier
+                size = len(item.body) if item.body is not None else 0
+                before = len(held.body) if held.body is not None else 0
+                if self.body_bytes - before + size > self.options.max_snapshot_bytes:
+                    self._limit({"max_snapshot_bytes": self.options.max_snapshot_bytes})
+                    return False
+                self.body_bytes += size - before
+                self.kept[item.id] = item
                 self.held += sum(len(t.encode("utf-8")) for t in (item.token, item.name))
                 if self.held > self.options.max_listing_bytes:
                     self._limit({"max_listing_bytes": self.options.max_listing_bytes})
@@ -742,8 +750,8 @@ class _Collect:
 
     def _finish(self, mode: str, complete: bool, resume: str | None) -> Listing:
         source = self.source
-        for key in self.duplicated:
-            del self.kept[key]
+        for key in sorted(self.duplicated):
+            self.kept.pop(key, None)
             self._reject("record_duplicated", key)
         refs = {key: source.ref(key, item.token) for key, item in self.kept.items()}
         entries = tuple(

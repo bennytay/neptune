@@ -290,12 +290,15 @@ class ServiceNowBackend(Backend):
             rows = [d for d in self.deleted if d["sys_created_on"] >= bound]
             return self._table(request, rows)
         if request.path == "/api/now/attachment":
-            ids = request.query["sysparm_query"].split("table_sys_idIN")[1].split(",")
+            query = request.query["sysparm_query"]
+            ids = query.split("table_sys_idIN")[1].split("^")[0].split(",")
             rows = [
                 {**a, "size_bytes": str(len(self.bytes[a["sys_id"]]))}
                 for a in self.attachments
                 if a["table_sys_id"] in ids
             ]
+            if "^ORDERBYsys_id" in query:  # a paged query is ordered, or pages skip and repeat
+                rows.sort(key=lambda a: a["sys_id"])
             return self._table(request, rows)
         prefix = "/api/now/attachment/"
         if request.path.startswith(prefix) and request.path.endswith("/file"):

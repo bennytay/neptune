@@ -209,7 +209,7 @@ class LinearSystem:
             writer.writerow(COLUMNS)
             writer.writerow(row)
             body = out.getvalue().encode("utf-8")
-        except UnicodeEncodeError:
+        except (UnicodeEncodeError, jsontext.JsonTextError):
             rejected.append(Rejected(item_id, "record_unrepresentable"))
             return None
         items.append(Item(item_id, f"updated:{updated}", f"{identifier}.csv", len(body), body=body))

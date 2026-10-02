@@ -122,7 +122,9 @@ def record_source(
     transport = RecordTransport(
         plan.endpoint, network, f"reading {connector_id} sources", timeout=parsed.timeout
     )
-    system, settings = spec.build(Api(transport, auth), plan.what, parsed)
+    system, settings = spec.build(
+        Api(transport, auth, base_path=plan.endpoint.base_path), plan.what, parsed
+    )
     return RecordSource(
         Location(connector_id, instance, plan.what),
         system,

@@ -182,6 +182,7 @@ def safe_name(raw: object, fallback: str) -> str:
         stem, suffix = text, ""
     else:
         suffix = dot + suffix
-    while not _fits(stem + suffix) and stem:
-        stem = stem[:-1]
+    if not _fits(stem + suffix):
+        room = MAX_NAME_BYTES - len(suffix.encode("utf-8"))
+        stem = stem.encode("utf-8")[: max(room, 0)].decode("utf-8", "ignore")
     return (stem + suffix) or fallback

@@ -215,7 +215,7 @@ class Api:
         self._base = base_path
 
     def _headers(self, accept: str) -> dict[str, str]:
-        return {self._auth.header: self._auth.value, "Accept": accept}
+        return {self._auth.header: self._auth.value, "Accept": accept, "User-Agent": USER_AGENT}
 
     def json(
         self, path: str, query: Sequence[tuple[str, str]] = ()
@@ -266,7 +266,9 @@ class Api:
         endpoint, target, pairs = pre_authenticated(location, hosts, status)
         other = self.transport.derive(endpoint)
         try:
-            return _exactly(other.get(target, pairs, {"Accept": "*/*"}), size)
+            return _exactly(
+                other.get(target, pairs, {"Accept": "*/*", "User-Agent": USER_AGENT}), size
+            )
         finally:
             other.drop()
 

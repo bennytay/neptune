@@ -39,7 +39,8 @@ them to record systems and records where those rules had to bend.
    - The instance is the host the URL names (a non-default port included), or `@<name>` when the operator
      declares `instance`, which a loopback host or a declared endpoint requires (as ADR 0006 §3 requires
      `store`). Linear shares one API host across every workspace, so its URL names the workspace and the
-     instance is `@<workspace url key>`.
+     instance is `@<workspace url key>`. `gdrive://my-drive` is one user's drive on a host every user shares, so it
+     requires a declared `instance` too.
    - The id is the system's own stable id, never a name or key that can change: `issue/<numeric id>` (Jira,
      whose key changes when an issue moves), `table/<table>/<sys_id>`, `issue/<uuid>`, `file/<id>`,
      `item/<driveItem id>`, `page/<id>`, `record/<id>`. An attachment is `<parent id>/attachment/<id>`.
@@ -70,7 +71,8 @@ them to record systems and records where those rules had to bend.
    - **OneDrive and SharePoint**: Microsoft Graph `root/delta`, one feed for snapshot and changes. Folders,
      packages and shortcuts are not files. Graph states an item more than once if it changed while paging,
      so Graph items are `later_wins`: the last statement is the item, where two different statements of an
-     id are otherwise `record_duplicated` and neither is used. A download is checked against `sha256Hash`
+     id are otherwise `record_duplicated` and neither is used. Drive's change feed and ServiceNow's
+     `sys_updated_on`-ordered rows are `later_wins` too, since an edit during paging states a record twice. A download is checked against `sha256Hash`
      or `sha1Hash` if the file states one.
    - **Confluence Cloud**: v2 `pages` for a space, storage format, `version.number`. No change feed, so every
      run lists the space. Attachments are not exported: their download is a redirect to another host that
@@ -92,12 +94,13 @@ them to record systems and records where those rules had to bend.
    (never fetched) and gone. Gone is: a complete snapshot's absences; ids the system said were deleted
    (and what hangs under them); and an attachment that its parent's own full list no longer holds. An item
    that was seen and could not be used is never called gone. A listing that stopped early is incomplete and
-   asserts nothing gone.
+   asserts nothing gone, and one with a page the system called incomplete states no cursor at all, since
+   a cursor from its end would skip what was missed.
 6. **The network boundary and read-only credentials.** ADR 0006 §6 holds: the workspace is asked before the
    source is built and before every request; `GET` is the transport's method; a redirect is refused; an
    endpoint is https, or http to loopback only, with no user information; a timeout is also a deadline.
    A URL a system states (a Jira attachment's `content`, a Confluence `_links.next`) is never requested:
-   requests are built from validated ids, so a hostile record cannot point the client, or its credentials,
+   requests are built from validated ids and the declared endpoint's base path, so a hostile record cannot point the client, or its credentials,
    anywhere. Nothing sleeps or retries: a `429` is a finding with the system's integer `Retry-After`, and the
    listing stops and says where. Two narrow exceptions, each for a system whose API has no other form:
    - **GraphQL queries by `POST` (Linear).** `Api.graphql` sends a constant query document of the module
