@@ -27,7 +27,7 @@ where that happens:
 1. **The mapper, not an adapter.** `neptune_deploy.lifecycle` is a deterministic mapper. Its inputs are one
    compiler ingest package, read through `neptune.store.package.read_package` under the pinned package
    schema (ADR 0001 §3), and one or more declared mapping files. Its output is a new package in the same
-   format, written by `neptune.store.package.package_contents` and `write_package`. It never opens a
+   format, built by `neptune.store.package.package_files` and written by `write_package`. It never opens a
    source's bytes and never parses CSV, JSON, XLSX or PDF. It reads `StructuredTable` and
    `StructuredRecord` records only. The base package is never changed (non-negotiables 1 and 6).
 2. **It is not an ABI adapter.** The four-method ABI maps one source's bytes to records under the sandbox.
@@ -77,8 +77,8 @@ where that happens:
    - a blank cell in a list field (`list_cell_blank`), because a list cannot hold `Unknown`;
    - two records of one mapping stating the same identifier (`identifier_repeated`), which are kept
      apart: identity is MVL-35's;
-   - a table no mapping applies to (`table_unmapped`), and a table whose header is undeclared
-     (`header_undeclared`).
+   - a table no mapping applies to, or one with no column names to map (`table_unmapped`), and a
+     table whose header row the compiler was not told of (`header_undeclared`).
 7. **Lineage.** Each mapping file is a transform. Its `adapter_id` is `deploy_lifecycle_map` and its
    version is the mapper's. Its config is `{base_package, mapping, mapping_sha256}`, where `mapping` is
    the parsed file and `mapping_sha256` the content id of its bytes. Its `upstream` lists the compiler
@@ -88,7 +88,8 @@ where that happens:
    their `TimestampDomain`s and the findings. The same base package, mapping files and mapper version
    give a byte-identical package. A changed mapping file or a new mapper version gives new record ids,
    which is new lineage beside the old.
-8. **Entry points.** The library call is `map_package(base, mappings) -> files` plus `write_package`. The
+8. **Entry points.** The library calls are `map_files(base, mappings)`, which returns the new package's
+   files, and `map_package(base_root, mappings, out)`, which writes them and returns the package id. The
    command line is `python -m neptune_deploy map <package> --mapping <file>... --out <dir>`. A console
    script would add an entry-point group, and ADR 0001 §1 allows only the compiler's two.
 

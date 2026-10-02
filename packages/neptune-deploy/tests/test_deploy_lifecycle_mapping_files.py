@@ -69,6 +69,8 @@ def test_a_valid_mapping_keeps_its_bytes_hash_and_document() -> None:
     [
         ({**_document(), "schema": "other/1"}, "schema"),
         (_document(kind="work_order"), "not a lifecycle kind"),
+        (_document(kind=["maintenance_event"]), "token"),
+        (_document(fields={"performed": {"column": "D", "format": []}}), "at least one format"),
         (_document(fields={"technician": {"column": "T"}}), "no fields"),
         (_document(fields={"site": {"column": "S"}}), "missing"),
         (_document(fields={"site": {"column": "S", "namespace": "Bad Space"}}), "token"),

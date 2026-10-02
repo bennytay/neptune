@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from neptune.identity.hashing import content_id
-from neptune.model.knowledge import AssertionKind, Known, KnownAbsent, Unknown
+from neptune.model.knowledge import AssertionKind, Known, KnownAbsent, NotApplicable, Unknown
 from neptune.model.lifecycle import LIFECYCLE_KINDS
 from neptune.model.provenance import ByteRange, JsonPointer, Provenance, RowCell, Span
 from neptune.model.time import Timescale
@@ -430,6 +430,18 @@ def test_a_table_with_an_undeclared_header_is_a_finding() -> None:
     assert len(_codes(package)["header_undeclared"]) == 1
 
 
+def test_a_table_declared_headerless_is_unmapped_not_undeclared() -> None:
+    base = _base("inspection_quadruped")
+    records = [
+        replace(r, header=NotApplicable()) if r.kind == "structured_table" else r
+        for r in base.records
+    ]
+    package = read_files(map_files(read_files(package_files(records)), [preset("cmms_maximo")]))
+    codes = _codes(package)
+    assert "header_undeclared" not in codes
+    assert len(codes["table_unmapped"]) == 1
+
+
 def test_a_mapped_column_the_table_lacks_is_not_covered() -> None:
     mapping = _rule_mapping(
         [
@@ -445,7 +457,9 @@ def test_a_mapped_column_the_table_lacks_is_not_covered() -> None:
     events = _of(package, "maintenance_event")
     assert len(events) == 2
     assert all(type(e.diagnosis).__name__ == "NotCovered" for e in events)
-    assert _codes(package)["column_absent"][0].details["column"] == "Problem statement"
+    (absent,) = _codes(package)["column_absent"]
+    assert absent.details["column"] == "Problem statement"
+    assert absent.details["count"] == 1  # one column, however many rows read it
 
 
 def test_cli_maps_with_presets_and_files(

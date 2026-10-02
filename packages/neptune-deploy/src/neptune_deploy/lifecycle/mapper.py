@@ -258,6 +258,11 @@ class _Findings:
             if len(group.related) < NAMED and ref not in group.related and ref != group.subject:
                 group.related.append(ref)
 
+    def once(self, name: str, table: _Table, subject: EvidenceRef, column: str) -> None:
+        """A finding about a table's column, made once however many rows read it."""
+        if (name, table.record.id, column) not in self.groups:
+            self.add(name, table, subject, key=column, details={"column": column})
+
     def build(self, transform: TransformRecord) -> list[IngestFinding]:
         out = []
         for (name, _, _), group in sorted(self.groups.items()):
@@ -314,16 +319,14 @@ class _Row:
     def cell(self, column: str) -> _Cell:
         table, record = self.table, self.record
         if not table.has(column):
-            self.mapper.findings.add(
-                "column_absent", table, table.evidence, key=column, details={"column": column}
-            )
+            self.mapper.findings.once("column_absent", table, table.evidence, column)
             return _Cell(None, self.evidence, absent_from_table=True)
         if self.pointers is not None:
             index: int | None = self.pointers.get(column)
         else:
             index = table.columns[column]
             if index is None:
-                self.finding("column_repeated", column, self.evidence)
+                self.mapper.findings.once("column_repeated", table, table.evidence, column)
                 return _Cell(Unknown(self.provenance(self.evidence)), self.evidence)
         if index is None or index >= len(record.cells):
             return _Cell(None, self.evidence)  # a missing key, or a short row
@@ -476,6 +479,8 @@ class _Row:
         for column in sorted(spec_columns(spec)):
             if not self.table.has(column):
                 continue
+            if self.pointers is None and self.table.columns[column] is None:
+                return False  # a repeated header: its field is unknown, not blank
             cell = self.cell(column)
             if cell.state is not None and not isinstance(cell.state, Unknown):
                 return False
@@ -684,7 +689,7 @@ class _Mapper:
 
 
 def tables_of(records: Iterable[Any]) -> tuple[list[_Table], list[StructuredTable]]:
-    """The package's tables a mapping can name, and those it cannot (header undeclared)."""
+    """The package's tables a mapping can name, and those whose columns have no names."""
     rows: dict[RecordId, list[StructuredRecord]] = defaultdict(list)
     tables: list[StructuredTable] = []
     for record in records:
@@ -747,8 +752,10 @@ def _run_findings(
     for table in unclaimed:
         findings.add("table_unmapped", table, table.evidence)
     for record in unnamed:
-        placeholder = _Table(record, [], ())
-        findings.add("header_undeclared", placeholder, record.provenance.evidence)
+        # Only a header the compiler was not told about is undeclared; a table declared to have
+        # none (csv_header none, a Parquet footer's tables) simply has no names to map.
+        name = "header_undeclared" if isinstance(record.header, Unknown) else "table_unmapped"
+        findings.add(name, _Table(record, [], ()), record.provenance.evidence)
     return [transform, *findings.build(transform)]
 
 

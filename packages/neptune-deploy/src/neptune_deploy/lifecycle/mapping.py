@@ -245,7 +245,7 @@ def _mapping(document: Any, sha256: ContentId) -> LifecycleMapping:
 
 def _rule(value: Any, where: str, zone: str | None) -> Rule:
     obj = _object(value, where, {"id", "kind", "requires", "fields"}, {"where", "ignore"})
-    kind = obj["kind"]
+    kind = _token(obj["kind"], f"{where}.kind")
     if kind not in KINDS:
         raise MappingError(f"{where}.kind: {kind!r} is not a lifecycle kind: {sorted(KINDS)}")
     requires = _texts(obj["requires"], f"{where}.requires")
@@ -359,6 +359,8 @@ def _scalar(shape: Shape, value: Any, where: str, zone: str | None) -> Scalar:
     if shape is Shape.TIME:
         formats = obj["format"] if isinstance(obj["format"], list) else [obj["format"]]
         checked = _texts(formats, f"{where}.format")
+        if not checked:
+            raise MappingError(f"{where}.format: name at least one format")
         for pattern in checked:
             try:
                 check_format(pattern)

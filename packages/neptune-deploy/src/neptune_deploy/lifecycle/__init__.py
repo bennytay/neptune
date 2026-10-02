@@ -7,7 +7,7 @@ value cites the exact source cell. The base package is never changed; the same p
 files and mapper version give a byte-identical result.
 
 - ``map_files(base, mappings)``: the new package's files, in memory;
-- ``map_package(base_root, mapping_paths, out)``: read, map, write; returns the new package id;
+- ``map_package(base_root, mappings, out)``: read, map, write; returns the new package id;
 - ``preset(name)`` / ``PRESETS``: the mapping files shipped for common exports.
 """
 
