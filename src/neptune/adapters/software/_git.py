@@ -29,8 +29,9 @@ from neptune.model.versions import GitCommit
 # A ref file is one short line; anything longer is not one.
 MAX_REF_FILE: Final = 1024
 _OBJECT: Final = rb"[0-9a-f]{40}(?:[0-9a-f]{24})?"
-# git check-ref-format forbids controls, space and ~^:?*[\ in refnames.
-_REFNAME: Final = rb"refs/[^\x00-\x20\x7f~^:?*\[\\]+"
+# git check-ref-format forbids controls, space and ~^:?*[\ in refnames. ASCII only: names are
+# decoded as ASCII below, so a non-ASCII name must not match.
+_REFNAME: Final = rb"refs/[^\x00-\x20\x7f-\xff~^:?*\[\\]+"
 _REF_FILE: Final = re.compile(
     rb"(?:ref: (?P<target>" + _REFNAME + rb")|(?P<sha>" + _OBJECT + rb"))\n?"
 )

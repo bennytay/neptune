@@ -49,11 +49,10 @@ def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: 
         assert case["state"] == "committed"
         assert case["manifest_valid"] and case["receipt_valid"] and case["package_verified"]
         assert case["package"].startswith("sha256:")
-    # Real ingest, partial success: the drone case commits whichever adapters claim its files;
-    # any finding is counted by code and is not pinned to one adapter's coverage.
+    # Real ingest, partial success: the drone's ULog is claimed by the flightlog (PX4) adapter,
+    # which reports the one sample dropout the log declares; ingest is deterministic.
     drone = cases[0]
-    assert isinstance(drone["findings"], dict)
-    assert all(isinstance(k, str) and isinstance(v, int) for k, v in drone["findings"].items())
+    assert drone["findings"] == {"flightlog.dropout": 1}
     ids = {case["package"] for case in cases}
     assert len(ids) == 4  # four robots, four packages
     packet = report["smoke"]["packet"]
