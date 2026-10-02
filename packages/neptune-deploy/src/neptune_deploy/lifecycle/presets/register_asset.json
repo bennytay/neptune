@@ -1,0 +1,40 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "register.asset",
+  "version": "1",
+  "description": "An asset register's commissioning rows: the baseline's controller and end-effector with serials and software, its calibration, an acceptance test, residual constraints and sign-off.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "baseline",
+      "kind": "commissioning_baseline",
+      "requires": ["Baseline ID", "Commissioned"],
+      "fields": {
+        "identifiers": [{"column": "Baseline ID", "namespace": "register.baseline"}],
+        "site": {"column": "Cell", "namespace": "register.site"},
+        "machines": [{"column": "Robot", "namespace": "register.robot"}],
+        "commissioned": {"column": "Commissioned", "format": "%Y-%m-%d", "required": true},
+        "hardware": [
+          {
+            "name": {"column": "Controller"},
+            "identifiers": [{"column": "Controller Serial", "namespace": "serial"}]
+          },
+          {
+            "name": {"column": "Gripper"},
+            "identifiers": [{"column": "Gripper Serial", "namespace": "serial"}]
+          }
+        ],
+        "software": [
+          {"name": {"column": "Controller"}, "version": {"column": "Controller Software", "scheme": "declared"}}
+        ],
+        "calibrations": [{"column": "Calibration", "namespace": "register.calibration"}],
+        "tests": [{"name": {"column": "Acceptance Test"}, "result": {"column": "Acceptance Result"}}],
+        "constraints": [{"column": "Constraints", "split": ";"}],
+        "sign_off": {
+          "authority": {"column": "Signed Off By"},
+          "time": {"column": "Signed Off On", "format": "%Y-%m-%d"}
+        }
+      }
+    }
+  ]
+}

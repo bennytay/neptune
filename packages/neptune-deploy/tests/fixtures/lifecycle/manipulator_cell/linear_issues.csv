@@ -1,0 +1,3 @@
+ID,Team,Title,Description,Status,Priority,Assignee,Labels,Created,Started,Completed,Parent issue
+OPS-112,Cell Operations,Recover ARM-3A from protective stop after part jam,Cleared jammed part from fixture 2 and resumed from teach pendant.,Done,High,K. Patel,intervention,2026-03-12T09:14:00.000Z,2026-03-12T09:16:30.000Z,2026-03-12T09:31:05.000Z,
+OPS-118,Cell Operations,Remote restart of cell PLC after network drop,Restarted the cell PLC remotely; robot homed and resumed.,Done,Urgent,On-call engineer,intervention,2026-03-14T22:40:00.000Z,2026-03-14T22:41:10.000Z,2026-03-14T22:52:45.000Z,OPS-112

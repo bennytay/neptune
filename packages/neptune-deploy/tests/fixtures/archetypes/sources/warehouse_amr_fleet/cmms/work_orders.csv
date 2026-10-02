@@ -1,0 +1,14 @@
+WO Number,WO Type,Asset ID,Site,Completed,Problem,Work Performed,Component,Removed Serial,Installed Serial,Firmware After,Related,Technician,Downtime h
+WO-26-0301,PM,AMR-05,S-007,2026-03-02 09:10,Scheduled 500 h service,Replace drive wheel; Clean lidar window,Drive wheel assembly,DW-11801,DW-12911,4.2.0,,J. Ortiz,1.5
+WO-26-0302,PM,AMR-06,S-007,2026-03-02 13:40,Scheduled 500 h service,Clean lidar window; Check bumper,,,,4.2.0,,J. Ortiz,1
+WO-26-0303,PM,AMR-07,S-007,2026-03-03 08:30,Scheduled 500 h service,Replace drive wheel; Clean lidar window,Drive wheel assembly,DW-11873,DW-12990,4.2.0,,J. Ortiz,1.5
+WO-26-0304,PM,AMR-08,S-012,2026-03-04 10:05,Scheduled 500 h service,Clean lidar window; Check bumper,,,,4.2.0,,A. Weber,1
+WO-26-0305,PM,AMR-09,S-012,2026-03-05 11:20,Scheduled 500 h service,Replace drive wheel,Drive wheel assembly,DW-11902,DW-13004,4.2.0,,A. Weber,1.25
+WO-26-0306,PM,AMR-10,S-012,07/03/2026,Scheduled 500 h service,Clean lidar window,,,,4.2.0,,A. Weber,0.75
+WO-26-0319,CM,AMR-07,S-007,2026-03-19 15:10,Fork carriage chain stretch,Replace lift chain; Re-tension,Lift chain,LC-0442,LC-0518,4.2.0,,J. Ortiz,2.5
+WO-26-0402,CM,AMR-07,S-007,2026-04-02 16:00,Contact with rack upright,Straighten left fork; Inspect mast,,,,4.2.0,INC-0007,J. Ortiz,4
+WO-26-0414,CM,AMR-07,S-007,2026-04-14 19:30,Localisation drift after map update,Flash controller firmware; Re-run lidar calibration,,,,4.3.1,CHG0050023; INC-0007,J. Ortiz,1.5
+WO-26-0416,CM,AMR-09,S-012,2026-04-14 20:10,Localisation drift after map update,Flash controller firmware,,,,4.3.1,CHG0050025,A. Weber,1
+WO-26-0420,INSP,AMR-09,S-012,2026-04-20 08:00,Monthly inspection,Visual check,,,,4.3.1,,A. Weber,0.5
+WO-26-0520,CM,AMR-08,S-012,2026-05-19 15:30,Bumper switch intermittent after contact,Replace bumper switch,Bumper switch,BS-2201,BS-2307,4.3.1,INC-0013,A. Weber,2
+WO-26-0611,CM,AMR-10,S-012,,Charging contacts worn,Replace charge contact plate,Charge contact plate,CC-0091,CC-0144,4.3.1,,A. Weber,3

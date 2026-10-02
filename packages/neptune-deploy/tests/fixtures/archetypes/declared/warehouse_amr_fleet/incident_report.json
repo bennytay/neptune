@@ -1,0 +1,101 @@
+{
+  "schema": "neptune-deploy.document-template/1",
+  "id": "incident.fleet_report",
+  "version": "1",
+  "description": "The fleet's incident report, one form for both sites: labelled header fields, a timeline table and two free-text sections (description and root cause) kept verbatim under their span, never summarised. Each site writes its own wall-clock times and the form does not name the zone.",
+  "kind": "incident_record",
+  "formats": [
+    "pdf"
+  ],
+  "zone": "unstated",
+  "tables": {
+    "timeline": [
+      "Time",
+      "Event"
+    ]
+  },
+  "requires": {
+    "labels": [
+      "Incident no",
+      "Occurred at"
+    ],
+    "headings": [
+      "Timeline"
+    ],
+    "tables": [
+      "timeline"
+    ]
+  },
+  "ignore": {
+    "headings": [
+      "Incident report",
+      "Timeline"
+    ]
+  },
+  "fields": {
+    "identifiers": [
+      {
+        "label": "Incident no",
+        "namespace": "fleet.incident"
+      }
+    ],
+    "site": {
+      "label": "Site",
+      "namespace": "fleet.site"
+    },
+    "machines": [
+      {
+        "label": "Machine",
+        "namespace": "fleet.amr",
+        "split": ";"
+      }
+    ],
+    "related": [
+      {
+        "label": "Related records",
+        "namespace": "fleet.record",
+        "split": ";"
+      }
+    ],
+    "occurred": {
+      "label": "Occurred at",
+      "format": "%Y-%m-%d %H:%M",
+      "required": true
+    },
+    "severity": {
+      "label": "Severity"
+    },
+    "zone": {
+      "label": "Zone",
+      "namespace": "fleet.zone"
+    },
+    "location": {
+      "label": "Location"
+    },
+    "assets": [
+      {
+        "label": "Assets",
+        "namespace": "fleet.asset",
+        "split": ";"
+      }
+    ],
+    "timeline": {
+      "rows": "timeline",
+      "each": {
+        "time": {
+          "column": "Time",
+          "format": "%Y-%m-%d %H:%M"
+        },
+        "text": {
+          "column": "Event"
+        }
+      }
+    },
+    "description": {
+      "section": "Description"
+    },
+    "root_cause": {
+      "section": "Root cause"
+    }
+  }
+}
