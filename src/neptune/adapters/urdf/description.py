@@ -260,6 +260,8 @@ class _Reader:
     def frame(
         self, name: Knowledge[str], element: Element, slot: ProvenanceSlot = INHERITED
     ) -> Knowledge[FrameRef]:
+        if isinstance(name, NotCovered):  # the name needs the environment: so does its frame
+            return NotCovered(INHERITED)
         if not isinstance(name, Known):
             return Unknown(INHERITED)
         try:

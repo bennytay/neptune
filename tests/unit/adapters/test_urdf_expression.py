@@ -102,6 +102,8 @@ def test_expressions_evaluate_as_python_does(text: str, value: Value) -> None:
         ("~n", Unsupported),
         ("9 ** 9 ** 9", ExpressionError),
         ("2 ** 64", ExpressionError),
+        ("round(5, -2 ** 62)", ExpressionError),  # would compute 10 ** (2 ** 62) first
+        ("round(5, -65)", ExpressionError),
         ("10 ** 300 * 1.0", ExpressionError),
         ("math.exp(1000)", ExpressionError),
         ("1 / 0", ExpressionError),
@@ -127,6 +129,7 @@ def test_an_integer_too_large_for_64_bits_is_refused_at_every_step() -> None:
         ev("2 ** 62 + 2 ** 62")
     with pytest.raises(ExpressionError):
         ev("round(1e300)")
+    assert (ev("round(1234, -64)"), ev("round(1234, -2)"), ev("round(1.25, 1)")) == (0, 1200, 1.2)
 
 
 def test_strings_are_bounded() -> None:

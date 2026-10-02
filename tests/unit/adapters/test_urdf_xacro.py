@@ -30,7 +30,12 @@ def tree(data: bytes) -> Element:
 
 
 def run(body: str, **limits: int) -> Expansion:
-    bounds = {"max_depth": 64, "max_elements": 50_000, "max_chars": 1 << 24, **limits}
+    bounds: dict[str, Any] = {
+        "max_depth": 64,
+        "max_elements": 50_000,
+        "max_chars": 1 << 24,
+        **limits,
+    }
     return expand(tree((HEADER + body + "</robot>").encode()), **bounds)
 
 
@@ -65,7 +70,7 @@ def test_the_quadrotor_expands_exactly_as_real_xacro_does() -> None:
 
 def test_the_expansion_serialises_to_the_same_bytes_and_ranges_every_time() -> None:
     data = (FIXTURES / "xacro" / "diff_drive.urdf.xacro").read_bytes()
-    bounds = {"max_depth": 64, "max_elements": 50_000, "max_chars": 1 << 24}
+    bounds: dict[str, Any] = {"max_depth": 64, "max_elements": 50_000, "max_chars": 1 << 24}
     first_run, second_run = expand(tree(data), **bounds), expand(tree(data), **bounds)
     assert serialize(first_run.root) == serialize(second_run.root)
     written = serialize(first_run.root)
@@ -248,6 +253,12 @@ def test_recursion_and_explosions_stop_at_the_bounds() -> None:
         run('<xacro:macro name="n"><a><xacro:n/></a></xacro:macro><xacro:n/>', max_depth=10)
     with pytest.raises(ExpansionLimit, match="larger than max_bytes"):
         run('<link name="l" a="' + "x" * 200 + '"/>', max_chars=100)
+    # A ** block's own text counts at every insertion, not only where the call gives it.
+    inserts = '<xacro:insert_block name="b"/>' * 10
+    body = f'<xacro:macro name="m" params="**b"><g>{inserts}</g></xacro:macro><xacro:m><c>'
+    assert run(body + "x" * 90 + "</c></xacro:m>", max_chars=1000)
+    with pytest.raises(ExpansionLimit, match="larger than max_bytes"):
+        run(body + "x" * 200 + "</c></xacro:m>", max_chars=1000)
 
 
 def test_work_without_output_is_bounded_too() -> None:

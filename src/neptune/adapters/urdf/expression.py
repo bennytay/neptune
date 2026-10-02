@@ -68,6 +68,13 @@ def _bounded_pow(base: Value, exponent: Value) -> Value:
     return _check(base**exponent)  # type: ignore[operator]
 
 
+def _bounded_round(number: Value, digits: Value | None = None) -> Value:
+    # round(int, -n) computes 10**n first; past 64 digits an int in range rounds to 0 anyway.
+    if isinstance(digits, int) and abs(digits) > 64:
+        raise ExpressionError("round's digit count is too large")
+    return _check(round(number, digits))  # type: ignore[arg-type]
+
+
 BUILTINS: Final[dict[str, Callable[..., Value]]] = {
     "abs": abs,
     "bool": bool,
@@ -77,7 +84,7 @@ BUILTINS: Final[dict[str, Callable[..., Value]]] = {
     "max": max,
     "min": min,
     "pow": _bounded_pow,
-    "round": round,
+    "round": _bounded_round,
     "str": str,
 }
 

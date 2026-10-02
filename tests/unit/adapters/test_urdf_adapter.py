@@ -435,6 +435,15 @@ def test_what_needs_ros_or_another_file_is_not_covered_never_guessed() -> None:
     assert found["plugin/0"].known_or_raise() == "diffbot_hardware/DiffBotSystem"
 
 
+def test_a_link_named_from_the_environment_has_a_frame_not_covered_too() -> None:
+    data = (
+        b'<robot name="r" xmlns:xacro="http://www.ros.org/wiki/xacro"><xacro:arg name="ns"/>'
+        b'<link name="$(arg ns)base"/></robot>'
+    )
+    (link,) = records(run(data), HardwareComponent)
+    assert isinstance(link.name, NotCovered) and isinstance(link.frame, NotCovered)
+
+
 # --- Malformed input ---------------------------------------------------------------------------
 
 

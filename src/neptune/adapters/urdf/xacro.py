@@ -691,6 +691,9 @@ class _Expander:
             copied = copy.deepcopy(child)
             if isinstance(copied, Element):
                 self.count(copied, node, depth)
+            else:  # a block's own text is output too, once per insertion
+                self.step(node)
+                self.produced(copied, node)
             out.children.append(copied)
 
     def count(self, element: Element, node: Element, depth: int) -> None:
