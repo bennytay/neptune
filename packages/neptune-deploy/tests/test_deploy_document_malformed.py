@@ -364,6 +364,30 @@ def test_a_wrapped_value_a_value_under_its_label_and_a_stray_line_are_never_drop
     assert "label_value_wrapped" not in _codes(package)
 
 
+def test_a_block_of_thousands_of_continuation_lines_is_a_finding_of_bounded_size() -> None:
+    lines = [f"continues {n}" for n in range(5000)]
+    huge = "Location: Aisle 14\n" + "\n".join(lines)
+    base = _with(_base("warehouse_amr"), _retext("Location: Aisle 14, rack face B", huge))
+    files = map_files(base, templates=_templates())
+    package = read_files(files)
+    (note,) = _codes(package)["label_value_wrapped"]
+    assert len(note.related) == 10 and note.details["lines"] == 5001
+    findings = len(files["records/ingest_finding.jsonl"])
+    plain = len(
+        map_files(_base("warehouse_amr"), templates=_templates())["records/ingest_finding.jsonl"]
+    )
+    assert findings - plain < 4096  # the finding does not grow with the block
+
+
+def test_the_form_id_is_an_identifier_so_the_line_after_it_is_not_part_of_it() -> None:
+    edit = _retext("Form: RA-3691-AMR", "Form: RA-3691-AMR\nIssued by: Safety office")
+    package = _mapped(_with(_base("warehouse_amr"), edit))
+    assert len(_of(package, "risk_assessment")) == 1  # not unmatched by "RA-3691-AMR Issued by..."
+    (unread,) = _codes(package)["text_unread"]
+    (line,) = unread.related  # the line after the form id is left for `text_unread`, with its span
+    assert line.locator[-1].end - line.locator[-1].start == len("Issued by: Safety office")
+
+
 def test_the_next_label_line_ends_a_value() -> None:
     two = _retext("Site: HH-DC2", "Site: HH-DC2\nOccurred at: 2026-04-02 14:07")
     gone = _retext("Occurred at: 2026-04-02 14:07", "Note: none")
