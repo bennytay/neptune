@@ -14,7 +14,7 @@ The spec the Ledger indexes with is committed beside the migrations as ``project
 and the Ledger version alone. A schema bump is one command, which rewrites the spec and writes the
 next migration::
 
-    uv run python -m neptune_ledger.catalog.projection contracts/package-schema/v1.0.0/schema.json
+    uv run python -m neptune_ledger.catalog.projection contracts/package-schema/v3.0.0/schema.json
 
 A hot filter in a shape this module does not know, or a kind or projection that disappears, raises
 ``ProjectionError``: a new shape or a removal is a decision for an ADR, not a guess.
