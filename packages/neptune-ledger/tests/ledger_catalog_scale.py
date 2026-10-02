@@ -39,6 +39,7 @@ import psycopg
 from psycopg import sql
 
 from neptune_ledger.catalog.migrate import apply_migrations, migrations, tenant_schema
+from neptune_ledger.threads.read import THREAD_MEMBERS
 
 Conn = psycopg.Connection[tuple[Any, ...]]
 TENANT: Final = "fleet"
@@ -249,6 +250,45 @@ WHERE r.kind IN ('machine', 'run', 'hardware_configuration', 'software_configura
                  'calibration', 'hardware_component')
 """
 
+# The derived thread index (Ledger ADR 0010) for the machine threads: each machine's identifier
+# opens its thread (subject) and the four records that state the machine cite it. thread_id is
+# ADR 0003 §1.3's hash of the key's canonical JSON; namespaces and values need no escaping.
+MACHINE_KEY: Final = (
+    """'{"key":{"namespace":"' || l.namespace || '","value":"' || l.value"""
+    """ || '"},"kind":"machine"}'"""
+)
+LOAD_THREADS: Final = (
+    f"""
+INSERT INTO thread
+SELECT DISTINCT %(tenant)s,
+       'sha256:' || encode(sha256(convert_to({MACHINE_KEY}, 'UTF8')), 'hex'), 'machine',
+       {MACHINE_KEY}
+FROM record_logical_id l WHERE l.kind <> 'hardware_component'
+""",
+    f"""
+INSERT INTO thread_member
+SELECT %(tenant)s, 'sha256:' || encode(sha256(convert_to({MACHINE_KEY}, 'UTF8')), 'hex'),
+       r.package_id, r.record_id, r.kind, r.registration_key,
+       CASE WHEN r.kind = 'machine' THEN ARRAY['subject'] ELSE ARRAY['cites'] END,
+       r.transform_id, r.source_content_id, r.world_clock, r.world_first, r.world_last,
+       -- ThreadEntry.world as membership.world_json writes it: not_applicable for kinds
+       -- without world time, unknown when no bound is Known, an open end as Unknown.
+       CASE WHEN r.kind NOT IN ('run', 'stream', 'calibration')
+              THEN '{{"knowledge":"not_applicable"}}'
+            WHEN r.world_clock IS NULL THEN '{{"knowledge":"unknown"}}'
+            ELSE '{{"knowledge":"known","value":{{"end":'
+                 || COALESCE('{{"knowledge":"known","value":{{"domain_id":"' || r.world_clock
+                             || '","ticks":' || r.world_last || '}}}}',
+                             '{{"knowledge":"unknown"}}')
+                 || ',"start":{{"domain_id":"' || r.world_clock || '","ticks":'
+                 || r.world_first || '}}}}}}' END
+FROM record_logical_id l
+JOIN record r ON r.tenant_id = l.tenant_id AND r.kind = l.kind
+             AND r.record_id = l.record_id AND r.package_id = l.package_id
+WHERE l.kind <> 'hardware_component'
+""",
+)
+
 # --- The measured queries (what thread() and query() run against the catalog indexes) ---------
 
 # thread(key=DeclaredKey, …): every record stating the key, with what ADR 0003 orders and
@@ -323,6 +363,12 @@ def _hash(text: str) -> str:
     import hashlib
 
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def machine_thread_id(namespace: str, value: str) -> str:
+    """ADR 0003 §1.3's thread id of a machine key, as LOAD_THREADS computes it in SQL."""
+    key = f'{{"key":{{"namespace":"{namespace}","value":"{value}"}},"kind":"machine"}}'
+    return "sha256:" + _hash(key)
 
 
 def _percentile(values: Sequence[float], q: float) -> float:
@@ -408,10 +454,17 @@ def _index_shape(conn: Conn) -> list[tuple[str, str]]:
 
 
 def _drop_record_indexes(conn: Conn) -> list[str]:
-    """Drop record's and record_logical_id's keys and indexes for the bulk load; return the DDL
-    that recreates them exactly as the migrations made them."""
+    """Drop the keys and indexes of record and of every table with a foreign key into it for the
+    bulk load; return the DDL that recreates them exactly as the migrations made them."""
     restore: list[str] = []
-    for table in ("record_logical_id", "record"):
+    for table in (
+        "thread_clock_mapping",
+        "thread_identity_link",
+        "thread_unresolved",
+        "thread_member",
+        "record_logical_id",
+        "record",
+    ):
         rows = conn.execute(
             "SELECT conname, pg_get_constraintdef(oid), contype FROM pg_constraint"
             " WHERE conrelid = %s::regclass AND contype IN ('p', 'u', 'f')"
@@ -484,10 +537,14 @@ def build(conn: Conn, scale: Scale, report: dict[str, Any]) -> None:
         with _phase(report, "indexes"):
             for statement in restore:
                 conn.execute(statement)
+        with _phase(report, "threads"):
+            for statement in LOAD_THREADS:
+                conn.execute(statement, params)
     with _phase(report, "analyze"):
         conn.execute(sql.SQL("VACUUM (ANALYZE) {}.record").format(sql.Identifier(SCHEMA)))
         conn.execute(sql.SQL("ANALYZE {}.record_logical_id").format(sql.Identifier(SCHEMA)))
         conn.execute(sql.SQL("ANALYZE {}.package").format(sql.Identifier(SCHEMA)))
+        conn.execute(sql.SQL("ANALYZE {}.thread_member").format(sql.Identifier(SCHEMA)))
     rebuilt = _index_shape(conn)
     if rebuilt != shape:
         missing, extra = sorted(set(shape) - set(rebuilt)), sorted(set(rebuilt) - set(shape))
@@ -517,6 +574,7 @@ def _counts(conn: Conn) -> dict[str, Any]:
         "records": one("SELECT count(*) FROM record"),
         "timed_records": one("SELECT count(*) FROM record WHERE world_clock IS NOT NULL"),
         "logical_ids": one("SELECT count(*) FROM record_logical_id"),
+        "thread_members": one("SELECT count(*) FROM thread_member"),
         "sources": one("SELECT count(*) FROM source"),
         "clocks": one("SELECT count(*) FROM clock"),
         "transforms": one("SELECT count(*) FROM transform"),
@@ -571,6 +629,19 @@ def measure(conn: Conn, scale: Scale, report: dict[str, Any]) -> None:
         for a in [as_of] * 20
     ]
     report["thread_declared_workhorse"] = _measure(conn, THREAD_DECLARED, heavy)
+    # The same machine threads through the derived thread index: what thread() runs (ADR 0010).
+    index = [
+        {
+            "tenant": TENANT,
+            "thread_id": machine_thread_id(p["namespace"], p["value"]),
+            "as_of": p["as_of"],
+        }
+        for p in threads
+    ]
+    report["thread_index_typical"] = _measure(conn, THREAD_MEMBERS, index)
+    heavy_id = machine_thread_id(heavy[0]["namespace"], heavy[0]["value"])
+    workhorse = [{"tenant": TENANT, "thread_id": heavy_id, "as_of": as_of}] * 20
+    report["thread_index_workhorse"] = _measure(conn, THREAD_MEMBERS, workhorse)
     anchored = [
         {
             "source": rows[seq][1],

@@ -4,11 +4,13 @@
 outside any transaction and without following a link (``check``), then writes the
 registration-log row, the package row and every index row in one READ COMMITTED transaction that
 holds the ``tx_clock`` row lock from before the package lookup to commit (ADR 0004 §4).
-``resolve`` reads the source and record indexes registration wrote (ADR 0006 §5). The remaining
-calls (``thread``, ``threads_of``, ``lineage``, ``query``) belong to MVL-92 and MVL-98 and raise
-``NotImplementedError`` until they land.
+``resolve`` reads the source and record indexes registration wrote (ADR 0006 §5). ``thread``,
+``threads_of`` and ``lineage`` read the derived thread index registration writes in the same
+transaction (ADR 0003, ADR 0010). ``query`` belongs to MVL-98 and raises ``NotImplementedError``
+until it lands.
 """
 
+import hashlib
 import os
 import re
 import time
@@ -23,14 +25,19 @@ import neptune_ledger
 from neptune.identity import canonical_json
 from neptune.model.knowledge import Knowledge, Known, NotApplicable, NotCovered, Unknown
 from neptune.store.package import blob_path
+from neptune_ledger.api import codec
 from neptune_ledger.api.protocol import CatalogUnavailable
 from neptune_ledger.api.types import (
+    AsRegisteredBy,
     CatalogFinding,
     ClockMerge,
     EvidenceAnchor,
+    History,
     KindCount,
+    LatestTransform,
     LineageGraph,
     Order,
+    Pinned,
     QuerySpec,
     RecordRef,
     Region,
@@ -48,6 +55,16 @@ from neptune_ledger.catalog.check import Checked, check_package, open_root
 from neptune_ledger.catalog.index import PackageRows, RecordRow, package_rows, projection_columns
 from neptune_ledger.catalog.migrate import tenant_schema
 from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, check_sources
+from neptune_ledger.lineage.graph import read_lineage, unknown_record
+from neptune_ledger.threads.alignment import clock_mapping
+from neptune_ledger.threads.membership import MembershipError, ThreadRows, thread_rows
+from neptune_ledger.threads.merge import ClockMapping
+from neptune_ledger.threads.read import (
+    empty_thread,
+    read_thread,
+    read_threads_of,
+    unknown_threads_of,
+)
 
 Conn = psycopg.Connection[tuple[Any, ...]]
 T = TypeVar("T")
@@ -188,8 +205,13 @@ class PostgresCatalog:
             finding = CatalogFinding("record_invalid", str(checked.package_id), detail)
             return self._refusal(root, checked, [finding])
         try:
+            threads = thread_rows(checked.lines)
+        except MembershipError as exc:  # a thread key the catalog API cannot express
+            finding = CatalogFinding("record_invalid", exc.record_id, exc.detail)
+            return self._refusal(root, checked, [finding])
+        try:
             outcome, key, locator, version = self._run(
-                lambda conn: self._write(conn, rows, root), refuse_as=rows.package_id
+                lambda conn: self._write(conn, rows, threads, root), refuse_as=rows.package_id
             )
         except _Refused as refused:
             return self._refusal(root, checked, refused.findings)
@@ -238,7 +260,7 @@ class PostgresCatalog:
         )
 
     def _write(
-        self, conn: Conn, rows: PackageRows, root: str
+        self, conn: Conn, rows: PackageRows, threads: ThreadRows, root: str
     ) -> tuple[Literal["already_registered", "registered"], TransactionKey, str, str]:
         """The registration transaction body (ADR 0002 §4, §6; ADR 0004 §4; ADR 0005 §2)."""
         conn.execute("SELECT 1 FROM tx_clock FOR UPDATE")  # held to commit: serialises the tenant
@@ -292,8 +314,9 @@ class PostgresCatalog:
                 ],
             )
             cur.executemany(
-                "INSERT INTO transform_upstream VALUES (%s, %s, %s)",
-                [(t, x.transform_id, up) for x in new for up in x.upstream],
+                "INSERT INTO transform_upstream (tenant_id, transform_id, upstream_id, position)"
+                " VALUES (%s, %s, %s, %s)",
+                [(t, x.transform_id, up, i) for x in new for i, up in enumerate(x.upstream)],
             )
             cur.executemany(
                 "INSERT INTO clock VALUES (%s, %s, %s, %s, %s)",
@@ -310,7 +333,85 @@ class PostgresCatalog:
                         for pointer, namespace, value in r.logical_ids
                     ],
                 )
+            self._write_threads(conn, cur, threads, p, seq)
         return "registered", TransactionKey(seq, at), root, self._ledger_version
+
+    def _write_threads(
+        self, conn: Conn, cur: psycopg.Cursor[Any], threads: ThreadRows, package: str, seq: int
+    ) -> None:
+        """The package's rows of the derived thread index (ADR 0010 §1), after its records.
+
+        A thread row is written once per id: the id is the hash of the key it holds, so an
+        existing row with that id holds the same key.
+        """
+        t = self._tenant
+        stored = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT thread_id FROM thread WHERE tenant_id = %s AND thread_id = ANY(%s)",
+                (t, [x.thread_id for x in threads.threads]),
+            ).fetchall()
+        }
+        new = [x for x in threads.threads if x.thread_id not in stored]
+        for keys in _batches(new):
+            cur.executemany(
+                "INSERT INTO thread VALUES (%s, %s, %s, %s)",
+                [(t, x.thread_id, x.kind, x.key) for x in keys],
+            )
+        for members in _batches(threads.members):
+            cur.executemany(
+                "INSERT INTO thread_member VALUES"
+                " (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    (
+                        t,
+                        m.thread_id,
+                        package,
+                        m.record_id,
+                        m.kind,
+                        seq,
+                        list(m.roles),
+                        m.transform_id,
+                        m.source_content_id,
+                        m.world_clock,
+                        m.world_first,
+                        m.world_last,
+                        m.world,
+                    )
+                    for m in members
+                ],
+            )
+        for named in _batches(threads.unresolved):
+            cur.executemany(
+                "INSERT INTO thread_unresolved VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                [(t, u.thread_id, package, u.record_id, u.kind, u.pointer, seq) for u in named],
+            )
+        for links in _batches(threads.links):
+            cur.executemany(
+                "INSERT INTO thread_identity_link VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    (
+                        t,
+                        package,
+                        x.record_id,
+                        "identity_link",
+                        seq,
+                        x.left,
+                        x.right,
+                        x.state,
+                        x.assertion_kind,
+                    )
+                    for x in links
+                ],
+            )
+        for mappings in _batches(threads.mappings):
+            cur.executemany(
+                "INSERT INTO thread_clock_mapping VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    (t, package, x.record_id, "clock_mapping", seq, x.source, x.target, x.mapping)
+                    for x in mappings
+                ],
+            )
 
     def _compare(
         self, conn: Conn, rows: PackageRows
@@ -614,10 +715,7 @@ class PostgresCatalog:
                 out.setdefault(str(package_id), []).append(loaded)
         return {package_id: tuple(found) for package_id, found in out.items()}
 
-    # --- the rest of the API (MVL-92, MVL-98) ----------------------------------------------------
-
-    def _missing(self, name: str) -> NotImplementedError:
-        return NotImplementedError(f"catalog API {name}() is not implemented yet")
+    # --- thread, threads_of, lineage (ADR 0003, ADR 0010) --------------------------------------
 
     def thread(
         self,
@@ -628,16 +726,121 @@ class PostgresCatalog:
         merge: ClockMerge | None = None,
         as_of: int | None = None,
     ) -> Thread:
-        raise self._missing("thread")
+        """One thread at one catalog point (ADR 0003 §3-§5): history or a current view."""
+        thread_id = _thread_id(key)
+        # A rejection echoes the optional request parts only when they are inside the contract,
+        # so it still encodes. A key or order outside it is echoed as given: such a request never
+        # decodes from the wire, only an in-process caller can make one (ADR 0010 §5).
+        chosen = preference if isinstance(preference, _PREFERENCES) and _valid(preference) else None
+        echo = merge if isinstance(merge, ClockMerge) and _valid(merge) else None
+        if _bad_as_of(as_of):
+            point, _, _ = self._run(lambda conn: self._lookup(conn, "", None))
+            finding = CatalogFinding("invalid_request", str(as_of), "as_of is a tx_seq, at least 1")
+            return empty_thread(thread_id, key, order, point, (finding,), chosen, echo)
+
+        def body(conn: Conn) -> Thread:
+            point, _, beyond = self._lookup(conn, "", as_of)
+            limit = point.value.tx_seq if isinstance(point, Known) else 0
+            if beyond:
+                return empty_thread(thread_id, key, order, point, (_beyond(as_of),), chosen, echo)
+            findings, mappings = self._thread_request(conn, key, order, preference, merge, limit)
+            if findings:
+                return empty_thread(thread_id, key, order, point, findings, chosen, echo)
+            assert chosen is not None
+            return read_thread(conn, self._tenant, key, order, chosen, echo, mappings, limit, point)
+
+        return self._run(body)
+
+    def _thread_request(
+        self,
+        conn: Conn,
+        key: ThreadKey,
+        order: Order,
+        preference: object,
+        merge: ClockMerge | None,
+        limit: int,
+    ) -> tuple[tuple[CatalogFinding, ...], tuple[ClockMapping, ...]]:
+        """Why a ``thread`` call is rejected, or nothing, and the clock mappings its merge names
+        (ADR 0004 §2; ADR 0010 §5, §9)."""
+        if preference is None:
+            detail = "a thread call names its preference; there is no default (ADR 0003 §4.4)"
+            return (CatalogFinding("preference_required", "preference", detail),), ()
+        if not isinstance(preference, _PREFERENCES) or not _valid(preference):
+            return (CatalogFinding("invalid_request", "preference", "not a thread preference"),), ()
+        if order not in ("world", "transaction"):
+            detail = "order is world or transaction"
+            return (CatalogFinding("invalid_request", str(order)[:200] or "order", detail),), ()
+        if not isinstance(key, ThreadKey) or not _valid(key):
+            bad = CatalogFinding("invalid_request", "key", "not a thread key of the contract")
+            return (bad,), ()
+        if merge is None:
+            return (), ()
+        if not isinstance(merge, ClockMerge) or not _valid(merge) or order != "world":
+            detail = "a merge is a reference clock and mapping ids, on world order only"
+            return (CatalogFinding("invalid_request", "merge", detail),), ()
+        found: list[CatalogFinding] = []
+        if not conn.execute(
+            "SELECT 1 FROM clock c JOIN package p USING (tenant_id, package_id)"
+            " WHERE c.tenant_id = %s AND c.clock_id = %s AND p.tx_seq <= %s LIMIT 1",
+            (self._tenant, merge.reference_clock, limit),
+        ).fetchone():
+            detail = "no registered package holds this clock"
+            found.append(CatalogFinding("unknown_clock", merge.reference_clock, detail))
+        # A record id names one body in every package that holds it (ADR 0002 §6), so the
+        # first registration's row is the mapping.
+        held = {
+            str(record): clock_mapping(str(record), str(source), str(target), str(text))
+            for record, source, target, text in conn.execute(
+                "SELECT DISTINCT ON (record_id) record_id, source_clock, target_clock, mapping"
+                " FROM thread_clock_mapping WHERE tenant_id = %s AND record_id = ANY(%s)"
+                "   AND registration_key <= %s ORDER BY record_id, registration_key",
+                (self._tenant, list(merge.mappings), limit),
+            ).fetchall()
+        }
+        detail = "no registered package holds a ClockMapping with this id"
+        found += [
+            CatalogFinding("unknown_mapping", m, detail)
+            for m in sorted(merge.mappings, key=lambda m: m.encode("utf-8"))
+            if m not in held
+        ]
+        if found:
+            return tuple(found), ()
+        return (), tuple(held[m] for m in sorted(held, key=lambda m: m.encode("utf-8")))
 
     def threads_of(self, record_id: str, *, as_of: int | None = None) -> ThreadsOf:
-        raise self._missing("threads_of")
+        """Every thread a record id is a member of, per registering package (ADR 0003 §1.4)."""
+        problem = _bad_record_request(record_id, as_of)
+        if problem is not None:
+            point, _, _ = self._run(lambda conn: self._lookup(conn, "", None))
+            return unknown_threads_of(str(record_id) or "record_id", point, problem)
+
+        def body(conn: Conn) -> ThreadsOf:
+            point, _, beyond = self._lookup(conn, "", as_of)
+            if beyond:
+                return unknown_threads_of(record_id, point, _beyond(as_of))
+            limit = point.value.tx_seq if isinstance(point, Known) else 0
+            return read_threads_of(conn, self._tenant, record_id, limit, point)
+
+        return self._run(body)
 
     def lineage(self, record_id: str, *, as_of: int | None = None) -> LineageGraph:
-        raise self._missing("lineage")
+        """The transform DAG behind a record id and its lineage siblings (ADR 0003 §4.1)."""
+        problem = _bad_record_request(record_id, as_of)
+        if problem is not None:
+            point, _, _ = self._run(lambda conn: self._lookup(conn, "", None))
+            return unknown_record(str(record_id) or "record_id", point, problem)
+
+        def body(conn: Conn) -> LineageGraph:
+            point, _, beyond = self._lookup(conn, "", as_of)
+            if beyond:
+                return unknown_record(record_id, point, _beyond(as_of))
+            limit = point.value.tx_seq if isinstance(point, Known) else 0
+            return read_lineage(conn, self._tenant, record_id, limit, point)
+
+        return self._run(body)
 
     def query(self, spec: QuerySpec) -> Any:
-        raise self._missing("query")
+        raise NotImplementedError("catalog API query() is not implemented yet (MVL-98)")
 
     # --- transactions --------------------------------------------------------------------------
 
@@ -701,6 +904,43 @@ def _batches(rows: Sequence[T]) -> Iterator[Sequence[T]]:
     """``rows`` in consecutive slices of ``BATCH_ROWS`` (ADR 0009 §4)."""
     for start in range(0, len(rows), BATCH_ROWS):
         yield rows[start : start + BATCH_ROWS]
+
+
+_PREFERENCES: Final = (History, LatestTransform, Pinned, AsRegisteredBy)
+
+
+def _valid(value: object) -> bool:
+    """Whether a request record is inside the contract: it encodes under its JSON Schema."""
+    try:
+        codec.to_json(value)
+    except (codec.CodecError, TypeError, ValueError):
+        return False
+    return True
+
+
+def _thread_id(key: object) -> str:
+    """ADR 0003 §1.3's thread id; for a key outside the contract, the same hash over whatever
+    of it can be written as JSON, so a rejected call still names what it was asked."""
+    if isinstance(key, ThreadKey) and _valid(key):
+        return key.thread_id
+    try:
+        text = canonical_json.dumps(codec.to_json(key))
+    except (codec.CodecError, canonical_json.CanonicalJsonError, TypeError, ValueError):
+        text = repr(key).encode("utf-8")
+    return "sha256:" + hashlib.sha256(text).hexdigest()
+
+
+def _bad_record_request(record_id: object, as_of: object) -> CatalogFinding | None:
+    if not isinstance(record_id, str) or not record_id:
+        return CatalogFinding("invalid_request", "record_id", "a record id is a non-empty string")
+    if _bad_as_of(as_of):
+        return CatalogFinding("invalid_request", str(as_of), "as_of is a tx_seq, at least 1")
+    return None
+
+
+def _beyond(as_of: int | None) -> CatalogFinding:
+    detail = "as_of is beyond the latest committed catalog point"
+    return CatalogFinding("as_of_out_of_range", str(as_of), detail)
 
 
 def _bad_as_of(as_of: object) -> bool:
