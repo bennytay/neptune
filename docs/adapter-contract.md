@@ -45,8 +45,8 @@ the wrong size, a raise naming another reader) and the call failed like any othe
 3. **Findings, not exceptions.** Recoverable problems are `IngestFinding`s in `ChunkOutput`, built with
    `identity.findings.ingest_finding` and a documented `<adapter id>.<name>` code (ADR 0017 §9). An uncaught
    exception is treated by the runtime as a crash: the chunk is quarantined with a finding; the job continues.
-4. **Leaf packages.** Adapters import `model/`, `identity/` and `adapters.contract`; never each other, the
-   registry or `runtime/`.
+4. **Leaf packages.** Adapters import `model/`, `identity/`, `adapters.contract` and, for JSON, TOML and YAML,
+   the shared `adapters.structured` readers (ADR 0055); never each other, the registry or `runtime/`.
 5. **Locators are exact.** Every emitted record carries an `EvidenceRef` that resolves to the bytes it came from.
    Nested evidence is a locator path from the outermost source inward (ADR 0016); build the transform with
    `identity.provenance.transform_record` and tier-2 ids with `evidence_record_id`.
@@ -202,7 +202,9 @@ For sources that describe machines (manifests, robot descriptions, flight logs, 
   write `Unknown` citing where you looked and emit `<adapter>.software_identity_missing`.
 - Calibration: one `Calibration` per calibrated subject, parameters under their declared names with
   numbers in source order, and extrinsics as `FrameTransform`s in the calibration file's own graph,
-  direction `Ambiguous` unless the format says which way they map.
+  direction `Ambiguous` unless the format says which way they map. The `calibration` adapter (ADR 0055) is the
+  worked example: ROS `camera_info`, Kalibr and OpenCV `FileStorage`, claimed by required keys at `VERIFIED`.
+  An extrinsic whose frames the file does not name stays a parameter with a `frame_unresolved` finding.
 
 ## Configuration (ADR 0037)
 
