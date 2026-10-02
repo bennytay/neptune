@@ -37,8 +37,9 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
    - Its fields are `domain` (the `TimestampDomain` record id) and `zone: Knowledge[str]`.
    - `zone` is the IANA tz database name exactly as declared, such as `Europe/Berlin`, `UTC` or
      `Etc/GMT-5`.
-   - It is checked by syntax only: `/`-joined components of letters, digits and `._+-`, no `.` or
-     `..` component, at most 255 characters. It is never looked up in a tz database. Whether a
+   - It is checked by syntax only: `/`-joined components of letters, digits and `._+-`, none
+     starting with `.`, `-` or `+` (so no `.` or `..` component, and no fixed offset such as `+05`
+     or `+0100`), at most 255 characters. It is never looked up in a tz database. Whether a
      name exists depends on the database release, and a record's bytes may not.
    - `Known` (or `Ambiguous` when declarations disagree) is a stated zone. `Unknown` means the
      source could state one and does not. `NotCovered` means its format has no place for one.

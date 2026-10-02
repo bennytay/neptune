@@ -157,11 +157,12 @@ def timestamp_domain_from_json(data: JsonValue) -> TimestampDomain:
 CIVIL_ZONE_SINCE: Final = 5
 
 # An IANA time zone database name, by syntax only: components of letters, digits and ``._+-``,
-# none starting with ``.`` or ``-``, joined by ``/``: ``Europe/Berlin``, ``Etc/GMT-5``, ``UTC``,
-# ``America/Argentina/Buenos_Aires``.
+# none starting with ``.``, ``-`` or ``+``, joined by ``/``: ``Europe/Berlin``, ``Etc/GMT-5``,
+# ``UTC``, ``America/Argentina/Buenos_Aires``. No IANA component starts with a sign, so a fixed
+# offset (``+05``, ``+0100``) is refused: it is not a zone (ADR 0061 §1).
 # Whether the name is in a tz database is never checked here: that depends on the database's
 # release, and a record's bytes may not (ADR 0061 §1).
-_ZONE_PART: Final = r"[A-Za-z0-9_+][A-Za-z0-9._+\-]*"
+_ZONE_PART: Final = r"[A-Za-z0-9_][A-Za-z0-9._+\-]*"
 _IANA_ZONE: Final = re.compile(f"{_ZONE_PART}(?:/{_ZONE_PART})*")
 _IANA_ZONE_MAX: Final = 255
 

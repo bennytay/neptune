@@ -213,6 +213,10 @@ def test_a_well_spelled_name_no_tz_database_knows_is_kept_as_declared() -> None:
         "x" * 256,
         "-Europe/Berlin",
         "Europe/-Berlin",
+        "+05",
+        "+0100",
+        "+01_00",
+        "Etc/+5",
     ],
 )
 def test_names_not_spelled_as_iana_zones_are_refused(name: str) -> None:
