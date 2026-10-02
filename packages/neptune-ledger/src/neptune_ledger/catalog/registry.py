@@ -1,16 +1,18 @@
-"""The catalog on PostgreSQL: ``register`` and ``verify`` (Ledger ADRs 0002, 0004, 0005, 0006).
+"""The catalog on PostgreSQL: ``register``, ``verify``, ``resolve`` (Ledger ADRs 0002, 0004-0008).
 
 ``PostgresCatalog`` serves one tenant's schema. ``register`` verifies the whole package first,
 outside any transaction and without following a link (``check``), then writes the
 registration-log row, the package row and every index row in one READ COMMITTED transaction that
-holds the ``tx_clock`` row lock from before the package lookup to commit (ADR 0004 §4). The
-remaining calls (``resolve``, ``thread``, ``threads_of``, ``lineage``, ``query``) belong to
-MVL-91, MVL-92 and MVL-98 and raise ``NotImplementedError`` until they land.
+holds the ``tx_clock`` row lock from before the package lookup to commit (ADR 0004 §4).
+``resolve`` reads the source and record indexes registration wrote (ADR 0006 §5). The remaining
+calls (``thread``, ``threads_of``, ``lineage``, ``query``) belong to MVL-92 and MVL-98 and raise
+``NotImplementedError`` until they land.
 """
 
 import os
+import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final, Literal, TypeVar
 
@@ -18,7 +20,9 @@ import psycopg
 from psycopg import sql
 
 import neptune_ledger
+from neptune.identity import canonical_json
 from neptune.model.knowledge import Knowledge, Known, NotApplicable, NotCovered, Unknown
+from neptune.store.package import blob_path
 from neptune_ledger.api.protocol import CatalogUnavailable
 from neptune_ledger.api.types import (
     CatalogFinding,
@@ -28,8 +32,11 @@ from neptune_ledger.api.types import (
     LineageGraph,
     Order,
     QuerySpec,
+    RecordRef,
+    Region,
     Registration,
     Resolution,
+    SourceLocation,
     Thread,
     ThreadKey,
     ThreadPreference,
@@ -38,7 +45,7 @@ from neptune_ledger.api.types import (
     VerifyReport,
 )
 from neptune_ledger.catalog.check import Checked, check_package, open_root
-from neptune_ledger.catalog.index import PackageRows, package_rows
+from neptune_ledger.catalog.index import PackageRows, RecordRow, package_rows, projection_columns
 from neptune_ledger.catalog.migrate import tenant_schema
 from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, check_sources
 
@@ -57,13 +64,54 @@ HOSTILE: Final = (
 )
 UNREADABLE: Final = "no readable package directory at this root"
 _MAX_SEQ: Final = 2**63 - 1
+_CONTENT_ID: Final = re.compile(r"sha256:[0-9a-f]{64}")
+# Region.addressing for the package schema's core locator steps; any other step is an adapter's.
+_CORE_STEPS: Final = frozenset(
+    {
+        "byte_range",
+        "frame",
+        "image_region",
+        "json_pointer",
+        "object",
+        "page",
+        "page_region",
+        "record_range",
+        "row",
+        "row_cell",
+        "span",
+        "video_frame",
+    }
+)
 Verdict = Literal["damaged", "intact", "unknown_package", "unreachable"]
 
+# Every record column registration writes (ADR 0002 §5, ADR 0005 §2, ADR 0008), in this order.
 _RECORD_COLUMNS: Final = (
-    "tenant_id, kind, record_id, package_id, registration_key, line, schema_version,"
-    " source_content_id, source_locator, transform_id, assertion_kind,"
-    " world_clock, world_first, world_last, ambiguous_pointers, body_digest"
+    "tenant_id",
+    "kind",
+    "record_id",
+    "package_id",
+    "registration_key",
+    "line",
+    "schema_version",
+    "source_content_id",
+    "source_locator",
+    "transform_id",
+    "assertion_kind",
+    "world_clock",
+    "world_first",
+    "world_last",
+    "ambiguous_pointers",
+    "body_digest",
+    "body",
+    "unknown_pointers",
+    *projection_columns(),
 )
+_INSERT_RECORD: Final = "INSERT INTO record ({}) VALUES ({})".format(
+    ", ".join(_RECORD_COLUMNS),
+    ", ".join("%s::jsonb" if column == "body" else "%s" for column in _RECORD_COLUMNS),
+)
+# Rows per executemany call (ADR 0008 §4): fixed, so a package is written the same way every time.
+BATCH_ROWS: Final = 1000
 
 
 class _Refused(Exception):
@@ -246,38 +294,19 @@ class PostgresCatalog:
                 "INSERT INTO clock VALUES (%s, %s, %s, %s, %s)",
                 [(t, clock, p, field, list(scope)) for clock, field, scope in rows.clocks],
             )
-            cur.executemany(
-                f"INSERT INTO record ({_RECORD_COLUMNS}) VALUES ({', '.join(['%s'] * 16)})",
-                [
-                    (
-                        t,
-                        r.kind,
-                        r.record_id,
-                        p,
-                        seq,
-                        r.line,
-                        r.schema_version,
-                        r.source_content_id,
-                        r.source_locator,
-                        r.transform_id,
-                        r.assertion_kind,
-                        r.world_clock,
-                        r.world_first,
-                        r.world_last,
-                        list(r.ambiguous_pointers),
-                        r.body_digest,
-                    )
-                    for r in rows.records
-                ],
-            )
-            cur.executemany(
-                "INSERT INTO record_logical_id VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                [
-                    (t, r.kind, r.record_id, p, pointer, namespace, value)
-                    for r in rows.records
-                    for pointer, namespace, value in r.logical_ids
-                ],
-            )
+            records = [_record_values(t, p, seq, r) for r in rows.records]
+            for start in range(0, len(records), BATCH_ROWS):
+                cur.executemany(_INSERT_RECORD, records[start : start + BATCH_ROWS])
+            logical = [
+                (t, r.kind, r.record_id, p, pointer, namespace, value)
+                for r in rows.records
+                for pointer, namespace, value in r.logical_ids
+            ]
+            for start in range(0, len(logical), BATCH_ROWS):
+                cur.executemany(
+                    "INSERT INTO record_logical_id VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    logical[start : start + BATCH_ROWS],
+                )
         return "registered", TransactionKey(seq, at), root, self._ledger_version
 
     def _compare(
@@ -375,7 +404,7 @@ class PostgresCatalog:
         self, package_id: str, as_of: int | None
     ) -> tuple[Knowledge[TransactionKey], tuple[TransactionKey, str] | None, CatalogFinding | None]:
         """The catalog point, and the package's key and root at it, or the finding why not."""
-        if as_of is not None and (not isinstance(as_of, int) or as_of < 1):
+        if _bad_as_of(as_of):
             point, _, _ = self._run(lambda conn: self._lookup(conn, package_id, None))
             detail = "as_of is a tx_seq, at least 1"
             return point, None, CatalogFinding("invalid_request", str(as_of), detail)
@@ -476,13 +505,119 @@ class PostgresCatalog:
             return point, None, False
         return point, (TransactionKey(int(seq), str(at)), str(root)), False
 
-    # --- the rest of the API (MVL-91, MVL-92, MVL-98) -------------------------------------------
+    # --- resolve -------------------------------------------------------------------------------
+
+    def resolve(self, evidence_ref: EvidenceAnchor, *, as_of: int | None = None) -> Resolution:
+        """The source's size, each package's route to it and the records citing this anchor
+        exactly (ADR 0004 §1, ADR 0006 §5), at one catalog point."""
+        steps = evidence_ref.locator if isinstance(evidence_ref.locator, tuple) else ()
+        region = _region(steps[-1] if steps else {})
+        locator = _anchor_locator(evidence_ref)
+        if _bad_as_of(as_of):
+            point, _, _ = self._run(lambda conn: self._lookup(conn, "", None))
+            finding = CatalogFinding("invalid_request", str(as_of), "as_of is a tx_seq, at least 1")
+            return _unresolved(evidence_ref, region, point, finding)
+        if locator is None:
+            point, _, _ = self._run(lambda conn: self._lookup(conn, "", None))
+            detail = "an evidence anchor is a content id and a non-empty locator of JSON objects"
+            finding = CatalogFinding("invalid_request", str(evidence_ref.source)[:200], detail)
+            return _unresolved(evidence_ref, region, point, finding)
+        return self._run(lambda conn: self._resolve(conn, evidence_ref, locator, region, as_of))
+
+    def _resolve(
+        self,
+        conn: Conn,
+        anchor: EvidenceAnchor,
+        locator: str,
+        region: Region,
+        as_of: int | None,
+    ) -> Resolution:
+        point, _, beyond = self._lookup(conn, "", as_of)
+        if beyond:
+            detail = "as_of is beyond the latest committed catalog point"
+            finding = CatalogFinding("as_of_out_of_range", str(as_of), detail)
+            return _unresolved(anchor, region, point, finding)
+        limit = point.value.tx_seq if isinstance(point, Known) else 0
+        holders = conn.execute(
+            "SELECT ps.package_id, ps.storage, s.size FROM package_source ps"
+            " JOIN source s USING (tenant_id, content_id)"
+            " JOIN package p USING (tenant_id, package_id)"
+            " WHERE ps.tenant_id = %s AND ps.content_id = %s AND p.tx_seq <= %s"
+            " ORDER BY p.tx_seq",
+            (self._tenant, anchor.source, limit),
+        ).fetchall()
+        if not holders:
+            detail = "no registered package holds this source"
+            finding = CatalogFinding("unresolvable_evidence", anchor.source, detail)
+            return _unresolved(anchor, region, point, finding)
+        stated = self._locations(conn, anchor.source, [str(h[0]) for h in holders])
+        fetch = tuple(
+            SourceLocation(
+                package_id=str(package_id),
+                storage=storage,
+                blob_path=Known(blob_path(anchor.source))  # type: ignore[arg-type]
+                if storage == "materialised"
+                else NotApplicable(),
+                locations=stated.get(str(package_id), ()),
+            )
+            for package_id, storage, _ in holders
+        )
+        cited_by = tuple(
+            RecordRef(str(package_id), str(kind), str(record_id), int(line))
+            for kind, record_id, package_id, line in conn.execute(
+                "SELECT kind, record_id, package_id, line FROM record"
+                " WHERE tenant_id = %s AND source_content_id = %s"
+                "   AND md5(source_locator) = md5(%s) AND source_locator = %s"
+                "   AND kind <> 'ingest_finding' AND registration_key <= %s"
+                " ORDER BY kind, record_id, package_id",
+                (self._tenant, anchor.source, locator, locator, limit),
+            ).fetchall()
+        )
+        return Resolution(
+            evidence_ref=anchor,
+            status="resolved",
+            size=Known(int(holders[0][2])),
+            region=region,
+            fetch=fetch,
+            cited_by=cited_by,
+            as_of=point,
+            findings=(),
+        )
+
+    def _locations(
+        self, conn: Conn, content_id: str, packages: list[str]
+    ) -> dict[str, tuple[dict[str, Any], ...]]:
+        """Per package, its revisions of ``content_id`` that no revision or absence in the same
+        package supersedes, in table order (ADR 0006 §5)."""
+        superseded = {
+            (str(pid), str(rid))
+            for pid, rid in conn.execute(
+                "SELECT package_id, unnest(supersedes)::text FROM source_location"
+                " WHERE tenant_id = %s AND package_id = ANY(%s)"
+                " UNION ALL SELECT package_id, unnest(supersedes)::text FROM location_absence"
+                " WHERE tenant_id = %s AND package_id = ANY(%s)",
+                (self._tenant, packages, self._tenant, packages),
+            ).fetchall()
+        }
+        out: dict[str, list[dict[str, Any]]] = {}
+        for package_id, revision_id, location in conn.execute(
+            "SELECT l.package_id, l.revision_id, l.location FROM source_location l"
+            " JOIN record r ON r.tenant_id = l.tenant_id AND r.kind = 'source_revision'"
+            "  AND r.record_id = l.revision_id AND r.package_id = l.package_id"
+            " WHERE l.tenant_id = %s AND l.content_id = %s AND l.package_id = ANY(%s)"
+            " ORDER BY l.package_id, r.line",
+            (self._tenant, content_id, packages),
+        ).fetchall():
+            if (str(package_id), str(revision_id)) not in superseded:
+                loaded = canonical_json.loads(str(location).encode("utf-8"))
+                assert isinstance(loaded, dict)
+                out.setdefault(str(package_id), []).append(loaded)
+        return {package_id: tuple(found) for package_id, found in out.items()}
+
+    # --- the rest of the API (MVL-92, MVL-98) ----------------------------------------------------
 
     def _missing(self, name: str) -> NotImplementedError:
         return NotImplementedError(f"catalog API {name}() is not implemented yet")
-
-    def resolve(self, evidence_ref: EvidenceAnchor, *, as_of: int | None = None) -> Resolution:
-        raise self._missing("resolve")
 
     def thread(
         self,
@@ -559,6 +694,80 @@ def _report(
         files_checked=files_checked,
         as_of=point,
         findings=findings,
+    )
+
+
+def _bad_as_of(as_of: object) -> bool:
+    """An ``as_of`` outside the contract: not a tx_seq of at least 1. A bool is not a tx_seq."""
+    return as_of is not None and (
+        isinstance(as_of, bool) or not isinstance(as_of, int) or as_of < 1
+    )
+
+
+def _region(step: Any) -> Region:
+    """The innermost locator step and how it addresses the source (``Region``)."""
+    kind = step.get("kind") if isinstance(step, Mapping) else None
+    addressing = kind if kind in _CORE_STEPS else "adapter"
+    return Region(addressing, step if isinstance(step, Mapping) else {})  # type: ignore[arg-type]
+
+
+def _anchor_locator(anchor: EvidenceAnchor) -> str | None:
+    """The anchor's locator as the canonical JSON ``record.source_locator`` holds, or None when
+    the anchor is outside the contract (not a content id, or not a non-empty list of objects)."""
+    steps = anchor.locator
+    if not isinstance(anchor.source, str) or not _CONTENT_ID.fullmatch(anchor.source):
+        return None
+    if not isinstance(steps, tuple) or not steps:
+        return None
+    if not all(isinstance(step, Mapping) for step in steps):
+        return None
+    try:
+        return canonical_json.dumps(list(steps)).decode("utf-8")
+    except canonical_json.CanonicalJsonError:
+        return None
+
+
+def _unresolved(
+    anchor: EvidenceAnchor,
+    region: Region,
+    point: Knowledge[TransactionKey],
+    finding: CatalogFinding,
+) -> Resolution:
+    """A rejected or unresolvable ``resolve``: empty payload, ``size`` NotCovered (ADR 0004 §2)."""
+    return Resolution(
+        evidence_ref=anchor,
+        status="unresolvable",
+        size=NotCovered(),
+        region=region,
+        fetch=(),
+        cited_by=(),
+        as_of=point,
+        findings=(finding,),
+    )
+
+
+def _record_values(tenant: str, package_id: str, seq: int, r: RecordRow) -> tuple[Any, ...]:
+    """One ``record`` row's values in ``_RECORD_COLUMNS`` order."""
+    return (
+        tenant,
+        r.kind,
+        r.record_id,
+        package_id,
+        seq,
+        r.line,
+        r.schema_version,
+        r.source_content_id,
+        r.source_locator,
+        r.transform_id,
+        r.assertion_kind,
+        r.world_clock,
+        r.world_first,
+        r.world_last,
+        list(r.ambiguous_pointers),
+        r.body_digest,
+        r.body,
+        list(r.unknown_pointers),
+        *r.projected,
     )
 
 

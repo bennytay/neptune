@@ -19,6 +19,7 @@ from conftest import new_database
 from neptune.identity import canonical_json
 from neptune.model.knowledge import Known, NotApplicable, NotCovered, Unknown
 from neptune_ledger.api import CatalogUnavailable, codec
+from neptune_ledger.catalog.index import projection_columns
 from neptune_ledger.catalog.migrate import apply_migrations
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.contract_tests.examples import EXAMPLES, WorkedPackage, materialise
@@ -113,7 +114,9 @@ def test_registration_writes_exactly_the_walkthrough_rows(
     apply_migrations(pg, "harness")
     for name in ("drone", "quadruped", "manipulator", "mobile_robot"):
         harness_register(pg, "tenant_harness", load_package(name))
-    skip = (*TX_COLUMNS, "root_locator")
+    # The harness applies ADR 0002 §5's mapping; ADR 0008's columns are checked against their
+    # own oracle in test_ledger_record_index.py.
+    skip = (*TX_COLUMNS, "root_locator", "body", "unknown_pointers", *projection_columns())
     assert dump(pg, "tenant_acme", skip) == dump(pg, "tenant_harness", skip)
 
 
