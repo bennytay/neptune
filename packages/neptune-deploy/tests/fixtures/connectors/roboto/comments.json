@@ -1,0 +1,19 @@
+{
+  "data": {
+    "items": [
+      {
+        "comment_id": "cm_001",
+        "comment_text": "Operator confirmed the stop at 08:00:09 local.",
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_reviewer",
+        "entity_id": "ds_shift_0914",
+        "entity_type": "dataset",
+        "mentions": [],
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_reviewer",
+        "org_id": "og_acme_robotics"
+      }
+    ],
+    "next_token": null
+  }
+}
