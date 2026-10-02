@@ -433,13 +433,14 @@ def test_a_cut_head_is_judged_by_the_members_it_holds() -> None:
     assert probe(geo)[:2] == (NAME_ONLY, ["config.shape_not_configuration"])
 
 
-def test_data_shaped_files_are_left_to_the_tabular_or_text_adapter() -> None:
+def test_data_shaped_files_are_left_to_the_tabular_or_geojson_adapter() -> None:
     engine = ProbeEngine(default_registry())
     rows = engine.probe(BytesReader(b'[{"t": 0.0}, {"t": 0.1}]'), "rows.json")
     assert rows.adapter == "tabular" and rows.findings == ()  # rows are a table
-    site = engine.probe(BytesReader(SITE_JSON), "site.json")  # GeoJSON: no table, no settings
-    assert site.adapter == "text"
-    assert [f.code for f in site.findings] == ["neptune.probe.name_mismatch"]
+    site = engine.probe(
+        BytesReader(SITE_JSON), "site.json"
+    )  # GeoJSON: the geojson adapter, VERIFIED
+    assert site.adapter == "geojson" and site.findings == ()
     assert engine.probe(BytesReader(fixture("px4_params.json")), "px4.json").adapter == "config"
 
 
