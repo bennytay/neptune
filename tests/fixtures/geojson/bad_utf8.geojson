@@ -1,0 +1,5 @@
+{"type": "FeatureCollection", "features": [
+{"type": "Feature", "geometry": {"type": "Point", "coordinates": [1.0, 2.0]}, "properties": {"site_id": "S-1", "name": "ok"}},
+{"type": "Feature", "geometry": {"type": "Point", "coordinates": [3.0, 4.0]}, "properties": {"site_id": "S-2", "name": "café"}},
+{"type": "Feature", "geometry": {"type": "Point", "coordinates": [5.0, 6.0]}, "properties": {"site_id": "S-3", "name": "ok too"}}
+]}
