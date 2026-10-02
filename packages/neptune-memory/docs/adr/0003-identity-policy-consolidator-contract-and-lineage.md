@@ -1,6 +1,6 @@
 # 0003 — Identity policy, the consolidator contract, and consolidator lineage
 
-- Status: Accepted
+- Status: Accepted; the §1.4 undo sentence and the §3 known gap superseded by 0007
 - Date: 2026-10-02
 - Issue: MVL-103
 

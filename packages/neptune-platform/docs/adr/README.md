@@ -11,3 +11,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0002](0002-contracts-registry-and-version-policy.md) | Contracts registry and version policy | Accepted |
 | [0003](0003-multi-coordinator-playbook-and-versioning.md) | Multi-coordinator playbook and release/versioning policy | Accepted |
 | [0004](0004-integration-harness.md) | Integration harness: real-or-stub stages, one deterministic report, no Docker until needed | Accepted |
+| [0005](0005-merge-without-a-queue.md) | Merge without a queue: no strict up-to-date rule, a freshness check, stop the line on a red main | Accepted |
