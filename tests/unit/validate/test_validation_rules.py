@@ -59,6 +59,7 @@ from neptune.validate import (
     VALIDATOR_ID,
     Bounds,
     Inputs,
+    Rule,
     validate_package,
 )
 
@@ -601,8 +602,8 @@ def test_a_calibration_for_other_hardware_and_outside_its_window(tmp_path: Path)
         )
     )
     stale = calibration(kit, clock, "rev-B", 0, 1_000)
-    calibration(kit, clock, "rev-C", 0, 1_000_000)
-    early = kit.run(clock, first=2_000, last=3_000)
+    current = calibration(kit, clock, "rev-C", 0, 4_000)  # covers the run stale no longer does
+    kit.run(clock, first=2_000, last=3_000)
     later = kit.run(clock, first=5_000, last=6_000)
     found = {
         f.code.removeprefix(f"{VALIDATOR_ID}."): f
@@ -611,8 +612,8 @@ def test_a_calibration_for_other_hardware_and_outside_its_window(tmp_path: Path)
     assert set(found) == {"calibration_out_of_window", "calibration_revision_mismatch"}
     assert found["calibration_revision_mismatch"].details["declared"] == ["rev-C"]
     window = found["calibration_out_of_window"]
-    assert window.details["after_valid_until"] == 2
-    assert set(window.records) == {stale.id, early.id, later.id}
+    assert window.details["after_valid_until"] == 1
+    assert set(window.records) == {stale.id, current.id, later.id}
 
 
 def test_a_document_revision_superseded_in_the_package(tmp_path: Path) -> None:
@@ -808,3 +809,52 @@ def test_a_large_package_is_validated_in_bounded_time_memory_and_output(tmp_path
     regression = next(f for f in report.findings if f.code.endswith("time_out_of_order"))
     assert regression.details["descents"] == rows // 2 - 1
     assert peak < 256 * 1024 * 1024 and elapsed < 30, (peak, elapsed)
+
+
+# --- Hostile values and faulty rules -------------------------------------------------------------
+
+
+def test_an_id_holding_a_newline_and_2_kb_still_makes_a_one_line_finding(tmp_path: Path) -> None:
+    register = Kit("legged", "register")
+    hostile = LogicalId("serial", "SPOT\n" + "9" * 2048)
+    machine(register, hostile, "Spot")
+    machine(register, hostile, "Spot")
+    (finding,) = validate_package(build(tmp_path, register)).findings
+    assert "\n" not in finding.message and len(finding.message) <= 1000
+    assert finding.details["id"] == hostile.value  # the facts stay whole in details
+
+
+def test_a_rule_that_raises_is_a_finding_and_the_others_still_run(tmp_path: Path) -> None:
+    def broken(context: Any) -> Iterable[Any]:
+        raise KeyError("boom")
+
+    faulty = Rule("broken", 1, FindingCategory.INCONSISTENT, Severity.WARNING, "raises", broken)
+    kit = Kit("aerial")
+    clock = kit.clock()
+    kit.stream(kit.run(clock, first=9, last=1), [clock], [[0, 1]])
+    report = validate_package(build(tmp_path, kit), rules=(faulty, *DEFAULT_RULES))
+    by_code = {f.code: f for f in report.findings}
+    failed = by_code[f"{VALIDATOR_ID}.rule_failed"]
+    assert failed.details == {"exception": "builtins.KeyError", "rule": f"{VALIDATOR_ID}.broken/1"}
+    assert f"{VALIDATOR_ID}.interval_reversed" in by_code
+    outcome = {o.code: o for o in report.rules}[f"{VALIDATOR_ID}.broken"]
+    assert not outcome.covered and outcome.reason == "failed: builtins.KeyError"
+
+
+def test_rows_left_out_on_request_and_limits_are_not_damage(tmp_path: Path) -> None:
+    kit = Kit("mobile_base")
+    clock = kit.clock()
+    stream = kit.stream(kit.run(clock), [clock], [[0, 1]], count=50)
+    kit.add(
+        ingest_finding(
+            code="mcap.not_selected",
+            category=FindingCategory.SKIPPED,
+            severity=Severity.INFO,
+            subject=kit.cite("selection").evidence,
+            transform=kit.transform,
+            message="the config selects none of the channel's messages",
+            records=[stream.id],
+        )
+    )
+    kit.finding("mcap.record_too_large", FindingCategory.LIMIT)
+    assert codes(build(tmp_path, kit)) == []

@@ -15,6 +15,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from neptune.model.finding import FindingCategory
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.knowledge import Known
 from neptune.model.provenance import EvidenceRef
@@ -37,8 +38,16 @@ def _named(stream: Stream, details: dict[str, JsonValue]) -> dict[str, JsonValue
 
 def count_mismatch(context: Context) -> Iterator[Draft]:
     """A stream declares a message count its series does not hold (a cut or padded recording)."""
+    # A stream the adapter was told to read only part of says so (a ``skipped`` finding naming
+    # it, such as ``mcap.not_selected``); its rows are short by request, not by loss.
+    chosen = {
+        record
+        for finding in context.findings
+        if finding.category is FindingCategory.SKIPPED
+        for record in finding.records
+    }
     for stream in context.records("stream"):
-        if not isinstance(stream.message_count, Known):
+        if not isinstance(stream.message_count, Known) or stream.id in chosen:
             continue
         content = context.package.series.get(stream.id)
         stored = 0 if content is None else _open(content).metadata.num_rows
@@ -213,7 +222,7 @@ def _walk_streams(context: Context) -> Iterator[tuple[bool, Draft]]:
                 Draft(
                     subject=_evidence(stream, parquet, row, cite),
                     message=f"stream {short(stream.id)} is not in time order on clock {clock}"
-                    f" in source order ({plural(falls, 'descent')})",
+                    " in source order",
                     details=details,
                     related=(_evidence(stream, parquet, prior_row, cite),),
                     records=(stream.id,),

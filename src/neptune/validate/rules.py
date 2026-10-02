@@ -27,15 +27,14 @@ if TYPE_CHECKING:
 
 # --- truncation and corruption ------------------------------------------------------------------
 
-_DAMAGE: Final = (FindingCategory.CORRUPT, FindingCategory.LIMIT)
-
 
 def source_incomplete(context: Context) -> Iterator[Draft]:
-    """Roll up, per source, every finding that says its bytes were cut off or corrupt."""
+    """Roll up, per source, every finding that says its bytes are corrupt or cut off (``corrupt``;
+    a ``limit`` stopped an intact file and is not damage)."""
     damaged: dict[str, list[IngestFinding]] = defaultdict(list)
     for finding in context.findings:
         subject = finding.subject
-        damage = finding.category in _DAMAGE and isinstance(subject, EvidenceRef)
+        damage = finding.category is FindingCategory.CORRUPT
         if damage and isinstance(subject, EvidenceRef) and isinstance(subject.source, str):
             damaged[subject.source].append(finding)
     if not damaged:
@@ -305,7 +304,8 @@ _REFERENCES: Final = (
     ("structured_record", "table", "structured_table"),
     ("video", "clock", "timestamp_domain"),
 )
-_TIMED: Final = ("calibration", "frame_transform", "image", "run", "stream", "video")
+# A stream's times lie on its clocks, which ``_REFERENCES`` already checks.
+_TIMED: Final = ("calibration", "frame_transform", "image", "run", "video")
 
 
 def dangling_reference(context: Context) -> Iterator[Draft]:
@@ -417,9 +417,23 @@ def calibration_revision_mismatch(context: Context) -> Iterator[Draft]:
 
 
 def calibration_out_of_window(context: Context) -> Iterator[Draft]:
-    """A run of a machine starts after its calibration's stated window ends, or ends before it
-    starts, both on the same clock. Runs are sorted once per (machine, clock), so each
-    calibration costs two bisections and the runs it names."""
+    """A run of a machine lies outside every stated window of one calibrated subject: it starts
+    after the last window ends, or ends before the first begins, all on one clock. A newer
+    calibration of the subject covers what an older one's window no longer does."""
+    groups: dict[tuple[LogicalId, str, str], list[Any]] = defaultdict(list)
+    for calibration in context.records("calibration"):
+        machine, subject = _known(calibration.machine), _known(calibration.subject)
+        if machine is None or subject is None:
+            continue
+        domains = {
+            stamp.domain_id
+            for stamp in (_known(calibration.valid_from), _known(calibration.valid_until))
+            if stamp is not None
+        }
+        if len(domains) == 1:
+            groups[machine, subject, domains.pop()].append(calibration)
+    if not groups:
+        return
     starts: dict[tuple[LogicalId, str], list[tuple[int, str, Any]]] = defaultdict(list)
     ends: dict[tuple[LogicalId, str], list[tuple[int, str, Any]]] = defaultdict(list)
     for run in context.records("run"):
@@ -434,35 +448,40 @@ def calibration_out_of_window(context: Context) -> Iterator[Draft]:
         for entries in index.values():
             entries.sort(key=lambda entry: (entry[0], entry[1]))
     limit = context.bounds.records_per_finding
-    for calibration in context.records("calibration"):
-        machine = _known(calibration.machine)
-        if machine is None:
-            continue
+    for (machine, subject, domain), calibrations in sorted(
+        groups.items(), key=lambda item: (_value_key(item[0][0]), item[0][1], item[0][2])
+    ):
+        untils = [_known(c.valid_until) for c in calibrations]
+        froms = [_known(c.valid_from) for c in calibrations]
         late: list[tuple[int, str, Any]] = []
         early: list[tuple[int, str, Any]] = []
-        until, since = _known(calibration.valid_until), _known(calibration.valid_from)
-        if until is not None:
-            entries = starts.get((machine, until.domain_id), [])
-            late = entries[bisect_right(entries, until.ticks, key=lambda e: e[0]) :]
-        if since is not None:
-            entries = ends.get((machine, since.domain_id), [])
-            early = entries[: bisect_left(entries, since.ticks, key=lambda e: e[0])]
+        if all(stamp is not None for stamp in untils):  # an open-ended window covers what follows
+            last = max(stamp.ticks for stamp in untils if stamp is not None)
+            entries = starts.get((machine, domain), [])
+            late = entries[bisect_right(entries, last, key=lambda e: e[0]) :]
+        if all(stamp is not None for stamp in froms):
+            first = min(stamp.ticks for stamp in froms if stamp is not None)
+            entries = ends.get((machine, domain), [])
+            early = entries[: bisect_left(entries, first, key=lambda e: e[0])]
         if not late and not early:
             continue
+        runs = {e[1] for e in (*late, *early)}
         named = sorted(
             {e[1]: e[2] for e in (*late[:limit], *early[:limit])}.values(), key=lambda r: r.id
         )[:limit]
+        ordered = sorted(calibrations, key=lambda c: c.id)
         yield Draft(
-            subject=evidence_of(calibration),
-            message=f"calibration {short(calibration.id)} is outside its stated window for"
-            f" {plural(len({e[1] for e in (*late, *early)}), 'run')} of its machine",
+            subject=evidence_of(ordered[-1]),
+            message=f"{plural(len(runs), 'run')} of the machine lie outside every stated window"
+            f" of its {plural(len(ordered), 'calibration')} of {subject!r}",
             details={
                 "after_valid_until": len(late),
                 "before_valid_from": len(early),
                 "machine": _value_key(machine),
+                "subject": subject,
             },
-            related=[evidence_of(r) for r in named],
-            records=[calibration.id, *(r.id for r in named)],
+            related=[*(evidence_of(c) for c in ordered[:-1]), *(evidence_of(r) for r in named)],
+            records=[*(c.id for c in ordered), *(r.id for r in named)],
         )
 
 

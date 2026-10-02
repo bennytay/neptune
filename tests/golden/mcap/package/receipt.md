@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:ad6097c3e2466ffc38f2112448ddfdecf8f09135a794613111da435e3052f676`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:364810e6d35747562ec0e1c766ab023e465b70d3b72ea51ac9761f7eaa754127`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -63,7 +63,7 @@ Receipt `rec:sha256:ad6097c3e2466ffc38f2112448ddfdecf8f09135a794613111da435e3052
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:2a04449178fd`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 4's message payloads are not decoded; each row cites its message's bytes · `rec:542c3cbcba95`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:5e30cda4992d`
-- **info** `neptune.validate.time_out_of_order` (inconsistent): stream rec:f6ee7d482736 is not in time order on clock 0 in source order (1 descent) · `rec:cc216092f69d`
+- **info** `neptune.validate.time_out_of_order` (inconsistent): stream rec:f6ee7d482736 is not in time order on clock 0 in source order · `rec:4f873b9d5b6e`
 
 ## Ambiguous fields
 

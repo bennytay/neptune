@@ -209,7 +209,7 @@ def _staged(destination: Path) -> Iterator[Path]:
 def _lay_out(
     staging: Path, contents: Mapping[str, Content], *, movable: Path | None = None
 ) -> list[str]:
-    """Write ``contents`` under ``staging``: bytes as given, paths under ``movable`` moved, the
+    """Write ``contents`` under ``staging``: bytes as given, paths beneath ``movable`` moved, the
     rest copied as streams (``copy_file``: no symlink followed, no special file opened). Returns
     the paths it copied: a copied file can have changed since it was hashed, so what landed must
     be checked (``_check_copies``).
@@ -220,7 +220,7 @@ def _lay_out(
         target.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(data, bytes):
             target.write_bytes(data)
-        elif movable is not None and data.parent == movable:
+        elif movable is not None and data.is_relative_to(movable):
             data.rename(target)
         else:
             copy_file(data, target)
@@ -366,8 +366,9 @@ def amend(staged: StagedPackage, package: IngestPackage, extra: Iterable[Any]) -
 
     ``package`` is ``staged`` as ``read_package`` read it. The new package is built in a fresh
     sibling: its tables, receipt and manifest are rewritten, and its series and blobs are moved
-    (never copied) out of ``staged``, which is then removed. On failure the new sibling is removed
-    and ``staged`` may have lost files; the caller discards it.
+    (never copied) out of ``staged``, which is then removed. ``package_contents`` verifies the
+    whole (``read_files``) before anything moves, so the result needs no second read. On failure
+    the new sibling is removed and ``staged`` may have lost files; the caller discards it.
     """
     contents = package_contents(
         [*package.records, *extra],
@@ -378,15 +379,8 @@ def amend(staged: StagedPackage, package: IngestPackage, extra: Iterable[Any]) -
     )
     staging = _sibling(staged.destination)
     try:
-        for relative, data in sorted(contents.items()):
-            target = staging / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if isinstance(data, bytes):
-                target.write_bytes(data)
-            elif data.is_relative_to(staged.path):
-                data.rename(target)
-            else:
-                raise PackageError(f"{relative} is not a file of the staged package")
+        copied = _lay_out(staging, contents, movable=staged.path)
+        _check_copies(staging, contents, copied)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise

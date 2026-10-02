@@ -33,8 +33,8 @@ not by re-parsing. The checks must not become a second parser, must not guess un
 
    | Rule | Checks | Category |
    |---|---|---|
-   | `source_incomplete` | per source, roll up every `corrupt` or `limit` finding about its bytes; name the records read from it | corrupt |
-   | `count_mismatch` | a stream's `Known` declared message count against its series' rows | inconsistent |
+   | `source_incomplete` | per source, roll up every `corrupt` finding about its bytes; name the records read from it (a `limit` stopped an intact file and is not damage) | corrupt |
+   | `count_mismatch` | a stream's `Known` declared message count against its series' rows, unless a `skipped` finding names the stream (rows left out on request, as `mcap.not_selected`) | inconsistent |
    | `time_regression` | per stream and clock, samples out of time order in source order (below), on a clock that declares itself monotonic | inconsistent |
    | `time_out_of_order` | the same, on a clock that does not declare it (`info`: an observation, not a contradiction) | inconsistent |
    | `interval_reversed` | run and stream `first > last`, calibration `valid_from > valid_until`, same clock only | inconsistent |
@@ -46,7 +46,7 @@ not by re-parsing. The checks must not become a second parser, must not guess un
    | `dangling_reference` | a record naming a run, clock, table, document, configuration or transform record (`frame_transform`) the package lacks | missing |
    | `frame_unresolved` | a frame named in a missing graph, or in a graph no frame or transform declares it in | missing |
    | `calibration_revision_mismatch` | a calibration's hardware revision is none its machine's configurations declare | inconsistent |
-   | `calibration_out_of_window` | a run of the machine lies after `valid_until` or before `valid_from`, same clock | inconsistent |
+   | `calibration_out_of_window` | a run of the machine lies outside every stated window of one calibrated subject (after the last `valid_until`, before the first `valid_from`; an open end covers all), same clock | inconsistent |
    | `software_conflict` | one release of named software declared with two commits, one build with two digests, one commit with two builds | inconsistent |
 
    *Time order.* A series is sorted by clock 0, then `seq` (source order). Clock 0 is in order
@@ -79,7 +79,10 @@ not by re-parsing. The checks must not become a second parser, must not guess un
    `findings_per_rule` 256, `records_per_finding` 256, `related_per_finding` 16,
    `values_per_detail` 16. A cut is counted in the finding (`records_omitted`,
    `related_omitted`) or reported once per rule as `neptune.validate.findings_capped` (info).
-   Bounds are in the transform's config, so changing them is a new lineage.
+   Bounds are in the transform's config, so changing them is a new lineage. A rule that raises
+   costs nothing else: its drafts are dropped, `neptune.validate.rule_failed` (failed, warning)
+   names it and the exception's class (never its text), and the other rules run. Messages are
+   forced to one printable line of at most 1,000 characters; the facts stay whole in `details`.
 
 ## Alternatives considered
 
@@ -101,7 +104,9 @@ not by re-parsing. The checks must not become a second parser, must not guess un
 - The receipt now says what is wrong across sources, ranked and cited, before anything downstream
   reads the package; the platform harness's pinned findings for a truncated recording gain the
   roll-up (`neptune.validate.source_incomplete`).
-- A package with findings costs one more pass over its series and blobs (amend, then verify).
+- A package with findings costs two more passes over its series and blobs (amend hashes them
+  again and verifies the whole before moving them); reusing the manifest's hashes is a later
+  optimisation, not a contract.
 - The receipt lists `neptune.validate` among the transforms that read a source it cites, as it
   already lists the runtime and discovery for theirs: a finding's citation counts as a read.
 - Adding a rule, or changing one's logic, bumps its version and so the validator transform:

@@ -27,7 +27,13 @@ from typing import Any, Final
 
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import transform_record
-from neptune.model.finding import FindingCategory, FindingSubject, IngestFinding, Severity
+from neptune.model.finding import (
+    MAX_MESSAGE_LENGTH,
+    FindingCategory,
+    FindingSubject,
+    IngestFinding,
+    Severity,
+)
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.provenance import ByteRange, EvidenceRef, Provenance, TransformRecord
@@ -38,6 +44,7 @@ VALIDATOR_ID: Final = "neptune.validate"
 VALIDATOR_VERSION: Final = "0.1.0"
 CODE_PREFIX: Final = f"{VALIDATOR_ID}."
 FINDINGS_CAPPED: Final = f"{VALIDATOR_ID}.findings_capped"
+RULE_FAILED: Final = f"{VALIDATOR_ID}.rule_failed"
 
 
 @dataclass(frozen=True)
@@ -236,6 +243,15 @@ def validator_transform(rules: Iterable[Rule], bounds: Bounds) -> TransformRecor
     )
 
 
+def _one_line(message: str) -> str:
+    """A message as one printable line of at most ``MAX_MESSAGE_LENGTH`` characters: rules quote
+    what the evidence states (ids, names), which may hold anything."""
+    text = "".join(ch if ch.isprintable() else "\ufffd" for ch in message)
+    if len(text) > MAX_MESSAGE_LENGTH:
+        text = text[: MAX_MESSAGE_LENGTH - 1] + "\u2026"
+    return text or "-"
+
+
 def _finding(rule: Rule, draft: Draft, transform: TransformRecord, bounds: Bounds) -> IngestFinding:
     records = sorted(set(draft.records))
     details = dict(draft.details)
@@ -262,7 +278,7 @@ def _finding(rule: Rule, draft: Draft, transform: TransformRecord, bounds: Bound
         severity=rule.severity,
         subject=draft.subject,
         transform=transform,
-        message=draft.message,
+        message=_one_line(draft.message),
         details=details,
         related=related,
         records=records,
@@ -280,6 +296,34 @@ def _capped(
         transform=transform,
         message=f"{rule.code} reported {emitted} findings and left {omitted} more out",
         details={"emitted": emitted, "omitted": omitted, "rule": rule.key},
+    )
+
+
+def _type_name(value: object) -> str:
+    kind = type(value)
+    return f"{kind.__module__}.{kind.__qualname__}"
+
+
+def _failed(
+    rule: Rule, exc: Exception, context: Context, transform: TransformRecord
+) -> IngestFinding | None:
+    """A rule that raised: a finding about the package's first source; its drafts are dropped.
+
+    It names the exception's class, never its text (which may hold paths or addresses). A
+    package without sources has nothing to cite, and the report alone says the rule failed.
+    """
+    sources = sorted(context.sizes)
+    subject = context.whole(sources[0]) if sources else None
+    if subject is None:
+        return None
+    return ingest_finding(
+        code=RULE_FAILED,
+        category=FindingCategory.FAILED,
+        severity=Severity.WARNING,
+        subject=subject,
+        transform=transform,
+        message=f"{rule.code} failed ({_type_name(exc)}); what it checks is unchecked here",
+        details={"exception": _type_name(exc), "rule": rule.key},
     )
 
 
@@ -316,15 +360,26 @@ def validate_package(
     for rule in sorted(chosen, key=lambda r: r.code):
         made = omitted = 0
         first_omitted: FindingSubject | None = None
-        for draft in _drafts(rule, context):
-            if made < bounds.findings_per_rule:
-                finding = _finding(rule, draft, transform, bounds)
-                if finding.id not in findings:
-                    findings[finding.id] = finding
-                    made += 1
-            else:
-                omitted += 1
-                first_omitted = first_omitted or draft.subject
+        mine: dict[RecordId, IngestFinding] = {}
+        try:
+            for draft in _drafts(rule, context):
+                if made < bounds.findings_per_rule:
+                    finding = _finding(rule, draft, transform, bounds)
+                    if finding.id not in mine and finding.id not in findings:
+                        mine[finding.id] = finding
+                        made += 1
+                else:
+                    omitted += 1
+                    first_omitted = first_omitted or draft.subject
+        except Exception as exc:  # one rule's fault never costs the package (non-negotiable 7)
+            failure = _failed(rule, exc, context, transform)
+            if failure is not None:
+                findings[failure.id] = failure
+            outcomes.append(
+                RuleOutcome(rule.code, rule.version, False, reason=f"failed: {_type_name(exc)}")
+            )
+            continue
+        findings.update(mine)
         if first_omitted is not None:
             capped = _capped(rule, made, omitted, first_omitted, transform)
             findings[capped.id] = capped
