@@ -195,13 +195,22 @@ def projected(spec: Spec, kind: str, record: Any) -> tuple[Any, ...]:
 
 
 def _holds_nul(value: Any) -> bool:
-    """Whether a string or key anywhere in ``value`` holds U+0000, which jsonb cannot store."""
-    if isinstance(value, str):
-        return "\x00" in value
-    if isinstance(value, dict):
-        return any("\x00" in key or _holds_nul(item) for key, item in value.items())
-    if isinstance(value, list):
-        return any(_holds_nul(item) for item in value)
+    """Whether a string or key anywhere in ``value`` holds U+0000, which jsonb cannot store.
+
+    Iterative: a free-form field may nest as deep as the compiler's reader allows, past Python's
+    recursion limit.
+    """
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            if "\x00" in item:
+                return True
+        elif isinstance(item, dict):
+            stack.extend(item.keys())
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
     return False
 
 
@@ -230,21 +239,28 @@ def _walk(
 
     An ``Ambiguous`` value is yielded but not entered: its candidates are not fields. ``opaque``
     names top-level fields the schema declares free-form (``transform_record.config``,
-    ``ingest_finding.details``): their content is data, not fields, so it is not walked (ADR 0009
-    §2) and a Knowledge-shaped object in it is never mistaken for a field's state.
+    ``ingest_finding.details``, ``stream.metadata`` …): their content is data, not fields, so it
+    is not walked (ADR 0009 §2) and a Knowledge-shaped object in it is never mistaken for a
+    field's state. Iterative, so depth never meets Python's recursion limit.
     """
-    if isinstance(value, dict):
-        state = _state(value)
-        if state is not None:
-            yield pointer, value
-            if state == "ambiguous":
-                return
-        for key in sorted(value):
-            if pointer or key not in opaque:
-                yield from _walk(value[key], f"{pointer}/{_escape(key)}")
-    elif isinstance(value, list):
-        for index, item in enumerate(value):
-            yield from _walk(item, f"{pointer}/{index}")
+    stack: list[tuple[str, Any]] = [(pointer, value)]
+    while stack:
+        here, item = stack.pop()
+        children: list[tuple[str, Any]] = []
+        if isinstance(item, dict):
+            state = _state(item)
+            if state is not None:
+                yield here, item
+                if state == "ambiguous":
+                    continue
+            children = [
+                (f"{here}/{_escape(key)}", item[key])
+                for key in sorted(item)
+                if here or key not in opaque
+            ]
+        elif isinstance(item, list):
+            children = [(f"{here}/{index}", child) for index, child in enumerate(item)]
+        stack.extend(reversed(children))
 
 
 def fields(

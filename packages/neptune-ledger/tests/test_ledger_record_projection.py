@@ -16,6 +16,7 @@ import psycopg
 import pytest
 
 from ledger_catalog_rows import add_package
+from neptune.model.record import SCHEMA_VERSION
 from neptune_ledger.catalog import projection
 from neptune_ledger.catalog.index import projected, projection_columns
 from neptune_ledger.catalog.migrate import Migration, apply_migrations, migrations
@@ -120,6 +121,35 @@ def test_a_record_of_an_older_version_without_the_field_projects_nothing() -> No
         (),
     )
     assert projected(spec, "stream", {"run": RECORD}) == (None, None)
+
+
+def test_the_shipped_spec_follows_the_compilers_schema_version() -> None:
+    """A schema bump cannot ship stale projections: regenerate projections.json with the bump."""
+    assert shipped_spec().major == SCHEMA_VERSION
+    exports = sorted(
+        (int(p.parent.name.removeprefix("v").split(".")[0]), p)
+        for p in (REPO / "contracts" / "package-schema").glob("v*/schema.json")
+    )
+    newest = exports[-1][1]
+    assert shipped_spec() == projection_spec(json.loads(newest.read_bytes()))
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda v: v["projections"][0].update(field="machine;DROP TABLE record"),
+        lambda v: v["projections"][0].update(filter="machine_value, kind) --"),
+        lambda v: v["projections"][0].update(shape="raw_sql"),
+        lambda v: v["kinds"].append("Run"),
+        lambda v: v["opaque"].append(["stream", "meta\ndata"]),
+        lambda v: v.update(schema_id="urn:neptune:schema:canonical:1; --"),
+    ],
+)
+def test_a_spec_with_names_outside_the_identifier_rule_is_refused(damage: Any) -> None:
+    value = shipped_spec().to_json()
+    damage(value)
+    with pytest.raises(ProjectionError):
+        Spec.from_json(value)
 
 
 def test_a_kind_outside_the_spec_has_no_projections() -> None:
@@ -264,7 +294,8 @@ def test_a_projection_added_to_an_existing_kind_guards_its_filed_rows() -> None:
     schema["$id"] = "urn:neptune:schema:canonical:2"
     schema["$defs"]["Image"]["properties"]["stream"] = {"$ref": "#/$defs/RecordId"}
     text = render_migration(projection_spec(schema_v1()), projection_spec(schema), 6)
-    assert "IF EXISTS (SELECT 1 FROM record WHERE (schema_version >= 2 AND kind IN (" in text
+    # Rows of any version after the old spec's state the field, even when a bump skips versions.
+    assert "IF EXISTS (SELECT 1 FROM record WHERE (schema_version > 1 AND kind IN (" in text
     assert "      'image'))) THEN" in text
 
 
