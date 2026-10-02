@@ -28,6 +28,12 @@ CASES: Final[dict[str, dict[str, Any]]] = {
     "ragged.csv": {"csv_delimiter": ",", "csv_header": "first_row"},
     "damaged.jsonl": {},
     "truncated.parquet": {},
+    "workorders_amr_fleet.xlsx": {"csv_header": "first_row"},
+    "changelog_manipulator_cell.xlsx": {"csv_header": "first_row"},
+    "epoch1904_quadruped.xlsx": {"csv_header": "first_row"},
+    "formulas_humanoid_energy.xlsx": {"csv_header": "first_row"},
+    "damaged_sheet_xml.xlsx": {"csv_header": "first_row"},
+    "truncated_workorders.xlsx": {},
 }
 
 

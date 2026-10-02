@@ -154,7 +154,7 @@ class CatalogContract:
             _validate(result)
             assert result.outcome == "registered"
             assert result.package_id == Known(package.package_id)
-            assert result.schema_version == Known(1)
+            assert result.schema_version == Known(package.schema_version)
             assert result.record_counts == package.record_counts()
             assert result.root_locator == str(package.root.resolve())
             assert result.findings == ()

@@ -16,8 +16,8 @@ package schema. The evidence packs (`packs/`) will be published here when they l
 
 | Contract | Owner | Version built against | Source of truth | Fixed by |
 |---|---|---|---|---|
-| Package schema (canonical records) | `neptune` (compiler) | **3** | `neptune.model.record.SCHEMA_VERSION`; schema id `urn:neptune:schema:canonical:3`; the lifecycle kinds of root ADR 0051 (MVL-83), `lifecycle-records` riding on it | Deploy [ADR 0001](adr/0001-a-compiler-plugin-of-adapters-and-read-only-sources.md) |
-| `catalog-api` | `neptune-ledger` | **1.3.0** | `neptune_ledger.api.CATALOG_API_VERSION`; declared because the registry lists Deploy as a consumer (`packs/` will read packages through it); nothing reads it yet | Ledger ADR 0004 |
+| Package schema (canonical records) | `neptune` (compiler) | **4** | `neptune.model.record.SCHEMA_VERSION`; schema id `urn:neptune:schema:canonical:4`; the lifecycle kinds of root ADR 0051 (MVL-83), `lifecycle-records` riding on it | Deploy [ADR 0001](adr/0001-a-compiler-plugin-of-adapters-and-read-only-sources.md) |
+| `catalog-api` | `neptune-ledger` | **1.4.0** | `neptune_ledger.api.CATALOG_API_VERSION`; declared because the registry lists Deploy as a consumer (`packs/` will read packages through it); nothing reads it yet | Ledger ADR 0004 |
 | `graph-schema` | `neptune-memory` | **1.0.0** | `neptune_memory.schema.GRAPH_SCHEMA_VERSION`; declared for the same reason; nothing reads it yet | Memory ADR 0002 |
 | Adapter ABI and plugin entry points | `neptune` (compiler) | ABI **1** | `neptune.adapters.contract.ABI_VERSION`; entry-point groups `neptune.adapters`, `neptune.sources` | root ADRs 0008, 0024; Deploy [ADR 0001](adr/0001-a-compiler-plugin-of-adapters-and-read-only-sources.md) |
 

@@ -13,7 +13,7 @@ flowchart LR
   subgraph C["neptune (compiler)"]
     EP["entry points: neptune.adapters · neptune.sources"]
     CONF["adapters.conformance"]
-    MODEL["model: lifecycle kinds · schema 3"]
+    MODEL["model: lifecycle kinds · schema 4"]
     STORE["store.package: read · write"]
   end
   CON[("contracts/")]
@@ -26,7 +26,7 @@ flowchart LR
   STORE -->|tables and documents of a package| MAP
   MAP -->|new package of lifecycle records| STORE
   MODEL -->|record kinds| MAP
-  CON -->|package-schema 3.0.0| PACKS
+  CON -->|package-schema 4.0.0| PACKS
   PACKS --> CONSOLE
 
   subgraph KEY[" "]

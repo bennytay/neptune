@@ -16,7 +16,7 @@ together — M2's runtime is complete.
 | 6 | plan | adapters emit chunks with deterministic ids and cost estimates | adapters | MVL-7 |
 | 7 | ingest | done: per-chunk pure parse → canonical records + findings; the job (ADR 0028) reuses every committed chunk by its id, across jobs and roots (ADR 0031), retries a chunk that raises and quarantines its source with a `neptune.runtime.*` finding | runtime + adapters | MVL-6, MVL-9 |
 | 8 | store | done: each chunk's records, findings and sorted series runs are committed to the workspace atomically; each stream's runs are merged once into its series file, kept as a derivative and copied into every package that holds it (ADRs 0025, 0026, 0031) | store | MVL-5, MVL-16, MVL-9 |
-| 9 | validate | cross-source integrity checks over the store; findings, not exceptions | validate | MVL-41 |
+| 9 | validate | done: `neptune.validate` runs versioned integrity and data-quality rules over the verified package (truncation roll-up, counts, time order, reversed intervals, missing metadata, schema and id conflicts, dangling references, unresolved frames, stale calibrations, software conflicts); findings are cited, capped, `warning`, and added to the package so the receipt lists them; rules whose kinds are not on main are off and listed as not covered (ADR 0054) | validate | MVL-41 |
 | 10 | receipt | done: core computed from the package's records (store); the job writes the volatile envelope (job id, clocks, host, root, seconds per phase) into the package before publishing it | store + runtime | MVL-5, MVL-6 |
 
 Alignment (clocks, frames, identities, bindings) is a separate pass after ingestion (M7); it produces new
@@ -47,8 +47,8 @@ state machine over the stages above, in nine phases (ADR 0028):
 | `plan` | 6 | reuses the workspace's saved plan for (source, transform) or calls `plan`, checks it, saves it |
 | `parse` | 7 | `ingest` on one chunk the workspace has not committed; `attempts` tries (default 2) |
 | `normalize` | 7–8 | `check_chunk_output` plus `seq` unique within the chunk; commit, whole or not at all |
-| `assemble` | 8 | admits each source whose chunks all committed and pass the cross-chunk laws (each run checked against its stream and agreeing on columns, disjoint `seq` ranges, no duplicate ids, every run has its stream); stages the package beside its destination |
-| `validate` | 9 | `read_package` over the staged package; MVL-41's validators go here |
+| `assemble` | 8 | admits each source whose chunks all committed and pass the cross-chunk laws (each run checked against its stream and agreeing on columns, disjoint `seq` ranges, no duplicate ids, every run has its stream); stages the package beside its destination; before staging, it introspects the admitted sources' streams: each cited schema definition is read once, bounded, and parsed into one `definition_layout` line per distinct definition (within name, pointer, per-layout and per-package output limits) that each stream's `stream_layout` line names, and `stream_semantic` lines infer what each stream carries (ADR 0049) |
+| `validate` | 9 | `read_package` over the staged package, then `validate_package`; any findings are added with the validator's transform (`amend`: restaged, verified again); `package_verified` carries the rules' coverage (ADR 0054) |
 | `commit` | 10 | writes the envelope into the staged package and renames it into place |
 
 - **Resume.** A new job over the same root and workspace is the resume: it hashes again (bytes may

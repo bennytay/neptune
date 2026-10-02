@@ -40,6 +40,7 @@ from neptune.runtime import job as job_module
 from neptune.runtime import lineage as runtime_lineage
 from neptune.store.package import read_package
 from neptune.store.workspace import Workspace
+from neptune.validate import RULE_FAILED
 
 pytestmark = pytest.mark.integration
 
@@ -95,7 +96,14 @@ def run(
 
 
 def codes(package: Any) -> list[str]:
-    return sorted(finding.code for finding in package.receipt.findings)
+    """The receipt's codes but validation's (ADR 0054): these tests pin what the runtime says.
+    Validation's rules must all have run, though: none of them failed."""
+    assert all(f.code != RULE_FAILED for f in package.receipt.findings)
+    return sorted(
+        finding.code
+        for finding in package.receipt.findings
+        if not finding.code.startswith("neptune.validate.")
+    )
 
 
 def path_of(details: Any) -> str:

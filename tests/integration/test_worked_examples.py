@@ -27,6 +27,13 @@ from neptune.identity import canonical_json
 from neptune.identity.findings import check_ingest_finding
 from neptune.identity.hashing import content_id
 from neptune.identity.provenance import check_evidence_record_id, check_transform_record
+from neptune.model.alignment import (
+    clock_mapping_from_json,
+    frame_binding_from_json,
+    identity_link_from_json,
+    run_assembly_from_json,
+    snapshot_binding_from_json,
+)
 from neptune.model.finding import ingest_finding_from_json
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.kinds import RECORD_KINDS
@@ -79,16 +86,21 @@ DEPLOYMENTS: Final = ("warehouse_amr", "manipulator_cell")
 EXAMPLES: Final = (*PLATFORMS, *DEPLOYMENTS)
 READERS: Final[dict[str, Callable[[JsonValue], Any]]] = {
     "calibration": calibration_from_json,
+    "clock_mapping": clock_mapping_from_json,
     "frame": frame_from_json,
+    "frame_binding": frame_binding_from_json,
     "frame_graph": frame_graph_from_json,
     "frame_transform": frame_transform_from_json,
     "hardware_component": hardware_component_from_json,
     "hardware_configuration": hardware_configuration_from_json,
+    "identity_link": identity_link_from_json,
     "image": image_from_json,
     "ingest_finding": ingest_finding_from_json,
     "machine": machine_from_json,
     "run": run_from_json,
+    "run_assembly": run_assembly_from_json,
     "site": site_from_json,
+    "snapshot_binding": snapshot_binding_from_json,
     "software_configuration": software_configuration_from_json,
     "source_artifact": source_artifact_from_json,
     "source_revision": source_revision_from_json,
@@ -292,23 +304,39 @@ REPRESENTED_AS: Final = {
         "hardware_configuration",
         "machine",
         "run",
+        "run_assembly",
+        "snapshot_binding",
         "software_configuration",
         "stream",
         "timestamp_domain",
     },
-    ("quadruped", "bag/metadata.yaml"): {"run", "software_configuration", "timestamp_domain"},
+    ("quadruped", "bag/metadata.yaml"): {
+        "clock_mapping",
+        "run",
+        "run_assembly",
+        "snapshot_binding",
+        "software_configuration",
+        "timestamp_domain",
+    },
     ("quadruped", "bag/walk_0.mcap"): {"stream", "timestamp_domain"},
     ("quadruped", "robot.urdf"): {
         "frame",
+        "frame_binding",
         "frame_graph",
         "frame_transform",
         "hardware_component",
         "hardware_configuration",
     },
     ("quadruped", "meshes/body.stl"): {"spatial_artifact"},
-    ("manipulator", "session.mcap"): {"run", "stream", "timestamp_domain"},
-    ("manipulator", "handeye.yaml"): {"calibration", "frame", "frame_graph", "frame_transform"},
-    ("mobile_robot", "drive.bag"): {"run", "stream", "timestamp_domain"},
+    ("manipulator", "session.mcap"): {"run", "run_assembly", "stream", "timestamp_domain"},
+    ("manipulator", "handeye.yaml"): {
+        "calibration",
+        "frame",
+        "frame_binding",
+        "frame_graph",
+        "frame_transform",
+    },
+    ("mobile_robot", "drive.bag"): {"run", "run_assembly", "stream", "timestamp_domain"},
     ("mobile_robot", "sites.csv"): {"site", "structured_record", "structured_table"},
     ("mobile_robot", "photos/dock.png"): {"image", "timestamp_domain"},
     ("manipulator_cell", "records.json"): {

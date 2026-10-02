@@ -23,6 +23,7 @@ from neptune.model.lifecycle import LIFECYCLE_KINDS
 from neptune.model.provenance import ByteRange, JsonPointer, Provenance, RowCell, Span
 from neptune.model.time import Timescale
 from neptune.store.package import IngestPackage, package_files, read_files, read_package
+from neptune_deploy import PACKAGE_SCHEMA_VERSION
 from neptune_deploy.lifecycle import (
     MAPPER_ID,
     MAPPER_VERSION,
@@ -388,7 +389,7 @@ def test_map_package_writes_a_readable_package_and_leaves_the_base_untouched(
     assert _tree(root) == before
     written = read_package(tmp_path / "out")
     assert written.id == package_id
-    assert written.manifest.version == 3
+    assert written.manifest.version == PACKAGE_SCHEMA_VERSION
 
 
 # --- Rules, tables and the command line ----------------------------------------------------------
