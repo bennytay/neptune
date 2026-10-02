@@ -21,11 +21,11 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from neptune.adapters.config import ConfigAdapter
-from neptune.adapters.config._json import spans as json_spans
-from neptune.adapters.config._scalars import implicit
-from neptune.adapters.config._toml import locate
-from neptune.adapters.config._tree import Issue, Null, Unreadable, Value
 from neptune.adapters.harness import ingest_source
+from neptune.adapters.structured.json_reader import spans as json_spans
+from neptune.adapters.structured.scalars import implicit
+from neptune.adapters.structured.toml_reader import locate
+from neptune.adapters.structured.tree import Issue, Null, Unreadable, Value
 from neptune.discovery.reader import BytesReader
 from neptune.model.configuration import ConfigScalar, ScalarType
 from neptune.model.scalars import NonFinite

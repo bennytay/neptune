@@ -13,9 +13,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from typing import Any, Final
 
-from neptune.adapters.config._scalars import floating, integer
-from neptune.adapters.config._text import offset_of
-from neptune.adapters.config._tree import (
+from neptune.adapters.structured.scalars import floating, integer
+from neptune.adapters.structured.text import offset_of
+from neptune.adapters.structured.tree import (
     Collection,
     Document,
     Issue,
