@@ -157,6 +157,34 @@ def spec_refs(spec: Spec) -> set[tuple[str, str]]:
     return out
 
 
+def uncovered(cls: type[Any], specs: Mapping[str, Spec], prefix: str = "") -> list[str]:
+    """The fields of ``cls`` a declaration does not read, in declaration order, with those of
+    the parts it does read as ``field/part_field`` (ADR 0005 §5). An unread scalar is
+    ``NotCovered`` in the record; an unread list is ``()``, which only this list tells apart from
+    a list stated empty."""
+    out: list[str] = []
+    for shape in fields_of(cls):
+        spec = specs.get(shape.name)
+        at = f"{prefix}{shape.name}"
+        if shape.shape is Shape.LABEL:
+            continue  # a score's name is its column's own label
+        if spec is None:
+            out.append(at)
+            continue
+        if isinstance(spec, Part):
+            parts = [spec]
+        elif isinstance(spec, Rows):
+            parts = [spec.part]
+        elif isinstance(spec, tuple):
+            parts = [item for item in spec if isinstance(item, Part)]
+        else:
+            parts = []
+        for part in parts:
+            if part.score is None:
+                out.extend(f for f in uncovered(part.cls, part.fields, f"{at}/") if f not in out)
+    return out
+
+
 def spec_columns(spec: Spec) -> set[str]:
     return {name for _, name in spec_refs(spec)}
 
