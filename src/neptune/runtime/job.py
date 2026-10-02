@@ -48,7 +48,7 @@ import threading
 import time
 import uuid
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -78,6 +78,7 @@ from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatu
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
 from neptune.derived.media import MediaIndex, index_media
+from neptune.derived.temporal import ClockAlignment, align_clocks, clock_records
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.layout import Layout, layout_from_scan
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
@@ -128,6 +129,7 @@ from neptune.runtime.cache import (
 from neptune.runtime.declared import Declarations
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
 from neptune.runtime.lineage import Failure, Law, Step, failure_from_json, type_name
+from neptune.runtime.plugins import Plugins
 from neptune.runtime.sandbox import (
     DEFAULT_LIMITS,
     Crashed,
@@ -152,6 +154,7 @@ from neptune.store.series import (
     SeriesReadError,
     check_run,
     count_rows,
+    read_rows,
     read_run,
 )
 from neptune.store.workspace import (
@@ -497,7 +500,8 @@ class IngestJob:
     Build it, then ``run`` it once, or ``dry_run`` it once to see what ``run`` would ingest
     (ADR 0035); a dry run needs no destination. ``on_event`` receives every ``JobEvent`` as it
     happens; ``cancel`` is checked at every checkpoint. Problems with one source become findings
-    in the package; problems with the job raise ``JobError``.
+    in the package; problems with the job raise ``JobError``. ``plugins`` are the plugins the
+    registry was built from (ADR 0058): the findings about those refused join the job's.
     """
 
     def __init__(
@@ -510,6 +514,7 @@ class IngestJob:
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
+        plugins: Plugins | None = None,
     ) -> None:
         self.root = Path(root)
         self.destination = Path(destination) if destination is not None else None
@@ -559,7 +564,14 @@ class IngestJob:
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
         self._calls: dict[str, int] = {"ingest": 0, "plan": 0, "probe": 0}
-        self._engine = ProbeEngine(registry)
+        self._plugins = plugins if plugins is not None else Plugins()
+        self._engine = ProbeEngine(
+            registry,
+            distributions={
+                adapter.descriptor.id: f"{adapter.origin.distribution} {adapter.origin.version}"
+                for adapter in self._plugins.adapters
+            },
+        )
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
         self._grouper = (
@@ -570,6 +582,11 @@ class IngestJob:
         if self._declared is not None:  # the manifest's own findings name it
             manifest = self._declared.loaded.transform
             self._producers[manifest.id] = manifest
+        # The plugins the registry was built from (ADR 0058): the findings about those refused,
+        # and, when any was admitted, the loader's transform naming every one, in every package.
+        self._producers[self._plugins.transform.id] = self._plugins.transform
+        for finding in self._plugins.findings:
+            self._record(finding, self._plugins.transform)
         self._layout = Layout(())
         self._grouping: Grouping | None = None
         self._dry = False  # a dry run: stops after plan and explains (ADR 0035, 0044)
@@ -1977,6 +1994,8 @@ class IngestJob:
                 cited.add(self._declared.loaded.transform.id)
             if self._lost_guarantees:
                 cited.add(self.transform.id)
+            if self._plugins.loaded:  # which plugins could change this package (ADR 0058 §5)
+                cited.add(self._plugins.transform.id)
             derived: dict[str, Iterable[JsonObject]] | None = None
             if self._grouping is not None:  # its derived tables name its transform
                 cited.add(self._grouping.transform.id)
@@ -1988,6 +2007,9 @@ class IngestJob:
                 if (media := self._index_media(streams, introspection, frames)) is not None:
                     cited.add(media.transform.id)
                     derived = {**derived, **media.tables()}
+            if (clocks := self._align_clocks()) is not None:
+                cited.add(clocks.transform.id)
+                derived = {**(derived or {}), **clocks.tables()}
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
@@ -2075,6 +2097,41 @@ class IngestJob:
         for finding in found.findings:
             self._record(finding, found.transform)
         self._emit(events.STREAMS_INTROSPECTED, found.summary())
+        return found
+
+    def _align_clocks(self) -> ClockAlignment | None:
+        """Stage 9c, before the package is staged: relate the admitted sources' clocks (ADR 0060).
+        Reads only the time and value columns of the committed runs its rules name; writes no
+        tick. A package with fewer than two clocks gets no alignment: no tables, no transform."""
+        records: list[object] = []
+        runs: dict[RecordId, list[Path]] = defaultdict(list)
+        try:
+            for content, transform in sorted(set(self._ingested)):
+                plan = self.workspace.load_plan(content, transform)
+                if plan is None:
+                    continue  # staging refuses the package and says why
+                for chunk in plan.chunks:
+                    output = self.workspace.load(str(chunk["id"]))
+                    records.extend(clock_records(output.records))  # the rest is dropped here
+                    for stream, run in sorted(output.runs.items()):
+                        runs[stream].append(run)
+        except (WorkspaceError, ValueError, OSError) as exc:
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+
+        def rows(stream: Stream, columns: Sequence[str]) -> Iterator[Mapping[str, object]]:
+            for run in runs.get(stream.id, ()):
+                yield from read_rows(run, columns)
+
+        try:
+            found = align_clocks(records, rows)
+        except (SeriesError, OSError) as exc:  # the runs were checked when committed
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+        if found is None:
+            return None
+        self._producers[found.transform.id] = found.transform
+        for finding in found.findings:
+            self._record(finding, found.transform)
+        self._emit(events.CLOCKS_ALIGNED, found.summary())
         return found
 
     def _index_media(
