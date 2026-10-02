@@ -19,10 +19,12 @@ from neptune.adapters.structured.text import (
     line_endings,
 )
 from neptune.adapters.structured.tree import Alias, Document, Limits, Parse, TooLong
+from neptune.identity.findings import ingest_finding
 from neptune.model.configuration import ConfigFormat, LineEndings, TextEncoding
-from neptune.model.finding import FindingCategory, Severity
+from neptune.model.finding import FindingCategory, IngestFinding, Severity
+from neptune.model.ids import ContentId
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.provenance import ByteRange, Locator, Span
+from neptune.model.provenance import ByteRange, EvidenceRef, Locator, Span, TransformRecord
 
 MIB: Final = 1024 * 1024
 _MESSAGE: Final = 300  # a parser's message is cut to this many characters in a finding
@@ -134,6 +136,21 @@ class Problem:
     where: Locator
     message: str
     details: dict[str, JsonValue] = field(default_factory=dict)
+
+
+def problem_finding(
+    adapter_id: str, source: ContentId, transform: TransformRecord, problem: Problem
+) -> IngestFinding:
+    """The finding for a problem, coded ``<adapter id>.<name>``, citing the bytes concerned."""
+    return ingest_finding(
+        code=f"{adapter_id}.{problem.name}",
+        category=problem.category,
+        severity=problem.severity,
+        subject=EvidenceRef(source, (problem.where,)),
+        transform=transform,
+        message=problem.message,
+        details=problem.details,
+    )
 
 
 def problems(source_size: int, loaded: Loaded, settings: Settings) -> Iterator[Problem]:

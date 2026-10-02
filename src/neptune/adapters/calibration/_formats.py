@@ -124,3 +124,18 @@ def recognise(root: Item, *, opencv: bool = False, xml: bool = False) -> Recogni
             CalibrationFormat.ROS_CAMERA_INFO_MESSAGE, (Entry(root, _text(named), where),)
         )
     return None
+
+
+# A head of a larger file is parsed only if it names something a format here requires.
+HINT: Final = re.compile(
+    "|".join(
+        [
+            r"\bcam[0-9]+\b",
+            r"\bimu[0-9]+\b",
+            *(rf"\b{re.escape(key)}\b" for key in sorted(OPENCV_KEYS)),
+            *(rf"\b{re.escape(key)}\b" for key in KALIBR_IMU_KEYS),
+            *(rf"\b{re.escape(key)}\b" for key in ROS_COMPANIONS),
+            *(rf"\b{re.escape(key)}\b" for key in ROS_MESSAGE_KEYS),
+        ]
+    )
+)

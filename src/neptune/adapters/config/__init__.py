@@ -61,7 +61,7 @@ from neptune.adapters.contract import (
     SourceReader,
     make_chunk,
 )
-from neptune.adapters.structured.load import Loaded, Settings, load, problems
+from neptune.adapters.structured.load import Loaded, Settings, load, problem_finding, problems
 from neptune.adapters.structured.reader import sniff
 from neptune.adapters.structured.text import (
     InvalidEncoding,
@@ -382,15 +382,7 @@ def _source_findings(
 ) -> Iterator[IngestFinding]:
     """What planning finds: problems with the file as a whole, or with whole documents."""
     for problem in problems(source.size, loaded, _settings(config)):
-        yield ingest_finding(
-            code=_code(problem.name),
-            category=problem.category,
-            severity=problem.severity,
-            subject=EvidenceRef(source.content_id, (problem.where,)),
-            transform=config.transform,
-            message=problem.message,
-            details=problem.details,
-        )
+        yield problem_finding(ADAPTER_ID, source.content_id, config.transform, problem)
 
 
 # --- Records of a document ---------------------------------------------------------------------

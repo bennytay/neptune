@@ -27,12 +27,18 @@ from xml.parsers import expat
 
 import yaml
 
+from neptune.adapters.calibration._codes import ADAPTER_ID, code
 from neptune.adapters.calibration._emit import Emitter
-from neptune.adapters.calibration._formats import CalibrationFormat, Recognised, recognise
+from neptune.adapters.calibration._formats import (
+    HINT,
+    CalibrationFormat,
+    Recognised,
+    recognise,
+)
 from neptune.adapters.calibration._items import (
     Item,
+    XmlLimits,
     XmlRefused,
-    count_items,
     from_document,
     read_xml,
 )
@@ -58,7 +64,14 @@ from neptune.adapters.contract import (
     make_chunk,
     read_pieces,
 )
-from neptune.adapters.structured.load import MIB, Problem, Settings, load, problems
+from neptune.adapters.structured.load import (
+    MIB,
+    Problem,
+    Settings,
+    load,
+    problem_finding,
+    problems,
+)
 from neptune.adapters.structured.reader import read_text
 from neptune.adapters.structured.text import InvalidEncoding, decode, detect
 from neptune.adapters.structured.tree import Limits
@@ -68,20 +81,10 @@ from neptune.model.machine import Calibration
 from neptune.model.provenance import ByteRange, EvidenceRef, Span
 from neptune.model.reference import FrameGraph, FrameTransform
 
-ADAPTER_ID: Final = "calibration"
 PYTHON: Final = f"{sys.version_info.major}.{sys.version_info.minor}"
 OPENCV_HEADER: Final = "%YAML:"
 MAX_DEPTH: Final = 200
 _XML_START: Final = re.compile(rb"(?:\xef\xbb\xbf)?\s*<")
-# A head of a larger file is parsed only if it names something a calibration does.
-_HINT: Final = re.compile(
-    r"camera_matrix|cameraMatrix|CameraMat|CameraExtrinsicMat|\bM1\b|\bcam[0-9]+\b|\bimu[0-9]+\b"
-    r"|distortion_model"
-)
-
-
-def _code(name: str) -> str:
-    return f"{ADAPTER_ID}.{name}"
 
 
 DESCRIPTOR: Final = AdapterDescriptor(
@@ -147,126 +150,126 @@ DESCRIPTOR: Final = AdapterDescriptor(
     libraries=(("expat", expat.EXPAT_VERSION), ("python", PYTHON), ("pyyaml", yaml.__version__)),
     finding_codes=(
         Documented(
-            _code("ambiguous_value"),
+            code("ambiguous_value"),
             "scalars YAML 1.1 and 1.2 read differently (1e-3 is text in 1.1); the parameter is"
             " Ambiguous with each reading (ambiguous, warning)",
         ),
         Documented(
-            _code("array_too_large"),
+            code("array_too_large"),
             "an array of more than max_array_values numbers; its parameter is Unknown (limit,"
             " warning)",
         ),
         Documented(
-            _code("byte_order_mark"),
+            code("byte_order_mark"),
             "a JSON file starts with a byte-order mark its format does not define; read past"
             " (inconsistent, info)",
         ),
         Documented(
-            _code("dtd_refused"),
+            code("dtd_refused"),
             "an XML file declares a DTD or an entity, which is never read; nothing is read"
             " (unsupported, error)",
         ),
         Documented(
-            _code("duplicate_key"),
+            code("duplicate_key"),
             "keys repeat in a mapping of an entry; each parameter is kept, named by its position"
             " (inconsistent, warning)",
         ),
         Documented(
-            _code("duplicate_subject"),
+            code("duplicate_subject"),
             "several calibrations of one file state the same subject; each is kept and none"
             " replaces another (inconsistent, warning)",
         ),
         Documented(
-            _code("entries_not_read"),
+            code("entries_not_read"),
             "top-level keys of a recognised document that belong to no calibration entry (a"
             " Kalibr file's other keys); they are not read (unsupported, info)",
         ),
         Documented(
-            _code("extrinsic_missing"),
+            code("extrinsic_missing"),
             "a Kalibr camera declares no T_cam_imu or T_cn_cnm1 where other cameras of the file"
             " do; the first camera has no T_cn_cnm1 (missing, info)",
         ),
         Documented(
-            _code("extrinsic_not_read"),
+            code("extrinsic_not_read"),
             "an extrinsic matrix is not four rows of four finite numbers; no transform is"
             " emitted and its rows stay parameters (unrepresentable, warning)",
         ),
         Documented(
-            _code("frame_graph_disconnected"),
+            code("frame_graph_disconnected"),
             "the file's transforms form separate groups of frames (missing, warning)",
         ),
         Documented(
-            _code("frame_loop"),
+            code("frame_loop"),
             "transforms join frames the others already connect: more than one declared path"
             " between frames, which may disagree (inconsistent, info)",
         ),
         Documented(
-            _code("frame_transform_repeated"),
+            code("frame_transform_repeated"),
             "several transforms join the same two frames; each is kept (inconsistent, warning)",
         ),
         Documented(
-            _code("frame_unresolved"),
+            code("frame_unresolved"),
             "an extrinsic names a frame the file does not (T_cn_cnm1 without the camera before"
             " it), or names no frame (OpenCV R, T, CameraExtrinsicMat); no transform is emitted,"
             " the numbers stay parameters (missing, warning or info)",
         ),
         Documented(
-            _code("invalid_encoding"),
+            code("invalid_encoding"),
             "the bytes are not valid UTF-8 (or the encoding their mark names); nothing is read"
             " (corrupt, error)",
         ),
         Documented(
-            _code("mixed_line_endings"),
+            code("mixed_line_endings"),
             "the file mixes LF, CR LF and lone CR line breaks (inconsistent, info)",
         ),
         Documented(
-            _code("no_document"),
+            code("no_document"),
             "the file is empty, blank or only comments (missing, info)",
         ),
         Documented(
-            _code("non_finite_value"),
+            code("non_finite_value"),
             "parameters holding NaN or an infinity, kept as declared (inconsistent, warning)",
         ),
         Documented(
-            _code("not_calibration"),
+            code("not_calibration"),
             "a document of the file is none of the formats read, or an entry states nothing"
             " (missing, info or warning)",
         ),
         Documented(
-            _code("paths_too_long"),
+            code("paths_too_long"),
             "a document whose values' paths total more than max_path_ratio times its size; not"
             " read (limit, error)",
         ),
         Documented(
-            _code("shape_mismatch"),
+            code("shape_mismatch"),
             "a matrix with rows, cols and data whose data holds other than rows x cols x"
             " channels numbers (inconsistent, warning)",
         ),
         Documented(
-            _code("syntax_error"),
+            code("syntax_error"),
             "the text is not YAML, JSON, TOML or XML from the cited place on; not read"
             " (corrupt, error)",
         ),
         Documented(
-            _code("too_deep"),
+            code("too_deep"),
             "a document nested deeper than max_depth; not read (limit, error)",
         ),
         Documented(
-            _code("too_large"),
+            code("too_large"),
             "a file over max_bytes; not read (limit, error)",
         ),
         Documented(
-            _code("too_many_values"),
+            code("too_many_values"),
             "a document of more than max_items values or elements; not read (limit, error)",
         ),
         Documented(
-            _code("value_not_read"),
+            code("value_not_read"),
             "values no record holds as text or numbers (a YAML alias, an application tag, a"
             " number beyond binary64, a scalar over max_scalar_length); each parameter is"
             " Unknown (unsupported, warning)",
         ),
         Documented(
-            _code("yaml_version_unsupported"),
+            code("yaml_version_unsupported"),
             "a %YAML directive names a version other than 1.1 or 1.2; typed as yaml_version says"
             " (unsupported, warning)",
         ),
@@ -362,6 +365,16 @@ def _opencv_rewrite(text: str) -> str:
     return "#" + text[1:] if text.startswith(OPENCV_HEADER) else text
 
 
+def _xml_limits(config: AdapterConfig, settings: Settings, size: int) -> XmlLimits:
+    return XmlLimits(
+        settings.max_depth,
+        config.integer("max_items"),
+        config.integer("max_array_values"),
+        settings.max_scalar_length,
+        settings.max_path_ratio * max(size, 4096),
+    )
+
+
 def _is_xml(head: bytes) -> bool:
     return _XML_START.match(head) is not None
 
@@ -398,10 +411,7 @@ def _read(source: SourceReader, config: AdapterConfig) -> _Documents:
         return found
     opencv = loaded.text.startswith("#YAML:") and _opencv_header(head)
     for document in parse.documents:
-        root = from_document(document)
-        if root is None:
-            continue
-        if count_items(root) > config.integer("max_items"):
+        if len(document.nodes) > config.integer("max_items"):
             found.problems.append(
                 Problem(
                     "too_many_values",
@@ -413,6 +423,9 @@ def _read(source: SourceReader, config: AdapterConfig) -> _Documents:
                     {"document": document.index, "max_items": config.integer("max_items")},
                 )
             )
+            continue
+        root = from_document(document)
+        if root is None:
             continue
         recognised = recognise(root, opencv=opencv)
         if recognised is None:
@@ -444,12 +457,7 @@ def _read_xml(
         return
     data = b"".join(read_pieces(source, 0, size))
     try:
-        root = read_xml(
-            data,
-            settings.max_depth,
-            config.integer("max_items"),
-            config.integer("max_array_values"),
-        )
+        root = read_xml(data, _xml_limits(config, settings, size))
     except XmlRefused as refused:
         category = {
             "syntax_error": FindingCategory.CORRUPT,
@@ -475,18 +483,10 @@ def _findings(
     source: SourceReader, config: AdapterConfig, found: _Documents
 ) -> Iterator[IngestFinding]:
     for problem in found.problems:
-        yield ingest_finding(
-            code=_code(problem.name),
-            category=problem.category,
-            severity=problem.severity,
-            subject=EvidenceRef(source.content_id, (problem.where,)),
-            transform=config.transform,
-            message=problem.message,
-            details=problem.details,
-        )
+        yield problem_finding(ADAPTER_ID, source.content_id, config.transform, problem)
     for index, where in found.unrecognised:
         yield ingest_finding(
-            code=_code("not_calibration"),
+            code=code("not_calibration"),
             category=FindingCategory.MISSING,
             severity=Severity.INFO,
             subject=EvidenceRef(source.content_id, (where,)),
@@ -507,17 +507,17 @@ class CalibrationAdapter:
 
     def probe(self, head: bytes, hints: ProbeHints) -> ProbeResult:
         if not head:
-            return ProbeResult(0.0, (ProbeReason(_code("empty"), "the source is empty"),))
+            return ProbeResult(0.0, (ProbeReason(code("empty"), "the source is empty"),))
         complete = len(head) >= hints.size
         if _is_xml(head):
             return self._probe_xml(head, complete)
         decoded = decode(head, final=complete)
         if isinstance(decoded, InvalidEncoding):
-            reason = ProbeReason(_code("not_text"), f"byte {decoded.offset} is not valid text")
+            reason = ProbeReason(code("not_text"), f"byte {decoded.offset} is not valid text")
             return ProbeResult(0.0, (reason,))
         text = decoded.text
-        if _HINT.search(text) is None:
-            return ProbeResult(0.0, (ProbeReason(_code("no_keys"), "no calibration key"),))
+        if HINT.search(text) is None:
+            return ProbeResult(0.0, (ProbeReason(code("no_keys"), "no calibration key"),))
         if not complete:  # a head ends where it ends: read to its last whole line
             cut = max(text.rfind("\n"), text.rfind("\r"))
             text = text[: cut + 1] if cut >= 0 else text
@@ -529,24 +529,24 @@ class CalibrationAdapter:
             recognised = recognise(root, opencv=opencv) if root is not None else None
             if recognised is not None:
                 return _claim(recognised.format, complete)
-        return ProbeResult(0.0, (ProbeReason(_code("not_calibration"), "no format's keys"),))
+        return ProbeResult(0.0, (ProbeReason(code("not_calibration"), "no format's keys"),))
 
     @staticmethod
     def _probe_xml(head: bytes, complete: bool) -> ProbeResult:
         if b"<opencv_storage" not in head:
-            return ProbeResult(0.0, (ProbeReason(_code("not_calibration"), "not opencv_storage"),))
+            return ProbeResult(0.0, (ProbeReason(code("not_calibration"), "not opencv_storage"),))
         if not complete:
             text = head.decode("utf-8", "replace")
-            if _HINT.search(text) is None:
-                return ProbeResult(0.0, (ProbeReason(_code("no_keys"), "no calibration key"),))
+            if HINT.search(text) is None:
+                return ProbeResult(0.0, (ProbeReason(code("no_keys"), "no calibration key"),))
             return _claim(CalibrationFormat.OPENCV_XML, complete)
         try:
-            root = read_xml(head, 200, 200_000, 100_000)
+            root = read_xml(head, XmlLimits(MAX_DEPTH, 200_000, 100_000, MIB, 64 * len(head)))
         except (XmlRefused, RecursionError):
-            return ProbeResult(0.0, (ProbeReason(_code("not_xml"), "not read as XML"),))
+            return ProbeResult(0.0, (ProbeReason(code("not_xml"), "not read as XML"),))
         recognised = recognise(root, opencv=True, xml=True)
         if recognised is None:
-            return ProbeResult(0.0, (ProbeReason(_code("not_calibration"), "no calibration key"),))
+            return ProbeResult(0.0, (ProbeReason(code("not_calibration"), "no calibration key"),))
         return _claim(recognised.format, complete)
 
     def inspect(self, source: SourceReader, config: AdapterConfig) -> InspectResult:
@@ -563,15 +563,11 @@ class CalibrationAdapter:
         )
 
     def plan(self, source: SourceReader, config: AdapterConfig) -> Plan:
-        found = _read(source, config)
-        findings = tuple(_findings(source, config, found))
-        part = "all" if found.recognised else "none"
-        cost = source.size if found.recognised else 0
-        return Plan((make_chunk(source, config, {"part": part}, cost),), findings)
+        # One chunk, and no read: a file is read once, by the chunk, so its findings are the
+        # chunk's. A source nothing of which is a calibration is that chunk's findings only.
+        return Plan((make_chunk(source, config, {"part": "file"}, source.size),))
 
     def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput:
-        if chunk.context.get("part") != "all":
-            return ChunkOutput()
         found = _read(source, config)
         emitter = Emitter(
             source.content_id, source.size, config, config.integer("max_array_values")
@@ -579,12 +575,13 @@ class CalibrationAdapter:
         for recognised, root in found.recognised:
             emitter.document(recognised, root)
         output = emitter.finish()
-        return ChunkOutput(records=tuple(output.records), findings=tuple(output.findings))
+        findings = (*_findings(source, config, found), *output.findings)
+        return ChunkOutput(records=tuple(output.records), findings=findings)
 
 
 def _claim(fmt: CalibrationFormat, complete: bool) -> ProbeResult:
     read = "the source" if complete else "the head of the source"
-    reason = ProbeReason(_code(str(fmt)), f"{read} holds the keys of a {fmt} calibration")
+    reason = ProbeReason(code(str(fmt)), f"{read} holds the keys of a {fmt} calibration")
     return ProbeResult(VERIFIED if complete else SIGNATURE, (reason,))
 
 

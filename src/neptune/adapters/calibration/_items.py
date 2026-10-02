@@ -6,6 +6,7 @@ YAML 1.1 and 1.2 differ). Nothing here knows what a camera matrix is; ``_formats
 do. Trees are built without recursion and never expand a YAML alias.
 """
 
+import math
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -16,7 +17,7 @@ from neptune.adapters.structured.tree import Alias, Collection, Document, Null, 
 from neptune.adapters.structured.tree import Value as ReadValue
 from neptune.model.configuration import CollectionType, ConfigScalar, ScalarType
 from neptune.model.provenance import ByteRange, Locator, Span
-from neptune.model.scalars import NonFinite, real
+from neptune.model.scalars import NonFinite
 
 OPENCV_MATRIX: Final = "opencv-matrix"
 # The YAML tag OpenCV's FileStorage writes a matrix with (``!!opencv-matrix``, expanded).
@@ -34,11 +35,11 @@ class Kind(StrEnum):
 
 @dataclass
 class Item:
-    """One value: ``name`` is its key (a sequence item's position); ``path`` the names from the
-    root. ``where`` is where it is written; ``count`` is how many items a collection declares."""
+    """One value: ``name`` is its key (a sequence item's position), ``where`` where it is written,
+    ``count`` how many items a collection declares. A name is cited in parameters as the path
+    from the entry, built when they are flattened."""
 
     name: str
-    path: tuple[str, ...]
     kind: Kind
     where: Locator
     children: list["Item"] = field(default_factory=list)
@@ -68,9 +69,8 @@ def from_document(document: Document) -> Item | None:
         parent = items[node.parent] if node.parent >= 0 else None
         where: Locator = Span(*node.span) if node.span is not None else _inherit(parent, document)
         name = str(node.path[-1]) if node.path else ""
-        path = (*parent.path, name) if parent is not None else ()
         value = node.value
-        item = Item(name, path, Kind.SCALAR, where, text=node.text, tag=node.tag)
+        item = Item(name, Kind.SCALAR, where, text=node.text, tag=node.tag)
         item.repeated, item.order = node.repeated, node.order
         match value:
             case Collection(type=kind, length=length):
@@ -105,6 +105,7 @@ def count_items(root: Item) -> int:
 
 # --- OpenCV FileStorage XML --------------------------------------------------------------------
 
+MAX_DIGITS: Final = 400  # past binary64 and far below Python's own int-from-text limit
 _INT: Final = re.compile(r"[+-]?[0-9]+")
 _FLOAT: Final = re.compile(r"[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 _NON_FINITE: Final = {
@@ -117,12 +118,17 @@ _NON_FINITE: Final = {
 
 def xml_scalar(text: str) -> ConfigScalar:
     """OpenCV's reading of an XML value: an integer, a real (``.nan``, ``.inf`` included) or the
-    text. XML has no types of its own; the declared text is kept beside it by the caller."""
+    text. XML has no types of its own. A number beyond what a record holds (an integer of more
+    than ``MAX_DIGITS`` digits, a real past binary64) is the text as written, never a guessed
+    value."""
     token = text.strip()
-    if _INT.fullmatch(token):
+    if _INT.fullmatch(token) and len(token) <= MAX_DIGITS:
         return ConfigScalar(ScalarType.INT, int(token))
-    if _FLOAT.fullmatch(token):
-        return ConfigScalar(ScalarType.FLOAT, real(float(token)))
+    if _FLOAT.fullmatch(token) and not _INT.fullmatch(token):
+        number = float(token)
+        if math.isfinite(number):
+            return ConfigScalar(ScalarType.FLOAT, number)
+        return ConfigScalar(ScalarType.STRING, text)
     special = _NON_FINITE.get(token.lower())
     if special is not None:
         return ConfigScalar(ScalarType.FLOAT, special)
@@ -144,54 +150,82 @@ class _Open:
     item: Item
     start: int
     texts: list[str]
+    cost: int  # characters of this element's path from the root
     elements: int = 0
 
 
-def read_xml(data: bytes, max_depth: int, max_items: int, max_array: int) -> Item:
+@dataclass(frozen=True)
+class XmlLimits:
+    max_depth: int
+    max_items: int
+    max_array: int
+    max_scalar: int
+    max_path_cost: int  # characters every element's path may total
+
+
+def _tag_end(data: bytes, start: int) -> int:
+    """One past the ``>`` that closes the tag at ``start``, skipping quoted attribute values."""
+    quote = 0
+    for i in range(start, len(data)):
+        byte = data[i]
+        if quote:
+            quote = 0 if byte == quote else quote
+        elif byte in (0x22, 0x27):
+            quote = byte
+        elif byte == 0x3E:
+            return i + 1
+    return len(data)
+
+
+def read_xml(data: bytes, limits: XmlLimits) -> Item:
     """The XML document's root element as an item, with byte-range locators.
 
     An element with child elements is a mapping (a sequence if every child is ``_``, which is how
     OpenCV writes one); one without is a scalar of its text. The ``data`` of an
     ``opencv-matrix`` is a sequence of its whitespace-separated numbers, all cited by the
     element. A DTD is refused (no entity is ever expanded). Raises ``XmlRefused`` or
-    ``expat.ExpatError``.
+    ``expat.ExpatError`` as ``XmlRefused``; ASCII-compatible encodings only.
     """
     parser = expat.ParserCreate()
     parser.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
     parser.buffer_text = True
     stack: list[_Open] = []
     root: list[Item] = []
-    seen = [0]
+    seen = [0, 0]  # elements and data numbers read; characters of every path
 
     def refuse_doctype(*_: object) -> None:
         raise XmlRefused("dtd_refused", "the XML declares a DTD or an entity, which is never read")
 
     def start(name: str, attributes: dict[str, str]) -> None:
-        if len(stack) >= max_depth:
-            raise XmlRefused("too_deep", f"elements nest deeper than max_depth ({max_depth})")
+        if len(stack) >= limits.max_depth:
+            raise XmlRefused(
+                "too_deep", f"elements nest deeper than max_depth ({limits.max_depth})"
+            )
         seen[0] += 1
-        if seen[0] > max_items:
-            raise XmlRefused("too_many_values", f"over max_items ({max_items}) elements")
+        if seen[0] > limits.max_items:
+            raise XmlRefused("too_many_values", f"over max_items ({limits.max_items}) values")
+        cost = (stack[-1].cost if stack else 0) + len(name) + 1
+        seen[1] += cost
+        if seen[1] > limits.max_path_cost:
+            raise XmlRefused("paths_too_long", "the elements' paths total too many characters")
         offset = parser.CurrentByteIndex
-        parent = stack[-1].item if stack else None
-        path = (*parent.path, name) if parent is not None else ()
-        item = Item(name, path, Kind.SCALAR, ByteRange(offset, 0))
+        item = Item(name, Kind.SCALAR, ByteRange(offset, 0))
         item.order = stack[-1].elements if stack else 0
         if attributes.get("type_id") == OPENCV_MATRIX:
             item.tag = OPENCV_MATRIX
-        stack.append(_Open(item, offset, []))
-        if parent is not None:
-            stack[-2].elements += 1
+        if stack:
+            stack[-1].elements += 1
         else:
             root.append(item)
+        stack.append(_Open(item, offset, [], cost))
 
     def end(name: str) -> None:
         opened = stack.pop()
         item = opened.item
-        close = data.find(b">", parser.CurrentByteIndex)
-        item.where = ByteRange(
-            opened.start, (close if close >= 0 else len(data) - 1) + 1 - opened.start
-        )
+        index = parser.CurrentByteIndex
+        closing = data[index : index + 2] == b"</"  # else an empty element: <x/> ends as it starts
+        stop = _tag_end(data, index if closing else opened.start)
+        item.where = ByteRange(opened.start, stop - opened.start)
         text = "".join(opened.texts)
         parent = stack[-1] if stack else None
         if opened.elements:
@@ -203,9 +237,10 @@ def read_xml(data: bytes, max_depth: int, max_items: int, max_array: int) -> Ite
             if item.kind is Kind.SEQUENCE:
                 for position, kid in enumerate(kids):
                     kid.name = str(position)
-                    kid.path = (*item.path, kid.name)
         elif name == "data" and parent is not None and parent.item.tag == OPENCV_MATRIX:
-            _matrix_data(item, text, max_array)
+            _matrix_data(item, text, limits, seen)
+        elif len(text) > limits.max_scalar:
+            item.kind, item.why = Kind.UNREAD, "a scalar over max_scalar_length"
         else:
             item.text = text.strip()
             item.readings = (xml_scalar(text),)
@@ -230,16 +265,17 @@ def read_xml(data: bytes, max_depth: int, max_items: int, max_array: int) -> Ite
     return root[0]
 
 
-def _matrix_data(item: Item, text: str, max_array: int) -> None:
+def _matrix_data(item: Item, text: str, limits: XmlLimits, seen: list[int]) -> None:
     tokens = text.split()
     item.text = None
-    if len(tokens) > max_array:
+    if len(tokens) > limits.max_array:
         item.kind, item.why, item.count = Kind.UNREAD, "array_too_large", len(tokens)
         return
+    seen[0] += len(tokens)
+    if seen[0] > limits.max_items:
+        raise XmlRefused("too_many_values", f"over max_items ({limits.max_items}) values")
     item.kind, item.count = Kind.SEQUENCE, len(tokens)
     item.children = [
-        Item(
-            str(i), (*item.path, str(i)), Kind.SCALAR, item.where, readings=(xml_scalar(t),), text=t
-        )
+        Item(str(i), Kind.SCALAR, item.where, readings=(xml_scalar(t),), text=t)
         for i, t in enumerate(tokens)
     ]

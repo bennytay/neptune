@@ -9,6 +9,7 @@ differently) is its items, each named by position. Text is kept as written, a ``
 reshaped.
 """
 
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Final
@@ -31,6 +32,14 @@ from neptune.model.scalars import NonFinite, Real, real
 from neptune.model.units import Unit
 
 _NUMERIC: Final = (ScalarType.INT, ScalarType.FLOAT)
+# OpenCV's element type: an optional channel count and a depth letter (``d``, ``3f``, ``2u``).
+_CHANNELS: Final = re.compile(r"([0-9]{1,4})?[a-z]", re.ASCII)
+
+
+def _segment(item: Item) -> str:
+    """An item's name in a parameter name: RFC 6901 escaped, a repeated key by its position."""
+    token = pointer_token(item.name)
+    return f"{token}#{item.order}" if item.repeated else token
 
 
 @dataclass
@@ -102,15 +111,18 @@ class Flattener:
 
     def run(self, entry: Item, skip: Iterable[str] = ()) -> tuple[CalibrationParameter, ...]:
         skipped = set(skip)
-        depth = len(entry.path)
-        stack = [child for child in reversed(entry.children) if child.name not in skipped]
+        stack = [
+            (child, _segment(child))
+            for child in reversed(entry.children)
+            if child.name not in skipped
+        ]
         while stack:
-            item = stack.pop()
-            name = self._name(item, depth)
+            item, name = stack.pop()
+            below = [(kid, f"{name}/{_segment(kid)}") for kid in reversed(item.children)]
             match item.kind:
                 case Kind.MAPPING:
                     self._shape(item, name)
-                    stack.extend(reversed(item.children))
+                    stack.extend(below)
                 case Kind.SEQUENCE:
                     values = numbers(item) if item.count <= self.max_array else None
                     if item.count > self.max_array:
@@ -120,7 +132,7 @@ class Flattener:
                             self.gaps.non_finite.append(name)
                         self._add(name, Known(values, self.cite(item.where)), item)
                     else:
-                        stack.extend(reversed(item.children))
+                        stack.extend(below)
                 case Kind.NULL:
                     self._add(name, KnownAbsent(self.cite(item.where)), item)
                 case Kind.SCALAR:
@@ -132,12 +144,6 @@ class Flattener:
                         self.gaps.unread.append((name, item.why or "not read"))
                         self._add(name, Unknown(self.cite(item.where)), item)
         return tuple(self.found[n] for n in sorted(self.found))
-
-    def _name(self, item: Item, depth: int) -> str:
-        segments = [pointer_token(segment) for segment in item.path[depth:]]
-        if item.repeated:
-            segments[-1] += f"#{item.order}"
-        return "/".join(segments)
 
     def _scalar(self, item: Item, name: str) -> Knowledge[ParameterValue]:
         cited = self.cite(item.where)
@@ -151,6 +157,8 @@ class Flattener:
                 values.append(value)
         if isinstance(values[0], tuple) and any(isinstance(n, NonFinite) for n in values[0]):
             self.gaps.non_finite.append(name)
+        if "" in values:  # the model holds no empty text: a blank is Unknown, never a value
+            return Unknown(cited)
         if len(values) == 1:
             return Known(values[0], cited)
         self.gaps.ambiguous.append(name)
@@ -163,6 +171,9 @@ class Flattener:
         item: Item,
         large: int = 0,
     ) -> None:
+        if not name:  # a parameter is named: an empty key has no name to hold
+            self.gaps.unread.append((name, "an empty key"))
+            return
         if large:
             self.gaps.too_large.append((name, large))
         if name in self.found:  # a repeated key and a '#' key that collide: keep both
@@ -185,8 +196,9 @@ class Flattener:
             return
         channels = 1
         dt = item.child("dt")
-        if dt is not None and dt.text and dt.text[:-1].isdigit():
-            channels = int(dt.text[:-1])
+        channel = _CHANNELS.fullmatch(dt.text or "") if dt is not None else None
+        if channel is not None and channel.group(1):
+            channels = int(channel.group(1))
         declared = int(r) * int(c) * channels
         if declared != data.count:
             self.gaps.shapes.append((name or "/", declared, data.count))

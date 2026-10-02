@@ -4,6 +4,7 @@ Every case runs through ``ingest_source``, which checks the adapter's contract l
 declared codes only, exact citations, one chunk per output.
 """
 
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Final
 
@@ -14,6 +15,7 @@ from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.discovery.reader import BytesReader
 from neptune.model.knowledge import Known, Unknown
 from neptune.model.machine import Calibration
+from neptune.model.provenance import ByteRange, Provenance
 from neptune.model.reference import FrameTransform
 from neptune.model.scalars import NonFinite
 
@@ -178,3 +180,104 @@ def test_a_utf8_byte_order_mark_and_crlf_are_read_past() -> None:
     )
     output = run(data)
     assert len(calibrations(output)) == 1 and codes(output) == []
+
+
+def xml(body: str) -> bytes:
+    return f"<opencv_storage>{body}</opencv_storage>".encode()
+
+
+def matrix(name: str, text: str, dt: str = "d") -> str:
+    return (
+        f"<{name} type_id='opencv-matrix'><rows>1</rows><cols>1</cols><dt>{dt}</dt>"
+        f"<data>{text}</data></{name}>"
+    )
+
+
+def known(calibration: Calibration, name: str) -> Known[Any]:
+    value = next(p.value for p in calibration.parameters if p.name == name)
+    assert isinstance(value, Known)
+    return value
+
+
+def test_a_number_no_record_can_hold_in_xml_is_text_not_a_crash_nor_a_guess() -> None:
+    body = (
+        matrix("camera_matrix", "1") + f"<fx>{'9' * 5_000}</fx><fy>1e999</fy><fz>{'9' * 300}</fz>"
+    )
+    output = run(xml(body))
+    (calibration,) = calibrations(output)
+    assert known(calibration, "fx").value == "9" * 5_000  # too long to be a number: its text
+    assert known(calibration, "fy").value == "1e999"  # not an infinity the file never wrote
+    assert known(calibration, "fz").value == (float("9" * 300),)
+    assert output.findings() == ()
+
+
+@pytest.mark.parametrize("dt", ["²f", "9" * 5_000 + "f", "d"])
+def test_an_odd_element_type_is_no_crash(dt: str) -> None:
+    output = run(xml(matrix("camera_matrix", "1.0", dt)))
+    assert len(calibrations(output)) == 1
+
+
+def test_numbers_of_an_xml_matrix_count_against_max_items() -> None:
+    body = "".join(matrix(f"M{i}", " ".join("1" for _ in range(5_000))) for i in range(40))
+    output = run(xml(matrix("camera_matrix", "1") + body), max_items=50_000)
+    assert output.records() == () and codes(output) == ["calibration.too_many_values"]
+
+
+def test_a_long_scalar_and_long_element_paths_in_xml_are_limited() -> None:
+    long = run(
+        xml(matrix("camera_matrix", "1") + f"<note>{'x' * 600}</note>"), max_scalar_length=500
+    )
+    (calibration,) = calibrations(long)
+    note = next(p for p in calibration.parameters if p.name == "note")
+    assert isinstance(note.value, Unknown) and "calibration.value_not_read" in codes(long)
+    name = "n" * 3_000
+    nested = (
+        "".join(f"<{name}>" for _ in range(10)) + "1" + "".join(f"</{name}>" for _ in range(10))
+    )
+    assert "calibration.paths_too_long" in codes(
+        run(xml(matrix("camera_matrix", "1") + nested), max_path_ratio=1)
+    )
+
+
+def test_xml_lists_of_mappings_are_named_by_position() -> None:
+    body = matrix("camera_matrix", "1") + (
+        "<rigs><_><name>a</name><v>1</v></_><_><name>b</name><v>2</v></_></rigs>"
+    )
+    (calibration,) = calibrations(run(xml(body)))
+    names = [p.name for p in calibration.parameters if p.name.startswith("rigs")]
+    assert names == ["rigs/0/name", "rigs/0/v", "rigs/1/name", "rigs/1/v"]
+    assert codes(run(xml(body))) == []
+
+
+def test_an_xml_element_span_ends_at_its_own_closing_tag() -> None:
+    body = (
+        "<camera_matrix type_id='opencv-matrix' note=\"x>y\"><rows>1</rows><cols>1</cols>"
+        "<dt>d</dt><data>1</data></camera_matrix><flag a='>'/><image_width>4</image_width>"
+    )
+    data = xml(body)
+    (calibration,) = calibrations(run(data))
+    for name, tag in (
+        ("image_width", "image_width"),
+        ("camera_matrix/rows", "rows"),
+        ("flag", "flag"),
+    ):
+        value = next(p.value for p in calibration.parameters if p.name == name)
+        assert isinstance(value, Known | Unknown)
+        assert isinstance(value.provenance, Provenance)
+        where = value.provenance.evidence.locator[0]
+        assert isinstance(where, ByteRange)
+        element = ET.fromstring(data[where.offset : where.offset + where.length])
+        assert element.tag == tag  # the whole element, not cut at a '>' inside an attribute
+
+
+def test_blank_values_and_empty_keys_are_unknown_never_a_value() -> None:
+    output = run(camera('empty: ""\n"": 1\nblank: " "\n'))
+    (calibration,) = calibrations(output)
+    found = {p.name: p.value for p in calibration.parameters}
+    assert isinstance(found["empty"], Unknown)  # the model holds no empty text
+    assert known(calibration, "blank").value == " "
+    assert "" not in found and "calibration.value_not_read" in codes(output)
+    blank = run(xml(matrix("camera_matrix", "1") + "<flag/>"))
+    assert isinstance(
+        next(p for p in calibrations(blank)[0].parameters if p.name == "flag").value, Unknown
+    )

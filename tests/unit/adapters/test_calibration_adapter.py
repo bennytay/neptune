@@ -491,3 +491,20 @@ def test_inspect_summarises_without_reading_values() -> None:
     opencv = CalibrationAdapter().inspect(BytesReader(fixture("lidar_camera_autoware.yml")), config)
     assert json.loads(canonical_json.dumps(xml.summary))["xml"] is True
     assert json.loads(canonical_json.dumps(opencv.summary))["opencv_header"] is True
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        # Kalibr's flat imu.yaml with no imu<N> anywhere in it
+        b"accelerometer_noise_density: 0.01\ngyroscope_noise_density: 0.005\nrostopic: /imu\n",
+        # OpenCV files whose only calibration key is a distortion name, or a second matrix
+        b"%YAML:1.0\n---\ndistCoeffs: !!opencv-matrix\n  rows: 1\n  cols: 1\n  dt: d\n"
+        b"  data: [0.]\n",
+        b"%YAML:1.0\n---\nM2: !!opencv-matrix\n  rows: 1\n  cols: 1\n  dt: d\n  data: [1.]\n",
+        b"<opencv_storage><dist_coeffs type_id='opencv-matrix'><rows>1</rows><cols>1</cols>"
+        b"<dt>d</dt><data>0.</data></dist_coeffs></opencv_storage>",
+    ],
+)
+def test_every_key_a_format_requires_can_make_the_probe_look(data: bytes) -> None:
+    assert probe(data)[0] == VERIFIED

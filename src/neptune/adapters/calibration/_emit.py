@@ -14,6 +14,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Final
 
+from neptune.adapters.calibration._codes import code
 from neptune.adapters.calibration._formats import (
     KALIBR_IMU_FRAME,
     KALIBR_PREVIOUS_CAMERA,
@@ -41,15 +42,10 @@ from neptune.model.machine import Calibration
 from neptune.model.provenance import ByteRange, EvidenceRef, Locator, Provenance
 from neptune.model.reference import FrameGraph, FrameTransform
 
-ADAPTER_ID: Final = "calibration"
 _CAMERA: Final = re.compile(r"cam([0-9]+)")
 OPENCV_EXTRINSICS: Final = ("CameraExtrinsicMat", "R", "T")
 _LISTED: Final = 8  # names a finding lists before it says "and n more"
 EvidenceOut = Calibration | FrameGraph | FrameTransform
-
-
-def _code(name: str) -> str:
-    return f"{ADAPTER_ID}.{name}"
 
 
 @dataclass
@@ -99,7 +95,7 @@ class Emitter:
     ) -> None:
         self.out.findings.append(
             ingest_finding(
-                code=_code(name),
+                code=code(name),
                 category=category,
                 severity=severity,
                 subject=EvidenceRef(self.source, (where,)),
