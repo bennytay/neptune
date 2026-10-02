@@ -65,7 +65,7 @@ the current wave, and raises a cap only when the weekly check (§ 6) shows the b
 
 **Coordinator prompt (verbatim from programme document §6; fill the placeholders, change nothing else):**
 
-> You coordinate <project name> (P-MVL-<n>) in `packages/<name>/` of `bennytay/neptune`. Read `AGENTS.md`, `packages/<name>/AGENTS.md` and the programme document's model policy. Run the software-factory loop in `docs/developer-workflow.md`. Caps: 3 implementers, 1 reviewer. Pick only issues in this project whose blockers are Done. Implementers and reviewers run on `sonnet` unless the issue is an ADR, a contract, a gate, or touches `store/`, `schema/`, `consolidate/`, `query/`; those run on `opus`. Merge through the merge queue with `scripts/factory-merge.sh`. Never edit outside `packages/<name>/` except `contracts/` with a version bump. Keep your context lean: never read agent transcripts, require 15-line reports, do not re-read the repo. Report to the programme coordinator only at a gate or when blocked for more than one hour.
+> You coordinate <project name> (P-MVL-<n>) in `packages/<name>/` of `bennytay/neptune`. Read `AGENTS.md`, `packages/<name>/AGENTS.md` and the programme document's model policy. Run the software-factory loop in `docs/developer-workflow.md`. Caps: 3 implementers, 1 reviewer. Pick only issues in this project whose blockers are Done. Implementers and reviewers run on `sonnet` unless the issue is an ADR, a contract, a gate, or touches `store/`, `schema/`, `consolidate/`, `query/`; those run on `opus`. Merge with `scripts/factory-merge.sh`; refresh a PR only when it says so. Never edit outside `packages/<name>/` except `contracts/` with a version bump. Keep your context lean: never read agent transcripts, require 15-line reports, do not re-read the repo. Report to the programme coordinator only at a gate or when blocked for more than one hour.
 
 | `<project name>` | `<n>` | `<name>` |
 |---|---|---|
@@ -172,21 +172,19 @@ reviewer judged. The coordinator posts one line per new head, in one of two form
 Anything else (a code or doc change a reviewer would read, a resolved conflict) needs a fresh review.
 `<old-sha>` is the head the original verdict named, so the chain traces back to a real review.
 
-**Live today: REST fallback with hand refresh.** GitHub rejected the ruleset's `merge_queue` rule (422
-`Invalid rule 'merge_queue'`) because `bennytay/neptune` belongs to a personal account; merge queues need an
-organisation-owned repository. MVL-192 moves the repository to an organisation. Until MVL-192 is Done and
-`.github/rulesets/main.json` is applied (ADR 0001 §5):
+**Live today: merge without a queue (ADR [0005](adr/0005-merge-without-a-queue.md)).** Merge queues need an
+organisation-owned repository, and `bennytay/neptune` stays on a personal account for now. `main` has no
+strict up-to-date rule; instead `factory-merge.sh`:
 
-- `main` keeps classic protection with the strict up-to-date rule. `factory-merge.sh` falls back to the REST
-  squash merge pinned to the head, which needs `mergeable_state` `clean`.
-- After every merge to `main` (this project's or another's), each coordinator hand-refreshes its open PRs:
-  `git merge origin/main`, push, wait for `check` (`docs/developer-workflow.md` loop step 4). It posts the
-  carried verdict for the new head as in step 3 above and merges one PR at a time.
-- Expect contention: only one PR across all projects can be up to date at a time, so keep at most 3
-  coordinators live until the queue is live.
+- merges a PR that is behind `main` as it stands when nothing `main` changed since the merge base reaches
+  what the PR changed (`scripts/merge_freshness.py`); otherwise it refuses with "needs a refresh" and the
+  reason, and the coordinator refreshes (`git merge origin/main`, push, wait for `check`, carried verdict as in
+  step 3) and runs it again;
+- refuses everything while the latest `check` on `main` is red, except a PR labelled `fix-main`. A coordinator
+  that sees this makes fixing `main` its first issue if its project broke it;
+- holds a machine-wide lock, so coordinators merge one at a time.
 
-Once the queue rule is live, the REST fallback is rejected, because the ruleset has no bypass actors. Hand
-refresh then stops working by design, and every merge goes through the queue (steps 2–3).
+Do not refresh PRs pre-emptively after other merges: refresh only when the script asks.
 
 **Verdict authority.** A `Review:` line counts only if its author is OWNER, MEMBER or COLLABORATOR on the
 repository, it is not quoted (`>`), fenced, indented as code or in inline code, and its SHA (7–40 hex
