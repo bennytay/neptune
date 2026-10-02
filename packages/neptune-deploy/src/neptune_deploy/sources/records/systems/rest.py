@@ -1,4 +1,4 @@
-"""A declared REST record API: a CMMS, EAM or other system described by a profile (ADR 0008 §5).
+"""A declared REST record API: a CMMS, EAM or other system described by a profile (ADR 0008 §4).
 
 There is no vendor preset here: a vendor's wire format is a preset only once a live tenant has
 validated it. A *profile* is the operator's declaration of one API, closed and checked, in JSON::

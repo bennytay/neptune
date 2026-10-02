@@ -26,7 +26,7 @@ class Fetch:
     ``size`` is the length the listing stated; a body of another length is refused. ``md5``,
     ``sha1`` and ``sha256`` (lower hex), if the system states them, must equal the body's.
     ``redirect`` says the system answers with a redirect to a pre-authenticated download URL on
-    another host, which is followed only under ``http.PreAuthenticated``'s rules (ADR 0008 §6).
+    another host, which is followed only under ``http.pre_authenticated``'s rules (ADR 0008 §6).
     """
 
     path: str

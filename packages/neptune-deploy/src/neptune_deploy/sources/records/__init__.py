@@ -32,8 +32,8 @@ called.
 """
 
 import os
-from dataclasses import replace
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Protocol
 
 from neptune.identity.revisions import SourceLedger

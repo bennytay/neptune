@@ -13,14 +13,14 @@ from deploy_records_fake_graph import LinearBackend
 from deploy_records_support import LINEAR_CREDENTIALS, codes, fingerprint, linear, online
 from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ExternalObjectRef
-from neptune_deploy.sources.records import RecordConfigError, linear_source
-from neptune_deploy.sources.records.http import Api
+from neptune_deploy.sources.records import RecordConfigError, RecordSource, linear_source
+from neptune_deploy.sources.records.systems.linear import LinearSystem
 
 SCOPE = "@acme-robotics/OPS/"
 FIRST = "issue/5b1f0c1e-62a4-4c7e-9a11-0d6c3b7a0001"
 
 
-def rows(source, item_id):  # type: ignore[no-untyped-def]
+def rows(source: RecordSource, item_id: str) -> list[list[str]]:
     entry = next(e for e in source.listing().entries if e.id == item_id)
     with source.open(entry.location) as stream:
         return list(csv.reader(io.StringIO(stream.read().decode())))
@@ -68,13 +68,15 @@ def test_only_graphql_queries_are_sent_and_the_variables_ride_in_the_body(tmp_pa
         assert json.loads(post.body)["query"].lstrip().startswith("query ")
         assert post.headers["content-type"] == "application/json"
         assert post.headers["authorization"] == "lin_api_key-never-printed"
-    assert not any("mutation" in d or "OPS" in d for d in backend.documents)  # no value in a document
+    assert not any(
+        "mutation" in d or "OPS" in d for d in backend.documents
+    )  # no value in a document
 
 
 @pytest.mark.parametrize(
     "document",
     [
-        "mutation { issueDelete(id: \"x\") { success } }",
+        'mutation { issueDelete(id: "x") { success } }',
         "{ viewer { id } }",
         "query A { x } mutation B { y }",
         "subscription { issueCreated { id } }",
@@ -84,7 +86,7 @@ def test_only_graphql_queries_are_sent_and_the_variables_ride_in_the_body(tmp_pa
 def test_a_document_that_is_not_a_query_is_never_sent(tmp_path: Path, document: str) -> None:
     server = FakeServer(LinearBackend())
     with linear(server, tmp_path) as source:
-        api: Api = source.system.api
+        api = source.system.api
         with pytest.raises(ValueError, match="queries only"):
             api.graphql("/graphql", document, {})
     assert server.log == []
@@ -209,8 +211,6 @@ def test_unusable_issues_are_findings_and_the_rest_are_listed(tmp_path: Path) ->
 
 
 def test_the_identity_is_the_workspace_so_a_shared_api_host_cannot_mix_two(tmp_path: Path) -> None:
-    from neptune_deploy.sources.records import RecordSource
-
     server = FakeServer(LinearBackend())
     with server.serve() as host:
         a = linear_source(
@@ -224,7 +224,9 @@ def test_the_identity_is_the_workspace_so_a_shared_api_host_cannot_mix_two(tmp_p
             credentials=LINEAR_CREDENTIALS,
         )  # fmt: skip
         assert b.location.scope == "@other-site/OPS/"
-        assert b.system.workspace == "other-corp"  # verified even when identity is declared
+        assert (
+            isinstance(b.system, LinearSystem) and b.system.workspace == "other-corp"
+        )  # verified even when identity is declared
 
 
 @pytest.mark.parametrize(

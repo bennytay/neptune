@@ -256,7 +256,7 @@ def test_unusable_items_are_findings_and_the_rest_are_still_listed(tmp_path: Pat
     "target",
     [
         "https://evil.example/dl/x?tempauth=1",  # not an allowed host
-        "https://127.0.0.1.evil.example/dl/x?tempauth=1",  # an allowed name is a suffix, not a prefix
+        "https://127.0.0.1.evil.example/dl/x?tempauth=1",  # a suffix, not a prefix
         "http://169.254.169.254/latest/meta-data/",  # plain http to a non-loopback host
         "https://user:pass@127.0.0.1/dl/x",  # user information
         "http://127.0.0.1:1/dl/x#frag",  # a fragment

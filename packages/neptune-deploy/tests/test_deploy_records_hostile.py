@@ -564,7 +564,8 @@ def test_every_system_only_ever_sends_get_and_leaks_no_secret(tmp_path: Path) ->
         DriveBackend,
         RestBackend,
     )
-    from deploy_records_support import confluence, gdrive, rest
+    from deploy_records_fake_graph import GraphBackend, LinearBackend
+    from deploy_records_support import confluence, gdrive, linear, onedrive, rest
 
     cases = [
         (jira, JiraBackend()),
@@ -572,6 +573,8 @@ def test_every_system_only_ever_sends_get_and_leaks_no_secret(tmp_path: Path) ->
         (gdrive, DriveBackend()),
         (confluence, ConfluenceBackend()),
         (rest, RestBackend()),
+        (onedrive, GraphBackend()),
+        (linear, LinearBackend()),
     ]
     for opener, backend in cases:
         server = FakeServer(backend)
@@ -582,4 +585,5 @@ def test_every_system_only_ever_sends_get_and_leaks_no_secret(tmp_path: Path) ->
             assert not any(secret in text for secret in SECRETS)
             assert not any(secret in repr(source.system) for secret in SECRETS)
         assert server.other_methods == [], opener
-        assert {r.method for r in server.log} == {"GET"}
+        # Linear has no REST form: it sends GraphQL queries by POST, and nothing else does
+        assert {r.method for r in server.log} == ({"POST"} if opener is linear else {"GET"})

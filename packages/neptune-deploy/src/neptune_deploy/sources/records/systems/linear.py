@@ -71,7 +71,9 @@ _WORKSPACE: Final = re.compile(r"[a-z0-9][a-z0-9\-]{0,62}")
 _TEAM: Final = re.compile(r"[A-Z][A-Z0-9]{0,15}")
 _ISSUE_ID: Final = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _IDENTIFIER: Final = re.compile(r"[A-Z][A-Z0-9]{0,15}-[0-9]{1,9}")
-_INSTANT: Final = re.compile(r"[0-9]{4}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9]{3}Z")
+_INSTANT: Final = re.compile(
+    r"[0-9]{4}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9]{3}Z"
+)
 _AFTER: Final = re.compile(r"[\x21-\x7e]{1,512}")
 ENV: Final = {"api_key": "NEPTUNE_LINEAR_API_KEY", "access_token": "NEPTUNE_LINEAR_ACCESS_TOKEN"}
 
@@ -90,7 +92,8 @@ SNAPSHOT_QUERY: Final = (
     "         filter: { team: { key: { eq: $team } } }) {" + _NODE + "  }\n}\n"
 )
 CHANGES_QUERY: Final = (
-    "query IssueChanges($team: String!, $first: Int!, $after: String, $since: DateTimeOrDuration) {\n"
+    "query IssueChanges($team: String!, $first: Int!, $after: String,\n"
+    "                    $since: DateTimeOrDuration) {\n"
     "  organization { urlKey }\n"
     "  issues(first: $first, after: $after, includeArchived: true, orderBy: updatedAt,\n"
     "         filter: { team: { key: { eq: $team } }, updatedAt: { gte: $since } }) {"
@@ -220,9 +223,11 @@ class LinearSystem:
 
         labels = record.get("labels")
         nodes = labels.get("nodes") if isinstance(labels, dict) else None
-        names = [
-            jsontext.cell(n.get("name")) for n in nodes if isinstance(n, dict)
-        ] if isinstance(nodes, list) else []
+        names = (
+            [jsontext.cell(n.get("name")) for n in nodes if isinstance(n, dict)]
+            if isinstance(nodes, list)
+            else []
+        )
         return [
             identifier,
             inner("team", "key"),

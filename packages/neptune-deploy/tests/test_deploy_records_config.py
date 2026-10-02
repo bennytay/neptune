@@ -12,6 +12,8 @@ from deploy_records_support import (
     CONFLUENCE_CREDENTIALS,
     DRIVE_CREDENTIALS,
     JIRA_CREDENTIALS,
+    LINEAR_CREDENTIALS,
+    ONEDRIVE_CREDENTIALS,
     REST_CREDENTIALS,
     SERVICENOW_CREDENTIALS,
     cmms_profile,
@@ -24,6 +26,8 @@ from neptune_deploy.sources.records import (
     confluence_source,
     gdrive_source,
     jira_source,
+    linear_source,
+    onedrive_source,
     record_source,
     rest_source,
     servicenow_source,
@@ -62,6 +66,8 @@ def make(kind: str, tmp_path: Path, url: str | None = None, **kwargs: Any) -> An
             CONFLUENCE_CREDENTIALS,
         ),
         "rest": (rest_source, "rest://cmms.example.com", REST_CREDENTIALS),
+        "onedrive": (onedrive_source, "onedrive://b!siteA_lib01", ONEDRIVE_CREDENTIALS),
+        "linear": (linear_source, "linear://acme-robotics/OPS", LINEAR_CREDENTIALS),
     }
     factory, default_url, credentials = factories[kind]
     options = kwargs.pop("options", None)
@@ -71,7 +77,9 @@ def make(kind: str, tmp_path: Path, url: str | None = None, **kwargs: Any) -> An
     return factory(url or default_url, network=online(tmp_path), options=options, **kwargs)
 
 
-@pytest.mark.parametrize("kind", ["jira", "servicenow", "gdrive", "confluence", "rest"])
+@pytest.mark.parametrize(
+    "kind", ["jira", "servicenow", "gdrive", "confluence", "rest", "onedrive", "linear"]
+)
 def test_every_system_builds_without_touching_the_network(tmp_path: Path, kind: str) -> None:
     source = make(kind, tmp_path)
     assert source.connector_id in CONNECTOR_IDS
@@ -83,6 +91,8 @@ def test_the_factory_names_are_the_connector_ids() -> None:
         "deploy_confluence",
         "deploy_gdrive",
         "deploy_jira",
+        "deploy_linear",
+        "deploy_onedrive",
         "deploy_rest",
         "deploy_servicenow",
     )

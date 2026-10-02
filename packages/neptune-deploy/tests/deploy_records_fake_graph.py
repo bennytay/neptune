@@ -5,7 +5,6 @@ refuses any request that carries an ``Authorization`` header."""
 
 import hashlib
 import json
-import urllib.parse
 from typing import Any
 
 from deploy_records_fake import Backend, Reply, Request, fixture, reply_json

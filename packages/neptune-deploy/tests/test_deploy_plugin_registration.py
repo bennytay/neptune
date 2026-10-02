@@ -40,6 +40,8 @@ def test_deploy_registers_its_adapters_and_nothing_else() -> None:
         "deploy_gcs": "neptune_deploy.sources.object_store:gcs_source",
         "deploy_gdrive": "neptune_deploy.sources.records:gdrive_source",
         "deploy_jira": "neptune_deploy.sources.records:jira_source",
+        "deploy_linear": "neptune_deploy.sources.records:linear_source",
+        "deploy_onedrive": "neptune_deploy.sources.records:onedrive_source",
         "deploy_rest": "neptune_deploy.sources.records:rest_source",
         "deploy_s3": "neptune_deploy.sources.object_store:s3_source",
         "deploy_servicenow": "neptune_deploy.sources.records:servicenow_source",
