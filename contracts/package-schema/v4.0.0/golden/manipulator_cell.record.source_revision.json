@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024",
+  "id": "rec:sha256:832608e8b1ae62eb501d1e06f6b41881a0fae62c175621524485f97e2b6bb545",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "records.json"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}
