@@ -2,10 +2,10 @@
 
 - ``TestStubCatalog``: every API-calling test is a strict expected failure with
   ``NotImplementedError`` (ADR 0004 §6); any other failure, or a pass, turns CI red.
-- ``TestPostgresCatalog``: ``register`` and ``verify`` (MVL-90) must pass. Each test that reaches a
-  call not implemented yet is listed in ``PENDING`` with the issue that owns it, and is a strict
-  expected failure with ``NotImplementedError``: when that call lands, the test passes, the strict
-  xfail turns CI red, and the entry is deleted.
+- ``TestPostgresCatalog``: ``register``, ``verify`` (MVL-90) and ``resolve`` (MVL-91) must pass.
+  Each test that reaches a call not implemented yet is listed in ``PENDING`` with the issue that
+  owns it, and is a strict expected failure with ``NotImplementedError``: when that call lands,
+  the test passes, the strict xfail turns CI red, and the entry is deleted.
 """
 
 from collections.abc import Iterator
@@ -21,16 +21,12 @@ from neptune_ledger.catalog.migrate import apply_migrations
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.contract_tests import CatalogContract
 
-RESOLVE: Final = "resolve() is not implemented yet (MVL-91)"
 THREAD: Final = "thread(), threads_of() and lineage() are not implemented yet (MVL-92)"
 QUERY: Final = "query() is not implemented yet (MVL-98)"
 
 # Contract tests that reach a call the real catalog does not implement yet, by the first such call.
 PENDING: Final = {
-    "test_a_moved_source_registers_as_another_package": RESOLVE,
-    "test_resolve_every_cited_anchor": RESOLVE,
-    "test_resolve_unknown_source": RESOLVE,
-    "test_same_call_twice_gives_identical_bytes": RESOLVE,
+    "test_same_call_twice_gives_identical_bytes": THREAD,
     "test_lineage_of_every_record": THREAD,
     "test_lineage_of_an_unknown_record": THREAD,
     "test_machine_threads_hold_exactly_their_declared_members": THREAD,

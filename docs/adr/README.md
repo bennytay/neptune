@@ -28,7 +28,7 @@ header).
 | [0017](0017-canonical-records-envelope-and-schema-version.md) | Canonical records: envelope, families, schema version and findings | Accepted; amended by 0023, 0037, 0050, 0062 |
 | [0018](0018-runs-streams-and-series-layout.md) | Runs, streams and the series layout | Accepted |
 | [0019](0019-machine-context-records.md) | Machine context: machines, hardware, software and calibration | Accepted |
-| [0020](0020-world-and-record-context-records.md) | World and record context: sites, assets, geometry, media, documents and tables | Accepted |
+| [0020](0020-world-and-record-context-records.md) | World and record context: sites, assets, geometry, media, documents and tables | Accepted; amended by 0051 |
 | [0021](0021-schema-export-and-worked-examples.md) | The canonical JSON Schema and the worked examples | Accepted |
 | [0022](0022-ingest-package-and-receipt.md) | The ingest package and its receipt | Accepted; amended by 0023, 0031, 0037 |
 | [0023](0023-m1-gate-freeze-and-growth.md) | The M1 gate: the model freezes, grows only by addition, and fixes four gaps | Accepted; amended by 0036, 0037 |
@@ -58,7 +58,9 @@ header).
 | [0048](0048-flight-log-adapter-px4-ulog-and-ardupilot-dataflash.md) | The flight-log adapter: PX4 ULog and ArduPilot DataFlash as runs, decoded streams and cited tables | Accepted |
 | [0049](0049-stream-introspection-declared-layouts-and-inferred-semantics.md) | Stream introspection: declared layouts and inferred semantics as derived tables | Accepted |
 | [0050](0050-alignment-record-contract-identity-links-clock-mappings-frame-and-run-bindings.md) | The alignment record contract: identity links, clock mappings, frame and run bindings | Accepted |
+| [0051](0051-deployment-lifecycle-records-stated-as-declared.md) | Deployment lifecycle records, stated as declared | Accepted |
 | [0052](0052-geometry-adapter-meshes-and-scenes-as-referenced-objects.md) | The geometry adapter: meshes and scenes as referenced objects, nothing copied, nothing guessed | Accepted |
 | [0054](0054-integrity-and-data-quality-rules-over-the-stored-package.md) | Integrity and data-quality rules run over the stored package | Accepted |
 | [0055](0055-calibration-adapter-ros-kalibr-opencv-and-shared-structured-readers.md) | The calibration adapter: ROS, Kalibr and OpenCV files as calibrations, extrinsics and a file-local frame graph, over shared structured readers | Accepted |
+| [0057](0057-geojson-adapter-crs-never-invented.md) | The GeoJSON adapter: features, bounds and a CRS that is stated, defaulted by the RFC or Unknown | Accepted |
 | [0062](0062-assertion-records-human-assertions-as-stated-evidence.md) | Assertion records: human assertions, acceptances and retractions as stated evidence | Accepted |

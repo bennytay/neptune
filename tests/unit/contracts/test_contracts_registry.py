@@ -77,6 +77,8 @@ def test_package_schema_goldens_cover_four_robots_and_every_document() -> None:
         "manipulator",
         "mobile_robot",
         "quadruped",
+        "warehouse_amr",  # deployment lifecycle records (ADR 0051)
+        "manipulator_cell",
         "assertion_cell_baseline",  # human assertions (ADR 0062)
         "assertion_fleet_identity",
         "assertion_retraction",

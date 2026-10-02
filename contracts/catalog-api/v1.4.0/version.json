@@ -43,7 +43,7 @@
     "query_spec.window.json": "#/$defs/QuerySpec"
   },
   "owner_version": "1.4.0",
-  "schema_sha256": "sha256:2ac7ec4c684afc1d74a2fb1b5588552c034e19d7fc1f4d43e4275ce1f946290b",
+  "schema_sha256": "sha256:762ec32738a3ed06a15d1b29578df5f8c5045629fc5687a207ba7b81279262c1",
   "status": "stable",
   "version": "1.4.0"
 }

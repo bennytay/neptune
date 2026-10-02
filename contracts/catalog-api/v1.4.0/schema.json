@@ -153,7 +153,7 @@
     },
     "KindCount": {
       "additionalProperties": false,
-      "description": "KindCount(kind: Annotated[str, Constraint(name='RecordKind', description='A record kind of package schema 1.', pattern=None, enum=('source_artifact', 'source_revision', 'source_absence', 'transform_record', 'ingest_finding', 'timestamp_domain', 'frame_graph', 'frame', 'frame_transform', 'run', 'stream', 'machine', 'hardware_configuration', 'hardware_component', 'software_configuration', 'calibration', 'configuration_snapshot', 'configuration_value', 'site', 'asset', 'spatial_artifact', 'image', 'video', 'document_record', 'document_block', 'structured_table', 'structured_record', 'identity_link', 'clock_mapping', 'frame_binding', 'run_assembly', 'snapshot_binding', 'assertion'), minimum=None, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)], count: Annotated[int, Constraint(name=None, description=None, pattern=None, enum=None, minimum=0, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)])",
+      "description": "KindCount(kind: Annotated[str, Constraint(name='RecordKind', description='A record kind of package schema 1.', pattern=None, enum=('source_artifact', 'source_revision', 'source_absence', 'transform_record', 'ingest_finding', 'timestamp_domain', 'frame_graph', 'frame', 'frame_transform', 'run', 'stream', 'machine', 'hardware_configuration', 'hardware_component', 'software_configuration', 'calibration', 'configuration_snapshot', 'configuration_value', 'site', 'asset', 'spatial_artifact', 'image', 'video', 'document_record', 'document_block', 'structured_table', 'structured_record', 'identity_link', 'clock_mapping', 'frame_binding', 'run_assembly', 'snapshot_binding', 'commissioning_baseline', 'authorisation_envelope', 'intervention', 'maintenance_event', 'requalification_record', 'incident_record', 'change_record', 'risk_assessment'), minimum=None, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)], count: Annotated[int, Constraint(name=None, description=None, pattern=None, enum=None, minimum=0, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)])",
       "properties": {
         "count": {
           "minimum": 0,
@@ -1335,10 +1335,12 @@
     "RecordKind": {
       "description": "A record kind of package schema 1.",
       "enum": [
-        "assertion",
         "asset",
+        "authorisation_envelope",
         "calibration",
+        "change_record",
         "clock_mapping",
+        "commissioning_baseline",
         "configuration_snapshot",
         "configuration_value",
         "document_block",
@@ -1351,8 +1353,13 @@
         "hardware_configuration",
         "identity_link",
         "image",
+        "incident_record",
         "ingest_finding",
+        "intervention",
         "machine",
+        "maintenance_event",
+        "requalification_record",
+        "risk_assessment",
         "run",
         "run_assembly",
         "site",

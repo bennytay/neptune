@@ -296,6 +296,14 @@ def test_kinds_are_unique_tokens_and_each_has_one_family() -> None:
         "frame_binding": "alignment",
         "run_assembly": "alignment",
         "snapshot_binding": "alignment",
+        "commissioning_baseline": "world",
+        "authorisation_envelope": "world",
+        "intervention": "world",
+        "maintenance_event": "world",
+        "requalification_record": "world",
+        "incident_record": "world",
+        "change_record": "world",
+        "risk_assessment": "world",
         "assertion": "assertion",
     }
 
@@ -331,7 +339,8 @@ def test_record_object_reports_the_version_before_the_keys() -> None:
     }
     assert record_object(frame, "frame", {"ref"})
     with pytest.raises(SchemaVersionError):
-        record_object({"kind": "frame_v2", "schema_version": 5, "other": 1}, "frame", {"ref"})
+        newer = SCHEMA_VERSION + 1
+        record_object({"kind": "frame_v2", "schema_version": newer, "other": 1}, "frame", {"ref"})
     with pytest.raises(ValueError, match="kind"):
         record_object({**frame, "kind": "frames"}, "frame", {"ref"})
     with pytest.raises(ValueError, match="JSON object"):

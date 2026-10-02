@@ -191,7 +191,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         Documented(
             "kinds",
-            "assertion (since schema version 4, ADR 0062) and timestamp_domain, all stated",
+            "assertion (ADR 0062) and timestamp_domain, all stated",
         ),
         Documented(
             "missingness",

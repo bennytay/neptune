@@ -60,7 +60,7 @@ from neptune.model.time import Timestamp, timestamp_from_json
 
 # The schema version that added ``Assertion`` (ADR 0062, ADR 0037 §1). Provisional: kind-adding
 # PRs are numbered in merge order.
-ASSERTION_SINCE: Final = 4
+ASSERTION_SINCE: Final = 5
 
 # A thing an assertion is about: a canonical record by its id, or a real-world thing by a
 # logical id. In JSON a record id is a string and a logical id an object.

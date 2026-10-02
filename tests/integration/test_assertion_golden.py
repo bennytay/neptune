@@ -3,7 +3,7 @@
 An identity confirmation between two robots of a warehouse fleet, a baseline acceptance for a
 manipulator cell, and a retraction of the fleet confirmation. Their records are
 compatibility-sensitive output (ADR 0003): any change to them is a new adapter version and an
-explained golden diff. Each is a schema version 4 package (ADR 0037 §1).
+explained golden diff. Each is written at the assertion kind's schema version (ADR 0037 §1).
 """
 
 import importlib.util
@@ -16,7 +16,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from neptune.identity import canonical_json
-from neptune.model.assertion import Assertion, AssertionType
+from neptune.model.assertion import ASSERTION_SINCE, Assertion, AssertionType
 from neptune.model.ids import LogicalId
 from neptune.model.knowledge import Known
 from neptune.model.schema import canonical_schema
@@ -60,7 +60,7 @@ def assertions(name: str) -> list[Assertion]:
     for kind in manifest["tables"]:
         files.setdefault(f"records/{kind}.jsonl", b"")  # empty tables are not kept as files
     package = read_files(files)
-    assert package.manifest.version == 4
+    assert package.manifest.version == ASSERTION_SINCE
     validator = Draft202012Validator(canonical_schema())
     for record in package.records:
         line = canonical_json.loads(canonical_json.dumps(record.to_json()))

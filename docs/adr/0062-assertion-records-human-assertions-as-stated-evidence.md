@@ -28,7 +28,7 @@ earlier statement. Nothing in the model can hold one. Forces:
 
 ## Decision
 
-1. **One record kind, `assertion`, in a new family `assertion`** (`model/assertion.py`, `since` 4).
+1. **One record kind, `assertion`, in a new family `assertion`** (`model/assertion.py`, `since` 5).
    It is an evidence record (ADR 0017 §5): `id` from its record-level evidence, one `provenance`,
    which must be `stated` (observed or inferred provenance is refused). Fields, each `Knowledge`:
    - `identifier: LogicalId`: the id the source gives the assertion, which a retraction names.
@@ -110,12 +110,12 @@ earlier statement. Nothing in the model can hold one. Forces:
    `assertion.retracts_not_applicable` and the value stays in the cited bytes), and may be
    either where the type was not read. A retraction of a retraction is allowed. Whether and when
    a retraction takes effect, and what a retraction of an unknown id means, is Memory's.
-6. **Version.** The kind is `since` 4, so `SCHEMA_VERSION` is 4 and the package-schema contract
-   publishes **4.0.0** (an integer owner constant is the registry major, platform ADR 0002 §3);
+6. **Version.** The kind is `since` 5, so `SCHEMA_VERSION` is 5 and the package-schema contract
+   publishes **5.0.0** (an integer owner constant is the registry major, platform ADR 0002 §3);
    every earlier golden still validates, and a package without assertions keeps its bytes (ADR
-   0037 §1). The Ledger's catalog API, which embeds the compiler's kinds, takes **1.4.0**. A new
+   0037 §1). The Ledger's catalog API, which embeds the compiler's kinds, takes **1.5.0**. A new
    planned contract, `assertion-records`, is part of package-schema and rides on its version.
-   Number 4 is provisional: kind-adding PRs are numbered in merge order, and a renumber touches
+   Number 5 is provisional: kind-adding PRs are numbered in merge order, and a renumber touches
    only the version constants, `since`, contract directories and regenerated outputs.
 7. **Goldens.** `tests/golden/assertion/` holds three packages ingested from
    `tests/fixtures/assertion/`: an identity confirmation between two robots of a warehouse fleet
@@ -146,7 +146,7 @@ earlier statement. Nothing in the model can hold one. Forces:
 ## Consequences
 
 - Memory (G1 identity policy, G3 baselines) and Deploy's console authoring (MVL-184) pin
-  package-schema 4.0.0 and write or read the `neptune.assertions` format; the console writes
+  package-schema 5.0.0 and write or read the `neptune.assertions` format; the console writes
   version 1 files through the normal ingest path.
 - The Ledger indexes `assertion` rows in its default partition until it adds one.
 - A field consumers need that is not here (a second author, a signature scheme, an expiry) is a

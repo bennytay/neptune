@@ -2,7 +2,7 @@
 
 MVL-183 acceptance: an assertion is stated evidence with author, time and scope; a retraction
 names an earlier assertion and changes nothing; inferred provenance is refused; the kind is from
-schema version 4 on and leaves older packages' bytes alone.
+schema version that added it on (``ASSERTION_SINCE``) and leaves older packages' bytes alone.
 """
 
 from dataclasses import replace
@@ -105,12 +105,13 @@ def roundtrip(record: Assertion) -> Assertion:
 # --- Shape and round trip ----------------------------------------------------------------------
 
 
-def test_the_kind_is_registered_in_its_own_family_from_version_4() -> None:
+def test_the_kind_is_registered_in_its_own_family_from_its_version() -> None:
     assert RECORD_KINDS["assertion"] == (Assertion, assertion_from_json)
     assert Assertion.family is Family.ASSERTION
-    assert KIND_SINCE["assertion"] == ASSERTION_SINCE == SCHEMA_VERSION == 4
-    assert "assertion" in kinds_at(4) and "assertion" not in kinds_at(3)
-    assert package_version(["assertion", "timestamp_domain"]) == 4
+    assert KIND_SINCE["assertion"] == ASSERTION_SINCE == SCHEMA_VERSION
+    assert "assertion" in kinds_at(ASSERTION_SINCE)
+    assert "assertion" not in kinds_at(ASSERTION_SINCE - 1)
+    assert package_version(["assertion", "timestamp_domain"]) == ASSERTION_SINCE
     assert package_version(["timestamp_domain", "identity_link"]) == 3
 
 
@@ -154,7 +155,7 @@ def test_scope_keeps_declared_order_and_both_kinds_of_reference() -> None:
     scope = data["scope"]
     assert isinstance(scope, dict)
     assert scope["value"] == [TAG.to_json(), SERIAL.to_json(), RECORD]
-    assert data["schema_version"] == 4 and data["kind"] == "assertion"
+    assert data["schema_version"] == ASSERTION_SINCE and data["kind"] == "assertion"
     # An empty scope is a declaration of none, distinct from a scope that was not read.
     assert roundtrip(retraction()).scope == Known(())
 
@@ -240,7 +241,7 @@ def test_the_reader_refuses_extra_or_missing_keys_and_other_versions() -> None:
     with pytest.raises(SchemaVersionError, match="newer"):
         assertion_from_json({**data, "schema_version": SCHEMA_VERSION + 1})
     for older in range(1, ASSERTION_SINCE):
-        with pytest.raises(SchemaVersionError, match="from schema version 4"):
+        with pytest.raises(SchemaVersionError, match=f"from schema version {ASSERTION_SINCE}"):
             assertion_from_json({**data, "schema_version": older})
     with pytest.raises(ValueError):
         assertion_from_json({**data, "assertion_type": {"knowledge": "known", "value": "merge"}})
@@ -252,7 +253,7 @@ def test_the_schema_rejects_what_the_reader_rejects_by_shape() -> None:
     data = canonical_json.loads(canonical_json.dumps(assertion().to_json()))
     assert isinstance(data, dict)
     for broken in (
-        {**data, "schema_version": 3},
+        {**data, "schema_version": ASSERTION_SINCE - 1},
         {**data, "assertion_type": {"knowledge": "known", "value": "merge"}},
         {**data, "scope": {"knowledge": "known", "value": [{"namespace": "x"}]}},
         {**data, "scope": {"knowledge": "known", "value": ["not a record id"]}},
