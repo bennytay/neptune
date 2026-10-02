@@ -57,17 +57,31 @@ two readings of one record, or they are more than 26 hours of civil offsets (plu
 
 ## Measurements
 
-`python tests/fixtures/archetypes/stress_lifecycle_mapper.py 10000 100000`. It maps grown copies of
-the fleet's base package in memory under `tracemalloc`, which roughly doubles wall time.
+`python tests/fixtures/archetypes/stress_lifecycle_mapper.py 10000 100000` maps grown copies of
+the fleet's base package in memory. It runs each case in its own process, so each RSS figure is that
+case's own peak. "map" is Deploy's mapper; "write" is the compiler's `package_files` (canonical JSON
+and the receipt).
 
 ```
-MEASUREMENTS
+CMMS export, 10,000 work orders              map   1.42 s  write   9.61 s      362 MiB RSS    46.93 MiB out   6945 findings
+CMMS export, 100,000 work orders             map  14.87 s  write  96.65 s     2891 MiB RSS   469.74 MiB out  69253 findings
+incident report, 4,000 labelled paragraphs   map   0.04 s  write   0.01 s       88 MiB RSS     0.06 MiB out      7 findings
+incident report, 32,000 labelled paragraphs  map   0.37 s  write   0.01 s      138 MiB RSS     0.06 MiB out      7 findings
+register cell, 1 MiB of ';'                  map   0.11 s  write   0.01 s       84 MiB RSS     0.07 MiB out      7 findings
+register cell, 1 MiB of one repeated id      map   0.01 s  write   0.01 s       85 MiB RSS     0.08 MiB out      8 findings
+register cell, 1 MiB of one-letter missions  map   0.01 s  write   0.09 s       89 MiB RSS     0.43 MiB out      7 findings
 ```
 
-- Time and memory grow linearly in rows, paragraphs and cell bytes. Before the fixes, 16,000
-  paragraphs took 6.9 s (8,000 took 1.8 s), 8,000 tables took 16.8 s, and an 80 KB cell of one
-  repeated id made 10,000 findings (13.8 MB, 13.6 s).
-- A 1 MiB hostile cell costs at most 1,000 parts and one finding of bounded size (D3, D4).
+- Everything is linear. The mapper costs 0.15 ms per work order. Writing the package costs about
+  1 ms per row, which is 87% of the time, and it is the compiler's code. A CMMS export of 100,000
+  work orders (one CMMS for a fleet of a few hundred robots over several years) maps in 15 s, writes
+  in 97 s and peaks at 2.9 GB (R3).
+- The 0.7 findings per row are `list_cell_blank`, one per blank `Related` cell. ADR 0002 §6 keeps
+  these per cell and uncapped, so that every emptied list is traceable.
+- Before the fixes: 16,000 paragraphs took 6.9 s (8,000 took 1.8 s, so quadratic); 8,000 tables in
+  one document took 16.8 s; an 80 KB cell of one repeated id made 10,000 findings (13.8 MB, 13.6 s);
+  and a 20 KB cell of one-letter missions made 10,000 statements (3.7 MB). Each 1 MiB hostile cell
+  now costs at most 1,000 parts and one finding of bounded size.
 
 ## Findings
 
@@ -80,7 +94,8 @@ MEASUREMENTS
 - **D3. Repeated ids were one finding each.** A cell that repeats one id 10,000 times made 10,000
   findings. They are now one finding per cell, as ADR 0002 §6 says, citing the first ten repeats.
 - **D4. A list cell had no bound.** One-letter parts cost about 180 times their bytes in cited
-  statements. A cell is now read into at most 1,000 parts, and `list_truncated` marks the rest.
+  statements. A cell is now read into at most 1,000 parts, and `list_truncated` cites the text that
+  was not read.
 - **D5. `column_unmapped` listed every column** (coordinator scope item). It now lists ten and counts
   them all.
 - **D6. Container-index tables were reported `table_unmapped`** (coordinator scope item): four per
@@ -90,7 +105,18 @@ MEASUREMENTS
   and its parts' fields, as `template_matched` does for a document.
 - **D8. One damaged time moved every record's clock id.** A table clock cited the first cell read, so
   damaging that cell re-cited the clock. It now cites the column's first cell, whatever that cell
-  holds.
+  holds, followed by a step naming how the clock reads. Each reading of a column (a date, a
+  date-time, an instant) is therefore its own clock.
+
+The gate's own changes were reviewed the same way (`/code-review` at high effort). The review
+confirmed one defect in the first D8 fix: every clock read from one column shared the first cell's
+id, so a date-only cell among date-times collapsed two clocks into one of the wrong resolution. The
+clock step above closes it, and `test_one_column_read_at_two_resolutions_is_two_clocks` covers it. A
+duplicate clock id is now refused rather than silently merged. The review also closed six smaller
+gaps: `list_truncated` cited no text, `list_id_repeated` did not cite the statement it kept, the
+Parquet footer's index tables were missing from the list, blocks sharing a start were not handled,
+the reader ordered an instant against a wall-clock reading inside one record, and one test assertion
+was a tautology.
 
 ### Decisions
 
@@ -130,3 +156,7 @@ MEASUREMENTS
 - **R2.** Once MVL-200 merges, a default `neptune ingest` lists Deploy's decline in each
   `neptune.probe.unsupported` finding. The generator and the harness drift check must ingest this
   corpus the same way (`--no-plugins`), or the drift check reports Deploy's presence as drift.
+- **R3. Package size in memory.** `package_files` builds the whole package in memory, at about 29 KB
+  of resident memory per mapped row (2.9 GB for 100,000 work orders), and writing is about 1 ms per
+  row. A multi-million-row export needs streaming package writes from the compiler's store. Coordinator
+  to file it against the compiler.
