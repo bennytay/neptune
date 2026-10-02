@@ -15,7 +15,14 @@ from neptune.store.package import MANIFEST, RECEIPT, RECEIPT_TEXT, package_files
 
 HERE: Final = Path(__file__).parent
 EXAMPLES: Final = HERE.parents[1] / "fixtures" / "model"
-NAMES: Final = ("drone", "quadruped", "manipulator", "mobile_robot")
+NAMES: Final = (
+    "drone",
+    "quadruped",
+    "manipulator",
+    "mobile_robot",
+    "warehouse_amr",
+    "manipulator_cell",
+)
 DOCUMENTS: Final = (MANIFEST, RECEIPT, RECEIPT_TEXT)
 
 

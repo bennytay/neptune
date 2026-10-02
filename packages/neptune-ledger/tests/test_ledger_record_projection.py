@@ -104,19 +104,22 @@ def test_the_shipped_spec_is_generated_from_the_declared_package_schema() -> Non
 
 
 def test_each_bump_migration_is_the_generated_migration_for_its_package_schema() -> None:
-    """Version 2 only adds kinds with no hot filter, so it needs no migration; version 3 adds a
-    run filter on run_assembly and snapshot_binding (columns exist: migration 0006 is a guard)."""
+    """Version 2 only adds kinds with no hot filter, so it needs no migration; versions 3 and 4
+    (both unreleased in the Ledger when indexed) share migration 0006: a run filter on
+    run_assembly and snapshot_binding and a site filter on the lifecycle kinds, all over
+    existing columns, so 0006 is a guard."""
     assert (
         render_migration(projection_spec(schema_v1()), projection_spec(schema_export(2)), 6) == ""
     )
-    (path,) = sorted((CATALOG / "migrations").glob("*_projections_schema_3.sql"))
-    assert path.name == "0006_projections_schema_3.sql"
+    (path,) = sorted((CATALOG / "migrations").glob("*_projections_schema_4.sql"))
+    assert path.name == "0006_projections_schema_4.sql"
     expected = render_migration(
-        projection_spec(schema_export(2)), projection_spec(schema_export(3)), 6
+        projection_spec(schema_export(2)), projection_spec(schema_export(4)), 6
     )
     assert path.read_text(encoding="utf-8") == expected
     assert "ADD COLUMN" not in expected
-    assert "kind IN ('run_assembly', 'snapshot_binding')" in expected
+    assert "'run_assembly', 'snapshot_binding'" in expected
+    assert "'maintenance_event'" in expected
 
 
 def test_migration_0005_is_the_generated_migration_for_package_schema_1() -> None:
