@@ -215,8 +215,8 @@ def test_each_provider_is_one_entry_point_named_by_its_connector_id() -> None:
     points = {
         ep.name: ep.value
         for ep in distribution("neptune-deploy").entry_points
-        if ep.group == "neptune.sources" and ep.name != "deploy_foxglove"  # its own ADR (0007)
-    }
+        if ep.group == "neptune.sources" and ep.name in CONNECTOR_IDS.values()
+    }  # the Roboto and Rerun connectors (ADR 0009) are not object-store providers
     factories = {"s3": s3_source, "gcs": gcs_source, "azure": azure_source}
     assert set(points) == set(CONNECTOR_IDS.values())
     for provider, connector in CONNECTOR_IDS.items():
