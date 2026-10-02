@@ -34,7 +34,7 @@ _NUMERIC: Final = (ScalarType.INT, ScalarType.FLOAT)
 
 
 @dataclass
-class Tally:
+class Gaps:
     """What flattening could not hold as a number or text, for findings (by reason)."""
 
     unread: list[tuple[str, str]] = field(default_factory=list)  # (name, why)
@@ -97,7 +97,7 @@ class Flattener:
     ) -> None:
         self.cite = cite
         self.max_array = max_array
-        self.tally = Tally()
+        self.gaps = Gaps()
         self.found: dict[str, CalibrationParameter] = {}
 
     def run(self, entry: Item, skip: Iterable[str] = ()) -> tuple[CalibrationParameter, ...]:
@@ -117,7 +117,7 @@ class Flattener:
                         self._add(name, Unknown(self.cite(item.where)), item, large=item.count)
                     elif values is not None:
                         if any(isinstance(n, NonFinite) for n in values):
-                            self.tally.non_finite.append(name)
+                            self.gaps.non_finite.append(name)
                         self._add(name, Known(values, self.cite(item.where)), item)
                     else:
                         stack.extend(reversed(item.children))
@@ -129,7 +129,7 @@ class Flattener:
                     if item.why == "array_too_large":
                         self._add(name, Unknown(self.cite(item.where)), item, large=item.count)
                     else:
-                        self.tally.unread.append((name, item.why or "not read"))
+                        self.gaps.unread.append((name, item.why or "not read"))
                         self._add(name, Unknown(self.cite(item.where)), item)
         return tuple(self.found[n] for n in sorted(self.found))
 
@@ -145,15 +145,15 @@ class Flattener:
         for scalar in item.readings:
             value = _value(scalar, item.text)
             if value is None:
-                self.tally.unread.append((name, "a number beyond binary64"))
+                self.gaps.unread.append((name, "a number beyond binary64"))
                 return Unknown(cited)
             if value not in values:
                 values.append(value)
         if isinstance(values[0], tuple) and any(isinstance(n, NonFinite) for n in values[0]):
-            self.tally.non_finite.append(name)
+            self.gaps.non_finite.append(name)
         if len(values) == 1:
             return Known(values[0], cited)
-        self.tally.ambiguous.append(name)
+        self.gaps.ambiguous.append(name)
         return Ambiguous(tuple(Candidate(value, cited) for value in values))
 
     def _add(
@@ -164,15 +164,15 @@ class Flattener:
         large: int = 0,
     ) -> None:
         if large:
-            self.tally.too_large.append((name, large))
+            self.gaps.too_large.append((name, large))
         if name in self.found:  # a repeated key and a '#' key that collide: keep both
-            self.tally.repeated.append(name)
+            self.gaps.repeated.append(name)
             n = 1
             while f"{name}#{n}" in self.found:
                 n += 1
             name = f"{name}#{n}"
         elif item.repeated:
-            self.tally.repeated.append(name)
+            self.gaps.repeated.append(name)
         self.found[name] = CalibrationParameter(name, value, _unit(value))
 
     def _shape(self, item: Item, name: str) -> None:
@@ -189,7 +189,7 @@ class Flattener:
             channels = int(dt.text[:-1])
         declared = int(r) * int(c) * channels
         if declared != data.count:
-            self.tally.shapes.append((name or "/", declared, data.count))
+            self.gaps.shapes.append((name or "/", declared, data.count))
 
 
 def _unit(value: Knowledge[ParameterValue]) -> Knowledge[Unit]:

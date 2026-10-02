@@ -52,3 +52,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0046](0046-ros1-bag-adapter-connections-as-streams-planning-from-the-index.md) | The ROS 1 bag adapter: connections as streams, planning from the index, the same Run and Stream as MCAP | Accepted |
 | [0047](0047-optional-manifest-stated-declarations-set-against-evidence.md) | The optional manifest: a source in the folder, stated declarations set against the evidence, generated as commented choices | Accepted |
 | [0048](0048-flight-log-adapter-px4-ulog-and-ardupilot-dataflash.md) | The flight-log adapter: PX4 ULog and ArduPilot DataFlash as runs, decoded streams and cited tables | Accepted |
+| [0055](0055-calibration-adapter-ros-kalibr-opencv-and-shared-structured-readers.md) | The calibration adapter: ROS, Kalibr and OpenCV files as calibrations, extrinsics and a file-local frame graph, over shared structured readers | Accepted |

@@ -22,7 +22,7 @@ from neptune.adapters.calibration._formats import (
     Recognised,
 )
 from neptune.adapters.calibration._items import Item, Kind
-from neptune.adapters.calibration._params import Flattener, Tally, single_number
+from neptune.adapters.calibration._params import Flattener, Gaps, single_number
 from neptune.adapters.contract import AdapterConfig
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import evidence_record_id
@@ -138,7 +138,7 @@ class Emitter:
         parameters = flat.run(item, consumed)
         if fmt in (CalibrationFormat.OPENCV_YAML, CalibrationFormat.OPENCV_XML):
             self._opencv_extrinsics(item, calibration_id)
-        self._tally(flat.tally, item, calibration_id)
+        self._gaps(flat.gaps, item, calibration_id)
         for transform in transforms:
             self.out.records.append(transform)
         self.transforms.extend(transforms)
@@ -265,7 +265,7 @@ class Emitter:
 
     # --- findings from flattening -------------------------------------------------------------
 
-    def _tally(self, tally: Tally, item: Item, calibration_id: RecordId) -> None:
+    def _gaps(self, gaps: Gaps, item: Item, calibration_id: RecordId) -> None:
         def report(
             name: str,
             category: FindingCategory,
@@ -288,7 +288,7 @@ class Emitter:
             "value_not_read",
             FindingCategory.UNSUPPORTED,
             Severity.WARNING,
-            [name for name, _ in tally.unread],
+            [name for name, _ in gaps.unread],
             "values are not read (an alias, a tag the application reads, a number beyond"
             " binary64 or a value no record holds); each parameter is Unknown",
         )
@@ -296,31 +296,31 @@ class Emitter:
             "array_too_large",
             FindingCategory.LIMIT,
             Severity.WARNING,
-            [name for name, _ in tally.too_large],
+            [name for name, _ in gaps.too_large],
             "arrays hold more numbers than max_array_values; each parameter is Unknown",
         )
         report(
             "non_finite_value",
             FindingCategory.INCONSISTENT,
             Severity.WARNING,
-            tally.non_finite,
+            gaps.non_finite,
             "parameters hold NaN or an infinity, kept as declared",
         )
         report(
             "ambiguous_value",
             FindingCategory.AMBIGUOUS,
             Severity.WARNING,
-            tally.ambiguous,
+            gaps.ambiguous,
             "values read differently under YAML 1.1 and 1.2; each parameter is Ambiguous",
         )
         report(
             "duplicate_key",
             FindingCategory.INCONSISTENT,
             Severity.WARNING,
-            tally.repeated,
+            gaps.repeated,
             "keys repeat in their mapping; each is kept, named by its position",
         )
-        shapes = tally.shapes
+        shapes = gaps.shapes
         report(
             "shape_mismatch",
             FindingCategory.INCONSISTENT,
