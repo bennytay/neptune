@@ -35,6 +35,7 @@ PENDING: Final = {
     "test_query_time_window_stays_on_one_clock": QUERY,
     "test_query_pages_by_cursor": QUERY,
     "test_query_rejects_an_inverted_window": QUERY,
+    "test_query_rejects_a_kind_no_schema_version_declares": QUERY,
 }
 
 

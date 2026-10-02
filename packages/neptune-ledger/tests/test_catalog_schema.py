@@ -56,6 +56,8 @@ def test_the_schema_has_the_tables_the_adr_names(catalog: Conn) -> None:
         "record",
         "registration_log",
         "schema_migration",
+        "schema_version",
+        "schema_version_projection",
         "source",
         "source_location",
         "tenant",
