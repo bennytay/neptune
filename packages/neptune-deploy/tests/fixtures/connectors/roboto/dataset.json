@@ -1,0 +1,27 @@
+{
+  "data": {
+    "administrator": "Roboto",
+    "created": "2026-09-14T08:00:00.000000+00:00",
+    "created_by": "usr_ops_bot",
+    "custom_fields": {},
+    "dataset_id": "ds_shift_0914",
+    "description": "Warehouse AMR shift, one arm cell and one legged patrol, 14 Sep",
+    "device_id": null,
+    "metadata": {
+      "site": "dc-4",
+      "standard": "ISO 3691-4"
+    },
+    "modified": "2026-09-14T08:00:00.000000+00:00",
+    "modified_by": "usr_ops_bot",
+    "name": "Shift 2026-09-14",
+    "org_id": "og_acme_robotics",
+    "roboto_record_version": 3,
+    "storage_ctx": {},
+    "storage_location": "S3",
+    "tags": [
+      "amr",
+      "arm-cell",
+      "legged"
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "schema": "neptune-deploy.record-profile/1",
+  "id": "cmms-example",
+  "records": {
+    "path": "/api/v1/work-orders",
+    "items": "/data",
+    "id": "/id",
+    "revision": {"pointer": "/updatedAt", "kind": "updated"},
+    "name": "/number"
+  },
+  "query": {"status": "all"},
+  "paging": {"style": "cursor", "limit_param": "limit", "cursor_param": "cursor", "next": "/meta/next"},
+  "since": {"param": "updatedAfter"},
+  "snapshot": {
+    "format": "csv",
+    "columns": {
+      "WO Number": "/number",
+      "WO Type": "/type",
+      "Asset ID": "/asset/id",
+      "Site": "/site",
+      "Completed": "/completed",
+      "Problem": "/problem",
+      "Work Performed": "/work"
+    }
+  },
+  "attachments": {
+    "pointer": "/attachments",
+    "id": "/id",
+    "name": "/fileName",
+    "size": "/size",
+    "revision": "/updatedAt",
+    "path": "/api/v1/work-orders/{record}/attachments/{attachment}/download"
+  },
+  "auth": {"header": "Session-Token"}
+}
