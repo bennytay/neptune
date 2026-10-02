@@ -189,16 +189,6 @@ def _sha256(key: str | bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def key_order(raw: bytes) -> KeyOrder:
-    """How keys are ordered when a listing is cut: by their first ``MAX_SKIPPED_KEY_BYTES``, then
-    length and digest. For keys no longer than that, this is plain byte order."""
-    return raw[:MAX_SKIPPED_KEY_BYTES], len(raw), _sha256(raw)
-
-
-def _within(order: KeyOrder, cutoff: KeyOrder | None) -> bool:
-    return cutoff is not None and order <= cutoff
-
-
 @dataclass(frozen=True)
 class SkippedObject:
     """A listed entry the source does not use, and the finding code saying why.
@@ -220,6 +210,7 @@ class SkippedObject:
 
     @property
     def order(self) -> KeyOrder:
+        """How unused keys are listed: by their kept prefix, then length and digest."""
         return self.raw_key, self.length, self.sha256
 
 
@@ -396,20 +387,25 @@ class ObjectStoreSource:
 
     @cached_property
     def _listing(self) -> Listing:
+        """Every page, read entry by entry in key order; a limit stops at the first entry over it.
+
+        Within a page, entries are taken in byte order of their keys. Stores list in key order, so
+        this is the same sequence of entries whatever the page size, and a limit (objects or bytes)
+        stops at the same entry: what is kept depends on the keys, never on the pages.
+        """
         prefix = self.location.prefix
         limit = self.options.max_objects
         budget = self.options.max_listing_bytes
         kept: dict[str, Listed] = {}
         duplicated: set[str] = set()
         skipped: set[SkippedObject] = set()
-        skipped_keys: set[KeyOrder] = set()
-        held = 0  # key and token bytes the listing holds: kept keys whole, skipped keys capped
+        held = 0  # bytes the listing holds: used keys and tokens whole, unused keys capped
         cursors: set[bytes] = set()  # digests of the cursors seen, never the cursors themselves
         cursor: Cursor | None = None
         complete = False
-        stopped: dict[str, JsonValue] | None = None  # why a limit stopped the listing
+        stopped: dict[str, JsonValue] | None = None  # the limit that stopped the listing
         pages = 0
-        while True:
+        while stopped is None:
             if pages >= MAX_PAGES:
                 stopped = {"pages": pages}
                 break
@@ -427,30 +423,38 @@ class ObjectStoreSource:
                     self.report("listing_failed", self.listing_ref, {**details, "cause": code})
                 break
             pages += 1
-            found = [SkippedObject(item.raw, item.reason) for item in page.unlisted]
+            arrived: list[tuple[bytes, Listed | SkippedObject]] = [
+                (item.raw, SkippedObject(item.raw, item.reason)) for item in page.unlisted
+            ]
             for item in page.objects:
                 raw = item.key.encode("utf-8")
                 if not item.key.startswith(prefix):
-                    found.append(SkippedObject(raw, "key_outside_prefix"))
+                    arrived.append((raw, SkippedObject(raw, "key_outside_prefix")))
                 elif len(raw) > MAX_KEY_BYTES:
-                    found.append(SkippedObject(raw, "key_too_long"))
-                elif item.key in kept and kept[item.key] != item:
-                    duplicated.add(item.key)
-                elif item.key not in kept:
-                    kept[item.key] = item
-                    held += len(raw) + len(item.token)
-            for skip in found:
-                if skip not in skipped:
-                    skipped.add(skip)
-                    skipped_keys.add(skip.order)
-                    held += len(skip.raw_key)
-            # Every distinct key counts, used or not, and so does every byte held: no listing
-            # grows without bound, whatever the store sends.
-            if len(kept) + len(skipped_keys) > limit:
-                stopped = {"max_objects": limit}
-                break
-            if held > budget:
-                stopped = {"max_listing_bytes": budget}
+                    arrived.append((raw, SkippedObject(raw, "key_too_long")))
+                else:
+                    arrived.append((raw, item))
+            for raw, entry in sorted(arrived, key=lambda pair: pair[0]):
+                if isinstance(entry, SkippedObject):
+                    cost = 0 if entry in skipped else len(entry.raw_key) + len(entry.reason)
+                elif entry.key in kept:
+                    cost = 0
+                    if kept[entry.key] != entry:
+                        duplicated.add(entry.key)
+                else:
+                    if len(kept) >= limit:
+                        stopped = {"max_objects": limit}
+                        break
+                    cost = len(raw) + len(entry.token)
+                if held + cost > budget:
+                    stopped = {"max_listing_bytes": budget}
+                    break
+                held += cost
+                if isinstance(entry, SkippedObject):
+                    skipped.add(entry)
+                elif entry.key not in kept:
+                    kept[entry.key] = entry
+            if stopped is not None:
                 break
             if page.cursor is None:
                 complete = True
@@ -461,27 +465,19 @@ class ObjectStoreSource:
                 break
             cursors.add(digest.digest())
             cursor = page.cursor
-        if stopped is not None and (kept or skipped_keys):
-            # Keep what any page size keeps. Stores list in key order, so every key below the
-            # greatest one seen has been seen whole, duplicates included; keep the first ``limit``
-            # of those, and nothing after them. The rest of the prefix is not covered.
-            seen = {key_order(key.encode("utf-8")) for key in kept} | skipped_keys
-            greatest = max(seen)
-            below = sorted(order for order in seen if order < greatest)[:limit]
-            cutoff = below[-1] if below else None
-            kept = {k: v for k, v in kept.items() if _within(key_order(k.encode("utf-8")), cutoff)}
-            duplicated = {k for k in duplicated if _within(key_order(k.encode("utf-8")), cutoff)}
-            skipped = {item for item in skipped if _within(item.order, cutoff)}
-            last = cutoff[0][:MAX_EXAMPLE_BYTES].hex() if cutoff else ""
-            self.report("listing_limit", self.listing_ref, {**stopped, "covered_through_hex": last})
-        elif stopped is not None:
-            self.report("listing_limit", self.listing_ref, {**stopped, "covered_through_hex": ""})
+        if stopped is not None:
+            # Covered: every key up to the last one kept, in byte order. Unused keys are reported
+            # as findings and play no part in the marker or in the object limit.
+            last = max((key.encode("utf-8") for key in kept), default=b"")
+            self.report(
+                "listing_limit", self.listing_ref, {**stopped, "covered_through_hex": last.hex()}
+            )
         for key in duplicated:
             del kept[key]
             skipped.add(SkippedObject(key.encode("utf-8"), "key_duplicated"))
         entries = tuple(
             ObjectEntry(self.ref(key, item.token), item.size, key)
-            for key, item in sorted(kept.items())
+            for key, item in sorted(kept.items(), key=lambda pair: pair[0].encode("utf-8"))
         )
         unique = tuple(sorted(skipped, key=lambda s: (s.reason, s.order)))
         self._report_skipped(unique)

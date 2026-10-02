@@ -85,18 +85,21 @@ rule is harder: the store is remote, mutable, paginated and hostile.
    - A cursor seen before stops the listing (`pagination_loop`). Only a sha256 digest of each cursor
      is kept for this, never the cursor. A continuation token or marker longer than 4 KiB stops the
      listing (`response_invalid`).
-   - Pages are limited to 100,000. Distinct keys, used or not, are limited to `max_objects` (default
-     1,000,000). The bytes the listing holds are limited to `max_listing_bytes` (default 256 MiB):
-     kept keys and tokens whole, and each unused key as at most its first 256 bytes, with its length
-     and sha256. Each limit is a `listing_limit` finding naming the last key covered
-     (`covered_through_hex`); every key after it is not covered. A store that lists huge or unusable
-     keys therefore cannot grow a listing without bound: 20,000 keys of 30 KB outside the prefix hold
-     about 5 MB, where they would otherwise hold 600 MB.
-   - A listing stopped by a limit keeps the first `max_objects` keys below the greatest key it saw,
-     and drops every finding about later keys. Stores list in key order, so every key below the
-     greatest has been seen whole, duplicates included, and a limited listing is the same for every
-     page size. A listing stopped by a failure or a loop depends on where it stopped, and its finding
-     says where.
+   - Pages are limited to 100,000. Used keys are limited to `max_objects` (default 1,000,000). The
+     bytes the listing holds are limited to `max_listing_bytes` (default 256 MiB). That budget counts
+     used keys and their tokens whole, and each unused key as at most its first 256 bytes, kept with
+     its length and sha256. A store that lists huge or unusable keys therefore cannot grow a listing
+     without bound: 20,000 keys of 30 KB outside the prefix hold about 5 MB, not 600 MB.
+   - A limit is checked entry by entry, never per page. Within a page, entries are taken in byte
+     order of their keys. Stores list in key order, so this is one sequence of entries whatever the
+     page size. The listing stops at the first entry that would pass a limit, and that entry is not
+     taken. A limited listing therefore keeps the same entries at every page size, and a test checks
+     page sizes 1 to 1,000.
+   - The stop is a `listing_limit` finding, and its `covered_through_hex` is the last kept used key,
+     whole, in byte order. Every key after it is not covered. Unused keys are reported as findings
+     (ordered by prefix, length, sha256) and play no part in that marker or in the object limit.
+   - A listing stopped by the page limit, a failure or a loop depends on where it stopped, and its
+     finding says where.
    - A listing that stopped early is `complete: false`, and nothing is asserted gone from it.
    - The only wall-clock reading is the SigV4 signing time. It reaches the request, never an output.
    - Findings carry codes, counts, statuses, offsets and keys (as hex), never error text, received
@@ -127,7 +130,8 @@ rule is harder: the store is remote, mutable, paginated and hostile.
      finding or transform holds a credential, and a test checks every exception chain.
    - The timeout (default 60 s) bounds each socket operation, and also the whole request as a
      deadline. When the deadline passes, the socket is shut down, so a server that sends a byte every
-     59 s cannot hold a read or a page open (`deadline_exceeded`).
+     59 s cannot hold a read or a page open (`deadline_exceeded`). The deadline is checked
+     again after connecting, before headers are read, in case it passed before a socket existed.
    - Credentials are the ones declared to the factory or, if none are declared, the `NEPTUNE_*`
      variables: `NEPTUNE_S3_ACCESS_KEY_ID`, `NEPTUNE_S3_SECRET_ACCESS_KEY`, `NEPTUNE_S3_SESSION_TOKEN`,
      `NEPTUNE_GCS_ACCESS_TOKEN`, `NEPTUNE_AZURE_SAS_TOKEN`. The ambient `AWS_*`, `GOOGLE_*` and

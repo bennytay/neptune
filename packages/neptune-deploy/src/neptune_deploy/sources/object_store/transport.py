@@ -316,7 +316,10 @@ class Transport:
                     connection.putheader(name, value)
                 if body is not None:
                     connection.putheader("Content-Length", str(len(body)))
-                connection.endheaders(body)
+                connection.endheaders(body)  # connects, if the connection is new
+                if deadline.expired:  # it passed while connecting, before a socket to shut down
+                    self.drop()
+                    raise DeadlineExceeded("the request outlived its deadline")
                 return connection.getresponse()
             except (ConnectionResetError, BrokenPipeError) as exc:  # RemoteDisconnected too
                 self.drop()
