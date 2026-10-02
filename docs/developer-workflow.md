@@ -99,9 +99,9 @@ each its own agent session:
 | Implementer (≤ cap) | one issue in one worktree: branch → implement → `make check` → PR → In Review → stop | merges, approves, touches another issue's branch |
 | Reviewer (≤2 at once) | reads one PR cold against the checklist above and the non-negotiables; returns a verdict | edits the branch; merges |
 
-**Caps.** 5 implementers once the MVL-57 gate is Done (3 before), plus up to 3 more that run adapter
-issues only (8 in all); 2 reviewers at once. Adapter work is independent by construction (adapters never
-import each other) and gets one review round, so it adds little to the conflict rate or to review bandwidth.
+**Caps.** 5 implementers in total once the MVL-57 gate is Done (3 before), adapter issues included; 2
+reviewers at once. The machine is RAM and CPU bound, so the cap does not rise for adapter work, though
+adapter PRs get one review round (below).
 
 ### Model policy and review rounds
 
