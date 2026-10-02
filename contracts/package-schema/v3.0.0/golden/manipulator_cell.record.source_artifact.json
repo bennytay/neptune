@@ -1,0 +1,10 @@
+{
+  "chunk_size": 8388608,
+  "chunks": [
+    "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+  ],
+  "content_id": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9",
+  "kind": "source_artifact",
+  "schema_version": 1,
+  "size": 3374
+}

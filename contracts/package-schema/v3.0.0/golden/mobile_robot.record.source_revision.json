@@ -1,10 +1,10 @@
 {
-  "content_id": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6",
-  "id": "rec:sha256:4278131bed884309947d8ac0d490a05070ceefebfd6931fb621a80c2b021b66f",
+  "content_id": "sha256:7d0b94de1c53854042801be9b3078fde7ffd1cf945a54c132e22f3461a5965a0",
+  "id": "rec:sha256:97ed17d76ff4fb5aad94202128b451c34c67d04fe9622997084b3a18a40e1f9e",
   "kind": "source_revision",
   "location": {
     "kind": "local",
-    "path": "deployment/records.json"
+    "path": "sites.csv"
   },
   "schema_version": 1,
   "supersedes": []

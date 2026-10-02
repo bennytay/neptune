@@ -87,13 +87,16 @@ its first issue (MVL-112) waits on a canonical place to put them. Forces:
    - `receipt.md` lists each new kind with its count in its Records table. No receipt field is added.
    - The package-schema contract is published at **3.0.0**. `SCHEMA_VERSION` is the registry major
      (platform ADR 0002 §3), so a minor version is not possible.
-8. **Worked examples.**
-   - `mobile_robot` adds a warehouse deployment export: AMR-07 at site S-007 with commissioning,
-     its authorisation envelope, a remote assist, an incident, the change that followed, and the
-     risk assessment.
-   - `manipulator` adds a cell export: commissioning, risk assessment, a joint-drive replacement,
-     and the requalification that returned the cell to service.
-   - Between them the two examples hold all eight kinds, and every value cites its JSON pointer.
+8. **Worked examples: two new ones, the four robots untouched.**
+   - `warehouse_amr` is a deployment export for AMR-07 at site S-007. It holds commissioning, the
+     authorisation envelope, a remote assist, an incident, the change that followed, and the risk
+     assessment.
+   - `manipulator_cell` covers cell CELL-3. It holds commissioning, the risk assessment, a
+     joint-drive replacement, and the requalification that returned the cell to service.
+   - Together they hold all eight kinds, and every value cites its JSON pointer.
+   - Both join the package-schema goldens. The four robot examples stay byte-identical version 1
+     packages, so consumers whose suites pin those examples (the Ledger's catalog contract, Memory,
+     the harness) do not move.
 
 ## Alternatives considered
 
@@ -109,6 +112,8 @@ its first issue (MVL-112) waits on a canonical place to put them. Forces:
   Lost.
 - **A lifecycle section in `IngestReceipt`.** It changes the receipt document's shape and every
   receipt id, while the Records table already lists the kinds. Revisit if consumers need more.
+- **Adding the records to the `mobile_robot` and `manipulator` examples.** Those examples would become
+  version 3 packages and break consumer suites that register them as version 1. Lost.
 - **Hand-written `to_json` and `from_json` per kind, as in `world.py`.** About 600 more lines across
   eight kinds and ten parts, with more room for a field to be written but not read. The codec table
   and its import-time check keep the three paths in step. Lost.

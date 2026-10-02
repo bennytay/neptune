@@ -1,10 +1,10 @@
 # Ingest receipt
 
-Receipt `rec:sha256:800258255ce4c8470fa2e11d5d25420267a25bc87747935f4ea0edd186a93646`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:db4bdca33ed9824bed9a42ebca5f391c68f5323862d76af6e99ef8b499e4720a`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
-- Sources: 4 seen, 4 read, 0 not read, 0 gone
+- Sources: 3 seen, 3 read, 0 not read, 0 gone
 - Runs: 1; streams: 2; entities: 2
 - Findings: 0 errors, 0 warnings, 0 info; ambiguous fields: 0
 
@@ -12,7 +12,6 @@ Receipt `rec:sha256:800258255ce4c8470fa2e11d5d25420267a25bc87747935f4ea0edd186a9
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `deployment/records.json` | 4903 | `sha256:5d7a7e18bb8b` | deployment_json 1.0.0 |
 | `drive.bag` | 5810 | `sha256:dbdd615de58b` | rosbag1 1.0.0 |
 | `photos/dock.png` | 352 | `sha256:a129a6a387b1` | png 1.0.0 |
 | `sites.csv` | 128 | `sha256:7d0b94de1c53` | csv 1.0.0 |
@@ -22,7 +21,6 @@ Receipt `rec:sha256:800258255ce4c8470fa2e11d5d25420267a25bc87747935f4ea0edd186a9
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
 | `csv` | `1.0.0` | `sha256:44136fa355b3` | none | `rec:800d71037ae3` |
-| `deployment_json` | `1.0.0` | `sha256:44136fa355b3` | none | `rec:538dcf592361` |
 | `png` | `1.0.0` | `sha256:44136fa355b3` | none | `rec:98cfc802e399` |
 | `rosbag1` | `1.0.0` | `sha256:44136fa355b3` | none | `rec:266373f75daf` |
 
@@ -30,22 +28,16 @@ Receipt `rec:sha256:800258255ce4c8470fa2e11d5d25420267a25bc87747935f4ea0edd186a9
 
 | Kind | Records |
 |---|---|
-| `authorisation_envelope` | 1 |
-| `change_record` | 1 |
-| `commissioning_baseline` | 1 |
 | `image` | 1 |
-| `incident_record` | 1 |
-| `intervention` | 1 |
-| `risk_assessment` | 1 |
 | `run` | 1 |
 | `site` | 2 |
-| `source_artifact` | 4 |
-| `source_revision` | 4 |
+| `source_artifact` | 3 |
+| `source_revision` | 3 |
 | `stream` | 2 |
 | `structured_record` | 2 |
 | `structured_table` | 1 |
-| `timestamp_domain` | 4 |
-| `transform_record` | 4 |
+| `timestamp_domain` | 3 |
+| `transform_record` | 3 |
 
 ## Runs
 

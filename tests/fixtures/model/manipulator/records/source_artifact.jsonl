@@ -1,3 +1,2 @@
 {"chunk_size":8388608,"chunks":["sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa"],"content_id":"sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa","kind":"source_artifact","schema_version":1,"size":348}
-{"chunk_size":8388608,"chunks":["sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"],"content_id":"sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9","kind":"source_artifact","schema_version":1,"size":3374}
 {"chunk_size":8388608,"chunks":["sha256:d6bebd2e8559a3b41e661de1efb79ea3dbbc183a8c4992b615726606c315a840"],"content_id":"sha256:d6bebd2e8559a3b41e661de1efb79ea3dbbc183a8c4992b615726606c315a840","kind":"source_artifact","schema_version":1,"size":2570}

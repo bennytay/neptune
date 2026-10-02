@@ -309,8 +309,10 @@ a bug, not a value.
 |---|---|---|
 | drone | PX4 ULog | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings |
 | quadruped | ROS 2 bag, URDF, STL mesh | run from bag metadata, joint and trajectory streams with three clocks each, URDF frames, transforms and components, the mesh as geometry |
-| manipulator | MCAP, hand-eye YAML, cell records JSON | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit; the cell's commissioning, risk assessment, maintenance and requalification |
-| mobile robot | ROS 1 bag, site register CSV, PNG photo, deployment records JSON | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture; the warehouse deployment's commissioning, authorisation, intervention, incident, change and risk assessment |
+| manipulator | MCAP, hand-eye YAML | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit |
+| mobile robot | ROS 1 bag, site register CSV, PNG photo | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture |
+| warehouse AMR | deployment records JSON | commissioning, authorisation envelope, intervention, incident, change and risk assessment (ADR 0051) |
+| manipulator cell | deployment records JSON | commissioning, risk assessment, maintenance event and requalification (ADR 0051) |
 
 Every source is a real file, and every record resolves back to it: citations land on real records, pointers,
 rows and cells resolve, and every id a record names is in the example.

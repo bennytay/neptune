@@ -4,13 +4,15 @@ Four robots, each with the sources such a team typically has (MVL-70):
 
 - drone: a PX4 flight log (``flight.ulg``);
 - quadruped: a ROS 2 bag (``bag/metadata.yaml`` and its MCAP file), a URDF and the mesh it uses;
-- manipulator: an MCAP recording, a hand-eye calibration result and the cell's deployment records;
-- mobile_robot: a ROS 1 bag, a site register (CSV), a photo taken at a dock (PNG with EXIF) and
-  the warehouse deployment's records.
+- manipulator: an MCAP recording and a hand-eye calibration result;
+- mobile_robot: a ROS 1 bag, a site register (CSV) and a photo taken at a dock (PNG with EXIF).
 
-Deployment records (ADR 0051) are JSON exports of the forms, tickets and work orders a deployment
-keeps: date-times carry their offset, and every value is written as the people who filled the
-forms wrote it.
+Two deployments add the records a deployment keeps (ADR 0051), each a JSON export of its forms,
+tickets and work orders, whose date-times carry their offset and whose values are written as the
+people who filled the forms wrote them:
+
+- warehouse_amr: a mobile robot's warehouse deployment;
+- manipulator_cell: a manipulator cell's.
 
 YAML sources are written in flow style, which is valid YAML and parses as JSON, so tests can
 resolve JSON pointers into them with the standard library.
@@ -480,11 +482,7 @@ def manipulator() -> list[Source]:
         McapChannel(2, 2, "/wrist_camera/image/compressed", "cdr"),
     )
     data, layout = mcap("ros2", schemas, channels, MANIPULATOR_MESSAGES)
-    return [
-        Source("session.mcap", data, layout),
-        Source("handeye.yaml", _json(HANDEYE), {}),
-        Source("cell/records.json", _json(CELL_RECORDS), {}),
-    ]
+    return [Source("session.mcap", data, layout), Source("handeye.yaml", _json(HANDEYE), {})]
 
 
 # --- Mobile robot: ROS 1 bag + site register + photo -------------------------------------------
@@ -676,8 +674,15 @@ def mobile_robot() -> list[Source]:
         Source("drive.bag", bag, bag_layout),
         Source("sites.csv", REGISTER.encode(), {}),
         Source("photos/dock.png", photo, photo_layout),
-        Source("deployment/records.json", _json(WAREHOUSE_RECORDS), {}),
     ]
+
+
+def warehouse_amr() -> list[Source]:
+    return [Source("records.json", _json(WAREHOUSE_RECORDS), {})]
+
+
+def manipulator_cell() -> list[Source]:
+    return [Source("records.json", _json(CELL_RECORDS), {})]
 
 
 EXAMPLES: Final = {
@@ -685,4 +690,6 @@ EXAMPLES: Final = {
     "quadruped": quadruped,
     "manipulator": manipulator,
     "mobile_robot": mobile_robot,
+    "warehouse_amr": warehouse_amr,
+    "manipulator_cell": manipulator_cell,
 }

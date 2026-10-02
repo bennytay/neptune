@@ -71,7 +71,14 @@ def test_compiler_owner_rule_holds() -> None:
 def test_package_schema_goldens_cover_four_robots_and_every_document() -> None:
     latest = _registry().latest("package-schema")
     robots = {name.split(".", 1)[0] for name in latest.goldens}
-    assert robots == {"drone", "manipulator", "mobile_robot", "quadruped"}
+    assert robots == {
+        "drone",
+        "manipulator",
+        "mobile_robot",
+        "quadruped",
+        "warehouse_amr",  # deployment lifecycle records (ADR 0051)
+        "manipulator_cell",
+    }
     for robot in robots:
         assert latest.goldens[f"{robot}.manifest.json"] == "#/$defs/PackageManifest"
         assert latest.goldens[f"{robot}.receipt.json"] == "#/$defs/IngestReceipt"
@@ -151,7 +158,6 @@ def _next(registry: Any, contract: str, *, major: bool = False) -> str:
 
 def test_a_minor_lag_warns_and_passes(registry: Any) -> None:
     assert _check(registry).ok
-    pinned = registry.lock()["neptune-ledger"]["package-schema"]
     newer = _next(registry, "package-schema")
     _publish(registry, "package-schema", newer)
     report = _check(registry)
@@ -200,7 +206,6 @@ def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> Non
 
 
 def test_a_minor_version_must_accept_its_majors_goldens(registry: Any) -> None:
-    pinned = registry.lock()["neptune-ledger"]["package-schema"]
     newer = _next(registry, "package-schema")
     _publish(registry, "package-schema", newer)
     path = registry.root / "package-schema" / f"v{newer}"

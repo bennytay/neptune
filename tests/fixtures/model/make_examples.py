@@ -805,7 +805,6 @@ def manipulator() -> Example:
             extrinsics=(transform.id,),
         )
     )
-    cell_records(ex)
     return ex
 
 
@@ -931,9 +930,10 @@ class Records:
         )
 
 
-def warehouse_records(ex: Example) -> None:
+def warehouse_amr() -> Example:
     """The warehouse deployment of AMR-07 at site S-007, from its records export."""
-    r = Records(ex, "deployment/records.json")
+    ex = Example("warehouse_amr", {source.path: source for source in EXAMPLES["warehouse_amr"]()})
+    r = Records(ex, "records.json")
     site = r.ref("register", "/site")  # the site register's id (sites.csv)
     c = "/commissioning/0"
     r.add(
@@ -1053,11 +1053,15 @@ def warehouse_records(ex: Example) -> None:
         hazards=r.hazards(f"{k}/hazards"),
         approval=r.decision(f"{k}/decision", f"{k}/approved_by", f"{k}/approved"),
     )
+    return ex
 
 
-def cell_records(ex: Example) -> None:
+def manipulator_cell() -> Example:
     """The manipulator cell CELL-3: commissioning, risk, a repair and its requalification."""
-    r = Records(ex, "cell/records.json")
+    ex = Example(
+        "manipulator_cell", {source.path: source for source in EXAMPLES["manipulator_cell"]()}
+    )
+    r = Records(ex, "records.json")
     site = r.ref("plant.cell", "/cell")
     c = "/commissioning"
     r.add(
@@ -1128,6 +1132,7 @@ def cell_records(ex: Example) -> None:
         result=r.text(f"{q}/result"),
         return_to_service=r.decision(f"{q}/return_to_service", f"{q}/returned_by", f"{q}/returned"),
     )
+    return ex
 
 
 # --- Mobile robot: a ROS 1 bag, a site register and a photo ------------------------------------
@@ -1319,7 +1324,6 @@ def mobile_robot() -> Example:
             ),
         )
     )
-    warehouse_records(ex)
     return ex
 
 
@@ -1328,6 +1332,8 @@ EXAMPLE_BUILDERS: Final[dict[str, Callable[[], Example]]] = {
     "quadruped": quadruped,
     "manipulator": manipulator,
     "mobile_robot": mobile_robot,
+    "warehouse_amr": warehouse_amr,
+    "manipulator_cell": manipulator_cell,
 }
 
 

@@ -73,7 +73,10 @@ from neptune.model.world import (
 pytestmark = pytest.mark.integration
 
 FIXTURES: Final = Path(__file__).parents[1] / "fixtures" / "model"
-EXAMPLES: Final = ("drone", "quadruped", "manipulator", "mobile_robot")
+PLATFORMS: Final = ("drone", "quadruped", "manipulator", "mobile_robot")
+# Two deployments' records (ADR 0051): an AMR in a warehouse and a manipulator cell.
+DEPLOYMENTS: Final = ("warehouse_amr", "manipulator_cell")
+EXAMPLES: Final = (*PLATFORMS, *DEPLOYMENTS)
 READERS: Final[dict[str, Callable[[JsonValue], Any]]] = {
     "calibration": calibration_from_json,
     "frame": frame_from_json,
@@ -152,7 +155,7 @@ def test_the_committed_examples_are_exactly_what_the_builder_writes() -> None:
 
 def test_the_examples_cover_the_four_platforms_each_with_a_run() -> None:
     assert set(BUILDER.EXAMPLE_BUILDERS) == set(EXAMPLES)
-    for example in EXAMPLES:
+    for example in PLATFORMS:
         assert len(tables(example)["run"]) == 1, example
 
 
@@ -308,14 +311,14 @@ REPRESENTED_AS: Final = {
     ("mobile_robot", "drive.bag"): {"run", "stream", "timestamp_domain"},
     ("mobile_robot", "sites.csv"): {"site", "structured_record", "structured_table"},
     ("mobile_robot", "photos/dock.png"): {"image", "timestamp_domain"},
-    ("manipulator", "cell/records.json"): {
+    ("manipulator_cell", "records.json"): {
         "commissioning_baseline",
         "maintenance_event",
         "requalification_record",
         "risk_assessment",
         "timestamp_domain",
     },
-    ("mobile_robot", "deployment/records.json"): {
+    ("warehouse_amr", "records.json"): {
         "authorisation_envelope",
         "change_record",
         "commissioning_baseline",
@@ -408,7 +411,7 @@ def test_declared_times_are_what_the_bytes_say() -> None:
 def test_the_two_deployments_hold_every_lifecycle_kind_as_stated() -> None:
     found = {
         kind: example
-        for example in ("mobile_robot", "manipulator")
+        for example in DEPLOYMENTS
         for kind, _, record in records(example)
         if kind in {cls.kind for cls in LIFECYCLE_KINDS}
         and record.provenance.assertion_kind.value == "stated"
@@ -417,16 +420,16 @@ def test_the_two_deployments_hold_every_lifecycle_kind_as_stated() -> None:
 
 
 def test_lifecycle_values_are_what_the_forms_say() -> None:
-    export = json.loads(source_files("mobile_robot")["deployment/records.json"])
-    incident = _record("mobile_robot", "incident_record")
+    export = json.loads(source_files("warehouse_amr")["records.json"])
+    incident = _record("warehouse_amr", "incident_record")
     assert incident.severity.value == export["incidents"][0]["severity"] == "S3"
-    envelope = _record("mobile_robot", "authorisation_envelope")
+    envelope = _record("warehouse_amr", "authorisation_envelope")
     limit = envelope.zones[0].speed_limit
     assert (limit.value.value, limit.unit.value.symbol) == (1.5, "m.s^-1")  # as declared, m/s
     occurred = calendar.timegm((2026, 9, 24, 18, 12, 0, 0, 0, 0))  # 04:12 at +10:00
     assert incident.occurred.value.ticks == occurred
-    cell = json.loads(source_files("manipulator")["cell/records.json"])
-    risk = _record("manipulator", "risk_assessment")
+    cell = json.loads(source_files("manipulator_cell")["records.json"])
+    risk = _record("manipulator_cell", "risk_assessment")
     hazard = cell["risk_assessment"]["hazards"][0]
     assert [(s.name, s.value.value) for s in risk.hazards[0].scores] == [
         (name, hazard[name]) for name in ("severity", "exposure", "avoidance", "PLr")
