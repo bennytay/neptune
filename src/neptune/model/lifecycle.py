@@ -42,7 +42,17 @@ from neptune.model._fields import (
 )
 from neptune.model.ids import LogicalId, RecordId, check_text, logical_id_from_json
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.knowledge import Ambiguous, Knowledge, Known, from_json, to_json
+from neptune.model.knowledge import (
+    Ambiguous,
+    Knowledge,
+    Known,
+    KnownAbsent,
+    NotApplicable,
+    NotCovered,
+    Unknown,
+    from_json,
+    to_json,
+)
 from neptune.model.provenance import (
     Provenance,
     check_evidence_record,
@@ -78,21 +88,37 @@ class _Codec(Generic[T]):
     decode: Callable[[JsonValue, str], T]
 
 
+def _check_state(name: str, value: Knowledge[Any]) -> None:
+    """A field is a state, never a bare value (non-negotiable 3), so a blank cannot pass as one."""
+    if not isinstance(
+        value, Known | KnownAbsent | Unknown | NotCovered | NotApplicable | Ambiguous
+    ):
+        raise TypeError(f"{name} must be a Knowledge state, got {value!r}")
+
+
 def _knowledge(
     kind: type | Any,
     encode: Callable[[Any], JsonValue] | None,
     decode: Callable[[JsonValue], Any],
 ) -> _Codec[Knowledge[Any]]:
+    def check(name: str, value: Knowledge[Any]) -> None:
+        _check_state(name, value)
+        check_type(name, value, kind)
+
     return _Codec(
-        lambda name, value: check_type(name, value, kind),
+        check,
         lambda value: to_json(value, encode),
         lambda data, _name: from_json(data, decode, provenance_from_json),
     )
 
 
 def _text_codec() -> _Codec[Knowledge[str]]:
+    def check(name: str, value: Knowledge[str]) -> None:
+        _check_state(name, value)
+        check_text_values(name, value)
+
     return _Codec(
-        check_text_values,
+        check,
         to_json,
         lambda data, name: from_json(data, text_decoder(name), provenance_from_json),
     )

@@ -254,6 +254,8 @@ BAD: Final = [
     ("text of the wrong type", "location", Known(3)),
     ("a time that is not a Timestamp", "occurred", Known("2026-09-30")),
     ("an id that is not a LogicalId", "zone", Known("PICK-A")),
+    ("a bare text, not a state", "severity", "S2"),
+    ("a bare id, not a state", "zone", LogicalId("site.zone", "DOCK-1")),
     ("a list, not a tuple", "assets", []),
     ("an unstated id", "assets", (Unknown(),)),
     (

@@ -867,6 +867,7 @@ class Records:
 
     def time(self, pointer: str) -> Known[Timestamp]:
         instant = datetime.fromisoformat(self.get(pointer))
+        assert instant.tzinfo is not None, pointer  # zone-less civil time is another clock
         ticks = calendar.timegm(instant.utctimetuple())
         return Known(Timestamp(ticks, self.clock.id), self.cite(pointer))
 
