@@ -2,13 +2,13 @@
 
 Status: **authoritative**; frozen at `SCHEMA_VERSION` 1 by the M1 gate (MVL-56, ADR 0023; review:
 `docs/reviews/m1-stress-test.md`) and grown only by addition since: version 2 adds configuration snapshots
-(MVL-23, ADR 0037). Primitives are specified by
+(MVL-23, ADR 0037), version 3 deployment lifecycle records (MVL-83, ADR 0051). Primitives are specified by
 MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66 (ADR 0017), runs, streams and series by MVL-67
 (ADR 0018), machine context by MVL-68 (ADR 0019) and world context by MVL-69 (ADR 0020). The JSON Schema
 (`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). Any change here needs
 an ADR and a schema-version bump, and must be an addition (ADR 0023 §1).
 
-## Record kinds (schema version 2)
+## Record kinds (schema version 3)
 
 Every record kind belongs to one family (ADR 0017 §4). The last four families are the design contract's source
 domains.
@@ -21,7 +21,7 @@ domains.
 | `reference` | `TimestampDomain`, `FrameGraph`, `Frame`, `FrameTransform` | `model/reference.py` |
 | `run` | `Run`, `Stream` | `model/run.py`, series contract in `model/series.py` (ADR 0018) |
 | `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration`; since version 2 `ConfigurationSnapshot`, `ConfigurationValue` | `model/machine.py` (ADR 0019), `model/configuration.py` (ADR 0037) |
-| `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord` | `model/world.py` (ADR 0020) |
+| `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord`; since version 3 `CommissioningBaseline`, `AuthorisationEnvelope`, `Intervention`, `MaintenanceEvent`, `RequalificationRecord`, `IncidentRecord`, `ChangeRecord`, `RiskAssessment` | `model/world.py` (ADR 0020), `model/lifecycle.py` (ADR 0051) |
 | `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
 
 `IngestReceipt` is the package-level account of an ingest run, not a record table: one document per package,
@@ -46,7 +46,7 @@ boundary to the memory learner.
 - A value defined by a format specification (MCAP `log_time` is ns) cites the bytes that establish the format
   plus the transform that applies the spec. When the source carries the definition itself (a ROS message
   definition in an MCAP schema record), it cites that instead.
-- `SCHEMA_VERSION` is 2. It became 1 at the M1 gate (ADR 0023), and a record kind's fields never change from
+- `SCHEMA_VERSION` is 3. It became 1 at the M1 gate (ADR 0023), and a record kind's fields never change from
   then on. The model grows only by addition (new record kinds, including companion kinds naming the record they
   extend, new enum members, new locator steps), each through an ADR and a version bump. So every record from
   version 1 on stays valid, readers read versions 1 to their own unchanged, and ids never move. Version 0
@@ -247,6 +247,22 @@ a bug, not a value.
   "none" is `KnownAbsent` citing the definition. A row cited as `Row(r)` hoists its cells' citations:
   cell `c` is `RowCell(r, c, header[c])` (`cell_evidence`).
 
+## Deployment lifecycle records (ADR 0051; `model/lifecycle.py`)
+
+- Eight `world` kinds from schema version 3, each `stated` by one form, ticket, work order or register
+  row: `CommissioningBaseline`, `AuthorisationEnvelope`, `Intervention`, `MaintenanceEvent`,
+  `RequalificationRecord`, `IncidentRecord`, `ChangeRecord`, `RiskAssessment`.
+- Shared fields, all declared ids: `identifiers` (the record's own), `site`, `machines`, `configuration`
+  (a maintenance event's is the as-maintained one it states) and `related` (records and evidence it
+  names). Never record ids: MVL-35 links them.
+- Stored as declared: severities, results, decisions, authorities, methods and scores are verbatim text
+  (`Score(name, value)` keeps the source's label); a `Quantity` is a declared number and declared unit;
+  times are `Timestamp`s on the clock the record names; versions are the kind the source names.
+- Parts: `Quantity`, `Decision` (decision, authority, time), `InventoryItem`, `TestResult`, `ZoneLimit`,
+  `PartReplacement`, `TimelineEntry`, `ChangeItem`, `Score`, `Hazard`. Statement lists keep source order and
+  may repeat; id lists are sorted and unique; an empty list states none.
+- No lifecycle logic: nothing orders stages, checks one record against another or ranks a severity.
+
 ## The package and its receipt (ADR 0022; `model/package.py`, `store/`)
 
 - A package is a directory: `manifest.json`, `receipt.json`, `receipt.md`, `records/<kind>.jsonl` (every kind of
@@ -293,8 +309,8 @@ a bug, not a value.
 |---|---|---|
 | drone | PX4 ULog | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings |
 | quadruped | ROS 2 bag, URDF, STL mesh | run from bag metadata, joint and trajectory streams with three clocks each, URDF frames, transforms and components, the mesh as geometry |
-| manipulator | MCAP, hand-eye YAML | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit |
-| mobile robot | ROS 1 bag, site register CSV, PNG photo | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture |
+| manipulator | MCAP, hand-eye YAML, cell records JSON | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit; the cell's commissioning, risk assessment, maintenance and requalification |
+| mobile robot | ROS 1 bag, site register CSV, PNG photo, deployment records JSON | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture; the warehouse deployment's commissioning, authorisation, intervention, incident, change and risk assessment |
 
 Every source is a real file, and every record resolves back to it: citations land on real records, pointers,
 rows and cells resolve, and every id a record names is in the example.

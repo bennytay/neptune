@@ -42,3 +42,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0035](0035-python-sdk-one-surface-dry-runs-results-and-errors.md) | The Python SDK: one sync and async surface over the job, dry runs, results and a stable error taxonomy | Accepted |
 | [0036](0036-session-grouping-v0-observed-layout-and-derived-proposals.md) | Session grouping v0: an observed layout, inferred proposals, derived tables in the package | Accepted |
 | [0037](0037-configuration-snapshots-and-additive-schema-versions.md) | Configuration snapshots, the config adapter, and schema versions that add without rewriting | Accepted |
+| [0051](0051-deployment-lifecycle-records-stated-as-declared.md) | Deployment lifecycle records, stated as declared | Accepted |
