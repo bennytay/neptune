@@ -8,10 +8,12 @@ record deleted). Knobs make it hostile: injected replies (429, 5xx, redirects, t
 compressed bodies, any bytes), a request log, and a count of methods other than GET.
 """
 
+import base64
 import copy
 import hashlib
 import json
 import threading
+import time
 import urllib.parse
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -42,6 +44,7 @@ class Reply:
     body: bytes = b""
     headers: dict[str, str] = field(default_factory=lambda: dict(JSON))
     declared_length: int | None = None  # a Content-Length other than the body's: truncation
+    trickle: float = 0.0  # seconds between the body's bytes: a server that never finishes
 
 
 def reply_json(value: Any, status: int = 200, headers: dict[str, str] | None = None) -> Reply:
@@ -111,6 +114,16 @@ class FakeServer:
                     self.send_header(name, value)
                 self.send_header("Content-Length", str(length))
                 self.end_headers()
+                if reply.trickle:
+                    try:
+                        for i in range(len(reply.body)):
+                            self.wfile.write(reply.body[i : i + 1])
+                            self.wfile.flush()
+                            time.sleep(reply.trickle)
+                    except OSError:
+                        pass
+                    self.close_connection = True
+                    return
                 self.wfile.write(reply.body)
                 if reply.declared_length is not None:
                     self.close_connection = True
@@ -126,8 +139,14 @@ class FakeServer:
             def log_message(self, *args: Any) -> None:
                 pass
 
-        httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        class Quiet(ThreadingHTTPServer):
+            def handle_error(self, request: Any, client_address: Any) -> None:
+                pass  # a client that hangs up mid-reply is the point of several tests
+
+        httpd = Quiet(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(
+            target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         thread.start()
         try:
             yield f"127.0.0.1:{httpd.server_address[1]}"
@@ -143,7 +162,7 @@ class FakeServer:
 class JiraBackend(Backend):
     """``/rest/api/2/search/jql`` and ``/rest/api/2/attachment/content/{id}``."""
 
-    auth_value = "Basic " + __import__("base64").b64encode(b"ops@example.com:jira-secret").decode()
+    auth_value = "Basic " + base64.b64encode(b"ops@example.com:jira-secret").decode()
 
     def __init__(self) -> None:
         data = fixture("jira_search_ops.json")
@@ -217,7 +236,7 @@ class JiraBackend(Backend):
 class ServiceNowBackend(Backend):
     """``/api/now/table/change_request``, ``/api/now/attachment`` and ``sys_audit_delete``."""
 
-    auth_value = "Basic " + __import__("base64").b64encode(b"integration:sn-secret").decode()
+    auth_value = "Basic " + base64.b64encode(b"integration:sn-secret").decode()
 
     def __init__(self) -> None:
         data = fixture("servicenow_change_requests.json")
@@ -294,7 +313,7 @@ def md5_of(data: bytes) -> str:
 
 
 class DriveBackend(Backend):
-    """``files.list``, ``changes.getStartPageToken``, ``changes.list`` and ``files.get?alt=media``."""
+    """``files.list``, ``changes.getStartPageToken``/``list`` and ``files.get?alt=media``."""
 
     auth_value = "Bearer drive-token-never-printed"
 
@@ -387,7 +406,7 @@ class DriveBackend(Backend):
 class ConfluenceBackend(Backend):
     """``/wiki/api/v2/pages`` with ``body-format=storage`` and cursor paging."""
 
-    auth_value = "Basic " + __import__("base64").b64encode(b"wiki@example.com:wiki-secret").decode()
+    auth_value = "Basic " + base64.b64encode(b"wiki@example.com:wiki-secret").decode()
 
     def __init__(self) -> None:
         self.pages: list[dict[str, Any]] = fixture("confluence_pages.json")["pages"]
@@ -409,15 +428,20 @@ class ConfluenceBackend(Backend):
         size = int(request.query["limit"])
         results = [
             {
-                "id": p["id"], "status": p["status"], "title": p["title"], "spaceId": p["spaceId"],
-                "version": p["version"], "body": {"storage": {"representation": "storage", "value": p["storage"]}},
+                "id": p["id"],
+                "status": p["status"],
+                "title": p["title"],
+                "spaceId": p["spaceId"],
+                "version": p["version"],
+                "body": {"storage": {"representation": "storage", "value": p["storage"]}},
             }
             for p in pages[start : start + size]
-        ]  # fmt: skip
+        ]
         body: dict[str, Any] = {"results": results, "_links": {}}
         if start + size < len(pages):
+            space = request.query["space-id"]
             body["_links"]["next"] = (
-                f"/wiki/api/v2/pages?space-id={request.query['space-id']}&limit={size}&cursor={start + size}"
+                f"/wiki/api/v2/pages?space-id={space}&limit={size}&cursor={start + size}"
             )
         return reply_json(body)
 

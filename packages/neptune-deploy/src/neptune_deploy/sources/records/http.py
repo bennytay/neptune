@@ -1,4 +1,4 @@
-"""The record connectors' one HTTP boundary: authenticated, bounded GETs that never follow (ADR 0008).
+"""The record connectors' HTTP boundary: authenticated, bounded GETs that never follow (ADR 0008).
 
 It reuses the object-store connector's ``Transport`` (ADR 0006 §6): ``GET`` is the only method, the
 workspace is asked before every request, a redirect is refused and never followed, ``http`` is
@@ -27,6 +27,7 @@ from neptune_deploy.sources.object_store.transport import (
     HttpStatusError,
     Response,
     ResponseTooLarge,
+    ShortRead,
     Transport,
     TransportError,
 )
@@ -59,6 +60,12 @@ class ResponseInvalid(TransportError):
     code = "response_invalid"
 
 
+class PaginationLoop(TransportError):
+    """A system that names, or returns, a page it already returned."""
+
+    code = "pagination_loop"
+
+
 class SizeMismatch(TransportError):
     """A download whose length is not the length the listing stated."""
 
@@ -87,7 +94,7 @@ class Auth:
 
 def _retry_after(headers: Mapping[str, str]) -> int | None:
     value = headers.get("retry-after", "")
-    if value.isascii() and value.isdigit() and int(value) <= _MAX_RETRY_AFTER:
+    if value.isascii() and value.isdigit() and len(value) <= 9 and int(value) <= _MAX_RETRY_AFTER:
         return int(value)
     return None  # a date, or nonsense: a date is a wall-clock reading this client does not use
 
@@ -100,7 +107,9 @@ class RecordTransport(Transport):
     ``403`` and ``429``. It remembers the last response's headers for that.
     """
 
-    _last_headers: dict[str, str] = {}
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._last_headers: dict[str, str] = {}
 
     def _send(self, *args: Any, **kwargs: Any) -> http.client.HTTPResponse:
         raw = super()._send(*args, **kwargs)
@@ -121,7 +130,7 @@ class RecordTransport(Transport):
 
 
 class Api:
-    """A record system's HTTP API: JSON documents and bounded downloads, with declared credentials."""
+    """A record system's HTTP API: JSON documents and bounded downloads, declared credentials."""
 
     def __init__(self, transport: Transport, auth: Auth, *, base_path: str = "") -> None:
         self.transport = transport
@@ -144,6 +153,10 @@ class Api:
             body = response.body(MAX_PAGE_BYTES)
         except ResponseTooLarge as exc:
             raise ResponseInvalid("the response is too large") from exc
+        declared = response.headers.get("content-length", "")
+        promised = declared.isascii() and declared.isdigit() and len(declared) <= 18
+        if promised and int(declared) != len(body):  # http.client does not raise for a short read
+            raise ShortRead("the body ended early", len(body), int(declared))
         try:
             return jsontext.loads(body), response.headers
         except jsontext.JsonTextError as exc:
@@ -162,6 +175,8 @@ class Api:
         except ResponseTooLarge as exc:
             raise SizeMismatch("more bytes than the listed size") from exc
         if len(data) != size:
+            if declared == str(size):  # it promised the listed length, then stopped early
+                raise ShortRead("the body ended early", len(data), size)
             raise SizeMismatch("fewer bytes than the listed size")
         return data
 

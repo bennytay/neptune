@@ -1,4 +1,4 @@
-"""Strict JSON in, deterministic text out, for what an API says and what a snapshot holds (ADR 0008).
+"""Strict JSON in, deterministic text out: what an API says, what a snapshot holds (ADR 0008).
 
 Reading is hostile-input safe: duplicate object keys, ``NaN`` and ``Infinity``, a body that is not
 UTF-8, nesting past ``MAX_DEPTH`` and absurd numbers are each refused, never repaired. A number
@@ -82,7 +82,7 @@ def _check_depth(root: Any) -> None:
 
 
 def dumps(value: Any) -> bytes:
-    """The deterministic UTF-8 text of ``value`` (dicts, lists, str, bool, None, ``Number``, int)."""
+    """The deterministic UTF-8 text of ``value`` (dict, list, str, bool, None, ``Number``, int)."""
     out: list[str] = []
     _write(value, out, 1)
     try:
@@ -117,7 +117,7 @@ def _write(value: Any, out: list[str], depth: int) -> None:
         out.append("true")
     elif value is False:
         out.append("false")
-    elif isinstance(value, Number) or isinstance(value, int):
+    elif isinstance(value, Number | int):
         out.append(str(value))
     elif isinstance(value, str):
         out.append(_string(value))

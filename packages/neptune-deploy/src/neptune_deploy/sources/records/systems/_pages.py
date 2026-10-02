@@ -56,7 +56,7 @@ def flag(value: Any) -> bool:
 def names(
     pattern: re.Pattern[str], what: str, *, limit: int = 200
 ) -> Callable[[Any], tuple[str, ...]]:
-    """A checker for a declared list of names, each matching ``pattern``, sorted and de-duplicated."""
+    """A checker for a declared list of names matching ``pattern``, sorted and de-duplicated."""
 
     def check(value: Any) -> tuple[str, ...]:
         if (

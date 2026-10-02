@@ -1,16 +1,17 @@
 """Jira Cloud: a project's issues and their attachments (ADR 0008 §4).
 
-Public API used (Atlassian, "The Jira Cloud platform REST API"): enhanced JQL search
-``GET /rest/api/{2,3}/search/jql`` (``jql``, ``fields``, ``maxResults``, ``nextPageToken``; the
-response's ``issues``, ``nextPageToken``, ``isLast``) and ``GET /rest/api/{2,3}/attachment/content/{id}``
-with ``redirect=false`` (the contents inline, so no redirect to another host is ever needed).
+Public API used (Atlassian, "The Jira Cloud platform REST API"): enhanced JQL search ``GET
+/rest/api/{2,3}/search/jql`` (``jql``, ``fields``, ``maxResults``, ``nextPageToken``; the
+response's ``issues``, ``nextPageToken``, ``isLast``) and ``GET
+/rest/api/{2,3}/attachment/content/{id}`` with ``redirect=false`` (the contents inline, so no
+redirect to another host is ever needed).
 
 - An issue is ``issue/<numeric id>`` (the key can change when an issue moves; the id cannot). Its
   token is ``updated:<fields.updated>`` as written. Its snapshot is ``[{"key", "fields"}]``, the
   shape the ``ticketing.jira-json`` mapping preset reads.
 - An attachment is ``issue/<id>/attachment/<attachment id>``, token ``created:<created>``, its
-  parent the issue. It is downloaded by id from the declared site, never from the ``content`` URL the
-  record states.
+  parent the issue. It is downloaded by id from the declared site, never from the ``content`` URL
+  the record states.
 - The feed is ordered ``updated ASC``, so the highest ``updated`` seen is a resume cursor. JQL
   states times in the credential user's zone, to the minute: the cursor's clock reading is taken
   from the very ``updated`` string (which carries that zone's offset) and widened by one day, and

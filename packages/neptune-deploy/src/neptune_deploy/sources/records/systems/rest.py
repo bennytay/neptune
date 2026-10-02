@@ -30,8 +30,8 @@ validated it. A *profile* is the operator's declaration of one API, closed and c
   valid only for ISO 8601 times in one zone or integers of one width. Without ``since`` the API has
   no change feed here and every run lists everything.
 - ``snapshot.format`` is ``json`` (the record, in an array of one) or ``csv`` (a header and one row;
-  ``columns`` maps each header to a pointer, so a CMMS's JSON gives the columns a mapping file such as
-  ``cmms.generic`` reads).
+  ``columns`` maps each header to a pointer, so a CMMS's JSON gives the columns that a mapping
+  file such as ``cmms.generic`` reads).
 - ``attachments`` lists each record's attachments from the record itself; the download path is built
   from validated ids, never from a URL the record states.
 - ``auth.header`` is the header an API key is sent in (the credential ``api_key``); without it the
@@ -214,14 +214,11 @@ class Profile:
 
 
 def _plain(value: Any) -> Any:
-    """The profile as JSON values, for the transform's config (so a changed profile is new lineage)."""
+    """The profile as JSON values, for the transform's config: a changed profile is new lineage."""
     if isinstance(value, dict):
         return {k: _plain(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_plain(v) for v in value]
-    if isinstance(value, jsontext.Number):
-        text_ = str(value)
-        return int(text_) if text_.isdigit() else text_
     return value
 
 

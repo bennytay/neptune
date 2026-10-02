@@ -1,17 +1,17 @@
 """Confluence Cloud: a space's current pages as storage-format documents (ADR 0008 §4).
 
 Public API used (Atlassian, "Confluence Cloud REST API v2"): ``GET /wiki/api/v2/pages`` with
-``space-id``, ``status=current``, ``body-format=storage``, ``sort=id``, ``limit`` and ``cursor``; the
-response's ``results`` (``id``, ``title``, ``version.number``, ``body.storage.value``) and
+``space-id``, ``status=current``, ``body-format=storage``, ``sort=id``, ``limit`` and ``cursor``;
+the response's ``results`` (``id``, ``title``, ``version.number``, ``body.storage.value``) and
 ``_links.next``.
 
-- A page is ``page/<id>``, token ``version:<version.number>``. Its bytes are the page's storage-format
-  body, as written (XHTML with Confluence's ``ac:`` elements), named ``<title>.xhtml``. A page's
-  title and version are identity and hints, not bytes.
+- A page is ``page/<id>``, token ``version:<version.number>``. Its bytes are the page's
+  storage-format body, as written (XHTML with Confluence's ``ac:`` elements), named
+  ``<title>.xhtml``. A page's title and version are identity and hints, not bytes.
 - ``_links.next`` is read only for its ``cursor`` parameter: the next request is built here, never
   taken from a URL the response states.
-- There is no change feed: Confluence Cloud v2 states neither a changes cursor nor deletions, so every
-  run lists the space, and a page absent from a complete listing is gone.
+- There is no change feed: Confluence Cloud v2 states neither a changes cursor nor deletions, so
+  every run lists the space, and a page absent from a complete listing is gone.
 - Attachments are not exported. Their download is a redirect to another host, which a read-only
   connector never follows (ADR 0006 §6), and the v2 API has no inline form of it.
 """

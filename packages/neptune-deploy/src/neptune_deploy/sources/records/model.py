@@ -21,7 +21,7 @@ MAX_SKIPPED_ID_BYTES: Final = 256  # of an id the source does not use
 
 @dataclass(frozen=True)
 class Fetch:
-    """How to download an item's bytes: a path built from validated ids, never a URL the system sent.
+    """How to download an item's bytes: a path built from validated ids, never a system's URL.
 
     ``size`` is the length the listing stated; a body of another length is refused. ``md5`` (lower
     hex), if the system states one, must equal the body's.
@@ -92,7 +92,7 @@ class RecordEntry:
 
 
 def sha256_text(text: str) -> str:
-    """The digest of ``text`` as UTF-8 (lone surrogates passed through), for ids too long to keep."""
+    """The sha256 of ``text`` as UTF-8 (lone surrogates kept), for ids too long to hold."""
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 

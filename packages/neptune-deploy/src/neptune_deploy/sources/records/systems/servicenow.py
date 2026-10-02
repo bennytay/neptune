@@ -2,23 +2,24 @@
 
 Public API used (ServiceNow, "REST API reference"): the Table API ``GET /api/now/table/{table}``
 (``sysparm_query``, ``sysparm_fields``, ``sysparm_limit``, ``sysparm_offset``,
-``sysparm_display_value=false``, ``sysparm_exclude_reference_link=true``; the response's ``result``
-and the ``X-Total-Count`` header), the Attachment API ``GET /api/now/attachment`` (metadata) and
-``GET /api/now/attachment/{sys_id}/file`` (bytes), and the ``sys_audit_delete`` table for deletions.
+``sysparm_display_value=false``, ``sysparm_exclude_reference_link=true``; the response's
+``result`` and the ``X-Total-Count`` header), the Attachment API ``GET /api/now/attachment``
+(metadata) and ``GET /api/now/attachment/{sys_id}/file`` (bytes), and the ``sys_audit_delete``
+table for deletions.
 
 - A record is ``table/<table>/<sys_id>``, token ``mod_count:<sys_mod_count>@<sys_updated_on>`` as
   written. Its snapshot is a CSV with a header and one row, the columns being exactly the declared
-  ``fields`` (the shape the ``ticketing.servicenow-csv`` mapping preset reads). Values are what the
-  API states with ``display_value=false``: stored values, not labels.
-- An attachment is ``table/<table>/<sys_id>/attachment/<attachment sys_id>``, its parent the record.
-  Attachments are listed with one query per batch of records, so the parent's attachment list is
-  authoritative for that page.
-- The feed is ordered ``sys_updated_on, sys_id``. ``sys_updated_on`` is stored in UTC, and the cursor
-  is the highest one seen; the next run re-reads that second (``>=``) and the ledger's revision
-  tokens discard what was seen already. An incremental run also reads the table's deletions from
-  ``sys_audit_delete`` (it needs read access to it: if denied, the run is incomplete and the cursor
-  does not advance). An attachment removed from a record whose own row did not change is found by the
-  next snapshot, not by the feed.
+  ``fields`` (the shape the ``ticketing.servicenow-csv`` mapping preset reads). Values are what
+  the API states with ``display_value=false``: stored values, not labels.
+- An attachment is ``table/<table>/<sys_id>/attachment/<attachment sys_id>``, its parent the
+  record. Attachments are listed with one query per batch of records, so the parent's attachment
+  list is authoritative for that page.
+- The feed is ordered ``sys_updated_on, sys_id``. ``sys_updated_on`` is stored in UTC, and the
+  cursor is the highest one seen; the next run re-reads that second (``>=``) and the ledger's
+  revision tokens discard what was seen already. An incremental run also reads the table's
+  deletions from ``sys_audit_delete`` (it needs read access to it: if denied, the run is
+  incomplete and the cursor does not advance). An attachment removed from a record whose own row
+  did not change is found by the next snapshot, not by the feed.
 """
 
 import csv
@@ -37,7 +38,7 @@ from neptune_deploy.sources.records.config import (
     endpoint_for,
     need,
 )
-from neptune_deploy.sources.records.http import Api, Auth
+from neptune_deploy.sources.records.http import Api, Auth, PaginationLoop
 from neptune_deploy.sources.records.model import Fetch, Item, Page, Rejected, safe_name
 from neptune_deploy.sources.records.systems._pages import (
     array,
@@ -52,6 +53,7 @@ from neptune_deploy.sources.records.systems.spec import Plan, Spec
 
 CONNECTOR_ID: Final = "deploy_servicenow"
 MAX_PAGE_SIZE: Final = 1000
+MAX_INNER_PAGES: Final = 10_000
 BATCH: Final = 40  # records per attachment query: ids ride in the query string
 CHANGE_REQUEST_FIELDS: Final = (
     "approval",
@@ -221,24 +223,33 @@ class ServiceNowSystem:
         for start in range(0, len(parents), BATCH):
             batch = {item.id.rsplit("/", 1)[1]: item.id for item in parents[start : start + BATCH]}
             query = f"table_name={self.table}^table_sys_idIN{','.join(sorted(batch))}"
-            offset = 0
-            while True:
-                rows, _ = self._table_page(
-                    "/api/now/attachment",
-                    query,
-                    "sys_id,file_name,size_bytes,table_sys_id,sys_mod_count,sys_updated_on",
-                    offset,
-                    1000,
-                )
-                if not rows:
-                    break
-                offset += len(rows)
-                for row in rows:
-                    made = self._attachment(row, batch)
-                    if isinstance(made, Rejected):
-                        rejected.append(made)
-                    else:
-                        items.append(made)
+            for row in self._rows(
+                "/api/now/attachment",
+                query,
+                "sys_id,file_name,size_bytes,table_sys_id,sys_mod_count,sys_updated_on",
+                1000,
+            ):
+                made = self._attachment(row, batch)
+                if isinstance(made, Rejected):
+                    rejected.append(made)
+                else:
+                    items.append(made)
+
+    def _rows(self, path: str, query: str, fields: str, limit: int) -> Generator[Any, None, None]:
+        """Every row of a query, by offset: stops on an empty page, and refuses a system that
+        returns a page it already returned (one that ignores the offset) or never ends."""
+        offset = 0
+        previous: list[Any] | None = None
+        for _ in range(MAX_INNER_PAGES):
+            rows, _total = self._table_page(path, query, fields, offset, limit)
+            if not rows:
+                return
+            if rows == previous:
+                raise PaginationLoop("a page repeats the one before it")
+            previous = rows
+            offset += len(rows)
+            yield from rows
+        raise PaginationLoop("a query has too many pages")
 
     def _attachment(self, row: Any, batch: Mapping[str, str]) -> Item | Rejected:
         record = row if isinstance(row, dict) else {}
@@ -269,22 +280,16 @@ class ServiceNowSystem:
     def _deletions(self, cursor: str, high: str | None) -> Page:
         removed: list[str] = []
         rejected: list[Rejected] = []
-        offset = 0
         query = f"tablename={self.table}^sys_created_on>={cursor}^ORDERBYsys_created_on"
-        while True:
-            rows, _ = self._table_page(
-                "/api/now/table/sys_audit_delete", query, "documentkey", offset, self.page_size
-            )
-            if not rows:
-                break
-            offset += len(rows)
-            for row in rows:
-                key = text(row.get("documentkey")) if isinstance(row, dict) else None
-                item_id = f"table/{self.table}/{key or ''}"
-                if key is not None and _SYS_ID.fullmatch(key):
-                    removed.append(item_id)
-                else:
-                    rejected.append(Rejected(item_id, "id_invalid"))
+        for row in self._rows(
+            "/api/now/table/sys_audit_delete", query, "documentkey", self.page_size
+        ):
+            key = text(row.get("documentkey")) if isinstance(row, dict) else None
+            item_id = f"table/{self.table}/{key or ''}"
+            if key is not None and _SYS_ID.fullmatch(key):
+                removed.append(item_id)
+            else:
+                rejected.append(Rejected(item_id, "id_invalid"))
         return Page(
             removed=tuple(removed),
             rejected=tuple(rejected),

@@ -1,21 +1,22 @@
 """Google Drive: a drive's binary files, with the Drive change feed (ADR 0008 §4).
 
-Public API used (Google, "Google Drive API v3"): ``files.list`` (``q``, ``pageSize``, ``pageToken``,
-``fields``, ``corpora``, ``driveId``, ``supportsAllDrives``; the response's ``files``,
-``nextPageToken``, ``incompleteSearch``), ``changes.getStartPageToken``, ``changes.list``
-(``pageToken``, ``includeRemoved``; ``changes``, ``nextPageToken``, ``newStartPageToken``) and
-``files.get`` with ``alt=media``.
+Public API used (Google, "Google Drive API v3"): ``files.list`` (``q``, ``pageSize``,
+``pageToken``, ``fields``, ``corpora``, ``driveId``, ``supportsAllDrives``; the response's
+``files``, ``nextPageToken``, ``incompleteSearch``), ``changes.getStartPageToken``,
+``changes.list`` (``pageToken``, ``includeRemoved``; ``changes``, ``nextPageToken``,
+``newStartPageToken``) and ``files.get`` with ``alt=media``.
 
-- A file is ``file/<file id>``, token ``version:<version>``: Drive's monotonically increasing version
-  number, which "reflects every change made to the file on the server". An edit in place is a new
-  token at the same location, so the ledger chains it as a new revision and keeps the old one; a
-  version bump over identical bytes (a rename, a share) is no new revision (root ADR 0009).
-- Only files with bytes are exported: those with a ``size`` and an ``md5Checksum``. A Google-native
-  document has neither until it is exported, so it is a ``type_unsupported`` finding, not an export
-  of unknown length. A download is checked against the listed size and the file's own MD5.
+- A file is ``file/<file id>``, token ``version:<version>``: Drive's monotonically increasing
+  version number, which "reflects every change made to the file on the server". An edit in place
+  is a new token at the same location, so the ledger chains it as a new revision and keeps the old
+  one; a version bump over identical bytes (a rename, a share) is no new revision (root ADR 0009).
+- Only files with bytes are exported: those with a ``size`` and an ``md5Checksum``. A
+  Google-native document has neither until it is exported, so it is a ``type_unsupported``
+  finding, not an export of unknown length. A download is checked against the listed size and the
+  file's own MD5.
 - A snapshot reads ``files.list`` and carries the start page token taken *before* it, so nothing
-  changed during the listing is missed. An incremental run reads ``changes.list`` from the cursor: a
-  change with ``removed`` or a trashed file is a deletion.
+  changed during the listing is missed. An incremental run reads ``changes.list`` from the cursor:
+  a change with ``removed`` or a trashed file is a deletion.
 """
 
 import re

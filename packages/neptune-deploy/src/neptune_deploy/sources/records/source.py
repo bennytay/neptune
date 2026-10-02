@@ -1,16 +1,17 @@
 """``RecordSource``: one record system's export as a read-only compiler ``Source`` (ADR 0008).
 
-It has the shape of the compiler's ``Source`` protocol (``walk``, ``open``) and, like the object-store
-source (ADR 0006), its own entry types, because members may not import the compiler's discovery
-package. What it adds for a record system:
+It has the shape of the compiler's ``Source`` protocol (``walk``, ``open``) and, like the
+object-store source (ADR 0006), its own entry types, because members may not import the compiler's
+discovery package. What it adds for a record system:
 
 - ``listing()``: every page of the system's feed, read once. A snapshot reads every record the
-  scope holds; an incremental run (a ``since`` cursor) reads what changed. Each record, document or
-  attachment is ``ExternalObjectRef(connector id, <scope><id>, <revision token>)``. Nothing in it
-  depends on the wall clock, the order entries arrive in within a page, or whether a retry happened.
+  scope holds; an incremental run (a ``since`` cursor) reads what changed. Each record, document
+  or attachment is ``ExternalObjectRef(connector id, <scope><id>, <revision token>)``. Nothing in
+  it depends on the wall clock, the order entries arrive in within a page, or whether a retry
+  happened.
 - ``discover(ledger)``: the listing against the compiler's ``SourceLedger``: new, changed,
-  unchanged (never fetched) and gone. ``gone`` is a complete snapshot's absences, the ids the system
-  said were deleted, and the attachments a parent's own listing no longer holds.
+  unchanged (never fetched) and gone. ``gone`` is a complete snapshot's absences, the ids the
+  system said were deleted, and the attachments a parent's own listing no longer holds.
 - ``walk()``: what a job should fingerprint and probe, in id order, then what was not used.
 - ``open(location)`` / ``reader(location, artifact)``: the item's bytes. A record's snapshot is
   held from its page; an attachment or a document is fetched once, to exactly its listed size, and
@@ -20,8 +21,8 @@ package. What it adds for a record system:
   durable.
 
 Every problem is a finding (``findings()``), deterministic and free of URLs, credentials and error
-text. A failed read also raises ``ObjectReadError`` (an ``OSError``), so the caller quarantines that
-item and nothing else.
+text. A failed read also raises ``ObjectReadError`` (an ``OSError``), so the caller quarantines
+that item and nothing else.
 """
 
 import hashlib
@@ -51,6 +52,7 @@ from neptune_deploy.sources.object_store.transport import (
 from neptune_deploy.sources.records.config import Location, Options
 from neptune_deploy.sources.records.http import (
     AccessDenied,
+    PaginationLoop,
     RateLimited,
     ResponseInvalid,
     SizeMismatch,
@@ -72,6 +74,7 @@ LISTING_TOKEN: Final = "listing"  # the revision token of a finding about the li
 MAX_PAGES: Final = 100_000
 MAX_EXAMPLES: Final = 10  # ids a finding about many ids cites
 MAX_EXAMPLE_BYTES: Final = 256  # of each id a finding cites
+ATTACHMENTS: Final = "/attachment/"  # what separates a parent's id from an attachment's
 MAX_CURSOR: Final = 4096  # bytes of a continuation cursor; a longer one stops the listing
 _MALFORMED: Final = (ValueError, TypeError, KeyError, IndexError, AttributeError, RecursionError)
 MAX_ID_BYTES: Final = 1024
@@ -350,7 +353,7 @@ class RecordSource:
         return tuple(new), tuple(changed), tuple(unchanged)
 
     def _gone(self, listing: Listing, ledger: SourceLedger) -> tuple[SourceRevision, ...]:
-        """Ledger revisions of this scope that the system no longer holds, and says so how it can."""
+        """Ledger revisions of this scope that the system no longer holds, as far as it says so."""
         scope = self.location.scope
         heads = [
             head
@@ -363,31 +366,33 @@ class RecordSource:
         seen = {scope + entry.id for entry in listing.entries}
         blind = {item.sha256 for item in listing.skipped}  # seen, not used: nothing is known
         gone: dict[str, SourceRevision] = {}
-
-        def object_id(head: SourceRevision) -> str:
+        by_name: dict[str, SourceRevision] = {}
+        by_dir: defaultdict[str, list[SourceRevision]] = defaultdict(list)
+        for head in heads:
             assert isinstance(head.location, ExternalObjectRef)
-            return head.location.object_id
+            name = head.location.object_id
+            by_name[name] = head
+            by_dir[name[: name.rfind("/") + 1]].append(head)  # an attachment's parent directory
+
+        def unknown(name: str) -> bool:
+            return name not in seen and sha256_text(name[len(scope) :]) not in blind
 
         if listing.mode == "snapshot" and listing.complete:
-            for head in heads:
-                name = object_id(head)
-                if name not in seen and sha256_text(name[len(scope) :]) not in blind:
+            for name, head in by_name.items():
+                if unknown(name):
                     gone[head.id] = head
         for removed in listing.removed:  # the system said so: the record and what hangs under it
             target = scope + removed
-            for head in heads:
-                if object_id(head) == target or object_id(head).startswith(target + "/"):
-                    gone[head.id] = head
+            if target in by_name:
+                gone[by_name[target].id] = by_name[target]
+            for head in by_dir.get(target + ATTACHMENTS, ()):
+                gone[head.id] = head
         for entry in listing.entries:  # a parent's own full list of its attachments
             prefix = self._children.get(entry.id)
             if prefix is not None:
-                for head in heads:
-                    name = object_id(head)
-                    if (
-                        name.startswith(scope + prefix)
-                        and name not in seen
-                        and sha256_text(name[len(scope) :]) not in blind
-                    ):
+                for head in by_dir.get(scope + prefix, ()):
+                    assert isinstance(head.location, ExternalObjectRef)
+                    if unknown(head.location.object_id):
                         gone[head.id] = head
         return tuple(sorted(gone.values(), key=lambda revision: revision.location.key))
 
@@ -496,7 +501,7 @@ def _retry(exc: RateLimited) -> dict[str, JsonValue]:
 
 
 class RecordReader:
-    """An adapter's ``SourceReader`` over one item: its bytes, checked against the artifact first."""
+    """An adapter's ``SourceReader`` over one item: bytes checked against the artifact first."""
 
     def __init__(self, source: RecordSource, entry: RecordEntry, artifact: SourceArtifact) -> None:
         if artifact.size != entry.size:
@@ -548,6 +553,7 @@ class _Collect:
         self.duplicated: set[str] = set()
         self.skipped: dict[tuple[str, str], SkippedRecord] = {}
         self.removed: dict[str, None] = {}
+        self.children: dict[str, list[str]] = defaultdict(list)  # parent id -> kept child ids
         self.body_bytes = 0
         self.held = 0  # id, token and name bytes the listing holds
 
@@ -618,6 +624,8 @@ class _Collect:
             source.report("access_denied", source.listing_ref, details)
         elif isinstance(exc, RedirectRefused):
             source.report("redirect_refused", source.listing_ref, details)
+        elif isinstance(exc, PaginationLoop):
+            source.report("pagination_loop", source.listing_ref, details)
         elif isinstance(exc, ResponseInvalid):
             source.report("response_invalid", source.listing_ref, details)
         else:
@@ -632,19 +640,30 @@ class _Collect:
     def _count(self) -> int:
         return len(self.kept) + len(self.skipped) + len(self.removed)
 
+    def _full(self) -> bool:
+        """Whether the record limit is reached (and, if so, say it)."""
+        if self._count() < self.options.max_records:
+            return False
+        self._limit({"max_records": self.options.max_records})
+        return True
+
     def _take(self, page: Page) -> bool:
         """Fold one page in. ``False`` once a limit is reached (the page's remainder is dropped)."""
         for rejected in page.rejected:
+            if self._full():
+                return False
             self._reject(rejected.reason, rejected.id)
         for removed in page.removed:
+            if self._full():
+                return False
             if removed not in self.removed:
                 self.removed[removed] = None
                 self.held += len(removed.encode("utf-8", "replace"))
-            for gone in [k for k in self.kept if k == removed or k.startswith(removed + "/")]:
-                del self.kept[gone]
+            self.kept.pop(removed, None)
+            for child in self.children.pop(removed, ()):  # what hung under it goes too
+                self.kept.pop(child, None)
         for item in page.items:
-            if self._count() >= self.options.max_records:
-                self._limit({"max_records": self.options.max_records})
+            if self._full():
                 return False
             problem = self._problem(item)
             if problem is not None:
@@ -665,6 +684,8 @@ class _Collect:
                     return False
                 self.body_bytes += size
                 self.kept[item.id] = item
+                if item.parent is not None:
+                    self.children[item.parent].append(item.id)
         return True
 
     def _problem(self, item: Item) -> str | None:

@@ -1,4 +1,4 @@
-"""What a record source is given: a URL, declared options and declared read-only credentials (ADR 0008).
+"""What a record source is given: a URL, options and read-only credentials, declared (ADR 0008).
 
 - The URL names the system and the part of it to read: ``jira://<site>/<PROJECT>``,
   ``servicenow://<instance host>/<table>``, ``confluence://<site>/<space id>``,
@@ -207,7 +207,7 @@ def need(found: Mapping[str, str], *names: str) -> None:
 
 
 def cursor_text(connector_id: str, payload: str) -> str:
-    """A cursor as a later run is given it: the connector id, ``/1:`` (the format) and the payload."""
+    """A cursor as a later run is given it: connector id, ``/1:`` (the format), then the payload."""
     return f"{connector_id}/1:{payload}"
 
 

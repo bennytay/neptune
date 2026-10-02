@@ -18,7 +18,8 @@ entry point            URL                                         reads
 
 - ``network``: the compiler's workspace; it is asked before the source is built and before every
   request, so a local-only workspace refuses it.
-- ``ledger``: the ingest root's ``SourceLedger``; with it, ``walk`` yields only new or changed items.
+- ``ledger``: the ingest root's ``SourceLedger``; with it, ``walk`` yields only new or changed
+  items.
 - ``options``: declared and closed (``config.Options`` and each system's own). ``since`` is the
   cursor the previous run's ``RecordSource.cursor`` returned.
 - ``credentials``: declared read-only credentials, else the system's ``NEPTUNE_*`` variables of
@@ -34,6 +35,7 @@ from typing import Protocol
 
 from neptune.identity.revisions import SourceLedger
 from neptune.model.jsonvalue import JsonValue
+from neptune_deploy.sources.object_store.source import ObjectReadError as ObjectReadError
 from neptune_deploy.sources.object_store.transport import NetworkGate
 from neptune_deploy.sources.records import config
 from neptune_deploy.sources.records.config import Location, Options, RecordConfigError
@@ -52,6 +54,7 @@ __all__ = [
     "CONNECTOR_IDS",
     "Discovery",
     "Listing",
+    "ObjectReadError",
     "RecordConfigError",
     "RecordEntry",
     "RecordReader",
@@ -169,5 +172,5 @@ confluence_source = _factory(
 rest_source = _factory(
     "deploy_rest",
     "rest_source",
-    "``deploy_rest``: a declared REST CMMS or EAM API (``rest://<host>`` and a ``profile`` option).",
+    "``deploy_rest``: a declared REST CMMS or EAM API (``rest://<host>`` plus a ``profile``).",
 )

@@ -1,4 +1,4 @@
-"""The Jira connector against an in-process Jira: identity, revisions, change feed, attachments (ADR 0008)."""
+"""The Jira connector against an in-process Jira: identity, revisions, feed, attachments."""
 
 from pathlib import Path
 
