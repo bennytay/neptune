@@ -683,3 +683,22 @@ def test_the_storage_options_that_decide_revision_tokens_are_part_of_the_transfo
 def test_an_encoded_nul_in_a_file_url_is_a_configuration_error(tmp_path: Path) -> None:
     with pytest.raises(ObjectStoreConfigError):
         rerun_source("file:///tmp/x%00.json", network=online(tmp_path))
+
+
+def test_ref_names_an_object_as_the_connector_of_its_store_does(tmp_path: Path) -> None:
+    with connect(store(), tmp_path) as source:
+        listed = {e.key: e.location for e in source.listing().entries}
+        url = f"s3://fleet-rrd/{BASE_KEY}"
+        token = listed[BASE_KEY].revision_token
+        assert source.ref(url, token) == listed[BASE_KEY]
+        assert source.ref(f"s3://fleet-rrd/{BASE_KEY}", "etag:x").revision_token == "etag:x"
+        for bad in ("", "episodes/a.rrd", "https://x/y", "s3://bucket-only", "s3://b/"):
+            with pytest.raises(ValueError, match="s3://, gs:// or az://"):
+                source.ref(bad, token)
+        # A provider with no declared store is on its public endpoint: the bucket is the scope.
+        assert source.ref("gs://b/k", "generation:1") == ExternalObjectRef(
+            "deploy_gcs", "b/k", "generation:1"
+        )
+        assert source.ref("az://acct01/cont/k", "etag:1") == ExternalObjectRef(
+            "deploy_azure_blob", "acct01/cont/k", "etag:1"
+        )

@@ -190,6 +190,22 @@ class RerunSource(ObjectStoreSource):
     def listing_ref(self) -> ExternalObjectRef:
         return ExternalObjectRef(self.connector_id, self._document_id("segments"), "listing")
 
+    def ref(self, key: str, token: str) -> ExternalObjectRef:
+        """The identity of the object at storage URL ``key`` (``s3://``, ``gs://``, ``az://``) at
+        revision ``token``: the one the object-store connector of its store gives it (ADR 0009 §1).
+
+        An object is not a Rerun object, so ``key`` is the catalog's own name for it, a URL. Any
+        other text is a ``ValueError``.
+        """
+        parsed = parse_storage_url(key)
+        if parsed is None:
+            raise ValueError("a Rerun object is named by an s3://, gs:// or az:// URL")
+        provider, bucket, account, path = parsed
+        location = StoreLocation(
+            provider, bucket, "", account, self.rerun.storage_options(provider).store
+        )
+        return ExternalObjectRef(CONNECTOR_IDS[provider], location.object_id(path), token)
+
     def report(self, code: str, subject: ExternalObjectRef, details: dict[str, JsonValue]) -> None:
         if code not in CATALOG_CODES:
             super().report(code, subject, details)

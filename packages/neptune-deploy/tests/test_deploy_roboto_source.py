@@ -111,6 +111,16 @@ def test_the_listing_is_deterministic_across_runs_and_page_boundaries(tmp_path: 
         ]
 
 
+def test_ref_is_the_identity_a_listing_gives(tmp_path: Path) -> None:
+    with connect(FakeRoboto(), tmp_path) as source:
+        listed = {e.key: e.location for e in source.listing().entries}
+        key = "amr07/run_0914_am.mcap"
+        assert source.ref(key, "version:fl_amr07_am:2") == listed[key]
+        assert source.ref("any/path", "version:fl_x:1") == ExternalObjectRef(
+            "deploy_roboto", f"{ORG}/{DATASET}/any/path", "version:fl_x:1"
+        )
+
+
 # --- Reads --------------------------------------------------------------------------------------
 
 
