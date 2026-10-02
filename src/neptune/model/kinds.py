@@ -20,6 +20,24 @@ from neptune.model.configuration import (
 )
 from neptune.model.finding import IngestFinding, ingest_finding_from_json
 from neptune.model.jsonvalue import JsonValue
+from neptune.model.lifecycle import (
+    AuthorisationEnvelope,
+    ChangeRecord,
+    CommissioningBaseline,
+    IncidentRecord,
+    Intervention,
+    MaintenanceEvent,
+    RequalificationRecord,
+    RiskAssessment,
+    authorisation_envelope_from_json,
+    change_record_from_json,
+    commissioning_baseline_from_json,
+    incident_record_from_json,
+    intervention_from_json,
+    maintenance_event_from_json,
+    requalification_record_from_json,
+    risk_assessment_from_json,
+)
 from neptune.model.machine import (
     Calibration,
     HardwareComponent,
@@ -107,6 +125,14 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (DocumentBlock, document_block_from_json),
         (StructuredTable, structured_table_from_json),
         (StructuredRecord, structured_record_from_json),
+        (CommissioningBaseline, commissioning_baseline_from_json),
+        (AuthorisationEnvelope, authorisation_envelope_from_json),
+        (Intervention, intervention_from_json),
+        (MaintenanceEvent, maintenance_event_from_json),
+        (RequalificationRecord, requalification_record_from_json),
+        (IncidentRecord, incident_record_from_json),
+        (ChangeRecord, change_record_from_json),
+        (RiskAssessment, risk_assessment_from_json),
     )
 }
 

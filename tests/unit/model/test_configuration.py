@@ -152,7 +152,7 @@ def test_both_kinds_are_machine_records_added_in_schema_version_2() -> None:
     for kind in (ConfigurationSnapshot, ConfigurationValue):
         assert kind.family is Family.MACHINE and kind.since == 2
         assert KIND_SINCE[kind.kind] == 2
-    assert SCHEMA_VERSION == 2
+    assert SCHEMA_VERSION >= 2  # later additions raise it (ADR 0051)
 
 
 @pytest.mark.parametrize(
@@ -170,7 +170,7 @@ def test_records_round_trip_strictly_at_version_2(record: Any, read: Any) -> Non
     with pytest.raises(SchemaVersionError, match="from schema version 2"):
         read({**data, "schema_version": 1})  # no version 1 reader ever wrote one
     with pytest.raises(SchemaVersionError, match="newer"):
-        read({**data, "schema_version": 3, "later": 1})
+        read({**data, "schema_version": SCHEMA_VERSION + 1, "later": 1})
     with pytest.raises(ValueError):
         read({**data, "extra": 1})
 
@@ -291,7 +291,7 @@ def test_a_package_is_written_at_the_lowest_version_that_holds_its_records() -> 
         "configuration_value",
     }
     with pytest.raises(SchemaVersionError):
-        kinds_at(3)
+        kinds_at(SCHEMA_VERSION + 1)
 
 
 # --- Comparing and digests -----------------------------------------------------------------------

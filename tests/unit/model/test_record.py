@@ -291,6 +291,14 @@ def test_kinds_are_unique_tokens_and_each_has_one_family() -> None:
         "document_block": "world",
         "structured_table": "world",
         "structured_record": "world",
+        "commissioning_baseline": "world",
+        "authorisation_envelope": "world",
+        "intervention": "world",
+        "maintenance_event": "world",
+        "requalification_record": "world",
+        "incident_record": "world",
+        "change_record": "world",
+        "risk_assessment": "world",
     }
 
 

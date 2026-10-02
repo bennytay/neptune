@@ -99,6 +99,104 @@
       ],
       "type": "object"
     },
+    "AuthorisationEnvelope": {
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/Decision"
+        },
+        "configuration": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "authorisation_envelope"
+        },
+        "machines": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "missions": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string"
+          },
+          "type": "array"
+        },
+        "payload_max": {
+          "$ref": "#/$defs/Quantity"
+        },
+        "payload_min": {
+          "$ref": "#/$defs/Quantity"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 3
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "supervision": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "valid_from": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "valid_until": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "zones": {
+          "items": {
+            "$ref": "#/$defs/ZoneLimit"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "approval",
+        "configuration",
+        "dependencies",
+        "id",
+        "identifiers",
+        "kind",
+        "machines",
+        "missions",
+        "payload_max",
+        "payload_min",
+        "provenance",
+        "related",
+        "schema_version",
+        "site",
+        "supervision",
+        "valid_from",
+        "valid_until",
+        "zones"
+      ],
+      "type": "object"
+    },
     "AxisConvention": {
       "enum": [
         "enu",
@@ -277,6 +375,102 @@
       ],
       "type": "object"
     },
+    "ChangeItem": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "before": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "category": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "target": {
+          "$ref": "#/$defs/Knowledge_string"
+        }
+      },
+      "required": [
+        "after",
+        "before",
+        "category",
+        "target"
+      ],
+      "type": "object"
+    },
+    "ChangeRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/Decision"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/ChangeItem"
+          },
+          "type": "array"
+        },
+        "configuration": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "effective": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "change_record"
+        },
+        "machines": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "rollback": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "schema_version": {
+          "const": 3
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        }
+      },
+      "required": [
+        "approval",
+        "changes",
+        "configuration",
+        "effective",
+        "id",
+        "identifiers",
+        "kind",
+        "machines",
+        "provenance",
+        "related",
+        "rollback",
+        "schema_version",
+        "site"
+      ],
+      "type": "object"
+    },
     "ClockRole": {
       "enum": [
         "receive",
@@ -290,6 +484,102 @@
         "mapping",
         "sequence"
       ]
+    },
+    "CommissioningBaseline": {
+      "additionalProperties": false,
+      "properties": {
+        "calibrations": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "commissioned": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "configuration": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "constraints": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string"
+          },
+          "type": "array"
+        },
+        "hardware": {
+          "items": {
+            "$ref": "#/$defs/InventoryItem"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "commissioning_baseline"
+        },
+        "machines": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 3
+        },
+        "sign_off": {
+          "$ref": "#/$defs/Decision"
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "software": {
+          "items": {
+            "$ref": "#/$defs/InventoryItem"
+          },
+          "type": "array"
+        },
+        "tests": {
+          "items": {
+            "$ref": "#/$defs/TestResult"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "calibrations",
+        "commissioned",
+        "configuration",
+        "constraints",
+        "hardware",
+        "id",
+        "identifiers",
+        "kind",
+        "machines",
+        "provenance",
+        "related",
+        "schema_version",
+        "sign_off",
+        "site",
+        "software",
+        "tests"
+      ],
+      "type": "object"
     },
     "ComponentCategory": {
       "enum": [
@@ -553,6 +843,26 @@
       "required": [
         "authority",
         "code"
+      ],
+      "type": "object"
+    },
+    "Decision": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "decision": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "time": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        }
+      },
+      "required": [
+        "authority",
+        "decision",
+        "time"
       ],
       "type": "object"
     },
@@ -1231,6 +1541,32 @@
         "sha512"
       ]
     },
+    "Hazard": {
+      "additionalProperties": false,
+      "properties": {
+        "hazard": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "mitigations": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string"
+          },
+          "type": "array"
+        },
+        "scores": {
+          "items": {
+            "$ref": "#/$defs/Score"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "hazard",
+        "mitigations",
+        "scores"
+      ],
+      "type": "object"
+    },
     "HeightReference": {
       "enum": [
         "ellipsoid",
@@ -1335,6 +1671,97 @@
         "x1",
         "y0",
         "y1"
+      ],
+      "type": "object"
+    },
+    "IncidentRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "configuration": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "description": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "incident_record"
+        },
+        "location": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "machines": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "occurred": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "root_cause": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "schema_version": {
+          "const": 3
+        },
+        "severity": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "timeline": {
+          "items": {
+            "$ref": "#/$defs/TimelineEntry"
+          },
+          "type": "array"
+        },
+        "zone": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        }
+      },
+      "required": [
+        "assets",
+        "configuration",
+        "description",
+        "id",
+        "identifiers",
+        "kind",
+        "location",
+        "machines",
+        "occurred",
+        "provenance",
+        "related",
+        "root_cause",
+        "schema_version",
+        "severity",
+        "site",
+        "timeline",
+        "zone"
       ],
       "type": "object"
     },
@@ -1488,7 +1915,7 @@
           "type": "array"
         },
         "schema_version": {
-          "maximum": 2,
+          "maximum": 3,
           "minimum": 1,
           "type": "integer"
         },
@@ -1525,6 +1952,117 @@
         "sources",
         "streams",
         "transforms"
+      ],
+      "type": "object"
+    },
+    "Intervention": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string"
+          },
+          "type": "array"
+        },
+        "configuration": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "end": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "intervention"
+        },
+        "machines": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "reason": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 3
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "start": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        }
+      },
+      "required": [
+        "authority",
+        "commands",
+        "configuration",
+        "end",
+        "id",
+        "identifiers",
+        "kind",
+        "machines",
+        "mode",
+        "outcome",
+        "provenance",
+        "reason",
+        "related",
+        "schema_version",
+        "site",
+        "start"
+      ],
+      "type": "object"
+    },
+    "InventoryItem": {
+      "additionalProperties": false,
+      "properties": {
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "model": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "version": {
+          "$ref": "#/$defs/Knowledge_GitCommit_or_SemanticVersion_or_DeclaredVersion_or_BuildId_or_FirmwareVersion_or_ModelCheckpointHash_or_ContainerImageDigest"
+        }
+      },
+      "required": [
+        "identifiers",
+        "model",
+        "name",
+        "version"
       ],
       "type": "object"
     },
@@ -3158,6 +3696,151 @@
                   },
                   "value": {
                     "$ref": "#/$defs/GitCommit"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Knowledge_GitCommit_or_SemanticVersion_or_DeclaredVersion_or_BuildId_or_FirmwareVersion_or_ModelCheckpointHash_or_ContainerImageDigest": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/GitCommit"
+                },
+                {
+                  "$ref": "#/$defs/SemanticVersion"
+                },
+                {
+                  "$ref": "#/$defs/DeclaredVersion"
+                },
+                {
+                  "$ref": "#/$defs/BuildId"
+                },
+                {
+                  "$ref": "#/$defs/FirmwareVersion"
+                },
+                {
+                  "$ref": "#/$defs/ModelCheckpointHash"
+                },
+                {
+                  "$ref": "#/$defs/ContainerImageDigest"
+                }
+              ]
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/GitCommit"
+                      },
+                      {
+                        "$ref": "#/$defs/SemanticVersion"
+                      },
+                      {
+                        "$ref": "#/$defs/DeclaredVersion"
+                      },
+                      {
+                        "$ref": "#/$defs/BuildId"
+                      },
+                      {
+                        "$ref": "#/$defs/FirmwareVersion"
+                      },
+                      {
+                        "$ref": "#/$defs/ModelCheckpointHash"
+                      },
+                      {
+                        "$ref": "#/$defs/ContainerImageDigest"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -4836,6 +5519,121 @@
         }
       ]
     },
+    "Knowledge_number_or_NonFinite": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "$ref": "#/$defs/NonFinite"
+                }
+              ]
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "$ref": "#/$defs/Provenance"
+                  },
+                  "value": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "$ref": "#/$defs/NonFinite"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Knowledge_string": {
       "anyOf": [
         {
@@ -5285,6 +6083,81 @@
       ],
       "type": "object"
     },
+    "MaintenanceEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string"
+          },
+          "type": "array"
+        },
+        "configuration": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "diagnosis": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "maintenance_event"
+        },
+        "machines": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/PartReplacement"
+          },
+          "type": "array"
+        },
+        "performed": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 3
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        }
+      },
+      "required": [
+        "actions",
+        "configuration",
+        "diagnosis",
+        "id",
+        "identifiers",
+        "kind",
+        "machines",
+        "parts",
+        "performed",
+        "provenance",
+        "related",
+        "schema_version",
+        "site"
+      ],
+      "type": "object"
+    },
     "MatrixLayout": {
       "enum": [
         "row_major",
@@ -5379,7 +6252,7 @@
           "$ref": "#/$defs/RecordId"
         },
         "schema_version": {
-          "maximum": 2,
+          "maximum": 3,
           "minimum": 1,
           "type": "integer"
         },
@@ -5458,6 +6331,32 @@
       ],
       "type": "object"
     },
+    "PartReplacement": {
+      "additionalProperties": false,
+      "properties": {
+        "installed": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "part": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "removed": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "installed",
+        "part",
+        "removed"
+      ],
+      "type": "object"
+    },
     "Pose": {
       "additionalProperties": false,
       "properties": {
@@ -5508,6 +6407,22 @@
         "assertion_kind",
         "evidence",
         "transform"
+      ],
+      "type": "object"
+    },
+    "Quantity": {
+      "additionalProperties": false,
+      "properties": {
+        "unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        },
+        "value": {
+          "$ref": "#/$defs/Knowledge_number_or_NonFinite"
+        }
+      },
+      "required": [
+        "unit",
+        "value"
       ],
       "type": "object"
     },
@@ -5641,7 +6556,7 @@
           "type": "string"
         },
         "schema_version": {
-          "maximum": 2,
+          "maximum": 3,
           "minimum": 1,
           "type": "integer"
         },
@@ -5868,6 +6783,161 @@
       ],
       "type": "object"
     },
+    "RequalificationRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "cause": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "configuration": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "corrective_actions": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "requalification_record"
+        },
+        "machines": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "performed": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "result": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "return_to_service": {
+          "$ref": "#/$defs/Decision"
+        },
+        "schema_version": {
+          "const": 3
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "tests": {
+          "items": {
+            "$ref": "#/$defs/TestResult"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cause",
+        "configuration",
+        "corrective_actions",
+        "id",
+        "identifiers",
+        "kind",
+        "machines",
+        "performed",
+        "provenance",
+        "related",
+        "result",
+        "return_to_service",
+        "schema_version",
+        "site",
+        "tests"
+      ],
+      "type": "object"
+    },
+    "RiskAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "approval": {
+          "$ref": "#/$defs/Decision"
+        },
+        "assessed": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "configuration": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "hazards": {
+          "items": {
+            "$ref": "#/$defs/Hazard"
+          },
+          "type": "array"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "risk_assessment"
+        },
+        "machines": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "method": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "related": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 3
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        }
+      },
+      "required": [
+        "approval",
+        "assessed",
+        "configuration",
+        "hazards",
+        "id",
+        "identifiers",
+        "kind",
+        "machines",
+        "method",
+        "provenance",
+        "related",
+        "schema_version",
+        "site"
+      ],
+      "type": "object"
+    },
     "RotationMatrix": {
       "additionalProperties": false,
       "properties": {
@@ -6005,6 +7075,22 @@
         "local_date",
         "local_time"
       ]
+    },
+    "Score": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/Knowledge_string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
     },
     "SemanticVersion": {
       "additionalProperties": false,
@@ -6578,6 +7664,26 @@
       ],
       "type": "object"
     },
+    "TestResult": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "performed": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        },
+        "result": {
+          "$ref": "#/$defs/Knowledge_string"
+        }
+      },
+      "required": [
+        "name",
+        "performed",
+        "result"
+      ],
+      "type": "object"
+    },
     "TextEncoding": {
       "enum": [
         "utf-8",
@@ -6586,6 +7692,22 @@
         "utf-32-le",
         "utf-32-be"
       ]
+    },
+    "TimelineEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "time": {
+          "$ref": "#/$defs/Knowledge_Timestamp"
+        }
+      },
+      "required": [
+        "text",
+        "time"
+      ],
+      "type": "object"
     },
     "Timescale": {
       "enum": [
@@ -6834,9 +7956,25 @@
         "track"
       ],
       "type": "object"
+    },
+    "ZoneLimit": {
+      "additionalProperties": false,
+      "properties": {
+        "speed_limit": {
+          "$ref": "#/$defs/Quantity"
+        },
+        "zone": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        }
+      },
+      "required": [
+        "speed_limit",
+        "zone"
+      ],
+      "type": "object"
     }
   },
-  "$id": "urn:neptune:schema:canonical:2",
+  "$id": "urn:neptune:schema:canonical:3",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
     {
@@ -6919,8 +8057,32 @@
     },
     {
       "$ref": "#/$defs/StructuredRecord"
+    },
+    {
+      "$ref": "#/$defs/CommissioningBaseline"
+    },
+    {
+      "$ref": "#/$defs/AuthorisationEnvelope"
+    },
+    {
+      "$ref": "#/$defs/Intervention"
+    },
+    {
+      "$ref": "#/$defs/MaintenanceEvent"
+    },
+    {
+      "$ref": "#/$defs/RequalificationRecord"
+    },
+    {
+      "$ref": "#/$defs/IncidentRecord"
+    },
+    {
+      "$ref": "#/$defs/ChangeRecord"
+    },
+    {
+      "$ref": "#/$defs/RiskAssessment"
     }
   ],
   "description": "One line of a Neptune ingest package's record tables (ADR 0002, ADR 0017). The package's manifest, receipt and receipt envelope are #/$defs/PackageManifest, #/$defs/IngestReceipt and #/$defs/ReceiptEnvelope (ADR 0022). Generated from neptune.model; the Python readers are stricter (ADR 0021).",
-  "title": "Neptune canonical record, schema version 2"
+  "title": "Neptune canonical record, schema version 3"
 }
