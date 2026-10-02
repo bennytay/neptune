@@ -1,0 +1,68 @@
+{
+  "api_version": "1.3.0",
+  "findings": [],
+  "ledger_version": "0.0.1",
+  "outcome": "registered",
+  "package_id": {
+    "knowledge": "known",
+    "value": "sha256:c804f5687845a7958966de0b52d46916240c8b307defa9d1c2cfbfc9efe89f3c"
+  },
+  "record_counts": [
+    {
+      "count": 1,
+      "kind": "image"
+    },
+    {
+      "count": 1,
+      "kind": "run"
+    },
+    {
+      "count": 1,
+      "kind": "run_assembly"
+    },
+    {
+      "count": 2,
+      "kind": "site"
+    },
+    {
+      "count": 3,
+      "kind": "source_artifact"
+    },
+    {
+      "count": 3,
+      "kind": "source_revision"
+    },
+    {
+      "count": 2,
+      "kind": "stream"
+    },
+    {
+      "count": 2,
+      "kind": "structured_record"
+    },
+    {
+      "count": 1,
+      "kind": "structured_table"
+    },
+    {
+      "count": 3,
+      "kind": "timestamp_domain"
+    },
+    {
+      "count": 3,
+      "kind": "transform_record"
+    }
+  ],
+  "registration_key": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 3,
+      "tx_time": "2026-10-02T00:00:03.000000Z"
+    }
+  },
+  "root_locator": "/srv/neptune/packages/mobile_robot",
+  "schema_version": {
+    "knowledge": "known",
+    "value": 3
+  }
+}

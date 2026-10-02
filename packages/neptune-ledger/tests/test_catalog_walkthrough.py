@@ -21,6 +21,7 @@ import psycopg
 import pytest
 
 import neptune_ledger
+from neptune.model.kinds import kinds_at
 from neptune_ledger.catalog.migrate import apply_migrations
 
 Conn = psycopg.Connection[tuple[object, ...]]
@@ -584,7 +585,7 @@ def _with_a_later_kind(package: Package) -> Package:
     snapshot = {**stream, "kind": "configuration_snapshot", "schema_version": 2}
     tables = {**package.tables, "configuration_snapshot": [snapshot]}
     manifest = json.loads(package.manifest_bytes)
-    manifest["schema_version"] = 2
+    manifest["schema_version"] = max(manifest["schema_version"], 2)
     manifest["tables"] = {**manifest["tables"], "configuration_snapshot": 1}
     return _altered(package, manifest, tables)
 
@@ -600,7 +601,10 @@ def test_a_kind_without_its_own_partition_is_stored_in_the_default(catalog: Conn
     ).fetchall()
     assert rows == [("tenant_acme.record_default", "configuration_snapshot", 1, 2, 1)]
     in_default = _count(catalog, "SELECT count(*) FROM tenant_acme.record_default")
-    assert in_default == 1  # every kind with a partition of its own stays in it
+    # every kind with a partition of its own stays in it; the rest (this one, and package
+    # schema 3's alignment kinds, root ADR 0050) are in the default
+    unpartitioned = set(later.tables) - set(kinds_at(1))
+    assert in_default == sum(len(later.tables[kind]) for kind in unpartitioned)
     total = _count(catalog, "SELECT count(*) FROM tenant_acme.record")
     assert total == sum(len(records) for records in later.tables.values())
 

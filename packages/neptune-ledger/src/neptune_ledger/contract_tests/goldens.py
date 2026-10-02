@@ -87,7 +87,7 @@ def registration(package: WorkedPackage, seq: int) -> Registration:
         registration_key=Known(tx(seq)),
         root_locator=f"/srv/neptune/packages/{package.name}",
         ledger_version=LEDGER_VERSION,
-        schema_version=Known(1),
+        schema_version=Known(package.schema_version),
         record_counts=package.record_counts(),
         findings=(),
     )
@@ -286,7 +286,7 @@ def goldens() -> dict[str, dict[str, Any]]:
             registration_key=NotApplicable(),
             root_locator="/srv/neptune/packages/manipulator-tampered",
             ledger_version=LEDGER_VERSION,
-            schema_version=Known(1),
+            schema_version=Known(packages[1].schema_version),
             record_counts=(),
             findings=(
                 CatalogFinding(
@@ -303,7 +303,7 @@ def goldens() -> dict[str, dict[str, Any]]:
             registration_key=NotApplicable(),
             root_locator="/srv/neptune/packages/mobile_robot-linked",
             ledger_version=LEDGER_VERSION,
-            schema_version=Known(1),
+            schema_version=Known(packages[2].schema_version),
             record_counts=(),
             findings=(
                 CatalogFinding(
