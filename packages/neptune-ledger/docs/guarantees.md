@@ -52,7 +52,8 @@ ledger --dsn "$DSN" --tenant acme --manifest /srv/ledger/acme.manifest.json \
   lineage's only record.
 - *A moved or damaged package* refuses the rebuild with that registration's findings
   (`package_unreadable`, `file_digest_mismatch`, …), as does a logged root that now resolves
-  through a link. Restore the package, or edit its manifest root to its real new location. The rebuilt log then records the new root, and nothing else differs.
+  through a link, or that now holds another package, however intact
+  (`manifest_digest_mismatch`). Restore the package, or edit its manifest root to its real new location. The rebuilt log then records the new root, and nothing else differs.
 - *Conflicting packages* (ADR 0005 §2): whichever registered first stands and the other was
   refused, so it is not in the log. Order independence holds for sets of packages that register
   without conflict.
@@ -64,14 +65,15 @@ robot, quadruped), the schema-4 `manipulator_cell` with its lifecycle kinds, and
 variants: adapter v2 lineage siblings, a moved source with its absence, and another chunk size.
 
 - `test_a_rebuild_from_the_manifest_and_packages_is_byte_identical` (seeds 94 and 2026):
-  registers in a seeded shuffle through the CLI and dumps; rebuilds from the manifest and dumps.
-  The two dumps are equal bytes, the manifest is rewritten unchanged, and every table, transaction
-  columns included, is unchanged.
+  registers in a seeded shuffle through the CLI and dumps; rebuilds from the manifest, in place
+  and into a fresh, empty database, and dumps each. All three dumps are equal bytes, the manifest
+  is rewritten unchanged, and every table, transaction columns included, is unchanged.
 - `test_the_dump_does_not_depend_on_registration_order_or_tenant`: the shuffle and package-id
   order, in two databases and two tenants, dump to equal bytes.
 - `test_every_transaction_column_is_left_out_of_the_dump`: a migration that adds a transaction
   column under a new name fails CI until the dump leaves it out.
-- The refusal, prune, root, clock, lineage and malformed-manifest cases in the same file.
+- The refusal (a damaged package, another package at a logged root), prune, root, clock,
+  lineage and malformed-manifest cases in the same file.
 
 ## Scale
 

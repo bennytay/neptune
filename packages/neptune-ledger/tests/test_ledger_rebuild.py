@@ -9,6 +9,7 @@ continues the clock or builds a new lineage.
 
 import io
 import random
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Final
@@ -84,14 +85,16 @@ def _register_all(uri: str, packages: list[WorkedPackage], tenant: str = "acme")
 @pytest.mark.integration
 @pytest.mark.parametrize("seed", SEEDS)
 def test_a_rebuild_from_the_manifest_and_packages_is_byte_identical(
+    pg_server: str,
     pg_uri: str,
     packages: list[WorkedPackage],
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     seed: int,
 ) -> None:
-    """Acceptance (MVL-94): register in a shuffled order, dump; rebuild from the manifest, dump;
-    the dumps are byte-identical, and so is every table, transaction columns included."""
+    """Acceptance (MVL-94): register in a shuffled order, dump; rebuild from the manifest, in
+    place and into a fresh, empty database, and dump each; the dumps are byte-identical, and so
+    is every table, transaction columns included."""
     order = list(packages)
     random.Random(seed).shuffle(order)
     roots = ["--package-root", str(tmp_path / "packages")]
@@ -124,6 +127,14 @@ def test_a_rebuild_from_the_manifest_and_packages_is_byte_identical(
     listed = [e.package_id for e in Manifest.from_bytes(manifest.read_bytes()).registrations]
     assert listed == [package.package_id for package in order]
     assert before.read_bytes().count(b"\n") > 500
+
+    # From the manifest and packages alone: a database that never saw a registration.
+    fresh, elsewhere = new_database(pg_server), tmp_path / "fresh.jsonl"
+    assert _cli(fresh, "rebuild", "--from", str(manifest), *roots) == 0
+    assert _cli(fresh, "dump", "--out", str(elsewhere)) == 0
+    assert elsewhere.read_bytes() == before.read_bytes()
+    with psycopg.connect(fresh) as conn:
+        assert dump_tables(conn, "tenant_acme") == tables_before
 
 
 @pytest.mark.integration
@@ -339,6 +350,27 @@ def test_a_refused_package_rolls_the_whole_rebuild_back(
     assert report.failed == registered.registrations[2]
     assert report.registration is not None
     assert [f.code for f in report.registration.findings] == ["file_digest_mismatch"]
+    assert _dump(pg_uri) == before
+    with psycopg.connect(pg_uri) as conn:
+        assert read_manifest(conn, "acme") == registered
+
+
+def test_another_package_at_a_logged_root_is_refused(
+    pg_uri: str, registered: Manifest, packages: list[WorkedPackage]
+) -> None:
+    """An intact package that is not the logged one must not take its tick in the rebuilt log."""
+    before = _dump(pg_uri)
+    first = registered.registrations[0]
+    shutil.rmtree(first.root_locator)
+    shutil.copytree(packages[4].root, first.root_locator)
+    report = rebuild(pg_uri, registered, package_roots=None)
+    assert (report.outcome, report.failed) == ("refused", first)
+    assert report.registration is not None
+    assert report.registration.package_id == Known(packages[4].package_id)
+    assert [(f.code, f.subject) for f in report.registration.findings] == [
+        ("manifest_digest_mismatch", "manifest.json")
+    ]
+    assert first.package_id in report.registration.findings[0].detail
     assert _dump(pg_uri) == before
     with psycopg.connect(pg_uri) as conn:
         assert read_manifest(conn, "acme") == registered
