@@ -228,7 +228,12 @@ def test_a_workspace_that_cannot_be_opened_is_unusable(tmp_path: Path) -> None:
 
 
 def test_adapters_default_to_the_shipped_ones(home: Path) -> None:
-    assert Neptune(home).registry.descriptors() == default_registry().descriptors()
+    # Plus whatever plugins this environment has installed (ADR 0058); none with plugins=False.
+    shipped = default_registry().descriptors()
+    assert Neptune(home, plugins=False).registry.descriptors() == shipped
+    every = Neptune(home).registry.descriptors()
+    assert {key: every[key] for key in shipped} == shipped
+    assert set(every) - set(shipped) == {a.descriptor.id for a in Neptune(home).plugins.adapters}
 
 
 def test_adapters_are_a_registry_or_any_iterable_of_adapters(home: Path) -> None:

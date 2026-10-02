@@ -537,11 +537,12 @@ def _entries_on(clock: str, starts: Sequence[int]) -> tuple[ThreadEntry, ...]:
 def test_p7_piecewise_mappings_are_searched_only_where_their_windows_hold(
     monkeypatch: Any,
 ) -> None:
-    """A sensor → host → PTP → GPS chain with one stated mapping per 1000-tick sync window (30
-    per hop) and 2000 entries. Listing every path first made this 27 000 paths per entry; the
-    windows leave one per entry. A budget of 100 steps per entry and 200 000 per merge holds."""
-    monkeypatch.setattr(merge_module, "MAX_ENTRY_STEPS", 100)
-    monkeypatch.setattr(merge_module, "MAX_MERGE_STEPS", 200_000)
+    """ADR 0005 §5's thread size on a sensor → host → PTP → GPS chain: 20 000 entries, one stated
+    mapping per 1000-tick sync window, 100 windows per hop. Each clock's windows are indexed, so
+    an entry costs a few comparisons per hop: a budget of 20 per entry and 300 000 per merge
+    (a backstop, far below the shipped one) holds, and every entry merges."""
+    monkeypatch.setattr(merge_module, "MAX_ENTRY_STEPS", 20)
+    monkeypatch.setattr(merge_module, "MAX_MERGE_STEPS", 300_000)
     a, b, c, d = CLOCKS[:4]
     mappings = [
         ClockMapping(
@@ -554,13 +555,13 @@ def test_p7_piecewise_mappings_are_searched_only_where_their_windows_hold(
             (i * 1000, (i + 1) * 1000),
         )
         for n, (s, t) in enumerate(((a, b), (b, c), (c, d)))
-        for i in range(30)
+        for i in range(100)
     ]
-    entries = _entries_on(a, [j * 15 for j in range(2000)])
+    entries = _entries_on(a, [j * 5 + j % 7 for j in range(20_000)])
     merged, findings = merge([Partition("clock", entries, a)], d, mappings)
-    assert findings == []
+    assert findings == [], "no entry with a usable path is left unmerged"
     (partition,) = merged
-    assert partition.kind == "merged" and len(partition.entries) == 2000
+    assert partition.kind == "merged" and len(partition.entries) == 20_000
     for entry in partition.entries:
         assert entry.mapped is not None
         window = entry.world.value.start.ticks // 1000  # type: ignore[union-attr]

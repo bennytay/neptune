@@ -1,7 +1,7 @@
 {
   "assertion_kind": "stated",
   "entity_kind": {
-    "knowledge": "unknown"
+    "knowledge": "not_covered"
   },
   "from_key": {
     "key": {

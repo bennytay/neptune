@@ -110,7 +110,10 @@ issue. Four facts shape it:
    path: per entry (and per distinct start tick of a clock) it walks depth first, following a
    hop only when the hop's window holds the interval as it stands, which is what makes a path
    usable, and keeps the best-ranked complete walk. The result is the one ranking every path
-   gives. The walk is bounded: 10 000 window checks per entry and 1 000 000 per merge. An entry
+   gives. Each clock's outgoing windows are sorted by start with a running maximum of their
+   ends, so `bisect` finds the windows that hold an interval in about log(windows) comparisons;
+   piecewise mappings at ADR 0005's thread size (20 000 entries, 100 windows per hop) merge
+   every entry. The walk is bounded as a backstop: 10 000 window checks per entry and 1 000 000 per merge. An entry
    whose walk reaches either bound stays on its clock with a `mapping_out_of_range` finding
    saying so; a finding names at most 16 tried path prefixes (each ending at the hop whose window
    failed) and says how many there were. Property test P7 checks the walk against the full
@@ -127,9 +130,10 @@ issue. Four facts shape it:
    `{namespace, value}`, the state (`known` or `ambiguous`) and the record's `assertion_kind`. A
    thread whose kind is keyed by a `LogicalId` (`machine`, `sensor`, `site`, `asset`, `run`) and
    whose declared key equals either side lists the link as a `ThreadLink` from the left id to the
-   right id. **A link states no entity kind** (schema 3's `IdentityLink` has no such field), so
-   the edge's `entity_kind` is `Unknown` (catalog-api 1.5.0), never the kind of the thread that
-   lists it. `from_key` and `to_key` carry the listing thread's kind only because they are keys
+   right id. **A link states no entity kind**: schema 3's `IdentityLink` has no field for one,
+   so the edge's `entity_kind` is `NotCovered` (catalog-api 1.5.0), never the kind of the thread
+   that lists it. It is not `Unknown`, which would mean the evidence could state the kind and
+   does not; here the record has no place to state it. `from_key` and `to_key` carry the listing thread's kind only because they are keys
    of the lookup the caller made: they say "this link names the id you asked about", not "this
    link is about a machine". ADR 0003 §1.6 (an equal key of another kind is another thread)
    stands: the link is listed on each of those threads separately, each listing joins nothing,
