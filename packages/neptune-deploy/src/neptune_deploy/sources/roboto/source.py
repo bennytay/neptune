@@ -222,7 +222,9 @@ class RobotoSource(ObjectStoreSource):
         for name, _, reason in catalog.skipped:
             counts[(name, reason)] = counts.get((name, reason), 0) + 1
         for (name, reason), count in sorted(counts.items()):
-            subject = ExternalObjectRef(self.connector_id, self._document_id(name), "catalog")
+            subject = ExternalObjectRef(
+                self.connector_id, self._document_id(name.removeprefix("roboto ")), "catalog"
+            )
             self.report(
                 "value_unrepresentable", subject, {"count": count, "reason": reason, "table": name}
             )

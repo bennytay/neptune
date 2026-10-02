@@ -119,7 +119,7 @@ class RobotoOptions:
             raise ObjectStoreConfigError(str(exc)) from exc
         hosts = given.get("content_hosts", [])
         if not isinstance(hosts, list | tuple) or not all(
-            isinstance(host, str) and _HOST.fullmatch(host) for host in hosts
+            isinstance(host, str) and _HOST.fullmatch(host.lower()) for host in hosts
         ):
             raise ObjectStoreConfigError("content_hosts is a list of host or host:port names")
         version = given.get("api_version", base.api_version)
