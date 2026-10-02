@@ -229,7 +229,8 @@ def test_two_equally_near_parameter_files_are_a_conflict_never_a_choice(package:
         if isinstance(f, IngestFinding) and f.code == CONFLICTING_SNAPSHOTS
     ]
     assert conflict.category is FindingCategory.AMBIGUOUS
-    paths = sorted(p for c in conflict.details["candidates"] for p in c["paths"])
+    candidates: Any = conflict.details["candidates"]
+    paths = sorted(p for c in candidates for p in c["paths"])
     assert paths == ["conflict/run_009/left/params.yaml", "conflict/run_009/right/params.yaml"]
     assert len(conflict.records) == 3  # the run and both candidates
     assert len(conflict.related) == 2  # both candidates' declarations
