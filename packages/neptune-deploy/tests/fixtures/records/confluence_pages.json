@@ -1,0 +1,8 @@
+{
+  "_recorded": "Shape of GET /wiki/api/v2/pages?body-format=storage (Confluence Cloud REST API v2); values synthetic.",
+  "pages": [
+    {"id": "9001", "status": "current", "title": "Dock charging SOP", "spaceId": "5001", "version": {"number": 4}, "storage": "<p>Park the AMR on the dock, confirm the green lamp.</p>"},
+    {"id": "9002", "status": "current", "title": "Quadruped stair policy", "spaceId": "5001", "version": {"number": 1}, "storage": "<p>Stairs are walked only in supervised mode.</p><ac:structured-macro ac:name=\"info\"/>"},
+    {"id": "9003", "status": "current", "title": "Harbour survey checklist", "spaceId": "5001", "version": {"number": 9}, "storage": "<ul><li>Check thruster current</li><li>Confirm geofence</li></ul>"}
+  ]
+}

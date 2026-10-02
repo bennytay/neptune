@@ -95,7 +95,7 @@ ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 | `unsafe_entry` | register, verify | An entry under the root is a symlink, FIFO, socket or device (subject: package-relative path). It is never followed or opened (1.1.0) |
 | `file_missing`, `unexpected_file` | register, verify | A listed file is absent (a deleted record table is `file_missing`), or a file the manifest does not list is present |
 | `file_digest_mismatch` | register, verify | A file's size or sha256 differs from the manifest (subject: package-relative path) |
-| `manifest_digest_mismatch` | verify | `manifest.json` at the stored root no longer hashes to the package id |
+| `manifest_digest_mismatch` | verify, rebuild | `manifest.json` at the stored root no longer hashes to the package id. From a rebuild: the logged root holds another package, named in the registration's `package_id` |
 | `unsupported_schema_version` | register | The manifest declares a package-schema version the Ledger's schema-version registry does not hold (a future version is refused, never guessed at), or the catalog indexed that version with another projection mapping and must be rebuilt (ADR 0011) |
 | `record_invalid` | register | A record fails the package-schema readers, or states a schema version newer than its package's |
 | `conflicting_id` | register | An existing source or transform id arrives with different fields (ADR 0002 §6), or an existing record id (clocks included) with another body; for `source_artifact`, another size only, since chunking is not identity (ADR 0005 §2) |

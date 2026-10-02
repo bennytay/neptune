@@ -12,3 +12,7 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0003](0003-lifecycle-records-from-documents-are-declared-templates-over-the-compilers-document-records.md) | Lifecycle records from documents are declared templates over the compiler's document records | Accepted |
 | [0004](0004-archetype-deployments-are-generated-folders-run-through-ingest-and-the-mapper.md) | The archetype deployments are generated folders, run through ingest and the mapper, with golden receipts | Accepted |
 | [0005](0005-d1-gate-bounds-container-index-tables-and-explicit-coverage.md) | D1 gate: bounded mapping, container-index tables, explicit coverage and stable clocks | Accepted |
+| [0006](0006-object-stores-are-read-only-sources-over-a-standard-library-client.md) | Object stores are read-only Sources over one client interface and the standard library | Accepted |
+| [0007](0007-foxglove-recordings-are-read-only-sources-over-the-documented-streaming-api.md) | Foxglove recordings are read-only Sources over the documented REST and streaming API | Accepted |
+| [0008](0008-record-systems-are-read-only-sources-with-revision-identity-and-change-feeds.md) | Record systems are read-only Sources with revision identity and change feeds | Accepted |
+| [0009](0009-roboto-and-rerun-hub-connectors-with-catalog-metadata-as-stated-records.md) | Roboto and Rerun Hub connectors: files as Sources, catalog metadata as stated records | Accepted |

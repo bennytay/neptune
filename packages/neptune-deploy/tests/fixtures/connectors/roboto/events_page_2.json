@@ -1,0 +1,39 @@
+{
+  "data": {
+    "items": [
+      {
+        "associations": [
+          {
+            "association_id": "fl_legged_patrol",
+            "association_type": "file",
+            "association_version": null
+          },
+          {
+            "association_id": "ds_shift_0914",
+            "association_type": "dataset",
+            "association_version": null
+          }
+        ],
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_reviewer",
+        "custom_fields": {},
+        "description": null,
+        "display_options": null,
+        "end_time": 1757836921250000000,
+        "event_id": "ev_legged_slip",
+        "metadata": {
+          "leg": "front_left"
+        },
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_reviewer",
+        "name": "foot_slip",
+        "org_id": "og_acme_robotics",
+        "start_time": 1757836920000000000,
+        "tags": [
+          "gait"
+        ]
+      }
+    ],
+    "next_token": null
+  }
+}
