@@ -5,7 +5,8 @@ Never invented (ADR 0057 §3):
 - A root ``crs`` member (GeoJSON 2008, removed by RFC 7946) is stated as written. Its ``name`` is
   read as an OGC URN, an OGC HTTP URI or ``AUTHORITY:CODE``, taking the authority and the code
   verbatim; a ``link`` is never followed, a ``null`` says no CRS can be assumed, and anything else
-  is not recognised: those are ``Unknown``. Two different CRSs are ``Ambiguous``.
+  is not recognised: those are ``Unknown``. Two different CRSs are ``Ambiguous``; a repeated
+  member where one states a CRS and another states none is ``Unknown``.
 - With no ``crs`` member the file is RFC 7946's and its CRS is that RFC's default (WGS 84,
   longitude then latitude: ``OGC:CRS84``), cited at the root ``type``, *only* if nothing
   contradicts it. A position outside longitude and latitude's range, a ``crs`` member on a feature
@@ -185,6 +186,12 @@ def decide(
                 )
             )
             return Decision("ambiguous", tuple(readings), at, False), found
+        if readings and reasons:  # a member that states nothing contradicts one that does
+            return unknown(
+                f"the file repeats crs and one member states none ({reasons[0]}), while another"
+                f" states {readings[0].authority}:{readings[0].code}",
+                at,
+            )
         if readings:
             only = readings[0]
             found.append(

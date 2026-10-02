@@ -42,7 +42,9 @@ One adapter, `geojson`, emitting existing kinds only (no schema change).
      `EPSG:n`. Always with `crs_legacy` (info): RFC 7946 removed the member.
    - Two different CRSs (a repeated member) are `Ambiguous`, each candidate cited
      (`crs_ambiguous`). A `null` (GeoJSON 2008: no CRS can be assumed), a `link` (never followed)
-     or a name no rule reads is `Unknown` with `crs_unknown` saying which.
+     or a name no rule reads is `Unknown` with `crs_unknown` saying which. A repeated member where
+     one states a CRS and another states none (`"crs": null` beside `EPSG:4326`) is `Unknown` too:
+     a statement that no CRS can be assumed is not outvoted by another.
    - With no `crs` member the file is RFC 7946's and its CRS is that RFC's default, `OGC:CRS84`
      (WGS 84, longitude then latitude), `stated` by the specification and cited at the root `type`
      (ADR 0017 §6), with `crs_defaulted` (info), **only when nothing contradicts it**: a position

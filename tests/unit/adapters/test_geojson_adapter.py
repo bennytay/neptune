@@ -461,6 +461,23 @@ def test_the_same_crs_twice_is_one_crs() -> None:
     assert "duplicate_member" in codes(output)
 
 
+@pytest.mark.parametrize(
+    "members",
+    [
+        b'"crs": null, "crs": {"type": "name", "properties": {"name": "EPSG:4326"}}',
+        b'"crs": {"type": "name", "properties": {"name": "EPSG:4326"}}, "crs": null',
+        b'"crs": {"type": "name", "properties": {"name": "EPSG:4326"}}, "crs": 5',
+        b'"crs": {"type": "link", "properties": {"href": "x"}}, '
+        b'"crs": {"type": "name", "properties": {"name": "EPSG:4326"}}',
+    ],
+)
+def test_a_repeated_crs_with_an_unreadable_member_is_unknown_not_stated(members: bytes) -> None:
+    output = run(b'{"type": "FeatureCollection", ' + members + b', "features": []}')
+    assert isinstance(artifact(output).crs, Unknown)
+    assert {"crs_unknown", "duplicate_member"} <= set(codes(output))
+    assert "crs_legacy" not in codes(output)
+
+
 def test_no_crs_member_and_positions_no_geographic_crs_holds_is_unknown_not_wgs84() -> None:
     output = run(fixture("utm_no_crs.geojson"))
     assert isinstance(artifact(output).crs, Unknown)
