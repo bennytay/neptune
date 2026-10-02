@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:c4048ec20214090a4f2764d236aa829ce846b8831eb483d9d6e9edc382f810e2`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:cafa5a56149f034ad8b983a94f4a8a0cdbe26101dd3d14936cc0548c88e552d7`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -18,14 +18,14 @@ Receipt `rec:sha256:c4048ec20214090a4f2764d236aa829ce846b8831eb483d9d6e9edc382f8
 | `calibration/CAL-ARM3A-0415.yaml` | 326 | `sha256:7734a681a3f1` | config 0.1.0 |
 | `calibration/CAL-ARM3A-0623.yaml` | 334 | `sha256:530ef05aaa16` | config 0.1.0 |
 | `calibration/CAL-ARM3A-0818.yaml` | 334 | `sha256:a2d19ecfbcda` | config 0.1.0 |
-| `changes/servicenow_changes.csv` | 626 | `sha256:fdca33396278` | tabular 0.1.0 |
-| `cmms/work_orders.csv` | 950 | `sha256:96d3810cd8c7` | tabular 0.1.0 |
+| `changes/servicenow_changes.csv` | 626 | `sha256:fdca33396278` | tabular 0.2.0 |
+| `cmms/work_orders.csv` | 950 | `sha256:96d3810cd8c7` | tabular 0.2.0 |
 | `documents/commissioning_CR-C3-2026-02.pdf` | 12618 | `sha256:5e9fde08afd8` | pdf 0.1.0 |
 | `documents/risk_assessment_CELL3-RA-009.pdf` | 11475 | `sha256:9929112c0ec5` | pdf 0.1.0 |
 | `documents/sop_CELL-014_finger_set.pdf` | 6551 | `sha256:962616825f67` | pdf 0.1.0 |
 | `neptune.yaml` | 149 | `sha256:2c6ff33f9633` | config 0.1.0 |
-| `requalification/requalification_tests.csv` | 987 | `sha256:30be864d249a` | tabular 0.1.0 |
-| `tickets/near_miss_export.json` | 1046 | `sha256:a48873e408ee` | tabular 0.1.0 |
+| `requalification/requalification_tests.csv` | 987 | `sha256:30be864d249a` | tabular 0.2.0 |
+| `tickets/near_miss_export.json` | 1046 | `sha256:a48873e408ee` | tabular 0.2.0 |
 | `urdf/arm6.urdf` | 1767 | `sha256:7f79c49b41ef` | text 0.1.0 |
 
 ## Adapters
@@ -35,10 +35,11 @@ Receipt `rec:sha256:c4048ec20214090a4f2764d236aa829ce846b8831eb483d9d6e9edc382f8
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
 | `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:d268e329090f` |
+| `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:e29bd75e0779` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
 | `rosbag2` | `0.1.0` | `sha256:44136fa355b3` | none | `rec:bf370f1dddcb` |
-| `tabular` | `0.1.0` | `sha256:15487b4cb47e` | pyarrow 25.0.1 | `rec:b4754c46f7fb` |
+| `tabular` | `0.2.0` | `sha256:f3ca9581546a` | pyarrow 25.0.1 | `rec:a849dd895889` |
 | `text` | `0.1.0` | `sha256:12b7c5463bbb` | none | `rec:3b8cd771874a` |
 
 ## Records
@@ -57,7 +58,7 @@ Receipt `rec:sha256:c4048ec20214090a4f2764d236aa829ce846b8831eb483d9d6e9edc382f8
 | `structured_record` | 46 |
 | `structured_table` | 15 |
 | `timestamp_domain` | 4 |
-| `transform_record` | 8 |
+| `transform_record` | 9 |
 
 ## Runs
 
@@ -82,9 +83,9 @@ Receipt `rec:sha256:c4048ec20214090a4f2764d236aa829ce846b8831eb483d9d6e9edc382f8
 
 - **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded; each row cites its message's bytes · `rec:09e5a12ecc04`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:9d5585a08e16`
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:d7e9625a4618`
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:eafdcc15527a`
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:f31833fd5408`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:182da7bcdc08`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:250acb73c5ee`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:ba08f3bb74a9`
 
 ## Ambiguous fields
 

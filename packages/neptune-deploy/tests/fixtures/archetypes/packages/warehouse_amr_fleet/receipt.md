@@ -1,20 +1,20 @@
 # Ingest receipt
 
-Receipt `rec:sha256:5ad3edc84f84f09d0135c0a2ee267b5dcd5d7cf692f9350a2765a24575de67e6`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8bd5f`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 25 seen, 25 read, 0 not read, 0 gone
 - Runs: 8; streams: 21; entities: 0
-- Findings: 1 errors, 2 warnings, 25 info; ambiguous fields: 0
+- Findings: 1 errors, 6 warnings, 27 info; ambiguous fields: 0
 
 ## Sources
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `authorisation/zone_register.csv` | 788 | `sha256:4b797207931a` | tabular 0.1.0 |
-| `changes/servicenow_changes.csv` | 1618 | `sha256:2b7b4b194dd1` | tabular 0.1.0 |
-| `cmms/work_orders.csv` | 1978 | `sha256:46a7c074ef28` | tabular 0.1.0 |
+| `authorisation/zone_register.csv` | 788 | `sha256:4b797207931a` | tabular 0.2.0 |
+| `changes/servicenow_changes.csv` | 1618 | `sha256:2b7b4b194dd1` | tabular 0.2.0 |
+| `cmms/work_orders.csv` | 1978 | `sha256:46a7c074ef28` | tabular 0.2.0 |
 | `config/AMR-05/nav2_params.yaml` | 405 | `sha256:6495d96ee25f` | config 0.1.0 |
 | `config/AMR-06/nav2_params.yaml` | 405 | `sha256:7f04720e8e8b` | config 0.1.0 |
 | `config/AMR-07/nav2_params.yaml` | 405 | `sha256:9e0b456f5606` | config 0.1.0 |
@@ -23,15 +23,15 @@ Receipt `rec:sha256:5ad3edc84f84f09d0135c0a2ee267b5dcd5d7cf692f9350a2765a24575de
 | `config/AMR-10/nav2_params.yaml` | 405 | `sha256:0ea560b788ce` | config 0.1.0 |
 | `incidents/INC-0007.pdf` | 6897 | `sha256:b793183fb43a` | pdf 0.1.0 |
 | `incidents/INC-0013.pdf` | 6416 | `sha256:c33a7d5acbe3` | pdf 0.1.0 |
-| `maps/S-007_zones.geojson` | 1393 | `sha256:83d1dc3347fe` | text 0.1.0 |
-| `maps/S-012_zones.geojson` | 1394 | `sha256:22a6767e99ac` | text 0.1.0 |
+| `maps/S-007_zones.geojson` | 1393 | `sha256:83d1dc3347fe` | geojson 0.1.0 |
+| `maps/S-012_zones.geojson` | 1394 | `sha256:22a6767e99ac` | geojson 0.1.0 |
 | `neptune.yaml` | 149 | `sha256:2c6ff33f9633` | config 0.1.0 |
-| `requalification/requalification_tests.csv` | 785 | `sha256:82e663e574ca` | tabular 0.1.0 |
+| `requalification/requalification_tests.csv` | 785 | `sha256:82e663e574ca` | tabular 0.2.0 |
 | `runs/S-007/amr-05_2026-03-03.mcap` | 17400 | `sha256:08528ca2ef6f` | mcap 0.1.0 |
 | `runs/S-007/amr-06_2026-03-03.mcap` | 17515 | `sha256:b80fb68ef024` | mcap 0.1.0 |
 | `runs/S-007/amr-07_2026-04-02.mcap` | 17516 | `sha256:34bb6772f2fd` | mcap 0.1.0 |
 | `runs/S-007/amr-07_2026-04-15.mcap` | 17400 | `sha256:e1987a0b1303` | mcap 0.1.0 |
-| `runs/S-012/amr-08_2026-05-19/amr-08_2026-05-19_0.mcap` | 10088 | `sha256:9ce9e303f7db` | mcap 0.1.0 |
+| `runs/S-012/amr-08_2026-05-19/amr-08_2026-05-19_0.mcap` | 10088 | `sha256:9ce9e303f7db` | mcap 0.1.0, neptune.introspection 0.1.0 |
 | `runs/S-012/amr-08_2026-05-19/metadata.yaml` | 1940 | `sha256:6a01ea04e416` | rosbag2 0.1.0 |
 | `runs/S-012/amr-09_2026-03-05.mcap` | 17400 | `sha256:e7e0782cb047` | mcap 0.1.0 |
 | `runs/S-012/amr-10_2026-03-06.mcap` | 17515 | `sha256:a217da2d2bc6` | mcap 0.1.0 |
@@ -43,12 +43,15 @@ Receipt `rec:sha256:5ad3edc84f84f09d0135c0a2ee267b5dcd5d7cf692f9350a2765a24575de
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
+| `geojson` | `0.1.0` | `sha256:542c42fe020a` | none | `rec:2c0e605ea2be` |
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
 | `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:d268e329090f` |
+| `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:e29bd75e0779` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
+| `neptune.validate` | `0.1.0` | `sha256:0a0d08ccf4b7` | none | `rec:c712df3eb7ab` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
 | `rosbag2` | `0.1.0` | `sha256:44136fa355b3` | none | `rec:bf370f1dddcb` |
-| `tabular` | `0.1.0` | `sha256:15487b4cb47e` | pyarrow 25.0.1 | `rec:b4754c46f7fb` |
+| `tabular` | `0.2.0` | `sha256:f3ca9581546a` | pyarrow 25.0.1 | `rec:a849dd895889` |
 | `text` | `0.1.0` | `sha256:12b7c5463bbb` | none | `rec:3b8cd771874a` |
 
 ## Records
@@ -57,17 +60,18 @@ Receipt `rec:sha256:5ad3edc84f84f09d0135c0a2ee267b5dcd5d7cf692f9350a2765a24575de
 |---|---|
 | `configuration_snapshot` | 7 |
 | `configuration_value` | 115 |
-| `document_block` | 36 |
-| `document_record` | 6 |
-| `ingest_finding` | 28 |
+| `document_block` | 34 |
+| `document_record` | 4 |
+| `ingest_finding` | 34 |
 | `run` | 8 |
 | `source_artifact` | 25 |
 | `source_revision` | 25 |
+| `spatial_artifact` | 2 |
 | `stream` | 21 |
-| `structured_record` | 44 |
-| `structured_table` | 10 |
+| `structured_record` | 60 |
+| `structured_table` | 14 |
 | `timestamp_domain` | 29 |
-| `transform_record` | 8 |
+| `transform_record` | 11 |
 
 ## Runs
 
@@ -118,6 +122,12 @@ Receipt `rec:sha256:5ad3edc84f84f09d0135c0a2ee267b5dcd5d7cf692f9350a2765a24575de
 - **error** `mcap.truncated` (corrupt): the file ends inside a chunk: 1507 of its bytes are there, and 5 message(s) are read from them · `rec:b0ccc4982d56`
 - **warning** `config.duplicate_key` (inconsistent): 2 entries repeat a key of their mapping; each is kept in source order (first: '/controller_server/ros__parameters/max_vel_x') · `rec:7ee22e82dd5d`
 - **warning** `mcap.chunk_truncated` (corrupt): the chunk is cut short: its stored bytes decode to 1458 of its 2965 bytes, whose whole records end at 1151; only those records are read, unchecked by its CRC · `rec:bea2a7286905`
+- **warning** `neptune.introspection.definition_unreadable` (unsupported): the stream's definition cannot be used: the definition is not one byte range · `rec:2f7dfaaf35c1`
+- **warning** `neptune.introspection.definition_unreadable` (unsupported): the stream's definition cannot be used: the definition is not one byte range · `rec:3b388a93f582`
+- **warning** `neptune.introspection.definition_unreadable` (unsupported): the stream's definition cannot be used: the definition is not one byte range · `rec:e5faf5868456`
+- **warning** `neptune.validate.source_incomplete` (corrupt): source sha256:9ce9e303f7db is incomplete: 2 findings report cut-off or corrupt bytes; 8 records hold what was read · `rec:550083a7b17c`
+- **info** `geojson.crs_legacy` (inconsistent): the file states CRS local:site-grid-m in a crs member, which RFC 7946 removed · `rec:b14603956bb4`
+- **info** `geojson.crs_legacy` (inconsistent): the file states CRS local:site-grid-m in a crs member, which RFC 7946 removed · `rec:e36dbe8c6388`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:2a2a77e18f26`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:2b04e32f6e3b`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:3d7af1403a85`
@@ -139,10 +149,10 @@ Receipt `rec:sha256:5ad3edc84f84f09d0135c0a2ee267b5dcd5d7cf692f9350a2765a24575de
 - **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded; each row cites its message's bytes · `rec:cee68bfcba62`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:e765b4253ec8`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:ee43ce9237a6`
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:4ec1a1ce29b4`
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:8b22f879a5a9`
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:aeba41f5da58`
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:ebf3e6cfd782`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:100048fd4ac5`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:2f08528c577c`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:7ba4868308e1`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:c9dbb00ab9f7`
 
 ## Ambiguous fields
 
