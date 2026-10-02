@@ -1,15 +1,17 @@
 """Projection columns generated from the package schema's JSON Schema export (ADR 0009 §3).
 
-The committed spec and its migrations are pinned to the generator's output over the published
-package-schema exports, up to the version the compiler declares. A schema-bump fixture adds a record
-kind to the declared version, and the migration the generator writes for it applies on top of the
-shipped ones and files the new kind's rows.
+The committed registry's newest spec is pinned to the newest published package-schema export, and
+migrations 0005 and 0006 to the generator's output over the exports they were written from (each
+version's entry is pinned in test_ledger_schema_registry.py). A schema-bump fixture adds a record
+kind, and the migration the generator writes for it applies on top of the shipped ones and files the
+new kind's rows.
 """
 
 import copy
 import hashlib
 import json
 import re
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Final
 
@@ -29,8 +31,10 @@ from neptune_ledger.catalog.projection import (
     Spec,
     generate,
     projection_spec,
+    read_registry,
     read_spec,
     render_migration,
+    shipped_registry,
     shipped_spec,
     spec_bytes,
 )
@@ -38,7 +42,7 @@ from neptune_ledger.catalog.projection import (
 Conn = psycopg.Connection[tuple[object, ...]]
 REPO: Final = Path(__file__).resolve().parents[3]
 EXPORTS: Final = REPO / "contracts" / "package-schema"
-BUMP: Final = SCHEMA_VERSION + 1  # the schema-bump fixture's version
+BUMPED: Final = shipped_registry().latest.version + 1  # the schema-bump fixture's version
 CATALOG: Final = Path(projection.__file__).resolve().parent
 RECORD: Final = "rec:sha256:" + "a" * 64
 STREAM: Final = "rec:sha256:" + "b" * 64
@@ -62,9 +66,9 @@ def schema_declared() -> dict[str, Any]:
 
 def bumped_schema() -> dict[str, Any]:
     """The declared package schema plus a contact-event kind that states a machine, a stream and
-    a clock, under the next version."""
+    a clock, under the version after the registry's newest."""
     schema = copy.deepcopy(schema_declared())
-    schema["$id"] = f"urn:neptune:schema:canonical:{BUMP}"
+    schema["$id"] = f"urn:neptune:schema:canonical:{BUMPED}"
     schema["$defs"]["ContactEvent"] = {
         "additionalProperties": False,
         "properties": {
@@ -74,7 +78,7 @@ def bumped_schema() -> dict[str, Any]:
             "kind": {"const": "contact_event"},
             "machine": {"$ref": "#/$defs/Knowledge_LogicalId"},
             "provenance": {"$ref": "#/$defs/Provenance"},
-            "schema_version": {"const": BUMP},
+            "schema_version": {"const": BUMPED},
             "stream": {"$ref": "#/$defs/RecordId"},
         },
         "required": ["clock", "details", "id", "kind", "machine", "provenance", "stream"],
@@ -93,10 +97,15 @@ def migration(version: int, text: str) -> Migration:
 
 
 def test_the_shipped_spec_is_generated_from_the_declared_package_schema() -> None:
-    assert (CATALOG / "projections.json").read_bytes() == spec_bytes(
-        projection_spec(schema_declared())
-    )
-    assert shipped_spec() == projection_spec(schema_declared())
+    """The newest spec follows the declared version. No version after 1 adds a projection
+    column: 2 adds kinds with no hot filter, and 3 and 4 fill columns 0005 made, so their only
+    migration is the guard 0006."""
+    latest = shipped_registry().latest
+    assert latest.version == SCHEMA_VERSION
+    newest = EXPORTS / f"v{latest.contract_version}" / "schema.json"
+    assert shipped_spec() == latest.spec == projection_spec(json.loads(newest.read_bytes()))
+    for older, newer in pairwise(shipped_registry().versions):
+        assert "ADD COLUMN" not in render_migration(older.spec, newer.spec, 6)
     assert set(shipped_spec().kinds) - set(BASELINE_KINDS) >= {
         "configuration_snapshot",
         "configuration_value",
@@ -231,7 +240,7 @@ def test_schema_key_order_does_not_change_the_spec() -> None:
 def test_a_bump_that_adds_a_kind_renders_its_new_columns_only() -> None:
     """No partition: the new kind lives in record_default (ADR 0008; ADR 0009 §6)."""
     text = render_migration(shipped_spec(), projection_spec(bumped_schema()), 5)
-    assert text.startswith(f"-- 0005 record projections for urn:neptune:schema:canonical:{BUMP}")
+    assert text.startswith(f"-- 0005 record projections for urn:neptune:schema:canonical:{BUMPED}")
     assert "CREATE TABLE" not in text
     assert "IF EXISTS (SELECT 1 FROM record WHERE kind IN ('contact_event')) THEN" in text
     assert "ADD COLUMN stream_ids text[]" in text
@@ -322,24 +331,37 @@ def test_a_projection_added_to_an_existing_kind_guards_its_filed_rows() -> None:
     assert "      'image'))) THEN" in text
 
 
+def published(directory: Path, schema: dict[str, Any], version: str) -> Path:
+    """``schema`` published as package-schema ``version`` in ``directory`` (as the registry
+    lays a version out: schema.json and the version.json recording its sha256)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(schema).encode("utf-8")
+    (directory / "schema.json").write_bytes(data)
+    digest = "sha256:" + hashlib.sha256(data).hexdigest()
+    record = {"contract": "package-schema", "schema_sha256": digest, "version": version}
+    (directory / "version.json").write_text(json.dumps(record), encoding="utf-8")
+    return directory / "schema.json"
+
+
 def test_generate_writes_the_spec_and_numbers_the_next_migration(tmp_path: Path) -> None:
     catalog = tmp_path / "catalog"
     (catalog / "migrations").mkdir(parents=True)
     for path in (CATALOG / "migrations").glob("*.sql"):
         (catalog / "migrations" / path.name).write_bytes(path.read_bytes())
     (catalog / "projections.json").write_bytes((CATALOG / "projections.json").read_bytes())
-    schema = tmp_path / "schema.json"
-    schema.write_text(json.dumps(schema_declared()), encoding="utf-8")
-    assert generate(schema, catalog) is None  # nothing new
-    schema.write_text(json.dumps(bumped_schema()), encoding="utf-8")
-    written = generate(schema, catalog)
-    assert (
-        written
-        == catalog / "migrations" / f"{len(migrations()) + 1:04d}_projections_schema_{BUMP}.sql"
-    )
-    assert read_spec((catalog / "projections.json").read_bytes()) == projection_spec(
-        bumped_schema()
-    )
+    # The newest published version again: nothing new, and the registry bytes do not change.
+    newest = EXPORTS / f"v{shipped_registry().latest.contract_version}" / "schema.json"
+    assert generate(newest, catalog) is None
+    assert (catalog / "projections.json").read_bytes() == (
+        CATALOG / "projections.json"
+    ).read_bytes()
+    written = generate(published(tmp_path / "bumped", bumped_schema(), f"{BUMPED}.0.0"), catalog)
+    number = len(migrations()) + 1
+    assert written == catalog / "migrations" / f"{number:04d}_projections_schema_{BUMPED}.sql"
+    registry = read_registry((catalog / "projections.json").read_bytes())
+    assert registry.numbers == (*shipped_registry().numbers, BUMPED)
+    assert registry.latest.spec == projection_spec(bumped_schema())
+    assert registry.versions[:-1] == shipped_registry().versions
 
 
 def test_the_generator_command_needs_one_schema_path() -> None:
@@ -380,7 +402,7 @@ def test_a_schema_bump_migration_applies_and_files_the_new_kind(pg: Conn) -> Non
         f" line, schema_version, body_digest, body, {', '.join(columns)})"
         f" VALUES ('acme', 'contact_event', %s, %s, 1, 1, %s, %s, %s::jsonb,"
         f" {', '.join(['%s'] * len(columns))})",
-        (RECORD, package, BUMP, "sha256:" + "0" * 64, json.dumps(record), *values),
+        (RECORD, package, BUMPED, "sha256:" + "0" * 64, json.dumps(record), *values),
     )
     row = pg.execute(
         "SELECT tableoid::regclass::text, stream_ids, body ->> 'kind' FROM tenant_acme.record"
@@ -409,7 +431,7 @@ def test_a_bump_migration_refuses_rows_of_its_kind_already_filed(pg: Conn) -> No
         "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
         " registration_key, line, schema_version, body_digest)"
         " VALUES ('acme', 'contact_event', %s, %s, 1, 1, %s, %s)",
-        (RECORD, package, BUMP, "sha256:" + "0" * 64),
+        (RECORD, package, BUMPED, "sha256:" + "0" * 64),
     )
     bump = migration(len(shipped) + 1, render_migration(shipped_spec(), new, len(shipped) + 1))
     with pytest.raises(psycopg.errors.RaiseException, match="rebuild this catalog"):

@@ -1,0 +1,12 @@
+{
+  "evidence_ref": {
+    "locator": [
+      {
+        "kind": "byte_range",
+        "length": 352,
+        "offset": 0
+      }
+    ],
+    "source": "sha256:a129a6a387b18d19bbbb00672f13b41987ea69ea42261895d257fb3b084fe0eb"
+  }
+}
