@@ -77,6 +77,7 @@ from neptune.adapters.tabular._xlsx_package import (
     read_styles,
     read_workbook,
     resolve,
+    small_int,
 )
 from neptune.model.finding import IngestFinding
 from neptune.model.jsonvalue import JsonObject, JsonValue
@@ -162,12 +163,15 @@ def probe(head: bytes, hints: ProbeHints) -> ProbeResult:
         except (zipfile.BadZipFile, ValueError, OSError, EOFError, NotImplementedError):
             pass
         else:
-            if "[Content_Types].xml" in names and any(n.startswith("xl/workbook") for n in names):
+            if "[Content_Types].xml" in names and "xl/workbook.xml" in names:
                 reason = ProbeReason(
                     "tabular.xlsx_workbook",
                     "the zip holds [Content_Types].xml and a workbook part under xl/",
                 )
                 return ProbeResult(VERIFIED, (reason,))
+    if "xl/workbook.bin" in names:
+        binary = ProbeReason("tabular.xlsx_binary", "a binary workbook (XLSB) is not read")
+        return ProbeResult(0.0, (binary,))
     if any(name.startswith("xl/") for name in names):
         reason = ProbeReason("tabular.xlsx_parts", "the zip's leading parts are under xl/")
         return ProbeResult(SIGNATURE, (reason,))
@@ -547,6 +551,7 @@ class _Scan:
     prologue: int = -1  # the bytes up to and including <sheetData>'s tag; -1: no sheetData
     blocks: list[_Block] = field(default_factory=list)
     header: tuple[int, int] | None = None
+    header_formulas: int = 0  # the formulas before the header row
     formulas: int = 0
     findings: list[IngestFinding] = field(default_factory=list)
 
@@ -567,9 +572,10 @@ def _scan(
     stack: list[str | None] = []
     numbers = RowNumbers()
     member = package.span(part)
-    row: list[list[int]] = []  # [start, cells, formulas, empty], one row at a time
+    # one row at a time: [start, cells, formulas, empty, width, last column, cell has a formula]
+    row: list[list[int]] = []
     row_numbers: list[tuple[int, bool, int, int]] = []
-    totals = {"rows": 0, "cells": 0}
+    totals = {"rows": 0, "cells": 0, "header": 0}
     block: list[_Block] = []
 
     def close() -> None:
@@ -578,8 +584,14 @@ def _scan(
             block.clear()
 
     def finish(
-        start: int, end: int, cells: int, formulas: int, numbered: tuple[int, bool, int, int]
+        start: int,
+        end: int,
+        declared: int,
+        cells: int,
+        formulas: int,
+        numbered: tuple[int, bool, int, int],
     ) -> None:
+        """A row of ``declared`` cells that read as ``cells`` (a gap is a cell too)."""
         number, accepted, seen_before, accepted_before = numbered
         totals["rows"] += 1
         if totals["rows"] > limits.max_rows:
@@ -611,9 +623,10 @@ def _scan(
             raise Stop
         before = found.formulas
         found.formulas += formulas
-        if cells == 0:
+        if declared == 0:
             return
-        if end - start > limits.max_row_bytes:
+        too_large = end - start > limits.max_row_bytes
+        if too_large:
             close()
             found.findings.append(
                 finding(
@@ -625,10 +638,16 @@ def _scan(
                     {"bytes": end - start, "max_row_bytes": limits.max_row_bytes, "row": number},
                 )
             )
-            return
-        if with_header and found.header is None and accepted:
+        if with_header and not totals["header"] and accepted:
+            # the first row is the header, whether or not it could be read: a data row is never
+            # promoted into its place
+            totals["header"] = 1
             close()
-            found.header = (start, end)
+            if not too_large:
+                found.header = (start, end)
+                found.header_formulas = before
+            return
+        if too_large:
             return
         if block and (
             block[0].rows >= BLOCK_ROWS
@@ -665,12 +684,18 @@ def _scan(
             empty = end is not None and window.is_empty_tag(at, end)
             seen_before, accepted_before = numbers.seen, numbers.accepted
             number, accepted = numbers.step(attrs.get("r"))
-            row[:] = [[at, 0, 0, 1 if empty else 0]]
+            row[:] = [[at, 0, 0, 1 if empty else 0, 0, -1, 0]]
             row_numbers[:] = [(number, accepted, seen_before, accepted_before)]
         elif kind == "c" and parent == "row" and row:
-            row[0][1] += 1
-        elif kind == "f" and parent == "c" and row:
-            row[0][2] += 1
+            counts = row[0]
+            counts[1] += 1
+            reference = _CELL_REF.fullmatch(attrs.get("r", ""))
+            column = _column(reference.group(1)) if reference else counts[5] + 1
+            counts[4] = max(counts[4], min(column, limits.max_columns) + 1)
+            counts[5], counts[6] = column, 0
+        elif kind == "f" and parent == "c" and row and not row[0][6]:
+            row[0][2] += 1  # a cell holds one formula: a second <f> is not another
+            row[0][6] = 1
         stack.append(kind)
 
     def end_element(tag: str) -> None:
@@ -678,11 +703,11 @@ def _scan(
         here = parser.CurrentByteIndex
         parent = stack[-1] if stack else None
         if kind == "row" and parent == "sheetData" and row:
-            start, cells, formulas, empty = row[0]
+            start, declared, formulas, empty, width, _, _ = row[0]
             numbered = row_numbers[0]
             row.clear()
             if empty:
-                finish(start, here, 0, 0, numbered)
+                finish(start, here, 0, 0, 0, numbered)
                 return
             end = window.tag_end(here)
             if end is None:
@@ -692,7 +717,7 @@ def _scan(
                     {"part": part, "error": "tag_too_long"},
                     (member,),
                 )
-            finish(start, end, cells, formulas, numbered)
+            finish(start, end, declared, width, formulas, numbered)
         elif kind == "sheetData" and parent == "worksheet":
             raise Stop
 
@@ -834,6 +859,7 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
             workbook.length,
         )
     ]
+    taken: set[str] = set()
     for index, decl in enumerate(book.sheets):
         rel = located.relationships.get(decl.rid or "")
         part = target_of(rel) if rel is not None and rel.type == "worksheet" else ""
@@ -844,6 +870,10 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
             if rel.type != "worksheet"
             else "part_missing"
         )
+        if part in taken:  # two sheets over one part would have the same rows' ids
+            part, reason = "", "part_shared"
+        if part:
+            taken.add(part)
         sheet = Sheet(
             index,
             decl.name,
@@ -879,6 +909,7 @@ def plan(source: SourceReader, config: AdapterConfig, limits: Limits) -> Plan:
             "covered": covered,
             "formulas": scan.formulas > 0,
             "header": list(scan.header) if scan.header else [],
+            "header_formulas": scan.header_formulas,
             "layout": "xlsx",
             "part": "sheet_table",
             "prologue": scan.prologue,
@@ -1014,22 +1045,28 @@ class _Context:
     limits: Limits
 
 
-def _open(package: Package, sheet: Sheet) -> tuple[SharedStrings, Styles]:
-    shared, _ = read_shared_strings(package, sheet.shared or None)
-    styles, _ = read_styles(package, sheet.styles or None)
+def _open(package: Package, sheet: Sheet, rows: list[_Row]) -> tuple[SharedStrings, Styles]:
+    """The shared strings and the styles, read only when a cell of ``rows`` needs them."""
+    cells = [cell for row in rows for cell in row.cells]
+    shared, styles = SharedStrings(), Styles()
+    if any(cell.type == "s" for cell in cells):
+        shared, _ = read_shared_strings(package, sheet.shared or None)
+    if any(cell.style is not None for cell in cells):
+        styles, _ = read_styles(package, sheet.styles or None)
     return shared, styles
 
 
 def _format(styles: Styles, style: str | None) -> tuple[int, str | None]:
     """A cell's number format id and, when the workbook defines the code, the code."""
-    if style is None or not style.isdecimal() or int(style) >= len(styles.formats):
+    index = small_int(style)
+    if index is None or index >= len(styles.formats):
         return 0, None
-    ident = styles.formats[int(style)]
+    ident = styles.formats[index]
     return ident, styles.codes.get(ident)
 
 
 def _row_cells(
-    ctx: _Context, raw: _Row, number: int, issues: Issues, record: "RecordId"
+    ctx: _Context, raw: _Row, number: int, issues: Issues, record: "RecordId | None"
 ) -> tuple[list[Knowledge[CellValue]], list[tuple[int, _Cell, str]]] | None:
     """A row's cells by column, a gap a blank cell, and its formula cells; ``None`` if the row
     has more cells than ``max_columns`` (it is not decoded)."""
@@ -1102,7 +1139,7 @@ def _row_cells(
 
 
 def _cell_issue(
-    issues: Issues, name: str, cell: _Cell, ref: str, number: int, record: "RecordId"
+    issues: Issues, name: str, cell: _Cell, ref: str, number: int, record: "RecordId | None"
 ) -> None:
     messages = {
         "xlsx_cell_unreadable": f"cell {ref} declares type {cell.type or 'n'!r} and its value"
@@ -1133,8 +1170,8 @@ def _formula_row(
         Known(ref, cites.provenance(cell_evidence)),
         Known(formula.text, declared) if formula.text else Unknown(declared),
         Known(formula.kind, declared),
-        Known(int(formula.si), declared)
-        if formula.si is not None and formula.si.isdecimal()
+        Known(shared, declared)
+        if (shared := small_int(formula.si)) is not None
         else Unknown(declared),
         Known(formula.ref, declared) if formula.ref else Unknown(declared),
     ]
@@ -1161,6 +1198,11 @@ def _rows(
     out: list[StructuredRecord] = []
     ordinal = formula_base
     for raw in rows:
+        # a formula's ordinal is its place among the formulas of the sheet's rows as they stand,
+        # whether or not its row or cell is dropped, so the blocks the sheet is cut into change
+        # no ordinal
+        position = {id(c): k for k, c in enumerate(c for c in raw.cells if c.formula is not None)}
+        first, ordinal = ordinal, ordinal + len(position)
         number, accepted = numbers.step(raw.r)
         evidence = cites.at(raw.start, raw.end)
         rid = record_id(StructuredRecord.kind, evidence, ctx.config)
@@ -1191,15 +1233,19 @@ def _rows(
         )
         if formulas_id is not None:
             for _, cell, ref in formulas:
-                out.append(_formula_row(ctx, formulas_id, ordinal, cell, ref))
-                ordinal += 1
+                out.append(_formula_row(ctx, formulas_id, first + position[id(cell)], cell, ref))
     return out, issues.findings()
 
 
 def _context(
-    source: SourceReader, config: AdapterConfig, limits: Limits, sheet: Sheet, package: Package
+    source: SourceReader,
+    config: AdapterConfig,
+    limits: Limits,
+    sheet: Sheet,
+    package: Package,
+    rows: list[_Row],
 ) -> _Context:
-    shared, styles = _open(package, sheet)
+    shared, styles = _open(package, sheet, rows)
     return _Context(source, config, sheet, _Cites(source, config, sheet), shared, styles, limits)
 
 
@@ -1217,7 +1263,11 @@ def _workbook(source: SourceReader, config: AdapterConfig, context: JsonObject) 
     out: list[StructuredRecord] = []
 
     def add(
-        prop: str, value: CellValue, tag: ByteRange | None, kind: AssertionKind, extra: str = ""
+        prop: str,
+        value: CellValue | None,
+        tag: ByteRange | None,
+        kind: AssertionKind,
+        extra: str = "",
     ) -> None:
         row_step = adapter_locator(STEP_WORKBOOK, {"part": part, "property": prop + extra})
         place = (
@@ -1233,21 +1283,17 @@ def _workbook(source: SourceReader, config: AdapterConfig, context: JsonObject) 
                 provenance=key,
                 table=table.id,
                 row=len(out),
-                cells=(Known(prop, key), Known(value, state)),
+                cells=(Known(prop, key), Unknown(state) if value is None else Known(value, state)),
             )
         )
 
     flag = _int(context["date1904"])
     epoch = _ints(context["epoch"])
     tag = ByteRange(epoch[0], epoch[1]) if epoch else None
-    # The 1904 system is what the workbook states; with no statement the format's default, the
-    # 1900 system, is what its bytes decode to (ECMA-376 18.2.28).
-    add(
-        "date_epoch",
-        1904 if flag == 1 else 1900,
-        tag,
-        AssertionKind.STATED if flag >= 0 else AssertionKind.OBSERVED,
-    )
+    # What the workbook states and nothing else: with no statement the epoch is Unknown. The
+    # format's default (ECMA-376 18.2.28: the 1900 system) is its specification's, not the
+    # workbook's, and applying it is the reader of the serials' decision.
+    add("date_epoch", None if flag < 0 else 1904 if flag == 1 else 1900, tag, AssertionKind.STATED)
     add("sheet_count", _int(context["sheet_total"]), None, AssertionKind.OBSERVED)
     sheets = context["sheets"]
     assert isinstance(sheets, list)
@@ -1284,6 +1330,8 @@ def _sheet_table(
     )
     header: Knowledge[tuple[str, ...]] = Unknown()
     findings: list[IngestFinding] = []
+    ctx: _Context | None = None
+    formula_rows: list[tuple[int, _Cell, str]] = []
     mode = config.text("csv_header")
     bounds = _ints(context["header"])
     covered = context["covered"] is True
@@ -1292,22 +1340,28 @@ def _sheet_table(
     elif mode == "none":
         header = NotApplicable()
     elif mode == "first_row" and bounds and package is not None:
-        ctx = _context(source, config, limits, sheet, package)
         rows, problem = read_rows(
             package, sheet.part, _int(context["prologue"]), bounds[0], bounds[1]
         )
+        ctx = _context(source, config, limits, sheet, package, rows)
         if problem is not None:
             findings.append(_problem(source, config, problem))
         if rows and rows[0].cells:
-            numbers = RowNumbers()
-            number, _ = numbers.step(rows[0].r)
+            number, _ = RowNumbers().step(rows[0].r)
             issues = Issues(source, config, (ctx.cites.member,))
             names = _header_names(ctx, rows[0], number, issues)
-            findings.extend(issues.findings())
+            at = ctx.cites.at(rows[0].start, rows[0].end)
             if names is not None:
-                at = ctx.cites.at(rows[0].start, rows[0].end)
                 header = Known(names, observed(at, config))
-    records: list[StructuredTable] = [
+            header_cells = _row_cells(ctx, rows[0], number, issues, None)
+            findings.extend(issues.findings())
+            header_formulas = (header_cells or ([], []))[1]
+            held = {id(c): k for k, c in enumerate(c for c in rows[0].cells if c.formula)}
+            formula_rows = [
+                (_int(context["header_formulas"]) + held[id(cell)], cell, ref)
+                for _, cell, ref in header_formulas
+            ]
+    records: list[StructuredTable | StructuredRecord] = [
         StructuredTable(
             id=record_id(StructuredTable.kind, evidence, config),
             provenance=observed(evidence, config),
@@ -1317,14 +1371,19 @@ def _sheet_table(
     ]
     if context["formulas"] is True and covered:
         formulas_evidence = sheet.formulas_evidence(source)
-        records.append(
-            StructuredTable(
-                id=record_id(StructuredTable.kind, formulas_evidence, config),
-                provenance=observed(formulas_evidence, config),
-                name=NotCovered(),
-                header=Known(FORMULA_HEADER, observed(formulas_evidence, config)),
-            )
+        formulas_table = StructuredTable(
+            id=record_id(StructuredTable.kind, formulas_evidence, config),
+            provenance=observed(formulas_evidence, config),
+            name=NotCovered(),
+            header=Known(FORMULA_HEADER, observed(formulas_evidence, config)),
         )
+        records.append(formulas_table)
+        if formula_rows:  # a header row's formulas are rows of the formulas table too
+            assert ctx is not None
+            records.extend(
+                _formula_row(ctx, formulas_table.id, ordinal, cell, ref)
+                for ordinal, cell, ref in formula_rows
+            )
     return ChunkOutput(records=tuple(records), findings=tuple(findings))
 
 
@@ -1361,9 +1420,9 @@ def _sheet_rows(
     package: Package,
 ) -> ChunkOutput:
     sheet = Sheet.of(context)
-    ctx = _context(source, config, limits, sheet, package)
     start, end = _int(context["start"]), _int(context["end"])
     rows, problem = read_rows(package, sheet.part, _int(context["prologue"]), start, end)
+    ctx = _context(source, config, limits, sheet, package, rows)
     table_id = record_id(StructuredTable.kind, sheet.table_evidence(source), config)
     formulas_id = record_id(StructuredTable.kind, sheet.formulas_evidence(source), config)
     numbers = RowNumbers(_int(context["seen"]), _int(context["accepted"]))

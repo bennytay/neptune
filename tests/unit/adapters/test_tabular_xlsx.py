@@ -218,7 +218,7 @@ def test_dates_stay_serials_with_their_number_format_cited_and_the_epoch_recorde
         "ref": "F3", "sheet": "Work Orders",
     }  # fmt: skip
     epoch = rows_of(output, workbook_table(output))[0]
-    assert values(epoch) == ["date_epoch", 1900]
+    assert values(epoch) == ["date_epoch", None]  # the workbook states no date system
 
 
 def test_a_1904_workbook_states_its_epoch_and_no_serial_is_converted(gen: ModuleType) -> None:
@@ -246,19 +246,29 @@ def test_a_1904_workbook_states_its_epoch_and_no_serial_is_converted(gen: Module
     assert [c.value for c in stamps if isinstance(c, Known)] == pytest.approx(expected)
 
 
-def test_without_a_statement_the_epoch_is_the_formats_default_observed_not_stated() -> None:
+def test_without_a_statement_the_epoch_is_unknown_not_the_formats_default(gen: ModuleType) -> None:
     output = run(fixture("workorders_amr_fleet.xlsx"))
     epoch = rows_of(output, workbook_table(output))[0]
     value = epoch.cells[1]
-    assert isinstance(value, Known) and value.value == 1900
-    assert value.provenance.assertion_kind is AssertionKind.OBSERVED  # type: ignore[union-attr]
+    assert isinstance(
+        value, Unknown
+    )  # ECMA-376's default is its specification's, not the workbook's
+    # an explicit date1904="0" is a statement
+    parts = gen.workorders_amr_fleet()
+    parts["xl/workbook.xml"] = parts["xl/workbook.xml"].replace(
+        b'<workbookPr defaultThemeVersion="124226"/>', b'<workbookPr date1904="0"/>'
+    )
+    stated = run(gen.zipped(parts))
+    declared = rows_of(stated, workbook_table(stated))[0].cells[1]
+    assert isinstance(declared, Known) and declared.value == 1900
+    assert declared.provenance.assertion_kind is AssertionKind.STATED  # type: ignore[union-attr]
 
 
 def test_the_workbook_table_lists_sheets_and_their_declared_state() -> None:
     output = run(fixture("workorders_amr_fleet.xlsx"))
     rows = [values(r) for r in rows_of(output, workbook_table(output))]
     assert rows == [
-        ["date_epoch", 1900],
+        ["date_epoch", None],
         ["sheet_count", 2],
         ["sheet", "Work Orders"],
         ["sheet", "Assets"],
@@ -792,3 +802,134 @@ def test_a_billion_text_sheet_is_not_held_in_memory(gen: ModuleType) -> None:
     rows = [gen.row(1, gen.i("A1", text))]
     output = run(build(gen, [("S", gen.worksheet(rows))], styles=False), max_row_bytes=100_000)
     assert codes(output) == ["tabular.row_too_large"]
+
+
+# --- Review: boundaries a hostile or odd workbook reaches --------------------------------------
+
+
+def test_digit_strings_too_long_for_a_number_are_not_numbers_not_crashes(gen: ModuleType) -> None:
+    huge = "9" * 5000
+    parts = gen.workorders_amr_fleet()
+    parts["xl/styles.xml"] = parts["xl/styles.xml"].replace(
+        b'numFmtId="14"', f'numFmtId="{huge}"'.encode()
+    )
+    sheet = parts["xl/worksheets/sheet1.xml"].replace(b' s="2"', f' s="{huge}"'.encode(), 1)
+    parts["xl/worksheets/sheet1.xml"] = sheet
+    output = run(gen.zipped(parts), **HEADED)
+    first = rows_of(output, named(output, "Work Orders"))[0]
+    assert isinstance(first.cells[5], Known)  # the value is read; its format is just not named
+    shared = gen.formulas_humanoid_energy()
+    shared["xl/worksheets/sheet1.xml"] = shared["xl/worksheets/sheet1.xml"].replace(
+        b'si="0"', f'si="{huge}"'.encode()
+    )
+    odd = run(gen.zipped(shared), **HEADED)
+    assert all(f.severity.value != "failed" for f in odd.findings())
+
+
+def test_a_sparse_row_counts_the_cells_it_makes_not_the_cells_it_declares(gen: ModuleType) -> None:
+    rows = [gen.row(r, gen.n(f"XFD{r}", r)) for r in range(1, 41)]
+    data = build(gen, [("S", gen.worksheet(rows))], styles=False)
+    output = run(data, xlsx_max_cells=40_000)  # 40 declared cells, 655,360 made
+    table = named(output, "S")
+    assert len(rows_of(output, table)) == 2  # 2 rows x 16,384 cells
+    assert all(len(r.cells) == 16384 for r in rows_of(output, table))
+    (finding,) = output.findings()
+    assert finding.code == "tabular.xlsx_limit" and finding.details["limit"] == "xlsx_max_cells"
+
+
+def test_a_header_over_max_row_bytes_is_not_replaced_by_the_next_row(gen: ModuleType) -> None:
+    rows = [
+        gen.row(1, *(gen.i(f"{c}1", "h" * 50) for c in "ABCDEF")),
+        gen.row(2, gen.n("A2", 1)),
+        gen.row(3, gen.n("A3", 2)),
+    ]
+    data = build(gen, [("S", gen.worksheet(rows))], styles=False)
+    output = run(data, max_row_bytes=200, **HEADED)
+    table = named(output, "S")
+    assert isinstance(table.header, Unknown)  # the header could not be read; no row stands in
+    assert [values(r) for r in rows_of(output, table)] == [[1], [2]]
+    assert codes(output) == ["tabular.row_too_large"]
+
+
+def test_a_formula_in_the_header_row_is_a_row_of_the_formulas_table(gen: ModuleType) -> None:
+    rows = [
+        gen.row(1, '<c r="A1" t="str"><f>"id"&amp;"x"</f><v>idx</v></c>', gen.i("B1", "v")),
+        gen.row(2, gen.n("A2", 1), '<c r="B2"><f>A2*2</f><v>2</v></c>'),
+    ]
+    output = run(build(gen, [("S", gen.worksheet(rows))], styles=False), **HEADED)
+    table = named(output, "S")
+    assert isinstance(table.header, Known) and table.header.value == ("idx", "v")
+    (formulas,) = [
+        t for t in tables(output) if _step(t.provenance.evidence.locator[-1]) == "formulas"
+    ]
+    listed = rows_of(output, formulas)
+    assert [(r.row, values(r)[:2]) for r in listed] == [
+        (0, ["A1", '"id"&"x"']),
+        (1, ["B2", "A2*2"]),
+    ]
+
+
+def test_formula_ordinals_do_not_depend_on_the_blocks_or_on_dropped_cells(
+    gen: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        gen.row(1, gen.i("A1", "h")),
+        gen.row(2, '<c r="A2"><f>1</f><v>1</v></c>'),
+        gen.row(
+            2, '<c r="A2"><f>9</f><v>9</v></c>'
+        ),  # a repeated row: dropped, its formula counted
+        gen.row(3, '<c r="A3"><f>3</f><v>3</v></c>', '<c r="A9"><f>8</f><v>8</v></c>'),
+        gen.row(4, '<c r="A4"><f>4</f><v>4</v></c>'),
+    ]
+    data = build(gen, [("S", gen.worksheet(rows))], styles=False)
+    whole = run(data, **HEADED)
+    monkeypatch.setattr(_xlsx, "BLOCK_ROWS", 1)
+    cut = run(data, **HEADED)
+    assert {r.id for r in whole.records()} == {r.id for r in cut.records()}
+    pairs = {(r.id, r.row) for r in whole.records() if isinstance(r, StructuredRecord)}
+    assert pairs == {(r.id, r.row) for r in cut.records() if isinstance(r, StructuredRecord)}
+
+
+def test_a_second_formula_element_in_one_cell_is_not_a_second_formula(
+    gen: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        gen.row(1, gen.i("A1", "h")),
+        gen.row(2, '<c r="A2"><f>1</f><f>2</f><v>1</v></c>', gen.n("B2", 2)),
+        gen.row(3, '<c r="A3"><f>3</f><v>3</v></c>'),
+    ]
+    data = build(gen, [("S", gen.worksheet(rows))], styles=False)
+    whole = run(data, **HEADED)
+    monkeypatch.setattr(_xlsx, "BLOCK_ROWS", 1)
+    cut = run(data, **HEADED)
+    assert {r.id for r in whole.records()} == {r.id for r in cut.records()}
+    (formulas,) = [
+        t for t in tables(whole) if _step(t.provenance.evidence.locator[-1]) == "formulas"
+    ]
+    assert [r.row for r in rows_of(whole, formulas)] == [0, 1]
+
+
+def test_a_binary_workbook_is_not_claimed_and_templates_are_named_workbooks(
+    gen: ModuleType,
+) -> None:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("xl/workbook.bin", b"\x00" * 10)
+    assert probe(out.getvalue(), "book.xlsb") == 0.0
+    templates = TabularAdapter().descriptor.formats[-1].extensions
+    assert ".xltx" in templates and ".xltm" in templates
+
+
+def test_two_sheets_over_one_part_are_not_two_tables_of_the_same_rows(gen: ModuleType) -> None:
+    parts = gen.workorders_amr_fleet()
+    parts["xl/_rels/workbook.xml.rels"] = parts["xl/_rels/workbook.xml.rels"].replace(
+        b"worksheets/sheet2.xml", b"worksheets/sheet1.xml"
+    )
+    output = run(gen.zipped(parts), **HEADED)
+    assert len(rows_of(output, named(output, "Work Orders"))) == 4
+    assert rows_of(output, named(output, "Assets")) == []
+    (finding,) = [f for f in output.findings() if f.code == "tabular.xlsx_sheet_unsupported"]
+    assert finding.details["reason"] == "part_shared"
+    ids = [r.id for r in output.records()]
+    assert len(ids) == len(set(ids))

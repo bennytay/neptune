@@ -40,8 +40,12 @@ its name.
    does not follow the cell before it, is dropped with a finding (`xlsx_row_order`,
    `xlsx_cell_ref`); its place is a blank cell. The header is `csv_header` (the option's name stays
    for the CSV case: `first_row` makes a sheet's first row its header and gives it no record,
-   `none` is `NotApplicable`, the default is `Unknown` and the first row is a record).
-   Deploy's mapper therefore reads a sheet exactly as it reads a CSV, with the same switch.
+   `none` is `NotApplicable`, the default is `Unknown` and the first row is a record). A first row
+   that cannot be read (over `max_row_bytes`, more cells than `max_columns`, a shared string not
+   covered) leaves the header `Unknown` and has no record: no data row stands in for it.
+   Deploy's mapper therefore reads a sheet exactly as it reads a CSV, with the same switch. Two
+   `<sheet>` tags that resolve to one part would give two tables the same rows' ids: the first is
+   read, the second is a table with no rows and an `xlsx_sheet_unsupported` finding (`part_shared`).
 3. **Cells as declared (ADR 0020 §5, non-negotiable 4).** A number is the stored number: an int
    when an int64 or uint64 holds the literal, a double when the double's shortest digits equal it
    (`INF`, `-INF` and `NaN` are the non-finite reals), else its literal text with an info finding
@@ -53,9 +57,10 @@ its name.
    is how a consumer can see a number is formatted as a date, and the reader does not decide.
 4. **The date system is stated, not applied.** The `workbook` table (a table of the source
    with columns `property`, `value`) holds the epoch: row `date_epoch` is 1904 or 1900, `Known`
-   with `assertion_kind` `stated` citing the `<workbookPr>` tag when the workbook declares
-   `date1904`. With no declaration it is 1900 by ECMA-376's default, `observed`, citing the
-   workbook part: the format's grammar gives the value, the workbook does not state it. The table
+   with `assertion_kind` `stated` citing the `<workbookPr>` tag, only when the workbook declares
+   `date1904`. With no declaration it is `Unknown` citing the workbook part: ECMA-376's default
+   (the 1900 system) belongs to the specification, not to this workbook, and applying it to a
+   serial is the consumer's decision (a derived annotation), never a canonical fact. The table
    also holds `sheet_count` and, per sheet, `sheet` (its name) and `sheet_state` (`hidden`,
    `veryHidden`, as declared; the default `visible` is not a row). A serial in a 1904 workbook is
    not the same date as in a 1900 one and is never rebased.
@@ -64,7 +69,9 @@ its name.
    cached value is `Unknown` (and an info finding `xlsx_formula_no_value`): nothing is ever
    calculated. The formula text is a row of the sheet's `formulas` table (a table citing the same
    sheet, columns `ref`, `formula`, `kind`, `si`, `range`), each cell citing the cell's `<f>`
-   element (`content` `formula_text`). A shared formula's children have no text: `Unknown`, with
+   element (`content` `formula_text`), the header row's formulas included. A row's `row` is the
+   formula's ordinal among the sheet's formulas as the sheet has them: a dropped row or cell
+   still holds its place, so no block boundary changes an ordinal. A shared formula's children have no text: `Unknown`, with
    the shared index. `kind` is the `t` attribute (`normal` when absent, the format's default).
 6. **Blank, absent and empty string are three things, all `Unknown`.** The model holds no empty
    text (ADR 0020 §5; ADR 0042 §1 does the same for JSON and Parquet), so the empty string is
@@ -82,10 +89,10 @@ its name.
    `tabular:xlsx_formulas`; the workbook table `tabular:xlsx_workbook`). Offsets are bytes of the
    inflated part, whatever the part's encoding declares.
 8. **Probing.** A zip whose leading local headers name parts under `xl/` is `SIGNATURE`; a whole
-   file in the head that holds `[Content_Types].xml` and a workbook part is `VERIFIED`; a zip whose
+   file in the head that holds `[Content_Types].xml` and `xl/workbook.xml` is `VERIFIED`; a zip whose
    first part is `[Content_Types].xml` and whose name ends `.xlsx`, `.xlsm`, `.xltx` or `.xltm` is
-   `STRUCTURE` (that is all a word-processor's package shows); every other zip is declined. The
-   probe never inflates.
+   `STRUCTURE` (that is all a word-processor's package shows); every other zip is declined, a
+   binary workbook (`xl/workbook.bin`, XLSB) included. The probe never inflates.
 9. **Blocks.** `plan` parses each worksheet once and streams it: it only counts and bounds rows,
    and cuts blocks between rows: 4,096 rows, 32,768 cells or about 1 MiB of the part, whichever
    comes first. `ingest` reads one block: deflate cannot seek, so it inflates the part from its
@@ -107,7 +114,7 @@ its name.
     | `xlsx_max_part_bytes` | 128 MiB | declared and, counted while inflating, actual bytes of one part: it is not read; the inflated bytes are counted because a declared size can lie |
     | `xlsx_max_shared_strings`, `xlsx_max_shared_string_bytes` | 1,000,000, 32 MiB | strings past it are not covered: a cell naming one is `NotCovered`, not `Unknown` |
     | `xlsx_max_styles` | 100,000 | formats past it are not read: cells keep their values, without a `numfmt` |
-    | `xlsx_max_cells` | 1,000,000 | per sheet: rows from the one that crosses it are not read |
+    | `xlsx_max_cells` | 1,000,000 | per sheet, counting the cells made (a gap in a row up to its last cell is a blank cell): rows from the one that crosses it are not read |
     | `xlsx_max_sheets` | 256 | sheets past it have no table; `sheet_count` says how many there were |
 
     The existing `max_rows`, `max_row_bytes` (a row's XML, and so a cell's text) and `max_columns`
@@ -156,7 +163,8 @@ its name.
 - **Inflate the zip with `inspect_archive` first.** It inflates every member once and spools
   nested archives in scratch space, which a sandboxed `plan` need not have. This adapter keeps
   its limits (§10) to the bounds the directory and the parts it reads need, using the same
-  directory checks.
+  directory checks (`neptune.discovery.archive.zip_directory`, `zip_directory_entries` and
+  `directory_cap`, which this change exposes as public names).
 
 ## Consequences
 

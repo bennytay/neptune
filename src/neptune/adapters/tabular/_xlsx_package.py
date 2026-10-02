@@ -25,9 +25,9 @@ from xml.parsers import expat
 from neptune.adapters.contract import AdapterConfig, ShortReadError, SourceReader
 from neptune.discovery.archive import (
     ArchiveLimits,
-    _directory_cap,
-    _zip_directory,
-    _zip_directory_entries,
+    directory_cap,
+    zip_directory,
+    zip_directory_entries,
 )
 from neptune.model.jsonvalue import JsonObject
 from neptune.model.provenance import ByteRange, Locator
@@ -147,6 +147,14 @@ class _SourceFile(io.RawIOBase):
         return len(data)
 
 
+def small_int(text: str | None, digits: int = 9) -> int | None:
+    """A non-negative integer an attribute states in at most ``digits`` ASCII digits, else
+    ``None``: hostile text never reaches ``int`` unbounded."""
+    if text is not None and text.isascii() and text.isdecimal() and len(text) <= digits:
+        return int(text)
+    return None
+
+
 def resolve(base: str, target: str) -> str | None:
     """The part name a relationship ``target`` of part ``base`` names, or ``None`` if it leaves the
     package. Only the name is computed; nothing is opened."""
@@ -188,7 +196,7 @@ class Package:
             max_compression_ratio=limits.max_compression_ratio,
         )
         try:
-            directory = _zip_directory(stream)
+            directory = zip_directory(stream)
         except ShortReadError:
             raise
         except Exception as exc:
@@ -211,7 +219,7 @@ class Package:
                 " its end record",
                 {"error": "bad_directory", "size": size},
             )
-        cap = _directory_cap(bounds)
+        cap = directory_cap(bounds)
         if directory.entries > limits.max_parts or directory.size > cap:
             raise Problem(
                 "xlsx_limit",
@@ -220,7 +228,7 @@ class Package:
                 {"limit": "xlsx_max_parts", "parts": directory.entries, "max": limits.max_parts},
             )
         try:
-            walked = _zip_directory_entries(stream, directory, limits.max_parts + 1)
+            walked = zip_directory_entries(stream, directory, limits.max_parts + 1)
         except ShortReadError:
             raise
         except Exception as exc:
@@ -720,12 +728,11 @@ def read_styles(package: Package, name: str | None) -> tuple[Styles, Problem | N
             styles.complete = False
             raise Stop
         if kind == "numFmt":
-            ident, code = attrs.get("numFmtId", ""), attrs.get("formatCode")
-            if ident.isdecimal() and code:
-                styles.codes[int(ident)] = code
+            ident, code = small_int(attrs.get("numFmtId")), attrs.get("formatCode")
+            if ident is not None and code:
+                styles.codes[ident] = code
         else:
-            ident = attrs.get("numFmtId", "0")
-            styles.formats.append(int(ident) if ident.isdecimal() else 0)
+            styles.formats.append(small_int(attrs.get("numFmtId", "0")) or 0)
 
     def end(tag: str) -> None:
         stack.pop()

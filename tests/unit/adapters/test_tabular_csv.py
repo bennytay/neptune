@@ -20,6 +20,7 @@ from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.tabular import TabularAdapter, _csv
 from neptune.discovery.reader import BytesReader
 from neptune.identity import canonical_json
+from neptune.model.finding import IngestFinding
 from neptune.model.knowledge import Known, NotApplicable, Unknown
 from neptune.model.provenance import ByteRange, EvidenceRef, Row, RowCell
 from neptune.model.world import StructuredRecord, StructuredTable
@@ -364,13 +365,18 @@ def test_blocks_do_not_change_what_is_read(monkeypatch: pytest.MonkeyPatch) -> N
     assert {r.id for r in cut.records()} == {r.id for r in whole.records()}
 
 
+def first_row(found: IngestFinding) -> int:
+    rows = found.details["rows"]
+    assert isinstance(rows, list) and isinstance(rows[0], int)
+    return rows[0]
+
+
 def test_findings_are_counted_per_block(monkeypatch: pytest.MonkeyPatch) -> None:
     data = b"a,b\n" + b"1\n" * 7
     monkeypatch.setattr(_csv, "BLOCK_ROWS", 3)
     output = run(data, csv_delimiter=",", csv_header="first_row")
     ragged = [f for f in output.findings() if f.code == "tabular.csv_ragged_rows"]
-    # findings come sorted by id, not by place: put them in row order
-    ragged.sort(key=lambda f: (f.details["rows"] or [0])[0])  # type: ignore[index, return-value, arg-type]
+    ragged.sort(key=first_row)  # findings come sorted by id, not by place
     assert [f.details["count"] for f in ragged] == [3, 3, 1]
 
 

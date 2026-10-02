@@ -103,7 +103,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
                 "application/vnd.ms-excel.sheet.macroEnabled.12",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ),
-            extensions=(".xlsm", ".xlsx"),
+            extensions=(".xlsm", ".xlsx", ".xltm", ".xltx"),
         ),
     ),
     record_kinds=("structured_record", "structured_table"),
@@ -301,8 +301,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " double, or its text when none holds it exactly), a date its serial; blank, a place"
             " with no cell and the empty string are Unknown, told apart by the cell step's"
             " content; a formula cell its cached value (content formula), its text a row of the"
-            " sheet's formulas table; the workbook table holds the date system (1900 or 1904,"
-            " stated), the sheet count and each sheet's name and declared state; the first row is"
+            " sheet's formulas table; the workbook table holds the date system (1900 or 1904) when"
+            " the workbook states it and Unknown when it does not, the sheet count and each sheet's name and declared state; the first row is"
             " the header under csv_header first_row; blocks of 4,096 rows, 32,768 cells or 1 MiB",
         ),
     ),
