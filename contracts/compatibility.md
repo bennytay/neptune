@@ -12,7 +12,7 @@ statement.
 | Contract | Owner package | Status | Latest stable | Latest draft | Consumers |
 |---|---|---|---|---|---|
 | `package-schema` | `neptune` | active | 3.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
-| `alignment-records` | `neptune` (part of `package-schema`) | active | — | — | `neptune-memory` |
+| `alignment-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-memory` |
 | `lifecycle-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-deploy`, `neptune-memory` |
 | `catalog-api` | `neptune-ledger` | active | 1.3.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
 | `graph-schema` | `neptune-memory` | active | 1.0.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |

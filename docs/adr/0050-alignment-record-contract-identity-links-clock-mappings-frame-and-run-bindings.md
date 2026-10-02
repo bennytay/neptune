@@ -90,7 +90,8 @@ Forces:
    publishes **3.0.0**: platform ADR 0002 §3 makes an integer owner constant the registry major,
    so a new kind cannot be a minor version even though every earlier golden still validates. A
    package that holds no alignment record is written at its old version, byte for byte (ADR 0037
-   §1). `alignment-records` becomes active and rides on package-schema's version.
+   §1). `alignment-records` stays registered as part of package-schema and rides on its version
+   (3.0.0); it has no export of its own.
 10. **Worked examples.** Each of the four examples holds the alignment its sources state, and no
     source changes: the drone (its log as its own run, three snapshot bindings from the log's
     start), the quadruped (rosbag2's file list, its `starting_time` → MCAP `log_time` identity map
