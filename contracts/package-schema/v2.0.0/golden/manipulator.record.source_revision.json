@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa",
+  "id": "rec:sha256:24962b67ab9f4247c3f4d2f16a698f97cd71ed4fc3136659ec8b6609c1f82d4e",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "handeye.yaml"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}

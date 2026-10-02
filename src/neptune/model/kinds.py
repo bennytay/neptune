@@ -3,9 +3,13 @@
 One entry per kind, in the order of ADR 0017's families. The JSON Schema (``neptune.model.schema``)
 and the ingest package (``neptune.store``) both read this list, so a new record kind is added here
 once. A test checks that every record class in ``neptune.model`` is listed.
+
+A kind added after the M1 gate says so with a class attribute ``since``, the schema version that
+added it; every other kind is from version 1. A package written at version ``v`` holds a table for
+each kind of ``kinds_at(v)``, and no other (ADR 0037 §1).
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Final
 
 from neptune.model.alignment import (
@@ -19,6 +23,12 @@ from neptune.model.alignment import (
     identity_link_from_json,
     run_assembly_from_json,
     snapshot_binding_from_json,
+)
+from neptune.model.configuration import (
+    ConfigurationSnapshot,
+    ConfigurationValue,
+    configuration_snapshot_from_json,
+    configuration_value_from_json,
 )
 from neptune.model.finding import IngestFinding, ingest_finding_from_json
 from neptune.model.jsonvalue import JsonValue
@@ -35,6 +45,7 @@ from neptune.model.machine import (
     software_configuration_from_json,
 )
 from neptune.model.provenance import TransformRecord, transform_record_from_json
+from neptune.model.record import OLDEST_READABLE_VERSION, check_schema_version
 from neptune.model.reference import (
     Frame,
     FrameGraph,
@@ -97,6 +108,8 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (HardwareComponent, hardware_component_from_json),
         (SoftwareConfiguration, software_configuration_from_json),
         (Calibration, calibration_from_json),
+        (ConfigurationSnapshot, configuration_snapshot_from_json),
+        (ConfigurationValue, configuration_value_from_json),
         (Site, site_from_json),
         (Asset, asset_from_json),
         (SpatialArtifact, spatial_artifact_from_json),
@@ -113,6 +126,27 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (SnapshotBinding, snapshot_binding_from_json),
     )
 }
+
+# The schema version that added each kind: the version every record of it is written at.
+KIND_SINCE: Final[Mapping[str, int]] = {
+    kind: getattr(cls, "since", OLDEST_READABLE_VERSION) for kind, (cls, _) in RECORD_KINDS.items()
+}
+
+
+def kinds_at(version: int) -> tuple[str, ...]:
+    """The record kinds of schema version ``version``: a package of that version's tables."""
+    check_schema_version(version)
+    return tuple(kind for kind, since in KIND_SINCE.items() if since <= version)
+
+
+def package_version(kinds: Iterable[str]) -> int:
+    """The lowest schema version that holds records of ``kinds``: what a package is written at.
+
+    A package holding only kinds of version 1 is a version 1 package, byte for byte what a
+    version 1 writer wrote, so an addition to the model never changes a package that does not
+    use it (ADR 0037 §1).
+    """
+    return max((KIND_SINCE[kind] for kind in kinds), default=OLDEST_READABLE_VERSION)
 
 
 def record_key(record: Any) -> str:

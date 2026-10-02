@@ -22,7 +22,7 @@ which the relation holds, as the evidence states it.
 from dataclasses import dataclass
 from enum import StrEnum
 from fractions import Fraction
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 from neptune.model._fields import (
     check_type,
@@ -67,6 +67,9 @@ from neptune.model.time import (
     resolution_to_json,
     timestamp_from_json,
 )
+
+# The schema version that added these kinds (ADR 0050 §9, ADR 0037 §1).
+ALIGNMENT_SINCE: Final = 3
 
 
 def _record_id(data: JsonValue) -> RecordId:
@@ -176,6 +179,7 @@ class IdentityLink:
 
     kind: ClassVar[str] = "identity_link"
     family: ClassVar[Family] = Family.ALIGNMENT
+    since: ClassVar[int] = ALIGNMENT_SINCE
     id: RecordId
     provenance: Provenance
     left: LogicalId
@@ -226,6 +230,7 @@ class IdentityLink:
                 "right": to_json(self.right, LogicalId.to_json),
                 "validity": _validity_json(self.validity),
             },
+            self.since,
         )
 
 
@@ -235,6 +240,7 @@ def identity_link_from_json(data: JsonValue) -> IdentityLink:
         data,
         IdentityLink.kind,
         {"basis", "evidence", "identifier", "left", "right", "validity"},
+        IdentityLink.since,
     )
     return IdentityLink(
         id=record_id,
@@ -300,6 +306,7 @@ class ClockMapping:
 
     kind: ClassVar[str] = "clock_mapping"
     family: ClassVar[Family] = Family.ALIGNMENT
+    since: ClassVar[int] = ALIGNMENT_SINCE
     id: RecordId
     provenance: Provenance
     source: RecordId
@@ -345,6 +352,7 @@ class ClockMapping:
                 "target": self.target,
                 "validity": _validity_json(self.validity),
             },
+            self.since,
         )
 
 
@@ -354,6 +362,7 @@ def clock_mapping_from_json(data: JsonValue) -> ClockMapping:
         data,
         ClockMapping.kind,
         {"anchor", "method", "rate", "residual_bound", "source", "target", "validity"},
+        ClockMapping.since,
     )
     return ClockMapping(
         id=record_id,
@@ -393,6 +402,7 @@ class FrameBinding:
 
     kind: ClassVar[str] = "frame_binding"
     family: ClassVar[Family] = Family.ALIGNMENT
+    since: ClassVar[int] = ALIGNMENT_SINCE
     id: RecordId
     provenance: Provenance
     parent: FrameRef
@@ -436,6 +446,7 @@ class FrameBinding:
                 "transform": self.transform,
                 "validity": _validity_json(self.validity),
             },
+            self.since,
         )
 
 
@@ -445,6 +456,7 @@ def frame_binding_from_json(data: JsonValue) -> FrameBinding:
         data,
         FrameBinding.kind,
         {"basis", "calibration", "child", "parent", "transform", "validity"},
+        FrameBinding.since,
     )
     return FrameBinding(
         id=record_id,
@@ -514,6 +526,7 @@ class RunAssembly:
 
     kind: ClassVar[str] = "run_assembly"
     family: ClassVar[Family] = Family.ALIGNMENT
+    since: ClassVar[int] = ALIGNMENT_SINCE
     id: RecordId
     provenance: Provenance
     run: RecordId
@@ -546,13 +559,14 @@ class RunAssembly:
                 "run": self.run,
                 "validity": _validity_json(self.validity),
             },
+            self.since,
         )
 
 
 def run_assembly_from_json(data: JsonValue) -> RunAssembly:
     """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
     obj, record_id, provenance = evidence_record_object(
-        data, RunAssembly.kind, {"members", "rule", "run", "validity"}
+        data, RunAssembly.kind, {"members", "rule", "run", "validity"}, RunAssembly.since
     )
     return RunAssembly(
         id=record_id,
@@ -588,6 +602,7 @@ class SnapshotBinding:
 
     kind: ClassVar[str] = "snapshot_binding"
     family: ClassVar[Family] = Family.ALIGNMENT
+    since: ClassVar[int] = ALIGNMENT_SINCE
     id: RecordId
     provenance: Provenance
     run: RecordId
@@ -614,13 +629,17 @@ class SnapshotBinding:
                 "snapshot_kind": str(self.snapshot_kind),
                 "validity": _validity_json(self.validity),
             },
+            self.since,
         )
 
 
 def snapshot_binding_from_json(data: JsonValue) -> SnapshotBinding:
     """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
     obj, record_id, provenance = evidence_record_object(
-        data, SnapshotBinding.kind, {"run", "snapshot", "snapshot_kind", "validity"}
+        data,
+        SnapshotBinding.kind,
+        {"run", "snapshot", "snapshot_kind", "validity"},
+        SnapshotBinding.since,
     )
     return SnapshotBinding(
         id=record_id,

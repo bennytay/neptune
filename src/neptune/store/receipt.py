@@ -16,7 +16,7 @@ from neptune.identity.ids import record_id
 from neptune.model.finding import IngestFinding, Severity
 from neptune.model.ids import ContentId, LogicalId, RecordId
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.kinds import RECORD_KINDS
+from neptune.model.kinds import RECORD_KINDS, kinds_at, package_version
 from neptune.model.knowledge import Ambiguous, Knowledge, Known, KnownAbsent
 from neptune.model.package import (
     SEVERITY_ORDER,
@@ -100,14 +100,24 @@ def _stated_ids(identifiers: Iterable[Knowledge[LogicalId]]) -> tuple[LogicalId,
     return tuple(sorted(values, key=lambda value: (value.namespace, value.value)))
 
 
-def build_receipt(records: Iterable[Any]) -> IngestReceipt:
-    """The receipt core of a package holding ``records`` (ledger, transforms, records, findings)."""
+def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestReceipt:
+    """The receipt core of a package holding ``records`` (ledger, transforms, records, findings).
+
+    ``version`` is the package's schema version: by default the lowest that holds the records
+    (``package_version``). The receipt counts the kinds of that version (ADR 0037 §1).
+    """
     by_kind: dict[str, list[Any]] = defaultdict(list)
     for record in records:
         by_kind[record.kind].append(record)
     unknown = set(by_kind) - set(RECORD_KINDS)
     if unknown:
         raise ValueError(f"not record kinds: {sorted(unknown)}")
+    if version is None:
+        version = package_version(by_kind)
+    kinds = kinds_at(version)
+    newer = sorted(set(by_kind) - set(kinds))
+    if newer:
+        raise ValueError(f"a schema version {version} package cannot hold {newer}")
     artifacts = {artifact.content_id: artifact for artifact in by_kind["source_artifact"]}
     revisions, absences = by_kind["source_revision"], by_kind["source_absence"]
     superseded = {previous for entry in (*revisions, *absences) for previous in entry.supersedes}
@@ -155,7 +165,7 @@ def build_receipt(records: Iterable[Any]) -> IngestReceipt:
             )
             for t in transforms
         ),
-        records=tuple((kind, len(by_kind.get(kind, ()))) for kind in sorted(RECORD_KINDS)),
+        records=tuple((kind, len(by_kind.get(kind, ()))) for kind in sorted(kinds)),
         clocks=tuple(
             ReceiptClock(clock.id, clock.field, clock.scope)
             for clock in sorted(by_kind["timestamp_domain"], key=lambda c: c.id)
@@ -194,6 +204,7 @@ def build_receipt(records: Iterable[Any]) -> IngestReceipt:
             )
         ),
         ambiguous=tuple(sorted(ambiguous, key=lambda field: (field.record, field.pointer))),
+        version=version,
     )
     return replace(draft, id=receipt_id(draft))
 
@@ -204,10 +215,11 @@ def receipt_id(receipt: IngestReceipt) -> RecordId:
 
 
 def check_receipt(receipt: IngestReceipt, records: Iterable[Any]) -> IngestReceipt:
-    """Verify a receipt read from a package: its id recomputes, and so does all of it."""
+    """Verify a receipt read from a package: its id recomputes, and so does all of it, at the
+    schema version the receipt says it was written at."""
     if receipt_id(receipt) != receipt.id:
         raise ValueError(f"receipt {receipt.id}: id does not match its content")
-    rebuilt = build_receipt(records)
+    rebuilt = build_receipt(records, receipt.version)
     if rebuilt != receipt:
         raise ValueError(f"receipt {receipt.id} is not the receipt of these records ({rebuilt.id})")
     return receipt

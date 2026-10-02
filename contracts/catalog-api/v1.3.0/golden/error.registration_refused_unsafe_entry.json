@@ -1,0 +1,25 @@
+{
+  "api_version": "1.3.0",
+  "findings": [
+    {
+      "code": "unsafe_entry",
+      "detail": "a symlink; a package holds regular files and directories only",
+      "subject": "records/run.jsonl"
+    }
+  ],
+  "ledger_version": "0.0.1",
+  "outcome": "refused",
+  "package_id": {
+    "knowledge": "known",
+    "value": "sha256:c804f5687845a7958966de0b52d46916240c8b307defa9d1c2cfbfc9efe89f3c"
+  },
+  "record_counts": [],
+  "registration_key": {
+    "knowledge": "not_applicable"
+  },
+  "root_locator": "/srv/neptune/packages/mobile_robot-linked",
+  "schema_version": {
+    "knowledge": "known",
+    "value": 1
+  }
+}

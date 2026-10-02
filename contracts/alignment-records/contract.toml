@@ -1,5 +1,5 @@
 title = "Alignment records: identity links and clock mappings (MVL-82)"
-status = "planned"
+status = "active"
 # Ships inside the package schema; versioned by package-schema until it needs its own export.
 part_of = "package-schema"
 consumers = ["neptune-memory"]

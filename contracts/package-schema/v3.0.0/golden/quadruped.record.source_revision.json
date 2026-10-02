@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:e6ffc3f6e3f8f32fd50efacfcfab2d8af2ccfe32acd00828f6140eee5e0a4020",
+  "id": "rec:sha256:1d9647ca8cd96f5e4892f7370b1050a14815a99ce46aca5ea23491e216a85e1c",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "bag/walk_0.mcap"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}

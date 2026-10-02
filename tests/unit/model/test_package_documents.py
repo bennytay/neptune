@@ -33,7 +33,7 @@ from neptune.model.package import (
     package_manifest_from_json,
     receipt_envelope_from_json,
 )
-from neptune.model.record import SCHEMA_VERSION, SchemaVersionError
+from neptune.model.record import OLDEST_READABLE_VERSION, SCHEMA_VERSION, SchemaVersionError
 from neptune.model.source import LocalPath
 from neptune.model.time import Timestamp
 
@@ -123,7 +123,7 @@ def test_documents_round_trip_and_are_read_strictly(document: Any, read: Any) ->
     line = canonical_json.dumps(document.to_json())
     assert read(canonical_json.loads(line)) == document
     data = document.to_json()
-    assert (data["kind"], data["schema_version"]) == (document.kind, SCHEMA_VERSION)
+    assert (data["kind"], data["schema_version"]) == (document.kind, OLDEST_READABLE_VERSION)
     with pytest.raises(SchemaVersionError, match="newer"):
         read({**data, "schema_version": SCHEMA_VERSION + 1, "later": 1})
     for broken in (

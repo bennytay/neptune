@@ -25,7 +25,7 @@ from neptune.model.frames import (
     Translation,
 )
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.kinds import RECORD_KINDS
+from neptune.model.kinds import KIND_SINCE, RECORD_KINDS
 from neptune.model.knowledge import AssertionKind, Known, Unknown
 from neptune.model.provenance import (
     ByteRange,
@@ -36,6 +36,7 @@ from neptune.model.provenance import (
 )
 from neptune.model.record import (
     ENVELOPE_KEYS,
+    OLDEST_READABLE_VERSION,
     SCHEMA_VERSION,
     Family,
     SchemaVersionError,
@@ -209,7 +210,7 @@ def test_every_record_kind_round_trips_byte_identically(sample: Any, decode: Any
     data = canonical_json.loads(line)
     assert isinstance(data, dict)
     assert data["kind"] == sample.kind
-    assert data["schema_version"] == SCHEMA_VERSION
+    assert data["schema_version"] == KIND_SINCE[sample.kind]
 
 
 @pytest.mark.parametrize(("sample", "decode"), SAMPLES, ids=IDS)
@@ -279,6 +280,8 @@ def test_kinds_are_unique_tokens_and_each_has_one_family() -> None:
         "hardware_component": "machine",
         "software_configuration": "machine",
         "calibration": "machine",
+        "configuration_snapshot": "machine",
+        "configuration_value": "machine",
         "site": "world",
         "asset": "world",
         "spatial_artifact": "world",
@@ -312,7 +315,7 @@ def test_envelope_keys_cannot_be_record_fields() -> None:
     assert envelope("frame", {"ref": 1}) == {
         "kind": "frame",
         "ref": 1,
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": OLDEST_READABLE_VERSION,
     }
     for key in ENVELOPE_KEYS:
         with pytest.raises(ValueError, match="envelope"):
@@ -320,7 +323,11 @@ def test_envelope_keys_cannot_be_record_fields() -> None:
 
 
 def test_record_object_reports_the_version_before_the_keys() -> None:
-    frame: dict[str, JsonValue] = {"kind": "frame", "schema_version": SCHEMA_VERSION, "ref": 1}
+    frame: dict[str, JsonValue] = {
+        "kind": "frame",
+        "schema_version": OLDEST_READABLE_VERSION,
+        "ref": 1,
+    }
     assert record_object(frame, "frame", {"ref"})
     with pytest.raises(SchemaVersionError):
         record_object({"kind": "frame_v2", "schema_version": 5, "other": 1}, "frame", {"ref"})

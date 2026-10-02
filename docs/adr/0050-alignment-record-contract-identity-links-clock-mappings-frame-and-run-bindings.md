@@ -31,7 +31,7 @@ Forces:
 
 ## Decision
 
-1. **Five record kinds in a new family, `alignment`** (`model/alignment.py`, `since` 4):
+1. **Five record kinds in a new family, `alignment`** (`model/alignment.py`, `since` 3):
    `identity_link`, `clock_mapping`, `frame_binding`, `run_assembly` and `snapshot_binding`. Each is
    an evidence record (ADR 0017 §5): `id` from its record-level evidence, one `provenance`
    (`observed` or `stated`), `Knowledge` fields for everything with epistemic weight, and
@@ -86,8 +86,8 @@ Forces:
    snapshot of kind `hardware_configuration`, `software_configuration` or `calibration`
    (`configuration_snapshot` joins when MVL-38 needs it, by ADR), for the window on one of the run's
    clocks that the evidence states. A mid-run change is two bindings with adjacent windows.
-9. **Version.** The kinds are `since` 4, so `SCHEMA_VERSION` is 4 and the package-schema contract
-   publishes **4.0.0**: platform ADR 0002 §3 makes an integer owner constant the registry major,
+9. **Version.** The kinds are `since` 3, so `SCHEMA_VERSION` is 3 and the package-schema contract
+   publishes **3.0.0**: platform ADR 0002 §3 makes an integer owner constant the registry major,
    so a new kind cannot be a minor version even though every earlier golden still validates. A
    package that holds no alignment record is written at its old version, byte for byte (ADR 0037
    §1). `alignment-records` becomes active and rides on package-schema's version.
@@ -122,8 +122,8 @@ Forces:
 
 ## Consequences
 
-- Memory (MVL-126, MVL-130) and the Ledger (MVL-97) pin package-schema 4.0.0 and parse these shapes;
-  the Ledger's catalog API, which embeds the compiler's kinds, takes a minor version in the same PR.
+- Memory (MVL-126, MVL-130) and the Ledger (MVL-97) pin package-schema 3.0.0 and parse these shapes;
+  the Ledger's catalog API, which embeds the compiler's kinds, takes 1.3.0 in the same PR.
 - MVL-34 to MVL-38 implement against these types: canonical records where a source states the
   relation, the same fields under `derived/` where they estimate it. A field they need that is not
   here is a new ADR and a new kind or companion kind, never an edit.

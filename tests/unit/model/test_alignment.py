@@ -16,6 +16,7 @@ from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id
 from neptune.identity.provenance import evidence_record_id, transform_record
 from neptune.model.alignment import (
+    ALIGNMENT_SINCE,
     ClockAnchor,
     ClockMapping,
     FrameBinding,
@@ -210,6 +211,10 @@ def test_readers_refuse_extra_or_missing_keys_and_newer_versions(sample: Any, re
         read({k: v for k, v in data.items() if k != "validity"})
     with pytest.raises(SchemaVersionError):
         read({**data, "schema_version": 10**6})
+    for older in range(1, ALIGNMENT_SINCE):  # the kinds are from version 3 on (ADR 0050 §9)
+        with pytest.raises(SchemaVersionError, match="from schema version 3"):
+            read({**data, "schema_version": older})
+    assert data["schema_version"] == ALIGNMENT_SINCE == 3
 
 
 @pytest.mark.parametrize(("sample", "read"), SAMPLES, ids=IDS)

@@ -7,8 +7,8 @@ import psycopg
 import pytest
 
 from ledger_catalog_rows import add_package
-from neptune.model.kinds import RECORD_KINDS
 from neptune_ledger.catalog import migrate
+from neptune_ledger.catalog.check import kinds_of
 from neptune_ledger.catalog.migrate import (
     MigrationError,
     apply_migrations,
@@ -131,28 +131,45 @@ def test_migration_versions_are_contiguous_from_one() -> None:
     assert all(re.fullmatch(r"sha256:[0-9a-f]{64}", m.sha256) for m in shipped)
 
 
-def test_record_partitions_are_exactly_the_package_schema_kinds(pg: Conn) -> None:
+def test_record_partitions_are_the_schema_1_kinds_and_a_default(pg: Conn) -> None:
+    """0001 partitions every kind of package schema 1; 0003 adds the default (ADR 0008 §1)."""
     apply_migrations(pg, "acme")
     rows = pg.execute(
-        "SELECT pg_get_expr(c.relpartbound, c.oid) FROM pg_inherits i"
+        "SELECT c.relname, pg_get_expr(c.relpartbound, c.oid) FROM pg_inherits i"
         " JOIN pg_class c ON c.oid = i.inhrelid"
         " WHERE i.inhparent = 'tenant_acme.record'::regclass"
     ).fetchall()
-    kinds = {re.fullmatch(r"FOR VALUES IN \('(\w+)'\)", str(row[0])).group(1) for row in rows}  # type: ignore[union-attr]
-    assert kinds == set(RECORD_KINDS)
-    assert len(rows) == len(RECORD_KINDS)  # and no DEFAULT partition
+    bounds = {str(name): str(bound) for name, bound in rows}
+    assert bounds.pop("record_default") == "DEFAULT"
+    kinds = {re.fullmatch(r"FOR VALUES IN \('(\w+)'\)", b).group(1) for b in bounds.values()}  # type: ignore[union-attr]
+    assert kinds == kinds_of(1)
+    assert set(bounds) == {f"record_{kind}" for kind in kinds_of(1)}
 
 
-def test_a_record_of_an_unknown_kind_is_refused(pg: Conn) -> None:
+def _insert_record(pg: Conn, kind: str) -> None:
+    pg.execute(
+        "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
+        " registration_key, line, schema_version, body_digest)"
+        f" VALUES ('acme', %s, %s, %s, 1, 1, 1, '{DIGEST}')",
+        (kind, ROBOT, PACKAGE),
+    )
+
+
+def test_a_kind_without_its_own_partition_is_filed_in_the_default(pg: Conn) -> None:
+    """The database keeps no list of kinds; registration decides which a package may hold."""
     apply_migrations(pg, "acme")
     add_package(pg, "tenant_acme", PACKAGE, 1)
-    with pytest.raises(psycopg.errors.CheckViolation):  # no partition for the value
-        pg.execute(
-            "INSERT INTO tenant_acme.record (tenant_id, kind, record_id, package_id,"
-            " registration_key, line, schema_version, body_digest)"
-            f" VALUES ('acme', 'telepathy', %s, %s, 1, 1, 1, '{DIGEST}')",
-            (ROBOT, PACKAGE),
-        )
+    _insert_record(pg, "configuration_snapshot")
+    rows = pg.execute("SELECT tableoid::regclass::text, kind FROM tenant_acme.record").fetchall()
+    assert rows == [("tenant_acme.record_default", "configuration_snapshot")]
+
+
+@pytest.mark.parametrize("kind", ["", "Run", "../run", "records/run.jsonl", "run kind", "1run"])
+def test_a_kind_that_is_not_a_table_name_is_refused(pg: Conn, kind: str) -> None:
+    apply_migrations(pg, "acme")
+    add_package(pg, "tenant_acme", PACKAGE, 1)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert_record(pg, kind)
 
 
 def test_the_transaction_clock_is_strictly_sequenced_and_never_goes_back(pg: Conn) -> None:

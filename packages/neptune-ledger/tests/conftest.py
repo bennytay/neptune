@@ -23,18 +23,29 @@ def pg_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         server.cleanup()
 
 
-@pytest.fixture
-def pg(pg_server: str) -> Iterator[psycopg.Connection[tuple[object, ...]]]:
-    """An autocommit connection to a new, empty, C-collated database on the session's server."""
+def new_database(server_uri: str) -> str:
+    """A new, empty, C-collated database on the server; returns its URI."""
     name = f"catalog_{next(_names)}"
-    with psycopg.connect(pg_server, autocommit=True) as admin:
+    with psycopg.connect(server_uri, autocommit=True) as admin:
         # The catalog requires byte-order collation (ADR 0005 §4), whatever the server's default.
         admin.execute(
             sql.SQL(
                 "CREATE DATABASE {} TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'"
             ).format(sql.Identifier(name))
         )
-    uri = pg_server.replace("/postgres?", f"/{name}?", 1)
+    uri = server_uri.replace("/postgres?", f"/{name}?", 1)
     assert name in uri
-    with psycopg.connect(uri, autocommit=True) as conn:
+    return uri
+
+
+@pytest.fixture
+def pg_uri(pg_server: str) -> str:
+    """The URI of a new, empty, C-collated database on the session's server."""
+    return new_database(pg_server)
+
+
+@pytest.fixture
+def pg(pg_uri: str) -> Iterator[psycopg.Connection[tuple[object, ...]]]:
+    """An autocommit connection to a new, empty, C-collated database on the session's server."""
+    with psycopg.connect(pg_uri, autocommit=True) as conn:
         yield conn

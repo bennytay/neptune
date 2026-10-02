@@ -96,8 +96,8 @@ def test_committed_compatibility_matrix_is_current() -> None:
     text = tool.render_matrix(_registry())
     assert text == (CONTRACTS / "compatibility.md").read_text("utf-8")
     assert text == tool.render_matrix(_registry())
-    assert "| `neptune-ledger` | 1.0.0 current |" in text
-    assert "| `catalog-api` | `neptune-ledger` | active | 1.1.0 | — |" in text
+    assert "| `neptune-ledger` | 2.0.0 current |" in text
+    assert "| `catalog-api` | `neptune-ledger` | active | 1.2.0 | — |" in text
 
 
 def test_golden_generator_is_deterministic() -> None:
@@ -189,7 +189,10 @@ def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> Non
 
     report = tool.check_packages(registry, registry.lock(), runner=runner)
     assert report.ok and len(calls) == 3  # one per owner: compiler, neptune-ledger, neptune-memory
-    assert sum("54 goldens checked" in n for n in report.notes) == 1
+    versions = len(registry.versions("package-schema"))  # each published version, once
+    assert sum(
+        n.startswith("package-schema ") and "goldens checked" in n for n in report.notes
+    ) == (versions)
 
 
 def test_a_minor_version_must_accept_its_majors_goldens(registry: Any) -> None:
@@ -219,7 +222,7 @@ def test_matrix_follows_the_registry(registry: Any, capsys: pytest.CaptureFixtur
     assert tool.main([*root, "matrix"]) == 0
     text = _text(registry.root / "compatibility.md")
     assert f"| `package-schema` | `neptune` | active | {newer} | — |" in text
-    assert "| `neptune-ledger` | 1.0.0 behind |" in text
+    assert "| `neptune-ledger` | 2.0.0 behind |" in text
     assert tool.main([*root, "matrix", "--check"]) == 0
     lock = registry.lock()
     registry.write_lock({**lock, "neptune-deploy": {}})

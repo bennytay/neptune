@@ -21,7 +21,7 @@ from neptune.model.finding import (
 from neptune.model.ids import ExternalObjectRef, RecordId
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.provenance import ByteRange, EvidenceRef, RowCell, adapter_locator
-from neptune.model.record import SCHEMA_VERSION, Family
+from neptune.model.record import OLDEST_READABLE_VERSION, Family
 from neptune.model.source import LocalPath, RawLocalPath
 
 LOG = content_id(b"\x89MCAP0\r\n" + bytes(1024))
@@ -91,7 +91,7 @@ def test_json_shape() -> None:
         "message": "chunk 3 fails its CRC; its messages are not ingested",
         "records": [STREAM],
         "related": [OTHER_CHUNK.to_json()],
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": OLDEST_READABLE_VERSION,
         "severity": "error",
         "subject": {"kind": "evidence", "ref": CHUNK.to_json()},
         "transform": MCAP.id,
