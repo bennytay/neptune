@@ -738,8 +738,8 @@ def _timed(make: Callable[[], Any]) -> float:
 
 @pytest.mark.slow
 def test_a_document_of_many_labelled_paragraphs_maps_in_linear_time() -> None:
-    """Before the gate, its unread lines were matched against every block: 16,000 paragraphs took
-    7 s and 32,000 about 28 s. Now 32,000 take about 2 s."""
+    """Before the gate its unread lines were matched against every block: 8,000 paragraphs took
+    1.8 s and 16,000 took 6.9 s. Now 32,000 take about 2 s."""
     _, templates = _declared(FLEET)
     small = _paragraphs(BASES[FLEET], [f"Site: S-{n}" for n in range(4000)])
     large = _paragraphs(BASES[FLEET], [f"Site: S-{n}" for n in range(32000)])
@@ -770,3 +770,22 @@ def test_finding_a_tables_block_is_logarithmic(monkeypatch: pytest.MonkeyPatch) 
     for block in pdf.blocks:
         assert pdf.block_at(block.provenance.evidence) is block
     assert calls == len(pdf.blocks)  # one candidate each, not a scan
+
+
+# --- The plugin adapter still declines (MVL-200 probes it on every source) ------------------------
+
+
+def test_the_lifecycle_adapter_declines_every_archetype_source() -> None:
+    """MVL-200 (PR #83) makes ``neptune ingest`` probe every source with ``deploy_lifecycle``. It
+    must claim none of the corpus, so installing Deploy changes no selection (ADR 0005 §8)."""
+    from neptune.adapters.contract import ProbeHints
+    from neptune_deploy.adapters.lifecycle import NO_READER, LifecycleAdapter
+
+    adapter = LifecycleAdapter()
+    sources = [p for p in sorted(A.SOURCES.rglob("*")) if p.is_file()]
+    assert len(sources) > 30
+    for path in sources:
+        head = path.read_bytes()[:65536]
+        result = adapter.probe(head, ProbeHints(path.name, path.stat().st_size))
+        assert result.confidence == 0.0, path
+        assert [reason.code for reason in result.reasons] == [NO_READER], path
