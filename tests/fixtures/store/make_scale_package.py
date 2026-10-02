@@ -58,7 +58,9 @@ def scale_records(rows: int) -> Iterator[Any]:
             Unknown(),
             Known(f"{-33.8 - n / 1e7:.7f}"),
             Known(f"{151.2 + n / 1e7:.7f}"),
-            Ambiguous((Candidate(f"D{n % 7}"), Candidate(f"E{n % 5}"))) if n % 10 == 0 else Unknown(),
+            Ambiguous((Candidate(f"D{n % 7}"), Candidate(f"E{n % 5}")))
+            if n % 10 == 0
+            else Unknown(),
         ]
         record = replace(
             template,
