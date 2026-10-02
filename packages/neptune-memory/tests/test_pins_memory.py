@@ -25,7 +25,8 @@ def test_docs_state_the_same_pins() -> None:
     adr = (ROOT / "docs" / "adr" / "0001-place-in-the-programme-and-contract-pins.md").read_text(
         encoding="utf-8"
     )
+    # The compiler pin moves with each additive bump and ADRs are not edited: contracts.md says it.
+    assert f"SCHEMA_VERSION = {pins.COMPILER_SCHEMA_VERSION}" in contracts
     for text in (contracts, adr):
-        assert f"SCHEMA_VERSION = {pins.COMPILER_SCHEMA_VERSION}" in text
         assert f"GRAPH_SCHEMA_VERSION = {pins.GRAPH_SCHEMA_VERSION}" in text
         assert 'CATALOG_API_VERSION = "pending' in text

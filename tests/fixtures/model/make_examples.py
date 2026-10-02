@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Final, TypeVar
+from typing import TYPE_CHECKING, Any, Final, TypeVar
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -60,6 +60,7 @@ from neptune.model.knowledge import (
     Ambiguous,
     AssertionKind,
     Candidate,
+    Knowledge,
     Known,
     NotApplicable,
     NotCovered,
@@ -122,7 +123,7 @@ from neptune.model.time import (
     Timestamp,
 )
 from neptune.model.units import unit_from_json, unit_from_text
-from neptune.model.versions import DeclaredVersion, GitCommit
+from neptune.model.versions import DeclaredVersion, GitCommit, VersionPrimitive
 from neptune.model.world import (
     Capture,
     Image,
@@ -132,6 +133,9 @@ from neptune.model.world import (
     StructuredRecord,
     StructuredTable,
 )
+
+if TYPE_CHECKING:
+    from neptune.model.scalars import Real
 
 HERE: Final = Path(__file__).parent
 R = TypeVar("R")
@@ -868,7 +872,7 @@ class Records:
 
     def quantity(self, value: str, unit: str) -> Quantity:
         # A declared integer is read with float(), as calibration parameters are (ADR 0019 §6).
-        number = Known(float(self.get(value)), self.cite(value))
+        number: Knowledge[Real] = Known(float(self.get(value)), self.cite(value))
         return Quantity(number, unit_from_text(self.get(unit), provenance=self.cite(unit)))
 
     def decision(self, decision: str, authority: str, time: str) -> Decision:
@@ -888,7 +892,7 @@ class Records:
         items = []
         for i, item in enumerate(self.get(pointer)):
             at = f"{pointer}/{i}"
-            version = (
+            version: Knowledge[VersionPrimitive] = (
                 # A version is the kind the source names; a form names none (ADR 0014).
                 Known(DeclaredVersion(item[key]), self.cite(f"{at}/{key}"))
                 if (key := "version" if "version" in item else "revision") in item
