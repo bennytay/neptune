@@ -32,6 +32,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, ClassVar, Final, TypeAlias
 
+from neptune.derived.clocks import (
+    DOMAIN_KIND,
+    MAPPING_KIND,
+    inferred_clock_mapping_from_json,
+    inferred_timestamp_domain_from_json,
+)
 from neptune.derived.provenance import DERIVED_SCHEMA_VERSION as DERIVED_SCHEMA_VERSION
 from neptune.derived.provenance import INFERRED
 from neptune.derived.provenance import derived_object as _derived_object
@@ -582,6 +588,8 @@ DERIVED_KINDS: Final[Mapping[str, Callable[[JsonValue], Any]]] = {
     DEFINITION_KIND: definition_layout_from_json,  # ADR 0049
     LAYOUT_KIND: stream_layout_from_json,
     SEMANTIC_KIND: stream_semantic_from_json,
+    DOMAIN_KIND: inferred_timestamp_domain_from_json,  # ADR 0060
+    MAPPING_KIND: inferred_clock_mapping_from_json,
 }
 
 
