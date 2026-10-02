@@ -65,6 +65,8 @@ def test_fresh(pr: list[str], main: list[str]) -> None:
         ([OTHER], ["scripts/contracts.py"], "neptune-other"),  # every job runs contracts.py
         ([OTHER], [".github/workflows/ci.yml"], "neptune-other"),
         (["packages/_template/AGENTS.md"], ["scripts/new-package.sh"], "template"),
+        (["harness/stages.py"], ["harness/run.py"], "neptune-platform"),  # both edit the platform
+        ([PLATFORM], ["harness/run.py"], "neptune-platform"),
     ],
 )
 def test_refresh(pr: list[str], main: list[str], shared: str) -> None:
@@ -91,15 +93,22 @@ def test_members_are_read_at_a_git_ref() -> None:
 
 
 ADAPTER_IMPORT = re.compile(
-    r"^\s*(from|import)\s+neptune\.adapters\.(?!contract\b|registry\b)\w+", re.M
+    r"neptune\.adapters\.(?!contract\b|registry\b)\w+"
+    r"|from\s+neptune\.adapters\s+import\s+(?!contract\b|registry\b)"
+    r"|neptune\.(sdk|runtime|discovery)\b"
 )
 
 
-def test_no_member_imports_a_format_adapter() -> None:
-    """ci_plan and merge_freshness rely on it: adapter changes do not reach members' jobs."""
+def test_no_member_imports_a_format_adapter_or_runs_ingestion() -> None:
+    """ci_plan and merge_freshness rely on it: adapter changes do not reach members' jobs.
+
+    The platform is exempt: its harness ingests, and adapter changes select its job.
+    """
     offenders = [
         str(path.relative_to(ROOT))
-        for path in sorted((ROOT / "packages").glob("*/src/**/*.py"))
-        if ADAPTER_IMPORT.search(path.read_text(encoding="utf-8"))
+        for path in sorted((ROOT / "packages").glob("*/*/**/*.py"))
+        if path.parts[len(ROOT.parts) + 2] in ("src", "tests")
+        and path.parts[len(ROOT.parts) + 1] not in ("neptune-platform", "_template")
+        and ADAPTER_IMPORT.search(path.read_text(encoding="utf-8"))
     ]
     assert offenders == []

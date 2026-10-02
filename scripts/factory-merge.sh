@@ -106,11 +106,13 @@ files=$(gh api --paginate "repos/$repo/pulls/$pr/files" --jq '.[] | .filename, (
 # Stop the line: nothing merges on top of a red main except a fix for it.
 # The newest main commit whose `check` has completed decides; one still running defers to its parent.
 main_check=""
-for sha in $(gh api "repos/$repo/commits?sha=main&per_page=${MAIN_LOOKBACK:-20}" --jq '.[].sha'); do
+main_shas=$(gh api "repos/$repo/commits?sha=main&per_page=${MAIN_LOOKBACK:-20}" --jq '.[].sha')
+for sha in $main_shas; do
   main_check=$(gh api "repos/$repo/commits/$sha/check-runs?check_name=check" \
     --jq '[.check_runs[] | select(.status == "completed")] | sort_by(.completed_at) | last | .conclusion // empty')
   [[ -z $main_check ]] || break
 done
+[[ -n $main_check ]] || refuse "no completed check in main's last ${MAIN_LOOKBACK:-20} commits"
 if [[ $main_check =~ ^(failure|cancelled|timed_out|action_required)$ ]] &&
   ! jq -e '[.labels[]?.name] | index("fix-main")' <<<"$pull" >/dev/null; then
   refuse "the latest check on main failed; fix main first (label the fixing PR 'fix-main')"
