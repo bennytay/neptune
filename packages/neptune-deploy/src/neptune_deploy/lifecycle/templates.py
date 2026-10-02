@@ -30,6 +30,7 @@ field), and, inside ``{"rows": <table>, "each": {...}}``, by ``column``. Anythin
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Final
 
@@ -53,6 +54,7 @@ from neptune_deploy.lifecycle.mapping import (
     _texts,
     _token,
     spec_columns,
+    spec_refs,
 )
 from neptune_deploy.lifecycle.shapes import KINDS
 
@@ -92,6 +94,17 @@ class DocumentTemplate:
     fields: Mapping[str, Spec]
     document: JsonObject
     sha256: ContentId
+
+    @cached_property
+    def leads(self) -> tuple[str, ...]:
+        """What a label line starts with, for every label the template reads or leaves unread:
+        where one label's value stops (ADR 0003 §4)."""
+        names = {*self.require_labels, *self.ignore_labels}
+        if self.form is not None:
+            names |= {self.form.label, self.form.version_label}
+        for spec in self.fields.values():
+            names |= {name for via, name in spec_refs(spec) if via == "label"}
+        return tuple(sorted(name + self.separator for name in names))
 
 
 class TemplateRegistry:

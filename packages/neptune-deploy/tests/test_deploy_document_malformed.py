@@ -324,6 +324,85 @@ def test_a_label_on_a_later_line_of_a_wrapped_block_is_read_from_its_own_line() 
     assert len(_of(_mapped(both), "risk_assessment")) == 1
 
 
+def test_a_wrapped_value_a_value_under_its_label_and_a_stray_line_are_never_dropped() -> None:
+    wrapped = "Location: Aisle 14, rack face B, between the\ncharging dock and the fire door"
+    base = _with(_base("warehouse_amr"), _retext("Location: Aisle 14, rack face B", wrapped))
+    package = _mapped(base)
+    (incident,) = _of(package, "incident_record")
+    # The value is every line up to the next label line, joined by one space, cited by its lines.
+    assert (
+        incident.location.value
+        == "Aisle 14, rack face B, between the charging dock and the fire door"
+    )
+    (note,) = _codes(package)["label_value_wrapped"]
+    spans = [r.locator[-1] for r in note.related]
+    assert len(spans) == 2 and spans[0].end < spans[1].start
+    assert incident.location.provenance.evidence.locator[-1] == Span(spans[0].start, spans[1].end)
+    assert note.records == (incident.id,) and note.details["reference"] == "Location"
+    assert "text_unread" not in _codes(package)
+
+    under = _with(
+        _base("warehouse_amr"),
+        _retext("Approved by: Site safety lead", "Approved by:\nSite safety lead"),
+    )
+    (risk,) = _of(_mapped(under), "risk_assessment")
+    authority = risk.approval.authority
+    assert isinstance(authority, Known) and authority.value == "Site safety lead"
+    cited = authority.provenance.evidence  # type: ignore[union-attr]
+    assert cited.locator[-1].end - cited.locator[-1].start == len("Site safety lead")
+
+    stray = _with(
+        _base("warehouse_amr"),
+        _retext("Assessed on: 2026-03-12", "Stray line here\nAssessed on: 2026-03-12"),
+    )
+    package = _mapped(stray)
+    (unread,) = _codes(package)["text_unread"]
+    # The line no label took is listed with its own span, not the block's.
+    (line,) = unread.related
+    assert line.locator[-1].end - line.locator[-1].start == len("Stray line here")
+    assert unread.details["count"] == 1
+    assert "label_value_wrapped" not in _codes(package)
+
+
+def test_the_next_label_line_ends_a_value() -> None:
+    two = _retext("Site: HH-DC2", "Site: HH-DC2\nOccurred at: 2026-04-02 14:07")
+    gone = _retext("Occurred at: 2026-04-02 14:07", "Note: none")
+    package = _mapped(_with(_with(_base("warehouse_amr"), two), gone))
+    (incident,) = _of(package, "incident_record")
+    assert incident.site.value.value == "HH-DC2"  # the next label line is not a wrapped value
+    assert isinstance(incident.occurred, Known)
+    wrapped = _codes(package).get("label_value_wrapped", [])
+    assert all(incident.id not in f.records for f in wrapped)
+
+
+def test_a_label_said_again_with_the_same_value_is_that_value_and_with_another_is_unknown() -> None:
+    same = _mapped(_with(_base("warehouse_amr"), _retext("Zone: Z3", "Site: HH-DC2")))
+    (incident,) = _of(same, "incident_record")
+    assert isinstance(incident.site, Known) and "label_repeated" not in _codes(same)
+    other = _mapped(_with(_base("warehouse_amr"), _retext("Zone: Z3", "Site: HH-DC9")))
+    (incident,) = _of(other, "incident_record")
+    assert isinstance(incident.site, Unknown) and "label_repeated" in _codes(other)
+
+
+def test_rows_are_only_a_top_level_field_of_a_template() -> None:
+    text = RISK.read_text()
+    template = json.loads(text)
+    nested = json.loads(text)
+    nested["fields"]["hazards"] = [
+        {
+            "hazard": {"label": "Hazard"},
+            "scores": {"rows": "hazards", "each": {"column": "Severity"}},
+        }
+    ]
+    with pytest.raises(MappingError, match="expected a list of parts"):
+        parse_template(json.dumps(nested).encode())
+    inside = json.loads(text)
+    inside["fields"]["approval"] = {"decision": {"rows": "hazards", "each": {}}}
+    with pytest.raises(MappingError):
+        parse_template(json.dumps(inside).encode())
+    assert parse_template(json.dumps(template).encode()).id == "risk.amr_iso3691_4"
+
+
 def test_a_form_shown_twice_is_that_form_if_every_statement_agrees_and_not_otherwise() -> None:
     agree = _mapped(
         _with(_base("warehouse_amr"), _retext("Reviewer: R. Okafor", "Form: RA-3691-AMR"))

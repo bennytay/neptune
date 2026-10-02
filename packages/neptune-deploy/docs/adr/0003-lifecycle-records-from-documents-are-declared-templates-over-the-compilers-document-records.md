@@ -59,19 +59,26 @@ another. Forces:
    lifecycle record's values stay `stated`. No lifecycle record is ever the observation itself.
 4. **A field names what it reads by `label`, `section` or, inside a table's rows, `column`.**
    - `label`: an inline `Label<separator> value` at the start of a line of a paragraph, list item or
-     untyped block (an extractor-wrapped block holds several lines; a value is the rest of its own line,
-     a wrapped continuation line is not followed), or a row
-     of a headerless table whose first cell is the label (a form's `Field | Value`). The value cites the
-     span after the separator, or its cell. A label shown twice is `label_repeated` and `Unknown`; one
-     the document lacks is `NotCovered` with `label_absent`; one shown with nothing after it is
-     `Unknown`.
+     untyped block, or a row of a headerless table whose first cell is the label (a form's
+     `Field | Value`). An extractor wraps a paragraph into one block of several lines, and a form may
+     put a value under its label, so a value is the rest of the label's line **and every following
+     line of the same block up to the next line that starts with a label the template names** (a
+     field's, a required or ignored one, the form's), joined by one space. The value cites one span
+     from its first line's text to its last line's; one citation cannot hold text joined that way, so a
+     value of several lines also gets a `label_value_wrapped` finding listing each line's span. A value
+     that goes on in another block or on another page is not followed (§9). Reads are tracked per
+     line: a line no label took (before the first label of its block, say) is `text_unread` with its
+     own span. A label shown twice is `label_repeated` and `Unknown`, unless every statement is the same
+     value, which is then that value (as for a form, §3); one the document lacks is `NotCovered` with
+     `label_absent`; one shown with nothing after it is `Unknown`.
    - `section`: the blocks under a heading, up to the next heading at its level or above. As a text
      field it is **free text, copied verbatim and cited by one span** from the first block to the last
      (blocks on one page, each starting one LF after the last ends: the page text's own layout). Text
      that cannot be one span (it crosses a page, holds a figure, or has a gap) is `Unknown` with
      `section_not_contiguous`, never a shortened or joined guess. As a statements field it is the
      section's list items, each citing its own block.
-   - `{"rows": <table>, "each": {...}}`: a list of parts, one per row of every table with exactly that
+   - `{"rows": <table>, "each": {...}}`, a top-level field only (never inside a part, and never for
+     scores; a template that tries is refused): a list of parts, one per row of every table with exactly that
      header (a table that repeats its header on each page is several tables, read in document order),
      each cell cited. A part whose cells are all blank is not listed (`item_blank`).
    Everything else follows ADR 0002 §4: a cell the compiler held `KnownAbsent` stays so, a value that
@@ -91,7 +98,8 @@ another. Forces:
 7. **Findings, coded `deploy_document_map.*`**, each documented with its severity and category in
    `lifecycle.documents.FINDINGS`: `template_matched`, `template_version_mismatch`,
    `template_structure_missing`, `template_ambiguous`, `document_unmatched`, `no_text_layer`,
-   `page_rotated`, `text_unread`, `column_unmapped`, `label_absent`, `label_repeated`, `section_absent`,
+   `page_rotated`, `text_unread`, `column_unmapped`, `label_absent`, `label_repeated`,
+   `label_value_wrapped`, `section_absent`,
    `section_repeated`, `section_not_contiguous`, `value_unreadable`, `value_blank`, `list_cell_blank`,
    `list_part_empty`, `list_id_repeated`, `item_blank`, `identifier_repeated`,
    `record_unrepresentable`. `value_unreadable`, `list_cell_blank`, `list_part_empty` and

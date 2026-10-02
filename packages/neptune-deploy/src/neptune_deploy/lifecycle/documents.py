@@ -126,6 +126,13 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = _catalog(
         "labels the template reads that the document does not show; their fields are not covered",
     ),
     (
+        "label_value_wrapped",
+        Severity.INFO,
+        FindingCategory.UNREPRESENTABLE,
+        "a label's value that takes several lines of its block: the value joins them with one"
+        " space, and one citation cannot hold that text, so each line's span is listed",
+    ),
+    (
         "label_repeated",
         Severity.WARNING,
         FindingCategory.AMBIGUOUS,
@@ -267,6 +274,43 @@ class _Hit:
     place: EvidenceRef
     block: RecordId | None = None
     row: tuple[RecordId, int] | None = None
+    lines: tuple[int, ...] = ()  # the lines of the block this label and its value took
+    cited: tuple[EvidenceRef, ...] = ()  # the span of each line of a value that took several
+
+
+def _lines(text: str) -> list[tuple[int, str]]:
+    """A block's lines with their offsets in its text (a page's text is its blocks, LF between)."""
+    out, offset = [], 0
+    for line in text.split("\n"):
+        out.append((offset, line))
+        offset += len(line) + 1
+    return out
+
+
+def _stray_lines(block: DocumentBlock, taken: set[int]) -> list[EvidenceRef]:
+    """The lines of a block, some of which a label took: each other line, cited by its own span."""
+    text = _text(block.text) or ""
+    evidence = block.provenance.evidence
+    span = _span(evidence)
+    exact = span is not None and span.end - span.start == len(text)
+    out = []
+    for index, (begin, line) in enumerate(_lines(text)):
+        if index in taken or not line.strip():
+            continue
+        if span is None or not exact:
+            out.append(evidence)
+            continue
+        first = begin + len(line) - len(line.lstrip())
+        out.append(
+            EvidenceRef(
+                evidence.source,
+                (
+                    *evidence.locator[:-1],
+                    Span(span.start + first, span.start + first + len(line.strip())),
+                ),
+            )
+        )
+    return list(dict.fromkeys(out))
 
 
 def _header_evidence(table: _Table) -> EvidenceRef:
@@ -311,39 +355,69 @@ class _View:
 
     # Lookups (pure: nothing is marked read) ------------------------------------------------
 
-    def labels(self, name: str, separator: str) -> list[_Hit]:
-        """Every place the document shows ``name`` with a value: an inline ``name: value``
-        paragraph, or a row of a headerless table whose first cell is ``name``."""
+    def labels(self, name: str, template: DocumentTemplate) -> list[_Hit]:
+        """Every place the document shows ``name`` with a value: an inline ``name: value`` line of a
+        paragraph, or a row of a headerless table whose first cell is ``name``.
+
+        An extractor wraps a paragraph into one block of several lines, and a form may put a value
+        under its label. A label's value is the rest of its line and every following line of the
+        block up to the next line of a label the template knows, joined by one space (ADR 0003 §4);
+        a value that goes on in another block or on another page is not followed."""
         hits = []
-        lead = name + separator
+        lead = name + template.separator
         for block in self.blocks:
             text = _text(block.text)
             if text is None or _role(block) in _NOT_TEXT or lead not in text:
                 continue
             evidence = block.provenance.evidence
             span = _span(evidence)
-            # A paragraph the extractor wrapped is one block of several lines: a label starts a
-            # line, and its value is the rest of that line (a wrapped value is not followed).
             exact = span is not None and span.end - span.start == len(text)
             provenance = Provenance(evidence, block.provenance.transform, OBSERVED)
-            offset = 0
-            for line in text.split("\n"):
-                begin, offset = offset, offset + len(line) + 1
+            lines = _lines(text)
+            for index, (_, line) in enumerate(lines):
                 if not line.startswith(lead):
                     continue
-                rest = line[len(lead) :]
-                value = rest.strip()
-                if not value:
-                    hits.append(_Hit(Unknown(provenance), evidence, block=block.id))
+                taken = [index]
+                pieces: list[tuple[int, int, str]] = []  # (start, end, text) in the block's text
+                for at in range(index, len(lines)):
+                    start, rest = lines[at]
+                    if at > index and any(rest.startswith(k) for k in template.leads):
+                        break
+                    if at > index:
+                        taken.append(at)
+                    if at == index:
+                        start, rest = start + len(lead), rest[len(lead) :]
+                    value = rest.strip()
+                    if value:
+                        first = start + len(rest) - len(rest.lstrip())
+                        pieces.append((first, first + len(value), value))
+                if not pieces:
+                    hits.append(
+                        _Hit(Unknown(provenance), evidence, block=block.id, lines=tuple(taken))
+                    )
                     continue
                 place = evidence
+                cited: tuple[EvidenceRef, ...] = ()
                 if span is not None and exact:
-                    start = span.start + begin + len(lead) + (len(rest) - len(rest.lstrip()))
+                    inner = (*evidence.locator[:-1],)
                     place = EvidenceRef(
                         evidence.source,
-                        (*evidence.locator[:-1], Span(start, start + len(value))),
+                        (*inner, Span(span.start + pieces[0][0], span.start + pieces[-1][1])),
                     )
-                hits.append(_Hit(Known(value, provenance), place, block=block.id))
+                    cited = tuple(
+                        EvidenceRef(evidence.source, (*inner, Span(span.start + a, span.start + b)))
+                        for a, b, _ in pieces
+                    )
+                value = " ".join(piece[2] for piece in pieces)
+                hits.append(
+                    _Hit(
+                        Known(value, provenance),
+                        place,
+                        block=block.id,
+                        lines=tuple(taken),
+                        cited=cited if len(pieces) > 1 else (),
+                    )
+                )
         for kv in self.kv:
             for row in kv.rows:
                 if len(row.cells) >= 2 and _text(row.cells[0]) == name:
@@ -405,6 +479,7 @@ class _DocRow(_Values):
         )
         self.read_blocks: set[RecordId] = set()
         self.read_rows: set[tuple[RecordId, int]] = set()
+        self.read_lines: set[tuple[RecordId, int]] = set()  # a label's lines, by block and line
         self._cells: dict[tuple[str, str], _Cell] = {}
 
     def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
@@ -425,7 +500,7 @@ class _DocRow(_Values):
 
     def read(self, hit: _Hit) -> None:
         if hit.block is not None:
-            self.read_blocks.add(hit.block)
+            self.read_lines.update((hit.block, line) for line in hit.lines)
         if hit.row is not None:
             self.read_rows.add(hit.row)
 
@@ -460,12 +535,15 @@ class _DocRow(_Values):
         )
 
     def _label(self, column: str) -> _Cell:
-        hits = self.view.labels(column, self.template.separator)
+        hits = self.view.labels(column, self.template)
         if not hits:
             self.mapper.findings.once("label_absent", self.table, self.evidence, column)
             return _Cell(None, self.evidence, absent_from_table=True)
         for hit in hits:
             self.read(hit)
+        values = {st.value if isinstance(st, Known) else None for st in (h.state for h in hits)}
+        if len(hits) > 1 and len(values) == 1 and None not in values:
+            hits = hits[:1]  # said again, the same: it is that value, as for a form
         if len(hits) > 1:
             self.mapper.findings.add(
                 "label_repeated",
@@ -476,7 +554,19 @@ class _DocRow(_Values):
                 related=[hit.place for hit in hits[1:]],
             )
             return _Cell(Unknown(self.provenance(self.evidence)), self.evidence)
-        return _Cell(hits[0].state, hits[0].place)
+        hit = hits[0]
+        if len(hit.cited) > 1:
+            self.mapper.direct.append(
+                _finding(
+                    "label_value_wrapped",
+                    hit.place,
+                    self.mapper.transform,
+                    {"reference": column},
+                    related=hit.cited,
+                    records=[self.record_id],
+                )
+            )
+        return _Cell(hit.state, hit.place)
 
     def _locate(self, name: str) -> tuple[str, DocumentBlock | None, list[DocumentBlock]]:
         headings = self.view.headings(name)
@@ -536,6 +626,8 @@ class _DocRow(_Values):
 
     def blank(self, spec: Part) -> bool:
         for via, name in sorted(spec_refs(spec)):
+            if via == "column":  # a column belongs to a table's row, not to the document
+                continue
             state = self.cell(name, via).state
             if state is not None and not isinstance(state, Unknown):
                 return False
@@ -634,15 +726,14 @@ def _judge(view: _View, template: DocumentTemplate) -> _Verdict:
     if view.record.format not in template.formats:
         return _Verdict(template, "other")
     seen: list[EvidenceRef] = []
-    separator = template.separator
     if template.form is not None:
         form = template.form
-        named = view.labels(form.label, separator)
+        named = view.labels(form.label, template)
         # A form shown more than once (say, on every page) is that form if every statement agrees.
         if not named or any(_text(hit.state) != form.value for hit in named):
             return _Verdict(template, "other")
         seen.append(named[0].place)
-        versions = view.labels(form.version_label, separator)
+        versions = view.labels(form.version_label, template)
         states = sorted({text for hit in versions if (text := _text(hit.state)) is not None})
         found = states[0] if len(states) == 1 and len(versions) >= 1 else None
         if found != form.version or any(_text(hit.state) is None for hit in versions):
@@ -650,7 +741,7 @@ def _judge(view: _View, template: DocumentTemplate) -> _Verdict:
         seen.append(versions[0].place)
     missing: list[str] = []
     for label in template.require_labels:
-        hits = view.labels(label, separator)
+        hits = view.labels(label, template)
         seen.extend(hit.place for hit in hits[:1])
         if not hits:
             missing.append(f"label {label}")
@@ -796,14 +887,15 @@ class _TemplateMapper(_Clocks):
     def _unread(self, view: _View, row: _DocRow) -> list[EvidenceRef]:
         """Evidence of blocks and headerless-table rows that neither a field, a required or
         ignored structure, nor a declared table accounts for, in reading order."""
-        template, separator = self.template, self.template.separator
+        template = self.template
         read = set(row.read_blocks)
         rows = set(row.read_rows)
+        lines = set(row.read_lines)
 
         def mark(hits: list[_Hit]) -> None:
             for hit in hits:
                 if hit.block is not None:
-                    read.add(hit.block)
+                    lines.update((hit.block, line) for line in hit.lines)
                 if hit.row is not None:
                     rows.add(hit.row)
 
@@ -811,7 +903,7 @@ class _TemplateMapper(_Clocks):
         if template.form is not None:
             labels += [template.form.label, template.form.version_label]
         for label in labels:
-            mark(view.labels(label, separator))
+            mark(view.labels(label, template))
         for name in (*template.require_headings, *template.ignore_headings):
             read.update(heading.id for heading in view.headings(name))
         for header in template.tables.values():
@@ -830,11 +922,15 @@ class _TemplateMapper(_Clocks):
             unread_rows += [
                 r.provenance.evidence for r in kv.rows if (kv.record.id, r.row) not in rows
             ]
-        blocks = [
-            b.provenance.evidence
-            for b in view.blocks
-            if b.id not in read and _role(b) not in FURNITURE
-        ]
+        blocks: list[EvidenceRef] = []
+        for block in view.blocks:
+            if block.id in read or _role(block) in FURNITURE:
+                continue
+            done = {line for owner, line in lines if owner == block.id}
+            if not done:
+                blocks.append(block.provenance.evidence)
+            else:
+                blocks.extend(_stray_lines(block, done))
         return [*blocks, *unread_rows]
 
     def _repeated(self, records: list[Any]) -> None:

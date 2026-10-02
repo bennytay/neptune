@@ -296,7 +296,11 @@ class Dialect:
     for a document template's fields, and ``column`` for the rows of one of its tables."""
 
     selectors: tuple[str, ...]
-    rows: bool = False  # an items field may be ``{"rows": <table>, "each": <part>}``
+    rows: bool = False  # a top-level items field may be ``{"rows": <table>, "each": <part>}``
+
+    def inner(self) -> "Dialect":
+        """The dialect inside a part: rows are a top-level field's list of parts, never nested."""
+        return Dialect(self.selectors)
 
 
 TABLE: Final = Dialect(("column",))
@@ -333,10 +337,10 @@ def _fields(
                 )
             case Shape.PART:
                 assert shape.part is not None
-                out[name] = _part(shape.part, spec, at, zone, dialect)
+                out[name] = _part(shape.part, spec, at, zone, dialect.inner())
             case Shape.ITEMS:
                 assert shape.part is not None
-                if dialect.rows and isinstance(spec, dict):
+                if dialect.rows and isinstance(spec, dict) and not is_score(shape.part):
                     obj = _object(spec, at, {"rows", "each"}, set())
                     each = _part(shape.part, obj["each"], f"{at}.each", zone, DOCUMENT_ROW)
                     out[name] = Rows(_text(obj["rows"], f"{at}.rows"), each)
@@ -344,7 +348,8 @@ def _fields(
                 if not isinstance(spec, list):
                     raise MappingError(f"{at}: expected a list of parts")
                 items = tuple(
-                    _part(shape.part, s, f"{at}[{i}]", zone, dialect) for i, s in enumerate(spec)
+                    _part(shape.part, s, f"{at}[{i}]", zone, dialect.inner())
+                    for i, s in enumerate(spec)
                 )
                 labels = [item.score.column for item in items if item.score is not None]
                 if len(set(labels)) != len(labels):
