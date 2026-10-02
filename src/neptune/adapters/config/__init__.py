@@ -36,34 +36,10 @@ parses the file again, so its output depends only on the bytes, never on another
 import sys
 from collections import defaultdict
 from collections.abc import Iterator
-from dataclasses import dataclass
 from typing import Final
 
 import yaml
 
-from neptune.adapters.config._read import read_text, sniff
-from neptune.adapters.config._text import (
-    InvalidEncoding,
-    decode,
-    detect,
-    line_and_column,
-    line_endings,
-)
-from neptune.adapters.config._tree import (
-    Alias,
-    Collection,
-    Document,
-    Issue,
-    Limits,
-    Node,
-    Null,
-    Parse,
-    Spot,
-    TooLong,
-    Value,
-    pointer_token,
-)
-from neptune.adapters.config._yaml import UNREADABLE_TYPE
 from neptune.adapters.contract import (
     ABI_VERSION,
     NAME_ONLY,
@@ -84,8 +60,27 @@ from neptune.adapters.contract import (
     Resources,
     SourceReader,
     make_chunk,
-    read_pieces,
 )
+from neptune.adapters.structured.load import Loaded, Settings, load, problems
+from neptune.adapters.structured.reader import sniff
+from neptune.adapters.structured.text import (
+    InvalidEncoding,
+    decode,
+    detect,
+    line_endings,
+)
+from neptune.adapters.structured.tree import (
+    Alias,
+    Collection,
+    Document,
+    Issue,
+    Node,
+    Null,
+    Spot,
+    Value,
+    pointer_token,
+)
+from neptune.adapters.structured.yaml_reader import UNREADABLE_TYPE
 from neptune.identity.configuration import configuration_digest
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import evidence_record_id
@@ -96,8 +91,6 @@ from neptune.model.configuration import (
     ConfigNode,
     ConfigurationSnapshot,
     ConfigurationValue,
-    LineEndings,
-    TextEncoding,
 )
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.jsonvalue import JsonObject, JsonValue
@@ -115,7 +108,6 @@ from neptune.model.knowledge import (
     Unknown,
 )
 from neptune.model.provenance import (
-    ByteRange,
     EvidenceRef,
     JsonPointer,
     Locator,
@@ -356,70 +348,18 @@ DESCRIPTOR: Final = AdapterDescriptor(
 # --- Reading a source --------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class _Loaded:
-    """A source as text, read in a format; what stopped it, if it was not."""
-
-    size: int
-    too_large: bool = False
-    invalid: InvalidEncoding | None = None
-    text: str = ""
-    encoding: TextEncoding = TextEncoding.UTF_8
-    bom: int = 0
-    parse: Parse | None = None
+def _settings(config: AdapterConfig) -> Settings:
+    return Settings(
+        config.integer("max_bytes"),
+        config.integer("max_depth"),
+        config.integer("max_path_ratio"),
+        config.integer("max_scalar_length"),
+        config.text("yaml_version"),
+    )
 
 
-def _load(source: SourceReader, config: AdapterConfig, only: ConfigFormat | None) -> _Loaded:
-    if source.size > config.integer("max_bytes"):
-        return _Loaded(source.size, too_large=True)
-    data = b"".join(read_pieces(source, 0, source.size))
-    decoded = decode(data)
-    if isinstance(decoded, InvalidEncoding):
-        return _Loaded(source.size, invalid=decoded)
-    limits = Limits(config.integer("max_depth"), config.integer("max_scalar_length"))
-    parse = read_text(decoded.text, decoded.encoding, limits, config.text("yaml_version"), only)
-    if parse is not None:
-        _budget_paths(parse, config.integer("max_path_ratio"))
-    return _Loaded(source.size, False, None, decoded.text, decoded.encoding, decoded.bom, parse)
-
-
-# The least path budget of a document, in code points: a small file may nest a little deeper.
-_PATH_FLOOR: Final = 4096
-
-
-def _segment(segment: str | int) -> int:
-    return len(segment) + 1 if isinstance(segment, str) else len(str(segment)) + 1
-
-
-def path_cost(document: Document) -> int:
-    """The code points every value's path and every alias's target total: what the records
-    repeat of the document's keys. Linear to compute: a node's path costs its parent's and one
-    more segment."""
-    costs: list[int] = []
-    total = 0
-    for node in document.nodes:
-        own = 0 if node.parent < 0 else costs[node.parent] + _segment(node.path[-1])
-        costs.append(own)
-        total += own
-        if isinstance(node.value, Alias) and node.value.target is not None:
-            total += sum(_segment(segment) for segment in node.value.target)
-    return total
-
-
-def _budget_paths(parse: Parse, ratio: int) -> None:
-    """Set aside every document whose records would repeat its keys more than ``ratio`` times
-    its own size: output stays linear in input (a 20,000-character key above 4,000 values is
-    80 million code points of paths)."""
-    kept: list[Document] = []
-    for document in parse.documents:
-        start, end = document.extent
-        budget = ratio * max(end - start, _PATH_FLOOR)
-        cost = path_cost(document)
-        if cost > budget:
-            parse.too_long.append(TooLong(document.index, document.extent, cost, budget))
-        else:
-            kept.append(document)
-    parse.documents = kept
+def _load(source: SourceReader, config: AdapterConfig, only: ConfigFormat | None) -> Loaded:
+    return load(source, _settings(config), only)
 
 
 def _int(context: JsonObject, key: str) -> int:
@@ -437,150 +377,19 @@ def _path_pointer(node: Node) -> str:
     return _pointer(tuple(pointer_token(segment) for segment in node.path))
 
 
-def _shorten(message: str) -> str:
-    message = " ".join(message.split())
-    return message if len(message) <= _MESSAGE else message[: _MESSAGE - 1] + "…"
-
-
-# --- Findings about the source -----------------------------------------------------------------
-
-
 def _source_findings(
-    source: SourceReader, config: AdapterConfig, loaded: _Loaded
+    source: SourceReader, config: AdapterConfig, loaded: Loaded
 ) -> Iterator[IngestFinding]:
     """What planning finds: problems with the file as a whole, or with whole documents."""
-
-    def finding(
-        name: str,
-        category: FindingCategory,
-        severity: Severity,
-        where: Locator,
-        message: str,
-        details: dict[str, JsonValue],
-    ) -> IngestFinding:
-        return ingest_finding(
-            code=_code(name),
-            category=category,
-            severity=severity,
-            subject=EvidenceRef(source.content_id, (where,)),
+    for problem in problems(source.size, loaded, _settings(config)):
+        yield ingest_finding(
+            code=_code(problem.name),
+            category=problem.category,
+            severity=problem.severity,
+            subject=EvidenceRef(source.content_id, (problem.where,)),
             transform=config.transform,
-            message=message,
-            details=details,
-        )
-
-    whole = ByteRange(0, source.size)
-    if loaded.too_large:
-        limit = config.integer("max_bytes")
-        yield finding(
-            "too_large",
-            FindingCategory.LIMIT,
-            Severity.ERROR,
-            whole,
-            f"the file holds {source.size} bytes, over max_bytes ({limit}); it is not read",
-            {"bytes": source.size, "max_bytes": limit},
-        )
-        return
-    if loaded.invalid is not None:
-        bad = loaded.invalid
-        yield finding(
-            "invalid_encoding",
-            FindingCategory.CORRUPT,
-            Severity.ERROR,
-            ByteRange(bad.offset, source.size - bad.offset),
-            f"byte {bad.offset} is not valid {bad.encoding} ({bad.reason}); the file is not read",
-            {"encoding": str(bad.encoding), "first_invalid_byte": bad.offset},
-        )
-        return
-    text, parse = loaded.text, loaded.parse
-    endings = line_endings(text)
-    if endings is LineEndings.MIXED:
-        yield finding(
-            "mixed_line_endings",
-            FindingCategory.INCONSISTENT,
-            Severity.INFO,
-            whole,
-            "the file mixes line breaks (LF, CR LF, CR); spans and text keep them as written",
-            {},
-        )
-    if parse is None or (
-        not parse.documents and not parse.too_deep and not parse.too_long and parse.problem is None
-    ):
-        yield finding(
-            "no_document",
-            FindingCategory.MISSING,
-            Severity.INFO,
-            whole,
-            "the file is empty, blank or only comments: it declares no configuration",
-            {},
-        )
-        return
-    if loaded.bom and parse.format is not ConfigFormat.YAML:
-        yield finding(
-            "byte_order_mark",
-            FindingCategory.INCONSISTENT,
-            Severity.INFO,
-            ByteRange(0, loaded.bom),
-            f"{parse.format} defines no byte-order mark; it was read past",
-            {"bytes": loaded.bom},
-        )
-    if parse.problem is not None:
-        problem = parse.problem
-        line, column = line_and_column(text, problem.offset)
-        lost = (
-            "the file is not read"
-            if problem.start == 0
-            else f"documents from {problem.document} on are not read"
-        )
-        yield finding(
-            "syntax_error",
-            FindingCategory.CORRUPT,
-            Severity.ERROR,
-            Span(problem.start, len(text)),
-            f"not {parse.format} at line {line}, column {column}:"
-            f" {_shorten(problem.message)}; {lost}",
-            {
-                "column": column,
-                "document": problem.document,
-                "format": str(parse.format),
-                "line": line,
-                "offset": problem.offset,
-            },
-        )
-    limit = config.integer("max_depth")
-    for deep in parse.too_deep:
-        yield finding(
-            "too_deep",
-            FindingCategory.LIMIT,
-            Severity.ERROR,
-            Span(*deep.extent),
-            f"document {deep.document} nests deeper than max_depth ({limit}); it is not read",
-            {"document": deep.document, "max_depth": limit},
-        )
-    ratio = config.integer("max_path_ratio")
-    for long in parse.too_long:
-        yield finding(
-            "paths_too_long",
-            FindingCategory.LIMIT,
-            Severity.ERROR,
-            Span(*long.extent),
-            f"document {long.document}'s values' paths total {long.cost} code points, over"
-            f" max_path_ratio ({ratio}) times its size ({long.budget}); it is not read",
-            {
-                "budget": long.budget,
-                "document": long.document,
-                "max_path_ratio": ratio,
-                "path_code_points": long.cost,
-            },
-        )
-    for document, version, spot in parse.unsupported_version:
-        yield finding(
-            "yaml_version_unsupported",
-            FindingCategory.UNSUPPORTED,
-            Severity.WARNING,
-            Span(*spot),
-            f"document {document} declares YAML {version}; it is typed as yaml_version"
-            f" ({config.text('yaml_version')}) says",
-            {"document": document, "version": version},
+            message=problem.message,
+            details=problem.details,
         )
 
 
@@ -649,7 +458,7 @@ class _Records:
         self,
         source: SourceReader,
         config: AdapterConfig,
-        loaded: _Loaded,
+        loaded: Loaded,
         fmt: ConfigFormat,
         document: Document,
     ) -> None:
