@@ -12,14 +12,17 @@ counts and bounds are NotCovered. A binary ``.usdc`` crate is recognised by its 
 signature and version bytes and its content is NotCovered.
 """
 
+import math
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Final
 
-from neptune.adapters.geometry._context import Context, Problems
+from neptune.adapters.geometry._context import Context, Problems, bytes_text
 from neptune.adapters.geometry._emit import (
     NOT_COVERED,
+    OBSERVED,
+    STATED,
     UNIT_UNMAPPED,
     Dep,
     Geometry,
@@ -28,13 +31,11 @@ from neptune.adapters.geometry._emit import (
     missing,
 )
 from neptune.adapters.geometry._scan import LimitHit, Unreadable
-from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotCovered, Unknown
+from neptune.model.knowledge import Knowledge, Known, NotCovered, Unknown
 from neptune.model.provenance import Locator
 from neptune.model.units import Unit, unit_from_text
 from neptune.model.world import SpatialCategory
 
-OBSERVED: Final = AssertionKind.OBSERVED
-STATED: Final = AssertionKind.STATED
 CRATE_MAGIC: Final = b"PXR-USDC"
 USDA_MAGIC: Final = re.compile(rb"#usda ([0-9]+\.[0-9]+)[ \t]*\r?(?:\n|$)")
 STANDARD_LENGTHS: Final = {1.0: "m", 0.01: "cm", 0.001: "mm", 0.0254: "in", 0.3048: "ft",
@@ -116,13 +117,15 @@ def read_layer(ctx: Context) -> Geometry:
                 )
             else:
                 unit = unit_from_text(symbol, provenance=out.provenance(where, STATED))
-    problems.report(ctx)
     name: Knowledge[str] = Unknown(prov)
     if layer.prim is not None and layer.prim[0]:
         text, at = layer.prim
-        name = Known(
-            text.decode("utf-8", "replace"), out.provenance(ctx.span(at, len(text)), STATED)
-        )
+        prim = bytes_text(text, ctx.max_value_bytes)
+        if prim is None:
+            problems.add("default prim names that are not usable text", at)
+        else:
+            name = Known(prim, out.provenance(ctx.span(at, len(text)), STATED))
+    problems.report(ctx)
     deps = tuple(
         Dep("sublayer", text.decode("utf-8", "replace"), ctx.span(at, len(text)))
         for text, at in layer.sublayers
@@ -144,9 +147,10 @@ def _number(found: Found | None) -> float | None:
     if found is None:
         return None
     try:
-        return float(found[0])
+        number = float(found[0])
     except ValueError:
         return None
+    return number if math.isfinite(number) else None
 
 
 def _declared(ctx: Context, name: str, found: Found | None, block: Where) -> Prop:
@@ -154,7 +158,10 @@ def _declared(ctx: Context, name: str, found: Found | None, block: Where) -> Pro
     if found is None:
         return missing(name, "unknown", block, STATED)
     text, at = found
-    return known(name, (text.decode("utf-8", "replace"),), ctx.span(at, len(text)), STATED)
+    usable = bytes_text(text, ctx.max_value_bytes)
+    if usable is None:
+        return missing(name, "unknown", ctx.span(at, len(text)), STATED)
+    return known(name, (usable,), ctx.span(at, len(text)), STATED)
 
 
 def _tokens(data: bytes, start: int) -> Iterator[Token]:
@@ -162,8 +169,14 @@ def _tokens(data: bytes, start: int) -> Iterator[Token]:
     while position < len(data):
         found = _TOKEN.match(data, position)
         if found is None:
-            yield "bad", data[position : position + 1], position
-            position += 1
+            # An unterminated string or asset path costs the rest of its line, once: restarting at
+            # every later quote of one long line would be quadratic.
+            skip = 1
+            if data[position : position + 1] in (b'"', b"'", b"@"):
+                newline = data.find(b"\n", position)
+                skip = (len(data) if newline < 0 else newline) - position
+            yield "bad", data[position : position + skip], position
+            position += skip
             continue
         kind = found.lastgroup or "bad"
         if kind not in ("ws", "comment"):
@@ -224,6 +237,8 @@ def _metadata(ctx: Context, data: bytes, start: int, problems: Problems) -> tupl
             layer.meters = (text, at)
             key = None
         elif depth == 2 and kind == "asset" and key == "subLayers":
+            if len(layer.sublayers) >= ctx.max_entries:
+                raise LimitHit("max_entries", ctx.max_entries)
             inner, skip = _unquote(text)
             layer.sublayers.append((inner, at + skip))
     if not closed:

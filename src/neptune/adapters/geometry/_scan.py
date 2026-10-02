@@ -13,6 +13,7 @@ from neptune.adapters.contract import SourceReader, read_pieces
 
 MAX_LINE: Final = 64 * 1024
 BLOCK: Final = 1024 * 1024
+BOM: Final = b"\xef\xbb\xbf"
 
 
 class LimitHit(Exception):
@@ -75,6 +76,8 @@ class Scanner:
         at = start  # offset of buffer[0]
         skipping = False
         for piece in self.blocks(start, end):
+            if start == 0 and at == 0 and not buffer and piece.startswith(BOM):
+                piece, at = piece[len(BOM) :], len(BOM)  # a byte order mark is not text
             buffer += piece
             position = 0
             while True:

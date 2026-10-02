@@ -68,7 +68,7 @@ DEFAULT_MAX_VERTICES: Final = 2_000_000
 DEFAULT_MAX_HEADER_BYTES: Final = 1024 * 1024
 DEFAULT_MAX_JSON_BYTES: Final = 16 * 1024 * 1024
 DEFAULT_MAX_JSON_DEPTH: Final = 64
-DEFAULT_MAX_ENTRIES: Final = 100_000
+DEFAULT_MAX_ENTRIES: Final = 10_000
 DEFAULT_MAX_VALUE_BYTES: Final = 4096
 
 DESCRIPTOR: Final = AdapterDescriptor(
@@ -189,8 +189,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         Documented(
             "objects",
-            "an object inside the artifact is cited by the artifact's citation then an"
-            " ObjectLocator: OBJ o name, glTF node or mesh name, USD prim path",
+            "no record is made per object. A later layer cites one object as the artifact's"
+            " citation then an ObjectLocator: OBJ o name, glTF node or mesh name, USD prim path"
+            " (the name as the file writes it)",
         ),
         Documented(
             "properties",
@@ -245,6 +246,7 @@ def _context(source: SourceReader, config: AdapterConfig) -> Context:
         max_json_bytes=config.integer("max_json_bytes"),
         max_json_depth=config.integer("max_json_depth"),
         max_entries=config.integer("max_entries"),
+        max_value_bytes=config.integer("max_value_bytes"),
     )
 
 
@@ -275,7 +277,7 @@ def _read(source: SourceReader, config: AdapterConfig) -> Context:
             {"limit": hit.limit, "option": hit.option},
         )  # fmt: skip
         return ctx
-    emit(ctx.out, geometry, source.size, config.integer("max_value_bytes"))
+    emit(ctx.out, geometry, source.size, ctx.max_value_bytes)
     return ctx
 
 

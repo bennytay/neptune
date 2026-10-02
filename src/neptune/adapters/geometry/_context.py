@@ -37,6 +37,7 @@ class Context:
     max_json_bytes: int
     max_json_depth: int
     max_entries: int
+    max_value_bytes: int
 
     @property
     def whole(self) -> tuple[Locator, ...]:
@@ -79,15 +80,17 @@ class Problems:
 
     def __init__(self) -> None:
         self._count: dict[str, int] = {}
-        self._first: dict[str, int] = {}
+        self._first: dict[str, tuple[Locator, ...] | int] = {}
 
-    def add(self, reason: str, offset: int) -> None:
+    def add(self, reason: str, offset: int, where: tuple[Locator, ...] | None = None) -> None:
+        """One statement at ``offset`` (or at ``where``, a finer citation) broke ``reason``."""
         self._count[reason] = self._count.get(reason, 0) + 1
-        self._first.setdefault(reason, offset)
+        self._first.setdefault(reason, offset if where is None else where)
 
     def report(self, ctx: Context, code: str = MALFORMED) -> None:
         for reason in sorted(self._count):
-            where = ctx.span(self._first[reason], 1)
+            first = self._first[reason]
+            where = ctx.span(first, 1) if isinstance(first, int) else first
             ctx.out.finding(
                 code,
                 where,
@@ -162,13 +165,33 @@ def measured_count(
     return missing(name, "not_covered", where, kind)
 
 
-def text_of(data: bytes) -> str | None:
-    """``data`` as UTF-8 text, or ``None`` when it is not (or has a control character)."""
+def clean_text(text: str, limit: int) -> str | None:
+    """``text`` if a record can hold it as a name: non-empty, valid Unicode (a JSON string may hold
+    a lone surrogate), no control character and at most ``limit`` bytes; else ``None``."""
+    if not text.strip() or any(ord(char) < 0x20 or ord(char) == 0x7F for char in text):
+        return None
     try:
-        text = data.decode("utf-8")
+        encoded = text.encode("utf-8")
+    except UnicodeEncodeError:
+        return None
+    return text if len(encoded) <= limit else None
+
+
+def bytes_text(data: bytes, limit: int) -> str | None:
+    """``data`` as a name (``clean_text``), ``None`` if it is not UTF-8 or not usable."""
+    try:
+        return clean_text(data.decode("utf-8"), limit)
     except UnicodeDecodeError:
         return None
-    return text if text.isprintable() or "\t" in text else None
+
+
+def operand(data: bytes, keyword_length: int) -> tuple[bytes, int]:
+    """What follows the keyword that starts ``data`` (after its leading whitespace), stripped, and
+    where that starts in ``data``."""
+    lead = len(data) - len(data.lstrip())
+    rest = data[lead + keyword_length :]
+    stripped = rest.lstrip()
+    return stripped.rstrip(), lead + keyword_length + len(rest) - len(stripped)
 
 
 def floats(tokens: Iterable[bytes]) -> list[float] | None:

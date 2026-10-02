@@ -610,3 +610,115 @@ def test_one_corrupt_source_among_good_ones_does_not_stop_the_others() -> None:
         run(data) for data in (data_of("arm_link.obj"), b"\x00" * 90, data_of("agv_fork.ply"))
     ]
     assert [bool(artifacts(r)) for r in results] == [True, False, True]
+
+
+# --- Review findings: quadratic regexes, huge numbers, surrogates, whitespace, byte order marks -
+
+
+def test_an_unterminated_json_string_full_of_escaped_quotes_costs_a_linear_scan() -> None:
+    bomb = b'{"asset":{"version":"2.0"},"x":"' + b'\\"' * 2_000_000 + b"}"
+    start = time.perf_counter()
+    output = run(bomb)
+    assert time.perf_counter() - start < 10
+    assert codes(output) == {"geometry.unreadable"}
+
+
+def test_an_unterminated_usd_string_full_of_escaped_quotes_costs_a_linear_scan() -> None:
+    bomb = b'#usda 1.0\n(\n    doc = "' + b'\\"' * 400_000
+    start = time.perf_counter()
+    output = run(bomb)
+    assert time.perf_counter() - start < 10
+    assert "geometry.truncated" in codes(output) or "geometry.limit_exceeded" in codes(output)
+
+
+def test_many_unterminated_usd_asset_paths_on_one_line_are_linear_too() -> None:
+    bomb = b"#usda 1.0\n(\n    subLayers = [" + b"@a " * 300_000 + b"]\n)\n"
+    start = time.perf_counter()
+    run(bomb)
+    assert time.perf_counter() - start < 10
+
+
+def test_a_ply_element_count_of_thousands_of_digits_or_past_int64_is_unreadable_not_a_raise() -> (
+    None
+):
+    for digits in ("9" * 5000, str(2**63), "9" * 19):
+        output = run(f"ply\nformat ascii 1.0\nelement vertex {digits}\nend_header\n".encode())
+        assert codes(output) == {"geometry.unreadable"}, digits[:20]
+
+
+def test_a_ply_element_name_that_is_not_an_identifier_is_unreadable() -> None:
+    output = run(b"ply\nformat ascii 1.0\nelement ve\xffrtex 1\nend_header\n1 2 3\n")
+    assert codes(output) == {"geometry.unreadable"}
+
+
+def test_a_gltf_integer_too_large_for_a_float_is_unknown_bounds_not_a_raise() -> None:
+    big = b"9" * 400
+    text = (
+        b'{"asset":{"version":"2.0"},"meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}],'
+        b'"accessors":[{"count":3,"min":[0,0,0],"max":[1,1,' + big + b"]}]}"
+    )
+    output = run(text)
+    assert cells(output, "bounds_max") == ("Unknown",)
+    huge = b"1" + b"0" * 30
+    text = (
+        b'{"asset":{"version":"2.0"},"meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}],'
+        b'"accessors":[{"count":' + huge + b',"min":[0,0,0],"max":[1,1,1]}]}'
+    )
+    assert cells(run(text), "vertex_count") == ("Unknown",)
+
+
+def test_a_json_string_with_a_lone_surrogate_or_a_control_character_is_not_a_name_or_a_row() -> (
+    None
+):
+    document = (
+        b'{"asset":{"version":"2.0"},"scenes":[{"name":"a\\ud800"}],'
+        b'"buffers":[{"byteLength":1,"uri":"a\\ud800.bin"}],"images":[{"uri":"b\\u0000.png"}]}'
+    )
+    output = run(document)
+    assert isinstance(artifacts(output)[0].name, Unknown)
+    assert reference_scopes(output) == {}
+    assert {"geometry.reference_unsafe", "geometry.malformed"} <= codes(output)
+    long = json.dumps({"asset": {"version": "2.0"}, "scenes": [{"name": "n" * 100_000}]}).encode()
+    assert isinstance(artifacts(run(long))[0].name, Unknown)
+    nul = json.dumps({"asset": {"version": "2.0"}, "scenes": [{"name": "a\u0000b"}]}).encode()
+    assert isinstance(artifacts(run(nul))[0].name, Unknown)
+
+
+def test_a_glTF_finding_cites_the_json_it_is_about_not_byte_zero() -> None:
+    glb = bytearray(data_of("humanoid_torso.glb"))
+    document = json.loads(bytes(glb[20 : 20 + struct.unpack("<I", glb[12:16])[0]]))
+    document["meshes"][0]["primitives"][0]["attributes"]["POSITION"] = 7
+    text = json.dumps(document).encode()
+    (found,) = by_code(run(text), "geometry.malformed")
+    assert found.subject.locator[0].pointer == "/accessors"  # type: ignore[union-attr]
+
+
+def test_obj_statements_may_start_with_whitespace() -> None:
+    output = run(b"  o  Arm link  \n\tv 1 2 3\n   mtllib   my arm.mtl  \n")
+    assert artifacts(output)[0].name.known_or_raise() == "Arm link"
+    assert reference_scopes(output) == {"my arm.mtl": "relative"}
+    data = b"  o  Arm link  \n\tv 1 2 3\n   mtllib   my arm.mtl  \n"
+    (row,) = (
+        r for r in run(data).records() if isinstance(r, StructuredRecord) and len(r.cells) == 3
+    )
+    span = row.provenance.evidence.locator[0]
+    assert data[span.offset : span.offset + span.length] == b"my arm.mtl"  # type: ignore[union-attr]
+
+
+def test_a_byte_order_mark_is_not_text_in_obj_and_ascii_stl_and_not_json_in_gltf() -> None:
+    bom = b"\xef\xbb\xbf"
+    stl = run(bom + data_of("quadruped_hip.stl"))
+    assert artifacts(stl)[0].name.known_or_raise() == "hip_abduction"
+    assert codes(stl) == set()
+    obj = run(bom + data_of("arm_link.obj"))
+    assert artifacts(obj)[0].name.known_or_raise() == "shoulder_link"
+    gltf = run(bom + data_of("marine_hull.gltf"))
+    assert artifacts(gltf) == [] and codes(gltf) == {"geometry.unreadable"}
+
+
+def test_a_usd_name_scale_or_axis_that_is_not_usable_is_unknown_not_a_raise() -> None:
+    output = run(usda('defaultPrim = "a\x00b"\nupAxis = "Z\x01"\nmetersPerUnit = 1e999'))
+    assert isinstance(artifacts(output)[0].name, Unknown)
+    assert cells(output, "up_axis") == ("Unknown",)
+    assert cells(output, "meters_per_unit") == ("Unknown",)
+    assert isinstance(artifacts(output)[0].unit, Unknown)

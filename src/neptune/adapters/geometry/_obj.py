@@ -15,24 +15,25 @@ from neptune.adapters.geometry._context import (
     Bounds,
     Context,
     Problems,
+    bytes_text,
     floats,
     measured_count,
-    text_of,
+    operand,
 )
+from neptune.adapters.geometry._detect import OBJ_KEYWORDS
 from neptune.adapters.geometry._emit import (
     NOT_COVERED,
+    OBSERVED,
     REFERENCE_UNSAFE,
+    STATED,
     Dep,
     Geometry,
     missing,
 )
 from neptune.adapters.geometry._scan import LimitHit
-from neptune.model.knowledge import AssertionKind, Known, Unknown
+from neptune.model.knowledge import Known, Unknown
 from neptune.model.world import SpatialCategory
 
-KEYWORDS: Final = frozenset(
-    {b"v", b"vt", b"vn", b"vp", b"f", b"l", b"p", b"o", b"g", b"s", b"usemtl", b"mtllib"}
-)
 FREE_FORM: Final = frozenset(
     {
         b"bevel", b"bmat", b"c_interp", b"con", b"cstype", b"ctech", b"curv", b"curv2", b"d_interp",
@@ -40,12 +41,11 @@ FREE_FORM: Final = frozenset(
         b"trace_obj", b"trim", b"shadow_obj",
     }
 )  # fmt: skip
-MAX_NAME: Final = 4096
 
 
 def read(ctx: Context) -> Geometry:
     out, whole = ctx.out, ctx.whole
-    observed = AssertionKind.OBSERVED
+    observed = OBSERVED
     bounds, problems = Bounds(), Problems()
     vertices = faces = objects = 0
     name: Known[str] | Unknown = Unknown(out.provenance(whole))
@@ -95,7 +95,7 @@ def read(ctx: Context) -> Geometry:
                 free_form[keyword] = free_form.get(keyword, 0) + 1
                 if first_free is None:
                     first_free = line.offset
-            elif keyword not in KEYWORDS:
+            elif keyword not in OBJ_KEYWORDS:
                 problems.add("statements that are not OBJ keywords", line.offset)
     except LimitHit as hit:
         complete = False
@@ -124,22 +124,25 @@ def read(ctx: Context) -> Geometry:
 
 
 def _name(ctx: Context, offset: int, data: bytes, problems: Problems) -> Known[str] | Unknown:
-    raw = data[1:].strip()
-    text = text_of(raw[:MAX_NAME]) if raw else None
-    where = ctx.span(offset + data.index(raw, 1), len(raw)) if raw else ctx.span(offset, len(data))
-    prov = ctx.out.provenance(where, AssertionKind.STATED)
+    raw, start = operand(data, len(b"o"))
+    if not raw:
+        return Unknown(ctx.out.provenance(ctx.span(offset, len(data))))
+    prov = ctx.out.provenance(ctx.span(offset + start, len(raw)), STATED)
+    text = bytes_text(raw, ctx.max_value_bytes)
     if text is None:
-        if raw:
-            problems.add("object names that are not text", offset)
+        problems.add("object names that are not usable text", offset + start)
         return Unknown(prov)
     return Known(text, prov)
 
 
 def _library(ctx: Context, offset: int, data: bytes, deps: list[Dep]) -> None:
-    raw = data[len(b"mtllib") :].strip()
-    where = ctx.span(offset + data.index(raw, len(b"mtllib")) if raw else offset, len(raw))
-    target = raw.decode("utf-8", errors="strict") if _valid(raw) else None
-    if target is None or not target.strip():
+    raw, start = operand(data, len(b"mtllib"))
+    where = ctx.span(offset + start, len(raw))
+    try:
+        target = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        target = ""
+    if not target.strip():
         ctx.out.finding(
             REFERENCE_UNSAFE,
             ctx.span(offset, max(len(data), 1)),
@@ -148,11 +151,3 @@ def _library(ctx: Context, offset: int, data: bytes, deps: list[Dep]) -> None:
         )
         return
     deps.append(Dep("material_library", target, where))
-
-
-def _valid(raw: bytes) -> bool:
-    try:
-        raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-    return True

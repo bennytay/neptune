@@ -25,6 +25,10 @@ _CONTROL: Final = re.compile(r"[\x00-\x1f\x7f]")
 
 def scope_of(target: str, *, percent_encoded: bool = False) -> str:
     """The scope of ``target``. glTF writes a URI, so its percent-encoding is undone first."""
+    try:
+        target.encode("utf-8")  # a JSON string may hold a lone surrogate
+    except UnicodeEncodeError:
+        return UNSAFE
     text = unquote(target) if percent_encoded else target
     if not text.strip() or _CONTROL.search(text):
         return UNSAFE

@@ -82,6 +82,11 @@ counts, truncated binaries, nesting bombs, and references to `/etc/passwd`.
    are left out of the bounds and counted once. Unknown OBJ statements and bad face indices are
    one `geometry.malformed` per reason. One damaged structure is a finding and the rest is read
    (non-negotiable 7); a file that is no readable geometry is `geometry.unreadable` and has no record.
+   Names (an OBJ object, an STL solid, a glTF scene, a USD default prim) are copied only as text a
+   record can hold: a control character, a lone surrogate, bytes that are not UTF-8 or more than
+   `max_value_bytes` make the name `Unknown` with a finding. A byte order mark is skipped in OBJ and
+   ASCII STL and refused in glTF JSON (RFC 8259). Numbers past int64 or float range are
+   unreadable (a PLY count) or `Unknown` (a glTF accessor), never an exception.
 7. **Probing is by bytes.** Signatures (GLB, PLY, USD) are `SIGNATURE` or `VERIFIED`; binary STL by
    its exact size; ASCII STL, OBJ and glTF JSON by grammar (glTF is `SIGNATURE`, so JSON readers
    never take it). A file that starts `solid` and whose size fits a binary STL is binary. The name

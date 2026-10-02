@@ -16,13 +16,22 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from neptune.adapters.geometry._context import Bounds, Context, Problems, floats
-from neptune.adapters.geometry._emit import NOT_COVERED, Dep, Geometry, Prop, known, missing
+from neptune.adapters.geometry._emit import (
+    NOT_COVERED,
+    OBSERVED,
+    REFERENCE_UNSAFE,
+    STATED,
+    Dep,
+    Geometry,
+    Prop,
+    known,
+    missing,
+)
 from neptune.adapters.geometry._scan import LimitHit, Unreadable
-from neptune.model.knowledge import AssertionKind, Unknown
+from neptune.model.knowledge import Unknown
 from neptune.model.world import SpatialCategory
 
-OBSERVED: Final = AssertionKind.OBSERVED
-STATED: Final = AssertionKind.STATED
+INT64_MAX: Final = 2**63 - 1
 SCALARS: Final = {
     "char": "b", "int8": "b", "uchar": "B", "uint8": "B", "short": "h", "int16": "h",
     "ushort": "H", "uint16": "H", "int": "i", "int32": "i", "uint": "I", "uint32": "I",
@@ -124,7 +133,11 @@ def _header(
         elif keyword == b"element" and len(words) == 3 and words[2].isdigit():
             if len(elements) >= ctx.max_entries:
                 raise LimitHit("max_entries", ctx.max_entries)
+            if len(words[2]) > 19 or int(words[2]) > INT64_MAX:
+                raise Unreadable("an element count past 2^63 - 1", at, len(line))
             name = words[1].decode("latin-1")
+            if not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", name):
+                raise Unreadable("an element name that is not a plain identifier", at, len(line))
             elements.append(Element(name, int(words[2]), at, len(line)))
         elif keyword == b"end_header" or (
             keyword == b"property" and elements and _property(elements[-1], words)
@@ -159,7 +172,7 @@ def _comment(ctx: Context, line: bytes, at: int, deps: list[Dep]) -> None:
             deps.append(Dep("texture", target.decode("utf-8"), ctx.span(start, len(target))))
         except UnicodeDecodeError:
             ctx.out.finding(
-                "geometry.reference_unsafe", ctx.span(at, len(line)),
+                REFERENCE_UNSAFE, ctx.span(at, len(line)),
                 "a texture reference is not text", {"kind": "texture"},
             )  # fmt: skip
 

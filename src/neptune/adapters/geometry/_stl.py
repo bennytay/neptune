@@ -11,18 +11,22 @@ name, so the name is Unknown. ASCII STL names its solid. STL has no unit: it sta
 import struct
 from typing import Final
 
-from neptune.adapters.geometry._context import Bounds, Context, Problems, floats, text_of
-from neptune.adapters.geometry._emit import Geometry, known, missing
+from neptune.adapters.geometry._context import (
+    Bounds,
+    Context,
+    Problems,
+    bytes_text,
+    floats,
+    operand,
+)
+from neptune.adapters.geometry._emit import OBSERVED, STATED, Geometry, known, missing
 from neptune.adapters.geometry._scan import LimitHit, Unreadable
-from neptune.model.knowledge import AssertionKind, Known, Unknown
+from neptune.model.knowledge import Known, Unknown
 from neptune.model.world import SpatialCategory
 
 HEADER: Final = 84
 FACET: Final = struct.Struct("<12fH")
 FACETS_PER_BLOCK: Final = 16384
-MAX_NAME: Final = 4096
-OBSERVED: Final = AssertionKind.OBSERVED
-STATED: Final = AssertionKind.STATED
 
 
 def read_binary(ctx: Context) -> Geometry:
@@ -129,15 +133,12 @@ def read_ascii(ctx: Context) -> Geometry:
 
 
 def _name(ctx: Context, offset: int, data: bytes, problems: Problems) -> Known[str] | Unknown:
-    raw = data.strip()[len(b"solid") :].strip()
+    raw, start = operand(data, len(b"solid"))
     if not raw:
         return Unknown(ctx.out.provenance(ctx.span(offset, len(data))))
-    where = ctx.span(
-        offset + data.lower().index(raw.lower(), data.lower().index(b"solid") + 5), len(raw)
-    )
-    text = text_of(raw[:MAX_NAME])
-    prov = ctx.out.provenance(where, STATED)
+    prov = ctx.out.provenance(ctx.span(offset + start, len(raw)), STATED)
+    text = bytes_text(raw, ctx.max_value_bytes)
     if text is None:
-        problems.add("solid names that are not text", offset)
+        problems.add("solid names that are not usable text", offset + start)
         return Unknown(prov)
     return Known(text, prov)

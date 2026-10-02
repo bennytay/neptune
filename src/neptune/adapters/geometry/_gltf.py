@@ -13,25 +13,32 @@ images, buffers and animations are array lengths (observed). Every ``buffers[].u
 """
 
 import json
+import math
 import re
 import struct
-from typing import Any, Final, TypeGuard
+from typing import Any, Final
 
-from neptune.adapters.geometry._context import Context, Problems
-from neptune.adapters.geometry._emit import Dep, Geometry, Prop, known, missing
+from neptune.adapters.geometry._context import Context, Problems, clean_text
+from neptune.adapters.geometry._emit import (
+    OBSERVED,
+    STATED,
+    Dep,
+    Geometry,
+    Prop,
+    known,
+    missing,
+)
 from neptune.adapters.geometry._refs import EMBEDDED, scope_of
 from neptune.adapters.geometry._scan import LimitHit, Unreadable
-from neptune.model.knowledge import AssertionKind, Known, Unknown
+from neptune.model.knowledge import Known, Unknown
 from neptune.model.provenance import JsonPointer, Locator
 from neptune.model.units import unit_from_text
 from neptune.model.world import SpatialCategory
 
-OBSERVED: Final = AssertionKind.OBSERVED
-STATED: Final = AssertionKind.STATED
+INT64_MAX: Final = 2**63 - 1
 GLB_MAGIC: Final = b"glTF"
 JSON_CHUNK: Final = 0x4E4F534A
-_STRING: Final = re.compile(rb'"(?:[^"\\]|\\.)*"', re.DOTALL)
-_BRACKETS: Final = re.compile(rb"[\[\]{}]")
+_SPECIAL: Final = re.compile(rb'[\\"\[\]{}]')
 COUNTED: Final = (
     ("node_count", "nodes"), ("mesh_count", "meshes"), ("material_count", "materials"),
     ("texture_count", "textures"), ("image_count", "images"), ("buffer_count", "buffers"),
@@ -74,17 +81,36 @@ def _region(ctx: Context, glb: bool) -> int:
 
 def _parse(ctx: Context, offset: int, length: int) -> Any:
     raw = ctx.scan.read(offset, length)
-    stripped = _STRING.sub(b'""', raw)
-    depth = deepest = 0
-    for bracket in _BRACKETS.finditer(stripped):
-        depth += 1 if bracket.group() in (b"[", b"{") else -1
-        deepest = max(deepest, depth)
-        if deepest > ctx.max_json_depth:
-            raise LimitHit("max_json_depth", ctx.max_json_depth)
+    _check_depth(raw, ctx.max_json_depth)
     try:
         return json.loads(raw.decode("utf-8"), parse_constant=_reject)
     except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise Unreadable(f"the JSON does not parse ({type(exc).__name__})", offset, length) from exc
+
+
+def _check_depth(raw: bytes, limit: int) -> None:
+    """Raise ``LimitHit`` if the JSON nests deeper than ``limit``, counting brackets outside
+    strings in one linear pass (no regex over strings: an unterminated one would cost n squared)."""
+    depth = 0
+    inside = False
+    escaped = -1
+    for found in _SPECIAL.finditer(raw):
+        at, char = found.start(), found.group()
+        if at == escaped:
+            continue  # the character after a backslash
+        if inside:
+            if char == b"\\":
+                escaped = at + 1
+            elif char == b'"':
+                inside = False
+        elif char == b'"':
+            inside = True
+        elif char in (b"[", b"{"):
+            depth += 1
+            if depth > limit:
+                raise LimitHit("max_json_depth", limit)
+        elif char in (b"]", b"}"):
+            depth -= 1
 
 
 def _reject(constant: str) -> Any:
@@ -113,7 +139,7 @@ def _geometry(ctx: Context, document: Any, prefix: tuple[Locator, ...], glb: boo
         props.append(known("format_version", (version,), _at(prefix, "asset", "version"), STATED))
     else:
         props.append(missing("format_version", "unknown", asset_at, STATED))
-        problems.add("assets with no version string", 0)
+        problems.add("assets with no version string", 0, asset_at)
     props.append(known("up_axis", ("Y",), asset_at, STATED))
     for label, key in COUNTED:
         items = _list(document, key)
@@ -123,7 +149,6 @@ def _geometry(ctx: Context, document: Any, prefix: tuple[Locator, ...], glb: boo
     if embedded:
         props.append(known("embedded_resource_count", (embedded,), _at(prefix), OBSERVED))
     props.extend(_positions(ctx, document, prefix, problems))
-    problems.report(ctx)
     scenes = _list(document, "scenes")
     chosen = document.get("scene")
     scene = None
@@ -133,10 +158,15 @@ def _geometry(ctx: Context, document: Any, prefix: tuple[Locator, ...], glb: boo
     name: Known[str] | Unknown = Unknown(
         out.provenance(_at(prefix, "scenes") if scenes else asset_at)
     )
-    if scene is not None and isinstance(scene[1], dict) and isinstance(scene[1].get("name"), str):
-        text = scene[1]["name"]
-        if text:
-            name = Known(text, out.provenance(_at(prefix, "scenes", scene[0], "name"), STATED))
+    if scene is not None and isinstance(scene[1], dict) and "name" in scene[1]:
+        where = _at(prefix, "scenes", scene[0], "name")
+        raw = scene[1]["name"]
+        text = clean_text(raw, ctx.max_value_bytes) if isinstance(raw, str) else None
+        if text is not None:
+            name = Known(text, out.provenance(where, STATED))
+        else:
+            problems.add("scene names that are not usable text", 0, where)
+    problems.report(ctx)
     unit = unit_from_text("m", provenance=out.provenance(asset_at, STATED))
     return Geometry("gltf", SpatialCategory.MESH, name, unit, tuple(props), tuple(deps))
 
@@ -154,7 +184,7 @@ def _dependencies(
             if uri is None:
                 continue
             if not isinstance(uri, str):
-                problems.add("uri values that are not text", 0)
+                problems.add("uri values that are not text", 0, _at(prefix, key, index, "uri"))
                 continue
             if scope_of(uri, percent_encoded=True) == EMBEDDED:
                 embedded += 1
@@ -193,28 +223,24 @@ def _positions(
             accessors[index] if accessors is not None and 0 <= index < len(accessors) else None
         )
         if not isinstance(accessor, dict):
-            problems.add("POSITION accessors that do not exist", 0)
+            problems.add("POSITION accessors that do not exist", 0, where)
             ranged = False
             continue
         total = accessor.get("count")
-        if isinstance(total, int) and not isinstance(total, bool) and total >= 0:
+        here = _at(prefix, "accessors", index)
+        if isinstance(total, int) and not isinstance(total, bool) and 0 <= total <= INT64_MAX:
             count += total
         else:
-            problems.add("POSITION accessors without a count", 0)
+            problems.add("POSITION accessors without a count", 0, here)
             ranged = False
-        lo, hi = accessor.get("min"), accessor.get("max")
-        if _vec3(lo) and _vec3(hi):
-            low = (
-                [min(a, b) for a, b in zip(low, lo, strict=True)] if low else [float(v) for v in lo]
-            )
-            high = (
-                [max(a, b) for a, b in zip(high, hi, strict=True)]
-                if high
-                else [float(v) for v in hi]
-            )
+        lo, hi = _numbers(accessor.get("min")), _numbers(accessor.get("max"))
+        if lo is not None and hi is not None:
+            low = [min(a, b) for a, b in zip(low, lo, strict=True)] if low else lo
+            high = [max(a, b) for a, b in zip(high, hi, strict=True)] if high else hi
         else:
-            problems.add("POSITION accessors without a min and max of three numbers", 0)
+            problems.add("POSITION accessors without a min and max of three numbers", 0, here)
             ranged = False
+    ranged = ranged and count <= INT64_MAX
     props = (
         [known("vertex_count", (count,), where, STATED)]
         if ranged
@@ -228,10 +254,19 @@ def _positions(
     return props
 
 
-def _vec3(value: Any) -> TypeGuard[list[Any]]:
-    return (
-        isinstance(value, list)
-        and len(value) == 3
-        and all(isinstance(v, int | float) and not isinstance(v, bool) for v in value)
-        and all(abs(float(v)) < float("inf") for v in value)
-    )
+def _numbers(value: Any) -> list[float] | None:
+    """Three finite numbers as floats, or ``None``: a JSON integer may be too large for a float."""
+    if not isinstance(value, list) or len(value) != 3:
+        return None
+    found: list[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, int | float):
+            return None
+        try:
+            number = float(item)
+        except OverflowError:
+            return None
+        if not math.isfinite(number):
+            return None
+        found.append(number)
+    return found

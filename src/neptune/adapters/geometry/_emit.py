@@ -123,6 +123,8 @@ FINDINGS: Final[Mapping[str, tuple[FindingCategory, Severity, str]]] = {
     ),
 }
 
+OBSERVED: Final = AssertionKind.OBSERVED
+STATED: Final = AssertionKind.STATED
 PROPERTY_STEP: Final = "geometry:property"
 TABLE_STEP: Final = "geometry:table"
 PROPERTIES_HEADER: Final = ("property", "v0", "v1", "v2")

@@ -34,7 +34,7 @@ _PLY_FORMAT: Final = re.compile(
 )
 _GLTF_ASSET: Final = re.compile(rb'"asset"\s*:\s*\{[^{}]*"version"\s*:\s*"(2\.[0-9]+)"')
 _USDA: Final = re.compile(rb"#usda ([0-9]+\.[0-9]+)")
-_OBJ_KEYWORDS: Final = frozenset(
+OBJ_KEYWORDS: Final = frozenset(
     {b"v", b"vt", b"vn", b"vp", b"f", b"l", b"p", b"o", b"g", b"s", b"usemtl", b"mtllib"}
 )
 _BOM: Final = b"\xef\xbb\xbf"
@@ -71,18 +71,18 @@ def detect(head: bytes, size: int) -> Detected | None:
         )  # fmt: skip
     if _binary_stl(head, size):
         return Detected(STL_BINARY, SIGNATURE, "an 84-byte header whose facet count fits the size")
-    text = head[len(_BOM) :] if head.startswith(_BOM) else head
-    stripped = text.lstrip()
-    if stripped.startswith(b"{"):
-        asset = _GLTF_ASSET.search(text)
+    if head.lstrip().startswith(b"{"):  # JSON has no byte order mark (RFC 8259, glTF 2.0)
+        asset = _GLTF_ASSET.search(head)
         if asset is not None:
             return Detected(GLTF, SIGNATURE, "a glTF asset object", asset.group(1).decode())
         return None
+    text = head[len(_BOM) :] if head.startswith(_BOM) else head
+    stripped = text.lstrip()
     if stripped[:5].lower() == b"solid" and re.search(
         rb"\b(?:facet|endsolid)\b", stripped[:4096], re.I
     ):
         return Detected(STL_ASCII, STRUCTURE, "a solid followed by facets")
-    if _obj(head, size):
+    if _obj(text, size - (len(head) - len(text))):
         return Detected(OBJ, STRUCTURE, "OBJ statements with a vertex of three numbers")
     return None
 
@@ -118,7 +118,7 @@ def _obj(head: bytes, size: int) -> bool:
         words = line.split("#", 1)[0].split()
         if not words:
             continue
-        if words[0].encode() not in _OBJ_KEYWORDS:
+        if words[0].encode() not in OBJ_KEYWORDS:
             return False
         if words[0] == "v" and len(words) >= 4:
             try:
@@ -177,6 +177,6 @@ def lenient(head: bytes, size: int) -> Detected | None:
         return Detected(STL_BINARY, NAME_ONLY, "a damaged binary STL")
     if head.lstrip()[:5].lower() == b"solid" and b"\x00" not in head:
         return Detected(STL_ASCII, NAME_ONLY, "an ASCII STL with no facets")
-    if _obj_like(head, size):
+    if _obj_like(head[len(_BOM) :] if head.startswith(_BOM) else head, size):
         return Detected(OBJ, NAME_ONLY, "an OBJ with statements that are not OBJ's")
     return None
