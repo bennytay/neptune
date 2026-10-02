@@ -40,7 +40,7 @@ from neptune.model.ids import (
 )
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import AssertionKind
-from neptune.model.record import Family, envelope, record_object
+from neptune.model.record import OLDEST_READABLE_VERSION, Family, envelope, record_object
 from neptune.model.source import external_object_ref_from_json
 from neptune.model.time import INT64_MAX, Timestamp
 
@@ -730,17 +730,25 @@ def check_evidence_record(record_id: RecordId, provenance: Provenance) -> None:
 
 
 def evidence_record_json(
-    kind: str, record_id: RecordId, provenance: Provenance, body: Mapping[str, JsonValue]
+    kind: str,
+    record_id: RecordId,
+    provenance: Provenance,
+    body: Mapping[str, JsonValue],
+    version: int = OLDEST_READABLE_VERSION,
 ) -> JsonObject:
-    """An evidence record's JSON: its fields plus ``id``, ``provenance`` and the envelope."""
-    return envelope(kind, {**body, "id": record_id, "provenance": provenance.to_json()})
+    """An evidence record's JSON: its fields plus ``id``, ``provenance`` and the envelope.
+
+    ``version`` is the schema version that added ``kind`` (ADR 0037 §1).
+    """
+    body = {**body, "id": record_id, "provenance": provenance.to_json()}
+    return envelope(kind, body, version)
 
 
 def evidence_record_object(
-    data: JsonValue, kind: str, keys: set[str]
+    data: JsonValue, kind: str, keys: set[str], since: int = OLDEST_READABLE_VERSION
 ) -> tuple[Mapping[str, JsonValue], RecordId, Provenance]:
     """Check an evidence record's JSON strictly; return its object, id and provenance."""
-    obj = record_object(data, kind, keys | {"id", "provenance"})
+    obj = record_object(data, kind, keys | {"id", "provenance"}, since)
     return (
         obj,
         parse_record_id(json_str(obj["id"], "id")),

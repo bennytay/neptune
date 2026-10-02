@@ -32,6 +32,7 @@ from neptune.model.frames import (
     Translation,
 )
 from neptune.model.ids import ExternalObjectRef, LogicalId, RecordId
+from neptune.model.kinds import KIND_SINCE
 from neptune.model.knowledge import (
     Ambiguous,
     AssertionKind,
@@ -135,7 +136,7 @@ def test_every_record_kind_in_the_model_is_in_the_schema() -> None:
     for kind in RECORD_KINDS:
         properties = defs[kind.__name__]["properties"]
         assert properties["kind"] == {"const": getattr(kind, "kind")}  # noqa: B009
-        assert properties["schema_version"] == {"const": SCHEMA_VERSION}
+        assert properties["schema_version"] == {"const": KIND_SINCE[kind.kind]}  # type: ignore[attr-defined]
 
 
 # --- Values the examples do not use ------------------------------------------------------------

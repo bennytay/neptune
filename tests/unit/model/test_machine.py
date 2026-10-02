@@ -27,6 +27,7 @@ from neptune.model.frames import (
     TransformDirection,
 )
 from neptune.model.ids import LogicalId, RecordId
+from neptune.model.kinds import KIND_SINCE
 from neptune.model.knowledge import (
     Ambiguous,
     AssertionKind,
@@ -328,7 +329,7 @@ def test_machine_records_round_trip_byte_identically(record: Any, read: Any) -> 
     assert canonical_json.dumps(read(canonical_json.loads(line)).to_json()) == line
     data = canonical_json.loads(line)
     assert isinstance(data, dict)
-    assert (data["kind"], data["schema_version"]) == (record.kind, SCHEMA_VERSION)
+    assert (data["kind"], data["schema_version"]) == (record.kind, KIND_SINCE[record.kind])
     assert record.family is Family.MACHINE
     check_evidence_record_id(record, TRANSFORMS[record.provenance.transform])
 

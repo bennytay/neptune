@@ -5,7 +5,8 @@ A package is a directory::
     manifest.json                    PackageManifest; the sha256 of these bytes is the package id
     receipt.json                     IngestReceipt: the receipt's deterministic core
     receipt.md                       the same core, rendered for people
-    records/<kind>.jsonl             one table per record kind, sorted by id; empty file = none
+    records/<kind>.jsonl             one table per record kind of the package's schema version,
+                                     sorted by id; empty file = none
     derived/<kind>.jsonl             a derived (inferred) table, sorted by id; absent = not made
     series/<64 hex>.parquet          one per stream, named by the stream's id (MVL-16 writes them)
     blobs/sha256/<2 hex>/<64 hex>    a materialised source's bytes
@@ -48,7 +49,7 @@ from neptune.identity.hashing import content_id
 from neptune.identity.provenance import check_evidence_record_id, check_transform_record
 from neptune.model.ids import ContentId, RecordId, parse_content_id, parse_record_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.kinds import RECORD_KINDS, record_key
+from neptune.model.kinds import RECORD_KINDS, kinds_at, package_version, record_key
 from neptune.model.package import (
     IngestReceipt,
     PackageFile,
@@ -174,12 +175,16 @@ def package_contents(
     ``derived`` are derived tables by kind, each its lines as JSON objects, in any order.
     """
     series, blobs, store = dict(series or {}), dict(blobs or {}), dict(store or {})
-    tables: dict[str, list[Any]] = {kind: [] for kind in RECORD_KINDS}
+    held: dict[str, list[Any]] = defaultdict(list)
     for record in records:
         kind = getattr(record, "kind", None)
-        if kind not in tables:
+        if not isinstance(kind, str) or kind not in RECORD_KINDS:
             raise PackageError(f"not a record of a known kind: {record!r}")
-        tables[kind].append(record)
+        held[kind].append(record)
+    # The lowest schema version that holds these records: a package that uses no later kind is
+    # what a version 1 writer wrote, byte for byte (ADR 0037 §1).
+    version = package_version(held)
+    tables: dict[str, list[Any]] = {kind: held.get(kind, []) for kind in kinds_at(version)}
     files: dict[str, Content] = {}
     for kind, members in tables.items():
         members.sort(key=record_key)
@@ -204,7 +209,7 @@ def package_contents(
     transforms = {transform.id for transform in tables["transform_record"]}
     for kind, lines in sorted((derived or {}).items()):
         files[derived_path(kind)] = _derived_table(kind, lines, transforms)
-    receipt = build_receipt(record for members in tables.values() for record in members)
+    receipt = build_receipt((r for members in tables.values() for r in members), version)
     files[RECEIPT] = _document(receipt)
     files[RECEIPT_TEXT] = render_receipt(receipt).encode("utf-8")
     manifest = PackageManifest(
@@ -220,6 +225,7 @@ def package_contents(
         ),
         files=tuple(PackageFile(path, *_digest(data)) for path, data in sorted(files.items())),
         store=store,
+        version=version,
     )
     files[MANIFEST] = _document(manifest)
     read_files(files)  # never hand out a package the reader would refuse
@@ -452,11 +458,24 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
     for path, file in listed.items():
         if _digest(small.get(path, files[path])) != (file.size, file.sha256):
             raise PackageError(f"{path} does not match its size and hash in the manifest")
-    if dict(manifest.tables).keys() != RECORD_KINDS.keys():
-        raise PackageError("the manifest must count a table for every record kind")
+    kinds = kinds_at(manifest.version)
+    if dict(manifest.tables).keys() != set(kinds):
+        raise PackageError(
+            f"the manifest must count a table for every record kind of schema version"
+            f" {manifest.version}, and no other"
+        )
+    # A package is written at the lowest version that holds its records (ADR 0037 §1), so the same
+    # records have one package: a higher version would be a second package of them.
+    held = package_version(kind for kind, count in manifest.tables if count)
+    if manifest.version != held:
+        raise PackageError(
+            f"the manifest says schema version {manifest.version}, but its records are of version"
+            f" {held}: a package is written at the lowest version that holds its records"
+        )
 
     records: list[Any] = []
-    for kind, (_, read) in RECORD_KINDS.items():
+    for kind in kinds:
+        read = RECORD_KINDS[kind][1]
         path = table_path(kind)
         if path not in small:
             raise PackageError(f"no table for {kind}: an empty table is an empty file")
@@ -509,6 +528,8 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
             raise PackageError(f"source {content} is {handle.storage}, but its blob says otherwise")
 
     receipt = ingest_receipt_from_json(_load(small[RECEIPT], RECEIPT))
+    if receipt.version != manifest.version:
+        raise PackageError("the receipt and the manifest are of different schema versions")
     try:
         check_receipt(receipt, records)
     except ValueError as exc:

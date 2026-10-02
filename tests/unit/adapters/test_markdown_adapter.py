@@ -134,7 +134,20 @@ def test_the_name_decides_only_where_the_bytes_cannot() -> None:
     assert probe(fixture("corrupted.md"), "corrupted.txt")[0] == 0.0
     assert probe(b"", "empty.md")[0] == NAMED_DAMAGED and probe(b"", "empty")[0] == 0.0
     assert probe(b"\x89PNG\r\n\x1a\n", "x.md")[0] == 0.0
-    assert probe(YAML, "robot.yaml") == (0.0, ["markdown.no_syntax"])  # comments and dashes
+    assert probe(YAML, "robot.yaml") == (0.0, ["markdown.comment_hash_name"])
+    assert probe(YAML, "robot") == (0.0, ["markdown.no_syntax"])  # comments and dashes
+
+
+def test_a_yaml_or_toml_name_makes_hash_lines_comments_not_headings() -> None:
+    commented = (
+        b"# Neptune manifest, written by `neptune init-manifest`.\n# See `docs`.\nneptune: 1\n"
+    )
+    assert probe(commented, "notes")[0] == STRUCTURE  # unnamed, the comment reads as a heading
+    for name in ("neptune.yaml", "params.YML", "tool.toml"):
+        assert probe(commented, name) == (0.0, ["markdown.comment_hash_name"])
+    assert default_registry().select(
+        commented, ProbeHints("neptune.yaml", len(commented))
+    ).adapter == ("config")
 
 
 @pytest.mark.parametrize(
@@ -227,7 +240,7 @@ def test_selection_against_the_text_adapter_never_ties() -> None:
     assert select(fixture("truncated.md"), "truncated.md") == "markdown"
     assert select((TEXT_FIXTURES / "notes.txt").read_bytes(), "notes.txt") == "text"
     assert select(fixture("corrupted.md"), "corrupted.txt") == "text"
-    assert select(YAML, "robot.yaml") == "text"
+    assert select(YAML, "robot.yaml") == "config"  # a content-specific reader wins
 
 
 def test_inspect_summarises_from_the_head() -> None:

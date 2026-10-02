@@ -92,6 +92,9 @@ EXTENSIONS: Final = (".markdown", ".md", ".mdown", ".mkd", ".mkdn")
 # A Markdown name over text the bytes cannot tell from plain text: just above the generic band.
 NAMED_TEXT: Final = GENERIC + 0.1
 NAMED_DAMAGED: Final = NAME_ONLY + 0.1
+# Names that declare YAML or TOML, where a line starting ``#`` is a comment: Markdown syntax in
+# such a head is not evidence of Markdown, so it is no claim (a content-specific reader wins).
+COMMENT_HASH_EXTENSIONS: Final = (".toml", ".yaml", ".yml")
 _TEXT_CONTROLS: Final = frozenset(b"\t\n\x0b\x0c\r\x1b")
 _BINARY_CONTROLS: Final = bytes(b for b in range(0x20) if b not in _TEXT_CONTROLS)
 _CONTINUATION: Final = bytes(range(0x80, 0xC0))
@@ -396,6 +399,12 @@ class MarkdownAdapter:
             return ProbeResult(NAMED_DAMAGED if named else 0.0, (*reasons,))
         if b"\x00" in head or len(head.translate(None, _BINARY_CONTROLS)) != len(head):
             return ProbeResult(0.0, (ProbeReason("markdown.binary", "the head is not text"),))
+        if hints.name.lower().endswith(COMMENT_HASH_EXTENSIONS):
+            reason = ProbeReason(
+                "markdown.comment_hash_name",
+                f"the name {hints.name!r} declares a format whose # lines are comments",
+            )
+            return ProbeResult(0.0, (reason,))
         try:
             decoder = codecs.getincrementaldecoder("utf-8")()
             text = decoder.decode(head.removeprefix(BOM), final=len(head) == hints.size)

@@ -36,6 +36,7 @@ from neptune.model.frames import (
 )
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
+from neptune.model.kinds import KIND_SINCE
 from neptune.model.knowledge import (
     Ambiguous,
     AssertionKind,
@@ -54,7 +55,7 @@ from neptune.model.provenance import (
     TransformRecord,
     adapter_locator,
 )
-from neptune.model.record import SCHEMA_VERSION, Family, SchemaVersionError
+from neptune.model.record import OLDEST_READABLE_VERSION, SCHEMA_VERSION, Family, SchemaVersionError
 from neptune.model.reference import (
     Frame,
     FrameGraph,
@@ -189,7 +190,7 @@ KINDS = [record.kind for record, _ in RECORDS]
 def test_reference_records_round_trip_with_their_envelope(record: Any, decode: Any) -> None:
     data = round_trip(record, decode)
     assert data["kind"] == record.kind
-    assert data["schema_version"] == SCHEMA_VERSION
+    assert data["schema_version"] == KIND_SINCE[record.kind]
     assert data["provenance"] == record.provenance.to_json()
     assert record.family is Family.REFERENCE
 
@@ -325,7 +326,7 @@ def test_domain_json_shape() -> None:
             "value": {"denominator": 1_000_000_000, "numerator": 1},
         },
         "role": {"knowledge": "known", "value": "receive"},
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": OLDEST_READABLE_VERSION,
         "scope": [],
         "timescale": {"knowledge": "unknown"},
     }
