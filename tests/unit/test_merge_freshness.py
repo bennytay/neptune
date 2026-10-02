@@ -67,6 +67,7 @@ def test_fresh(pr: list[str], main: list[str]) -> None:
         (["packages/_template/AGENTS.md"], ["scripts/new-package.sh"], "template"),
         (["harness/stages.py"], ["harness/run.py"], "neptune-platform"),  # both edit the platform
         ([PLATFORM], ["harness/run.py"], "neptune-platform"),
+        ([".github/workflows/harness.yml"], ["harness/stages.py"], "neptune-platform"),
     ],
 )
 def test_refresh(pr: list[str], main: list[str], shared: str) -> None:
@@ -96,6 +97,7 @@ ADAPTER_IMPORT = re.compile(
     r"neptune\.adapters\.(?!contract\b|registry\b)\w+"
     r"|from\s+neptune\.adapters\s+import\s+(?!contract\b|registry\b)"
     r"|neptune\.(sdk|runtime|discovery)\b"
+    r"|from\s+neptune\s+import\s+[^\n]*\b(sdk|runtime|discovery|adapters)\b"
 )
 
 

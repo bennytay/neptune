@@ -49,7 +49,12 @@ ci_plan = _ci_plan()
 EXCLUDED = frozenset({ci_plan.HARNESS_MEMBER})
 
 
-PLATFORM_PATHS = ("packages/neptune-platform/", *ci_plan.MEMBER_DIRS)
+PLATFORM_PATHS = ("packages/neptune-platform/", *ci_plan.MEMBER_DIRS, ".github/")
+
+
+def _platform_owned(path: str) -> bool:
+    """Paths the platform's own tests read: its package, the harness, CI files and plumbing."""
+    return path.startswith(PLATFORM_PATHS) or path in ci_plan.PLUMBING_FILES
 
 
 def jobs(changed: list[str], members: dict[str, frozenset[str]], root: Path = ROOT) -> set[str]:
@@ -72,7 +77,7 @@ def decide(
     if not pr or not main:
         return None
     shared = jobs(pr, members, root) & jobs(main, members, root)
-    if not all(any(p.startswith(PLATFORM_PATHS) for p in side) for side in (pr, main)):
+    if not all(any(_platform_owned(p) for p in side) for side in (pr, main)):
         shared -= EXCLUDED
     if shared:
         return f"main changed inputs to {', '.join(sorted(shared))}"
