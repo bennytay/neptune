@@ -14,9 +14,11 @@ from collections import Counter
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
+from xml.etree import ElementTree  # our own generated fixtures, not hostile input
 
 import pytest
 
+from neptune.model.ids import ContentId
 from neptune.model.knowledge import AssertionKind, Known
 from neptune.model.lifecycle import LIFECYCLE_KINDS
 from neptune.model.provenance import EvidenceRef, Provenance
@@ -39,6 +41,7 @@ def _generator() -> ModuleType:
 
 
 A: Final = _generator()
+BUILT: Final = A.build()  # the generator's output, once; one test builds it a second time
 
 
 def _tree(root: Path) -> dict[str, bytes]:
@@ -54,11 +57,11 @@ def _tree(root: Path) -> dict[str, bytes]:
 
 def test_the_committed_sources_are_what_the_generator_writes() -> None:
     # On failure, run make_archetypes.py and explain the diff in the PR.
-    assert A.build() == _tree(A.SOURCES)
+    assert _tree(A.SOURCES) == BUILT
 
 
 def test_generation_is_deterministic() -> None:
-    assert A.build() == A.build()
+    assert A.build() == BUILT
 
 
 def test_every_committed_fixture_file_is_under_512_kib() -> None:
@@ -67,9 +70,7 @@ def test_every_committed_fixture_file_is_under_512_kib() -> None:
 
 
 def _names(deployment: str) -> set[str]:
-    return {
-        path.removeprefix(f"{deployment}/") for path in A.build() if path.startswith(deployment)
-    }
+    return {path.removeprefix(f"{deployment}/") for path in BUILT if path.startswith(deployment)}
 
 
 def test_the_fleet_has_what_the_issue_lists() -> None:
@@ -112,10 +113,25 @@ def test_the_cell_has_what_the_issue_lists() -> None:
         assert needed in names
 
 
-def test_the_archetypes_are_not_drones() -> None:
-    """Every embodiment here is a ground vehicle or an arm (root AGENTS.md: every robot)."""
-    suffixes = {Path(path).suffix for path in A.build()}
-    assert not suffixes & {".ulg", ".px4", ".tlog", ".bin", ".bag"}
+def _joints(path: str) -> dict[str, str]:
+    """A built URDF's joints and their types."""
+    root = ElementTree.fromstring(BUILT[path])
+    return {joint.attrib["name"]: joint.attrib["type"] for joint in root.iter("joint")}
+
+
+def test_the_embodiments_are_ground_vehicles_and_an_arm() -> None:
+    """Every robot here is a wheeled AMR or a six-axis arm (root AGENTS.md: every robot)."""
+    tug = _joints(f"{A.FLEET}/urdf/tug_200.urdf")
+    lift = _joints(f"{A.FLEET}/urdf/lift_150.urdf")
+    arm = _joints(f"{A.CELL}/urdf/arm6.urdf")
+    wheels = sorted(joint for joint, kind in tug.items() if kind == "continuous")
+    assert wheels == ["left_wheel_joint", "right_wheel_joint"]
+    assert {joint for joint, kind in lift.items() if kind == "prismatic"} == {"fork_lift_joint"}
+    assert list(arm.values()).count("revolute") == 6
+    for joints in (tug, lift, arm):
+        assert not any(word in name for name in joints for word in ("rotor", "prop", "motor"))
+    configured = {path.split("/")[2] for path in BUILT if path.startswith(f"{A.FLEET}/config/")}
+    assert configured == {f"AMR-{n:02d}" for n in range(5, 11)}
 
 
 # --- The pipeline (slow: a real ingest job per deployment) ----------------------------------------
@@ -133,6 +149,21 @@ def _of(package: IngestPackage, kind: str) -> list[Any]:
 
 def _paths(package: IngestPackage) -> dict[Any, str]:
     return {r.content_id: r.location.path for r in _of(package, "source_revision")}
+
+
+def _sources(value: Any) -> set[Any]:
+    """Every source id a record's provenance and findings cite, found in its JSON."""
+    found: set[Any] = set()
+    stack = [value.to_json()]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            if isinstance(item.get("source"), str):
+                found.add(ContentId(item["source"]))
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return found
 
 
 def _codes(package: IngestPackage) -> Counter[str]:
@@ -208,13 +239,24 @@ def test_the_stale_config_is_a_finding_and_a_stated_revision(
     assert revisions == {f"AMR-{n:02d}": "12" for n in range(5, 11)} | {"AMR-09": "11"}
     # The change record states AMR-09 went to 4.3.1: Deploy keeps both facts and decides nothing.
     mapped = read_package(packages[A.FLEET][1])
+    paths_of_mapped = _paths(mapped)
     (change,) = (
         r
         for r in _of(mapped, "change_record")
         if any(isinstance(m, Known) and m.value.value == "AMR-09" for m in r.machines)
     )
     assert change.changes[0].after.value == "4.3.1"
-    assert not any(isinstance(r, LIFECYCLE_KINDS) and "stale" in repr(r) for r in mapped.records)
+    # Deploy states no comparison: nothing in the mapped package cites a config, and no lifecycle
+    # record cites a log (a finding may name the bag's metadata table it could not map).
+    cited = {paths_of_mapped[source] for r in mapped.records for source in _sources(r)}
+    assert not {path for path in cited if path.startswith("config/")}
+    lifecycle = {
+        paths_of_mapped[source]
+        for r in mapped.records
+        if isinstance(r, LIFECYCLE_KINDS)
+        for source in _sources(r)
+    }
+    assert not {path for path in lifecycle if path.startswith("runs/")}
 
 
 @pytest.mark.slow
@@ -254,8 +296,8 @@ def test_the_cell_lifecycle_package(packages: dict[str, tuple[Path, Path]]) -> N
         "change_record": 2,
         "commissioning_baseline": 1,
         "incident_record": 1,
-        "maintenance_event": 4,
-        "requalification_record": 2,
+        "maintenance_event": 5,  # four work orders and the tool-change SOP
+        "requalification_record": 3,
         "risk_assessment": 1,
     }
     base = read_package(packages[A.CELL][0])

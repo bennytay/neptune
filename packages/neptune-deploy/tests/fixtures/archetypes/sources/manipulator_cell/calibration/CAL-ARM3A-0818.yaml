@@ -1,6 +1,6 @@
-calibration_id: CAL-ARM3A-0819
+calibration_id: CAL-ARM3A-0818
 robot: ARM-3A
-performed: '2026-08-19T09:15:00+02:00'
+performed: '2026-08-18T12:40:00-04:00'
 reason: after gripper finger set change
 method: hand-eye, 24 poses, ChArUco board
 eye_on_hand: true

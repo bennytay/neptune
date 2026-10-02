@@ -4,7 +4,7 @@
   "version": "1",
   "description": "A cell SOP as it was carried out: the procedure's steps as the actions stated, and a work record naming the work order, the machine, when it was done, the diagnosis and the parts swapped. Plant 2 writes dates on its wall clock.",
   "kind": "maintenance_event",
-  "zone": "Europe/Berlin",
+  "zone": "America/Detroit",
   "tables": {
     "parts": [
       "Part",

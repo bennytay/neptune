@@ -1,6 +1,6 @@
 calibration_id: CAL-ARM3A-0226
 robot: ARM-3A
-performed: '2026-02-26T15:10:00+01:00'
+performed: '2026-02-26T15:10:00-05:00'
 reason: commissioning
 method: hand-eye, 24 poses, ChArUco board
 eye_on_hand: true

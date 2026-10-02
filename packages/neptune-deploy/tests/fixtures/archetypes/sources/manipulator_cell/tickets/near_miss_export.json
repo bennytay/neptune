@@ -1,7 +1,7 @@
 [
   {
     "fields": {
-      "created": "2026-07-09T14:22:00.000+0200",
+      "created": "2026-07-09T14:22:00.000-0400",
       "description": "Operator reached into the pallet gate while the light curtain was muted for a pallet change. The arm was at reduced speed and stopped.",
       "environment": "Pallet gate, CELL-3",
       "issuetype": {
@@ -23,7 +23,7 @@
   },
   {
     "fields": {
-      "created": "2026-07-10T09:00:00.000+0200",
+      "created": "2026-07-10T09:00:00.000-0400",
       "description": "Mark the muting zone on the floor.",
       "environment": null,
       "issuetype": {

@@ -47,7 +47,6 @@ ROOT: Final = HERE.parents[4]
 SOURCES: Final = HERE / "sources"
 GOLDEN: Final = HERE / "golden"
 DECLARED: Final = HERE / "declared"
-LIFECYCLE: Final = HERE.parent / "lifecycle"  # the mapping files and templates MVL-113/114 wrote
 DOCUMENTS: Final = HERE.parent / "documents"
 FLEET: Final = "warehouse_amr_fleet"
 CELL: Final = "manipulator_cell"
@@ -63,6 +62,9 @@ def _load(name: str, path: Path) -> ModuleType:
 
 
 M: Final = _load("archetype_mcap_writer", ROOT / "tests" / "fixtures" / "mcap" / "make_mcap.py")
+R: Final = _load(
+    "archetype_rosbag2_writer", ROOT / "tests" / "fixtures" / "rosbag2" / "make_rosbag2.py"
+)
 D: Final = _load(
     "archetype_document_writer", HERE.parent / "documents" / "make_document_fixtures.py"
 )
@@ -125,7 +127,7 @@ def amr_run(robot: str, start: int, bias: float, volts: float, events: dict[int,
         if i in events:
             add(3, at + 3, _json_bytes({"level": events[i], "robot": robot}))
     channels = (
-        M.Channel(1, 1, "/imu", "cdr", {"offered_qos_profiles": M.QOS}),
+        M.Channel(1, 1, "/imu", "cdr", {"offered_qos_profiles": QOS}),
         M.Channel(2, 2, "/battery", "json"),
         M.Channel(3, 0, "/diagnostics", "json", {"source": robot}),
     )
@@ -153,9 +155,9 @@ class Topic:
     definition: str
 
 
-HEADER_DEFINITION: Final = (
-    "std_msgs/Header header\n"
-    + "=" * 80
+# The definitions a ROS 2 message that carries a header appends, one section per nested type.
+HEADER_MSGS: Final = (
+    "=" * 80
     + "\nMSG: std_msgs/Header\nbuiltin_interfaces/Time stamp\nstring frame_id\n"
     + "=" * 80
     + "\nMSG: builtin_interfaces/Time\nint32 sec\nuint32 nanosec\n"
@@ -164,24 +166,14 @@ JOINT_STATE: Final = Topic(
     "/joint_states",
     "sensor_msgs/msg/JointState",
     "std_msgs/Header header\nstring[] name\nfloat64[] position\nfloat64[] velocity\n"
-    "float64[] effort\n"
-    + "=" * 80
-    + "\nMSG: std_msgs/Header\nbuiltin_interfaces/Time stamp\nstring frame_id\n"
-    + "=" * 80
-    + "\nMSG: builtin_interfaces/Time\nint32 sec\nuint32 nanosec\n",
+    "float64[] effort\n" + HEADER_MSGS,
 )
 STRING: Final = Topic("/status", "std_msgs/msg/String", "string data\n")
 FLOAT32: Final = Topic("/battery_voltage", "std_msgs/msg/Float32", "float32 data\n")
 IMU: Final = Topic("/imu", "sensor_msgs/msg/Imu", M.IMU_DEFINITION)
-CDR_HEADER: Final = b"\x00\x01\x00\x00"
-# The QoS profile text rosbag2 (Humble and later) writes; the official reader needs every key.
-QOS: Final = (
-    "- history: 3\n  depth: 0\n  reliability: 1\n  durability: 2\n"
-    "  deadline:\n    sec: 9223372036\n    nsec: 854775807\n"
-    "  lifespan:\n    sec: 9223372036\n    nsec: 854775807\n  liveliness: 1\n"
-    "  liveliness_lease_duration:\n    sec: 9223372036\n    nsec: 854775807\n"
-    "  avoid_ros_namespace_conventions: false\n"
-)
+CDR_HEADER: Final = R.CDR
+# The QoS profile text rosbag2 writes; the official reader needs every key of it.
+QOS: Final = R.QOS
 
 
 class Cdr:
@@ -872,6 +864,7 @@ def pdf_commissioning() -> bytes:
                 [
                     ("Component", "Version"),
                     ("Palletising application", "1.4.0"),
+                    ("Cell controller software", "5.4.2"),
                     ("Safety configuration", "2026.02-a"),
                 ],
                 (300, 390),
@@ -935,10 +928,11 @@ def pdf_sop() -> bytes:
 
 CELL_CMMS: Final = """\
 WO Number,WO Type,Asset ID,Site,Completed,Problem,Work Performed,Component,Removed Serial,Installed Serial,Firmware After,Related,Technician,Downtime h
-WO-26-0415,PM,ARM-3A,CELL-3,2026-04-15 10:20,Scheduled calibration check,Re-run hand-eye calibration,,,,5.4.2,CAL-ARM3A-0415,K. Patel,2
-WO-26-0623,CM,ARM-3A,CELL-3,2026-06-23 17:45,Joint 4 drive noise,Replace joint 4 drive; Re-run hand-eye calibration,Joint 4 drive unit,JD4-0771,JD4-0912,5.4.2,CAL-ARM3A-0624,K. Patel,6
-WO-26-0391,CM,ARM-3A,CELL-3,2026-08-18 13:00,Finger pads worn,Replace finger set; Re-run hand-eye calibration,Finger set PG-80,FS-0183,FS-0291,5.6.0,CAL-ARM3A-0819; CHG0030013,K. Patel,3
+WO-26-0310,CM,ARM-3A,CELL-3,2026-03-10 19:45,Joint 4 brake test timeout,Apply controller software update,,,,5.6.0,CHG0030012,K. Patel,1.75
+WO-26-0415,PM,ARM-3A,CELL-3,2026-04-15 10:20,Scheduled calibration check,Re-run hand-eye calibration,,,,5.6.0,CAL-ARM3A-0415,K. Patel,2
+WO-26-0623,CM,ARM-3A,CELL-3,2026-06-23 17:45,Joint 4 drive noise,Replace joint 4 drive; Re-run hand-eye calibration,Joint 4 drive unit,JD4-0771,JD4-0912,5.6.0,CAL-ARM3A-0623,K. Patel,6
 WO-26-0709,INSP,ARM-3A,CELL-3,2026-07-09 15:00,Review after near miss,Review of light curtain muting; no fault found,,,,5.6.0,INC-C3-0004,K. Patel,0.5
+WO-26-0391,CM,ARM-3A,CELL-3,2026-08-18 13:00,Finger pads worn,Replace finger set; Re-run hand-eye calibration,Finger set PG-80,FS-0183,FS-0291,5.6.0,CAL-ARM3A-0818; CHG0030013,K. Patel,3
 """
 
 
@@ -949,7 +943,7 @@ def cell_cmms() -> bytes:
 CELL_CHANGES: Final = """\
 number,short_description,category,type,cmdb_ci,u_site,approval,approval_set,start_date,end_date,u_before,u_after,assignment_group,description
 CHG0030012,Update cell controller software,Software,Normal,ARM-3A,PLANT-2,approved,2026-03-09 16:30:00,2026-03-10 18:00:00,2026-03-10 19:30:00,5.4.2,5.6.0,Robotics Engineering,Controller software update to fix the joint 4 brake test timeout.
-CHG0030013,Gripper TCP offset after finger replacement,Parameter,Standard,ARM-3A,PLANT-2,approved,2026-08-18 08:10:00,2026-08-18 09:00:00,2026-08-18 09:20:00,TCP z=142.0 mm,TCP z=145.5 mm,Robotics Engineering,New finger set is 3.5 mm longer.
+CHG0030013,Gripper TCP offset after finger replacement,Parameter,Standard,ARM-3A,PLANT-2,approved,2026-08-18 08:10:00,2026-08-18 12:50:00,2026-08-18 12:55:00,TCP z=142.0 mm,TCP z=145.5 mm,Robotics Engineering,New finger set is 3.5 mm longer.
 """
 
 
@@ -959,6 +953,7 @@ def cell_changes() -> bytes:
 
 CELL_REQUALIFICATION: Final = """\
 Requal ID,Cell,Robot,Performed,Cause,Corrective Actions,Test 1,Result 1,Test 2,Result 2,Test 3,Result 3,Result,Decision,Decided By,Decided On,Work Order,Inspector
+RQ-2026-004,CELL-3,ARM-3A,2026-03-10 20:15,Controller software update CHG0030012,Re-teach safe zones; Verify brake test,Joint brake test,PASS,Safety-rated speed monitoring 250 mm/s,PASS,Light curtain stop distance,212 mm,PASS,Returned to service,Cell owner,2026-03-10 21:00,WO-26-0310,K. Patel
 RQ-2026-005,CELL-3,ARM-3A,2026-06-23 20:15,Joint 4 drive replacement WO-26-0623,Re-teach safe zones; Verify brake test,Joint brake test,PASS,Safety-rated speed monitoring 250 mm/s,PASS,Light curtain stop distance,212 mm,PASS,Returned to service,Cell owner,2026-06-23 21:00,WO-26-0623,K. Patel
 RQ-2026-006,CELL-3,ARM-3A,2026-08-18 14:05,Gripper finger replacement CHG0030013,Re-calibrate TCP,TCP accuracy check,0.21 mm,Pick-and-place cycle 50x,PASS,,,PASS,Returned to service with speed restriction,Cell owner,,WO-26-0391,J. Meyer
 """
@@ -977,7 +972,7 @@ def near_miss_export() -> bytes:
                     "issuetype": {"name": "Incident"},
                     "summary": "Hand inside pallet gate while arm moving",
                     "priority": {"name": "near miss"},
-                    "created": "2026-07-09T14:22:00.000+0200",
+                    "created": "2026-07-09T14:22:00.000-0400",
                     "environment": "Pallet gate, CELL-3",
                     "description": (
                         "Operator reached into the pallet gate while the light curtain was"
@@ -993,7 +988,7 @@ def near_miss_export() -> bytes:
                     "issuetype": {"name": "Task"},
                     "summary": "Add floor marking at the pallet gate",
                     "priority": {"name": "Low"},
-                    "created": "2026-07-10T09:00:00.000+0200",
+                    "created": "2026-07-10T09:00:00.000-0400",
                     "environment": None,
                     "description": "Mark the muting zone on the floor.",
                     "status": {"name": "Done"},
@@ -1010,28 +1005,28 @@ def cell() -> dict[str, bytes]:
         "urdf/arm6.urdf": urdf_arm(),
         "calibration/CAL-ARM3A-0226.yaml": calibration(
             "CAL-ARM3A-0226",
-            "2026-02-26T15:10:00+01:00",
+            "2026-02-26T15:10:00-05:00",
             "commissioning",
             (0.032, -0.011, 0.071),
             0.42,
         ),
         "calibration/CAL-ARM3A-0415.yaml": calibration(
             "CAL-ARM3A-0415",
-            "2026-04-15T10:05:00+02:00",
+            "2026-04-15T10:05:00-04:00",
             "scheduled recalibration",
             (0.0321, -0.0108, 0.0712),
             0.39,
         ),
-        "calibration/CAL-ARM3A-0624.yaml": calibration(
-            "CAL-ARM3A-0624",
-            "2026-06-24T08:30:00+02:00",
+        "calibration/CAL-ARM3A-0623.yaml": calibration(
+            "CAL-ARM3A-0623",
+            "2026-06-23T17:30:00-04:00",
             "after joint 4 drive replacement",
             (0.0334, -0.0102, 0.0709),
             0.47,
         ),
-        "calibration/CAL-ARM3A-0819.yaml": calibration(
-            "CAL-ARM3A-0819",
-            "2026-08-19T09:15:00+02:00",
+        "calibration/CAL-ARM3A-0818.yaml": calibration(
+            "CAL-ARM3A-0818",
+            "2026-08-18T12:40:00-04:00",
             "after gripper finger set change",
             (0.0334, -0.0103, 0.0745),
             0.44,
@@ -1075,7 +1070,7 @@ PIPELINES: Final = {
     ),
     CELL: Declared(
         presets=("cmms_generic", "servicenow_csv", "jira_json"),
-        mappings=(LIFECYCLE / "mappings" / "cell3_requalification.json",),
+        mappings=(DECLARED / CELL / "requalification.json",),
         templates=(
             DOCUMENTS / "templates" / "risk_cell_arm.json",
             DOCUMENTS / "templates" / "commissioning_cell3.json",

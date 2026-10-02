@@ -1,6 +1,6 @@
-calibration_id: CAL-ARM3A-0624
+calibration_id: CAL-ARM3A-0623
 robot: ARM-3A
-performed: '2026-06-24T08:30:00+02:00'
+performed: '2026-06-23T17:30:00-04:00'
 reason: after joint 4 drive replacement
 method: hand-eye, 24 poses, ChArUco board
 eye_on_hand: true

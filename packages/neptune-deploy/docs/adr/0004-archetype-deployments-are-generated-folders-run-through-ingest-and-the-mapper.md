@@ -30,21 +30,22 @@ this corpus, and the D1 gate (MVL-116) stress-tests lifecycle records on both.
      CMMS work-order export, a ServiceNow firmware change export, a requalification sheet and two incident
      report PDFs.
    - Cell: a ROS 2 bag of joint states, a URDF, four calibration files (commissioning and three
-     recalibrations), a CMMS export (three recalibrations, a joint drive replacement, a tool change
-     and an inspection), a ServiceNow export (controller update, tool offset), a requalification sheet, a
+     recalibrations), a CMMS export (a controller update, a scheduled recalibration, a joint drive
+     replacement with a recalibration, a tool change with a recalibration, and an inspection after the near
+     miss), a ServiceNow export (controller update, tool offset), a requalification sheet (three rows), a
      Jira near-miss export, and a risk assessment, a commissioning report and a tool-change SOP as PDFs.
 3. **The pipeline is the one ADR 0002 draws.** `pipeline(name, ...)` runs the compiler's ingest through the SDK
    the command line wraps (so `neptune.yaml` applies), in process and with the job named `archetype`, then
    `neptune_deploy.lifecycle.map_package` with the deployment's declared files. In process, so the receipt
    does not depend on the host's Landlock level (the compiler's own golden packages do the same). The
    declared files are shipped presets where one fits (`cmms_generic`, `servicenow_csv`, `register_zone`,
-   `jira_json`), MVL-113's cell requalification mapping and MVL-114's risk and commissioning templates
-   unchanged, and three files written here (`declared/`: the fleet's requalification mapping and incident
-   template, the cell's SOP template). No plugin entry point is loaded: the compiler does not load them yet
+   `jira_json`), MVL-114's risk and commissioning templates unchanged, and four files written here
+   (`declared/`: the fleet's requalification mapping and incident template, the cell's requalification
+   mapping, which is MVL-113's with the plant's zone, and its SOP template). No plugin entry point is loaded: the compiler does not load them yet
    (MVL-200), and the mapper is outside the ABI (ADR 0002 §2).
 4. **Golden receipts, in CI.** `golden/<name>/base` holds the base package's `manifest.json`, `receipt.json` and
    `receipt.md`; `golden/<name>/lifecycle` holds the mapped package whole but for its empty tables (about
-   250 KiB for the fleet; the manifest lists those with their hashes). The base manifest pins every record
+   220 KiB for the fleet; the manifest lists those with their hashes). The base manifest pins every record
    table by hash, so a compiler adapter change is seen without committing the series and the large tables.
    The pipeline tests are `slow` and `integration` (a real ingest job, about 25 s for both folders) and run
    in the package's CI job. Changing a golden file needs an explanation in the PR (root AGENTS.md).
@@ -63,10 +64,14 @@ this corpus, and the D1 gate (MVL-116) stress-tests lifecycle records on both.
      date, a date written in another format than its column's and a requalification with no decision time. The mapper
      reports `row_unmatched`, `value_blank`, `value_unreadable` and `list_cell_blank`; those records keep
      `Unknown` fields.
-6. **Clocks stay as declared.** Logs are POSIX nanoseconds (UTC); incident, CMMS and requalification times
-   are wall-clock text. The fleet's mapping and template zones are `unstated` because two sites in two
-   zones share one export and one form. The cell's plant zones are declared in its templates. Nothing is
-   moved to UTC.
+6. **Clocks stay as declared, and the stories agree.** Logs are POSIX nanoseconds (UTC); incident, CMMS and
+   requalification times are wall-clock text. The fleet's mapping and template zones are `unstated`
+   because two sites in two zones share one export and one form. The cell is one plant: every template and
+   mapping declares `America/Detroit`, and its calibration files and near-miss ticket state offsets of that
+   zone (-05:00 in February, -04:00 in summer). Each calibration precedes the work order and requalification
+   that cite it, and every CMMS row after the controller update (2026-03-10) states the 5.6.0 it left. A
+   contradiction in a golden lifecycle package is therefore a finding about the pipeline or a deliberate
+   case, never an accident of the fixtures. Nothing is moved to UTC.
 7. **Formats the compiler reads today.** ROS 2 bags use MCAP storage with uncompressed chunks, because a
    SQLite file's header carries the library version and a compression library changes bytes; the MCAP and
    the bag were read once with the official `mcap` and `rosbags` readers (never dependencies) to check them,
@@ -96,6 +101,10 @@ this corpus, and the D1 gate (MVL-116) stress-tests lifecycle records on both.
 
 ## Consequences
 
+- The goldens pin the versions of the libraries the adapters record in the receipt (`pypdf`, `pyarrow`,
+  `pyyaml`, `lz4`, `zstandard`) and the Parquet bytes `pyarrow` writes, like the compiler's own golden
+  packages. A dependency bump that changes them is a regeneration in the bump's PR; the diff is the library
+  strings and table hashes, and the PR says so.
 - A compiler adapter change (a PDF, MCAP, config or tabular change) moves the golden base receipts, and a
   mapper or template change moves the lifecycle ones; either is a deliberate regeneration PR with the diff
   explained. The 25 s the pipeline tests take is the price of testing the real ingest.

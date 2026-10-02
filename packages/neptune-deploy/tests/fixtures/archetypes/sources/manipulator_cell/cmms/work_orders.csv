@@ -1,5 +1,6 @@
 WO Number,WO Type,Asset ID,Site,Completed,Problem,Work Performed,Component,Removed Serial,Installed Serial,Firmware After,Related,Technician,Downtime h
-WO-26-0415,PM,ARM-3A,CELL-3,2026-04-15 10:20,Scheduled calibration check,Re-run hand-eye calibration,,,,5.4.2,CAL-ARM3A-0415,K. Patel,2
-WO-26-0623,CM,ARM-3A,CELL-3,2026-06-23 17:45,Joint 4 drive noise,Replace joint 4 drive; Re-run hand-eye calibration,Joint 4 drive unit,JD4-0771,JD4-0912,5.4.2,CAL-ARM3A-0624,K. Patel,6
-WO-26-0391,CM,ARM-3A,CELL-3,2026-08-18 13:00,Finger pads worn,Replace finger set; Re-run hand-eye calibration,Finger set PG-80,FS-0183,FS-0291,5.6.0,CAL-ARM3A-0819; CHG0030013,K. Patel,3
+WO-26-0310,CM,ARM-3A,CELL-3,2026-03-10 19:45,Joint 4 brake test timeout,Apply controller software update,,,,5.6.0,CHG0030012,K. Patel,1.75
+WO-26-0415,PM,ARM-3A,CELL-3,2026-04-15 10:20,Scheduled calibration check,Re-run hand-eye calibration,,,,5.6.0,CAL-ARM3A-0415,K. Patel,2
+WO-26-0623,CM,ARM-3A,CELL-3,2026-06-23 17:45,Joint 4 drive noise,Replace joint 4 drive; Re-run hand-eye calibration,Joint 4 drive unit,JD4-0771,JD4-0912,5.6.0,CAL-ARM3A-0623,K. Patel,6
 WO-26-0709,INSP,ARM-3A,CELL-3,2026-07-09 15:00,Review after near miss,Review of light curtain muting; no fault found,,,,5.6.0,INC-C3-0004,K. Patel,0.5
+WO-26-0391,CM,ARM-3A,CELL-3,2026-08-18 13:00,Finger pads worn,Replace finger set; Re-run hand-eye calibration,Finger set PG-80,FS-0183,FS-0291,5.6.0,CAL-ARM3A-0818; CHG0030013,K. Patel,3
