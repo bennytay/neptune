@@ -2,9 +2,9 @@
 
 ```mermaid
 flowchart LR
-  EXT[("CMMS · tickets · fleet managers · forms")]
+  EXT[("object stores · CMMS · tickets · fleet managers · forms")]
   subgraph P["neptune-deploy"]
-    SRC["sources/ read-only connectors"]
+    SRC["sources/ read-only connectors: S3 · GCS · Azure"]
     LIF["adapters/lifecycle"]
     MAP["lifecycle/ mapper · mapping files · document templates · vendor presets"]
     PACKS["packs/ evidence-pack compiler"]
@@ -41,8 +41,8 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1,CONF,MODEL,STORE,MAP built
-  class K2,LIF,EP partial
-  class SRC,PACKS,CONSOLE,K3 todo
+  class K2,LIF,EP,SRC partial
+  class PACKS,CONSOLE,K3 todo
   class CON,EXT ext
   style P fill:#8b949e0f,stroke:#8b949e
   style C fill:#8b949e0f,stroke:#8b949e

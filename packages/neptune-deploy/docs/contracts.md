@@ -9,8 +9,12 @@ neptune-platform ADR 0002.
 
 ## Publishes
 
-_None yet._ Deploy's records are the compiler's lifecycle kinds, published by the compiler as part of the
-package schema. The evidence packs (`packs/`) will be published here when they land.
+Deploy's records are the compiler's lifecycle kinds, published by the compiler as part of the package
+schema. The evidence packs (`packs/`) will be published here when they land.
+
+| Interface | Consumer | Version | Source of truth | Fixed by |
+|---|---|---|---|---|
+| Object-store connectors: `neptune.sources` entry points `deploy_s3`, `deploy_gcs`, `deploy_azure_blob`; factory `(url, *, network, ledger, options, credentials, environ)` returning a read-only `Source` | `neptune` (compiler), once it ingests plugin Sources | connector **0.1.0** | `neptune_deploy.sources.object_store`; `CONNECTOR_VERSION`; external identity `ExternalObjectRef(connector id, <bucket>/<key>, version:/generation:/etag:)` | Deploy [ADR 0006](adr/0006-object-stores-are-read-only-sources-over-a-standard-library-client.md) |
 
 ## Consumes
 
