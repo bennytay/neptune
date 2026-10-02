@@ -29,6 +29,7 @@ from neptune.derived.grouping import (
     CONTESTED,
     NO_SESSION,
     SHARED_REFERENCE,
+    Grouping,
     GroupingConfig,
     LayoutGrouper,
     Rule,
@@ -162,11 +163,14 @@ def test_a_bag_inside_a_session_directory_keeps_its_directory_reading() -> None:
     assert len(assembly.records) == 1
 
 
+def shape(grouping: Grouping) -> list[tuple[str, float, list[str]]]:
+    return sorted((p.rule, p.confidence, sorted(paths(p))) for p in grouping.proposals)
+
+
 def test_without_evidence_the_readings_are_v0s() -> None:
     tree = layout("bag/metadata.yaml", "bag/bag_0.mcap", "run_1/a.mcap", "run_1/n.md", "x.md")
     assembled = RunAssembler().propose(tree)
     plain = LayoutGrouper().propose(tree)
-    shape = lambda g: sorted((p.rule, p.confidence, sorted(paths(p))) for p in g.proposals)  # noqa: E731
     assert shape(assembled) == shape(plain)
     assert assembled.transform.adapter_id == "neptune.assembly"
     assert assembled.transform.id != plain.transform.id

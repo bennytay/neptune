@@ -62,7 +62,6 @@ from neptune.derived.grouping import (
 from neptune.derived.sessions import Reason, Role
 from neptune.discovery.layout import ROOT, Layout, basename, parent
 from neptune.identity.findings import ingest_finding
-from neptune.identity.ids import record_id
 from neptune.identity.provenance import evidence_record_id, transform_record
 from neptune.model.alignment import MemberRole, RunAssembly, RunMember
 from neptune.model.configuration import ConfigurationSnapshot
@@ -221,8 +220,8 @@ def _source(record: object) -> ContentId | None:
 class EvidenceBuilder:
     """Gathers evidence from records as they are read, chunk by chunk, keeping only what
     assembly reads: a document's words (at most ``MAX_WORDS`` per source), not its blocks; the
-    rows of rosbag2 file-list tables (each after its table, as the adapter emits them), not
-    every table's rows. So memory grows with runs and names, never with a source's size."""
+    rows of rosbag2 file-list tables (each in the batch of its table, as the adapter emits them
+    in one chunk), not every table's rows. So memory grows with runs and names, never with a source's size."""
 
     def __init__(self) -> None:
         self.by_source: dict[ContentId, SourceEvidence] = defaultdict(SourceEvidence)
@@ -233,8 +232,14 @@ class EvidenceBuilder:
         self.rows: dict[RecordId, list[StructuredRecord]] = defaultdict(list)
 
     def add(self, records: Iterable[object]) -> "EvidenceBuilder":
-        for record in records:
-            if isinstance(record, ASSEMBLY_INPUTS):
+        """Add one batch (a chunk's output): its tables first, so a row finds its table
+        whatever order the batch is in."""
+        batch = [record for record in records if isinstance(record, ASSEMBLY_INPUTS)]
+        for record in batch:
+            if isinstance(record, StructuredTable):
+                self._add(record)
+        for record in batch:
+            if not isinstance(record, StructuredTable):
                 self._add(record)
         return self
 
@@ -305,7 +310,7 @@ class EvidenceBuilder:
 
 
 def evidence_of(records: Iterable[object]) -> Evidence:
-    """The evidence ``records`` hold, in any order but each row after its table."""
+    """The evidence ``records`` hold, as one batch."""
     return EvidenceBuilder().add(records).build()
 
 
@@ -450,13 +455,36 @@ class _Assembler(_Proposer):
         by_directory: dict[bytes, list[bytes]] = defaultdict(list)
         for path in self.files:
             by_directory[parent(path)].append(path)
+        # One statement per metadata's bytes, so one canonical record: copies of a bag share
+        # their metadata's Run, and the record lists every copy's files (ADR 0066 §1).
+        members: dict[ContentId, dict[RecordId, RunMember]] = defaultdict(dict)
+        stated: dict[ContentId, FileList] = {}
         for path in sorted(self.files):
             if basename(path) != BAG_METADATA:
                 continue
             found = self._of(path)
             if found is None or len(found.file_lists) != 1:
                 continue
-            self._file_list(path, found.file_lists[0], holders, by_directory)
+            content = ContentId(self.files[path].content_id)
+            stated[content] = found.file_lists[0]
+            members[content].update(self._file_list(path, stated[content], holders, by_directory))
+        for content, statement in sorted(stated.items()):
+            held = members[content]
+            self.assemblies.append(
+                RunAssembly(
+                    id=self._assembly_id(statement),
+                    provenance=Provenance(
+                        statement.evidence, self.transform.id, AssertionKind.STATED
+                    ),
+                    run=statement.run,
+                    rule="rosbag2.metadata",
+                    members=tuple(held[key] for key in sorted(held)),
+                    validity=NotApplicable(),
+                )
+            )
+
+    def _assembly_id(self, stated: FileList) -> RecordId:
+        return evidence_record_id(RunAssembly.kind, stated.evidence, self.transform)
 
     def _file_list(
         self,
@@ -464,7 +492,8 @@ class _Assembler(_Proposer):
         stated: FileList,
         holders: Mapping[bytes, list[int]],
         by_directory: Mapping[bytes, list[bytes]],
-    ) -> None:
+    ) -> dict[RecordId, RunMember]:
+        """One copy of a bag: its findings, its readings, and its members of the run."""
         directory = parent(metadata)
         listed: dict[bytes, EvidenceRef] = {}
         for text, evidence in stated.entries:
@@ -479,8 +508,12 @@ class _Assembler(_Proposer):
             if self._sig(path).extension in BAG_STORAGE
         )
         unlisted = [path for path in storage if path not in listed]
-        assembly = self._run_assembly(metadata, stated, {p: listed[p] for p in present})
-        self.assemblies.append(assembly)
+        assembly = self._assembly_id(stated)
+        revision = self.files[metadata].revision
+        members = {revision: RunMember(revision, MemberRole.DESCRIPTION, stated.run_evidence)}
+        for path in present:
+            member = self.files[path].revision
+            members.setdefault(member, RunMember(member, MemberRole.RECORDING, listed[path]))
         if missing:
             self.findings.append(
                 ingest_finding(
@@ -516,7 +549,7 @@ class _Assembler(_Proposer):
             "missing": len(missing),
             "present": len(present),
             "run": stated.run,
-            "run_assembly": assembly.id,
+            "run_assembly": assembly,
             "unlisted": len(unlisted),
         }
         reason = Reason(
@@ -543,31 +576,10 @@ class _Assembler(_Proposer):
                     Reason(
                         Rule.RECORDING_FILE,
                         "a storage file the bag beside it does not list: its own recording",
-                        {"run_assembly": assembly.id},
+                        {"run_assembly": assembly},
                     )
                 )
-
-    def _run_assembly(
-        self, metadata: bytes, stated: FileList, present: Mapping[bytes, EvidenceRef]
-    ) -> RunAssembly:
-        revision = self.files[metadata].revision
-        members: dict[RecordId, RunMember] = {
-            revision: RunMember(revision, MemberRole.DESCRIPTION, stated.run_evidence)
-        }
-        for path, evidence in sorted(present.items()):
-            member = self.files[path].revision
-            members.setdefault(member, RunMember(member, MemberRole.RECORDING, evidence))
-        # One record per copy of the metadata: the same bytes at two places list two sets of
-        # files, so the id covers the statement and the metadata's revision.
-        base = evidence_record_id(RunAssembly.kind, stated.evidence, self.transform)
-        return RunAssembly(
-            id=record_id(RunAssembly.kind, {"evidence": base, "revision": revision}),
-            provenance=Provenance(stated.evidence, self.transform.id, AssertionKind.STATED),
-            run=stated.run,
-            rule="rosbag2.metadata",
-            members=tuple(members[key] for key in sorted(members)),
-            validity=NotApplicable(),
-        )
+        return members
 
     # --- 2 and 3. edges, and splits by machine -------------------------------------------------
 
