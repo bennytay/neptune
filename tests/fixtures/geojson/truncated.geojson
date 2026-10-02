@@ -1,0 +1,4 @@
+{"type": "FeatureCollection", "name": "Warehouse 7 floor map", "features": [
+{"type": "Feature", "id": "wh7-outline", "geometry": {"type": "Polygon", "coordinates": [[[103.6001, 1.3501], [103.6011, 1.3501], [103.6011, 1.3511], [103.6001, 1.3511], [103.6001, 1.3501]]]}, "properties": {"site_id": "WH-7", "name": "Warehouse 7", "operator": {"name": "Tuas Logistics", "contact": null}}},
+{"type": "Feature", "id": 101, "geometry": {"type": "Point", "coordinates": [103.6004, 1.3504, 4.5]}, "properties": {"asset_id": "DOCK-01", "site_id": "WH-7", "category": "charging dock", "name": "Dock 1"}},
+{"type": "Feature", "geometry": {"type": "Point", "coordinates": [103.6008, 1.3508]}, "properties": {"asset_id": 17, "name": 

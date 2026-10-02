@@ -1,0 +1,4 @@
+{"type": "FeatureCollection", "crs": {"type": "name", "properties": {"name": "EPSG:32648"}}, "features": [
+{"type": "Feature", "id": "survey-box", "geometry": {"type": "Polygon", "coordinates": [[[366000.0, 143000.0], [367000.0, 143000.0], [367000.0, 144000.0], [366000.0, 144000.0], [366000.0, 143000.0]]]}, "properties": {"site_id": "SURVEY-3", "name": "Strait survey 3", "depth_m": [12.5, 18.0]}},
+{"type": "Feature", "id": "buoy-9", "geometry": {"type": "Point", "coordinates": [366500.0, 143500.0]}, "properties": {"asset_id": "BUOY-9", "site_id": "SURVEY-3", "category": "marker buoy"}}
+]}
