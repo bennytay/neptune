@@ -126,10 +126,12 @@ def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> C
     if entries.get(MANIFEST) != "file":
         code: FindingCode = "file_missing" if mode == "verify" else "package_unreadable"
         return Checked((CatalogFinding(code, MANIFEST, "the package has no readable manifest"),))
+    limit: int | None = None
     if mode == "verify":  # hashed as a stream first: a hostile large manifest is never held
-        streamed = _digest(root_fd, MANIFEST)
-        if streamed is None:
+        hashed = _digest(root_fd, MANIFEST)
+        if hashed is None:
             return Checked((CatalogFinding("package_unreadable", MANIFEST, "cannot read it"),))
+        streamed, limit = hashed
         if streamed != expected_id:
             return Checked(
                 (
@@ -141,7 +143,7 @@ def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> C
                 ),
                 package_id=streamed,
             )
-    manifest_bytes = _read_small(root_fd, MANIFEST)
+    manifest_bytes = _read_small(root_fd, MANIFEST, limit)  # verify: no more than was hashed
     if manifest_bytes is None:
         return Checked((CatalogFinding("package_unreadable", MANIFEST, "cannot read it"),))
     package_id = "sha256:" + hashlib.sha256(manifest_bytes).hexdigest()
@@ -191,7 +193,12 @@ def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> C
         for path in sorted(set(listed) & present):
             size, digest = listed[path]
             large = bool(_LARGE.fullmatch(path))
-            got = _hash(root_fd, path, size, keep=mode == "register" and not large)
+            try:
+                got = _hash(root_fd, path, size, keep=mode == "register" and not large)
+            except PermissionError:
+                denied = "permission to read it is denied"
+                findings.append(CatalogFinding("package_unreadable", path, denied))
+                continue
             if got is None or got[0] != digest:
                 detail = "size or sha256 differs from the manifest"
                 findings.append(CatalogFinding("file_digest_mismatch", path, detail))
@@ -353,37 +360,43 @@ def open_below(root_fd: int, path: str) -> int:
     return target
 
 
-def _read_small(root_fd: int, path: str) -> bytes | None:
+def _read_small(root_fd: int, path: str, limit: int | None = None) -> bytes | None:
+    """The file's bytes, or None if it cannot be read or holds more than ``limit`` bytes."""
     try:
         with os.fdopen(open_below(root_fd, path), "rb") as stream:
-            return stream.read()
+            data = stream.read() if limit is None else stream.read(limit + 1)
     except OSError:
         return None
+    return None if limit is not None and len(data) > limit else data
 
 
-def _digest(root_fd: int, path: str) -> str | None:
-    """The sha256 of the file, read as a stream, or None if it cannot be read."""
+def _digest(root_fd: int, path: str) -> tuple[str, int] | None:
+    """The sha256 and size of the file, read as a stream, or None if it cannot be read."""
     try:
         descriptor = open_below(root_fd, path)
     except OSError:
         return None
-    digest = hashlib.sha256()
+    digest, size = hashlib.sha256(), 0
     try:
         with os.fdopen(descriptor, "rb") as stream:
             while block := stream.read(_READ_SIZE):
                 digest.update(block)
+                size += len(block)
     except OSError:
         return None
-    return "sha256:" + digest.hexdigest()
+    return "sha256:" + digest.hexdigest(), size
 
 
 def _hash(root_fd: int, path: str, size: int, *, keep: bool) -> tuple[str, bytes | None] | None:
     """``(sha256, bytes if keep)`` of the file, or None if it cannot be read or has another size.
 
-    The size is compared before reading, so a hostile file of another size is never read.
+    The size is compared before reading, so a hostile file of another size is never read. A
+    file the Ledger may not open raises ``PermissionError``: it is unreadable, not changed.
     """
     try:
         descriptor = open_below(root_fd, path)
+    except PermissionError:
+        raise
     except OSError:
         return None
     with os.fdopen(descriptor, "rb") as stream:

@@ -60,7 +60,7 @@ from neptune_ledger.catalog.index import (
     package_rows,
     projection_columns,
 )
-from neptune_ledger.catalog.manifest import write_manifest
+from neptune_ledger.catalog.manifest import ManifestNotWritten, write_manifest
 from neptune_ledger.catalog.migrate import tenant_schema
 from neptune_ledger.catalog.projection import SchemaVersion, shipped_registry
 from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, check_sources
@@ -201,21 +201,28 @@ class PostgresCatalog:
     def register(self, package_root: str | os.PathLike[str]) -> Registration:
         """Catalogue the package at ``package_root``; see ``CatalogApi.register``.
 
-        With a manifest path, a registration that adds a package then rewrites the manifest. An
-        ``OSError`` writing it propagates after the registration has committed; ``ledger
-        manifest`` writes it again.
+        With a manifest path, a registration that is not refused then rewrites the manifest, so
+        registering a package again repairs a manifest an earlier failure left stale. A failure
+        writing it raises ``ManifestNotWritten``, which carries the committed registration.
         """
         registration = self._register(package_root, None)
-        if self._manifest is not None and registration.outcome == "registered":
-            write_manifest(self._connection(), self._tenant, self._manifest)
+        if self._manifest is not None and registration.outcome != "refused":
+            try:
+                write_manifest(self._connection(), self._tenant, self._manifest)
+            except (OSError, psycopg.Error) as exc:
+                raise ManifestNotWritten(registration, exc) from exc
         return registration
 
     def replay(self, package_root: str, tick: TransactionKey) -> Registration:
         """Register ``package_root`` at ``tick``, a registration-log entry, on a rebuild.
 
         The clock is advanced with ``replay_tx`` instead of ``next_tx`` (ADR 0002 §4), so the
-        rebuilt log holds the logged transaction key. Everything else is ``register``.
+        rebuilt log holds the logged transaction key. A logged root that now resolves elsewhere
+        (a link put on one of its directories) is refused, since the rebuilt log would record
+        another root; the manifest names the new root if the package really moved.
         """
+        if os.path.realpath(package_root) != package_root:
+            return self._unreadable(package_root)
         return self._register(package_root, tick)
 
     def _register(

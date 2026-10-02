@@ -48,8 +48,10 @@ Conn = psycopg.Connection[tuple[Any, ...]]
 @dataclass(frozen=True)
 class RebuildReport:
     """What a rebuild did. ``refused`` changed nothing: ``failed`` is the manifest entry whose
-    registration did not succeed and ``registration`` its answer, or ``unlisted`` names the
-    registered packages the manifest leaves out (and ``prune`` was not given)."""
+    registration did not succeed and ``registration`` its answer; or ``unlisted`` names the
+    registered packages the manifest leaves out (and ``prune`` was not given); or
+    ``other_versions`` names the Ledger versions of entries this version would re-index into a
+    new lineage (and ``new_lineage`` was not given)."""
 
     outcome: Literal["rebuilt", "refused"]
     tenant_id: str
@@ -58,6 +60,7 @@ class RebuildReport:
     failed: Entry | None = None
     registration: Registration | None = None
     unlisted: tuple[str, ...] = field(default=())
+    other_versions: tuple[str, ...] = field(default=())
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -72,6 +75,8 @@ class RebuildReport:
             out["registration"] = codec.to_json(self.registration)
         if self.unlisted:
             out["unlisted"] = list(self.unlisted)
+        if self.other_versions:
+            out["other_versions"] = list(self.other_versions)
         return out
 
 
@@ -90,18 +95,23 @@ def rebuild(
     package_roots: Sequence[str] | None,
     ledger_version: str = neptune_ledger.__version__,
     prune: bool = False,
+    new_lineage: bool = False,
 ) -> RebuildReport:
     """Replace ``manifest.tenant_id``'s catalog with one rebuilt from the manifest's packages.
 
     Entries are replayed in ``tx_seq`` order at their logged ticks, from their logged roots, which
     must lie inside ``package_roots`` (ADR 0006 §3; ``None`` for no limit). With the Ledger version
     every entry names, the result is the original catalog byte for byte, transaction times included
-    (ADR 0002 §4). With another version it is a new catalog lineage over the same transaction keys.
-    A registered package the manifest does not list is refused unless ``prune``: a stale manifest
+    (ADR 0002 §4). An entry of another version is refused unless ``new_lineage``: the rebuilt
+    catalog would be a new lineage over the same transaction keys, logging this version. A
+    registered package the manifest does not list is refused unless ``prune``: a stale manifest
     must not silently drop packages. Store failures raise ``CatalogUnavailable``.
     """
     tenant = manifest.tenant_id
     schema = tenant_schema(tenant)
+    others = sorted({e.ledger_version for e in manifest.registrations} - {ledger_version})
+    if others and not new_lineage:
+        return RebuildReport("refused", tenant, 0, ledger_version, other_versions=tuple(others))
     try:
         with psycopg.connect(conninfo, autocommit=True) as conn:
             try:
@@ -144,12 +154,19 @@ def rebuild(
 
 
 def _unlisted(conn: Conn, schema: str, manifest: Manifest) -> list[str]:
-    """Package ids the existing catalog holds and the manifest does not, in byte order."""
+    """Package ids the existing catalog holds and the manifest does not, in byte order.
+
+    The clock row is locked first, as every registration does (ADR 0004 §4): one in flight
+    commits before the log is read, and none can start until the rebuild ends, so no package is
+    registered between this check and the drop.
+    """
     exists = conn.execute(
-        "SELECT to_regclass(%s) IS NOT NULL", (f"{schema}.registration_log",)
+        "SELECT to_regclass(%s) IS NOT NULL AND to_regclass(%s) IS NOT NULL",
+        (f"{schema}.registration_log", f"{schema}.tx_clock"),
     ).fetchone()
     if exists is None or not exists[0]:
         return []
+    conn.execute(sql.SQL("SELECT 1 FROM {}.tx_clock FOR UPDATE").format(sql.Identifier(schema)))
     held = {
         str(row[0])
         for row in conn.execute(
@@ -164,7 +181,11 @@ def dump(conninfo: str, tenant_id: str, out: IO[bytes]) -> None:
     """Write the tenant's catalog to ``out`` canonically, from one snapshot (ADR 0012 §3)."""
     schema = tenant_schema(tenant_id)
     try:
-        with psycopg.connect(conninfo) as conn:
+        with psycopg.connect(conninfo, autocommit=True) as conn:
+            # Shared with other dumps, exclusive against a rebuild or a migration, and taken
+            # before the snapshot: a dump never reads a snapshot older than a rebuild's tables.
+            conn.execute("SELECT pg_advisory_lock_shared(hashtext(%s))", (schema,))
+            conn.autocommit = False
             conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
             conn.read_only = True
             # Text forms are fixed whatever the server's or the session's defaults are.

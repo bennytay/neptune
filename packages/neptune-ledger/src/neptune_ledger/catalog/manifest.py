@@ -10,10 +10,12 @@ the newest committed log, and replaces the file atomically. ``Manifest.from_byte
 as hostile input: anything but the exact shape this module writes is ``ManifestError``.
 """
 
+import contextlib
 import itertools
 import os
 import re
 import threading
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
@@ -22,6 +24,7 @@ import psycopg
 from psycopg import sql
 
 from neptune.identity import canonical_json
+from neptune.store.durable import fsync_directory
 from neptune_ledger.catalog.migrate import tenant_schema
 
 FORMAT: Final = "neptune-ledger/registry-manifest"
@@ -42,6 +45,18 @@ Conn = psycopg.Connection[tuple[Any, ...]]
 
 class ManifestError(ValueError):
     """The bytes are not a registry manifest this Ledger writes."""
+
+
+class ManifestNotWritten(RuntimeError):
+    """A registration committed, but the manifest could not be rewritten (ADR 0012 §1).
+
+    ``registration`` is the committed answer. Registering the same package again, or ``ledger
+    manifest``, rewrites the file.
+    """
+
+    def __init__(self, registration: Any, cause: BaseException) -> None:
+        super().__init__(f"the registry manifest was not rewritten: {cause}")
+        self.registration = registration
 
 
 @dataclass(frozen=True)
@@ -174,18 +189,33 @@ def write_manifest(conn: Conn, tenant_id: str, path: str | os.PathLike[str]) -> 
 
 
 def replace_file(path: Path, data: bytes) -> None:
-    """Write ``data`` to ``path`` atomically: a sibling temporary file, fsync, rename."""
+    """Write ``data`` to ``path`` atomically and durably (``replacing``)."""
+    with replacing(path) as fd:
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view) :]
+
+
+@contextlib.contextmanager
+def replacing(path: Path) -> Iterator[int]:
+    """A descriptor to write ``path``'s new content to; on success it replaces ``path``.
+
+    The content goes to a new sibling file (``O_EXCL``, so nothing planted at its name is
+    written through), is fsynced and renamed over ``path``, and the directory is fsynced. On any
+    failure the sibling is removed and ``path`` is unchanged.
+    """
     temporary = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+    temporary.unlink(missing_ok=True)  # a leftover of a crashed writer with the same ids
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    fd = os.open(temporary, flags, 0o644)
     try:
         try:
-            view = memoryview(data)
-            while view:
-                view = view[os.write(fd, view) :]
+            yield fd
             os.fsync(fd)
         finally:
             os.close(fd)
         temporary.replace(path)
+        fsync_directory(path.parent)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise

@@ -39,7 +39,8 @@ ledger --dsn "$DSN" --tenant acme --manifest /srv/ledger/acme.manifest.json \
   the tenant's package roots. Any refusal rolls everything back and names the entry; the old
   catalog stands. Readers wait until commit and never see a partial catalog.
 - A registered package the manifest does not list refuses the rebuild unless `--prune` is
-  given, so a stale manifest cannot drop packages silently.
+  given, so a stale manifest cannot drop packages silently. The rebuild locks the clock first,
+  so no registration slips in between that check and the drop.
 - Live registration continues after the last replayed tick.
 
 **Limits.**
@@ -47,10 +48,11 @@ ledger --dsn "$DSN" --tenant acme --manifest /srv/ledger/acme.manifest.json \
 - *Another Ledger version* re-indexes the same packages over the same transaction keys. That is
   a new catalog lineage, by design (ADR 0002 §4, ADR 0009 §6): its log records the new version,
   and its rows follow the new version's migrations and projections. Upgrading the Ledger is
-  exactly this rebuild.
+  exactly this rebuild, and it needs `--new-lineage`. Keep the old manifest: it is the old
+  lineage's only record.
 - *A moved or damaged package* refuses the rebuild with that registration's findings
-  (`package_unreadable`, `file_digest_mismatch`, …). Restore it, or edit its manifest root to
-  the new location. The rebuilt log then records the new root, and nothing else differs.
+  (`package_unreadable`, `file_digest_mismatch`, …), as does a logged root that now resolves
+  through a link. Restore the package, or edit its manifest root to its real new location. The rebuilt log then records the new root, and nothing else differs.
 - *Conflicting packages* (ADR 0005 §2): whichever registered first stands and the other was
   refused, so it is not in the log. Order independence holds for sets of packages that register
   without conflict.

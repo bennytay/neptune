@@ -12,7 +12,8 @@ unreachable store or a manifest that cannot be read or written.
 - ``dump``: the catalog as canonical JSON Lines (to ``--out``, else stdout; ADR 0012 §3).
 - ``rebuild --from MANIFEST``: drop the tenant's catalog and replay the manifest's packages into
   a fresh one, in one transaction (ADR 0012 §2). ``--prune`` allows dropping packages the
-  manifest does not list.
+  manifest does not list; ``--new-lineage`` allows re-indexing entries another Ledger version
+  logged.
 
 Configuration, by flag or environment:
 
@@ -35,7 +36,14 @@ import psycopg
 
 from neptune.identity import canonical_json
 from neptune_ledger.api import CatalogUnavailable, codec
-from neptune_ledger.catalog.manifest import Manifest, ManifestError, read_manifest, write_manifest
+from neptune_ledger.catalog.manifest import (
+    Manifest,
+    ManifestError,
+    ManifestNotWritten,
+    read_manifest,
+    replacing,
+    write_manifest,
+)
 from neptune_ledger.catalog.migrate import MigrationError, apply_migrations
 from neptune_ledger.catalog.rebuild import dump, rebuild
 from neptune_ledger.catalog.registry import PostgresCatalog
@@ -69,6 +77,11 @@ def _parser() -> argparse.ArgumentParser:
     rebuilt.add_argument("--from", dest="source", required=True, help="the registry manifest")
     rebuilt.add_argument(
         "--prune", action="store_true", help="allow dropping packages the manifest does not list"
+    )
+    rebuilt.add_argument(
+        "--new-lineage",
+        action="store_true",
+        help="allow re-indexing entries another Ledger version logged (a new catalog lineage)",
     )
     _package_roots(rebuilt)
     verify = commands.add_parser("verify", help="re-hash a registered package at its stored root")
@@ -128,7 +141,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             with PostgresCatalog(
                 args.dsn, args.tenant, package_roots=roots, manifest=args.manifest
             ) as catalog:
-                registration = catalog.register(args.root)
+                try:
+                    registration = catalog.register(args.root)
+                except ManifestNotWritten as exc:  # committed: report it, then the problem
+                    _print(codec.dumps(exc.registration))
+                    _error(f"{exc}; run `ledger manifest` or register the package again")
+                    return PROBLEM
             _print(codec.dumps(registration))
             return OK if registration.outcome != "refused" else PROBLEM
         if args.command == "manifest":
@@ -139,8 +157,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     sys.stdout.write(read_manifest(conn, args.tenant).to_bytes().decode())
             return OK
         if args.command == "dump":
-            if args.out:
-                with Path(args.out).open("wb") as out:
+            if args.out:  # replaced only by a complete dump
+                with replacing(Path(args.out)) as fd, os.fdopen(fd, "wb", closefd=False) as out:
                     dump(args.dsn, args.tenant, out)
             else:
                 dump(args.dsn, args.tenant, sys.stdout.buffer)
@@ -174,7 +192,9 @@ def _rebuild(args: argparse.Namespace) -> int:
         raise ManifestError(
             f"{args.source} is tenant {manifest.tenant_id!r}'s manifest, not {args.tenant!r}'s"
         )
-    report = rebuild(args.dsn, manifest, package_roots=roots, prune=args.prune)
+    report = rebuild(
+        args.dsn, manifest, package_roots=roots, prune=args.prune, new_lineage=args.new_lineage
+    )
     if report.outcome == "rebuilt" and args.manifest:
         with psycopg.connect(args.dsn, autocommit=True) as conn:
             write_manifest(conn, args.tenant, args.manifest)

@@ -232,6 +232,19 @@ def test_a_directory_the_ledger_may_not_read_is_unreadable_not_unsafe(
     assert _codes(result) == [("package_unreadable", "records")]
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a file whatever its mode")
+def test_a_file_the_ledger_may_not_read_is_unreadable_not_changed(
+    catalog: PostgresCatalog, drone: WorkedPackage
+) -> None:
+    table = drone.root / "records" / "run.jsonl"
+    table.chmod(0)
+    try:
+        result = catalog.register(drone.root)
+    finally:
+        table.chmod(0o644)
+    assert _codes(result) == [("package_unreadable", "records/run.jsonl")]
+
+
 def test_verify_hashes_a_replaced_manifest_without_holding_it(
     catalog: PostgresCatalog, drone: WorkedPackage, monkeypatch: pytest.MonkeyPatch
 ) -> None:

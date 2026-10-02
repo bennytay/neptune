@@ -9,6 +9,7 @@ continues the clock or builds a new lineage.
 
 import io
 import random
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Final
 
@@ -19,7 +20,13 @@ from conftest import new_database
 from neptune.identity import canonical_json
 from neptune.model.knowledge import Known
 from neptune_ledger.api import CatalogUnavailable
-from neptune_ledger.catalog.manifest import FORMAT, Manifest, ManifestError, read_manifest
+from neptune_ledger.catalog.manifest import (
+    FORMAT,
+    Manifest,
+    ManifestError,
+    ManifestNotWritten,
+    read_manifest,
+)
 from neptune_ledger.catalog.migrate import apply_migrations
 from neptune_ledger.catalog.rebuild import LEFT_OUT, TRANSACTION_COLUMNS, dump, rebuild
 from neptune_ledger.catalog.registry import PostgresCatalog
@@ -200,9 +207,10 @@ def test_the_manifest_is_rewritten_after_every_registration_that_adds_a_package(
             ]
         written = path.read_bytes()
         path.unlink()
-        assert catalog.register(packages[0].root).outcome == "already_registered"
         assert catalog.register(tmp_path / "nowhere").outcome == "refused"
-        assert not path.exists()  # neither changed the log
+        assert not path.exists()  # a refusal writes nothing
+        assert catalog.register(packages[0].root).outcome == "already_registered"
+        assert path.read_bytes() == written  # registering again repairs a stale manifest
     with psycopg.connect(pg_uri) as conn:
         assert read_manifest(conn, "acme").to_bytes() == written
     entry = Manifest.from_bytes(written).registrations[0]
@@ -212,6 +220,21 @@ def test_the_manifest_is_rewritten_after_every_registration_that_adds_a_package(
         "0.0.1",
     )
     assert not list(tmp_path.glob(".manifest.json.*"))  # the temporary file was renamed
+
+
+def test_a_manifest_that_cannot_be_written_still_reports_the_registration(
+    pg_uri: str, packages: list[WorkedPackage], tmp_path: Path
+) -> None:
+    path = tmp_path / "later" / "manifest.json"
+    with psycopg.connect(pg_uri, autocommit=True) as conn:
+        apply_migrations(conn, "acme")
+    with PostgresCatalog(pg_uri, "acme", package_roots=None, manifest=path) as catalog:
+        with pytest.raises(ManifestNotWritten) as caught:
+            catalog.register(packages[0].root)
+        assert caught.value.registration.outcome == "registered"
+        path.parent.mkdir()
+        assert catalog.register(packages[0].root).outcome == "already_registered"
+    assert len(Manifest.from_bytes(path.read_bytes()).registrations) == 1
 
 
 def test_ledger_manifest_writes_the_file_or_stdout(
@@ -332,6 +355,22 @@ def test_a_root_outside_the_package_roots_is_refused(
     assert [f.code for f in report.registration.findings] == ["package_unreadable"]
 
 
+def test_a_logged_root_that_now_resolves_elsewhere_is_refused(
+    pg_uri: str, registered: Manifest, tmp_path: Path
+) -> None:
+    """The rebuilt log would record another root, so the rebuild says so instead."""
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path / "packages", target_is_directory=True)
+    first = registered.registrations[0]
+    moved = Path(first.root_locator).relative_to(tmp_path / "packages")
+    through = replace(first, root_locator=str(link / moved))
+    manifest = Manifest("acme", (through, *registered.registrations[1:]))
+    report = rebuild(pg_uri, manifest, package_roots=None)
+    assert (report.outcome, report.failed) == ("refused", through)
+    assert report.registration is not None
+    assert [f.code for f in report.registration.findings] == ["package_unreadable"]
+
+
 def test_a_stale_manifest_does_not_drop_packages_unless_pruned(
     pg_uri: str, registered: Manifest
 ) -> None:
@@ -363,7 +402,11 @@ def test_live_registration_continues_after_the_replayed_ticks(
 def test_another_ledger_version_rebuilds_a_new_lineage_over_the_same_keys(
     pg_uri: str, registered: Manifest
 ) -> None:
-    report = rebuild(pg_uri, registered, package_roots=None, ledger_version="0.0.2")
+    refused = rebuild(pg_uri, registered, package_roots=None, ledger_version="0.0.2")
+    assert (refused.outcome, refused.other_versions) == ("refused", ("0.0.1",))
+    report = rebuild(
+        pg_uri, registered, package_roots=None, ledger_version="0.0.2", new_lineage=True
+    )
     assert (report.outcome, report.ledger_version) == ("rebuilt", "0.0.2")
     with psycopg.connect(pg_uri) as conn:
         now = read_manifest(conn, "acme")
@@ -398,7 +441,11 @@ def test_the_cli_refuses_another_tenants_manifest_and_a_rebuild_without_roots(
     assert _cli(pg_uri, "rebuild", "--from", str(tmp_path / "missing.json"), *roots) == 2
 
 
-def test_dumping_a_tenant_without_a_catalog_is_unavailable(pg_uri: str) -> None:
+def test_dumping_a_tenant_without_a_catalog_is_unavailable(pg_uri: str, tmp_path: Path) -> None:
     with pytest.raises(CatalogUnavailable):
         _dump(pg_uri, "nobody")
-    assert _cli(pg_uri, "dump", tenant="nobody") == 2
+    out = tmp_path / "dump.jsonl"
+    out.write_bytes(b"an earlier dump\n")
+    assert _cli(pg_uri, "dump", "--out", str(out), tenant="nobody") == 2
+    assert out.read_bytes() == b"an earlier dump\n"  # replaced only by a complete dump
+    assert [p.name for p in tmp_path.iterdir()] == ["dump.jsonl"]

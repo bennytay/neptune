@@ -35,13 +35,15 @@ order. The guarantee must say what is compared, and in which order a rebuild reg
    `registrations` lists every `registration_log` row in `tx_seq` order: `tx_seq`, `tx_time`,
    `package_id`, `root_locator` and `ledger_version`. It is a function of the log alone, so a
    catalog always writes the same bytes.
-   - `PostgresCatalog(manifest=path)` rewrites it after every registration that adds a package.
-     `already_registered` and `refused` leave the log, and so the file, unchanged. The writer
-     takes a per-tenant transaction advisory lock, reads the log after taking it, and replaces
-     the file atomically (sibling temporary file, fsync, rename) while still holding the lock. So
-     after concurrent registrations, the last writer has read every committed row. A failed
-     write raises `OSError` after the registration has committed; `ledger manifest` rewrites the
-     file from the catalog.
+   - `PostgresCatalog(manifest=path)` rewrites it after every registration that is not
+     refused. `already_registered` rewrites it too, so registering a package again repairs a
+     manifest that an earlier failure left stale. The writer takes a per-tenant transaction
+     advisory lock and reads the log after taking it. While still holding the lock, it replaces
+     the file atomically and durably: a new `O_EXCL` sibling, fsync, rename, then fsync of the
+     directory. So after concurrent registrations, the last writer has read every committed row.
+     A failed write raises `ManifestNotWritten`, which carries the committed registration; the
+     CLI prints that registration and exits 1. `ledger manifest` also rewrites the file from the
+     catalog.
    - `Manifest.from_bytes` treats the file as hostile. It accepts only canonical bytes of exactly
      that shape: `tx_seq` rising, `tx_time` never falling, each package once, roots absolute and
      free of NUL, and every value in the shape its log column requires. Anything else is
@@ -53,23 +55,32 @@ order. The guarantee must say what is compared, and in which order a rebuild reg
    `PostgresCatalog.replay` advances the clock with `replay_tx(tx_seq, tx_time)` instead of
    `next_tx`, so the log, the package rows, every registration key and the thread index carry
    the original keys. It also checks the tenant's package roots (ADR 0006 §3), because a manifest
-   is input. The catalog borrows the rebuild's connection and writes each registration in a
+   is input. A logged root that now resolves to another path (a link put on one of its
+   directories) is refused as `package_unreadable`, because the rebuilt log would record another
+   root. The catalog borrows the rebuild's connection and writes each registration in a
    savepoint. If any entry is not `registered`, the whole transaction rolls back and the old
    catalog stands. The report names the entry and its registration's findings. Readers block on
    the dropped schema's locks until commit, so they never see a partial catalog.
    - **Same Ledger version, same catalog.** If every entry names the running Ledger version, the
      result is the original catalog byte for byte, transaction times included: ADR 0002 §4's
-     guarantee. If an entry names another version, the rebuild is a new catalog lineage over the
-     same transaction keys (ADR 0002 §4, ADR 0009 §6). Its log records the running version, and
-     `as_of` points held by consumers keep their meaning.
-   - **A stale manifest drops nothing by accident.** Before dropping, the rebuild reads the
-     existing log. A registered package that the manifest leaves out refuses the rebuild and is
-     listed in the report, unless `prune` (`--prune`) is given. With `prune`, the existence check
-     is skipped, so a catalog too damaged to read can still be replaced.
+     guarantee. If an entry names another version, the rebuild would be a new catalog lineage
+     over the same transaction keys (ADR 0002 §4, ADR 0009 §6). Its log would record the running
+     version, while `as_of` points held by consumers keep their meaning. Such a rebuild is
+     refused, with the other versions listed, unless `new_lineage` (`--new-lineage`) is given.
+     The old manifest is the only record of the old lineage, so keep it.
+   - **A stale manifest drops nothing by accident.** Before dropping, the rebuild locks the clock
+     row, as every registration does. A registration already in flight commits first, and no new
+     one starts until the rebuild ends. The rebuild then reads the existing log. A registered
+     package that the manifest leaves out refuses the rebuild and is listed in the report, unless
+     `prune` (`--prune`) is given. With `prune`, this check is skipped, so a catalog too damaged
+     to read can still be replaced.
 3. **The dump is canonical and leaves out registration order.** `dump(conninfo, tenant, out)`,
-   or `ledger dump`, reads one `REPEATABLE READ READ ONLY` snapshot. It sets `bytea_output`,
-   `extra_float_digits` and `TimeZone`, so text forms do not depend on session defaults. It then
-   writes JSON Lines:
+   or `ledger dump`, first takes the tenant's migration lock in shared mode. A rebuild or a
+   migration in progress therefore finishes before the dump takes its snapshot; otherwise an old
+   snapshot could read a rebuilt schema as empty. It then reads one `REPEATABLE READ READ ONLY`
+   snapshot. It sets `bytea_output`, `extra_float_digits` and `TimeZone`, so text forms do not
+   depend on session defaults. It writes JSON Lines, and `--out` replaces its file only with a
+   complete dump:
    - a header `{format: "neptune-ledger/catalog-dump", format_version: 1, left_out}`;
    - per table, in byte order of name (partitioned `record` as one table): `{columns, table}`
      with the kept columns in byte order, then one object per row mapping each column to its
