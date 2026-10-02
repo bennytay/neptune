@@ -230,7 +230,7 @@ def test_a_civil_clock_always_has_a_zone_so_absence_is_refused(state: Any) -> No
 
 def test_the_zone_names_a_record_id() -> None:
     with pytest.raises(ValueError):
-        replace(zone(Known("UTC")), domain="Europe/Berlin")
+        replace(zone(Known("UTC")), domain="Europe/Berlin")  # type: ignore[arg-type]
 
 
 # --- Lists that can be blank -------------------------------------------------------------------
@@ -292,6 +292,40 @@ def test_list_state_lines_are_refused_below_their_version_and_in_another_spellin
         MaintenanceEvent.from_json({**data, "parts": "none"})
     with pytest.raises(ValueError, match="KnownAbsent"):
         work_order(parts=KnownAbsent(cell("parts_replaced")))
+    # An item in doubt is an Ambiguous item of a Known list; the whole list is never Ambiguous.
+    with pytest.raises(ValueError, match="Ambiguous"):
+        work_order(
+            machines=Ambiguous[tuple[Any, ...]](
+                (
+                    Candidate((Known(LogicalId("robot.serial", "ARM-3")),), cell("robot")),
+                    Candidate((Known(LogicalId("robot.serial", "ARM-4")),), cell("robot")),
+                )
+            )
+        )
+    in_doubt = Ambiguous(
+        (
+            Candidate(LogicalId("robot.serial", "ARM-3"), cell("robot")),
+            Candidate(LogicalId("robot.serial", "ARM-8"), cell("robot")),
+        )
+    )
+    assert line(work_order(machines=Known((in_doubt,))))["machines"][0]["knowledge"] == "ambiguous"
+
+
+@pytest.mark.parametrize(
+    "parts",
+    [
+        {"knowledge": "known_absent", "provenance": cell("parts_replaced").to_json()},
+        {"knowledge": "known", "value": []},  # the bare array written another way
+        {"knowledge": "ambiguous", "candidates": [{"value": []}, {"value": [{}]}]},
+        "none",
+    ],
+    ids=["known_absent", "inherited_known_object", "ambiguous", "text"],
+)
+def test_the_schema_refuses_list_shapes_the_reader_refuses(parts: Any) -> None:
+    data = {**line(work_order()), "parts": parts}
+    assert list(VALIDATOR.iter_errors(data)) != []
+    with pytest.raises(ValueError):
+        MaintenanceEvent.from_json(data)
 
 
 def test_same_row_same_bytes() -> None:

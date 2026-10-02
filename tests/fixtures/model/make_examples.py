@@ -1005,9 +1005,8 @@ class Records:
                 found += [self.ref(namespace, f"{pointer}/{i}") for i in range(len(value))]
             else:
                 found.append(self.ref(namespace, pointer))
-        ordered: tuple[Knowledge[LogicalId], ...] = tuple(
-            sorted(found, key=lambda known: (known.value.namespace, known.value.value))
-        )
+        found.sort(key=lambda known: (known.value.namespace, known.value.value))
+        ordered: tuple[Knowledge[LogicalId], ...] = tuple(found)
         return Known(ordered)
 
     def time(self, pointer: str) -> Known[Timestamp]:

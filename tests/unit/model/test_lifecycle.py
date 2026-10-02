@@ -276,7 +276,7 @@ BAD: Final = [
         Known((Known(LogicalId("m", "a")), Known(LogicalId("m", "a")))),
     ),
     (
-        "a repeated id in one candidate",
+        "an ambiguous whole list",
         "machines",
         Ambiguous[tuple[Any, ...]](
             (

@@ -5,10 +5,11 @@ is a fact like any other value, so a blank cell cannot become ``()`` (non-negoti
 ``Listed[T]`` field is ``Knowledge[tuple[T, ...]]``:
 
 - ``Known(())`` is a list the declaration states is empty; ``Known((a, b))`` its items.
-- ``Unknown`` is a list it leaves blank, ``NotCovered`` one its format has no place for,
-  ``NotApplicable`` one that does not apply, and ``Ambiguous`` one with several readings (a cell
-  whose separator is in doubt). ``KnownAbsent`` is refused: "declared empty" is ``Known(())``,
-  one fact with one encoding.
+- ``Unknown`` is a list it leaves blank, ``NotCovered`` one its format has no place for, and
+  ``NotApplicable`` one that does not apply.
+- ``KnownAbsent`` is refused: "declared empty" is ``Known(())``, one fact with one encoding.
+  ``Ambiguous`` is refused too: an item in doubt is an ``Ambiguous`` item of a ``Known`` list,
+  so a reader never finds a stated id inside a rejected reading of the whole list.
 
 Kinds are frozen (ADR 0023 §1), so the JSON stays what the kind's first version wrote wherever it
 can: a ``Known`` list that inherits the record's provenance is the bare array. Every other state
@@ -64,10 +65,13 @@ def check_listed(
     state: Knowledge[tuple[Any, ...]],
     check_items: Callable[[str, tuple[Any, ...]], None],
 ) -> None:
-    """A state, never a bare tuple or ``KnownAbsent``; ``check_items`` checks each list."""
+    """A state, never a bare tuple, ``KnownAbsent`` or ``Ambiguous``; ``check_items`` checks
+    each list."""
     if isinstance(state, KnownAbsent):
         raise ValueError(f"{name}: a list declared empty is Known(()), not KnownAbsent")
-    if not isinstance(state, Known | Unknown | NotCovered | NotApplicable | Ambiguous):
+    if isinstance(state, Ambiguous):
+        raise ValueError(f"{name}: a list is Known with Ambiguous items, not Ambiguous whole")
+    if not isinstance(state, Known | Unknown | NotCovered | NotApplicable):
         raise TypeError(f"{name} must be a Knowledge state of a tuple, got {state!r}")
     for items in values_of(state):
         check_items(name, items)

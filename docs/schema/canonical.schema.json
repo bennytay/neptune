@@ -5745,1076 +5745,6 @@
         }
       ]
     },
-    "Knowledge_list_of_ChangeItem": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            },
-            "value": {
-              "items": {
-                "$ref": "#/$defs/ChangeItem"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "knowledge",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known_absent"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge",
-            "provenance"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "enum": [
-                "unknown",
-                "not_covered"
-              ]
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "not_applicable"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "candidates": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "provenance": {
-                    "$ref": "#/$defs/Provenance"
-                  },
-                  "value": {
-                    "items": {
-                      "$ref": "#/$defs/ChangeItem"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              },
-              "minItems": 2,
-              "type": "array"
-            },
-            "knowledge": {
-              "const": "ambiguous"
-            }
-          },
-          "required": [
-            "candidates",
-            "knowledge"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Knowledge_list_of_Hazard": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            },
-            "value": {
-              "items": {
-                "$ref": "#/$defs/Hazard"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "knowledge",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known_absent"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge",
-            "provenance"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "enum": [
-                "unknown",
-                "not_covered"
-              ]
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "not_applicable"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "candidates": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "provenance": {
-                    "$ref": "#/$defs/Provenance"
-                  },
-                  "value": {
-                    "items": {
-                      "$ref": "#/$defs/Hazard"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              },
-              "minItems": 2,
-              "type": "array"
-            },
-            "knowledge": {
-              "const": "ambiguous"
-            }
-          },
-          "required": [
-            "candidates",
-            "knowledge"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Knowledge_list_of_InventoryItem": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            },
-            "value": {
-              "items": {
-                "$ref": "#/$defs/InventoryItem"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "knowledge",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known_absent"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge",
-            "provenance"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "enum": [
-                "unknown",
-                "not_covered"
-              ]
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "not_applicable"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "candidates": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "provenance": {
-                    "$ref": "#/$defs/Provenance"
-                  },
-                  "value": {
-                    "items": {
-                      "$ref": "#/$defs/InventoryItem"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              },
-              "minItems": 2,
-              "type": "array"
-            },
-            "knowledge": {
-              "const": "ambiguous"
-            }
-          },
-          "required": [
-            "candidates",
-            "knowledge"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Knowledge_list_of_Knowledge_LogicalId": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            },
-            "value": {
-              "items": {
-                "$ref": "#/$defs/Knowledge_LogicalId"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "knowledge",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known_absent"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge",
-            "provenance"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "enum": [
-                "unknown",
-                "not_covered"
-              ]
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "not_applicable"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "candidates": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "provenance": {
-                    "$ref": "#/$defs/Provenance"
-                  },
-                  "value": {
-                    "items": {
-                      "$ref": "#/$defs/Knowledge_LogicalId"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              },
-              "minItems": 2,
-              "type": "array"
-            },
-            "knowledge": {
-              "const": "ambiguous"
-            }
-          },
-          "required": [
-            "candidates",
-            "knowledge"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Knowledge_list_of_Knowledge_string": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            },
-            "value": {
-              "items": {
-                "$ref": "#/$defs/Knowledge_string"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "knowledge",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known_absent"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge",
-            "provenance"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "enum": [
-                "unknown",
-                "not_covered"
-              ]
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "not_applicable"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "candidates": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "provenance": {
-                    "$ref": "#/$defs/Provenance"
-                  },
-                  "value": {
-                    "items": {
-                      "$ref": "#/$defs/Knowledge_string"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              },
-              "minItems": 2,
-              "type": "array"
-            },
-            "knowledge": {
-              "const": "ambiguous"
-            }
-          },
-          "required": [
-            "candidates",
-            "knowledge"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Knowledge_list_of_PartReplacement": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            },
-            "value": {
-              "items": {
-                "$ref": "#/$defs/PartReplacement"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "knowledge",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known_absent"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge",
-            "provenance"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "enum": [
-                "unknown",
-                "not_covered"
-              ]
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "not_applicable"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "candidates": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "provenance": {
-                    "$ref": "#/$defs/Provenance"
-                  },
-                  "value": {
-                    "items": {
-                      "$ref": "#/$defs/PartReplacement"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              },
-              "minItems": 2,
-              "type": "array"
-            },
-            "knowledge": {
-              "const": "ambiguous"
-            }
-          },
-          "required": [
-            "candidates",
-            "knowledge"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Knowledge_list_of_Score": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            },
-            "value": {
-              "items": {
-                "$ref": "#/$defs/Score"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "knowledge",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known_absent"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge",
-            "provenance"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "enum": [
-                "unknown",
-                "not_covered"
-              ]
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "not_applicable"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "candidates": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "provenance": {
-                    "$ref": "#/$defs/Provenance"
-                  },
-                  "value": {
-                    "items": {
-                      "$ref": "#/$defs/Score"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              },
-              "minItems": 2,
-              "type": "array"
-            },
-            "knowledge": {
-              "const": "ambiguous"
-            }
-          },
-          "required": [
-            "candidates",
-            "knowledge"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Knowledge_list_of_TestResult": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            },
-            "value": {
-              "items": {
-                "$ref": "#/$defs/TestResult"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "knowledge",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known_absent"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge",
-            "provenance"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "enum": [
-                "unknown",
-                "not_covered"
-              ]
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "not_applicable"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "candidates": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "provenance": {
-                    "$ref": "#/$defs/Provenance"
-                  },
-                  "value": {
-                    "items": {
-                      "$ref": "#/$defs/TestResult"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              },
-              "minItems": 2,
-              "type": "array"
-            },
-            "knowledge": {
-              "const": "ambiguous"
-            }
-          },
-          "required": [
-            "candidates",
-            "knowledge"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Knowledge_list_of_TimelineEntry": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            },
-            "value": {
-              "items": {
-                "$ref": "#/$defs/TimelineEntry"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "knowledge",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known_absent"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge",
-            "provenance"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "enum": [
-                "unknown",
-                "not_covered"
-              ]
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "not_applicable"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "candidates": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "provenance": {
-                    "$ref": "#/$defs/Provenance"
-                  },
-                  "value": {
-                    "items": {
-                      "$ref": "#/$defs/TimelineEntry"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              },
-              "minItems": 2,
-              "type": "array"
-            },
-            "knowledge": {
-              "const": "ambiguous"
-            }
-          },
-          "required": [
-            "candidates",
-            "knowledge"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Knowledge_list_of_ZoneLimit": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            },
-            "value": {
-              "items": {
-                "$ref": "#/$defs/ZoneLimit"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "knowledge",
-            "value"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "known_absent"
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge",
-            "provenance"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "enum": [
-                "unknown",
-                "not_covered"
-              ]
-            },
-            "provenance": {
-              "$ref": "#/$defs/Provenance"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "knowledge": {
-              "const": "not_applicable"
-            }
-          },
-          "required": [
-            "knowledge"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "candidates": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "provenance": {
-                    "$ref": "#/$defs/Provenance"
-                  },
-                  "value": {
-                    "items": {
-                      "$ref": "#/$defs/ZoneLimit"
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              },
-              "minItems": 2,
-              "type": "array"
-            },
-            "knowledge": {
-              "const": "ambiguous"
-            }
-          },
-          "required": [
-            "candidates",
-            "knowledge"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "Knowledge_list_of_string": {
       "anyOf": [
         {
@@ -7531,7 +6461,57 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/Knowledge_list_of_ChangeItem"
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/ChangeItem"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7544,7 +6524,57 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/Knowledge_list_of_Hazard"
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/Hazard"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7557,7 +6587,57 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/Knowledge_list_of_InventoryItem"
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/InventoryItem"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7570,7 +6650,57 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/Knowledge_list_of_Knowledge_LogicalId"
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/Knowledge_LogicalId"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7583,7 +6713,57 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/Knowledge_list_of_Knowledge_string"
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/Knowledge_string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7596,7 +6776,57 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/Knowledge_list_of_PartReplacement"
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/PartReplacement"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7609,7 +6839,57 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/Knowledge_list_of_Score"
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/Score"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7622,7 +6902,57 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/Knowledge_list_of_TestResult"
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/TestResult"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7635,7 +6965,57 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/Knowledge_list_of_TimelineEntry"
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/TimelineEntry"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7648,7 +7028,57 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/Knowledge_list_of_ZoneLimit"
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            },
+            "value": {
+              "items": {
+                "$ref": "#/$defs/ZoneLimit"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "enum": [
+                "unknown",
+                "not_covered"
+              ]
+            },
+            "provenance": {
+              "$ref": "#/$defs/Provenance"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
         }
       ]
     },

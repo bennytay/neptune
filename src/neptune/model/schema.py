@@ -141,13 +141,31 @@ class _Builder:
         return {"items": self.schema(item), "type": "array"}
 
     def _listed(self, knowledge: Any) -> JsonObject:
-        """A ``Listed`` field (ADR 0061 §5): the bare array, or a state whose value is one."""
+        """A ``Listed`` field (ADR 0061 §4, §5): the bare array, or a state other than
+        ``known_absent`` and ``ambiguous``; a ``known`` object cites its own provenance."""
         (known,) = [arg for arg in typing.get_args(knowledge) if typing.get_origin(arg) is Known]
         (items,) = typing.get_args(known)
         name = "Listed_" + _name(typing.get_args(items)[0])
-        return self.ref(
-            name, lambda: {"anyOf": [self._tuple(typing.get_args(items)), self._knowledge(items)]}
-        )
+
+        def build() -> JsonObject:
+            provenance = self.schema(Provenance)
+            array = self._tuple(typing.get_args(items))
+            return {
+                "anyOf": [
+                    array,  # Known, inheriting the record's provenance
+                    _obj({"knowledge": _const("known"), "provenance": provenance, "value": array}),
+                    _obj(
+                        {
+                            "knowledge": {"enum": ["unknown", "not_covered"]},
+                            "provenance": provenance,
+                        },
+                        optional=("provenance",),
+                    ),
+                    _obj({"knowledge": _const("not_applicable")}),
+                ]
+            }
+
+        return self.ref(name, build)
 
     def _knowledge(self, value_type: Any) -> JsonObject:
         """``Knowledge[T]`` (ADR 0011): six states, tagged by ``knowledge``."""

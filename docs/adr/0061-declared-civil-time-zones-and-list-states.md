@@ -88,8 +88,10 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
    - `Unknown` is a blank list.
    - `NotCovered` is a list the format has no place for, and `NotApplicable` one that does not
      apply.
-   - `Ambiguous` is a list with several readings, such as a cell whose separator is in doubt.
    - `KnownAbsent` is refused. "Declared empty" is `Known(())`: one fact with one encoding.
+   - `Ambiguous` is refused for a whole list. An item in doubt is an `Ambiguous` item of a `Known`
+     list, as before. Otherwise a consumer that indexes stated ids would find them inside a
+     rejected reading of the whole list.
 5. **The JSON keeps every version 4 byte.**
    - A `Known` list that inherits the record's provenance is written as the bare array, which is
      the version 4 shape.
@@ -97,7 +99,8 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
      (ADR 0011) whose value is that array.
    - A reader refuses a `Known` object that inherits its provenance, because that is the array
      written another way.
-   - In the JSON Schema, each such field is `Listed_<item>`: the array, or the state.
+   - In the JSON Schema, each such field is `Listed_<item>`: the array, a `known` object with its
+     own provenance, `unknown` or `not_covered`, or `not_applicable`.
 6. **A record is written at the lowest version whose readers read it.** This amends ADR 0037 §1:
    a field may gain states, as an enum gains members.
    - A lifecycle record whose lists are all bare arrays is written at 4, as before. One holding
@@ -131,6 +134,9 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
   Lost.
 - **Allowing `KnownAbsent` for a declared-empty list.** It gives two encodings of one fact, so two
   adapters could write different bytes for the same declaration. Lost.
+- **Allowing `Ambiguous` for a whole list** (a cell whose separator is in doubt). No source needs it
+  yet. Consumers that walk records for stated ids, such as the Ledger's index, would read every
+  candidate's items as stated. It can be added later as a state, by ADR. Lost.
 - **Widening every declared list in the model** (`Machine`, `Site` and `Asset` identifiers and
   aliases, calibration parameters). These are the ids and names one declaration gives the record
   itself, or the entries a parsed file holds. For them "none given" is exactly what `()` says, and
