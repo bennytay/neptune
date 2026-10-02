@@ -7,7 +7,8 @@ holds the ``tx_clock`` row lock from before the package lookup to commit (ADR 00
 ``resolve`` reads the source and record indexes registration wrote (ADR 0006 §5). ``thread``,
 ``threads_of`` and ``lineage`` read the derived thread index registration writes in the same
 transaction (ADR 0003, ADR 0010). ``query`` belongs to MVL-98 and raises ``NotImplementedError``
-until it lands.
+until it lands. With a ``manifest`` path, every registration rewrites the registry manifest, and
+``replay`` re-registers a package at its logged tick on a rebuild (ADR 0012).
 """
 
 import hashlib
@@ -59,6 +60,7 @@ from neptune_ledger.catalog.index import (
     package_rows,
     projection_columns,
 )
+from neptune_ledger.catalog.manifest import write_manifest
 from neptune_ledger.catalog.migrate import tenant_schema
 from neptune_ledger.catalog.projection import SchemaVersion, shipped_registry
 from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, check_sources
@@ -155,6 +157,11 @@ class PostgresCatalog:
     ``None`` means no limit; it is for single-tenant hosts and tests, and ``access/`` (MVL-99)
     configures roots before any multi-tenant deployment. One connection is opened lazily and
     reused; ``close`` (or ``with``) releases it.
+
+    ``manifest`` names the tenant's registry manifest, rewritten after every registration that
+    adds a package (ADR 0012 §1). ``connection`` is for a rebuild: an open connection inside the
+    caller's transaction, which the catalog borrows, writes through with savepoints, and never
+    opens again or closes.
     """
 
     def __init__(
@@ -165,6 +172,8 @@ class PostgresCatalog:
         package_roots: Sequence[str | os.PathLike[str]] | None,
         ledger_version: str = neptune_ledger.__version__,
         attempts: int = 5,
+        manifest: str | os.PathLike[str] | None = None,
+        connection: Conn | None = None,
     ) -> None:
         self._conninfo = conninfo
         self._tenant = tenant_id
@@ -172,6 +181,8 @@ class PostgresCatalog:
         self._roots = None if package_roots is None else tuple(Path(root) for root in package_roots)
         self._ledger_version = ledger_version
         self._attempts = attempts
+        self._manifest = manifest
+        self._borrowed = connection
         self._conn: Conn | None = None
 
     def __enter__(self) -> "PostgresCatalog":
@@ -183,12 +194,33 @@ class PostgresCatalog:
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()
-            self._conn = None
+            self._conn = None  # a borrowed connection is never closed here: its owner ends it
 
     # --- register ------------------------------------------------------------------------------
 
     def register(self, package_root: str | os.PathLike[str]) -> Registration:
-        """Catalogue the package at ``package_root``; see ``CatalogApi.register``."""
+        """Catalogue the package at ``package_root``; see ``CatalogApi.register``.
+
+        With a manifest path, a registration that adds a package then rewrites the manifest. An
+        ``OSError`` writing it propagates after the registration has committed; ``ledger
+        manifest`` writes it again.
+        """
+        registration = self._register(package_root, None)
+        if self._manifest is not None and registration.outcome == "registered":
+            write_manifest(self._connection(), self._tenant, self._manifest)
+        return registration
+
+    def replay(self, package_root: str, tick: TransactionKey) -> Registration:
+        """Register ``package_root`` at ``tick``, a registration-log entry, on a rebuild.
+
+        The clock is advanced with ``replay_tx`` instead of ``next_tx`` (ADR 0002 §4), so the
+        rebuilt log holds the logged transaction key. Everything else is ``register``.
+        """
+        return self._register(package_root, tick)
+
+    def _register(
+        self, package_root: str | os.PathLike[str], tick: TransactionKey | None
+    ) -> Registration:
         raw = Path(package_root)
         given = str(raw.absolute())  # as named, unresolved: a refusal reveals nothing more
         # Every link and ".." resolved in order (ADR 0006 §3); realpath, unlike Path.resolve on
@@ -221,7 +253,7 @@ class PostgresCatalog:
             return self._refusal(root, checked, [finding])
         try:
             outcome, key, locator, version = self._run(
-                lambda conn: self._write(conn, rows, threads, root), refuse_as=rows.package_id
+                lambda conn: self._write(conn, rows, threads, root, tick), refuse_as=rows.package_id
             )
         except _Refused as refused:
             return self._refusal(root, checked, refused.findings)
@@ -270,9 +302,17 @@ class PostgresCatalog:
         )
 
     def _write(
-        self, conn: Conn, rows: PackageRows, threads: ThreadRows, root: str
+        self,
+        conn: Conn,
+        rows: PackageRows,
+        threads: ThreadRows,
+        root: str,
+        replayed: TransactionKey | None,
     ) -> tuple[Literal["already_registered", "registered"], TransactionKey, str, str]:
-        """The registration transaction body (ADR 0002 §4, §6; ADR 0004 §4; ADR 0005 §2)."""
+        """The registration transaction body (ADR 0002 §4, §6; ADR 0004 §4; ADR 0005 §2).
+
+        ``replayed`` is the logged tick a rebuild replays; otherwise the clock allocates one.
+        """
         conn.execute("SELECT 1 FROM tx_clock FOR UPDATE")  # held to commit: serialises the tenant
         stored = conn.execute(
             "SELECT tx_seq, tx_time, root_locator, ledger_version FROM package"
@@ -286,9 +326,13 @@ class PostgresCatalog:
         unseen, remapped = self._schema_versions(conn, rows)
         if conflicts or remapped:
             raise _Refused([*remapped, *conflicts])
-        tick = conn.execute("SELECT tx_seq, tx_time FROM next_tx()").fetchone()
-        assert tick is not None
-        seq, at = int(tick[0]), str(tick[1])
+        if replayed is None:
+            tick = conn.execute("SELECT tx_seq, tx_time FROM next_tx()").fetchone()
+            assert tick is not None
+            seq, at = int(tick[0]), str(tick[1])
+        else:
+            seq, at = replayed.tx_seq, replayed.tx_time
+            conn.execute("SELECT replay_tx(%s, %s)", (seq, at))
         t, p = self._tenant, rows.package_id
         conn.execute(
             "INSERT INTO registration_log VALUES (%s, %s, %s, %s, %s, %s)",
@@ -920,6 +964,10 @@ class PostgresCatalog:
     # --- transactions --------------------------------------------------------------------------
 
     def _connection(self) -> Conn:
+        if self._borrowed is not None:  # never replaced: a write must not escape the rebuild
+            if self._borrowed.closed:
+                raise CatalogUnavailable("the rebuild's connection is closed")
+            return self._borrowed
         if self._conn is None or self._conn.closed:
             conn: Conn = psycopg.connect(self._conninfo, autocommit=True)
             conn.isolation_level = psycopg.IsolationLevel.READ_COMMITTED
