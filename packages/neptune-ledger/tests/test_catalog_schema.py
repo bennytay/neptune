@@ -61,6 +61,11 @@ def test_the_schema_has_the_tables_the_adr_names(catalog: Conn) -> None:
         "source",
         "source_location",
         "tenant",
+        "thread",
+        "thread_clock_mapping",
+        "thread_identity_link",
+        "thread_member",
+        "thread_unresolved",
         "transform",
         "transform_upstream",
         "tx_clock",
@@ -127,7 +132,8 @@ def test_transaction_time_and_world_time_never_share_a_table(catalog: Conn) -> N
     tx_tables = {t for t, c, _, _ in columns if c.startswith("tx_")}
     world_tables = {t for t, c, _, _ in columns if c.startswith("world_")}
     assert tx_tables == {"package", "registration_log"}  # package copies its log entry
-    assert all(t == "record" or t.startswith("record_") for t in world_tables)
+    # thread_member copies its record's world time for the thread index (ADR 0010 §1).
+    assert all(t in ("record", "thread_member") or t.startswith("record_") for t in world_tables)
     assert tx_tables.isdisjoint(world_tables)
     tx_types = {(c, d) for t, c, d, _ in columns if t == "package" and c.startswith("tx_")}
     assert tx_types == {("tx_seq", "bigint"), ("tx_time", "text")}
@@ -192,6 +198,8 @@ def test_the_registration_log_is_the_packages_in_sequence_order(catalog: Conn) -
         "UPDATE {s}.record SET line = 2",
         "DELETE FROM {s}.record",
         "TRUNCATE {s}.record CASCADE",
+        "TRUNCATE {s}.thread_identity_link",
+        "TRUNCATE {s}.thread_clock_mapping",
     ],
 )
 def test_registered_rows_are_append_only(catalog: Conn, statement: str) -> None:

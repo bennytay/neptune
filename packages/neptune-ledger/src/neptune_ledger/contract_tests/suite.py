@@ -27,10 +27,12 @@ from neptune_ledger.api.protocol import CatalogApi
 from neptune_ledger.api.types import (
     CATALOG_API_VERSION,
     AsRegisteredBy,
+    ClockMerge,
     DeclaredKey,
     EvidenceAnchor,
     History,
     LatestTransform,
+    MappedInterval,
     Pinned,
     QueryCursor,
     QueryRow,
@@ -694,6 +696,42 @@ class CatalogContract:
         ]
         untimed = {e.record_id for e in thread.partitions[2].entries}
         assert untimed == {package.records("stream")[1]["id"]}
+
+    def test_a_named_clock_mapping_merges_onto_the_reference_clock(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        """ADR 0003 §3 over the quadruped's stated ``ClockMapping`` (package schema 3): rosbag2's
+        ``starting_time`` onto MCAP ``log_time``, rate 1, offset 0, bound 0. The run, timed on
+        ``starting_time``, joins one merged partition on the reference clock with its interval
+        and path; its stored world time is unchanged. Without the merge it stays on its clock."""
+        quadruped = packages["quadruped"]
+        assert catalog.register(quadruped.root).outcome == "registered"
+        (run,) = quadruped.records("run")
+        (mapping,) = quadruped.records("clock_mapping")
+        world = timed(run)
+        anchor = evidence_anchor(run)
+        assert world is not None and anchor is not None and world.clock == mapping["source"]
+        key = ThreadKey("run", anchor)
+        native = catalog.thread(key, "world", History())
+        self._assert_unmerged(native)
+        merge = ClockMerge(mapping["target"], (mapping["id"],))
+        thread = catalog.thread(key, "world", History(), merge=merge)
+        _validate(thread)
+        assert thread.findings == () and thread.merge == merge
+        merged = [p for p in thread.partitions if p.kind == "merged"]
+        assert len(merged) == 1 and merged[0].clock_key == mapping["target"]
+        (entry,) = merged[0].entries
+        assert entry.record_id == run["id"]
+        ticks = world.start.ticks
+        assert entry.mapped == MappedInterval(mapping["target"], ticks, ticks, (mapping["id"],))
+        assert entry.world == Known(world), "stored ticks are never rewritten"
+        rest = [e.record_id for p in thread.partitions if p.kind != "merged" for e in p.entries]
+        assert sorted(rest) == sorted(
+            e.record_id for p in native.partitions if p.clock_key != world.clock for e in p.entries
+        )
+        assert codec.dumps(thread) == codec.dumps(
+            catalog.thread(key, "world", History(), merge=merge)
+        )
 
     def test_current_view_is_within_history(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
