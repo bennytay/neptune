@@ -1,0 +1,10 @@
+{"type": "FeatureCollection", "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::4326"}}, "features": [
+{"type": "Feature", "id": "unclosed", "geometry": {"type": "Polygon", "coordinates": [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]]}, "properties": null},
+{"type": "Feature", "id": "short", "geometry": {"type": "Polygon", "coordinates": [[[0.0, 0.0], [1.0, 0.0], [0.0, 0.0]]]}, "properties": null},
+{"type": "Feature", "id": "one-number", "geometry": {"type": "Point", "coordinates": [5.0]}, "properties": null},
+{"type": "Feature", "id": "unknown-type", "geometry": {"type": "Circle", "coordinates": [5.0, 6.0]}, "properties": null},
+{"type": "Feature", "id": "far-east", "geometry": {"type": "Point", "coordinates": [200.0, 10.0]}, "properties": {"asset_id": "A-1"}},
+{"type": "Feature", "id": "nan", "geometry": {"type": "LineString", "coordinates": [[1.0, 2.0], [NaN, 3.0], [4.0, 5.0]]}, "properties": null},
+{"type": "Feature", "id": "no-coordinates", "geometry": {"type": "Point"}, "properties": null},
+{"type": "Feature", "id": "null-geometry", "geometry": null, "properties": null}
+]}
