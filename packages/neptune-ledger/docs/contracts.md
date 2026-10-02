@@ -15,7 +15,7 @@ Lakehouse table contracts are listed here when they land.
 
 | Contract | Owner | Version built against | Source of truth | Fixed by |
 |---|---|---|---|---|
-| Package schema (canonical records) | `neptune` (compiler) | **1** | `neptune.model.record.SCHEMA_VERSION`; schema id `urn:neptune:schema:canonical:1` | root ADR 0017; Ledger [ADR 0001](adr/0001-ledger-place-in-the-programme.md) |
+| Package schema (canonical records) | `neptune` (compiler) | **1** | `neptune.model.record.SCHEMA_VERSION`; schema id `urn:neptune:schema:canonical:1`; its JSON Schema export `contracts/package-schema/v1.0.0/schema.json` generates the record projections (`catalog/projections.json`, migration 0004) | root ADR 0017; Ledger [ADR 0001](adr/0001-ledger-place-in-the-programme.md), [ADR 0008](adr/0008-record-index-bodies-pointers-and-generated-projections.md) |
 
 Rules:
 

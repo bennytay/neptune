@@ -45,6 +45,10 @@ transaction in the tenant's schema does the rest:
    pointers of its `Ambiguous` fields and `body_digest`, the sha256 of the record's line. A record
    id already catalogued with another digest is refused (ADR 0005 §2); then `record_logical_id` for every Known logical id the
    record states.
+   [ADR 0008](adr/0008-record-index-bodies-pointers-and-generated-projections.md) adds, per row,
+   the body as `jsonb` (a projection copy; the package line stays authoritative), the pointers of
+   its `Unknown` fields, and the hot-filter columns generated from the package schema
+   (`machine_*`, `site_*`, `run_ids`, `clock_ids`). Rows are written in `(kind, record_id)` order.
 
 ## Packages
 
