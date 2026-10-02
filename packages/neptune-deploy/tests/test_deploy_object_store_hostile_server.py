@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from deploy_object_store_fake import Entry, FakeStore
+from deploy_object_store_fake import Entry, FakeStore, Version
 from neptune.identity import canonical_json
 from neptune.store.workspace import Workspace
 from neptune_deploy.sources.object_store import (
@@ -273,6 +273,44 @@ def test_many_short_unused_keys_hold_no_more_than_the_byte_budget(tmp_path: Path
     assert results[0] == results[1]  # the same cut at every page size
     skipped = results[0][0].skipped
     assert [s.raw_key for s in skipped] == [b"o/%06d" % i for i in range(len(skipped))]
+
+
+ROBOT = "\U0001f916"  # one character, stored at 4 bytes per character with every other one
+
+
+@pytest.mark.parametrize(
+    ("key_tail", "version_id"),
+    [
+        ("k" * 1000, "v1"),  # 1 KB ASCII keys
+        (ROBOT + "k" * 1000, "v1"),  # one emoji makes CPython store the whole key at 4 B a char
+        ("", ROBOT + "v" * 1000),  # the same for a token
+    ],
+    ids=["ascii_keys", "emoji_keys", "emoji_tokens"],
+)
+def test_used_keys_hold_no_more_than_the_byte_budget(
+    tmp_path: Path, key_tail: str, version_id: str
+) -> None:
+    budget = 2**20
+    fake = FakeStore()
+    for index in range(2_000):
+        key = f"cell/{index:05d}{key_tail}".encode()
+        fake.history[key] = [Version(b"", f"{version_id}{index:05d}", index + 1)]
+    with connect(fake, tmp_path, "cell/", max_objects=1) as warm:
+        warm.listing()  # the fake builds and keeps its own entries, outside what is measured
+    results = []
+    for page_size in (1000, 97):
+        with connect(fake, tmp_path, "cell/", page_size=page_size, max_listing_bytes=budget) as src:
+            tracemalloc.start()
+            before = tracemalloc.get_traced_memory()[0]
+            listing = src.listing()
+            grown = tracemalloc.get_traced_memory()[0] - before
+            tracemalloc.stop()
+        assert grown <= 2 * budget, f"{grown / 2**20:.1f} MiB held for a 1 MiB budget"
+        assert not listing.complete and 0 < len(listing.entries) < 2_000
+        (limit,) = src.findings()
+        assert limit.details["max_listing_bytes"] == budget
+        results.append((listing, limit.id))
+    assert results[0] == results[1]  # the same cut at every page size
 
 
 def test_the_object_limit_counts_unused_keys_at_every_page_size(tmp_path: Path) -> None:

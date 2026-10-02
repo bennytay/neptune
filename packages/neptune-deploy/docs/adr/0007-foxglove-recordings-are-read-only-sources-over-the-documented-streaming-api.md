@@ -151,7 +151,9 @@ the bytes come from a generated stream behind a link the API names; a device's n
      `declared()` keeps only the last 256 results. A device list that failed (a failed request, not a limit) is not remembered and a declaration made
      without it is not kept: the next call asks again.
    - Every request has the transport's per-request deadline, so a server that trickles is cut off. Digits in
-     headers are ASCII only. No URL, key, signature, link host or error text reaches a finding, an error or the
+     headers are ASCII only. The shared transport also treats a header or path it cannot encode as a failed request (the
+     connection is dropped), bounds `timeout` to 3,600 seconds, and raises `ShortRead` for a body shorter than a
+     valid `Content-Length`; these are MVL-153 hardening fixes applied to the code both connectors share. No URL, key, signature, link host or error text reaches a finding, an error or the
      transform: configuration errors do not repeat the URL they refuse.
 9. **Findings** carry codes, counts, statuses and ids as hex: `listing_failed`, `not_authorised`, `rate_limited`,
    `redirect_refused`, `response_invalid`, `link_refused`, `listing_limit`, `pagination_loop`, `record_invalid`,

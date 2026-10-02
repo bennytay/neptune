@@ -10,6 +10,7 @@ Set ``NEPTUNE_WORKED_EXAMPLES`` to the examples directory when running outside t
 """
 
 import hashlib
+import io
 import os
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
@@ -17,11 +18,12 @@ from pathlib import Path
 from typing import Any, Final, cast
 
 from neptune.identity import canonical_json
+from neptune.identity.hashing import digest_stream
 from neptune.identity.provenance import evidence_record_id, transform_record
-from neptune.identity.revisions import absence_id, revision_id
-from neptune.model.kinds import RECORD_KINDS
+from neptune.identity.revisions import SourceLedger, absence_id, revision_id
+from neptune.model.kinds import KIND_SINCE, RECORD_KINDS
 from neptune.model.knowledge import Knowledge, Known
-from neptune.model.source import SourceAbsence, SourceRevision, location_from_json
+from neptune.model.source import LocalPath, SourceAbsence, SourceRevision, location_from_json
 from neptune.store.package import MANIFEST, blob_path, package_files, write_package
 from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
@@ -64,11 +66,19 @@ def examples_dir() -> Path:
     )
 
 
-def package_bytes(name: str, directory: Path | None = None) -> dict[str, bytes]:
-    """Every file of one worked-example package, built by the compiler's own package writer."""
+def package_bytes(
+    name: str, directory: Path | None = None, up_to: int | None = None
+) -> dict[str, bytes]:
+    """Every file of one worked-example package, built by the compiler's own package writer.
+
+    ``up_to`` keeps only the kinds of that package-schema version and earlier: the package a
+    compiler of that version wrote. A kind never refers to a later kind, so nothing dangles.
+    """
     root = (directory or examples_dir()) / name / "records"
     records: list[Any] = []
     for path in sorted(root.glob("*.jsonl")):
+        if up_to is not None and KIND_SINCE[path.stem] > up_to:
+            continue
         _, read = RECORD_KINDS[path.stem]
         records += [read(canonical_json.loads(line)) for line in path.read_bytes().splitlines()]
     return package_files(records)
@@ -303,7 +313,11 @@ def _read(kind: str, data: Any) -> Any:
 
 
 def reparse(
-    name: str, adapter_version: str, config: Mapping[str, Any], directory: Path | None = None
+    name: str,
+    adapter_version: str,
+    config: Mapping[str, Any],
+    directory: Path | None = None,
+    up_to: int | None = None,
 ) -> dict[str, bytes]:
     """The package one worked example gives when its adapter runs at another version or config.
 
@@ -311,12 +325,13 @@ def reparse(
     0003 tier 2), every tier-2 reference rewritten to match: lineage siblings of the original, as
     adapter v2 or a second config would produce them (ADR 0003 §4.1). Ingest findings are left
     out; their ids hash their own content. Only single-transform examples whose locators hold no
-    tier-2 id qualify; anything else raises.
+    tier-2 id qualify; anything else raises. ``up_to`` is as for ``package_bytes``.
     """
     root = (directory or examples_dir()) / name / "records"
     tables = {
         path.stem: [canonical_json.loads(line) for line in path.read_bytes().splitlines()]
         for path in sorted(root.glob("*.jsonl"))
+        if up_to is None or KIND_SINCE[path.stem] <= up_to
     }
     (stated,) = tables["transform_record"]
     old: Any = stated
@@ -342,6 +357,52 @@ def reparse(
             continue
         records += [_read(kind, _replace_ids(row, ids)) for row in rows]
     return package_files(records)
+
+
+# A controller parameter file exported beside a recording, in no robot's vocabulary: what a
+# package-schema 2 run of the compiler also ingests, as configuration records (root ADR 0037).
+# ``controller_parameters/`` holds those records as the compiler's config adapter wrote them for
+# these bytes, frozen: Ledger members never import a format adapter or run ingestion (CI plan
+# and merge freshness rely on it), and a schema-2 package is history that must not drift.
+PARAMETERS: Final = b"""# Controller parameters exported with the recording.
+max_linear_speed: 1.5
+max_angular_speed: 0.8
+stop_on_lost_link: true
+"""
+
+
+_CONFIGURATION: Final = Path(__file__).parent / "controller_parameters"
+
+
+def at_schema_2(
+    name: str, adapter_version: str, config: Mapping[str, Any], directory: Path | None = None
+) -> dict[str, bytes]:
+    """The package a schema-2 compiler gives for a worked example: a two-version fixture.
+
+    The example re-identified under its adapter at ``adapter_version`` (``reparse``: lineage
+    siblings of every evidence record of the schema-1 package; today only the drone, the one
+    single-transform example, qualifies), plus the configuration records the config adapter
+    writes for a parameter file ingested beside it, kinds that schema 2 adds.
+    So the package is written at schema version 2, while its version-1 kinds keep their records'
+    version 1 (root ADR 0037 §1). Kinds of later versions in the example are left out. The
+    schema-1 package is ``package_bytes(name, up_to=1)``: what a schema-1 compiler wrote, byte
+    for byte (ADR 0037 §1).
+    """
+    records = [
+        _read(kind, canonical_json.loads(line))
+        for path, data in sorted(reparse(name, adapter_version, config, directory, 2).items())
+        if path.startswith("records/") and path.endswith(".jsonl")
+        for kind in (path.removeprefix("records/").removesuffix(".jsonl"),)
+        for line in data.splitlines()
+    ]
+    ledger = SourceLedger()
+    ledger.observe(LocalPath("params/controller.yaml"), digest_stream(io.BytesIO(PARAMETERS)))
+    configuration = [
+        _read(path.stem, canonical_json.loads(line))
+        for path in sorted(_CONFIGURATION.glob("*.jsonl"))
+        for line in path.read_bytes().splitlines()
+    ]
+    return package_files([*records, *ledger.artifacts(), *ledger.revisions(), *configuration])
 
 
 def with_source_size(name: str, size: int, directory: Path | None = None) -> dict[str, bytes]:
@@ -430,6 +491,11 @@ def with_changed_body(
     index = next(i for i, r in enumerate(records) if r.kind == kind)
     records[index] = _read(kind, change(cast("Record", records[index].to_json())))
     return package_files(records)
+
+
+def at_schema_1(name: str, directory: Path | None = None) -> dict[str, bytes]:
+    """The worked example as a schema-1 compiler wrote it: its schema-1 kinds only."""
+    return package_bytes(name, directory, 1)
 
 
 def write(name: str, root: Path, files: Mapping[str, bytes]) -> WorkedPackage:

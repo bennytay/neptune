@@ -33,6 +33,7 @@ from typing import Final, Protocol
 from neptune_deploy.sources.object_store.sigv4 import quote
 
 DEFAULT_TIMEOUT: Final = 60.0
+MAX_TIMEOUT: Final = 3600.0  # seconds; a huge timeout is an ``OverflowError`` in the socket layer
 USER_AGENT: Final = "neptune-deploy-object-store/0.1.0"
 
 
@@ -215,6 +216,12 @@ class Response:
             raise self._fail(None, DeadlineExceeded("the request outlived its deadline"))
         if len(data) > limit:
             raise self._fail(None, ResponseTooLarge(f"more than {limit} bytes", self.status))
+        declared = self.headers.get("content-length", "")
+        # ``read(n)`` returns a body that ends before its Content-Length without an error.
+        digits = declared.isascii() and declared.isdigit() and len(declared) <= 19
+        expected = int(declared) if digits else -1
+        if len(data) < expected:
+            raise self._fail(None, ShortRead("the body ended early", len(data), expected))
         self._done()
         return data
 
@@ -326,7 +333,9 @@ class Transport:
                 self.drop()
                 if not (reused and attempt == 0) or deadline.expired:
                     raise deadline.error(exc, TransportError(type(exc).__name__)) from exc
-            except (OSError, http.client.HTTPException) as exc:
+            except (OSError, http.client.HTTPException, ValueError) as exc:
+                # ValueError: a header or path http.client cannot encode (a non-Latin-1 etag or
+                # token, a non-ASCII endpoint path) leaves the connection mid-request: drop it.
                 self.drop()
                 raise deadline.error(exc, TransportError(type(exc).__name__)) from exc
         raise AssertionError("unreachable")
