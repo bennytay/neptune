@@ -4,7 +4,7 @@ length. Object-store reads and Foxglove reads go through the same code, so both 
 
 import socket
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -15,7 +15,12 @@ from deploy_foxglove_fake import API_KEY, FakeFoxglove
 from neptune.store.workspace import Workspace
 from neptune_deploy.sources.foxglove import FoxgloveConfigError, foxglove_source
 from neptune_deploy.sources.foxglove.client import FoxgloveTransport
-from neptune_deploy.sources.object_store import ObjectStoreConfigError, s3_source
+from neptune_deploy.sources.object_store import (
+    ObjectStoreConfigError,
+    azure_source,
+    gcs_source,
+    s3_source,
+)
 from neptune_deploy.sources.object_store.transport import (
     MAX_TIMEOUT,
     Endpoint,
@@ -23,6 +28,8 @@ from neptune_deploy.sources.object_store.transport import (
     Transport,
     TransportError,
 )
+from neptune_deploy.sources.rerun import rerun_source
+from neptune_deploy.sources.roboto import roboto_source
 
 BODY = b"x" * 100
 
@@ -120,25 +127,66 @@ def test_foxglove_posts_with_a_value_that_cannot_be_encoded_fail_as_a_transport_
 # --- (b) timeout is bounded above ---------------------------------------------------------------
 
 
-@pytest.mark.parametrize("timeout", [MAX_TIMEOUT + 1, 10**30, float("inf")])
-def test_a_huge_timeout_is_a_configuration_error_for_both_connectors(
-    tmp_path: Path, timeout: float
-) -> None:
-    keys = {"s3_access_key_id": "AKID", "s3_secret_access_key": "s3cr3t"}
-    with pytest.raises(ObjectStoreConfigError):
-        s3_source(
-            "s3://bucket/cell/",
-            network=_online(tmp_path),
+def _refusals(tmp_path: Path, timeout: float) -> dict[str, Callable[[], object]]:
+    """Every connector, built with ``timeout`` where the operator sets it."""
+    network = _online(tmp_path)
+    s3_keys = {"s3_access_key_id": "AKID", "s3_secret_access_key": "s3cr3t"}
+    export = Path(__file__).parent / "fixtures" / "connectors" / "rerun" / "catalog_export.json"
+    return {
+        "s3": lambda: s3_source(
+            "s3://bucket/cell/", network=network, options={"timeout": timeout}, credentials=s3_keys
+        ),
+        "gcs": lambda: gcs_source(
+            "gs://bucket/cell/",
+            network=network,
             options={"timeout": timeout},
-            credentials=keys,
-        )
-    with pytest.raises(FoxgloveConfigError):
-        foxglove_source(
+            credentials={"gcs_access_token": "ya29.x"},
+        ),
+        "azure": lambda: azure_source(
+            "az://account/container/cell/",
+            network=network,
+            options={"timeout": timeout},
+            credentials={"azure_sas_token": "sig=x&sp=rl"},
+        ),
+        "roboto": lambda: roboto_source(
+            "roboto://org_a/ds_a/",
+            network=network,
+            options={"timeout": timeout},
+            credentials={"roboto_api_token": "k3y"},
+        ),
+        "rerun": lambda: rerun_source(
+            str(export),
+            network=network,
+            options={"storage": {"s3": {"timeout": timeout}}},
+            credentials=s3_keys,
+        ),
+        "foxglove": lambda: foxglove_source(
             "foxglove://prj_a",
-            network=_online(tmp_path),
+            network=network,
             options={"timeout": timeout},
             credentials={"foxglove_api_key": API_KEY},
-        )
+        ),
+    }
+
+
+@pytest.mark.parametrize("timeout", [1e10, MAX_TIMEOUT + 1, 10**30, float("inf"), float("nan")])
+@pytest.mark.parametrize("connector", ["s3", "gcs", "azure", "roboto", "rerun", "foxglove"])
+def test_an_absurd_timeout_is_a_configuration_error_for_every_connector(
+    tmp_path: Path, connector: str, timeout: float
+) -> None:
+    with pytest.raises((ObjectStoreConfigError, FoxgloveConfigError)):
+        _refusals(tmp_path, timeout)[connector]()
+
+
+@pytest.mark.parametrize("connector", ["s3", "gcs", "azure", "roboto", "rerun", "foxglove"])
+def test_the_refusal_is_the_timeout_and_nothing_else_in_the_fixture(
+    tmp_path: Path, connector: str
+) -> None:
+    """The same construction with a legal timeout works: the refusals above are the timeout."""
+    source = _refusals(tmp_path, MAX_TIMEOUT)[connector]()
+    close = getattr(source, "close", None)
+    if close is not None:
+        close()
 
 
 def test_the_largest_allowed_timeout_is_accepted_by_foxglove(tmp_path: Path) -> None:
