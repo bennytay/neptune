@@ -404,7 +404,7 @@ def definition_line(encoding: str, name: str, text: str) -> DefinitionLayout:
     assert parsed.layout is not None
     content = content_id(text.encode())
     line_id = definition_layout_id(TRANSFORM_ID, content, encoding, parsed.layout.root)
-    return DefinitionLayout(line_id, TRANSFORM_ID, content, encoding, parsed.layout)
+    return DefinitionLayout(line_id, TRANSFORM_ID, content, encoding, REF, parsed.layout)
 
 
 def test_a_definition_layout_line_round_trips_canonically() -> None:
@@ -413,12 +413,14 @@ def test_a_definition_layout_line_round_trips_canonically() -> None:
     assert isinstance(data, dict)
     assert definition_layout_from_json(data) == line
     assert data["assertion_kind"] == "observed" and data["root"] == "sensor_msgs/Imu"
+    assert data["definition"] == REF.to_json()  # where the bytes sit
     for broken in (
         {**data, "assertion_kind": "inferred"},
         {**data, "root": "other/Root"},  # the id no longer recomputes
         {**data, "content": "sha256:" + "4" * 64},
         {**data, "extra": 1},
         {k: v for k, v in data.items() if k != "types"},
+        {k: v for k, v in data.items() if k != "definition"},
     ):
         with pytest.raises((ValueError, TypeError)):
             definition_layout_from_json(broken)
@@ -724,3 +726,41 @@ def test_messages_quote_hostile_text_briefly() -> None:
     parsed = parse_definition("ros2msg", "pkg/A", b"f@" + b"x" * 900 + b" y\n", LIMITS)
     assert parsed.problem is not None and parsed.problem.reason == "malformed"
     assert len(parsed.problem.message) < 200
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "float64 " + "!" * 2000 + "\n",  # a field name
+        "pkg/" + "!" * 2000 + " x\n",  # a field type
+        f"int8 x\n{SEP}\nMSG: pkg/" + "!" * 2000 + "\nint8 y\n",  # a type name
+    ],
+)
+def test_a_long_corrupt_token_is_malformed_not_a_limit(text: str) -> None:
+    parsed = parse_definition("ros2msg", "pkg/A", text.encode(), LIMITS)
+    assert parsed.state is LayoutState.UNKNOWN
+    assert parsed.problem is not None and parsed.problem.reason == "malformed"
+    assert len(parsed.problem.message) < 200
+
+
+def test_a_resolved_type_name_past_the_limit_is_not_covered() -> None:
+    # Each part is under the limit; the ``pkg/Name`` the layout would write is not.
+    package, name = "p" * 700, "N" * 700
+    text = f"{name} x\n{SEP}\nMSG: {package}/{name}\nint8 y\n"
+    parsed = parse_definition("ros2msg", f"{package}/Root", text.encode(), LIMITS)
+    assert parsed.problem is not None and parsed.problem.reason == "name_limit"
+    assert dict(parsed.problem.counts)["bytes"] == len(package) + 1 + len(name)
+
+
+def test_escaped_text_counts_as_written() -> None:
+    # 900 control characters are 5400 bytes once escaped: 4096 paths of them pass 4 MiB as
+    # written although their characters alone do not.
+    unit = "\u0001" * 900
+    document = {
+        "$defs": {"v": {"type": "number", "unit": unit}},
+        "properties": {f"p{i}": {"$ref": "#/$defs/v"} for i in range(4096)},
+    }
+    data = json.dumps(document).encode()
+    assert 4096 * len(unit) < LIMITS.max_layout_bytes
+    parsed = parse_definition("jsonschema", "pkg/A", data, LIMITS)
+    assert parsed.problem is not None and parsed.problem.reason == "layout_limit"

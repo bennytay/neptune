@@ -34,8 +34,10 @@ and another follows it. A new canonical record kind or field would collide with 
    - **`definition_layout`**: one line per *distinct definition*, never per stream. Its id is the
      content id (sha256) of the definition's bytes, the encoding, and the root type name they are
      parsed under (the three inputs of a parse), plus the transform. It holds `content`,
-     `encoding`, `root`, `types`, `paths` and `truncated`. 300 MCAP channels on one schema, or
-     the same `.msg` in two bags, give one line.
+     `encoding`, `root`, `types`, `paths`, `truncated`, and `definition`: where the bytes sit,
+     the citation of the first stream (by id) that declares them. Every citation of one content
+     id holds the same bytes, so the line carries a source and range of its own. 300 MCAP
+     channels on one schema, or the same `.msg` in two bags, give one line.
    - **`stream_layout`**: one line per stream. It holds the stream's declared name and encoding,
      `definition` (the stream's `schema_definition`: where its copy of the bytes sits, which
      carries the layout's provenance to a source and range), `state`, `problem`, and `layout`,
@@ -104,21 +106,25 @@ and another follows it. A new canonical record kind or field would collide with 
    - It runs over the streams of the admitted sources, before staging. It reads only the cited
      definition ranges, through the job's verified `LocalReader`. Pure-Python parsers are bounded
      like grouping, so no adapter call and no sandbox is needed.
-   - Streams that share a definition are read and parsed once.
-   - Streams that share bytes are parsed once and their layout written once (§2): what a
-     package holds grows with distinct definitions, not with channels.
+   - Each cited range is read once and held for the run, within the read budget. Each distinct
+     (content, encoding, root) is parsed once and its layout written once (§2), so what a
+     package holds grows with distinct definitions, not with channels or with name spellings
+     (`pkg/msg/Foo` and `pkg/Foo` are one root).
    - Limits are the transform's config, so changing one is a new lineage. Reading: 1 MiB per
      definition, 64 MiB per package. Parsing: 1024 types, 16384 fields, JSON nesting 64, path
      depth 32, 4096 paths. Every parser is iterative, and JSON nesting is checked before
      `json.loads`.
    - Output is bounded as well as input, because a small definition can name a lot of text: every
      path repeats its prefix, and every field typed by one `$ref` repeats the pointer.
-     - **Caps**: a type, field, constant or property name is at most 1 KiB (`max_name_bytes`,
-       reason `name_limit`), and a JSON pointer, as a `$ref` or as a nested object's type name,
-       at most 4 KiB (`max_pointer_bytes`, `pointer_limit`). Path depth is `max_depth`.
+     - **Caps**: a type name as the layout writes it (`pkg/Name`), or a field, constant or
+       property name, is at most 1 KiB (`max_name_bytes`, reason `name_limit`), and a JSON
+       pointer, as a `$ref` or as a nested object's type name, at most 4 KiB
+       (`max_pointer_bytes`, `pointer_limit`). Path depth is `max_depth`. Syntax is checked
+       first: a long token that is not a name is `malformed` (`unknown`), not a limit.
      - **Per layout**: a `definition_layout` line is at most 4 MiB (`max_layout_bytes`,
-       `layout_limit`). The parser counts type and path text as it builds it and stops at the
-       limit, so it never holds more; the line's exact size is checked before it is written.
+       `layout_limit`). The parser counts type and path text as it builds it, as written
+       (quoted, escaped, UTF-8), and stops at the limit, so it never holds much more; the line's
+       exact size is checked before it is written.
      - **Per package**: all `definition_layout` lines together are at most 32 MiB
        (`max_output_bytes`, `output_budget`), charged in stream id order, so which definitions
        are written is deterministic.
@@ -154,8 +160,10 @@ and another follows it. A new canonical record kind or field would collide with 
    - A package without the tables gives `None` rather than a guess.
    - A stream with several lines of one kind (two introspection transforms in one package, say)
      gets `Ambiguous` with every line as a candidate, in id order. None is chosen: `carries` is
-     false, `may_carry` reads them all, and the state is `ambiguous`. A `stream_layout` naming a
-     `definition_layout` the package lacks makes the package invalid.
+     false, `may_carry` reads them all, and `layout_state` / `semantic_state` are
+     `KnowledgeState.AMBIGUOUS` (a semantic whose readings tie stays `SemanticState.AMBIGUOUS`).
+     A `stream_layout` naming a `definition_layout` the package lacks, or one of another
+     transform, makes the package invalid.
 
 ## Alternatives considered
 

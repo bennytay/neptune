@@ -34,6 +34,7 @@ from neptune.derived.schemas import (
     layout_id,
     parse_definition,
     problem,
+    root_name,
 )
 from neptune.derived.semantics import (
     SEMANTIC_KIND,
@@ -180,8 +181,11 @@ class _Run:
         )
         self.spent = 0  # definition bytes read
         self.written = 0  # layout bytes written
-        self.outcomes: dict[tuple[EvidenceRef, str, str | None], _Outcome] = {}
-        self.by_content: dict[tuple[ContentId, str, str | None], _Outcome] = {}
+        self.outcomes: dict[tuple[EvidenceRef, str, str], _Outcome] = {}
+        self.by_content: dict[tuple[ContentId, str, str], _Outcome] = {}
+        # Each cited range read once, held for the run (within ``max_total_bytes``) in case
+        # streams citing it declare another encoding or root; or why it could not be used.
+        self.held: dict[EvidenceRef, tuple[ContentId, bytes] | Problem] = {}
         self.definitions: dict[RecordId, DefinitionLayout] = {}
         # One finding per definition (or per stream without one): (code, subject) -> streams
         self.reports: dict[
@@ -226,54 +230,50 @@ class _Run:
 
     def parse(self, ref: EvidenceRef, encoding: str, name: str | None) -> _Outcome:
         """The outcome of the definition at ``ref``: read once per citation, parsed and written
-        once per distinct content."""
-        key = (ref, encoding, name)
+        once per distinct content, encoding and root."""
+        key = (ref, encoding, root_name(name))
         if key not in self.outcomes:
-            self.outcomes[key] = self._parse(ref, encoding, name)
+            held = self.held.get(ref)
+            if held is None:
+                held = self.held[ref] = self._read(ref)
+            if isinstance(held, Problem):
+                self.outcomes[key] = _failed(held)
+            else:
+                content, data = held
+                by = (content, encoding, key[2])
+                if by not in self.by_content:
+                    self.by_content[by] = self._build(ref, content, encoding, name, data)
+                self.outcomes[key] = self.by_content[by]
         return self.outcomes[key]
 
-    def _parse(self, ref: EvidenceRef, encoding: str, name: str | None) -> _Outcome:
+    def _read(self, ref: EvidenceRef) -> tuple[ContentId, bytes] | Problem:
         limits = self.config.limits
         if len(ref.locator) != 1 or not isinstance(ref.locator[0], ByteRange):
-            return _failed(
-                problem("definition_not_a_range", "the definition is not one byte range")
-            )
+            return problem("definition_not_a_range", "the definition is not one byte range")
         length = ref.locator[0].length
         if length > limits.max_definition_bytes:
-            return _failed(
-                problem(
-                    "definition_too_large",
-                    f"{length} bytes, more than the {limits.max_definition_bytes} a definition"
-                    " may be; it was not read",
-                    counts={"bytes": length, "limit": limits.max_definition_bytes},
-                )
+            return problem(
+                "definition_too_large",
+                f"{length} bytes, more than the {limits.max_definition_bytes} a definition"
+                " may be; it was not read",
+                counts={"bytes": length, "limit": limits.max_definition_bytes},
             )
         if self.spent + length > self.config.max_total_bytes:
-            return _failed(
-                problem(
-                    "introspection_budget",
-                    f"the package's definitions exceed {self.config.max_total_bytes} bytes;"
-                    " this one was not read",
-                    counts={
-                        "bytes": length,
-                        "limit": self.config.max_total_bytes,
-                        "read": self.spent,
-                    },
-                )
+            return problem(
+                "introspection_budget",
+                f"the package's definitions exceed {self.config.max_total_bytes} bytes;"
+                " this one was not read",
+                counts={"bytes": length, "limit": self.config.max_total_bytes, "read": self.spent},
             )
         self.spent += length
         data = self.read(ref)
         if data is None or len(data) != length:
-            return _failed(
-                problem("definition_unreadable", "the definition's bytes could not be read")
-            )
-        content = content_id(data)
-        key = (content, encoding, name)
-        if key not in self.by_content:
-            self.by_content[key] = self._build(content, encoding, name, data)
-        return self.by_content[key]
+            return problem("definition_unreadable", "the definition's bytes could not be read")
+        return content_id(data), data
 
-    def _build(self, content: ContentId, encoding: str, name: str | None, data: bytes) -> _Outcome:
+    def _build(
+        self, ref: EvidenceRef, content: ContentId, encoding: str, name: str | None, data: bytes
+    ) -> _Outcome:
         """Parse one distinct definition and write its layout line, within the layout's and the
         package's output budgets."""
         limits = self.config.limits
@@ -282,10 +282,8 @@ class _Run:
             return _Outcome(parsed.state, problem=parsed.problem)
         layout = parsed.layout
         line_id = definition_layout_id(self.transform.id, content, encoding, layout.root)
-        if line_id in self.definitions:  # another name with the same root: the same line
-            return _Outcome(LayoutState.KNOWN, self.definitions[line_id])
         try:
-            line = DefinitionLayout(line_id, self.transform.id, content, encoding, layout)
+            line = DefinitionLayout(line_id, self.transform.id, content, encoding, ref, layout)
             size = len(canonical_json.dumps(line.to_json())) + 1
         except Exception as exc:  # never expected: the parsers emit canonical text only
             found = problem("parser_failed", f"the layout cannot be written: {type(exc).__name__}")

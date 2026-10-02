@@ -436,6 +436,12 @@ def canonical_type_name(name: str) -> str | None:
         return None
 
 
+def root_name(schema_name: str | None) -> str:
+    """The root type's name a definition declared as ``schema_name`` is parsed under: streams
+    whose names give the same root share a parse."""
+    return _root_name(schema_name)
+
+
 def _root_name(schema_name: str | None) -> str:
     if schema_name is None or not schema_name or schema_name.startswith("#"):
         return ROOT_NAME  # "#..." would collide with a JSON Schema pointer's type name
@@ -511,9 +517,12 @@ def _ros_field(
     if len(parts) < 2:
         raise _Malformed("malformed", "a field line is a type and a name", line)
     head, rest = parts[0], parts[1].strip()
-    _cap(head, limits.max_name_bytes, "name_limit", "field type", line)
     kind, primitive, array, bound = _ros_type(head, package, ros2, line)
-    kind = names.setdefault(kind, kind)
+    # Syntax first, then length: a corrupt token is malformed, a well-formed long one a limit.
+    # The name capped is the resolved one (``pkg/Name``), as the layout writes it.
+    kind = names.setdefault(
+        kind, _cap(kind, limits.max_name_bytes, "name_limit", "type name", line)
+    )
     constant = _CONSTANT.fullmatch(rest)
     if constant is not None:
         if not primitive or array is not None:
@@ -526,10 +535,9 @@ def _ros_field(
             raise _Malformed("malformed", f"constant {_shown(name)} has no value", line)
         return Field(name, kind, True, None, bound, constant=value)
     words = _uncommented(rest).split(None, 1)
-    if words:
-        _cap(words[0], limits.max_name_bytes, "name_limit", "field name", line)
     if not words or not _NAME.fullmatch(words[0]):
         raise _Malformed("malformed", f"{_shown(rest)} is not a field name", line)
+    _cap(words[0], limits.max_name_bytes, "name_limit", "field name", line)
     default = words[1].strip() if len(words) > 1 else None
     if default is not None and not ros2:
         raise _Malformed("malformed", "a ROS 1 field has no default value", line)
@@ -550,8 +558,10 @@ def _parse_msg(text: str, root: str, ros2: bool, limits: SchemaLimits) -> list[M
         if expect_name:
             if not line.startswith("MSG:"):
                 raise _Malformed("malformed", "a dependency starts with 'MSG: <name>'", number)
-            name = _cap(line[4:].strip(), limits.max_name_bytes, "name_limit", "type name", number)
-            sections.append((_canonical(name, number), []))
+            name = _canonical(line[4:].strip(), number)
+            sections.append(
+                (_cap(name, limits.max_name_bytes, "name_limit", "type name", number), [])
+            )
             if len(sections) > limits.max_types:
                 raise _Malformed("type_limit", f"more than {limits.max_types} types", number)
             expect_name = False
@@ -795,23 +805,31 @@ def _segment(field: Field) -> str:
     return text + "[]" if field.array is not None else text
 
 
-# Lower bounds on the JSON a field, a type and a path add to a layout line besides their text:
-# ``{"name":"","primitive":true,"type":""}``, ``{"fields":[],"name":""}``,
-# ``{"kind":"","path":"","type":""}``. The emitted line's exact size is checked when it is built.
-_FIELD_JSON: Final = 38
-_TYPE_JSON: Final = 23
-_PATH_JSON: Final = 31
+# Lower bounds on the JSON a field, a type and a path add to a layout line besides their strings:
+# ``{"name":,"primitive":true,"type":}``, ``{"fields":[],"name":}``, ``{"kind":,"path":,"type":}``.
+# Strings are counted as written: quoted, escaped, UTF-8. The emitted line's exact size is checked
+# again when it is built.
+_FIELD_JSON: Final = 34
+_TYPE_JSON: Final = 21
+_PATH_JSON: Final = 25
+
+
+def _json_bytes(text: str | None) -> int:
+    """The bytes ``text`` takes as a canonical JSON string; 0 for ``None``."""
+    if text is None:
+        return 0
+    return len(json.dumps(text, ensure_ascii=False).encode("utf-8", "surrogatepass"))
 
 
 def _types_bytes(types: Iterable[MessageType]) -> int:
     """At least the bytes ``types`` take in a layout line (names repeat there as text)."""
     total = 0
     for declared in types:
-        total += _TYPE_JSON + len(declared.name)
+        total += _TYPE_JSON + _json_bytes(declared.name)
         for field in declared.fields:
-            total += _FIELD_JSON + len(field.name) + len(field.type)
+            total += _FIELD_JSON + _json_bytes(field.name) + _json_bytes(field.type)
             for text in (field.constant, field.default, field.unit):
-                total += len(text) if text is not None else 0
+                total += _json_bytes(text)
     return total
 
 
@@ -820,7 +838,7 @@ def _flatten(root: str, types: Iterable[MessageType], limits: SchemaLimits) -> L
     declaration order, depth first. At most ``max_paths`` paths (``truncated`` says more exist)
     and ``max_depth`` nested message fields; a cycle ends its path as ``recursive``. A layout
     whose types and paths pass ``max_layout_bytes`` is a ``layout_limit``: flattening stops as
-    the paths reach it, so a definition never builds more text than the limit."""
+    the paths reach it, so a definition never builds much more text than the limit."""
     declared = tuple(types)
     spent = _types_bytes(declared)
     counts = {"limit": limits.max_layout_bytes, "types": len(declared)}
@@ -865,7 +883,8 @@ def _flatten(root: str, types: Iterable[MessageType], limits: SchemaLimits) -> L
             continue
         if len(paths) >= limits.max_paths:
             return Layout(root, declared, tuple(paths), True)
-        spent += _PATH_JSON + len(ending) + len(path) + len(field.type) + len(field.unit or "")
+        spent += _PATH_JSON + len(ending) + _json_bytes(path) + _json_bytes(field.type)
+        spent += _json_bytes(field.unit)
         if spent > limits.max_layout_bytes:
             raise _Malformed(
                 "layout_limit",
@@ -928,8 +947,9 @@ class DefinitionLayout:
     however many streams declare the definition.
 
     ``content`` is the content id of the definition's bytes: the layout is a decoding of exactly
-    those bytes. Each ``stream_layout`` naming this line cites where its stream's copy of them
-    sits (``definition``), and so carries the layout's provenance to a source and range.
+    those bytes. ``definition`` cites where they sit: the citation of the first stream, by id,
+    that declares them (every citation of the same content holds the same bytes). Each
+    ``stream_layout`` naming this line cites its own stream's copy as well.
     """
 
     kind: ClassVar[str] = DEFINITION_KIND
@@ -937,6 +957,7 @@ class DefinitionLayout:
     transform: RecordId
     content: ContentId
     encoding: str
+    definition: EvidenceRef
     layout: Layout
 
     def __post_init__(self) -> None:
@@ -959,6 +980,7 @@ class DefinitionLayout:
         return {
             "assertion_kind": OBSERVED,
             "content": self.content,
+            "definition": self.definition.to_json(),
             "encoding": self.encoding,
             "id": self.id,
             "kind": DEFINITION_KIND,
@@ -973,13 +995,24 @@ class DefinitionLayout:
 
 def definition_layout_from_json(data: JsonValue) -> DefinitionLayout:
     """Parse strictly; the id must recompute from the content, encoding, root and transform."""
-    keys = {"content", "encoding", "id", "paths", "root", "transform", "truncated", "types"}
+    keys = {
+        "content",
+        "definition",
+        "encoding",
+        "id",
+        "paths",
+        "root",
+        "transform",
+        "truncated",
+        "types",
+    }
     obj = derived_object(data, DEFINITION_KIND, keys, frozenset({OBSERVED}))
     return DefinitionLayout(
         id=parse_record_id(json_str(obj["id"], "id")),
         transform=parse_record_id(json_str(obj["transform"], "transform")),
         content=parse_content_id(json_str(obj["content"], "content")),
         encoding=json_str(obj["encoding"], "encoding"),
+        definition=evidence_ref_from_json(obj["definition"]),
         layout=Layout(
             json_str(obj["root"], "root"),
             tuple(_type_from_json(t) for t in json_array(obj["types"], "types")),

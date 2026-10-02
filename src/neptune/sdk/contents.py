@@ -101,10 +101,11 @@ class StreamContents:
         return () if self.definition is None else self.definition.paths
 
     @property
-    def semantic_state(self) -> SemanticState | None:
-        """The semantic's state; ``ambiguous`` also when the package holds several lines."""
+    def semantic_state(self) -> SemanticState | KnowledgeState | None:
+        """The semantic's state; ``KnowledgeState.AMBIGUOUS`` when the package holds several
+        lines (``SemanticState.AMBIGUOUS`` is one line whose readings tie)."""
         if isinstance(self.semantic, Ambiguous):
-            return SemanticState.AMBIGUOUS
+            return KnowledgeState.AMBIGUOUS
         return None if self.semantic is None else self.semantic.state
 
     def carries(self, semantic: Semantic | str) -> bool:
@@ -187,6 +188,13 @@ def run_contents(package: IngestPackage) -> tuple[RunContents, ...]:
     for line in derived:
         if isinstance(line, StreamLayout):
             layouts[line.stream].append(line)
+            if line.layout is not None:  # every line, ambiguous or not, names a line it holds
+                named = definitions.get(line.layout)
+                if named is None or named.transform != line.transform:
+                    raise PackageInvalidError(
+                        f"stream layout {line.id} names a definition layout the package lacks"
+                        " under its transform"
+                    )
         elif isinstance(line, StreamSemantic):
             semantics[line.stream].append(line)
     runs = {r.id: r for r in package.records if isinstance(r, Run)}
@@ -198,11 +206,7 @@ def run_contents(package: IngestPackage) -> tuple[RunContents, ...]:
             layout = _one(layouts.get(record.id, []))
             definition = None
             if isinstance(layout, StreamLayout) and layout.layout is not None:
-                definition = definitions.get(layout.layout)
-                if definition is None:
-                    raise PackageInvalidError(
-                        f"stream layout {layout.id} names a definition layout the package lacks"
-                    )
+                definition = definitions[layout.layout]
             entry = StreamContents(record, layout, _one(semantics.get(record.id, [])), definition)
             streams[record.run].append(entry)
     return tuple(

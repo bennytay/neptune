@@ -18,8 +18,10 @@ from typing import Final
 
 import pytest
 
+from neptune.derived import introspection, schemas
 from neptune.derived.introspection import DefinitionReader, IntrospectionConfig, introspect
 from neptune.derived.schemas import (
+    DefinitionLayout,
     LayoutState,
     PathKind,
     SchemaLimits,
@@ -420,9 +422,13 @@ def distinct_definitions(work: Path, count: int) -> tuple[list[Stream], Definiti
 def test_the_package_output_budget_stops_further_layouts_and_says_so(tmp_path: Path) -> None:
     records, read = distinct_definitions(tmp_path, 4)
     full = introspect(records, read)
-    sizes = {len(canonical_json.dumps(d.to_json())) + 1 for d in full.definitions}
-    (size,) = sizes  # equal definitions, equal layouts
-    budget = IntrospectionConfig(max_output_bytes=size * 5 // 2)
+
+    def size(line: DefinitionLayout) -> int:
+        return len(canonical_json.dumps(line.to_json())) + 1
+
+    sizes = sorted(size(d) for d in full.definitions)  # near equal: only the offsets differ
+    limit = 2 * sizes[-1] + sizes[0] // 2  # room for two, never three
+    budget = IntrospectionConfig(max_output_bytes=limit)
     found = introspect(records, read, budget)
     assert len(found.definitions) == 2
     states = sorted(str(line.state) for line in found.layouts)
@@ -433,7 +439,9 @@ def test_the_package_output_budget_stops_further_layouts_and_says_so(tmp_path: P
     assert len(limits) == 2  # one per definition not written, each citing it
     counts = limits[0].details["counts"]
     assert isinstance(counts, dict)
-    assert (counts["bytes"], counts["limit"], counts["written"]) == (size, size * 5 // 2, 2 * size)
+    written = sum(size(d) for d in found.definitions)
+    assert (counts["limit"], counts["written"]) == (limit, written)
+    assert counts["bytes"] + written > limit
     assert introspect(list(reversed(records)), read, budget) == found  # which two: by stream id
     assert found.transform.id != full.transform.id
 
@@ -473,7 +481,13 @@ def test_several_lines_for_a_stream_are_ambiguous_never_one_picked(
     imu = next(line for line in semantics if line.semantic is Semantic.IMU)
     again = dataclasses.replace(imu, transform=other, id=semantic_id(other, imu.stream))
     layout = next(line for line in layouts if line.stream == imu.stream)
-    moved = dataclasses.replace(layout, transform=other, id=layout_id(other, layout.stream))
+    moved = dataclasses.replace(
+        layout,
+        transform=other,
+        id=layout_id(other, layout.stream),
+        state=LayoutState.NOT_COVERED,
+        layout=None,
+    )
     doubled = dataclasses.replace(
         package,
         derived={
@@ -485,7 +499,7 @@ def test_several_lines_for_a_stream_are_ambiguous_never_one_picked(
     (stream,) = [s for run in run_contents(doubled) for s in run.streams if s.id == imu.stream]
     assert isinstance(stream.semantic, Ambiguous) and isinstance(stream.layout, Ambiguous)
     assert {c.value.id for c in stream.semantic.candidates} == {imu.id, again.id}
-    assert stream.semantic_state is SemanticState.AMBIGUOUS
+    assert stream.semantic_state is KnowledgeState.AMBIGUOUS  # not a tie: several lines
     assert stream.layout_state is KnowledgeState.AMBIGUOUS
     assert not stream.carries(Semantic.IMU) and stream.may_carry(Semantic.IMU)
     assert stream.definition is None and stream.fields == ()
@@ -499,3 +513,45 @@ def test_a_layout_naming_a_missing_definition_is_an_invalid_package(
     broken = dataclasses.replace(package, derived={**package.derived, "definition_layout": ()})
     with pytest.raises(PackageInvalidError, match="names a definition layout"):
         run_contents(broken)
+    # Also when the line is one of several for its stream, or names a line of another transform.
+    layouts = [stream_layout_from_json(line) for line in package.derived["stream_layout"]]
+    known = next(line for line in layouts if line.layout is not None)
+    other = RecordId("rec:sha256:" + "7" * 64)
+    moved = dataclasses.replace(known, transform=other, id=layout_id(other, known.stream))
+    stray = {
+        **package.derived,
+        "stream_layout": (*package.derived["stream_layout"], moved.to_json()),
+    }
+    with pytest.raises(PackageInvalidError, match="names a definition layout"):
+        run_contents(dataclasses.replace(package, derived=stray))
+
+
+def test_names_with_one_root_share_one_read_and_one_parse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    records, read = distinct_definitions(tmp_path, 1)
+    (stream,) = records
+    spelled = [
+        dataclasses.replace(
+            stream, id=RecordId(f"rec:sha256:{i}" + "0" * 63), schema_name=Known(name)
+        )
+        for i, name in enumerate(("pkg/msg/T1", "pkg/T1", "pkg/msg/T1"), 1)
+    ]
+    reads: list[EvidenceRef] = []
+    parses: list[object] = []
+    real = schemas.parse_definition
+
+    def counting(*args: object) -> object:
+        parses.append(args)
+        return real(*args)  # type: ignore[arg-type]
+
+    def reading(ref: EvidenceRef) -> bytes | None:
+        reads.append(ref)
+        return read(ref)
+
+    monkeypatch.setattr(introspection, "parse_definition", counting)
+    found = introspect(spelled, reading)
+    assert (len(reads), len(parses), len(found.definitions)) == (1, 1, 1)
+    (definition,) = found.definitions
+    assert definition.definition == stream.schema_definition.value  # type: ignore[union-attr]
+    assert {line.layout for line in found.layouts} == {definition.id}
