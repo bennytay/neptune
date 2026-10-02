@@ -58,3 +58,4 @@ header).
 | [0048](0048-flight-log-adapter-px4-ulog-and-ardupilot-dataflash.md) | The flight-log adapter: PX4 ULog and ArduPilot DataFlash as runs, decoded streams and cited tables | Accepted |
 | [0049](0049-stream-introspection-declared-layouts-and-inferred-semantics.md) | Stream introspection: declared layouts and inferred semantics as derived tables | Accepted |
 | [0050](0050-alignment-record-contract-identity-links-clock-mappings-frame-and-run-bindings.md) | The alignment record contract: identity links, clock mappings, frame and run bindings | Accepted |
+| [0052](0052-geometry-adapter-meshes-and-scenes-as-referenced-objects.md) | The geometry adapter: meshes and scenes as referenced objects, nothing copied, nothing guessed | Accepted |
