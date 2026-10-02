@@ -114,11 +114,14 @@ def test_neptune_ingest_probes_and_runs_an_installed_plugin_adapter(
     libraries = {t["adapter_id"]: t["libraries"] for t in receipt["transforms"]}
     assert libraries["tally"] == {"neptune-test-tally": "1.0.0"}
     assert libraries["framelog"] == {"neptune-test-framelog": "2.0.0"}
-    # The loader names every plugin the job could use, sorted (ADR 0058 §5).
-    assert libraries[PLUGINS_ID] == {
+    # The loader names every plugin the job could use, sorted (ADR 0058 §5): these, and any the
+    # workspace itself installs (neptune-deploy).
+    loaded = libraries[PLUGINS_ID]
+    assert list(loaded) == sorted(loaded)
+    assert {
         "neptune-test-framelog": "2.0.0",
         "neptune-test-tally": "1.0.0",
-    }
+    }.items() <= loaded.items()
     (broken,) = [f for f in receipt["findings"] if f["code"] == LOAD_FAILED]
     assert broken["severity"] == "warning"
 
@@ -286,7 +289,8 @@ def test_the_package_names_the_loaded_plugins_even_when_none_reads_a_file(
     root = tmp_path / "run"
     root.mkdir()
     (root / "notes.txt").write_text("cell 3, second shift\n", encoding="utf-8")
-    result = Neptune(tmp_path / "ws").ingest(root, tmp_path / "pkg")
+    only = PluginPolicy(allow=("neptune-test-shadow",))  # whatever else the workspace installs
+    result = Neptune(tmp_path / "ws", plugins=only).ingest(root, tmp_path / "pkg")
     assert result.committed and result.ingested == ()
     assert _transforms(result)[PLUGINS_ID] == {"neptune-test-shadow": "0.1.0"}
     (tie,) = [f for f in result.findings if f.code == "neptune.probe.ambiguous"]
