@@ -8,7 +8,9 @@ the L1 gate's amendments, [ADR 0005](adr/0005-l1-gate-catalog-data-model-amendme
 bodies, clock checks, collation, scale) and
 [ADR 0006](adr/0006-l1-gate-catalog-api-amendments.md) (hostile packages, moved packages and
 sources, tenant roots, paging, merge order). The gate's review is
-[reviews/l1-stress-test.md](reviews/l1-stress-test.md).
+[reviews/l1-stress-test.md](reviews/l1-stress-test.md). How the real catalog serves `thread`,
+`threads_of` and `lineage` (the derived thread index, request checks, `ClockMapping` before
+MVL-82) is [ADR 0010](adr/0010-entity-thread-index-and-lineage-reads.md).
 
 - **Version:** `1.2.0`, `neptune_ledger.api.CATALOG_API_VERSION`, **stable**, in
   `contracts/catalog-api/v1.2.0/`. 1.0.0 was the pre-gate draft; 1.1.0 adds the `unsafe_entry`
@@ -80,10 +82,10 @@ ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 | `unknown_record` | lineage, threads_of | No registered package holds the record id |
 | `unresolvable_evidence` | resolve | No registered package holds the source |
 | `preference_required` | thread | The preference was missing |
-| `unknown_clock`, `unknown_mapping` | thread | The merge names a clock or mapping that the catalog does not hold |
+| `unknown_clock`, `unknown_mapping` | thread | The merge names a clock or mapping that the catalog does not hold. No package schema the Ledger reads carries `ClockMapping` yet (MVL-82), so today every named mapping is `unknown_mapping` (ADR 0010 §5) |
 | `unsupported_mapping`, `mapping_out_of_range` | thread | ADR 0003 §3: a mapping that is not usable, or an entry that no usable path covers; `mapping_out_of_range` lists the paths it tried in `paths_tried` |
 | `as_of_out_of_range` | read calls | `as_of` is beyond the latest committed point |
-| `invalid_request` | any | An argument outside the contract, for example a window with `first > last` |
+| `invalid_request` | any | An argument outside the contract, for example a window with `first > last`, or a merge on `transaction` order |
 
 ## Running the contract tests against an implementation
 
@@ -117,16 +119,17 @@ The suite contains:
 - determinism checks: the same call twice gives identical bytes, and `as_of` replays an earlier
   point.
 
-Clock-merge and `mapping_out_of_range` tests are deferred to MVL-92. They need MVL-82
-`ClockMapping` records, which no package carries yet. It needs pytest and jsonschema (the `contract-tests` extra). Outside this repository, set
+Clock-merge and `mapping_out_of_range` contract tests wait for MVL-82 `ClockMapping` records,
+which no package carries yet. The merge rules themselves are property-tested inside the Ledger
+(ADR 0003 §7, P7; ADR 0010 §6). The suite needs pytest and jsonschema (the `contract-tests` extra). Outside this repository, set
 `NEPTUNE_WORKED_EXAMPLES` to the compiler's `tests/fixtures/model`.
 
 This package runs the suite twice (`tests/contract/test_ledger_catalog_contract.py`): against
 `StubCatalog` as strict expected failures, where each test must fail with `NotImplementedError`,
 and against the real `neptune_ledger.catalog.registry.PostgresCatalog`. There, `register`,
-`verify` and `resolve` pass. Each test that reaches a call not implemented yet is listed by name
-with its owning issue (`thread`, `threads_of`, `lineage`: MVL-92; `query`: MVL-98)
-and is a strict expected failure until that call lands. `make_catalog` must return a catalog
+`verify`, `resolve`, `thread`, `threads_of` and `lineage` pass. Each test that reaches a call not
+implemented yet is listed by name with its owning issue (`query`: MVL-98) and is a strict
+expected failure until that call lands. `make_catalog` must return a catalog
 with no package-root limit, because the tests register from `tmp_path`.
 
 Referenced sources are re-hashed on request by `PostgresCatalog.verify_sources`, outside this

@@ -5,14 +5,15 @@ resolution and any merge are the pure functions of ``order`` and ``merge``. Thre
 whole (ADR 0006 §7).
 """
 
+import json
 from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any, Final, cast
+from typing import Any, Final
 
 import psycopg
 
-from neptune.identity import canonical_json
-from neptune.model.knowledge import Knowledge
+from neptune.model import knowledge
+from neptune.model.knowledge import Knowledge, Known, NotApplicable, Unknown
 from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
     CatalogFinding,
@@ -21,10 +22,12 @@ from neptune_ledger.api.types import (
     Membership,
     Order,
     RevisionEdge,
+    StatedProvenance,
     Thread,
     ThreadKey,
     ThreadPreference,
     ThreadsOf,
+    TimePoint,
     TransactionKey,
     UnresolvedMember,
     UnresolvedMembership,
@@ -56,12 +59,33 @@ WHERE m.tenant_id = %(tenant)s AND m.thread_id = %(thread_id)s
   AND m.registration_key <= %(as_of)s
 """
 
-_WORLD: Final[Any] = cast("Any", Knowledge)[WorldTime]
-
 
 @lru_cache(maxsize=65536)
 def _world(text: str) -> Knowledge[WorldTime]:
-    return codec.decode_as(_WORLD, canonical_json.loads(text.encode("utf-8")))  # type: ignore[no-any-return]
+    """``ThreadEntry.world`` from the canonical JSON registration stored (``world_json``).
+
+    The text was written by ``membership.world_json`` from a verified record, so it is decoded
+    directly rather than through the generic codec, which costs too much on a 20 000-entry
+    thread (ADR 0005 §5's budget). The end keeps the package's state and provenance verbatim.
+    """
+    data = json.loads(text)
+    match data["knowledge"]:
+        case "not_applicable":
+            return NotApplicable()
+        case "unknown":
+            return Unknown()
+    value = data["value"]
+    start = value["start"]
+    end = knowledge.from_json(value["end"], _point, _stated)
+    return Known(WorldTime(TimePoint(start["domain_id"], start["ticks"]), end))
+
+
+def _point(data: Any) -> TimePoint:
+    return TimePoint(data["domain_id"], data["ticks"])
+
+
+def _stated(document: Any) -> StatedProvenance:
+    return StatedProvenance(document)
 
 
 @lru_cache(maxsize=65536)
