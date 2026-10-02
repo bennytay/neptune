@@ -1,0 +1,25 @@
+{
+  "api_version": "1.2.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "files_checked": 27,
+  "findings": [],
+  "package_id": "sha256:74f0761606322f58fe41abd43b24f12ffda223ecad2996404d7dd20bfd6e0b0f",
+  "registration_key": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 2,
+      "tx_time": "2026-10-02T00:00:02.000000Z"
+    }
+  },
+  "root_locator": {
+    "knowledge": "known",
+    "value": "/srv/neptune/packages/manipulator"
+  },
+  "verdict": "intact"
+}

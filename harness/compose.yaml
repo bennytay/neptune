@@ -1,0 +1,44 @@
+# The services a real stage may need (MVL-123, platform ADR 0004). Nothing in the harness starts
+# this file unless a stage that runs for real declares `needs_services`: today every stage is the
+# real compiler (in process) or a contract stub, so CI and `python -m harness` need no Docker.
+#
+#   docker compose -f harness/compose.yaml up -d --wait     # or: python -m harness --compose
+#
+# Host ports are off the defaults so the stack never collides with a local Postgres or MinIO; the
+# addresses are `HARNESS_POSTGRES` and `HARNESS_MINIO` (see harness/services.py). The credentials
+# are throwaway values for a loopback-only test stack.
+name: neptune-harness
+
+services:
+  postgres:
+    # Apache AGE 1.5 on PostgreSQL 16 plus pgvector, built from harness/postgres/Dockerfile
+    # (the base image is pinned there by digest).
+    build:
+      context: ./postgres
+    image: neptune-harness-postgres:pg16-age1.5.0-pgvector
+    environment:
+      POSTGRES_USER: neptune
+      POSTGRES_PASSWORD: neptune-harness
+      POSTGRES_DB: neptune
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U neptune -d neptune"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: neptune
+      MINIO_ROOT_PASSWORD: neptune-harness
+    ports:
+      - "127.0.0.1:59000:9000"
+      - "127.0.0.1:59001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

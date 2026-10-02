@@ -1,0 +1,10 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "grasp-planner"
+dynamic = ["version"]
+description = "Grasp planning for a parallel-jaw gripper"
+requires-python = ">=3.11"
+dependencies = ["numpy>=2"]

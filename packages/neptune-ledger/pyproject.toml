@@ -6,7 +6,18 @@ version = "0.0.1"
 description = "Neptune Ledger: catalog, entity threads, lakehouse and lineage over compiled Neptune packages."
 requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
-dependencies = ["neptune"]
+# psycopg 3 is the PostgreSQL driver for the catalog (ADR 0002). Pinned; bump deliberately.
+# pyarrow: query() returns a pyarrow.Table (catalog API, ADR 0004); same floor as the compiler.
+dependencies = ["neptune", "psycopg[binary]==3.3.6", "pyarrow>=25.0.1"]
+
+# What a downstream package needs to run neptune_ledger.contract_tests against its implementation.
+[project.optional-dependencies]
+contract-tests = ["jsonschema>=4.23", "pytest>=8.3"]
+
+# pgserver ships PostgreSQL 16 binaries in a wheel, so the catalog migration tests run against a real
+# PostgreSQL 16 in CI with no service container (ADR 0002 §8). Test-only.
+[dependency-groups]
+dev = ["pgserver==0.1.4"]
 
 [tool.uv.sources]
 neptune = { workspace = true }
@@ -32,6 +43,11 @@ strict = true
 warn_unreachable = true
 files = ["src", "tests"]
 mypy_path = "src"
+
+# pyarrow ships no type information; neptune_ledger.api.arrow is the only module that imports it.
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

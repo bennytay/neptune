@@ -16,7 +16,12 @@ print(result.package, result.receipt)
 `tests/fixtures/sdk/sdk_consumer.py` is a worked consumer (dry run, async, options, errors), run and
 `mypy --strict`-checked by the tests.
 
-- **Source**: a folder, as a path or a `file:` URI. A single file is refused: ingest its folder.
+- **Source**: a folder or one regular file, as a path or a `file:` URI. A file ingests exactly as a
+  folder holding only it would (ADR 0043).
+- **Ignore rules**: `JobOptions(ignore=IgnorePolicy(...))`. By default version-control internals and
+  OS metadata (`DEFAULT_PATTERNS`) and the root's `.neptune-ignore` are left unread; each ignored
+  entry is a `neptune.discovery.ignored` finding. A refused pattern, or a `.neptune-ignore` that cannot
+  be used, is `invalid_configuration` (ADR 0043 §6–§7).
 - **Destination**: required, must not exist, must not be inside the source. Packages are written once.
 - **Workspace**: `Neptune(workspace)` takes a `Workspace`, a directory, or `None` for
   `$NEPTUNE_HOME`, else `$XDG_CACHE_HOME/neptune`, else `~/.cache/neptune`. It is the cache: run the
@@ -26,10 +31,10 @@ print(result.package, result.receipt)
 
 | `Neptune` | `AsyncNeptune` | Does |
 |---|---|---|
-| `ingest(source, destination, *, on_event, cancel)` | `await ingest(...)` | the whole job → `IngestResult` |
-| `dry_run(source, *, on_event, cancel)` | `await dry_run(...)` | discover → plan, nothing parsed → `planned` |
-| `start(source, destination, *, cancel)` | `start(...)` | the job on its own thread → `Ingestion` / `AsyncIngestion` |
-| `start_dry_run(source, *, cancel)` | `start_dry_run(...)` | the dry run on its own thread |
+| `ingest(source, destination, *, on_event, cancel, resume)` | `await ingest(...)` | the whole job → `IngestResult` |
+| `dry_run(source, *, on_event, cancel, resume)` | `await dry_run(...)` | discover → plan + `inspect`, nothing parsed → `planned`, with `explanation` |
+| `start(source, destination, *, cancel, resume)` | `start(...)` | the job on its own thread → `Ingestion` / `AsyncIngestion` |
+| `start_dry_run(source, *, cancel, resume)` | `start_dry_run(...)` | the dry run on its own thread |
 
 Both take `Neptune(workspace=None, *, adapters=None, options=None, remote=None)`. Shorthands:
 `neptune.sdk.ingest(source, destination, workspace=..., ...)` and `neptune.sdk.dry_run(...)`.
@@ -62,7 +67,11 @@ async def ingest_with_progress() -> IngestResult:
   result: `committed_result(error)` returns the committed `IngestResult`, or `None` if no package was
   written. Check it before retrying into the same destination.
 - Resume = call `ingest` again with the same source and workspace. Killed processes too: the
-  workspace is the checkpoint (ADR 0028 §2).
+  workspace is the checkpoint (ADR 0028 §2). `resume=True` insists on it: `nothing_to_resume` if
+  the workspace never scanned this source. Either way the package is the one a fresh workspace
+  writes (ADR 0035 §9).
+- `publish_incomplete` is not committed, so `committed_result` returns `None` for it;
+  `error.destination` names the package that is there.
 
 ## Results
 
@@ -76,11 +85,35 @@ async def ingest_with_progress() -> IngestResult:
 | `read_receipt()` | the package's receipt, every adapter's findings included, checked against `receipt` |
 | `read_package()` | the whole package, read and verified |
 | `cache` | per source: adapter, plan and chunks with hit/miss rules; calls per adapter method |
+| `explanation` | a planned dry run's `Explanation` (ADR 0044); `None` otherwise |
 | `ingested`, `job`, `destination`, `durations` | as in `JobOutcome` |
 
 Same sources + adapters + config ⇒ same `receipt` and `package`, sync or async, cold or warm workspace,
 whatever earlier dry runs or ingests saw: a package lists only its own job's scan (ADR 0035 §9).
 A dry run's `cache` says what is left: chunks with rule `committed` are done, the rest will be parsed.
+
+## Explain before ingesting
+
+```python
+from pathlib import Path
+from neptune.sdk import Neptune
+
+plan = Neptune().dry_run("runs/2026-09-30")
+print(plan.explanation.render())            # for people
+Path("plan.json").write_bytes(plan.explanation.dumps())  # canonical JSON, neptune.explanation/1
+```
+
+- What it holds: the inventory; per source its detected format, every adapter's verdict with probe
+  confidence, reasons and why it won or lost, the adapter's `inspect` summary and the plan; the
+  session grouping with reasons and contested readings; work left and heavy sources; everything left
+  out (unsupported, ambiguous, quarantined, unreadable, skipped, links) with why. ADR 0044.
+- It parses nothing (`ingest` is never called) and only reads the sources. Like any dry run it warms
+  the workspace (ledger and plans), so the ingest after it plans nothing again; no package depends on
+  what the workspace held.
+- Byte-identical for the same folder, adapters, config and workspace contents; no job id, clock or
+  absolute path inside. Bounded: long lists end in `*_omitted` counts and a
+  `neptune.explain.truncated` finding (ADR 0044 §8).
+- From the shell: `neptune ingest SOURCE --explain [--json]` (`cli.md`).
 
 ## Adapters and options
 
@@ -95,7 +128,20 @@ client = Neptune(
 
 `options` is the runtime's `JobOptions` (attempts, isolation, limits, per-adapter config, job name):
 there is no SDK copy of it. Selection is still the probe engine's rule; pinning an adapter to a file
-is the manifest's (MVL-14). A config change is a new lineage: new record ids, a new package.
+is the manifest's. A config change is a new lineage: new record ids, a new package.
+
+## Manifests
+
+Every `ingest`, `dry_run`, `start` and `start_dry_run` (sync and async, and the shorthands) takes
+`manifest=`: `None` (the default) applies the root's `neptune.yaml`, `neptune.yml` or
+`neptune.json` if it has one; a path names a manifest file inside the root; `False` applies none.
+It is read and checked when the call is made, before the job starts: one that cannot be used is a
+`ConfigurationError` (`invalid_configuration`). The read manifest reaches the job as
+`JobOptions.manifest` (a `neptune.manifest.LoadedManifest`); setting it there directly skips the
+lookup. With a manifest, `JobOptions.grouping` must stay default (runs and `gap_seconds` are the
+manifest's) and its adapter options may not set a key `JobOptions.config` also sets.
+`neptune.manifest.generate.generate(root, client)` is `neptune init-manifest` as a function.
+See [manifest](manifest.md).
 
 ## Errors
 
@@ -103,10 +149,11 @@ Every SDK call raises only `NeptuneError` subclasses; branch on `error.code`, ne
 
 | Code | Class | When |
 |---|---|---|
-| `invalid_source` | `InvalidSourceError` | missing, not a directory, a `file:` URI with a query |
+| `invalid_source` | `InvalidSourceError` | missing, neither a directory nor a regular file, a `file:` URI with a query |
 | `destination_exists` | `DestinationExistsError` | anything at the destination, a dangling symlink too |
 | `invalid_destination` | `InvalidDestinationError` | the destination is inside the source |
-| `invalid_configuration` | `ConfigurationError` | adapters conflict, config names an unknown adapter/option/value, bad `remote` |
+| `invalid_configuration` | `ConfigurationError` | adapters conflict, config names an unknown adapter/option/value, bad `remote`, ignore rules that cannot be used |
+| `nothing_to_resume` | `NothingToResumeError` | `resume=True` and the workspace holds no earlier work on the source |
 | `network_refused` | `NetworkRefusedError` | a remote source or `remote=` while the workspace is local-only |
 | `unsupported` | `UnsupportedError` | a URI scheme with no connector; remote execution (MVL-46) |
 | `sandbox_unavailable` | `SandboxUnavailableError` | the host cannot confine adapters (ADR 0030 §3) |
@@ -115,9 +162,9 @@ Every SDK call raises only `NeptuneError` subclasses; branch on `error.code`, ne
 | `job_failed` | `JobFailedError` | anything else that stops the job: an unreadable root; a package that cannot be assembled, verified or written beside its destination |
 | `publish_incomplete` | `PublishIncompleteError` | the job renamed its package into place but could not flush its directory: the package is there, whole, and may not survive a crash |
 
-`invalid_request` (`InvalidRequestError`) is the parent of the first four, `job_failed` of
+`invalid_request` (`InvalidRequestError`) is the parent of the first five, `job_failed` of
 `publish_incomplete`, and `error` (`NeptuneError`) of all. A corrupt or unsupported *file* is never an error: it is a finding.
-`JobOptions(...)` with a bad value raises the runtime's `JobError` when you build it.
+`JobOptions(...)` with a bad value raises the runtime's `JobError` (re-exported as `neptune.sdk.JobError`) when you build it.
 
 ## Local-only and remote
 

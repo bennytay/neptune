@@ -7,10 +7,15 @@ requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 dependencies = [
     "lz4>=4.4.5",
+    "markdown-it-py>=4.2.0",
     "pyarrow>=25.0.1",
+    "pypdf>=6.19.0",
     "pyyaml>=6.0.2",
     "zstandard>=0.25.0",
 ]
+
+[project.scripts]
+neptune = "neptune.cli:main"
 
 [dependency-groups]
 dev = [
@@ -62,7 +67,8 @@ warn_unreachable = true
 files = ["src", "tests"]
 mypy_path = "src"
 
-# pyarrow ships no type information; its use is confined to neptune.store.
+# pyarrow ships no type information; it is imported only by neptune.store and the tabular
+# adapter (neptune.adapters.tabular, which loads it lazily for Parquet sources).
 [[tool.mypy.overrides]]
 module = ["pyarrow", "pyarrow.*"]
 ignore_missing_imports = true

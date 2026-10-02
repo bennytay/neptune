@@ -1,0 +1,63 @@
+{
+  "api_version": "1.0.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "cited_by": [
+    {
+      "kind": "calibration",
+      "line": 1,
+      "package_id": "sha256:74f0761606322f58fe41abd43b24f12ffda223ecad2996404d7dd20bfd6e0b0f",
+      "record_id": "rec:sha256:db51ab20577a4798da4bc4014bb82c195f9ca6e5d3cd7fe9f455c4dbeeb1ec94"
+    },
+    {
+      "kind": "frame_graph",
+      "line": 1,
+      "package_id": "sha256:74f0761606322f58fe41abd43b24f12ffda223ecad2996404d7dd20bfd6e0b0f",
+      "record_id": "rec:sha256:4e12de3b72e12a5547463a4230660633176fb35ff6498a2e7938a1d278fc162a"
+    }
+  ],
+  "evidence_ref": {
+    "locator": [
+      {
+        "kind": "byte_range",
+        "length": 348,
+        "offset": 0
+      }
+    ],
+    "source": "sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa"
+  },
+  "fetch": [
+    {
+      "blob_path": {
+        "knowledge": "not_applicable"
+      },
+      "locations": [
+        {
+          "kind": "local",
+          "path": "handeye.yaml"
+        }
+      ],
+      "package_id": "sha256:74f0761606322f58fe41abd43b24f12ffda223ecad2996404d7dd20bfd6e0b0f",
+      "storage": "referenced"
+    }
+  ],
+  "findings": [],
+  "region": {
+    "addressing": "byte_range",
+    "step": {
+      "kind": "byte_range",
+      "length": 348,
+      "offset": 0
+    }
+  },
+  "size": {
+    "knowledge": "known",
+    "value": 348
+  },
+  "status": "resolved"
+}

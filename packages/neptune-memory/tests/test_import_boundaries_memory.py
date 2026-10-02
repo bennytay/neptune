@@ -19,7 +19,16 @@ MODEL_CLIENTS = (
     "langchain",
     "litellm",
 )
-SUBPACKAGES = ("schema", "store", "consolidate", "derived", "spatial", "episodes", "cli")
+SUBPACKAGES = (
+    "schema",
+    "store",
+    "consolidate",
+    "derived",
+    "spatial",
+    "episodes",
+    "cli",
+    "contract",
+)
 
 
 def _imports_of_source(source: str, package: tuple[str, ...]) -> list[str]:

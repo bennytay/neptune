@@ -7,5 +7,6 @@
 package-schema = "2.0.0"
 
 [neptune-memory]
+catalog-api = "1.1.0"
 
 [neptune-platform]

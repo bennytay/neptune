@@ -1,0 +1,57 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:3e671687-395b-41f5-a30f-a58921a69b79",
+  "version": 1,
+  "version": 2,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "warehouse-amr-stack",
+      "version": "4.2.0"
+    }
+  },
+  "components": [
+    {
+      "type": "machine-learning-model",
+      "name": "pick-policy",
+      "version": "2026.09.1",
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "35a441e1fdf276ec66e2fcaf6bbe19e654406c77bd79239148d8813035f7366bdce37dc6fe7acc9f4aa127b6b06f12b333ae5a81c3540f945987846fc2cf0008"
+        },
+        {
+          "alg": "SHA-256",
+          "content": "4f83182764b4d056f74d1d944a637e3146dfaad9227dcc1de1b38d6258cefd37"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "nav2-runtime",
+      "version": "humble",
+      "purl": "pkg:oci/nav2-runtime@sha256%3Abdd807cbd8d6ee90d2e356ce0324379686b21e1fe029bfe26e1e890ee5c737e6?repository_url=ghcr.io/example"
+    },
+    {
+      "type": "firmware",
+      "name": "motor-controller",
+      "version": "0x010E"
+    },
+    {
+      "type": "library",
+      "name": "eigen",
+      "version": "3.4.0",
+      "components": [
+        {
+          "type": "library",
+          "name": "eigen-blas"
+        }
+      ]
+    },
+    {
+      "type": "container",
+      "name": "unpinned-sidecar"
+    }
+  ]
+}

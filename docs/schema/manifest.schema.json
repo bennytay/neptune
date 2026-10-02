@@ -1,0 +1,641 @@
+{
+  "$defs": {
+    "aliases": {
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": [
+                  "number",
+                  "boolean"
+                ]
+              }
+            ],
+            "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+          },
+          {
+            "items": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": [
+                    "number",
+                    "boolean"
+                  ]
+                }
+              ],
+              "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        ]
+      },
+      "description": "Other identifiers the evidence uses for this entity, by namespace.",
+      "propertyNames": {
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$"
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://neptune.dev/schema/manifest/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "An optional neptune.yaml (or .json) at the root of a folder: declarations the evidence does not make. Everything it declares is stated, with the manifest as its source (docs/manifest.md).",
+  "properties": {
+    "adapters": {
+      "oneOf": [
+        {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "options": {
+                "description": "An adapter's options by name (see the adapter's descriptor).",
+                "propertyNames": {
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                },
+                "type": "object"
+              }
+            },
+            "required": [
+              "options"
+            ],
+            "type": "object"
+          },
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "grouping": {
+      "additionalProperties": false,
+      "properties": {
+        "gap_seconds": {
+          "maximum": 86400,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "machines": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "A robot or vehicle.",
+            "properties": {
+              "aliases": {
+                "$ref": "#/$defs/aliases"
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              },
+              "embodiment": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10').",
+                "examples": [
+                  "manipulator",
+                  "mobile_base",
+                  "mobile_manipulator",
+                  "legged",
+                  "humanoid",
+                  "aerial",
+                  "marine",
+                  "ground_vehicle",
+                  "fleet",
+                  "other"
+                ]
+              },
+              "id": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "An id; a number or boolean here is read as text, exactly as written."
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "neptune": {
+      "const": 1,
+      "description": "The manifest schema version."
+    },
+    "runs": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "A declared session (ADR 0036 §6).",
+            "properties": {
+              "description": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              },
+              "machine": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "An id; a number or boolean here is read as text, exactly as written."
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              },
+              "paths": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$",
+                      "type": "string"
+                    },
+                    {
+                      "type": [
+                        "number",
+                        "boolean"
+                      ]
+                    }
+                  ],
+                  "description": "Root-relative, '/'-separated: a file, or a directory and all below it. A number or boolean here is read as text, exactly as written."
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "site": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "An id; a number or boolean here is read as text, exactly as written."
+              },
+              "software": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                      "type": "string"
+                    },
+                    {
+                      "type": [
+                        "number",
+                        "boolean"
+                      ]
+                    }
+                  ],
+                  "description": "An id; a number or boolean here is read as text, exactly as written."
+                },
+                "type": "array"
+              },
+              "task": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "An id; a number or boolean here is read as text, exactly as written."
+              }
+            },
+            "required": [
+              "name",
+              "paths"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sites": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "A place where runs happened.",
+            "properties": {
+              "aliases": {
+                "$ref": "#/$defs/aliases"
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              },
+              "id": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "An id; a number or boolean here is read as text, exactly as written."
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "software": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "Software a run used.",
+            "properties": {
+              "aliases": {
+                "$ref": "#/$defs/aliases"
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              },
+              "id": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "An id; a number or boolean here is read as text, exactly as written."
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              },
+              "version": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sources": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "Which adapter reads the files a path or glob matches.",
+            "oneOf": [
+              {
+                "required": [
+                  "path"
+                ]
+              },
+              {
+                "required": [
+                  "glob"
+                ]
+              }
+            ],
+            "properties": {
+              "adapter": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "An id; a number or boolean here is read as text, exactly as written."
+              },
+              "glob": {
+                "description": "Ignore-rule glob syntax, anchored at the root.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "options": {
+                "description": "An adapter's options by name (see the adapter's descriptor).",
+                "propertyNames": {
+                  "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                },
+                "type": "object"
+              },
+              "path": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*(^|/)\\.\\.?(/|$)).+$",
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Root-relative, '/'-separated: a file, or a directory and all below it. A number or boolean here is read as text, exactly as written."
+              }
+            },
+            "required": [
+              "adapter"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tasks": {
+      "oneOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "description": "What a run was for.",
+            "properties": {
+              "aliases": {
+                "$ref": "#/$defs/aliases"
+              },
+              "description": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              },
+              "id": {
+                "anyOf": [
+                  {
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "An id; a number or boolean here is read as text, exactly as written."
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": [
+                      "number",
+                      "boolean"
+                    ]
+                  }
+                ],
+                "description": "Text; a number or boolean here is read as text, exactly as written (1.10 is '1.10')."
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "neptune"
+  ],
+  "title": "Neptune manifest",
+  "type": "object"
+}
