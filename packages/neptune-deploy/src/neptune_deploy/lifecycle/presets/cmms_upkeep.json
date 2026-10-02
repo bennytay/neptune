@@ -1,0 +1,31 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "cmms.upkeep",
+  "version": "1",
+  "description": "UpKeep work-order CSV export. Category Preventive and Corrective are maintenance. UpKeep writes completion times in the account's zone without an offset: declare it in a copy.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "work_order",
+      "kind": "maintenance_event",
+      "requires": ["Work Order ID", "Category"],
+      "where": {"column": "Category", "in": ["Preventive", "Corrective"]},
+      "ignore": ["Assigned To", "Priority", "Status", "Due Date", "Created Date"],
+      "fields": {
+        "identifiers": [{"column": "Work Order ID", "namespace": "upkeep.work_order"}],
+        "machines": [{"column": "Asset", "namespace": "upkeep.asset"}],
+        "site": {"column": "Location", "namespace": "upkeep.location"},
+        "performed": {"column": "Completed Date", "format": ["%m/%d/%Y %H:%M", "%m/%d/%Y"], "required": true},
+        "diagnosis": {"column": "Title"},
+        "actions": [{"column": "Description"}],
+        "parts": [
+          {
+            "part": {"column": "Parts Used"},
+            "removed": [{"column": "Removed Serial", "namespace": "serial"}],
+            "installed": [{"column": "Installed Serial", "namespace": "serial"}]
+          }
+        ]
+      }
+    }
+  ]
+}
