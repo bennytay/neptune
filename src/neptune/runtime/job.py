@@ -77,7 +77,7 @@ from neptune.adapters.contract import (
 from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatus
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
-from neptune.derived.temporal import ClockAlignment, align_clocks
+from neptune.derived.temporal import ClockAlignment, align_clocks, clock_records
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.layout import Layout, layout_from_scan
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
@@ -2072,7 +2072,7 @@ class IngestJob:
                     continue  # staging refuses the package and says why
                 for chunk in plan.chunks:
                     output = self.workspace.load(str(chunk["id"]))
-                    records.extend(output.records)
+                    records.extend(clock_records(output.records))  # the rest is dropped here
                     for stream, run in sorted(output.runs.items()):
                         runs[stream].append(run)
         except (WorkspaceError, ValueError, OSError) as exc:

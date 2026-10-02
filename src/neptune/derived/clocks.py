@@ -307,11 +307,13 @@ class Line:
 class FitProblem(StrEnum):
     NO_ANCHORS = "no_anchors"  # no reading pair: the clocks stay unrelated
     NOT_INCREASING = "not_increasing"  # the target runs backward against the source
+    RATE_TOO_SMALL = "rate_too_small"  # increasing, but below 1/max_denominator: rounds to zero
     OUT_OF_RANGE = "out_of_range"  # the anchor does not fit a signed 64-bit tick
 
 
 def _round(value: Fraction) -> int:
-    """Nearest integer, halves away from zero: a fixed rule, independent of the platform."""
+    """Nearest integer, halves up (toward +infinity: 2.5 -> 3, -2.5 -> -2): a fixed rule,
+    independent of the platform."""
     floor = math.floor(value)
     return floor + 1 if value - floor >= Fraction(1, 2) else floor
 
@@ -348,7 +350,7 @@ def fit_line(
             return FitProblem.NOT_INCREASING
         rate = slope.limit_denominator(max_denominator)
         if rate <= 0:  # a slope too small for the denominator rounds to zero
-            return FitProblem.NOT_INCREASING
+            return FitProblem.RATE_TOO_SMALL
         anchor_target = _round(Fraction(sy, n) + slope * (anchor_source - Fraction(sx, n)))
     if not INT64_MIN <= anchor_target <= INT64_MAX:
         return FitProblem.OUT_OF_RANGE
@@ -376,11 +378,12 @@ def fitted_mapping(
 
     ``slack`` bounds, in target ticks, how far apart an anchor's two readings' instants may be;
     ``None`` where nothing bounds it, which leaves the residual bound ``Unknown``: the map is
-    estimated, its error is not.
+    estimated, its error is not. A bound past a signed 64-bit tick count is ``Unknown`` too
+    (``bound_representable`` says when; the caller reports it).
     """
-    bound: Knowledge[Duration] = (
-        Known(Duration(line.residual + slack, target)) if slack is not None else Unknown()
-    )
+    bound: Knowledge[Duration] = Unknown()
+    if slack is not None and bound_representable(line, slack):
+        bound = Known(Duration(line.residual + slack, target))
     end: Knowledge[Timestamp] = (
         Known(Timestamp(line.last + 1, source)) if line.last < INT64_MAX else Unknown()
     )
@@ -400,6 +403,11 @@ def fitted_mapping(
         residual_bound=bound,
         validity=Known(window),
     )
+
+
+def bound_representable(line: Line, slack: int | None) -> bool:
+    """Whether a stated ``slack`` gives the fit a bound that fits a signed 64-bit tick count."""
+    return slack is not None and line.residual + slack <= INT64_MAX
 
 
 # --- Aligning across clocks ---------------------------------------------------------------------
@@ -429,10 +437,14 @@ class Aligned:
     inferred: bool
 
     def window(self) -> tuple[Timestamp, Timestamp] | None:
-        """``[instant - bound, instant + bound]``, both ends included; ``None`` when unbounded."""
+        """``[instant - bound, instant + bound]``, both ends included; ``None`` when unbounded or
+        when an end falls outside the signed 64-bit tick range (no tick can name it)."""
         if self.bound is None:
             return None
-        return self.instant - self.bound, self.instant + self.bound
+        low, high = self.instant.ticks - self.bound.ticks, self.instant.ticks + self.bound.ticks
+        if low < INT64_MIN or high > INT64_MAX:
+            return None
+        return Timestamp(low, self.instant.domain_id), Timestamp(high, self.instant.domain_id)
 
 
 @dataclass(frozen=True)
@@ -580,5 +592,7 @@ def _result(
     ticks = _round(value)
     if not INT64_MIN <= ticks <= INT64_MAX:
         return Unaligned(Reason.OUTSIDE_VALIDITY)
-    bound = None if error is None else Duration(math.ceil(error + abs(ticks - value)), target)
+    # A bound past a signed 64-bit tick count is no bound a tick can state: unbounded.
+    width = None if error is None else math.ceil(error + abs(ticks - value))
+    bound = None if width is None or width > INT64_MAX else Duration(width, target)
     return Aligned(Timestamp(ticks, target), bound, path, inferred)

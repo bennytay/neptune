@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-02
 - Issue: MVL-36
+- Amends: ADR 0050 §5 (`co_sampled` on inferred mappings)
 
 ## Context
 
@@ -47,29 +48,40 @@ does not. Forces:
    that rounded line, rounded up to whole target ticks. Two passes over the rows, constant memory,
    no float, no randomness: the same rows in any order give the same bytes. One source instant
    gives an anchor with `rate` `Unknown`; a slope that is not positive gives no mapping and a
-   `clock_not_increasing` finding.
+   `clock_not_increasing` finding, and a positive slope that rounds to zero gives no mapping and a
+   `rate_too_small` finding.
 4. **The bound is honest.** `residual_bound` = fit residual + the latency between an anchor's two
    readings. Nothing states that latency by default, so it is `Unknown`, and one
    `latency_unbounded` finding per rule and source lists each mapping's fit residual. A caller may
    state a latency bound per rule (`ClockConfig.slack`, seconds as a `Fraction`, part of the
-   transform config); then the bound is `Known`, rounded up to target ticks.
+   transform config); then the bound is `Known`, rounded up to target ticks. A bound past a
+   signed 64-bit tick count is `Unknown` with a `bound_out_of_range` finding, never a crash.
 5. **No extrapolation.** `validity` is `[first, last + 1)` of the anchors' source readings; outside
    it the mapping does not apply.
 6. **Derived `clock_mapping` lines** carry ADR 0050 §5's fields exactly, with the derived envelope
    (`kind`, `schema_version`, `assertion_kind: inferred`) and `InferredProvenance` flattened as
    `evidence` and `transform`, like every derived kind (ADR 0036). Their states carry no
-   provenance of their own; the reader refuses one. `method` is `co_sampled`: the anchors are
-   read from one record's fields; the inference is the provenance, not a new method value.
-   Stated mappings stay canonical and are never re-estimated.
+   provenance of their own; the reader refuses one. `method` is `co_sampled` (§9). Stated
+   mappings stay canonical and are never re-estimated.
 7. **Aligning is a query, not a rewrite.** `ClockGraph.align(timestamp, clock)` walks stated then
    inferred mappings breadth-first, applying a mapping (or its inverse) only inside its validity,
    and returns `Aligned {instant, bound, path, inferred}`, where the bound grows as
-   `rate · bound_so_far + residual_bound` and is `None` once any step's is `Unknown`; or
+   `rate · bound_so_far + residual_bound` and is `None` once any step's is `Unknown` or once it
+   passes a signed 64-bit tick count (`window()` is `None` when an end would); or
    `Unaligned {reason}`: `unsynchronised` (no chain of mappings joins the clocks),
    `outside_validity`, or `rate_unknown`. A validity bound that is not stated is not assumed open.
 8. **Unsynchronised is explicit.** When the package's clocks form more than one group that no
    mapping joins, one `unsynchronised` finding lists the groups. A rule that matched a stream but
    found no reading pair gives `anchors_absent`; one source instant gives `single_instant`.
+9. **Amends ADR 0050 §5: `co_sampled` on an inferred mapping.** ADR 0050 §5 allows `co_sampled`
+   only where the format says two fields of one sample are the same instant. On a canonical
+   mapping that stays the rule. On an inferred (`derived/clock_mapping`) mapping, `co_sampled`
+   means the anchors were read as pairs from one record's fields, which may mark two events (a
+   publish and a receipt, a GPS fix and its publication); the inference, and the latency it
+   cannot see, are carried by `assertion_kind: inferred`, the `InferredProvenance` and an
+   `Unknown` `residual_bound` (§4), not by `method`. A consumer that needs ADR 0050's
+   same-instant meaning reads it only from canonical mappings. No new `method` value is added
+   (that would change the frozen shape and the package schema).
 
 ## Alternatives considered
 

@@ -57,7 +57,7 @@ header).
 | [0047](0047-optional-manifest-stated-declarations-set-against-evidence.md) | The optional manifest: a source in the folder, stated declarations set against the evidence, generated as commented choices | Accepted |
 | [0048](0048-flight-log-adapter-px4-ulog-and-ardupilot-dataflash.md) | The flight-log adapter: PX4 ULog and ArduPilot DataFlash as runs, decoded streams and cited tables | Accepted |
 | [0049](0049-stream-introspection-declared-layouts-and-inferred-semantics.md) | Stream introspection: declared layouts and inferred semantics as derived tables | Accepted |
-| [0050](0050-alignment-record-contract-identity-links-clock-mappings-frame-and-run-bindings.md) | The alignment record contract: identity links, clock mappings, frame and run bindings | Accepted |
+| [0050](0050-alignment-record-contract-identity-links-clock-mappings-frame-and-run-bindings.md) | The alignment record contract: identity links, clock mappings, frame and run bindings | Accepted; amended by 0060 |
 | [0052](0052-geometry-adapter-meshes-and-scenes-as-referenced-objects.md) | The geometry adapter: meshes and scenes as referenced objects, nothing copied, nothing guessed | Accepted |
 | [0054](0054-integrity-and-data-quality-rules-over-the-stored-package.md) | Integrity and data-quality rules run over the stored package | Accepted |
 | [0055](0055-calibration-adapter-ros-kalibr-opencv-and-shared-structured-readers.md) | The calibration adapter: ROS, Kalibr and OpenCV files as calibrations, extrinsics and a file-local frame graph, over shared structured readers | Accepted |

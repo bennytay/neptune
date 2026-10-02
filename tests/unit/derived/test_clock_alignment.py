@@ -31,7 +31,13 @@ from neptune.derived.clocks import (
 )
 from neptune.derived.provenance import INFERRED
 from neptune.derived.sessions import read_derived
-from neptune.derived.temporal import CO_RECORDED, ClockConfig, align_clocks, clock_graph
+from neptune.derived.temporal import (
+    CO_RECORDED,
+    ClockConfig,
+    align_clocks,
+    clock_graph,
+    clock_records,
+)
 from neptune.identity import canonical_json
 from neptune.model.alignment import ClockAnchor, ClockMapping, MappingMethod, ValidityWindow
 from neptune.model.ids import ContentId, RecordId
@@ -474,3 +480,101 @@ def test_a_window_is_checked_on_the_source_clock() -> None:
     anchor = ClockAnchor(Timestamp(0, B), Timestamp(0, A))
     with pytest.raises(ValueError, match="anchor"):
         InferredClockMapping(**{**good.__dict__, "anchor": Known(anchor)})
+
+
+# --- Review round (PR #85): overflow, tiny rates, the amended contract, streamed records ----------
+
+
+def test_adr_0060_declares_that_it_amends_adr_0050_section_5() -> None:
+    adrs = Path(__file__).parents[3] / "docs" / "adr"
+    [adr] = adrs.glob("0060-*.md")
+    header = adr.read_text().split("## Context")[0]
+    assert "- Amends: ADR 0050 §5" in header
+    index = (adrs / "README.md").read_text()
+    [row] = [line for line in index.splitlines() if line.startswith("| [0050]")]
+    assert row.endswith("amended by 0060 |")
+
+
+def test_a_bound_past_int64_is_no_bound_never_an_error() -> None:
+    # the reviewer's repro: the inverse bound is 1.3e19 ticks
+    pairs = [(1, 1), (5 * 10**17, 5 * 10**8 + 2 * 10**10), (10**18, 10**9)]
+    fitted = mapping(A, B, pairs, slack=0)
+    line = line_of(pairs)
+    assert isinstance(line, Line)
+    back = ClockGraph([fitted]).align(Timestamp(line.anchor_target, B), A)
+    assert isinstance(back, Aligned) and back.bound is None and back.window() is None
+
+
+def test_a_window_past_int64_is_none() -> None:
+    near = Aligned(Timestamp(INT64_MAX - 5, B), Duration(10, B), (), False)
+    assert near.window() is None
+    inside = Aligned(Timestamp(INT64_MAX - 10, B), Duration(10, B), (), False)
+    assert inside.window() == (Timestamp(INT64_MAX - 20, B), Timestamp(INT64_MAX, B))
+
+
+def test_a_residual_plus_latency_past_int64_is_an_unknown_bound() -> None:
+    top = INT64_MAX
+    hostile = [(1, -top), (2, top), (3, -top + 5)]
+    line = line_of(hostile)
+    assert isinstance(line, Line) and line.residual > top
+    fitted = mapping(A, B, hostile, slack=0)
+    assert isinstance(fitted.residual_bound, Unknown)
+
+
+def test_hostile_rows_with_a_stated_latency_give_a_finding_not_a_crash() -> None:
+    records: list[object] = list(example_records("manipulator"))
+    joints = by_topic(records)["/joint_states"]
+    top = INT64_MAX
+    rows: Rows = {
+        joints.id: [
+            {"time/0": -top, "time/1": 1, "time/2": 1},
+            {"time/0": top, "time/1": 2, "time/2": 2},
+            {"time/0": -top + 5, "time/1": 3, "time/2": 3},
+        ]
+    }
+    config = ClockConfig(slack=((CO_RECORDED, Fraction(1, 1000)),))
+    found = align_clocks(records, reader(rows), config)
+    assert found is not None and found.mappings
+    assert all(isinstance(m.residual_bound, Unknown) for m in found.mappings)
+    codes = [f.code for f in found.findings]
+    assert codes.count("neptune.clocks.bound_out_of_range") == len(found.mappings)
+
+
+def test_a_rate_too_small_to_state_is_its_own_problem_not_a_backward_clock() -> None:
+    top = INT64_MAX
+    assert line_of([(1, 1), (top, 2), (2, 3)]) is FitProblem.RATE_TOO_SMALL
+    records: list[object] = list(example_records("manipulator"))
+    joints = by_topic(records)["/joint_states"]
+    rows: Rows = {
+        joints.id: [
+            {"time/0": 1, "time/1": 1, "time/2": 1},
+            {"time/0": 2, "time/1": top, "time/2": top},
+            {"time/0": 3, "time/1": 2, "time/2": 2},
+        ]
+    }
+    found = align_clocks(records, reader(rows))
+    assert found is not None
+    codes = {f.code for f in found.findings}
+    assert "neptune.clocks.rate_too_small" in codes
+    assert "neptune.clocks.clock_not_increasing" not in codes
+
+
+def test_only_clock_records_are_kept_and_the_alignment_is_the_same() -> None:
+    records: list[object] = list(example_records("manipulator"))
+    kept = list(clock_records(records))
+    assert kept and all(isinstance(r, TimestampDomain | Stream | ClockMapping) for r in kept)
+    assert len(kept) < len(records)
+    rows = manipulator_rows(records)
+    whole, filtered = align_clocks(records, reader(rows)), align_clocks(kept, reader(rows))
+    assert whole is not None and filtered is not None
+    assert (whole.transform, whole.mappings, whole.findings) == (
+        filtered.transform,
+        filtered.mappings,
+        filtered.findings,
+    )
+
+
+def test_rounding_takes_halves_up() -> None:
+    from neptune.derived.clocks import _round
+
+    assert [_round(Fraction(n, 2)) for n in (5, -5, 3, -3)] == [3, -2, 2, -1]

@@ -37,6 +37,7 @@ from neptune.derived.clocks import (
     InferredClockMapping,
     InferredTimestampDomain,
     Line,
+    bound_representable,
     fit_line,
     fitted_mapping,
 )
@@ -368,6 +369,18 @@ class _Pass:
                 records,
             )
             return
+        if line is FitProblem.RATE_TOO_SMALL:
+            self.finding(
+                "rate_too_small",
+                FindingCategory.UNREPRESENTABLE,
+                Severity.WARNING,
+                stream.provenance.evidence,
+                f"the target advances, but by less than 1/{self.config.max_rate_denominator} of a"
+                " tick per source tick: the rate rounds to zero; no mapping is made",
+                details,
+                records,
+            )
+            return
         if line is FitProblem.OUT_OF_RANGE:
             self.finding(
                 "anchor_out_of_range",
@@ -406,6 +419,17 @@ class _Pass:
         self.mappings.append(mapping)
         if task.target in self.candidates:  # a found clock is kept where it has a reading
             self.embedded[task.target] = self.candidates[task.target]
+        if slack is not None and not bound_representable(line, slack):
+            self.finding(
+                "bound_out_of_range",
+                FindingCategory.UNREPRESENTABLE,
+                Severity.WARNING,
+                stream.provenance.evidence,
+                "the fit residual plus the stated latency does not fit a signed 64-bit tick; the"
+                " mapping's residual bound is unknown",
+                {**details, "fit_residual": line.residual, "mapping": mapping.id, "slack": slack},
+                records,
+            )
         if line.rate is None:
             self.finding(
                 "single_instant",
@@ -465,6 +489,12 @@ class _Pass:
             {"groups": [list(group) for group in groups]},
             sorted(self.domains),
         )
+
+
+def clock_records(records: Iterable[object]) -> Iterator[object]:
+    """The records ``align_clocks`` reads: timestamp domains, streams and stated clock mappings.
+    A caller gathering a package chunk by chunk keeps only these, not every record."""
+    return (r for r in records if isinstance(r, TimestampDomain | Stream | ClockMapping))
 
 
 def align_clocks(
