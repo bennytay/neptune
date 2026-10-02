@@ -4,8 +4,12 @@ Nothing in the runtime, the store or the model names a format: they see adapters
 registry and the contract. A job may also build its own ``AdapterRegistry`` from any adapters.
 """
 
+from neptune.adapters.calibration import CalibrationAdapter
 from neptune.adapters.config import ConfigAdapter
 from neptune.adapters.contract import Adapter
+from neptune.adapters.flightlog import FlightLogAdapter
+from neptune.adapters.geojson import GeoJsonAdapter
+from neptune.adapters.geometry import GeometryAdapter
 from neptune.adapters.image import ImageAdapter
 from neptune.adapters.markdown import MarkdownAdapter
 from neptune.adapters.mcap import McapAdapter
@@ -21,7 +25,11 @@ from neptune.adapters.text import TextAdapter
 def builtin_adapters() -> tuple[Adapter, ...]:
     """A fresh instance of every shipped adapter, in id order."""
     return (
+        CalibrationAdapter(),
         ConfigAdapter(),
+        FlightLogAdapter(),
+        GeoJsonAdapter(),
+        GeometryAdapter(),
         ImageAdapter(),
         MarkdownAdapter(),
         McapAdapter(),

@@ -10,6 +10,7 @@ from typing import Any, Final
 import pytest
 from jsonschema import Draft202012Validator
 
+from neptune.derived.provenance import InferredProvenance
 from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id, digest_stream
 from neptune.identity.provenance import evidence_record_id, transform_record
@@ -290,10 +291,18 @@ def test_malformed_parts_are_refused() -> None:
         record(IncidentRecord, timeline=(Score("t", Known("x")),))
 
 
-def test_inferred_provenance_has_no_place_on_a_lifecycle_record() -> None:
+def test_a_lifecycle_record_is_stated_never_observed_or_inferred() -> None:
     stated = record(IncidentRecord)
+    observed = Provenance(stated.provenance.evidence, ADAPTER.id, AssertionKind.OBSERVED)
+    with pytest.raises(ValueError, match="stated"):
+        replace(stated, provenance=observed)
+    inferred = InferredProvenance((stated.provenance.evidence,), ADAPTER.id)
     with pytest.raises(TypeError, match="derived"):
-        replace(stated, provenance="inferred")
+        replace(stated, provenance=inferred)
+    data = stated.to_json()
+    data["provenance"] = {**data["provenance"], "assertion_kind": "observed"}
+    with pytest.raises(ValueError, match="stated"):
+        IncidentRecord.from_json(data)
 
 
 # --- In a package ------------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-10-02
 - Issue: MVL-83
-- Amends: ADR 0020 (the `world` family gains eight kinds); ADR 0037 §1 (schema version 3)
+- Amends: ADR 0020 (the `world` family gains eight kinds); ADR 0037 §1 (schema version 4)
 
 ## Context
 
@@ -26,7 +26,7 @@ its first issue (MVL-112) waits on a canonical place to put them. Forces:
 
 ## Decision
 
-1. **Eight kinds in the `world` family, at schema version 3 (`since = 3`).** Each is an evidence
+1. **Eight kinds in the `world` family, at schema version 4 (`since = 4`).** Each is an evidence
    record whose provenance cites the one declaration it comes from: a form, a ticket, a work order
    or a register row. The assertion is `stated`. The kinds live in `model/lifecycle.py`:
    - `commissioning_baseline`: `commissioned`, `hardware` and `software` inventories (name, model,
@@ -83,9 +83,9 @@ its first issue (MVL-112) waits on a canonical place to put them. Forces:
    if the codecs and the dataclass fields ever differ. The JSON Schema is still generated from the
    dataclass types (ADR 0021).
 7. **The package and its receipt.**
-   - A package holding any lifecycle record is a version 3 package (ADR 0037 §1).
+   - A package holding any lifecycle record is a version 4 package (ADR 0037 §1).
    - `receipt.md` lists each new kind with its count in its Records table. No receipt field is added.
-   - The package-schema contract is published at **3.0.0**. `SCHEMA_VERSION` is the registry major
+   - The package-schema contract is published at **4.0.0**. `SCHEMA_VERSION` is the registry major
      (platform ADR 0002 §3), so a minor version is not possible.
 8. **Worked examples: two new ones, the four robots untouched.**
    - `warehouse_amr` is a deployment export for AMR-07 at site S-007. It holds commissioning, the
@@ -94,8 +94,8 @@ its first issue (MVL-112) waits on a canonical place to put them. Forces:
    - `manipulator_cell` covers cell CELL-3. It holds commissioning, the risk assessment, a
      joint-drive replacement, and the requalification that returned the cell to service.
    - Together they hold all eight kinds, and every value cites its JSON pointer.
-   - Both join the package-schema goldens. The four robot examples stay byte-identical version 1
-     packages, so consumers whose suites pin those examples (the Ledger's catalog contract, Memory,
+   - Both join the package-schema goldens. The four robot examples stay byte-identical packages
+     below version 4, so consumers whose suites pin those examples (the Ledger's catalog contract, Memory,
      the harness) do not move.
 
 ## Alternatives considered
@@ -113,7 +113,7 @@ its first issue (MVL-112) waits on a canonical place to put them. Forces:
 - **A lifecycle section in `IngestReceipt`.** It changes the receipt document's shape and every
   receipt id, while the Records table already lists the kinds. Revisit if consumers need more.
 - **Adding the records to the `mobile_robot` and `manipulator` examples.** Those examples would become
-  version 3 packages and break consumer suites that register them as version 1. Lost.
+  version 4 packages and break consumer suites that pin their current version. Lost.
 - **Hand-written `to_json` and `from_json` per kind, as in `world.py`.** About 600 more lines across
   eight kinds and ten parts, with more room for a field to be written but not read. The codec table
   and its import-time check keep the three paths in step. Lost.
@@ -121,9 +121,9 @@ its first issue (MVL-112) waits on a canonical place to put them. Forces:
 ## Consequences
 
 - Neptune Deploy (MVL-112 onward) parses forms, tickets and CMMS exports into these kinds and pins
-  package-schema 3.0.0. Memory and Learn read them as `stated` evidence.
+  package-schema 4.0.0. Memory and Learn read them as `stated` evidence.
 - A field a real form needs and these kinds lack becomes a new companion kind or a new kind at a
   later schema version. Kinds are frozen (ADR 0023 §1).
-- The kinds' schema version is one constant (`LIFECYCLE_SINCE`). Had another addition taken
-  version 3 first, only that constant, the generated schema, the examples and the contract version
-  would have moved.
+- The kinds' schema version is one constant (`LIFECYCLE_SINCE`). The alignment kinds (ADR 0050)
+  took version 3 first, so only that constant, the generated schema, the examples and the contract
+  versions moved to 4 (package-schema 4.0.0, catalog-api 1.4.0).

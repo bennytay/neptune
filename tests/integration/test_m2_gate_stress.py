@@ -60,6 +60,7 @@ from neptune.runtime import IngestJob, JobEvent, JobOptions, JobOutcome, JobStat
 from neptune.runtime.sandbox import Codec, Returned, Subprocess
 from neptune.store.package import read_package
 from neptune.store.workspace import Workspace
+from neptune.validate import RULE_FAILED
 
 pytestmark = pytest.mark.integration
 
@@ -294,7 +295,12 @@ def test_findings_on_half_the_chunks_land_with_everything_else(tmp_path: Path) -
     (root / "half.tally").write_bytes(TALLY_MAGIC + rows)
     adapters = registry(tally=TALLY.TallyAdapter(rows_per_chunk=1))
     first = Job(root, tmp_path / "home", tmp_path / "first", adapters)
-    found = [r for r in first.package.records if isinstance(r, IngestFinding)]
+    found = [
+        r
+        for r in first.package.records
+        if isinstance(r, IngestFinding) and not r.code.startswith("neptune.validate.")
+    ]
+    assert not [r for r in first.package.records if getattr(r, "code", "") == RULE_FAILED]
     assert sorted(f.code for f in found) == ["tally.bad_row"] * 5 and first.codes() == []
     assert len({f.subject for f in found}) == 5  # each cites its own line
     assert len(first.outcome.ingested) == 1

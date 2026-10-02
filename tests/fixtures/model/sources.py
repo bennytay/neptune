@@ -381,7 +381,7 @@ CELL_RECORDS: Final = {
     "cell": "CELL-3",
     "commissioning": {
         "record": "CC-3-001",
-        "robot": "UR10e-20415",
+        "robot": "20415",
         "configuration": "CELL3-CFG-A",
         "date": "2026-09-14T08:30:00+10:00",
         "hardware": [
@@ -409,7 +409,7 @@ CELL_RECORDS: Final = {
     },
     "risk_assessment": {
         "record": "RA-CELL3",
-        "robot": "UR10e-20415",
+        "robot": "20415",
         "configuration": "CELL3-CFG-A",
         "method": "ISO 12100 risk graph",
         "date": "2026-09-10T13:00:00+10:00",
@@ -437,7 +437,7 @@ CELL_RECORDS: Final = {
     },
     "maintenance": {
         "work_order": "WO-55190",
-        "robot": "UR10e-20415",
+        "robot": "20415",
         "date": "2026-09-29T07:10:00+10:00",
         "diagnosis": "joint 3 encoder fault: 14 protective stops over two shifts",
         "actions": ["replace joint 3 drive", "re-run joint calibration"],
@@ -446,7 +446,7 @@ CELL_RECORDS: Final = {
     },
     "requalification": {
         "record": "RQ-0019",
-        "robot": "UR10e-20415",
+        "robot": "20415",
         "configuration": "CELL3-CFG-A.1",
         "work_order": "WO-55190",
         "date": "2026-09-29T13:30:00+10:00",

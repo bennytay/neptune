@@ -20,6 +20,7 @@ from neptune.identity import canonical_json
 from neptune.model.knowledge import Known, NotApplicable, NotCovered, Unknown
 from neptune.model.record import OLDEST_READABLE_VERSION, SCHEMA_VERSION
 from neptune_ledger.api import CatalogUnavailable, codec
+from neptune_ledger.catalog.index import projection_columns
 from neptune_ledger.catalog.migrate import apply_migrations
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.contract_tests.examples import EXAMPLES, WorkedPackage, materialise
@@ -114,7 +115,9 @@ def test_registration_writes_exactly_the_walkthrough_rows(
     apply_migrations(pg, "harness")
     for name in ("drone", "quadruped", "manipulator", "mobile_robot"):
         harness_register(pg, "tenant_harness", load_package(name))
-    skip = (*TX_COLUMNS, "root_locator")
+    # The harness applies ADR 0002 §5's mapping; ADR 0009's columns are checked against their
+    # own oracle in test_ledger_record_index.py.
+    skip = (*TX_COLUMNS, "root_locator", "body", "unknown_pointers", *projection_columns())
     assert dump(pg, "tenant_acme", skip) == dump(pg, "tenant_harness", skip)
 
 
@@ -248,7 +251,7 @@ def test_a_manifest_that_is_not_one_is_invalid(
 
 @pytest.mark.parametrize("version", [OLDEST_READABLE_VERSION - 1, SCHEMA_VERSION + 1])
 def test_a_schema_version_this_ledger_does_not_read_is_unsupported(
-    catalog: PostgresCatalog, drone: WorkedPackage, version: int
+    catalog: PostgresCatalog, pg: Conn, drone: WorkedPackage, version: int
 ) -> None:
     """A future version is refused before anything is written, whatever partitions exist."""
     _rewrite_manifest(drone, lambda m: m.update(schema_version=version))
@@ -256,6 +259,12 @@ def test_a_schema_version_this_ledger_does_not_read_is_unsupported(
     assert result.outcome == "refused"
     assert [f.code for f in result.findings] == ["unsupported_schema_version"]
     assert result.schema_version == Known(version)
+    written = counts(pg)
+    assert written["tx_clock"] == 1  # the clock row is seeded by the migrations, never ticked
+    assert all(
+        n == 0 for t, n in written.items() if t not in ("tenant", "schema_migration", "tx_clock")
+    )
+    assert pg.execute("SELECT last_seq FROM tenant_acme.tx_clock").fetchone() == (0,)
 
 
 def test_a_table_its_schema_version_does_not_declare_is_invalid(

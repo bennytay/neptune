@@ -74,6 +74,7 @@ DERIVATIVE_REUSED: Final = "derivative_reused"
 DERIVATIVE_BUILT: Final = "derivative_built"
 SOURCE_ADMITTED: Final = "source_admitted"
 SOURCE_QUARANTINED: Final = "source_quarantined"
+STREAMS_INTROSPECTED: Final = "streams_introspected"  # introspection's counts (ADR 0049)
 PACKAGE_STAGED: Final = "package_staged"
 PACKAGE_VERIFIED: Final = "package_verified"
 JOB_COMMITTED: Final = "job_committed"

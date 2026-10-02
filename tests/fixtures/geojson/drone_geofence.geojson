@@ -1,0 +1,4 @@
+{"type": "FeatureCollection", "features": [
+{"type": "Feature", "id": "fence-1", "geometry": {"type": "Polygon", "coordinates": [[[8.5400, 47.3700], [8.5500, 47.3700], [8.5500, 47.3780], [8.5400, 47.3780], [8.5400, 47.3700]]]}, "properties": {"max_altitude_m": 120, "kind": "inclusion"}},
+{"type": "Feature", "id": "launch", "geometry": {"type": "Point", "coordinates": [8.5450, 47.3710, 408.0]}, "properties": {"asset_id": "LAUNCH-ZRH-1", "category": "launch pad", "name": "North pad"}}
+]}

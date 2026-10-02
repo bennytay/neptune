@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:a0f6a3618161809bf784943643e8fd29328812443254d663ff197c04e44acad9`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:b9790d83522939545e83f920f0bba142f1caf71ada9c0bba454134f4feea3e87`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -29,12 +29,16 @@ Receipt `rec:sha256:a0f6a3618161809bf784943643e8fd29328812443254d663ff197c04e44a
 
 | Kind | Records |
 |---|---|
+| `clock_mapping` | 1 |
 | `frame` | 3 |
+| `frame_binding` | 2 |
 | `frame_graph` | 1 |
 | `frame_transform` | 2 |
 | `hardware_component` | 6 |
 | `hardware_configuration` | 1 |
 | `run` | 1 |
+| `run_assembly` | 1 |
+| `snapshot_binding` | 1 |
 | `software_configuration` | 1 |
 | `source_artifact` | 4 |
 | `source_revision` | 4 |

@@ -11,35 +11,35 @@
   "findings": [],
   "kind": {
     "knowledge": "known",
-    "value": "frame"
+    "value": "clock_mapping"
   },
   "nodes": [
     {
       "transform": {
         "knowledge": "known",
         "value": {
-          "adapter_id": "urdf",
+          "adapter_id": "rosbag2",
           "adapter_version": "1.0.0",
           "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
           "libraries": {}
         }
       },
-      "transform_id": "rec:sha256:163827bfaac771e9ba9f51d5b630984a2aa8eb3d64ff852bfe24bf0303285e07"
+      "transform_id": "rec:sha256:3b71f1d5e3ff1d93422c9779e890a374547b3412ea02c7ace78100729e6dd526"
     }
   ],
-  "record_id": "rec:sha256:2ad7c49634e4c6f5fb9a8a453119fe44dac0aadfaf223ddf7766c198d4a65309",
+  "record_id": "rec:sha256:63aa1aa4ccdc1469a5dcbd8761cec32cb1f890ace83b17cabb17d7151d84bd1b",
   "registered_by": [
     {
-      "kind": "frame",
+      "kind": "clock_mapping",
       "line": 1,
-      "package_id": "sha256:44b4309877e2ce74d1a82d2c872eaafec8f07325b299637dae59d8f07dfa76b1",
-      "record_id": "rec:sha256:2ad7c49634e4c6f5fb9a8a453119fe44dac0aadfaf223ddf7766c198d4a65309"
+      "package_id": "sha256:4ef25575cf89858d879dedec24ea4ef2dced9235de0450966c2cf890b1fd7b51",
+      "record_id": "rec:sha256:63aa1aa4ccdc1469a5dcbd8761cec32cb1f890ace83b17cabb17d7151d84bd1b"
     }
   ],
   "siblings": [],
   "status": "found",
   "transform_id": {
     "knowledge": "known",
-    "value": "rec:sha256:163827bfaac771e9ba9f51d5b630984a2aa8eb3d64ff852bfe24bf0303285e07"
+    "value": "rec:sha256:3b71f1d5e3ff1d93422c9779e890a374547b3412ea02c7ace78100729e6dd526"
   }
 }
