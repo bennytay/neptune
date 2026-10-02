@@ -89,7 +89,11 @@ def test_every_recording_lands_read_by_mcap_inside_the_sandbox(
     package = read_package(work / "package")
     transforms = {t.id: t.adapter_id for t in package.receipt.transforms}
     for source in package.receipt.sources:
-        derived = {"neptune.grouping", "neptune.introspection"}  # interpretation, not readers
+        derived = {
+            "neptune.grouping",
+            "neptune.introspection",
+            "neptune.clocks",
+        }  # interpretation, not readers
         readers = [transforms[t] for t in source.read_by if transforms[t] not in derived]
         assert readers == ["mcap"], source.location
     codes = {r.code for r in package.records if isinstance(r, IngestFinding)}
@@ -97,7 +101,9 @@ def test_every_recording_lands_read_by_mcap_inside_the_sandbox(
         c
         for c in codes
         if c.startswith("neptune.")
-        and not c.startswith(("neptune.grouping.", "neptune.introspection.", "neptune.validate."))
+        and not c.startswith(
+            ("neptune.grouping.", "neptune.introspection.", "neptune.clocks.", "neptune.validate.")
+        )
     }
     # session grouping may say a recording's session is ambiguous; introspection, that a schema's
     # encoding is not parsed

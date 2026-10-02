@@ -72,7 +72,7 @@ def test_every_log_lands_read_by_flightlog_inside_the_sandbox(
         source.location.path: [
             transforms[t]
             for t in source.read_by
-            if transforms[t] not in {"neptune.grouping", "neptune.introspection"}
+            if transforms[t] not in {"neptune.grouping", "neptune.introspection", "neptune.clocks"}
         ]
         for source in package.receipt.sources
     }
@@ -83,7 +83,9 @@ def test_every_log_lands_read_by_flightlog_inside_the_sandbox(
         c
         for c in codes
         if c.startswith("neptune.")
-        and not c.startswith(("neptune.grouping.", "neptune.introspection.", "neptune.validate."))
+        and not c.startswith(
+            ("neptune.grouping.", "neptune.introspection.", "neptune.clocks.", "neptune.validate.")
+        )
     }
     assert RULE_FAILED not in codes  # every validation rule ran
     assert not quarantined

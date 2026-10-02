@@ -450,12 +450,7 @@ class _Pass:
         groups = graph.groups(clocks)
         if len(groups) < 2:
             return
-        first = self.domains.get(groups[0][0])
-        subject = (
-            first.provenance.evidence
-            if first is not None
-            else self.domains[min(self.domains)].provenance.evidence
-        )
+        subject = self.domains[min(self.domains)].provenance.evidence
         self.finding(
             "unsynchronised",
             FindingCategory.MISSING,
@@ -474,6 +469,7 @@ def align_clocks(
     """Relate the clocks of a package's ``records`` (module docstring); ``None`` when it holds
     fewer than two clocks, found ones included: nothing to relate, so no tables and no transform.
     Deterministic: the same records, rows and config give the same lines and findings."""
+    records = list(records)  # read twice
     by_id = {r.id: r for r in records if isinstance(r, TimestampDomain | Stream)}
     domains = {i: r for i, r in sorted(by_id.items()) if isinstance(r, TimestampDomain)}
     streams = [r for _, r in sorted(by_id.items()) if isinstance(r, Stream)]
