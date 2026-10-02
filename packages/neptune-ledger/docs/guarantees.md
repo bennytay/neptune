@@ -75,6 +75,24 @@ variants: adapter v2 lineage siblings, a moved source with its absence, and anot
 - The refusal (a damaged package, another package at a logged root), prune, root, clock,
   lineage and malformed-manifest cases in the same file.
 
+## 2. Package series are read in place, never copied
+
+**Statement.** The lakehouse reads a package's `series/*.parquet` where the package lies (its
+registered root, or a byte-for-byte mirror an `ObjectStore` names) and writes nothing: no copy,
+cache or rewrite of a package byte
+([ADR 0013](adr/0013-lakehouse-layout-and-in-place-series-reads.md)). A package that moved or
+changed since registration is a finding at read time, never a silent read.
+
+**Held by.** `tests/test_ledger_lake.py`:
+`test_reads_copy_no_byte_and_scan_the_packages_own_files` snapshots every file's size, mtime and
+inode under the test root before and after reads with both engines, and checks that the scan names
+the package's own file. `test_a_package_changed_since_registration_is_a_finding` covers truncation,
+links, removal, a changed manifest, a moved root and a linked root.
+
+**Budget.** A 10⁶-row window reads in under 200 ms locally, end to end (catalog, manifest, footer,
+scan into Arrow): `test_a_million_row_window_reads_under_200_ms` (`slow`). Measured: DuckDB about
+55 ms, DataFusion about 75 ms (ADR 0013 §6).
+
 ## Scale
 
 The catalog's query budget (ADR 0005 §5) re-measured with every record's stored body (ADR 0009 §1)
