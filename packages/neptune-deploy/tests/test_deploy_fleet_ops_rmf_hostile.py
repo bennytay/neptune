@@ -249,7 +249,7 @@ def test_a_view_that_yields_forever_stops_at_the_row_limit(tmp_path: Path) -> No
     db.close()
     source = sql(tmp_path, max_rows=50)
     document = source.catalog().documents[0]
-    assert document.item_count == 50
+    assert len(document.items) == 50
     assert codes(source)["part_limit"][0].details["cause"] == "row_limit"
 
 

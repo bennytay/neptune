@@ -1,0 +1,79 @@
+{
+  "catalog": "hub-acme",
+  "dataset": {
+    "id": "ds-warehouse-0914",
+    "name": "Warehouse episodes 14 Sep"
+  },
+  "format": "neptune.rerun_catalog_export",
+  "indexes": [
+    {
+      "kind": "timestamp",
+      "name": "log_time"
+    },
+    {
+      "kind": "sequence",
+      "name": "frame"
+    }
+  ],
+  "schema": [
+    {
+      "archetype": "rerun.archetypes.Scalars",
+      "component": "Scalars:scalars",
+      "entity_path": "/arm_cell3/joint_states/shoulder",
+      "is_static": false
+    },
+    {
+      "archetype": "rerun.archetypes.Transform3D",
+      "component": "Transform3D:translation",
+      "entity_path": "/amr07/odometry",
+      "is_static": false
+    },
+    {
+      "archetype": "rerun.archetypes.Points3D",
+      "component": "Points3D:positions",
+      "entity_path": "/legged01/lidar",
+      "is_static": false
+    }
+  ],
+  "segments": [
+    {
+      "property:RecordingInfo:name": "amr07 aisle 12 stop",
+      "rerun_last_updated_at": "2026-09-14T09:00:00Z",
+      "rerun_layer_names": [
+        "base"
+      ],
+      "rerun_segment_id": "amr07_aisle12",
+      "rerun_size_bytes": 260,
+      "rerun_storage_urls": [
+        "s3://fleet-rrd/episodes/amr07_aisle12.rrd"
+      ]
+    },
+    {
+      "property:RecordingInfo:name": "arm cell 3 pick and place",
+      "rerun_last_updated_at": "2026-09-14T09:05:00Z",
+      "rerun_layer_names": [
+        "base",
+        "annotations"
+      ],
+      "rerun_segment_id": "arm3_pick_0914",
+      "rerun_size_bytes": 340,
+      "rerun_storage_urls": [
+        "s3://fleet-rrd/episodes/arm3_pick_0914.rrd",
+        "s3://fleet-rrd/episodes/arm3_pick_0914.annotations.rrd"
+      ]
+    },
+    {
+      "property:RecordingInfo:name": "legged01 foot slip",
+      "rerun_last_updated_at": "2026-09-14T09:10:00Z",
+      "rerun_layer_names": [
+        "base"
+      ],
+      "rerun_segment_id": "legged01_slip",
+      "rerun_size_bytes": 180,
+      "rerun_storage_urls": [
+        "s3://fleet-rrd/episodes/legged01_slip.rrd"
+      ]
+    }
+  ],
+  "version": 1
+}

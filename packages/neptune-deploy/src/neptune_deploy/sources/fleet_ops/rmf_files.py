@@ -32,7 +32,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Final
 
 from neptune.model.jsonvalue import JsonValue
-from neptune_deploy.sources.fleet_ops.documents import DocumentInvalid, parse_json
+from neptune_deploy.sources.stated_records import DocumentInvalid, parse_json
 
 SQLITE_MAGIC: Final = b"SQLite format 3\x00"
 PROGRESS_STEP: Final = 10_000  # VM instructions between progress callbacks

@@ -34,12 +34,6 @@ from neptune.model.jsonvalue import JsonValue
 from neptune.model.reference import TimestampDomain
 from neptune_deploy.sources.fleet_ops import options as opt
 from neptune_deploy.sources.fleet_ops.base import FleetOpsSource, Part
-from neptune_deploy.sources.fleet_ops.documents import (
-    DeclaredClock,
-    Document,
-    StatedTable,
-    parse_clock,
-)
 from neptune_deploy.sources.fleet_ops.rmf_files import (
     FileRefused,
     Rows,
@@ -52,6 +46,12 @@ from neptune_deploy.sources.fleet_ops.rmf_records import (
     DEFAULT_TASK_FIELDS,
     build_map,
     build_runs,
+)
+from neptune_deploy.sources.stated_records import (
+    CatalogDocument,
+    DeclaredClock,
+    StatedCatalog,
+    parse_clock,
 )
 
 CONNECTOR_ID: Final = "deploy_open_rmf"
@@ -288,8 +288,8 @@ class OpenRmfSource(FleetOpsSource):
     def extend(
         self,
         part: Part,
-        document: Document,
-        table: StatedTable,
+        document: CatalogDocument,
+        table: StatedCatalog,
         clocks: Mapping[str, TimestampDomain],
     ) -> Sequence[Any]:
         if part.name == "tasks":

@@ -35,7 +35,8 @@ from neptune.model.reference import Frame, FrameGraph, TimestampDomain
 from neptune.model.run import Run
 from neptune.model.time import Timestamp
 from neptune.model.world import SpatialArtifact, SpatialCategory
-from neptune_deploy.sources.fleet_ops.documents import Document, cite, stated
+from neptune_deploy.sources.fleet_ops.citing import cite, stated
+from neptune_deploy.sources.stated_records import CatalogDocument
 
 TASK_NAMESPACE: Final = "rmf.task"
 ROBOT_NAMESPACE: Final = "rmf.robot"
@@ -85,7 +86,7 @@ def _parts(pointer: str) -> list[str | int]:
 
 
 def build_runs(
-    document: Document,
+    document: CatalogDocument,
     transform: TransformRecord,
     fields: Mapping[str, str],
     clocks: Mapping[str, TimestampDomain],
@@ -146,7 +147,7 @@ def build_runs(
 
 
 def build_map(
-    document: Document, transform: TransformRecord, report: Report
+    document: CatalogDocument, transform: TransformRecord, report: Report
 ) -> list[FrameGraph | Frame | SpatialArtifact]:
     """A ``FrameGraph`` for the document, then a ``Frame`` and a ``SpatialArtifact`` per level.
 

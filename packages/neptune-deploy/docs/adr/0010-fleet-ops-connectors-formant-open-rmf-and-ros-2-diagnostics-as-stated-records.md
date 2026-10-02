@@ -71,9 +71,9 @@ more than it says.
    bytes, so the compiler stores what every record cites. Over each document:
    - A `StructuredTable` cites `/items`, a row `/items/<i>` and a cell `/items/<i>/<key>`, all `stated`. A cell is
      the value as given: text is text, a number or boolean keeps its type, an object or array is its sorted JSON
-     as text. `null`, an absent key and `""` are `Unknown`. A key the table cannot name (empty, or a lone
-     surrogate) and a value it cannot store are `Unknown` with a `value_unrepresentable` finding; they stay in
-     the document's bytes.
+     as text. `null`, an absent key and `""` are `Unknown`. A key the table cannot name (a lone
+     surrogate, or one of the form `@clock:...`), an element that is not an object (a row of `Unknown`) and a
+     value it cannot store are reported (`value_unrepresentable`); they stay in the document's bytes.
    - An integer time field (`time`, `startTime`, `endTime`; Open-RMF's `unix_millis_*`) is a `TimestampDomain`
      named by the field, whose role, epoch, timescale and resolution are `Unknown` unless the operator declared
      them (`clock`). The declaration is in the transform, so it is in every id. The row carries a
@@ -84,9 +84,9 @@ more than it says.
      at a limit is a finding (`part_failed`, `part_limit`, `part_invalid`) and is absent or partial, never
      invented. Other parts are read as if it were not there.
 
-   The shape is the one MVL-155's `sources/stated_records.py` has. It is kept here as
-   `sources/fleet_ops/documents.py`, under another name, so that two branches do not collide; unifying them is a
-   follow-up once both are on `main`.
+   The documents, their byte form, the tables and the clocks are MVL-155's `sources/stated_records.py` (ADR
+   0009 §4), imported and not copied; `sources/fleet_ops/citing.py` adds only the `cite` and `stated` shorthands
+   and the `Catalog` a fleet-ops source returns.
 4. **Formant interventions are `Intervention` records.** Each item of `interventions` that states a usable `id`
    becomes one record whose provenance is the item and whose every value cites its own key, `stated`
    (`sources/fleet_ops/interventions.py`):
@@ -238,10 +238,9 @@ more than it says.
 - **A flaw in ADR 0006's `Transport`:** `abort()` shuts down `connection.sock`, which `http.client` sets to
   `None` once a response says it will close the connection (HTTP/1.0 or `Connection: close`), so an object store
   that answers that way can hold a read open past its deadline. Fixing it is a change to `object_store/transport.py`
-  (keep a reference to the socket in `_send`, as `QueryTransport` does), which MVL-154's branch also edits, so it
-  is left for a dedicated PR or the D2 gate.
-- `sources/fleet_ops/documents.py` duplicates `sources/stated_records.py` (MVL-155) and `QueryTransport`
-  duplicates `RobotoTransport`. Both are to be unified once the branches are on `main`.
+  (keep a reference to the socket in `_send`, as `QueryTransport` does); MVL-154 (#101) owns the fix.
+- `QueryTransport` duplicates `RobotoTransport`. Both are to switch to the shared transport once its
+  `abort()` fix (MVL-154, #101) is on `main`.
 - D3 follow-up (MVL-137): check the transform's `levels` and `names` values against the registered event
   vocabulary, and file findings for the strings it does not hold. The records are unchanged by it.
 - Revisit when a live Formant tenant or an Open-RMF api-server disagrees with the recorded shapes, when the

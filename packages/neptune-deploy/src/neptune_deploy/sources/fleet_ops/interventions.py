@@ -34,7 +34,8 @@ from neptune.model.provenance import Provenance, TransformRecord
 from neptune.model.reference import TimestampDomain
 from neptune.model.time import ClockRole, Epoch, Timescale, Timestamp
 from neptune_deploy.lifecycle.times import read_time
-from neptune_deploy.sources.fleet_ops.documents import Document, cite, stated
+from neptune_deploy.sources.fleet_ops.citing import cite, stated
+from neptune_deploy.sources.stated_records import CatalogDocument
 
 ID_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:\-]{0,255}")
 MAX_COMMANDS: Final = 1000
@@ -68,7 +69,7 @@ class _Item:
 
     def __init__(
         self,
-        document: Document,
+        document: CatalogDocument,
         index: int,
         transform: TransformRecord,
         formats: tuple[str, ...],
@@ -161,7 +162,7 @@ class _Item:
 
 
 def build_interventions(
-    document: Document,
+    document: CatalogDocument,
     transform: TransformRecord,
     formats: tuple[str, ...],
     report: Report,

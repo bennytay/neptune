@@ -29,11 +29,11 @@ from neptune.model.jsonvalue import JsonValue
 from neptune.model.provenance import TransformRecord
 from neptune.model.reference import TimestampDomain
 from neptune.model.source import SourceRevision
-from neptune_deploy.sources.fleet_ops.documents import (
-    Catalog,
+from neptune_deploy.sources.fleet_ops.citing import Catalog
+from neptune_deploy.sources.stated_records import (
+    CatalogDocument,
     DeclaredClock,
-    Document,
-    StatedTable,
+    StatedCatalog,
     build_document,
     clock_domain,
     stated_table,
@@ -162,8 +162,8 @@ class FleetOpsSource:
     def extend(
         self,
         part: Part,
-        document: Document,
-        table: StatedTable,
+        document: CatalogDocument,
+        table: StatedCatalog,
         clocks: Mapping[str, TimestampDomain],
     ) -> Sequence[Any]:
         """The records built over a part's document besides its table (runs, interventions);
@@ -221,10 +221,10 @@ class FleetOpsSource:
     # --- Catalog ------------------------------------------------------------------------------
 
     @cached_property
-    def _built(self) -> tuple[Catalog, tuple[tuple[Part, Document], ...]]:
+    def _built(self) -> tuple[Catalog, tuple[tuple[Part, CatalogDocument], ...]]:
         records: list[Any] = []
-        documents: list[Document] = []
-        built: list[tuple[Part, Document]] = []
+        documents: list[CatalogDocument] = []
+        built: list[tuple[Part, CatalogDocument]] = []
         skipped: dict[tuple[str, str], int] = {}
         for part in self.collect():
             if part.stopped is not None:
@@ -244,7 +244,7 @@ class FleetOpsSource:
             table = stated_table(
                 document, f"{self.connector_id} {part.name}", self.transform, clocks=clocks
             )
-            records.extend([*clocks.values(), table.table, *table.rows])
+            records.extend([*clocks.values(), *table.tables, *table.rows])
             records.extend(self.extend(part, document, table, clocks))
             documents.append(document)
             built.append((part, document))

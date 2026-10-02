@@ -24,15 +24,16 @@ from neptune_deploy.sources.fleet_ops.base import (
     DocumentReadError,
     FleetOpsSource,
 )
-from neptune_deploy.sources.fleet_ops.documents import Catalog, Document
+from neptune_deploy.sources.fleet_ops.citing import Catalog
 from neptune_deploy.sources.fleet_ops.formant import FormantSource, formant_source
 from neptune_deploy.sources.fleet_ops.options import FleetOpsConfigError
 from neptune_deploy.sources.fleet_ops.rmf import OpenRmfSource, open_rmf_source
+from neptune_deploy.sources.stated_records import CatalogDocument
 
 __all__ = [
     "Catalog",
+    "CatalogDocument",
     "Discovery",
-    "Document",
     "DocumentEntry",
     "DocumentReadError",
     "FleetOpsConfigError",

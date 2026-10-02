@@ -25,7 +25,7 @@ from neptune_deploy.sources.fleet_ops import (
     FormantSource,
     formant_source,
 )
-from neptune_deploy.sources.fleet_ops.documents import parse_json
+from neptune_deploy.sources.stated_records import parse_json
 
 CREDENTIALS = {"formant_access_token": "test-token-123"}
 

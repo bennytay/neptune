@@ -4,7 +4,7 @@
 flowchart LR
   EXT[("object stores · CMMS · tickets · fleet managers · forms")]
   subgraph P["neptune-deploy"]
-    SRC["sources/ read-only connectors: S3 · GCS · Azure · Formant · Open-RMF"]
+    SRC["sources/ read-only connectors: S3 · GCS · Azure · Roboto · Rerun Hub · Formant · Open-RMF"]
     LIF["adapters/lifecycle"]
     MAP["lifecycle/ mapper · mapping files · document templates · vendor presets"]
     DIAG["diagnostics/ ROS 2 vendor mapping: statuses to event rows"]

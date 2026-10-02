@@ -27,7 +27,6 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from neptune.model.jsonvalue import JsonValue
-from neptune_deploy.sources.fleet_ops.documents import DocumentInvalid, dumps, parse_json
 from neptune_deploy.sources.object_store.transport import (
     DeadlineExceeded,
     Endpoint,
@@ -37,6 +36,7 @@ from neptune_deploy.sources.object_store.transport import (
     TransportError,
     _Deadline,
 )
+from neptune_deploy.sources.stated_records import DocumentInvalid, dumps, parse_json
 
 DEFAULT_ENDPOINT: Final = "https://api.formant.io"
 MAX_PAGE_BYTES: Final = 8 * 1024 * 1024

@@ -1,28 +1,28 @@
-"""Fleet-ops metadata as ``stated`` structured records, cited to its document (ADR 0010 §3).
+"""Catalog metadata as ``stated`` structured records, cited to the API response (ADR 0009 §4).
 
-A fleet-operations system (Formant's API, an Open-RMF task log or fleet-state database) says things
-about a deployment: a device's name, an event, an intervention, a task and its robot. That is
-evidence a person or a system authored, so it is ``stated``, never ``observed`` and never inferred
-(root ADR 0051). This module turns a list of JSON objects such a system returned into the
-compiler's own record kinds (``StructuredTable`` and ``StructuredRecord``, root ADR 0020 §5) with
-nothing added:
+A hosted catalog (Roboto's dataset, file and event API; a Rerun Hub segment table) says things about
+the objects it indexes: names, tags, annotations with time ranges, entity paths. That is evidence a
+person or a system authored, so it is ``stated``, never ``observed`` and never inferred. This module
+turns a list of JSON objects such a catalog returned into the compiler's own record kinds
+(``StructuredTable`` and ``StructuredRecord``, root ADR 0020 §5) with nothing added:
 
-- The objects are kept as one **document**: ``{"items": [...]}`` in a fixed byte form (sorted keys,
-  ASCII, no whitespace, items in sorted order, duplicates removed). The document is a function of
-  the objects, whatever order or paging they arrived in. Its content id is the evidence source of
-  every record, so a record's tier-2 id is derived from bytes the compiler can store (root ADR
-  0003).
+- The objects are kept as one **catalog document**: ``{"items": [...]}`` in a fixed byte form
+  (sorted keys, ASCII, no whitespace, items in sorted order). The document is a deterministic
+  function of the objects, whatever order the pages came in. Its content id is the evidence source
+  of every record, so a record's tier-2 id is derived from bytes the compiler can store (root ADR
+  0003), and its ``ExternalObjectRef`` names it as an object of the connector.
 - Each table cites ``/items``, each row ``/items/<i>`` and each cell ``/items/<i>/<key>``, as JSON
   pointers, with ``assertion_kind`` ``stated``.
-- A cell is the value as the system gave it: a string is text, a number or boolean keeps its type,
-  an object or array is its own JSON as text (sorted keys). ``null``, an absent key and an empty
-  string are ``Unknown``. Nothing is parsed, converted or normalised.
-- A clock a system names becomes a ``TimestampDomain`` whose epoch, timescale, resolution and role
-  are ``Unknown`` unless the operator declared them.
-
-The shape is the one the Roboto and Rerun connectors use (MVL-155, ``sources/stated_records.py``);
-it is kept here, under another name, so the two branches do not collide. Unifying them is a
-follow-up once both are on ``main`` (ADR 0010, consequences).
+- A cell is the value as the catalog gave it. A string is text, a number or boolean keeps its type,
+  and an object or array is its own JSON as text (sorted keys). ``null``, an absent key and an empty
+  string are ``Unknown``: the catalog could have said and did not. Nothing is parsed, converted or
+  normalised (a time stays the integer the catalog wrote; a tag list stays a list).
+- A clock a catalog names (``start_time`` of an event) becomes a ``TimestampDomain`` whose epoch,
+  timescale, resolution and role are ``Unknown`` unless the operator declared them. A catalog's
+  documentation saying "nanoseconds, assumed Unix epoch" is not something its responses state. A
+  declared part is the operator's word, not the catalog's: it is in the transform config that the
+  record's provenance names (so a different declaration is a different transform), and the record's
+  evidence cites only the catalog value that names the clock.
 
 Nothing here touches the network, a file or a clock.
 """
@@ -34,24 +34,30 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
 from functools import cached_property
-from typing import Any, Final
+from typing import Final
 
 from neptune.identity.hashing import content_id
 from neptune.identity.provenance import evidence_record_id
 from neptune.model.ids import ContentId, ExternalObjectRef
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.knowledge import AssertionKind, Knowledge, Known, Unknown
+from neptune.model.knowledge import (
+    AssertionKind,
+    Knowledge,
+    Known,
+    Unknown,
+)
 from neptune.model.provenance import EvidenceRef, JsonPointer, Provenance, TransformRecord
 from neptune.model.reference import TimestampDomain
 from neptune.model.time import ClockRole, Epoch, Timescale
 from neptune.model.world import CellValue, StructuredRecord, StructuredTable
 
-MAX_DEPTH: Final = 64  # nesting of a parsed response; deeper is refused, never recursed into
+MAX_DEPTH: Final = 64  # nesting of a parsed API response; deeper is refused, never recursed into
+CLOCK_PREFIX: Final = "@clock:"  # companion columns; a catalog key of this form is not kept
 MAX_CELL_BYTES: Final = 1 << 20  # one cell's text; a longer one is not stored whole
 
 
 class DocumentInvalid(ValueError):
-    """A response or file is not the JSON this module accepts (duplicate keys, NaN, too deep)."""
+    """An API response is not the JSON this module accepts (duplicate keys, NaN, too deep)."""
 
 
 def parse_json(data: bytes) -> JsonValue:
@@ -72,9 +78,9 @@ def parse_json(data: bytes) -> JsonValue:
     def constant(token: str) -> JsonValue:
         raise DocumentInvalid(f"{token} is not JSON")
 
-    def real(text: str) -> JsonValue:
+    def number(text: str) -> float:
         value = float(text)
-        if not math.isfinite(value):  # 1e999 is JSON text, and no finite number
+        if not math.isfinite(value):  # 1e999 is a number to the parser and no JSON to ``dumps``
             raise DocumentInvalid("a number is not finite")
         return value
 
@@ -83,18 +89,18 @@ def parse_json(data: bytes) -> JsonValue:
             data.decode("utf-8"),
             object_pairs_hook=pairs,
             parse_constant=constant,
-            parse_float=real,
+            parse_float=number,
         )
     except DocumentInvalid:
         raise
     except (ValueError, RecursionError) as exc:  # UnicodeDecodeError, JSONDecodeError, digit limit
         raise DocumentInvalid("not JSON") from exc
-    if too_deep(value):
+    if _too_deep(value):
         raise DocumentInvalid(f"nested deeper than {MAX_DEPTH}")
     return value
 
 
-def too_deep(value: JsonValue) -> bool:
+def _too_deep(value: JsonValue) -> bool:
     """Iterative: a hostile response cannot exhaust the stack here."""
     stack: list[tuple[JsonValue, int]] = [(value, 1)]
     while stack:
@@ -114,8 +120,9 @@ def too_deep(value: JsonValue) -> bool:
 def dumps(value: JsonValue) -> bytes:
     """The fixed byte form of a JSON value: sorted keys, ASCII, no whitespace.
 
-    It keeps ``null``: the system said ``null``, and the record is where that becomes ``Unknown``.
-    ASCII keeps a lone surrogate a response carried representable.
+    Unlike the compiler's canonical JSON it keeps ``null``: the catalog said ``null``, and the
+    record is where that becomes ``Unknown``. ASCII keeps a lone surrogate a response carried
+    representable.
     """
     return json.dumps(
         value, sort_keys=True, ensure_ascii=True, separators=(",", ":"), allow_nan=False
@@ -123,8 +130,8 @@ def dumps(value: JsonValue) -> bytes:
 
 
 @dataclass(frozen=True)
-class Document:
-    """What a system returned, as one object: ``data`` is ``{"items": [...]}``."""
+class CatalogDocument:
+    """What a catalog returned, as one object: ``data`` is ``{"items": [...]}``."""
 
     ref: ExternalObjectRef
     data: bytes
@@ -134,29 +141,33 @@ class Document:
         return content_id(self.data)
 
     @cached_property
-    def items(self) -> tuple[Mapping[str, JsonValue], ...]:
+    def raw_items(self) -> tuple[JsonValue, ...]:
         parsed = parse_json(self.data)
         assert isinstance(parsed, Mapping)
         items = parsed["items"]
         assert isinstance(items, list)
-        return tuple(item for item in items if isinstance(item, Mapping))
+        return tuple(items)
 
     @cached_property
-    def item_count(self) -> int:
-        return len(self.items)
+    def items(self) -> tuple[Mapping[str, JsonValue], ...]:
+        """One mapping per element of ``/items``, at the same index: an element that is not an
+        object is an empty mapping here, so every pointer ``/items/<i>`` names what it says."""
+        return tuple(item if isinstance(item, Mapping) else {} for item in self.raw_items)
 
 
-def build_document(connector_id: str, object_id: str, items: Sequence[JsonValue]) -> Document:
-    """The document of ``items``: sorted by their own bytes and de-duplicated, so it does not
-    depend on the order or the paging the system answered in. Only objects are items.
+def build_document(
+    connector_id: str, object_id: str, items: Sequence[JsonValue]
+) -> CatalogDocument:
+    """The document of ``items``: sorted by their own bytes and de-duplicated, so the document
+    does not depend on the order or the paging the catalog answered in.
 
-    Its revision token is ``records:<sha256 of the bytes>``: a record changed in any way is a new
-    revision of the document, and an unchanged one is the same revision.
+    Its revision token is ``records:<sha256 of the bytes>``: a catalog record changed in any way is
+    a new revision of the document, and an unchanged one is the same revision.
     """
-    unique = sorted({dumps(item) for item in items if isinstance(item, Mapping)})
+    unique = sorted({dumps(item) for item in items})
     data = b'{"items":[' + b",".join(unique) + b"]}"
     token = "records:" + hashlib.sha256(data).hexdigest()
-    return Document(ExternalObjectRef(connector_id, object_id, token), data)
+    return CatalogDocument(ExternalObjectRef(connector_id, object_id, token), data)
 
 
 def pointer(*parts: str | int) -> str:
@@ -164,19 +175,9 @@ def pointer(*parts: str | int) -> str:
     return "".join("/" + str(part).replace("~", "~0").replace("/", "~1") for part in parts)
 
 
-def cite(document: Document, *parts: str | int) -> EvidenceRef:
-    """The place in ``document`` at ``parts``."""
-    return EvidenceRef(document.content_id, (JsonPointer(pointer(*parts)),))
-
-
-def stated(document: Document, transform: TransformRecord, *parts: str | int) -> Provenance:
-    """Provenance of a value the document states at ``parts``."""
-    return Provenance(cite(document, *parts), transform.id, AssertionKind.STATED)
-
-
 @dataclass(frozen=True)
 class DeclaredClock:
-    """What the operator declared about a system's clock; every part optional, none assumed."""
+    """What the operator declared about a catalog's clock; every part optional, none assumed."""
 
     role: ClockRole | None = None
     epoch: Epoch | None = None
@@ -199,7 +200,7 @@ class DeclaredClock:
 
 def parse_clock(declared: "JsonValue | None") -> DeclaredClock:
     """A clock declared in options: ``{"epoch": "unix", "timescale": "posix", "resolution":
-    "1/1000", "role": "sample"}``, each key optional. Anything else is refused."""
+    "1/1000000000", "role": "sample"}``, each key optional. Anything else is refused."""
     if declared is None:
         return DeclaredClock()
     if not isinstance(declared, Mapping):
@@ -212,11 +213,11 @@ def parse_clock(declared: "JsonValue | None") -> DeclaredClock:
         if "resolution" in declared:
             text = declared["resolution"]
             if not isinstance(text, str):
-                raise ValueError("resolution is text such as '1/1000' (seconds per tick)")
+                raise ValueError("resolution is text such as '1/1000000000' (seconds per tick)")
             numerator, _, denominator = text.partition("/")
-            numbers = [numerator, denominator or "1"]
+            numbers = [part for part in (numerator, denominator or "1")]
             if not all(part.isascii() and part.isdigit() and len(part) <= 30 for part in numbers):
-                raise ValueError("resolution is text such as '1/1000' (seconds per tick)")
+                raise ValueError("resolution is text such as '1/1000000000' (seconds per tick)")
             resolution = Fraction(int(numerator), int(denominator or "1"))
             if resolution <= 0:
                 raise ValueError("resolution is positive")
@@ -230,70 +231,27 @@ def parse_clock(declared: "JsonValue | None") -> DeclaredClock:
         raise ValueError(f"not a valid clock declaration: {exc}") from exc
 
 
-def _is_int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def clock_domain(
-    document: Document,
-    field_name: str,
-    scope: tuple[str, ...],
-    transform: TransformRecord,
-    declared: DeclaredClock,
-) -> TimestampDomain | None:
-    """The clock a document's integer ``field_name`` counts on, or ``None`` if no item has one.
-
-    It cites the first item (in document order) that has the field. Role, epoch, timescale and
-    resolution are ``Unknown`` unless declared; ``declared_monotonic`` always is.
-    """
-    for index, item in enumerate(document.items):
-        if _is_int(item.get(field_name)):
-            where = cite(document, "items", index, field_name)
-            return TimestampDomain(
-                id=evidence_record_id(TimestampDomain.kind, where, transform),
-                provenance=Provenance(where, transform.id, AssertionKind.STATED),
-                field=field_name,
-                scope=scope,
-                role=Unknown() if declared.role is None else Known(declared.role),
-                resolution=(
-                    Unknown() if declared.resolution is None else Known(declared.resolution)
-                ),
-                epoch=Unknown() if declared.epoch is None else Known(declared.epoch),
-                timescale=Unknown() if declared.timescale is None else Known(declared.timescale),
-                declared_monotonic=Unknown(),
-            )
-    return None
-
-
 @dataclass(frozen=True)
-class StatedTable:
-    """One table over one document, and the cells it could not store."""
+class StatedCatalog:
+    """Records over one or more documents, all by one transform."""
 
-    table: StructuredTable
-    rows: tuple[StructuredRecord, ...]
-    skipped: tuple[tuple[str, int, str], ...] = field(default=())  # (table name, item, reason)
-
-
-def _storable_key(key: str) -> bool:
-    """A header cell is non-empty, valid Unicode text: the table has no other kind of name."""
-    if not key:
-        return False
-    try:
-        key.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return True
+    documents: tuple[CatalogDocument, ...] = ()
+    tables: tuple[StructuredTable, ...] = ()
+    rows: tuple[StructuredRecord, ...] = ()
+    domains: tuple[TimestampDomain, ...] = ()
+    skipped: tuple[tuple[str, int, str], ...] = field(default=())  # (document, item, reason)
 
 
 def _cell(
-    document: Document,
+    document: CatalogDocument,
     transform: TransformRecord,
     row: int,
     key: str,
     value: JsonValue,
     reasons: list[str],
 ) -> Knowledge[CellValue]:
-    provenance = stated(document, transform, "items", row, key)
+    where = EvidenceRef(document.content_id, (JsonPointer(pointer("items", row, key)),))
+    provenance = Provenance(where, transform.id, AssertionKind.STATED)
     if value is None or value == "":
         return Unknown(provenance)
     if isinstance(value, str):
@@ -313,25 +271,40 @@ def _cell(
     return Known(text, provenance)
 
 
+def _usable_key(key: str) -> bool:
+    """A key a header can hold: valid Unicode, and not the name of a companion column."""
+    if key.startswith(CLOCK_PREFIX):
+        return False
+    try:
+        key.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def stated_table(
-    document: Document,
+    document: CatalogDocument,
     name: str,
     transform: TransformRecord,
     *,
     clocks: Mapping[str, TimestampDomain] | None = None,
-) -> StatedTable:
+) -> StatedCatalog:
     """One ``StructuredTable`` and a ``StructuredRecord`` per object of ``document``.
 
     The header is every key any object has, sorted. An object's cell is ``Unknown`` for a key it
     does not have. ``clocks`` maps a column name to the clock its integer cells count on: each such
     column gets a companion column ``@clock:<name>`` whose cell is that clock's record id where the
-    object has a value, citing that value, so a time says which named clock it is on.
+    object has a value, citing that value. A catalog key that starts with ``@clock:``, or is not
+    valid Unicode, is not a column: it is reported as ``key_unusable`` and its value is not stored,
+    so a companion is never confused with a catalog's own key. An element of the document that is
+    not an object is a row of ``Unknown``, reported as ``not_an_object``. Companions are appended
+    after the sorted keys.
     """
     clocks = clocks or {}
     items = document.items
-    keys = sorted({key for item in items for key in item if _storable_key(key)})
-    header = (*keys, *(f"@clock:{column}" for column in sorted(clocks)))
-    table_evidence = cite(document, "items")
+    keys = sorted({key for item in items for key in item if _usable_key(key)})
+    header = (*keys, *(f"{CLOCK_PREFIX}{column}" for column in sorted(clocks)))
+    table_evidence = EvidenceRef(document.content_id, (JsonPointer(pointer("items")),))
     table_provenance = Provenance(table_evidence, transform.id, AssertionKind.STATED)
     table = StructuredTable(
         id=evidence_record_id(StructuredTable.kind, table_evidence, transform),
@@ -343,22 +316,33 @@ def stated_table(
     skipped: list[tuple[str, int, str]] = []
     for index, item in enumerate(items):
         reasons: list[str] = []
+        if not isinstance(document.raw_items[index], Mapping):
+            reasons.append("not_an_object")  # a row of Unknown: the catalog said something else
+        reasons.extend(sorted({"key_unusable" for key in item if not _usable_key(key)}))
         cells: list[Knowledge[CellValue]] = [
             _cell(document, transform, index, key, item[key], reasons)
             if key in item
-            else Unknown(stated(document, transform, "items", index))
+            else Unknown(
+                Provenance(
+                    EvidenceRef(document.content_id, (JsonPointer(pointer("items", index)),)),
+                    transform.id,
+                    AssertionKind.STATED,
+                )
+            )
             for key in keys
         ]
         for column in sorted(clocks):
-            provenance = stated(document, transform, "items", index, column)
-            if _is_int(item.get(column)):
+            value = item.get(column)
+            where = EvidenceRef(
+                document.content_id, (JsonPointer(pointer("items", index, column)),)
+            )
+            provenance = Provenance(where, transform.id, AssertionKind.STATED)
+            if isinstance(value, int) and not isinstance(value, bool):
                 cells.append(Known(clocks[column].id, provenance))
             else:
                 cells.append(Unknown(provenance))
-        if any(not _storable_key(key) for key in item):
-            reasons.append("key_unrepresentable")
         skipped.extend((name, index, reason) for reason in sorted(set(reasons)))
-        evidence = cite(document, "items", index)
+        evidence = EvidenceRef(document.content_id, (JsonPointer(pointer("items", index)),))
         rows.append(
             StructuredRecord(
                 id=evidence_record_id(StructuredRecord.kind, evidence, transform),
@@ -368,19 +352,41 @@ def stated_table(
                 cells=tuple(cells),
             )
         )
-    return StatedTable(table, tuple(rows), tuple(skipped))
+    return StatedCatalog((document,), (table,), tuple(rows), (), tuple(skipped))
 
 
-@dataclass(frozen=True)
-class Catalog:
-    """What a fleet-ops source states: its documents and the evidence records built over them.
+def clock_domain(
+    document: CatalogDocument,
+    field_name: str,
+    scope: tuple[str, ...],
+    transform: TransformRecord,
+    declared: DeclaredClock,
+) -> TimestampDomain | None:
+    """The clock a catalog's ``field_name`` counts on, or ``None`` if no object has the field.
 
-    ``records`` is every record, in one deterministic order: for each document in order, its
-    clocks, table, rows, then the records built from it (runs, interventions, frames, maps).
+    It cites the first object (in document order) that has the field. Role, epoch, timescale and
+    resolution are ``Unknown`` unless declared; ``declared_monotonic`` always is (events are not a
+    series).
     """
+    for index, item in enumerate(document.items):
+        value = item.get(field_name)
+        if isinstance(value, int) and not isinstance(value, bool):
+            where = EvidenceRef(
+                document.content_id, (JsonPointer(pointer("items", index, field_name)),)
+            )
+            provenance = Provenance(where, transform.id, AssertionKind.STATED)
 
-    documents: tuple[Document, ...] = ()
-    records: tuple[Any, ...] = ()
-
-    def of(self, kind: str) -> tuple[Any, ...]:
-        return tuple(record for record in self.records if record.kind == kind)
+            return TimestampDomain(
+                id=evidence_record_id(TimestampDomain.kind, where, transform),
+                provenance=provenance,
+                field=field_name,
+                scope=scope,
+                role=Unknown() if declared.role is None else Known(declared.role),
+                resolution=(
+                    Unknown() if declared.resolution is None else Known(declared.resolution)
+                ),
+                epoch=Unknown() if declared.epoch is None else Known(declared.epoch),
+                timescale=Unknown() if declared.timescale is None else Known(declared.timescale),
+                declared_monotonic=Unknown(),
+            )
+    return None

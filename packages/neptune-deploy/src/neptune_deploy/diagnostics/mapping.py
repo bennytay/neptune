@@ -31,7 +31,7 @@ from neptune.identity.hashing import content_id
 from neptune.model.ids import ContentId
 from neptune.model.jsonvalue import JsonValue
 from neptune_deploy.lifecycle.mapping import MappingError
-from neptune_deploy.sources.fleet_ops.documents import (
+from neptune_deploy.sources.stated_records import (
     DeclaredClock,
     DocumentInvalid,
     parse_clock,

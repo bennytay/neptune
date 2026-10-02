@@ -29,11 +29,6 @@ from neptune.model.reference import TimestampDomain
 from neptune_deploy.lifecycle.times import check_format
 from neptune_deploy.sources.fleet_ops import options as opt
 from neptune_deploy.sources.fleet_ops.base import FleetOpsSource, Part
-from neptune_deploy.sources.fleet_ops.documents import (
-    Document,
-    StatedTable,
-    parse_clock,
-)
 from neptune_deploy.sources.fleet_ops.formant_api import (
     DEFAULT_ENDPOINT,
     ROUTES,
@@ -46,6 +41,7 @@ from neptune_deploy.sources.fleet_ops.interventions import (
     build_interventions,
 )
 from neptune_deploy.sources.object_store.transport import Endpoint, NetworkGate, redact
+from neptune_deploy.sources.stated_records import CatalogDocument, StatedCatalog, parse_clock
 
 CONNECTOR_ID: Final = "deploy_formant"
 TOKEN_VARIABLE: Final = "NEPTUNE_FORMANT_ACCESS_TOKEN"
@@ -236,15 +232,15 @@ class FormantSource(FleetOpsSource):
     def extend(
         self,
         part: Part,
-        document: Document,
-        table: StatedTable,
+        document: CatalogDocument,
+        table: StatedCatalog,
         clocks: Mapping[str, TimestampDomain],
     ) -> Sequence[Any]:
         if part.name == "recordings":
             self.report(
                 "recording_not_fetched",
                 self.part_subject("recordings"),
-                {"records": document.item_count},
+                {"records": len(document.items)},
             )
         if part.name != "interventions":
             return ()
