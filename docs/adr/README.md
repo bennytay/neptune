@@ -25,7 +25,7 @@ header).
 | [0014](0014-version-primitives.md) | Version primitives: one type per kind, stored verbatim | Accepted |
 | [0015](0015-frame-rotation-and-transform-types.md) | Frames, rotations and frame transforms: types and named conventions | Accepted |
 | [0016](0016-evidence-refs-locator-paths-and-transform-lineage.md) | Evidence refs, locator paths and transform lineage | Accepted; amended by 0023 |
-| [0017](0017-canonical-records-envelope-and-schema-version.md) | Canonical records: envelope, families, schema version and findings | Accepted; amended by 0023, 0037 |
+| [0017](0017-canonical-records-envelope-and-schema-version.md) | Canonical records: envelope, families, schema version and findings | Accepted; amended by 0023, 0037, 0050 |
 | [0018](0018-runs-streams-and-series-layout.md) | Runs, streams and the series layout | Accepted |
 | [0019](0019-machine-context-records.md) | Machine context: machines, hardware, software and calibration | Accepted |
 | [0020](0020-world-and-record-context-records.md) | World and record context: sites, assets, geometry, media, documents and tables | Accepted |
