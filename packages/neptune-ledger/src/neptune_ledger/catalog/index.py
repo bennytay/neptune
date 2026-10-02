@@ -1,19 +1,21 @@
-"""The catalog rows one verified package produces (Ledger ADR 0002 §5, ADR 0005 §2, §3).
+"""The catalog rows one verified package produces (Ledger ADR 0002 §5, ADR 0005 §2, §3, ADR 0009).
 
-A pure function of the package's bytes: every value comes from the record lines that registration
-hashed, read once, so the same package gives the same rows in any catalog. These are the rows
-migrations 0001 to 0003 define, over the package's own tables: exactly the kinds of its schema
-version (Ledger ADR 0008 §2), never the compiler's whole list. Kind-specific projections and the
-derived thread index belong to later migrations (MVL-91, ADR 0005 §6); they extend
-``package_rows`` without changing these.
+A pure function of the package's bytes and this Ledger version: every value comes from the record
+lines that registration hashed, read once, and the kind-specific projections come from the spec
+this Ledger ships (``projection.shipped_spec``), never from the compiler's live schema. So the same
+package gives the same rows in any catalog, whatever was registered before it. It indexes the
+package's own tables, exactly the kinds of its schema version (Ledger ADR 0008 §2), never the
+compiler's whole list. Records are ordered by kind, then record id (ADR 0009 §4).
 """
 
 import hashlib
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from functools import cache
 from typing import Any, Final
 
 from neptune.identity import canonical_json
+from neptune_ledger.catalog.projection import Spec, shipped_spec
 
 # The fields that state an entry's world time (ADR 0003 §3): start, end, and the fallback that
 # stands in for both when neither is Known.
@@ -42,6 +44,11 @@ class RecordRow:
     ambiguous_pointers: tuple[str, ...]
     body_digest: str
     logical_ids: tuple[tuple[str, str, str], ...]  # (pointer, namespace, value)
+    # ADR 0009: the body as canonical JSON text for the jsonb column (None when it holds U+0000),
+    # the Unknown pointers, and one value per ``projection_columns()`` column, in that order.
+    body: str | None = None
+    unknown_pointers: tuple[str, ...] = ()
+    projected: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -78,13 +85,23 @@ def package_rows(
     package_id: str, manifest: Mapping[str, Any], lines: Mapping[str, tuple[bytes, ...]]
 ) -> PackageRows:
     """The rows of one package whose manifest and record lines were verified."""
+    spec = shipped_spec()
+    # Every table the package holds: the compiler's kind list is not closed (ADR 0009 §3). A kind
+    # the spec does not know is indexed with its common columns and no projections.
     tables: dict[str, list[Any]] = {
-        kind: [canonical_json.loads(line) for line in lines[kind]] for kind in sorted(lines)
+        kind: [canonical_json.loads(line) for line in lines[kind]] for kind in lines
     }
     records = tuple(
-        _record_row(kind, number, line, body)
-        for kind in sorted(lines)
-        for number, (line, body) in enumerate(zip(lines[kind], tables[kind], strict=True), 1)
+        sorted(
+            (
+                _record_row(spec, kind, number, line, body)
+                for kind in tables
+                for number, (line, body) in enumerate(
+                    zip(lines[kind], tables[kind], strict=True), 1
+                )
+            ),
+            key=lambda row: (row.kind, row.record_id, row.line),
+        )
     )
     return PackageRows(
         package_id=package_id,
@@ -93,11 +110,11 @@ def package_rows(
         sources=tuple((s["content_id"], s["size"], s["storage"]) for s in manifest["sources"]),
         locations=tuple(
             (r["id"], r["content_id"], canonical(r["location"]), tuple(r["supersedes"]))
-            for r in tables["source_revision"]
+            for r in tables.get("source_revision", [])
         ),
         absences=tuple(
             (a["id"], canonical(a["location"]), tuple(a["supersedes"]))
-            for a in tables["source_absence"]
+            for a in tables.get("source_absence", [])
         ),
         transforms=tuple(
             TransformRow(
@@ -108,16 +125,29 @@ def package_rows(
                 canonical(t["libraries"]),
                 tuple(t["upstream"]),
             )
-            for t in tables["transform_record"]
+            for t in tables.get("transform_record", [])
         ),
-        clocks=tuple((d["id"], d["field"], tuple(d["scope"])) for d in tables["timestamp_domain"]),
+        clocks=tuple(
+            (d["id"], d["field"], tuple(d["scope"])) for d in tables.get("timestamp_domain", [])
+        ),
         records=records,
     )
 
 
-def _record_row(kind: str, number: int, line: bytes, record: Any) -> RecordRow:
+def projection_columns(spec: Spec | None = None) -> tuple[str, ...]:
+    """The kind-specific projection columns of ``record``, in the order ``projected`` holds."""
+    return _columns(spec or shipped_spec())
+
+
+@cache
+def _columns(spec: Spec) -> tuple[str, ...]:
+    return tuple(name for name, _ in spec.columns())
+
+
+def _record_row(spec: Spec, kind: str, number: int, line: bytes, record: Any) -> RecordRow:
     source, locator, transform, assertion = provenance_summary(kind, record)
     clock, first, last = world_time(kind, record)
+    ambiguous, unknown, logical = fields(record, spec.opaque_fields(kind))
     return RecordRow(
         kind=kind,
         record_id=record["content_id"] if kind == "source_artifact" else record["id"],
@@ -130,44 +160,147 @@ def _record_row(kind: str, number: int, line: bytes, record: Any) -> RecordRow:
         world_clock=clock,
         world_first=first,
         world_last=last,
-        ambiguous_pointers=tuple(ambiguous_pointers(record)),
+        ambiguous_pointers=tuple(ambiguous),
         body_digest="sha256:" + hashlib.sha256(line).hexdigest(),
-        logical_ids=tuple(logical_ids(record)),
+        logical_ids=tuple(logical),
+        body=None if _holds_nul(record) else line.decode("utf-8"),
+        unknown_pointers=tuple(unknown),
+        projected=projected(spec, kind, record),
     )
+
+
+def projected(spec: Spec, kind: str, record: Any) -> tuple[Any, ...]:
+    """One value per projection column (ADR 0009 §3); None where the kind does not fill it.
+
+    A logical id fills ``<filter>_namespace`` and ``<filter>_value`` only when Known; a record id
+    or record id list fills ``<filter>_ids`` as stated, in order.
+    """
+    values: dict[str, Any] = {}
+    for p in spec.projections:
+        if p.kind != kind:
+            continue
+        stated = record.get(p.field)
+        if stated is None:  # a package of an older schema version does not state the field
+            continue
+        if p.shape == "logical_id":
+            if _state(stated) == "known":
+                namespace, value = p.columns
+                values[namespace] = stated["value"]["namespace"]
+                values[value] = stated["value"]["value"]
+        else:
+            ids = [stated] if p.shape == "record_id" else list(stated)
+            (column,) = p.columns
+            values[column] = [*values.get(column, []), *ids]
+    return tuple(values.get(name) for name in projection_columns(spec))
+
+
+def _holds_nul(value: Any) -> bool:
+    """Whether a string or key anywhere in ``value`` holds U+0000, which jsonb cannot store.
+
+    Iterative: a free-form field may nest as deep as the compiler's reader allows, past Python's
+    recursion limit.
+    """
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            if "\x00" in item:
+                return True
+        elif isinstance(item, dict):
+            stack.extend(item.keys())
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return False
 
 
 def _escape(token: str) -> str:
     return token.replace("~", "~0").replace("/", "~1")
 
 
-def _walk(value: Any, pointer: str = "") -> Iterator[tuple[str, Any]]:
-    """Every JSON object in ``value`` with its JSON pointer, outermost first."""
-    if isinstance(value, dict):
-        yield pointer, value
-        for key in sorted(value):
-            yield from _walk(value[key], f"{pointer}/{_escape(key)}")
-    elif isinstance(value, list):
-        for index, item in enumerate(value):
-            yield from _walk(item, f"{pointer}/{index}")
+# The keys a Knowledge value's JSON may have (the compiler's Knowledge[T] shape). An object with
+# any other key, such as an adapter locator step that carries a "knowledge" property, is not a
+# field's state.
+_KNOWLEDGE_KEYS: Final = frozenset({"candidates", "knowledge", "provenance", "value"})
 
 
-def ambiguous_pointers(record: Any) -> list[str]:
+def _state(obj: Any) -> str | None:
+    """The Knowledge state of ``obj``, or None when it is not a Knowledge value."""
+    if not isinstance(obj, dict) or not obj.keys() <= _KNOWLEDGE_KEYS:
+        return None
+    state = obj.get("knowledge")
+    return state if isinstance(state, str) else None
+
+
+def _walk(
+    value: Any, pointer: str = "", opaque: frozenset[str] = frozenset()
+) -> Iterator[tuple[str, Any]]:
+    """Every Knowledge value in ``value`` with its JSON pointer, outermost first.
+
+    An ``Ambiguous`` value is yielded but not entered: its candidates are not fields. ``opaque``
+    names top-level fields the schema declares free-form (``transform_record.config``,
+    ``ingest_finding.details``, ``stream.metadata`` …): their content is data, not fields, so it
+    is not walked (ADR 0009 §2) and a Knowledge-shaped object in it is never mistaken for a
+    field's state. Iterative, so depth never meets Python's recursion limit.
+    """
+    stack: list[tuple[str, Any]] = [(pointer, value)]
+    while stack:
+        here, item = stack.pop()
+        children: list[tuple[str, Any]] = []
+        if isinstance(item, dict):
+            state = _state(item)
+            if state is not None:
+                yield here, item
+                if state == "ambiguous":
+                    continue
+            children = [
+                (f"{here}/{_escape(key)}", item[key])
+                for key in sorted(item)
+                if here or key not in opaque
+            ]
+        elif isinstance(item, list):
+            children = [(f"{here}/{index}", child) for index, child in enumerate(item)]
+        stack.extend(reversed(children))
+
+
+def fields(
+    record: Any, opaque: frozenset[str] = frozenset()
+) -> tuple[list[str], list[str], list[tuple[str, str, str]]]:
+    """One walk: the ``Ambiguous`` pointers, the ``Unknown`` pointers and the Known logical ids
+    ``(pointer, namespace, value)``, each sorted by pointer."""
+    ambiguous: list[str] = []
+    unknown: list[str] = []
+    logical: list[tuple[str, str, str]] = []
+    for pointer, obj in _walk(record, "", opaque):
+        state = obj["knowledge"]
+        if state == "ambiguous":
+            ambiguous.append(pointer)
+        elif state == "unknown":
+            unknown.append(pointer)
+        elif (
+            state == "known"
+            and isinstance(obj.get("value"), dict)
+            and obj["value"].keys() == {"namespace", "value"}
+            and isinstance(obj["value"]["namespace"], str)
+            and isinstance(obj["value"]["value"], str)
+        ):
+            logical.append((pointer, obj["value"]["namespace"], obj["value"]["value"]))
+    return sorted(ambiguous), sorted(unknown), sorted(logical)
+
+
+def ambiguous_pointers(record: Any, opaque: frozenset[str] = frozenset()) -> list[str]:
     """JSON pointers of every ``Ambiguous`` field; candidates inside one are not fields."""
-    found = [p for p, obj in _walk(record) if obj.get("knowledge") == "ambiguous"]
-    return sorted(p for p in found if not any(p.startswith(q + "/") for q in found))
+    return fields(record, opaque)[0]
 
 
-def logical_ids(record: Any) -> list[tuple[str, str, str]]:
+def unknown_pointers(record: Any, opaque: frozenset[str] = frozenset()) -> list[str]:
+    """JSON pointers of every ``Unknown`` field, outside ``Ambiguous`` candidates (ADR 0009 §2)."""
+    return fields(record, opaque)[1]
+
+
+def logical_ids(record: Any, opaque: frozenset[str] = frozenset()) -> list[tuple[str, str, str]]:
     """Every Known logical id ``{namespace, value}`` with the pointer it is stated at."""
-    return [
-        (p, obj["value"]["namespace"], obj["value"]["value"])
-        for p, obj in _walk(record)
-        if obj.get("knowledge") == "known"
-        and isinstance(obj.get("value"), dict)
-        and obj["value"].keys() == {"namespace", "value"}
-        and isinstance(obj["value"]["namespace"], str)
-        and isinstance(obj["value"]["value"], str)
-    ]
+    return fields(record, opaque)[2]
 
 
 def _known_time(record: Any, name: str | None) -> tuple[str, int] | None:
