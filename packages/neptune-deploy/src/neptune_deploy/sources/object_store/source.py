@@ -24,12 +24,13 @@ text. A read that fails also raises ``ObjectReadError`` (an ``OSError``), so the
 that object and nothing else.
 """
 
+import hashlib
 import io
 from collections import OrderedDict, defaultdict
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
-from typing import BinaryIO, Final
+from typing import BinaryIO, Final, TypeAlias
 
 from neptune.identity.findings import ingest_finding
 from neptune.identity.hashing import content_id
@@ -58,6 +59,8 @@ CONNECTOR_VERSION: Final = "0.1.0"
 LISTING_TOKEN: Final = "listing"  # the revision token of a finding about the listing itself
 MAX_PAGES: Final = 100_000
 MAX_EXAMPLES: Final = 10  # keys a finding about many keys cites
+MAX_EXAMPLE_BYTES: Final = 256  # of each key a finding cites
+MAX_SKIPPED_KEY_BYTES: Final = 256  # of a key the source does not use, kept with length and digest
 MIN_WINDOW: Final = 64 * 1024
 MAX_WINDOW: Final = 8 * 1024 * 1024  # the most one ranged GET of a stream asks for
 READER_CACHE: Final = 4  # checked chunks an ObjectReader keeps
@@ -83,7 +86,8 @@ CODES: Final[dict[str, tuple[FindingCategory, Severity, str]]] = {
     "listing_limit": (
         FindingCategory.LIMIT,
         Severity.WARNING,
-        "the listing stopped at the object or page limit; it is incomplete",
+        "the listing stopped at the object, byte or page limit; keys after the one it names are"
+        " not covered",
     ),
     "pagination_loop": (
         FindingCategory.INCONSISTENT,
@@ -177,12 +181,46 @@ class ObjectEntry:
         return self.key.rpartition("/")[2]
 
 
+KeyOrder: TypeAlias = tuple[bytes, int, str]
+
+
+def _sha256(key: str | bytes) -> str:
+    raw = key.encode("utf-8", "surrogateescape") if isinstance(key, str) else key
+    return hashlib.sha256(raw).hexdigest()
+
+
+def key_order(raw: bytes) -> KeyOrder:
+    """How keys are ordered when a listing is cut: by their first ``MAX_SKIPPED_KEY_BYTES``, then
+    length and digest. For keys no longer than that, this is plain byte order."""
+    return raw[:MAX_SKIPPED_KEY_BYTES], len(raw), _sha256(raw)
+
+
+def _within(order: KeyOrder, cutoff: KeyOrder | None) -> bool:
+    return cutoff is not None and order <= cutoff
+
+
 @dataclass(frozen=True)
 class SkippedObject:
-    """A listed entry the source does not use: its key bytes as listed, and the finding code."""
+    """A listed entry the source does not use, and the finding code saying why.
+
+    Built from the key bytes as listed, it keeps only their first ``MAX_SKIPPED_KEY_BYTES``, with
+    the whole key's length and sha256: a store that lists huge unusable keys cannot make the source
+    hold them.
+    """
 
     raw_key: bytes
     reason: str
+    length: int = field(init=False)
+    sha256: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "length", len(self.raw_key))
+        object.__setattr__(self, "sha256", _sha256(self.raw_key))
+        object.__setattr__(self, "raw_key", self.raw_key[:MAX_SKIPPED_KEY_BYTES])
+
+    @property
+    def order(self) -> KeyOrder:
+        return self.raw_key, self.length, self.sha256
 
 
 @dataclass(frozen=True)
@@ -242,6 +280,7 @@ class ObjectStoreSource:
         config: dict[str, JsonValue] = {
             "bucket": self.location.bucket,
             "max_objects": self.options.max_objects,
+            "max_listing_bytes": self.options.max_listing_bytes,
             "prefix": self.location.prefix,
             "provider": self.location.provider.value,
         }
@@ -290,29 +329,33 @@ class ObjectStoreSource:
     def _listing(self) -> Listing:
         prefix = self.location.prefix
         limit = self.options.max_objects
+        budget = self.options.max_listing_bytes
         kept: dict[str, Listed] = {}
         duplicated: set[str] = set()
         skipped: set[SkippedObject] = set()
-        skipped_keys: set[bytes] = set()
-        cursors: set[Cursor] = set()
+        skipped_keys: set[KeyOrder] = set()
+        held = 0  # key and token bytes the listing holds: kept keys whole, skipped keys capped
+        cursors: set[bytes] = set()  # digests of the cursors seen, never the cursors themselves
         cursor: Cursor | None = None
-        complete = limited = False
+        complete = False
+        stopped: dict[str, JsonValue] | None = None  # why a limit stopped the listing
         pages = 0
         while True:
             if pages >= MAX_PAGES:
-                self.report("listing_limit", self.listing_ref, {"pages": pages})
+                stopped = {"pages": pages}
                 break
             try:
                 page = self.client.list_page(prefix, cursor, self.options.page_size)
-            except TransportError as exc:
+            except (TransportError, ValueError) as exc:
                 # One finding: the specific refusal if it has a code, else the failure's cause.
+                code = exc.code if isinstance(exc, TransportError) else "response_invalid"
                 details: dict[str, JsonValue] = {"page": pages}
-                if exc.status is not None:
+                if isinstance(exc, TransportError) and exc.status is not None:
                     details["status"] = exc.status
-                if exc.code in ("redirect_refused", "response_invalid"):
-                    self.report(exc.code, self.listing_ref, details)
+                if code in ("redirect_refused", "response_invalid"):
+                    self.report(code, self.listing_ref, details)
                 else:
-                    self.report("listing_failed", self.listing_ref, {**details, "cause": exc.code})
+                    self.report("listing_failed", self.listing_ref, {**details, "cause": code})
                 break
             pages += 1
             found = [SkippedObject(item.raw, item.reason) for item in page.unlisted]
@@ -321,36 +364,49 @@ class ObjectStoreSource:
                 if not item.key.startswith(prefix):
                     found.append(SkippedObject(raw, "key_outside_prefix"))
                 elif len(raw) > MAX_KEY_BYTES:
-                    found.append(SkippedObject(raw[: MAX_KEY_BYTES + 1], "key_too_long"))
+                    found.append(SkippedObject(raw, "key_too_long"))
                 elif item.key in kept and kept[item.key] != item:
                     duplicated.add(item.key)
-                else:
+                elif item.key not in kept:
                     kept[item.key] = item
-            skipped.update(found)
-            skipped_keys.update(item.raw_key for item in found)
-            # Every distinct key counts, used or not, so no listing grows without bound.
+                    held += len(raw) + len(item.token)
+            for skip in found:
+                if skip not in skipped:
+                    skipped.add(skip)
+                    skipped_keys.add(skip.order)
+                    held += len(skip.raw_key)
+            # Every distinct key counts, used or not, and so does every byte held: no listing
+            # grows without bound, whatever the store sends.
             if len(kept) + len(skipped_keys) > limit:
-                self.report("listing_limit", self.listing_ref, {"max_objects": limit})
-                limited = True
+                stopped = {"max_objects": limit}
+                break
+            if held > budget:
+                stopped = {"max_listing_bytes": budget}
                 break
             if page.cursor is None:
                 complete = True
                 break
-            if page.cursor in cursors:
+            digest = hashlib.sha256("\x00".join(page.cursor).encode("utf-8", "surrogateescape"))
+            if digest.digest() in cursors:
                 self.report("pagination_loop", self.listing_ref, {"page": pages})
                 break
-            cursors.add(page.cursor)
+            cursors.add(digest.digest())
             cursor = page.cursor
-        if limited:
+        if stopped is not None and (kept or skipped_keys):
             # Keep what any page size keeps. Stores list in key order, so every key below the
             # greatest one seen has been seen whole, duplicates included; keep the first ``limit``
-            # of those, and nothing after them.
-            seen = {key.encode("utf-8") for key in kept} | skipped_keys
+            # of those, and nothing after them. The rest of the prefix is not covered.
+            seen = {key_order(key.encode("utf-8")) for key in kept} | skipped_keys
             greatest = max(seen)
-            cutoff = sorted(key for key in seen if key < greatest)[:limit][-1]
-            kept = {k: v for k, v in kept.items() if k.encode("utf-8") <= cutoff}
-            duplicated = {key for key in duplicated if key.encode("utf-8") <= cutoff}
-            skipped = {item for item in skipped if item.raw_key <= cutoff}
+            below = sorted(order for order in seen if order < greatest)[:limit]
+            cutoff = below[-1] if below else None
+            kept = {k: v for k, v in kept.items() if _within(key_order(k.encode("utf-8")), cutoff)}
+            duplicated = {k for k in duplicated if _within(key_order(k.encode("utf-8")), cutoff)}
+            skipped = {item for item in skipped if _within(item.order, cutoff)}
+            last = cutoff[0][:MAX_EXAMPLE_BYTES].hex() if cutoff else ""
+            self.report("listing_limit", self.listing_ref, {**stopped, "covered_through_hex": last})
+        elif stopped is not None:
+            self.report("listing_limit", self.listing_ref, {**stopped, "covered_through_hex": ""})
         for key in duplicated:
             del kept[key]
             skipped.add(SkippedObject(key.encode("utf-8"), "key_duplicated"))
@@ -358,7 +414,7 @@ class ObjectStoreSource:
             ObjectEntry(self.ref(key, item.token), item.size, key)
             for key, item in sorted(kept.items())
         )
-        unique = tuple(sorted(skipped, key=lambda s: (s.reason, s.raw_key)))
+        unique = tuple(sorted(skipped, key=lambda s: (s.reason, s.order)))
         self._report_skipped(unique)
         return Listing(entries, unique, complete)
 
@@ -370,7 +426,9 @@ class ObjectStoreSource:
         for reason in _KEY_REASONS:
             keys = by_reason.get(reason)
             if keys:
-                examples: list[JsonValue] = [key[:256].hex() for key in keys[:MAX_EXAMPLES]]
+                examples: list[JsonValue] = [
+                    key[:MAX_EXAMPLE_BYTES].hex() for key in keys[:MAX_EXAMPLES]
+                ]
                 self.report(reason, self.listing_ref, {"count": len(keys), "keys_hex": examples})
 
     def listing(self) -> Listing:
@@ -412,11 +470,7 @@ class ObjectStoreSource:
         gone: list[SourceRevision] = []
         if listing.complete:
             seen = {entry.location.object_id for entry in listing.entries}
-            for item in listing.skipped:  # seen but not used: nothing is known of them
-                try:
-                    seen.add(self.location.object_id(item.raw_key.decode("utf-8")))
-                except UnicodeDecodeError:
-                    continue
+            blind = {item.sha256 for item in listing.skipped}  # seen, not used: nothing known
             scope = self.location.scope + self.location.prefix
             for head in ledger.heads():
                 where = head.location
@@ -426,6 +480,7 @@ class ObjectStoreSource:
                     and where.connector_id == self.connector_id
                     and where.object_id.startswith(scope)
                     and where.object_id not in seen
+                    and _sha256(where.object_id[len(self.location.scope) :]) not in blind
                 ):
                     gone.append(head)
         return tuple(sorted(gone, key=lambda revision: revision.location.key))
@@ -503,6 +558,9 @@ class ObjectStoreSource:
             code = "redirect_refused" if exc.code == "redirect_refused" else "read_failed"
             self.report(code, where, {**span, "cause": exc.code})
             raise ObjectReadError(code, where) from exc
+        except ValueError as exc:  # a client let a malformed answer through: still this object's
+            self.report("read_failed", where, {**span, "cause": "response_invalid"})
+            raise ObjectReadError("read_failed", where) from exc
         if got.total is not None and got.total != entry.size:
             self.report("object_changed", where, {**span, "size": got.total})
             raise ObjectReadError("object_changed", where)

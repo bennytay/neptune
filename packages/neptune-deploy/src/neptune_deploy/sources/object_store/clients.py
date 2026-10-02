@@ -32,6 +32,7 @@ from neptune_deploy.sources.object_store.transport import Response, Transport, T
 
 MAX_PAGE_BYTES: Final = 32 * 1024 * 1024
 MAX_TOKEN: Final = 1024  # characters in a version id, etag or generation
+MAX_CURSOR_BYTES: Final = 4096  # a continuation token or marker; a longer one stops the listing
 AZURE_VERSION: Final = "2021-08-06"  # the x-ms-version every Azure request names
 _DECLARATION: Final = re.compile(r"<!\s*(?:DOCTYPE|ENTITY)", re.IGNORECASE)
 
@@ -151,6 +152,12 @@ def _token(kind: str, value: str | None) -> str | None:
 
 
 def _size(value: object) -> int | None:
+    """A non-negative decimal count of at most 19 ASCII digits, or ``None``.
+
+    ``str.isdigit`` alone accepts ``²`` and other digits ``int`` refuses, and an unbounded string
+    of digits costs quadratic time (or, past 4,300 digits, a ``ValueError``): a header or a
+    listing field is never given to ``int`` before this check.
+    """
     if isinstance(value, str) and value.isascii() and value.isdigit() and len(value) <= 19:
         return int(value)
     return None
@@ -169,6 +176,10 @@ def _entry(raw: bytes, token: str | None, size: int | None) -> Listed | Unlisted
 
 
 def _page(found: list[Listed | Unlisted], cursor: Cursor | None) -> Page:
+    if cursor is not None and any(
+        len(part.encode("utf-8", "surrogateescape")) > MAX_CURSOR_BYTES for part in cursor
+    ):
+        raise PageInvalid(f"a continuation token or marker is longer than {MAX_CURSOR_BYTES} bytes")
     objects = tuple(item for item in found if isinstance(item, Listed))
     unlisted = tuple(item for item in found if isinstance(item, Unlisted))
     return Page(objects, unlisted, cursor)
@@ -184,12 +195,17 @@ def _content_range(response: Response, start: int, length: int) -> int | None:
     value = response.headers.get("content-range", "")
     unit, _, rest = value.partition(" ")
     span, _, total = rest.partition("/")
-    first, _, last = span.partition("-")
-    if unit != "bytes" or not first.isdigit() or not last.isdigit():
+    first, last = (_size(part) for part in span.partition("-")[::2])
+    if unit != "bytes" or first is None or last is None:
         raise RangeInvalid("a partial response states no byte range")
-    if int(first) != start or int(last) != start + length - 1:
+    if first != start or last != start + length - 1:
         raise RangeInvalid("a partial response holds other bytes than were asked for")
-    return int(total) if total.isdigit() else None
+    if total == "*":
+        return None
+    size = _size(total)
+    if size is None:
+        raise RangeInvalid("a partial response states no object size")
+    return size
 
 
 def read_range(response: Response, start: int, length: int) -> Range:
@@ -207,9 +223,9 @@ def read_range(response: Response, start: int, length: int) -> Range:
             response.discard()  # its body is unread: the connection cannot be reused
             raise
         return Range(response.exact(length), total)
-    declared = response.headers.get("content-length", "")
-    if response.status == 200 and start == 0 and declared.isdigit():
-        return Range(response.exact(length), int(declared))
+    declared = _size(response.headers.get("content-length", ""))
+    if response.status == 200 and start == 0 and declared is not None:
+        return Range(response.exact(length), declared)
     response.discard()
     raise RangeInvalid(f"status {response.status} to a ranged read", response.status)
 
