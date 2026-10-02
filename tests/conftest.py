@@ -32,6 +32,12 @@ def tabular_fixtures() -> ModuleType:
 
 
 @pytest.fixture(scope="session")
+def xlsx_fixtures() -> ModuleType:
+    """The XLSX fixture generator, ``tests/fixtures/tabular/make_xlsx_fixtures.py``."""
+    return load_generator(FIXTURES / "tabular" / "make_xlsx_fixtures.py")
+
+
+@pytest.fixture(scope="session")
 def tabular_golden() -> ModuleType:
     """The tabular golden-file generator, ``tests/golden/tabular/make_tabular_golden.py``."""
     return load_generator(Path(__file__).parent / "golden" / "tabular" / "make_tabular_golden.py")

@@ -13,12 +13,14 @@ not written: a stream's samples are Parquet, which the store writes (MVL-5, MVL-
 
 import calendar
 import io
+import json
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, Final, TypeVar
+from typing import TYPE_CHECKING, Any, Final, TypeVar
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -71,10 +73,31 @@ from neptune.model.knowledge import (
     Ambiguous,
     AssertionKind,
     Candidate,
+    Knowledge,
     Known,
     NotApplicable,
     NotCovered,
     Unknown,
+)
+from neptune.model.lifecycle import (
+    AuthorisationEnvelope,
+    ChangeItem,
+    ChangeRecord,
+    CommissioningBaseline,
+    Decision,
+    Hazard,
+    IncidentRecord,
+    Intervention,
+    InventoryItem,
+    MaintenanceEvent,
+    PartReplacement,
+    Quantity,
+    RequalificationRecord,
+    RiskAssessment,
+    Score,
+    TestResult,
+    TimelineEntry,
+    ZoneLimit,
 )
 from neptune.model.machine import (
     Calibration,
@@ -110,10 +133,11 @@ from neptune.model.time import (
     ClockRole,
     Duration,
     Epoch,
+    Timescale,
     Timestamp,
 )
-from neptune.model.units import unit_from_json
-from neptune.model.versions import DeclaredVersion, GitCommit
+from neptune.model.units import unit_from_json, unit_from_text
+from neptune.model.versions import DeclaredVersion, GitCommit, VersionPrimitive
 from neptune.model.world import (
     Capture,
     Image,
@@ -123,6 +147,9 @@ from neptune.model.world import (
     StructuredRecord,
     StructuredTable,
 )
+
+if TYPE_CHECKING:
+    from neptune.model.scalars import Real
 
 HERE: Final = Path(__file__).parent
 R = TypeVar("R")
@@ -924,6 +951,334 @@ def manipulator() -> Example:
     return ex
 
 
+# --- Deployment records (ADR 0051) -------------------------------------------------------------
+
+
+class Records:
+    """Cites one deployment-records export: each value its own JSON pointer, all ``stated``.
+
+    The adapter it stands in for is Neptune Deploy's (MVL-112 on); it reads every value as
+    written, so a severity stays its text and a number keeps its unit.
+    """
+
+    ADAPTER: Final = "deployment_json"
+
+    def __init__(self, ex: Example, path: str) -> None:
+        self.ex, self.path = ex, path
+        self.document = json.loads(ex.sources[path].data)
+        # Every date-time in the export states its offset, so its ticks are the POSIX seconds of
+        # the instant it names (ADR 0023 §2); the export's own root is what declares that.
+        self.clock = clock(
+            ex,
+            self.cite(""),
+            "date-time",
+            role=Known(ClockRole.DOCUMENT),
+            resolution=Known(SECOND),
+            epoch=Known(Epoch.UNIX),
+            timescale=Known(Timescale.POSIX),
+        )
+
+    def cite(self, pointer: str) -> Provenance:
+        return self.ex.pointer(self.ADAPTER, self.path, pointer, kind=STATED)
+
+    def get(self, pointer: str) -> Any:
+        value = self.document
+        for token in pointer.split("/")[1:]:
+            value = value[int(token)] if isinstance(value, list) else value[token]
+        return value
+
+    def text(self, pointer: str) -> Known[str]:
+        return Known(str(self.get(pointer)), self.cite(pointer))
+
+    def texts(self, pointer: str) -> tuple[Known[str], ...]:
+        return tuple(self.text(f"{pointer}/{i}") for i in range(len(self.get(pointer))))
+
+    def ref(self, namespace: str, pointer: str) -> Known[LogicalId]:
+        return Known(LogicalId(namespace, self.get(pointer)), self.cite(pointer))
+
+    def refs(self, *named: tuple[str, str]) -> tuple[Known[LogicalId], ...]:
+        """Declared ids: ``(namespace, pointer)`` to a value, or to a list of them."""
+        found = []
+        for namespace, pointer in named:
+            value = self.get(pointer)
+            if isinstance(value, list):
+                found += [self.ref(namespace, f"{pointer}/{i}") for i in range(len(value))]
+            else:
+                found.append(self.ref(namespace, pointer))
+        return tuple(sorted(found, key=lambda known: (known.value.namespace, known.value.value)))
+
+    def time(self, pointer: str) -> Known[Timestamp]:
+        instant = datetime.fromisoformat(self.get(pointer))
+        assert instant.tzinfo is not None, pointer  # zone-less civil time is another clock
+        ticks = calendar.timegm(instant.utctimetuple())
+        return Known(Timestamp(ticks, self.clock.id), self.cite(pointer))
+
+    def quantity(self, value: str, unit: str) -> Quantity:
+        # A declared integer is read with float(), as calibration parameters are (ADR 0019 §6).
+        number: Knowledge[Real] = Known(float(self.get(value)), self.cite(value))
+        return Quantity(number, unit_from_text(self.get(unit), provenance=self.cite(unit)))
+
+    def decision(self, decision: str, authority: str, time: str) -> Decision:
+        return Decision(self.text(decision), self.text(authority), self.time(time))
+
+    def tests(self, pointer: str) -> tuple[TestResult, ...]:
+        return tuple(
+            TestResult(
+                self.text(f"{pointer}/{i}/test"),
+                self.text(f"{pointer}/{i}/result"),
+                self.time(f"{pointer}/{i}/date"),
+            )
+            for i in range(len(self.get(pointer)))
+        )
+
+    def inventory(self, pointer: str) -> tuple[InventoryItem, ...]:
+        items = []
+        for i, item in enumerate(self.get(pointer)):
+            at = f"{pointer}/{i}"
+            version: Knowledge[VersionPrimitive] = (
+                # A version is the kind the source names; a form names none (ADR 0014).
+                Known(DeclaredVersion(item[key]), self.cite(f"{at}/{key}"))
+                if (key := "version" if "version" in item else "revision") in item
+                else NotCovered()
+            )
+            items.append(
+                InventoryItem(
+                    name=self.text(f"{at}/item"),
+                    model=self.text(f"{at}/model") if "model" in item else NotCovered(),
+                    identifiers=self.refs(("serial", f"{at}/serial")) if "serial" in item else (),
+                    version=version,
+                )
+            )
+        return tuple(items)
+
+    def hazards(self, pointer: str) -> tuple[Hazard, ...]:
+        hazards = []
+        for i, hazard in enumerate(self.get(pointer)):
+            at = f"{pointer}/{i}"
+            # Every other column is a score, named by its column, in the form's order.
+            scores = tuple(
+                Score(name, self.text(f"{at}/{name}"))
+                for name in hazard
+                if name not in {"hazard", "mitigations"}
+            )
+            hazards.append(
+                Hazard(self.text(f"{at}/hazard"), scores, self.texts(f"{at}/mitigations"))
+            )
+        return tuple(hazards)
+
+    def add(self, cls: Any, pointer: str, **values: Any) -> Any:
+        provenance = self.cite(pointer)
+        return self.ex.add(
+            cls(id=self.ex.id_of(cls.kind, provenance), provenance=provenance, **values)
+        )
+
+
+def warehouse_amr() -> Example:
+    """The warehouse deployment of AMR-07 at site S-007, from its records export."""
+    ex = Example("warehouse_amr", {source.path: source for source in EXAMPLES["warehouse_amr"]()})
+    r = Records(ex, "records.json")
+    # The export's own site id; linking it to a site register's S-007 is MVL-35's, not a join here.
+    site = r.ref("siteops.site", "/site")
+    c = "/commissioning/0"
+    r.add(
+        CommissioningBaseline,
+        c,
+        identifiers=r.refs(("siteops.form", f"{c}/form")),
+        site=site,
+        machines=r.refs(("fleet", f"{c}/machine")),
+        configuration=r.ref("siteops.configuration", f"{c}/configuration"),
+        related=(),
+        commissioned=r.time(f"{c}/commissioned"),
+        hardware=r.inventory(f"{c}/hardware"),
+        software=r.inventory(f"{c}/software"),
+        calibrations=r.refs(("siteops.calibration", f"{c}/calibrations")),
+        tests=r.tests(f"{c}/tests"),
+        constraints=r.texts(f"{c}/constraints"),
+        sign_off=r.decision(f"{c}/acceptance", f"{c}/signed_off_by", f"{c}/signed_off"),
+    )
+    a = "/authorisations/0"
+    zones = tuple(
+        ZoneLimit(
+            r.ref("siteops.zone", f"{a}/zones/{i}/zone"),
+            r.quantity(f"{a}/zones/{i}/speed_limit", f"{a}/zones/{i}/unit"),
+        )
+        for i in range(len(r.get(f"{a}/zones")))
+    )
+    r.add(
+        AuthorisationEnvelope,
+        a,
+        identifiers=r.refs(("siteops.form", f"{a}/authorisation")),
+        site=site,
+        machines=r.refs(("fleet", f"{a}/machine")),
+        configuration=r.ref("siteops.configuration", f"{a}/configuration"),
+        related=r.refs(("siteops.form", f"{a}/commissioning")),
+        missions=r.texts(f"{a}/missions"),
+        payload_min=r.quantity(f"{a}/payload/min", f"{a}/payload/unit"),
+        payload_max=r.quantity(f"{a}/payload/max", f"{a}/payload/unit"),
+        zones=zones,
+        supervision=r.text(f"{a}/supervision"),
+        dependencies=r.texts(f"{a}/dependencies"),
+        valid_from=r.time(f"{a}/valid_from"),
+        valid_until=r.time(f"{a}/valid_until"),
+        approval=r.decision(f"{a}/decision", f"{a}/approved_by", f"{a}/approved"),
+    )
+    n = "/interventions/0"
+    r.add(
+        Intervention,
+        n,
+        identifiers=r.refs(("siteops.ticket", f"{n}/ticket")),
+        site=site,
+        machines=r.refs(("fleet", f"{n}/machine")),
+        configuration=NotCovered(),  # a ticket has no place for one
+        related=(),
+        mode=r.text(f"{n}/mode"),
+        authority=r.text(f"{n}/authority"),
+        reason=r.text(f"{n}/reason"),
+        commands=r.texts(f"{n}/commands"),
+        start=r.time(f"{n}/start"),
+        end=r.time(f"{n}/end"),
+        outcome=r.text(f"{n}/outcome"),
+    )
+    i = "/incidents/0"
+    r.add(
+        IncidentRecord,
+        i,
+        identifiers=r.refs(("siteops.incident", f"{i}/incident")),
+        site=site,
+        machines=r.refs(("fleet", f"{i}/machines")),
+        configuration=NotCovered(),
+        # The evidence it links, by the names it gives them: a video id and a log's file name.
+        related=r.refs(("siteops.evidence", f"{i}/evidence")),
+        occurred=r.time(f"{i}/occurred"),
+        severity=r.text(f"{i}/severity"),  # "S3", as the site's scale writes it; never ranked
+        zone=r.ref("siteops.zone", f"{i}/zone"),
+        location=r.text(f"{i}/location"),
+        assets=r.refs(("siteops.asset", f"{i}/assets")),
+        timeline=tuple(
+            TimelineEntry(r.time(f"{i}/timeline/{k}/time"), r.text(f"{i}/timeline/{k}/entry"))
+            for k in range(len(r.get(f"{i}/timeline")))
+        ),
+        description=r.text(f"{i}/description"),
+        root_cause=r.text(f"{i}/root_cause"),
+    )
+    g = "/changes/0"
+    r.add(
+        ChangeRecord,
+        g,
+        identifiers=r.refs(("siteops.change", f"{g}/change")),
+        site=site,
+        machines=r.refs(("fleet", f"{g}/machines")),
+        configuration=r.ref("siteops.configuration", f"{g}/configuration"),
+        related=r.refs(("siteops.incident", f"{g}/incident")),
+        changes=tuple(
+            ChangeItem(
+                r.text(f"{g}/items/{k}/type"),
+                r.text(f"{g}/items/{k}/target"),
+                r.text(f"{g}/items/{k}/from"),
+                r.text(f"{g}/items/{k}/to"),
+            )
+            for k in range(len(r.get(f"{g}/items")))
+        ),
+        approval=r.decision(f"{g}/decision", f"{g}/approved_by", f"{g}/approved"),
+        effective=r.time(f"{g}/effective"),
+        rollback=r.ref("siteops.release", f"{g}/rollback"),
+    )
+    k = "/risk_assessments/0"
+    r.add(
+        RiskAssessment,
+        k,
+        identifiers=r.refs(("siteops.form", f"{k}/assessment")),
+        site=site,
+        machines=r.refs(("fleet", f"{k}/machines")),
+        configuration=r.ref("siteops.configuration", f"{k}/configuration"),
+        related=(),
+        assessed=r.time(f"{k}/assessed"),
+        method=r.text(f"{k}/method"),
+        hazards=r.hazards(f"{k}/hazards"),
+        approval=r.decision(f"{k}/decision", f"{k}/approved_by", f"{k}/approved"),
+    )
+    return ex
+
+
+def manipulator_cell() -> Example:
+    """The manipulator cell CELL-3: commissioning, risk, a repair and its requalification."""
+    ex = Example(
+        "manipulator_cell", {source.path: source for source in EXAMPLES["manipulator_cell"]()}
+    )
+    r = Records(ex, "records.json")
+    site = r.ref("plant.cell", "/cell")
+    c = "/commissioning"
+    r.add(
+        CommissioningBaseline,
+        c,
+        identifiers=r.refs(("plant.record", f"{c}/record")),
+        site=site,
+        machines=r.refs(("robot.serial", f"{c}/robot")),
+        configuration=r.ref("plant.configuration", f"{c}/configuration"),
+        related=(),
+        commissioned=r.time(f"{c}/date"),
+        hardware=r.inventory(f"{c}/hardware"),
+        software=r.inventory(f"{c}/software"),
+        calibrations=r.refs(("plant.calibration", f"{c}/calibrations")),
+        tests=r.tests(f"{c}/tests"),
+        constraints=r.texts(f"{c}/constraints"),
+        sign_off=r.decision(f"{c}/acceptance", f"{c}/signed_off_by", f"{c}/signed_off"),
+    )
+    k = "/risk_assessment"
+    r.add(
+        RiskAssessment,
+        k,
+        identifiers=r.refs(("plant.record", f"{k}/record")),
+        site=site,
+        machines=r.refs(("robot.serial", f"{k}/robot")),
+        configuration=r.ref("plant.configuration", f"{k}/configuration"),
+        related=(),
+        assessed=r.time(f"{k}/date"),
+        method=r.text(f"{k}/method"),
+        hazards=r.hazards(f"{k}/hazards"),
+        approval=r.decision(f"{k}/decision", f"{k}/approved_by", f"{k}/approved"),
+    )
+    m = "/maintenance"
+    r.add(
+        MaintenanceEvent,
+        m,
+        identifiers=r.refs(("cmms.work_order", f"{m}/work_order")),
+        site=site,
+        machines=r.refs(("robot.serial", f"{m}/robot")),
+        # The as-maintained configuration the work order states resulted.
+        configuration=r.ref("plant.configuration", f"{m}/as_maintained_configuration"),
+        related=(),
+        performed=r.time(f"{m}/date"),
+        diagnosis=r.text(f"{m}/diagnosis"),
+        actions=r.texts(f"{m}/actions"),
+        parts=tuple(
+            PartReplacement(
+                r.text(f"{m}/parts/{p}/part"),
+                r.refs(("serial", f"{m}/parts/{p}/removed")),
+                r.refs(("serial", f"{m}/parts/{p}/installed")),
+            )
+            for p in range(len(r.get(f"{m}/parts")))
+        ),
+    )
+    q = "/requalification"
+    r.add(
+        RequalificationRecord,
+        q,
+        identifiers=r.refs(("plant.record", f"{q}/record")),
+        site=site,
+        machines=r.refs(("robot.serial", f"{q}/robot")),
+        configuration=r.ref("plant.configuration", f"{q}/configuration"),
+        related=r.refs(("cmms.work_order", f"{q}/work_order")),
+        performed=r.time(f"{q}/date"),
+        cause=r.text(f"{q}/cause"),
+        corrective_actions=r.texts(f"{q}/corrective_actions"),
+        tests=r.tests(f"{q}/tests"),
+        result=r.text(f"{q}/result"),
+        return_to_service=r.decision(f"{q}/return_to_service", f"{q}/returned_by", f"{q}/returned"),
+    )
+    return ex
+
+
 # --- Mobile robot: a ROS 1 bag, a site register and a photo ------------------------------------
 
 
@@ -1132,6 +1487,8 @@ EXAMPLE_BUILDERS: Final[dict[str, Callable[[], Example]]] = {
     "quadruped": quadruped,
     "manipulator": manipulator,
     "mobile_robot": mobile_robot,
+    "warehouse_amr": warehouse_amr,
+    "manipulator_cell": manipulator_cell,
 }
 
 
