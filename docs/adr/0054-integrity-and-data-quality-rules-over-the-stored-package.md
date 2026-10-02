@@ -102,6 +102,8 @@ not by re-parsing. The checks must not become a second parser, must not guess un
   reads the package; the platform harness's pinned findings for a truncated recording gain the
   roll-up (`neptune.validate.source_incomplete`).
 - A package with findings costs one more pass over its series and blobs (amend, then verify).
+- The receipt lists `neptune.validate` among the transforms that read a source it cites, as it
+  already lists the runtime and discovery for theirs: a finding's citation counts as a read.
 - Adding a rule, or changing one's logic, bumps its version and so the validator transform:
   packages with its findings get a new lineage; packages without stay identical.
 - Revisit when the limit, document-revision or run-binding kinds land (turn the pending rules

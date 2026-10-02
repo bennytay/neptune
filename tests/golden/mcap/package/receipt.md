@@ -1,18 +1,18 @@
 # Ingest receipt
 
-Receipt `rec:sha256:f59d7b85823f88cd2139eef91b0cfb622beb5fbe29addc24e99d0a481cae1e1d`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:ad6097c3e2466ffc38f2112448ddfdecf8f09135a794613111da435e3052f676`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 1 seen, 1 read, 0 not read, 0 gone
 - Runs: 1; streams: 4; entities: 0
-- Findings: 0 errors, 0 warnings, 5 info; ambiguous fields: 0
+- Findings: 0 errors, 0 warnings, 6 info; ambiguous fields: 0
 
 ## Sources
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `robot.mcap` | 4816 | `sha256:9e775857ab35` | mcap 0.1.0 |
+| `robot.mcap` | 4816 | `sha256:9e775857ab35` | neptune.validate 0.1.0, mcap 0.1.0 |
 
 ## Adapters
 
@@ -20,12 +20,13 @@ Receipt `rec:sha256:f59d7b85823f88cd2139eef91b0cfb622beb5fbe29addc24e99d0a481cae
 |---|---|---|---|---|
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
 | `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:a46247e2db11` |
+| `neptune.validate` | `0.1.0` | `sha256:d96d1fae05d7` | none | `rec:06628a52b384` |
 
 ## Records
 
 | Kind | Records |
 |---|---|
-| `ingest_finding` | 5 |
+| `ingest_finding` | 6 |
 | `run` | 1 |
 | `source_artifact` | 1 |
 | `source_revision` | 1 |
@@ -33,7 +34,7 @@ Receipt `rec:sha256:f59d7b85823f88cd2139eef91b0cfb622beb5fbe29addc24e99d0a481cae
 | `structured_record` | 3 |
 | `structured_table` | 1 |
 | `timestamp_domain` | 5 |
-| `transform_record` | 2 |
+| `transform_record` | 3 |
 
 ## Runs
 
@@ -62,6 +63,7 @@ Receipt `rec:sha256:f59d7b85823f88cd2139eef91b0cfb622beb5fbe29addc24e99d0a481cae
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:2a04449178fd`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 4's message payloads are not decoded; each row cites its message's bytes · `rec:542c3cbcba95`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:5e30cda4992d`
+- **info** `neptune.validate.time_out_of_order` (inconsistent): stream rec:f6ee7d482736 is not in time order on clock 0 in source order (1 descent) · `rec:cc216092f69d`
 
 ## Ambiguous fields
 
