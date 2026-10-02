@@ -96,6 +96,7 @@ class Context:
         self.package = package
         self.bounds = bounds
         self.inputs = inputs
+        self.memo: dict[str, Any] = {}  # work two rules share, done once
         self.by_kind: dict[str, list[Any]] = defaultdict(list)
         self.by_id: dict[str, Any] = {}
         for record in package.records:

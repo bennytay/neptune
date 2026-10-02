@@ -126,7 +126,24 @@ def _evidence(stream: Stream, parquet: Any, index: int, columns: list[str]) -> E
 
 
 def time_regression(context: Context) -> Iterator[Draft]:
-    """A stream's samples step back in time on a clock, in the order the source wrote them."""
+    """Samples out of time order on a clock that declares itself monotonic."""
+    yield from (draft for declared, draft in _time_order(context) if declared)
+
+
+def time_out_of_order(context: Context) -> Iterator[Draft]:
+    """Samples out of time order on a clock that does not declare itself monotonic."""
+    yield from (draft for declared, draft in _time_order(context) if not declared)
+
+
+def _time_order(context: Context) -> list[tuple[bool, Draft]]:
+    """Every stream's clocks walked once, for both rules: (declared monotonic, draft)."""
+    found = context.memo.get("time_order")
+    if found is None:
+        found = context.memo["time_order"] = list(_walk_streams(context))
+    return list(found)
+
+
+def _walk_streams(context: Context) -> Iterator[tuple[bool, Draft]]:
     domains = {domain.id: domain for domain in context.records("timestamp_domain")}
     for stream in context.records("stream"):
         content = context.package.series.get(stream.id)
@@ -191,13 +208,16 @@ def time_regression(context: Context) -> Iterator[Draft]:
             _named(stream, details)
             if clock == 0 and len(clocks) > 1:
                 details["other_clocks"] = "not_judged"  # file order is not source order
-            yield Draft(
-                subject=_evidence(stream, parquet, row, cite),
-                message=f"stream {short(stream.id)} is not in time order on clock {clock}"
-                f" in source order ({plural(falls, 'descent')})",
-                details=details,
-                related=(_evidence(stream, parquet, prior_row, cite),),
-                records=(stream.id,),
+            yield (
+                declared == "true",
+                Draft(
+                    subject=_evidence(stream, parquet, row, cite),
+                    message=f"stream {short(stream.id)} is not in time order on clock {clock}"
+                    f" in source order ({plural(falls, 'descent')})",
+                    details=details,
+                    related=(_evidence(stream, parquet, prior_row, cite),),
+                    records=(stream.id,),
+                ),
             )
 
 

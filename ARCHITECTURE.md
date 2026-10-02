@@ -55,8 +55,8 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class CAN,WS,K1 built
-  class DISC,RT,AD,PKG,DER,MAN,K2 partial
-  class VAL,K3 todo
+  class DISC,RT,AD,PKG,DER,MAN,VAL,K2 partial
+  class K3 todo
   class SB built
   class SDK,CLI built
   class DEV ext

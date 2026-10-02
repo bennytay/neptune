@@ -316,7 +316,8 @@ def test_a_clock_that_steps_back_in_source_order_is_cited_at_the_sample(tmp_path
     # Source order: 0, 10, 30, 20 (seq 3 is stamped before seq 2), then 40.
     stream = kit.stream(run, [clock], [[0, 10, 30, 20, 40]])
     (finding,) = validate_package(build(tmp_path, kit)).findings
-    assert finding.code == f"{VALIDATOR_ID}.time_regression"
+    assert finding.code == f"{VALIDATOR_ID}.time_regression"  # the clock declares otherwise
+    assert finding.severity is Severity.WARNING
     assert finding.details["seq"] == 3 and finding.details["ticks"] == 20
     assert finding.details["previous_seq"] == 2 and finding.details["previous_ticks"] == 30
     assert finding.details["declared_monotonic"] == "true" and finding.details["descents"] == 1
@@ -329,6 +330,8 @@ def test_a_second_clock_is_judged_in_source_order(tmp_path: Path) -> None:
     run = kit.run(receive)
     kit.stream(run, [receive, header], [[0, 10, 20, 30], [5, 4, 6, 3]])  # header falls twice
     (finding,) = validate_package(build(tmp_path, kit)).findings
+    # Neither clock declares itself monotonic: an observation, not a contradiction.
+    assert finding.code.endswith("time_out_of_order") and finding.severity is Severity.INFO
     assert finding.details["clock"] == 1 and finding.details["descents"] == 2
     assert (finding.details["seq"], finding.details["previous_seq"]) == (1, 0)
 
@@ -802,6 +805,6 @@ def test_a_large_package_is_validated_in_bounded_time_memory_and_output(tmp_path
     bounds = Bounds()
     assert len(report.findings) <= len(ALL_RULES) * (bounds.findings_per_rule + 1)
     assert all(len(f.records) <= bounds.records_per_finding for f in report.findings)
-    regression = next(f for f in report.findings if f.code.endswith("time_regression"))
+    regression = next(f for f in report.findings if f.code.endswith("time_out_of_order"))
     assert regression.details["descents"] == rows // 2 - 1
     assert peak < 256 * 1024 * 1024 and elapsed < 30, (peak, elapsed)

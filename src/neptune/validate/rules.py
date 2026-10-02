@@ -20,7 +20,7 @@ from neptune.model.time import Timestamp
 from neptune.model.versions import version_to_json
 from neptune.validate import pending
 from neptune.validate.engine import Context, Draft, Rule, evidence_of, plural, short, source_of
-from neptune.validate.series import count_mismatch, time_regression
+from neptune.validate.series import count_mismatch, time_out_of_order, time_regression
 
 if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonValue
@@ -573,8 +573,12 @@ RULES_ON: Final = (
     Rule("source_incomplete", 1, _C.CORRUPT, _W,
          "a source's bytes were cut off or corrupt: its findings rolled up, its records named",
          source_incomplete),
+    Rule("time_out_of_order", 1, _C.INCONSISTENT, Severity.INFO,
+         "a stream's samples are out of time order, in source order, on a clock that does not"
+         " declare itself monotonic", time_out_of_order),
     Rule("time_regression", 1, _C.INCONSISTENT, _W,
-         "a stream's samples step back in time on a clock, in source order", time_regression),
+         "a stream's samples are out of time order, in source order, on a clock that declares"
+         " itself monotonic", time_regression),
 )  # fmt: skip
 
 DEFAULT_RULES: Final = RULES_ON
