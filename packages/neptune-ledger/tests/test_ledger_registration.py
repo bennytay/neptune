@@ -120,7 +120,13 @@ def test_registration_writes_exactly_the_walkthrough_rows(
     # ADR 0003's rules in test_ledger_threads.py and the contract suite.
     skip = (*TX_COLUMNS, "root_locator", "body", "unknown_pointers", *projection_columns())
     real, harness = dump(pg, "tenant_acme", skip), dump(pg, "tenant_harness", skip)
-    derived = ("thread", "thread_member", "thread_unresolved")
+    derived = (
+        "thread",
+        "thread_member",
+        "thread_unresolved",
+        "thread_clock_mapping",
+        "thread_identity_link",
+    )
     assert all(real[table] for table in derived[:2]) and not any(harness[t] for t in derived)
     assert {t: r for t, r in real.items() if t not in derived} == {
         t: r for t, r in harness.items() if t not in derived

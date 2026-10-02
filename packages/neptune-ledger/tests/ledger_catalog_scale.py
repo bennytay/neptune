@@ -457,7 +457,14 @@ def _drop_record_indexes(conn: Conn) -> list[str]:
     """Drop the keys and indexes of record and of every table with a foreign key into it for the
     bulk load; return the DDL that recreates them exactly as the migrations made them."""
     restore: list[str] = []
-    for table in ("thread_unresolved", "thread_member", "record_logical_id", "record"):
+    for table in (
+        "thread_clock_mapping",
+        "thread_identity_link",
+        "thread_unresolved",
+        "thread_member",
+        "record_logical_id",
+        "record",
+    ):
         rows = conn.execute(
             "SELECT conname, pg_get_constraintdef(oid), contype FROM pg_constraint"
             " WHERE conrelid = %s::regclass AND contype IN ('p', 'u', 'f')"

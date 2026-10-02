@@ -60,6 +60,8 @@ def test_the_schema_has_the_tables_the_adr_names(catalog: Conn) -> None:
         "source_location",
         "tenant",
         "thread",
+        "thread_clock_mapping",
+        "thread_identity_link",
         "thread_member",
         "thread_unresolved",
         "transform",
@@ -194,6 +196,8 @@ def test_the_registration_log_is_the_packages_in_sequence_order(catalog: Conn) -
         "UPDATE {s}.record SET line = 2",
         "DELETE FROM {s}.record",
         "TRUNCATE {s}.record CASCADE",
+        "TRUNCATE {s}.thread_identity_link",
+        "TRUNCATE {s}.thread_clock_mapping",
     ],
 )
 def test_registered_rows_are_append_only(catalog: Conn, statement: str) -> None:
