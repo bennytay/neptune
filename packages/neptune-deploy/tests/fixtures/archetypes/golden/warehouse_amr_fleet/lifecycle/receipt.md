@@ -1,12 +1,12 @@
 # Ingest receipt
 
-Receipt `rec:sha256:0387e9683207b8156849e6b7e0c335118d6aa41b40964e037cbfa905e4079cf8`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:f93812286d5cfe5dcdf1dc748354e700e4bda9c5dd622a6c9a4ad28ca30719ca`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
-- Sources: 25 seen, 11 read, 14 not read, 0 gone
+- Sources: 25 seen, 10 read, 15 not read, 0 gone
 - Runs: 0; streams: 0; entities: 0
-- Findings: 0 errors, 13 warnings, 12 info; ambiguous fields: 0
+- Findings: 0 errors, 13 warnings, 8 info; ambiguous fields: 0
 
 ## Sources
 
@@ -32,7 +32,7 @@ Receipt `rec:sha256:0387e9683207b8156849e6b7e0c335118d6aa41b40964e037cbfa905e407
 | `runs/S-007/amr-07_2026-04-02.mcap` | 17516 | `sha256:34bb6772f2fd` | not read |
 | `runs/S-007/amr-07_2026-04-15.mcap` | 17400 | `sha256:e1987a0b1303` | not read |
 | `runs/S-012/amr-08_2026-05-19/amr-08_2026-05-19_0.mcap` | 10088 | `sha256:9ce9e303f7db` | not read |
-| `runs/S-012/amr-08_2026-05-19/metadata.yaml` | 1940 | `sha256:6a01ea04e416` | deploy_lifecycle_map 0.1.0 |
+| `runs/S-012/amr-08_2026-05-19/metadata.yaml` | 1940 | `sha256:6a01ea04e416` | not read |
 | `runs/S-012/amr-09_2026-03-05.mcap` | 17400 | `sha256:e7e0782cb047` | not read |
 | `runs/S-012/amr-10_2026-03-06.mcap` | 17515 | `sha256:a217da2d2bc6` | not read |
 | `urdf/lift_150.urdf` | 1757 | `sha256:4ed9c552ac68` | deploy_document_map 0.1.0 |
@@ -47,10 +47,8 @@ Receipt `rec:sha256:0387e9683207b8156849e6b7e0c335118d6aa41b40964e037cbfa905e407
 | `deploy_lifecycle_map` | `0.1.0` | `sha256:22fd5b3c0f8b` | none | `rec:1725dd9fd9d3` |
 | `deploy_lifecycle_map` | `0.1.0` | `sha256:01f101f527e7` | none | `rec:23dc3adc91e0` |
 | `deploy_lifecycle_map` | `0.1.0` | `sha256:bcba1781f592` | none | `rec:2b672723e64e` |
-| `deploy_lifecycle_map` | `0.1.0` | `sha256:4af9dbefeb8c` | none | `rec:51dd3ad3b8eb` |
 | `deploy_lifecycle_map` | `0.1.0` | `sha256:fd3b955cad3c` | none | `rec:c155dd82fcef` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
-| `rosbag2` | `0.1.0` | `sha256:44136fa355b3` | none | `rec:bf370f1dddcb` |
 | `tabular` | `0.1.0` | `sha256:15487b4cb47e` | pyarrow 25.0.1 | `rec:b4754c46f7fb` |
 | `text` | `0.1.0` | `sha256:12b7c5463bbb` | none | `rec:3b8cd771874a` |
 
@@ -61,13 +59,13 @@ Receipt `rec:sha256:0387e9683207b8156849e6b7e0c335118d6aa41b40964e037cbfa905e407
 | `authorisation_envelope` | 4 |
 | `change_record` | 6 |
 | `incident_record` | 2 |
-| `ingest_finding` | 25 |
+| `ingest_finding` | 21 |
 | `maintenance_event` | 12 |
 | `requalification_record` | 2 |
 | `source_artifact` | 25 |
 | `source_revision` | 25 |
 | `timestamp_domain` | 12 |
-| `transform_record` | 11 |
+| `transform_record` | 9 |
 
 ## Runs
 
@@ -86,7 +84,7 @@ Receipt `rec:sha256:0387e9683207b8156849e6b7e0c335118d6aa41b40964e037cbfa905e407
 
 ## Findings
 
-- **warning** `deploy_lifecycle_map.column_unmapped` (unsupported): columns the mapping neither maps nor ignores; they stay in the base package's rows only · `rec:f4c4901c9170`
+- **warning** `deploy_lifecycle_map.column_unmapped` (unsupported): columns the mapping neither maps nor ignores; they stay in the base package's rows only · `rec:5d69a9018228`
 - **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:0e3b217ec318`
 - **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:3e68528695f8`
 - **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:7127f70bc350`
@@ -107,10 +105,6 @@ Receipt `rec:sha256:0387e9683207b8156849e6b7e0c335118d6aa41b40964e037cbfa905e407
 - **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:e890597554d9`
 - **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:9154f12997a6`
 - **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:9ad74a27081b`
-- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:5c3f2123d4c2`
-- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:97e6028d01cb`
-- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:df2bf5de0ee1`
-- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:e325a82bcbc0`
 
 ## Ambiguous fields
 

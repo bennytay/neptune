@@ -8,9 +8,11 @@ reads is stated as the document states it and cites the exact span or cell. What
 covers, and what a document shows that no field read, is a finding (ADR 0003 §7).
 """
 
+from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from functools import cached_property
 from itertools import pairwise
 from typing import Any, Final
 
@@ -18,6 +20,7 @@ from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import evidence_record_id, transform_record
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import ContentId, LogicalId, RecordId
+from neptune.model.jsonvalue import JsonValue
 from neptune.model.knowledge import AssertionKind, Knowledge, Known, Unknown
 from neptune.model.lifecycle import LIFECYCLE_KINDS
 from neptune.model.provenance import EvidenceRef, Page, Provenance, Span, TransformRecord
@@ -38,6 +41,7 @@ from neptune_deploy.lifecycle.mapper import (
     _Table,
     _table,
     _Values,
+    named_columns,
 )
 from neptune_deploy.lifecycle.mapping import ListCell, MappingError, Part, Rows, spec_refs
 from neptune_deploy.lifecycle.shapes import fields_of
@@ -186,8 +190,15 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = _catalog(
         "list_id_repeated",
         Severity.INFO,
         FindingCategory.INCONSISTENT,
-        "an identifier stated again in a record's list; a declared-id list holds each once, so the"
-        " first statement is kept",
+        "identifiers a list value states again; a declared-id list holds each once, so the first"
+        " statement is kept and the repeats are cited",
+    ),
+    (
+        "list_truncated",
+        Severity.WARNING,
+        FindingCategory.LIMIT,
+        "a list value stating more parts than the mapper reads; the record's list holds the first"
+        " of them only, so it is not the whole statement",
     ),
     (
         "item_blank",
@@ -462,10 +473,35 @@ class _View:
         return (_page(evidence) or 0, span.start if span else 0)
 
     def block_at(self, evidence: EvidenceRef) -> DocumentBlock | None:
-        for block in self.blocks:
-            if _within(evidence, block.provenance.evidence):
-                return block
+        """The block whose span holds ``evidence``'s. A page's blocks are disjoint spans (its text
+        is its blocks, LF between: root ADR 0038), so the one starting last at or before it is the
+        only candidate; an index by page makes each lookup logarithmic (ADR 0005 §4)."""
+        span = _span(evidence)
+        if span is None:
+            return None
+        starts, blocks = self._index.get((evidence.source, _page(evidence)), ([], []))
+        at = bisect_right(starts, span.start) - 1
+        if at >= 0 and _within(evidence, blocks[at].provenance.evidence):
+            return blocks[at]
         return None
+
+    @cached_property
+    def _index(
+        self,
+    ) -> dict[tuple[Any, int | None], tuple[list[int], list[DocumentBlock]]]:
+        """Each page's blocks with a span, by span start (reading order breaks a tie)."""
+        pages: dict[tuple[Any, int | None], list[tuple[int, int, DocumentBlock]]]
+        pages = defaultdict(list)
+        for order, block in enumerate(self.blocks):
+            evidence = block.provenance.evidence
+            span = _span(evidence)
+            if span is not None:
+                pages[(evidence.source, _page(evidence))].append((span.start, order, block))
+        out = {}
+        for key, entries in pages.items():
+            entries.sort(key=lambda entry: (entry[0], entry[1]))
+            out[key] = ([start for start, _, _ in entries], [block for _, _, block in entries])
+        return out
 
 
 # --- Reading a document into fields ---------------------------------------------------------
@@ -492,15 +528,24 @@ class _DocRow(_Values):
             name, self.table, subject, key=column, details={"reference": column}
         )
 
-    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
+    def cell_finding(
+        self,
+        name: str,
+        column: str,
+        path: str,
+        subject: EvidenceRef,
+        related: Sequence[EvidenceRef] = (),
+        details: dict[str, JsonValue] | None = None,
+    ) -> None:
         """One finding per value, naming the record and field: never capped, never grouped."""
         self.mapper.findings.add(
             name,
             self.table,
             subject,
             key=f"{path}|{column}|{subject.locator_json()}",
-            details={"reference": column, "field": path},
+            details={"reference": column, "field": path, **(details or {})},
             record=self.record_id,
+            related=related,
         )
 
     def read(self, hit: _Hit) -> None:
@@ -615,7 +660,7 @@ class _DocRow(_Values):
         text = "\n".join(t for t in texts if t is not None)
         return text, EvidenceRef(first.source, (*prefix, Span(head.start, tail.end)))
 
-    def pieces(self, spec: ListCell, path: str) -> list[tuple[str, EvidenceRef]]:
+    def pieces(self, spec: ListCell, path: str) -> list[tuple[str, EvidenceRef, EvidenceRef]]:
         if spec.via != "section":
             return super().pieces(spec, path)
         status, heading, blocks = self._locate(spec.column)
@@ -626,7 +671,7 @@ class _DocRow(_Values):
         for block in blocks:
             if _role(block) is BlockRole.LIST_ITEM and (text := _text(block.text)):
                 self.read_blocks.add(block.id)
-                out.append((text, block.provenance.evidence))
+                out.append((text, block.provenance.evidence, block.provenance.evidence))
         return out
 
     def blank(self, spec: Part) -> bool:
@@ -675,14 +720,23 @@ class _TableRow(_Row):
             name, self.scope, subject, key=column, details={"reference": column}
         )
 
-    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
+    def cell_finding(
+        self,
+        name: str,
+        column: str,
+        path: str,
+        subject: EvidenceRef,
+        related: Sequence[EvidenceRef] = (),
+        details: dict[str, JsonValue] | None = None,
+    ) -> None:
         self.mapper.findings.add(
             name,
             self.scope,
             subject,
             key=f"{self.record.row}|{path}|{column}|{subject.locator_json()}",
-            details={"reference": column, "field": path},
+            details={"reference": column, "field": path, **(details or {})},
             record=self.record_id,
+            related=related,
         )
 
 
@@ -884,7 +938,7 @@ class _TemplateMapper(_Clocks):
                         "column_unmapped",
                         _header_evidence(tables[0]),
                         self.transform,
-                        {"template": template.id, "table": name, "columns": left},
+                        {"template": template.id, "table": name, **named_columns(left)},
                         records=records,
                     )
                 )
@@ -927,11 +981,14 @@ class _TemplateMapper(_Clocks):
             unread_rows += [
                 r.provenance.evidence for r in kv.rows if (kv.record.id, r.row) not in rows
             ]
+        done_lines: dict[RecordId, set[int]] = defaultdict(set)
+        for owner, line in lines:
+            done_lines[owner].add(line)
         blocks: list[EvidenceRef] = []
         for block in view.blocks:
             if block.id in read or _role(block) in FURNITURE:
                 continue
-            done = {line for owner, line in lines if owner == block.id}
+            done = done_lines.get(block.id, set())
             if not done:
                 blocks.append(block.provenance.evidence)
             else:

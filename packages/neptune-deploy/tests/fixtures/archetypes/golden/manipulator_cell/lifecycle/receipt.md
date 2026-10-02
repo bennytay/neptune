@@ -1,18 +1,18 @@
 # Ingest receipt
 
-Receipt `rec:sha256:990ad42b336844629e098544d22c55e18c05f83c7b9033db0fc5c737b85240bd`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:a6b4dcc6e5e974d05c087ff18b1f51426ea186e09d865a3930907d5fcd3d01a6`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
-- Sources: 15 seen, 9 read, 6 not read, 0 gone
+- Sources: 15 seen, 8 read, 7 not read, 0 gone
 - Runs: 0; streams: 0; entities: 0
-- Findings: 0 errors, 5 warnings, 12 info; ambiguous fields: 0
+- Findings: 0 errors, 5 warnings, 8 info; ambiguous fields: 0
 
 ## Sources
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `bags/pick_place_2026-08-20/metadata.yaml` | 1480 | `sha256:6af83e864da1` | deploy_lifecycle_map 0.1.0 |
+| `bags/pick_place_2026-08-20/metadata.yaml` | 1480 | `sha256:6af83e864da1` | not read |
 | `bags/pick_place_2026-08-20/pick_place_2026-08-20_0.mcap` | 22273 | `sha256:a6eff07ae440` | not read |
 | `calibration/CAL-ARM3A-0226.yaml` | 313 | `sha256:fecc413f15fd` | not read |
 | `calibration/CAL-ARM3A-0415.yaml` | 326 | `sha256:7734a681a3f1` | not read |
@@ -39,10 +39,8 @@ Receipt `rec:sha256:990ad42b336844629e098544d22c55e18c05f83c7b9033db0fc5c737b852
 | `deploy_lifecycle_map` | `0.1.0` | `sha256:2ac4f938ccc7` | none | `rec:7895ad224df7` |
 | `deploy_lifecycle_map` | `0.1.0` | `sha256:7d835eff2625` | none | `rec:8388add2ac14` |
 | `deploy_lifecycle_map` | `0.1.0` | `sha256:2ba367219906` | none | `rec:8ffe671cac95` |
-| `deploy_lifecycle_map` | `0.1.0` | `sha256:1aa03dee3352` | none | `rec:9bac592660b1` |
 | `deploy_lifecycle_map` | `0.1.0` | `sha256:829d68be8077` | none | `rec:c9415b95fde0` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
-| `rosbag2` | `0.1.0` | `sha256:44136fa355b3` | none | `rec:bf370f1dddcb` |
 | `tabular` | `0.1.0` | `sha256:15487b4cb47e` | pyarrow 25.0.1 | `rec:b4754c46f7fb` |
 | `text` | `0.1.0` | `sha256:12b7c5463bbb` | none | `rec:3b8cd771874a` |
 
@@ -53,14 +51,14 @@ Receipt `rec:sha256:990ad42b336844629e098544d22c55e18c05f83c7b9033db0fc5c737b852
 | `change_record` | 2 |
 | `commissioning_baseline` | 1 |
 | `incident_record` | 1 |
-| `ingest_finding` | 17 |
+| `ingest_finding` | 13 |
 | `maintenance_event` | 5 |
 | `requalification_record` | 3 |
 | `risk_assessment` | 1 |
 | `source_artifact` | 15 |
 | `source_revision` | 15 |
 | `timestamp_domain` | 12 |
-| `transform_record` | 13 |
+| `transform_record` | 11 |
 
 ## Runs
 
@@ -79,8 +77,8 @@ Receipt `rec:sha256:990ad42b336844629e098544d22c55e18c05f83c7b9033db0fc5c737b852
 
 ## Findings
 
-- **warning** `deploy_document_map.column_unmapped` (unsupported): columns of a table the template reads that no field reads and the template does not ignore; their cells stay in the base package only · `rec:0405d993cf52`
-- **warning** `deploy_lifecycle_map.column_unmapped` (unsupported): columns the mapping neither maps nor ignores; they stay in the base package's rows only · `rec:2e4c10fbe65c`
+- **warning** `deploy_document_map.column_unmapped` (unsupported): columns of a table the template reads that no field reads and the template does not ignore; their cells stay in the base package only · `rec:cc089dd2fe32`
+- **warning** `deploy_lifecycle_map.column_unmapped` (unsupported): columns the mapping neither maps nor ignores; they stay in the base package's rows only · `rec:9e454a7f4187`
 - **warning** `deploy_lifecycle_map.row_unmatched` (unsupported): rows of a mapped table that no rule of the mapping applies to; they have no lifecycle record · `rec:41eef547b688`
 - **warning** `deploy_lifecycle_map.row_unmatched` (unsupported): rows of a mapped table that no rule of the mapping applies to; they have no lifecycle record · `rec:6af418a6033c`
 - **warning** `deploy_lifecycle_map.value_blank` (missing): blank cells in columns the mapping declares required; the fields are unknown · `rec:2a5364a70c4a`
@@ -92,10 +90,6 @@ Receipt `rec:sha256:990ad42b336844629e098544d22c55e18c05f83c7b9033db0fc5c737b852
 - **info** `deploy_document_map.text_unread` (unsupported): text and tables of a matched document that no field of the template reads; they stay in the base package only · `rec:dcc4d55dcd9f`
 - **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:5219483e3cf4`
 - **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:99f346b0dd8d`
-- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:628d84126872`
-- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:9769c926061e`
-- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:a0fb7e7dfb8f`
-- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:bc8c9b300bfc`
 
 ## Ambiguous fields
 

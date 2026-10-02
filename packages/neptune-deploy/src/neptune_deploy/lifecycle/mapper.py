@@ -65,6 +65,9 @@ STATED: Final = AssertionKind.STATED
 LEDGER_KINDS: Final = frozenset({"source_artifact", "source_revision", "source_absence"})
 # How many rows and records one grouped finding names (as root ADR 0042 §10 does).
 NAMED: Final = 10
+# The most parts one list cell is read into (ADR 0005 §3): a cell of a million delimiters would
+# otherwise make a million cited values, each a hundred times its bytes.
+MAX_LIST_PARTS: Final = 1000
 _DECIMAL: Final = re.compile(r"[+-]?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?")
 _VERSIONS: Final = {"build": BuildId, "declared": DeclaredVersion, "firmware": FirmwareVersion}
 
@@ -127,8 +130,14 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = {
     "list_id_repeated": (
         Severity.INFO,
         FindingCategory.INCONSISTENT,
-        "an identifier stated again in a record's list; a declared-id list holds each once, so the"
-        " first statement is kept",
+        "identifiers a list cell states again; a declared-id list holds each once, so the first"
+        " statement is kept and the repeats are cited",
+    ),
+    "list_truncated": (
+        Severity.WARNING,
+        FindingCategory.LIMIT,
+        "a list cell stating more parts than the mapper reads; the record's list holds the first"
+        " of them only, so it is not the whole statement",
     ),
     "item_blank": (
         Severity.INFO,
@@ -346,7 +355,15 @@ class _Values:
     def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
         raise NotImplementedError
 
-    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
+    def cell_finding(
+        self,
+        name: str,
+        column: str,
+        path: str,
+        subject: EvidenceRef,
+        related: Sequence[EvidenceRef] = (),
+        details: dict[str, JsonValue] | None = None,
+    ) -> None:
         raise NotImplementedError
 
     def blank(self, spec: Part) -> bool:
@@ -435,8 +452,9 @@ class _Values:
 
     # Cells into lists ----------------------------------------------------------------------
 
-    def pieces(self, spec: ListCell, path: str) -> list[tuple[str, EvidenceRef]]:
-        """The texts a list cell states, each with its citation (a span inside a split cell)."""
+    def pieces(self, spec: ListCell, path: str) -> list[tuple[str, EvidenceRef, EvidenceRef]]:
+        """The texts a list cell states, each with its citation (a span inside a split cell) and
+        the cell's. At most ``MAX_LIST_PARTS``; more is ``list_truncated``, citing the cell."""
         cell = self.cell(spec.column, spec.via)
         if cell.absent_from_table or isinstance(cell.state, KnownAbsent):
             return []
@@ -448,32 +466,38 @@ class _Values:
             self.cell_finding("value_unreadable", spec.column, path, cell.place)
             return []
         if spec.split is None:
-            return [(text, cell.place)]
-        out = []
+            return [(text, cell.place, cell.place)]
+        out: list[tuple[str, EvidenceRef, EvidenceRef]] = []
         start = 0
-        for part in text.split(spec.split):
+        parts = text.split(spec.split)
+        for part in parts:
             stripped = part.strip()
             if not stripped:
                 self.cell_finding("list_part_empty", spec.column, path, cell.place)
+            elif len(out) == MAX_LIST_PARTS:
+                details: dict[str, JsonValue] = {"limit": MAX_LIST_PARTS, "parts": len(parts)}
+                self.cell_finding("list_truncated", spec.column, path, cell.place, details=details)
+                break
             else:
                 begin = start + (len(part) - len(part.lstrip()))
                 end = begin + len(stripped)
                 place = cell.place
                 if (begin, end) != (0, len(text)):
                     place = EvidenceRef(place.source, (*place.locator, Span(begin, end)))
-                out.append((stripped, place))
+                out.append((stripped, place, cell.place))
             start += len(part) + len(spec.split)
         return out
 
     def ids(self, specs: tuple[ListCell, ...], path: str) -> tuple[Knowledge[LogicalId], ...]:
-        """Declared ids, sorted, each once: a repeat is kept once and is a finding."""
+        """Declared ids, sorted, each once: a cell's repeats are kept once and are one finding
+        about the cell, citing the first ``NAMED`` repeats."""
         found: dict[LogicalId, Knowledge[LogicalId]] = {}
         for spec in specs:
             assert spec.namespace is not None
-            for text, place in self.pieces(spec, path):
+            for text, place, cell in self.pieces(spec, path):
                 identifier = LogicalId(spec.namespace, text)
                 if identifier in found:
-                    self.cell_finding("list_id_repeated", spec.column, path, place)
+                    self.cell_finding("list_id_repeated", spec.column, path, cell, (place,))
                     continue
                 found[identifier] = Known(identifier, self.provenance(place))
         return tuple(found[key] for key in sorted(found, key=lambda i: (i.namespace, i.value)))
@@ -482,7 +506,7 @@ class _Values:
         return tuple(
             Known(text, self.provenance(place))
             for spec in specs
-            for text, place in self.pieces(spec, path)
+            for text, place, _ in self.pieces(spec, path)
         )
 
     # Parts and records ---------------------------------------------------------------------
@@ -557,16 +581,25 @@ class _Row(_Values):
             name, self.table, subject, key=column, details={"column": column}, row=self.record.row
         )
 
-    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
+    def cell_finding(
+        self,
+        name: str,
+        column: str,
+        path: str,
+        subject: EvidenceRef,
+        related: Sequence[EvidenceRef] = (),
+        details: dict[str, JsonValue] | None = None,
+    ) -> None:
         """One finding per cell, naming the record and field: never capped, never grouped."""
         self.mapper.findings.add(
             name,
             self.table,
             subject,
             key=f"{self.record.row}|{path}|{column}|{subject.locator_json()}",
-            details={"column": column, "field": path},
+            details={"column": column, "field": path, **(details or {})},
             row=self.record.row,
             record=self.record_id,
+            related=related,
         )
 
     def cell(self, column: str, via: str = "column") -> _Cell:
@@ -596,6 +629,11 @@ class _Row(_Values):
             if cell.state is not None and not isinstance(cell.state, Unknown):
                 return False
         return True
+
+
+def named_columns(columns: Sequence[str]) -> dict[str, JsonValue]:
+    """A finding's list of columns: the first ``NAMED``, and how many there are (ADR 0005 §2)."""
+    return {"columns": list(columns[:NAMED]), "column_count": len(columns)}
 
 
 def _number(value: Any) -> float | NonFinite | None:
@@ -745,9 +783,7 @@ class _Mapper(_Clocks):
             if isinstance(table.record.header, Known):
                 grounds = _grounds(table.record.header)
                 subject = grounds.evidence if grounds else subject
-            self.findings.add(
-                "column_unmapped", table, subject, details={"columns": list(unmapped)}
-            )
+            self.findings.add("column_unmapped", table, subject, details=named_columns(unmapped))
 
     def _record(self, rule: Rule, table: _Table, index: int) -> Any:
         row = _Row(self, table, index, rule.kind.kind)
@@ -800,17 +836,68 @@ class _Mapper(_Clocks):
                 )
 
 
+@dataclass(frozen=True)
+class IndexTable:
+    """A kind of compiler table that indexes its container instead of holding rows an export
+    states: the adapter that emits it, and either its citation's last step kind or the names it
+    states (ADR 0005 §1)."""
+
+    adapter: str
+    step: str | None = None
+    names: frozenset[str] = frozenset()
+
+    def holds(self, table: StructuredTable, adapter: str | None) -> bool:
+        if adapter != self.adapter:
+            return False
+        if self.step is not None:
+            locator = table.provenance.evidence.locator
+            return bool(locator) and locator[-1].kind == self.step
+        return isinstance(table.name, Known) and table.name.value in self.names
+
+
+# The compiler's container-index tables, by name (ADR 0005 §1). No mapping applies to them and no
+# finding reports them unmapped: they hold no exported row, and the base package keeps them.
+CONTAINER_INDEX_TABLES: Final = (
+    # An XLSX workbook's sheet list, sheet states and date system (root ADR 0059 §4).
+    IndexTable("tabular", step="tabular:xlsx_workbook"),
+    # A rosbag2 bag's metadata.yaml: its storage files, topics and counts, which the adapter
+    # already reads into the bag's run and streams.
+    IndexTable(
+        "rosbag2",
+        names=frozenset(
+            {
+                "rosbag2_bagfile_information",
+                "topics_with_message_count",
+                "files",
+                "relative_file_paths",
+            }
+        ),
+    ),
+)
+
+
+def _indexes(table: StructuredTable, adapters: dict[RecordId, str]) -> bool:
+    adapter = adapters.get(table.provenance.transform)
+    return any(index.holds(table, adapter) for index in CONTAINER_INDEX_TABLES)
+
+
 def tables_of(records: Iterable[Any]) -> tuple[list[_Table], list[StructuredTable]]:
-    """The package's tables a mapping can name, and those whose columns have no names."""
+    """The package's tables a mapping can name, and those whose columns have no names; a
+    container-index table is neither."""
     rows: dict[RecordId, list[StructuredRecord]] = defaultdict(list)
     tables: list[StructuredTable] = []
+    adapters: dict[RecordId, str] = {}
     for record in records:
         if isinstance(record, StructuredRecord):
             rows[record.table].append(record)
         elif isinstance(record, StructuredTable):
             tables.append(record)
+        elif isinstance(record, TransformRecord):
+            adapters[record.id] = record.adapter_id
     usable, unnamed = [], []
     for table in sorted(tables, key=lambda t: t.id):
+        if _indexes(table, adapters):
+            continue
         built = _table(table, rows[table.id])
         if built is None:
             unnamed.append(table)
