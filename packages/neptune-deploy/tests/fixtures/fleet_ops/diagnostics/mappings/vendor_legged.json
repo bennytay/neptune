@@ -1,0 +1,13 @@
+{
+  "schema": "neptune-deploy.diagnostics-mapping/1",
+  "id": "acme.legged-diagnostics",
+  "version": "2",
+  "vendor": "acme-legged",
+  "description": "An inspection-robot vendor: ROS 2 diagnostic levels, and its battery status name mapped to one target string. Its gait controller states code 4, which the file does not map.",
+  "array": "/status",
+  "stamp": {"sec": "/header/stamp/sec", "nanosec": "/header/stamp/nanosec"},
+  "clock": {"epoch": "unix", "timescale": "posix", "resolution": "1/1000000000", "role": "sample"},
+  "topics": ["/diagnostics"],
+  "levels": {"0": "diagnostic.ok", "1": "diagnostic.warn", "2": "diagnostic.error", "3": "diagnostic.stale"},
+  "names": {"/legged/battery": "power.battery_state"}
+}

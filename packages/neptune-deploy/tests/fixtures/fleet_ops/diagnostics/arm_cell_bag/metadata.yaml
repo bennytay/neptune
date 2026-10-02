@@ -1,0 +1,32 @@
+rosbag2_bagfile_information:
+  version: 5
+  storage_identifier: sqlite3
+  relative_file_paths:
+    - arm_cell_bag_0.db3
+  duration:
+    nanoseconds: 5500000000
+  starting_time:
+    nanoseconds_since_epoch: 1772366400000000000
+  message_count: 12
+  topics_with_message_count:
+    - topic_metadata:
+        name: /diagnostics
+        type: diagnostic_msgs/msg/DiagnosticArray
+        serialization_format: cdr
+        offered_qos_profiles: "- history: 3\n  depth: 0\n  reliability: 1\n  durability: 2\n"
+      message_count: 6
+    - topic_metadata:
+        name: /joint_states
+        type: sensor_msgs/msg/JointState
+        serialization_format: cdr
+        offered_qos_profiles: "- history: 3\n  depth: 0\n  reliability: 1\n  durability: 2\n"
+      message_count: 6
+  compression_format: ""
+  compression_mode: ""
+  files:
+    - path: arm_cell_bag_0.db3
+      starting_time:
+        nanoseconds_since_epoch: 1772366400000000000
+      duration:
+        nanoseconds: 5500000000
+      message_count: 12
