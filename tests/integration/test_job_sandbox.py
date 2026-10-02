@@ -111,7 +111,12 @@ class Run:
         self.package: Any = read_package(tmp_path / name)
 
     def codes(self) -> list[str]:
-        return sorted(finding.code for finding in self.outcome.findings)
+        """The job's codes but snapshot binding's (ADR 0064): its runs bind to nothing here."""
+        return sorted(
+            finding.code
+            for finding in self.outcome.findings
+            if not finding.code.startswith("neptune.bindings.")
+        )
 
     def finding(self, code: str) -> IngestFinding:
         (found,) = [f for f in self.outcome.findings if f.code == code]
