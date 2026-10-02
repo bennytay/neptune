@@ -15,11 +15,12 @@ sources, tenant roots, paging, merge order). The gate's review is
   finding, the `unreachable` verdict and `QuerySpec.after`, and accepts every 1.0.0 document;
   1.2.0 adds package schema 2's `configuration_snapshot` and `configuration_value` record kinds
   (root ADR 0037) and accepts every 1.1.0 document; 1.3.0 adds package schema 3's alignment
-  record kinds (root ADR 0050) and accepts every 1.2.0 document; 1.4.0 stops listing record
-  kinds and references the package-schema contract for them instead (below, [ADR
-  0011](adr/0011-schema-version-registry-and-record-kinds-by-package-schema-version.md)), and
-  accepts every 1.3.0 document. A package-schema version that adds kinds changes no catalog-api
-  version.
+  record kinds (root ADR 0050) and accepts every 1.2.0 document; 1.4.0 adds package schema 4's
+  eight deployment lifecycle record kinds (root ADR 0051) and accepts every 1.3.0 document; 1.5.0
+  stops listing record kinds and references the package-schema contract for them instead (below,
+  [ADR 0011](adr/0011-schema-version-registry-and-record-kinds-by-package-schema-version.md)),
+  and accepts every 1.4.0 document. A package-schema version that adds kinds changes no
+  catalog-api version.
 - **Code:** `neptune_ledger.api`. It holds the `CatalogApi` protocol, the request and response
   records, `catalog_schema()` (JSON Schema 2020-12, one `$defs` entry per record),
   `QUERY_RESULT_SCHEMA` (Arrow), `to_json` / `from_json` / `dumps` / `loads`, and `StubCatalog`.

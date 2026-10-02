@@ -18,7 +18,7 @@
 
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM record WHERE (schema_version >= 1 AND kind IN (
+  IF EXISTS (SELECT 1 FROM record WHERE (schema_version > 0 AND kind IN (
       'asset',
       'calibration',
       'hardware_configuration',

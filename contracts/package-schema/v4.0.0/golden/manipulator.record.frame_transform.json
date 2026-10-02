@@ -1,0 +1,74 @@
+{
+  "child": {
+    "frame_graph_id": "rec:sha256:4e12de3b72e12a5547463a4230660633176fb35ff6498a2e7938a1d278fc162a",
+    "frame_id": "wrist_camera"
+  },
+  "direction": {
+    "candidates": [
+      {
+        "value": "child_to_parent"
+      },
+      {
+        "value": "parent_to_child"
+      }
+    ],
+    "knowledge": "ambiguous"
+  },
+  "id": "rec:sha256:e2c144c52c3f1c398b3a8f14738901a89d68bd7853dce97e558c112e596044f6",
+  "kind": "frame_transform",
+  "parent": {
+    "frame_graph_id": "rec:sha256:4e12de3b72e12a5547463a4230660633176fb35ff6498a2e7938a1d278fc162a",
+    "frame_id": "tool0"
+  },
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 348,
+          "offset": 0
+        },
+        {
+          "kind": "json_pointer",
+          "pointer": "/transformation"
+        }
+      ],
+      "source": "sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa"
+    },
+    "transform": "rec:sha256:b067af6b936bfee6cc0672de2e1ea86982eff4ea2e821b27f71b4d8701de85c0"
+  },
+  "schema_version": 1,
+  "validity": {
+    "kind": "static"
+  },
+  "value": {
+    "kind": "pose",
+    "rotation": {
+      "convention": {
+        "knowledge": "unknown"
+      },
+      "kind": "quaternion",
+      "order": {
+        "knowledge": "known",
+        "value": "wxyz"
+      },
+      "values": [
+        0.7071067811865476,
+        0.0,
+        0.0,
+        0.7071067811865476
+      ]
+    },
+    "translation": {
+      "unit": {
+        "knowledge": "unknown"
+      },
+      "values": [
+        0.032,
+        -0.011,
+        0.071
+      ]
+    }
+  }
+}

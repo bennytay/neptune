@@ -54,6 +54,9 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
      property (`AdapterLocator` admits any extra scalar), and it is not a field.
    - It does not enter an `Ambiguous` value, so no logical id inside the candidates becomes a key.
 
+   The walks are iterative: a free-form field may nest as deep as the compiler's readers accept
+   (about 980 levels), past Python's recursion limit. Should building the index still run out of
+   stack or memory, registration refuses the package with `record_invalid`; it never raises.
    The worked examples' rows are unchanged.
    `NotCovered`, `KnownAbsent` and `NotApplicable` are not listed: the issue names Ambiguous and
    Unknown, and `NotCovered` marks most fields of most records, so a list of them would index
@@ -77,7 +80,10 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
    kinds fill them, whether a kind has its own partition or lives in `record_default` (ADR 0008).
    - The spec the Ledger indexes with is committed as `catalog/projections.json`, and `index`
      reads that file, never the compiler's live schema. Projections therefore depend on the
-     Ledger version only.
+     Ledger version only. A test ties its version to the compiler's `SCHEMA_VERSION` and the newest
+     `contracts/package-schema` export, so a schema bump cannot ship stale projections.
+     `Spec.from_json` refuses any kind, field, filter or shape outside a strict identifier rule,
+     since those names reach SQL.
    - `python -m neptune_ledger.catalog.projection <schema.json>` rewrites the spec and writes
      the next migration from the difference: columns, constraint and index for each new column
      group. It never creates a partition (§6), and a new kind with no hot filter needs no
@@ -92,7 +98,8 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
      walked again.
    - A generated migration refuses to apply over rows its projections would leave blank: any row
      of a kind new to the spec (a kind states its fields from the version that introduced it),
-     and rows of the new schema version or later for a kind that gains a field. Such rows would
+     and rows of any version after the old spec's for a kind that gains a field (a bump may skip
+     versions). Such rows would
      read as not Known. Rows of older versions do not state the field, so NULL is their truth.
      The catalog is then rebuilt (ADR 0002 §4) by a Ledger that ships the migration.
    - A record of an older schema version that lacks a projected field gets NULL there.

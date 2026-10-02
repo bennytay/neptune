@@ -16,9 +16,11 @@ import pytest
 from conftest import new_database
 from ledger_catalog_rows import add_package
 from neptune.identity import canonical_json
+from neptune.identity.findings import finding_id
+from neptune.model.finding import ingest_finding_from_json
 from neptune.model.kinds import RECORD_KINDS
 from neptune.model.knowledge import Known, NotCovered
-from neptune.store.package import package_files
+from neptune.store.package import PackageError, package_files, read_files
 from neptune_ledger.api.types import EvidenceAnchor
 from neptune_ledger.catalog import registry
 from neptune_ledger.catalog.check import kinds_of
@@ -50,6 +52,8 @@ AMBIGUOUS_TRANSFORM: Final = (
     "rec:sha256:e2c144c52c3f1c398b3a8f14738901a89d68bd7853dce97e558c112e596044f6"
 )
 MACHINE_CITERS: Final = ("calibration", "hardware_configuration", "run", "software_configuration")
+# Kinds whose plain ``run`` record id fills run_ids (stream since schema 1; the rest since 3).
+RUN_CITERS: Final = ("run_assembly", "snapshot_binding", "stream")
 # Every column a registration-order change may move: the registration key and transaction time.
 ORDER_COLUMNS: Final = (*TX_COLUMNS, "tx_seq", "last_seq", "registration_key")
 
@@ -57,6 +61,12 @@ ORDER_COLUMNS: Final = (*TX_COLUMNS, "tx_seq", "last_seq", "registration_key")
 @pytest.fixture
 def packages(tmp_path: Path) -> dict[str, WorkedPackage]:
     return {name: materialise(name, tmp_path / name) for name in EXAMPLES}
+
+
+@pytest.fixture
+def catalog(pg_uri: str) -> Iterator[PostgresCatalog]:
+    with fresh(pg_uri) as made:
+        yield made
 
 
 @pytest.fixture
@@ -93,7 +103,8 @@ def _states(value: Any, state: str, pointer: str = "") -> list[str]:
 
 
 def _expected_projection(kind: str, record: dict[str, Any]) -> dict[str, Any]:
-    """Package schema 1's hot filters, written out by hand (ADR 0009 §3's table)."""
+    """The declared package schema's hot filters, written out by hand (ADR 0009 §3's table;
+    schema 3 adds the run filter on run_assembly and snapshot_binding)."""
     out: dict[str, Any] = dict.fromkeys(projection_columns())
 
     def logical(name: str, field: dict[str, Any]) -> None:
@@ -105,8 +116,9 @@ def _expected_projection(kind: str, record: dict[str, Any]) -> dict[str, Any]:
         logical("machine", record["machine"])
     if kind == "asset":
         logical("site", record["site"])
-    if kind == "stream":
+    if kind in RUN_CITERS:
         out["run_ids"] = [record["run"]]
+    if kind == "stream":
         out["clock_ids"] = list(record["clocks"])
     if kind == "video":
         out["clock_ids"] = [record["clock"]]
@@ -200,10 +212,16 @@ def test_the_hot_filters_find_a_machines_records(
     ).fetchall()
     assert ("run",) in found
     assert {kind for (kind,) in found} <= set(MACHINE_CITERS)
-    streams = indexed.execute(
-        "SELECT count(*) FROM record WHERE run_ids @> ARRAY[%s]", (run["id"],)
-    ).fetchone()
-    assert streams == (len(packages["drone"].records("stream")),)
+    citing = indexed.execute(
+        "SELECT kind, count(*) FROM record WHERE run_ids @> ARRAY[%s] GROUP BY kind ORDER BY 1",
+        (run["id"],),
+    ).fetchall()
+    expected = {
+        kind: sum(1 for r in packages["drone"].records(kind) if r["run"] == run["id"])
+        for kind in RUN_CITERS
+    }
+    assert {str(k): int(str(n)) for k, n in citing} == {k: n for k, n in expected.items() if n}
+    assert expected["stream"] == len(packages["drone"].records("stream"))
 
 
 # --- a pure function of (package, Ledger version) ---------------------------------------------
@@ -291,6 +309,60 @@ def test_a_body_holding_u0000_is_indexed_without_a_body(pg_uri: str, tmp_path: P
     assert row[0] is None
     assert row[2] == [stream["run"]]
     assert b"\\u0000" in canonical_json.dumps(stream)
+
+
+def _nested(depth: int) -> Any:
+    value: Any = "leaf"
+    for _ in range(depth):
+        value = {"k": value}
+    return value
+
+
+def _deep_finding(depth: int) -> Any:
+    def change(record: Any) -> Any:
+        record = {**record, "details": {"deep": _nested(depth)}}
+        return {**record, "id": finding_id(ingest_finding_from_json(record))}
+
+    return change
+
+
+def test_a_finding_nested_to_the_compilers_limit_registers(pg_uri: str, tmp_path: Path) -> None:
+    """Free-form ``details`` may nest as deep as the compiler's readers accept; indexing must not
+    run out of stack where they did not (a rebuild from main would otherwise fail)."""
+    depth = 1000
+    while depth > 0:  # the deepest finding the compiler writes and reads back, from here
+        try:
+            files = with_changed_body("drone", "ingest_finding", _deep_finding(depth))
+            read_files(files)
+            break
+        except (PackageError, canonical_json.CanonicalJsonError, RecursionError):
+            depth -= 5
+    assert depth > 900
+    package = write("deep", tmp_path / "deep", files)
+    with fresh(pg_uri) as catalog:
+        result = catalog.register(package.root)
+    assert (result.outcome, result.findings) == ("registered", ())
+    with psycopg.connect(pg_uri) as conn:
+        row = conn.execute(
+            "SELECT body IS NOT NULL, unknown_pointers FROM tenant_acme.record"
+            " WHERE kind = 'ingest_finding'"
+        ).fetchone()
+    assert row == (True, [])
+
+
+def test_an_index_that_runs_out_of_stack_or_memory_is_a_finding(
+    catalog: PostgresCatalog, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = materialise("drone", tmp_path / "drone")
+    for error in (RecursionError, MemoryError):
+
+        def boom(*_: Any, error: type[BaseException] = error) -> Any:
+            raise error
+
+        monkeypatch.setattr(registry, "package_rows", boom)
+        result = catalog.register(package.root)
+        assert result.outcome == "refused"
+        assert [f.code for f in result.findings] == ["record_invalid"]
 
 
 def test_knowledge_shaped_values_in_a_free_form_config_are_not_fields(

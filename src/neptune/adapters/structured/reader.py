@@ -32,12 +32,12 @@ from yaml.events import (
     SequenceStartEvent,
 )
 
-from neptune.adapters.config._json import read_json
-from neptune.adapters.config._scalars import implicit
-from neptune.adapters.config._text import is_blank
-from neptune.adapters.config._toml import read_toml
-from neptune.adapters.config._tree import Limits, Parse, Value
-from neptune.adapters.config._yaml import read_yaml
+from neptune.adapters.structured.json_reader import read_json
+from neptune.adapters.structured.scalars import implicit
+from neptune.adapters.structured.text import is_blank
+from neptune.adapters.structured.toml_reader import read_toml
+from neptune.adapters.structured.tree import Limits, Parse, Value
+from neptune.adapters.structured.yaml_reader import read_yaml
 from neptune.model.configuration import ConfigFormat, ScalarType, TextEncoding
 
 # How near the end of a head cut short a parser may fail and the head still count as a valid

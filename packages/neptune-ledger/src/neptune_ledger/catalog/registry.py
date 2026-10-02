@@ -193,6 +193,10 @@ class PostgresCatalog:
         except UnindexedVersion as exc:
             finding = CatalogFinding("record_invalid", str(checked.package_id), str(exc))
             return self._refusal(root, checked, [finding])
+        except (RecursionError, MemoryError) as exc:  # hostile depth or size the readers let by
+            detail = f"the record index cannot be built: {type(exc).__name__}"
+            finding = CatalogFinding("record_invalid", str(checked.package_id), detail)
+            return self._refusal(root, checked, [finding])
         try:
             outcome, key, locator, version = self._run(
                 lambda conn: self._write(conn, rows, root), refuse_as=rows.package_id

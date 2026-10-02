@@ -19,7 +19,14 @@ from neptune.model.kinds import RECORD_KINDS
 from neptune.store.package import MANIFEST, RECEIPT, package_files
 
 EXAMPLES: Final = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "model"
-NAMES: Final = ("drone", "manipulator", "mobile_robot", "quadruped")
+NAMES: Final = (
+    "drone",
+    "manipulator",
+    "mobile_robot",
+    "quadruped",
+    "warehouse_amr",
+    "manipulator_cell",
+)
 DOCUMENTS: Final = {MANIFEST: "#/$defs/PackageManifest", RECEIPT: "#/$defs/IngestReceipt"}
 
 

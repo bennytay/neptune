@@ -100,7 +100,7 @@ from neptune.manifest import LoadedManifest, ManifestError
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.package import ReceiptEnvelope
+from neptune.model.package import ReceiptEnvelope, package_manifest_from_json
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
 from neptune.model.run import Stream
 from neptune.model.series import SEQ, SeriesBatch
@@ -137,8 +137,9 @@ from neptune.runtime.sandbox import (
     Returned,
     SandboxError,
 )
-from neptune.store.assemble import NotDurableError, StagedPackage, publish, stage
+from neptune.store.assemble import NotDurableError, StagedPackage, amend, publish, stage
 from neptune.store.package import (
+    MANIFEST,
     PackageError,
     read_package,
     write_cache_report,
@@ -153,6 +154,7 @@ from neptune.store.workspace import (
     Workspace,
     WorkspaceError,
 )
+from neptune.validate import validate_package
 
 DEFAULT_ATTEMPTS: Final = 2
 ADAPTER_FAILED: Final = f"{PROBE_ID}.adapter_failed"
@@ -2049,23 +2051,34 @@ class IngestJob:
     # --- validate ------------------------------------------------------------------------------
 
     def _validate(self) -> RecordId:
-        """Read the staged package back and verify every file, id, series and the receipt."""
+        """Read the staged package back and verify it; run the integrity and data-quality rules
+        over it (ADR 0054) and, if they find anything, stage it again with their findings."""
         with self._enter(Phase.VALIDATE):
             self._check_cancel()
             assert self._staged is not None
             try:
                 package = read_package(self._staged.path)
+                report = validate_package(package)
+                receipt, identity = package.manifest.receipt, package.id
+                if report.findings:  # amend verifies the whole before it moves anything
+                    self._staged = amend(self._staged, package, report.records())
+                    manifest = package_manifest_from_json(
+                        canonical_json.loads((self._staged.path / MANIFEST).read_bytes())
+                    )
+                    receipt, identity = manifest.receipt, self._staged.id
             except (PackageError, SeriesError, ValueError, OSError) as exc:
                 raise JobError(f"the assembled package does not verify: {exc}") from exc
+            added = report.records()
             summary: dict[str, JsonValue] = {
-                "findings": len(package.receipt.findings),
-                "package": package.id,
-                "records": len(package.records),
+                "findings": len(package.receipt.findings) + len(report.findings),
+                "package": identity,
+                "records": len(package.records) + len(added),
                 "series": len(package.series),
+                "validation": report.summary(),
             }
             self._emit(events.PACKAGE_VERIFIED, summary)
             self._finish(Phase.VALIDATE, summary)
-        return package.manifest.receipt
+        return receipt
 
     # --- commit --------------------------------------------------------------------------------
 

@@ -15,9 +15,9 @@ The Ledger keeps one spec per package-schema version it reads, the schema-versio
 and the Ledger version alone. Each record is projected with the spec of the version it states, so
 packages of every version are indexed side by side, and a package of a version the registry does
 not hold is refused. Adding a version is one command over the registry's version directory, which
-appends its spec and writes the next migration when it adds projection columns::
+appends its spec and writes the next migration when a kind gains a projection::
 
-    uv run python -m neptune_ledger.catalog.projection contracts/package-schema/v3.0.0/schema.json
+    uv run python -m neptune_ledger.catalog.projection contracts/package-schema/v4.0.0/schema.json
 
 A hot filter in a shape this module does not know, a kind or projection that disappears, or an
 indexed version whose mapping would change raises ``ProjectionError``: a new shape, a removal or a
@@ -90,7 +90,11 @@ BASELINE_KINDS: Final = (
 _KIND: Final = re.compile(r"[a-z][a-z0-9_]{0,55}")
 SPEC_FILE: Final = "projections.json"
 _MIGRATION: Final = re.compile(r"(\d{4})_[a-z0-9_]+\.sql")
-_SCHEMA_ID: Final = re.compile(r"urn:neptune:schema:canonical:([1-9][0-9]{0,8})")
+# A package-schema id; version 0 names only BASELINE, the catalog before any projection.
+_SCHEMA_ID: Final = re.compile(r"urn:neptune:schema:canonical:(0|[1-9][0-9]{0,8})")
+# Field and filter names are spliced into SQL and comments: plain lower-case identifiers only.
+_NAME: Final = re.compile(r"[a-z][a-z0-9_]{0,55}")
+_SHAPE_NAMES: Final = frozenset({"logical_id", "record_id", "record_ids"})
 
 
 class ProjectionError(ValueError):
@@ -134,7 +138,8 @@ class Spec:
 
     @staticmethod
     def from_json(value: Any) -> "Spec":
-        return Spec(
+        """A spec from its JSON; every name it would splice into SQL is checked first."""
+        spec = Spec(
             schema_id=value["schema_id"],
             kinds=tuple(value["kinds"]),
             projections=tuple(
@@ -143,6 +148,18 @@ class Spec:
             ),
             opaque=tuple((kind, field) for kind, field in value["opaque"]),
         )
+        names = [
+            *spec.kinds,
+            *(name for p in spec.projections for name in (p.kind, p.field)),
+            *(name for pair in spec.opaque for name in pair),
+        ]
+        bad = [n for n in names if not isinstance(n, str) or not _NAME.fullmatch(n)]
+        if bad or not isinstance(spec.schema_id, str) or not _SCHEMA_ID.fullmatch(spec.schema_id):
+            raise ProjectionError(f"spec names outside the identifier rule: {bad[:3]!r}")
+        for p in spec.projections:
+            if p.filter not in HOT_FILTERS or p.shape not in _SHAPE_NAMES:
+                raise ProjectionError(f"spec projection {p.kind}.{p.field} is not a known shape")
+        return spec
 
     def columns(self) -> tuple[tuple[str, str], ...]:
         """Every projection column ``(name, SQL type)``, sorted by name."""
@@ -165,7 +182,7 @@ class Spec:
         return int(match.group(1))
 
 
-BASELINE: Final = Spec("baseline: migration 0001", BASELINE_KINDS, (), ())
+BASELINE: Final = Spec("urn:neptune:schema:canonical:0", BASELINE_KINDS, (), ())
 _SEMVER: Final = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 _DIGEST: Final = re.compile(r"sha256:[0-9a-f]{64}")
 
@@ -306,7 +323,11 @@ def projection_spec(schema: Mapping[str, Any]) -> Spec:
         schema_id = schema["$id"]
     except (KeyError, TypeError) as exc:
         raise ProjectionError(f"not a package-schema export: {exc!r} is missing") from exc
-    if not isinstance(schema_id, str) or not _SCHEMA_ID.fullmatch(schema_id):
+    if (
+        not isinstance(schema_id, str)
+        or not _SCHEMA_ID.fullmatch(schema_id)
+        or schema_id[-2:] == ":0"
+    ):
         raise ProjectionError(f"schema id {schema_id!r} does not name a package-schema version")
     kinds: list[str] = []
     projections: list[Projection] = []
@@ -357,11 +378,8 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
         {(p.filter, p.columns) for p in new.projections}
         - {(p.filter, p.columns) for p in old.projections}
     )
-    if not groups:
-        # A new kind without hot filters lives in record_default, and a projection into columns
-        # that exist needs no DDL. No row it would leave blank can exist: registration refuses a
-        # schema version before the registry holds it (ADR 0011 §2).
-        return ""
+    if not added:
+        return ""  # a new kind without hot filters needs no migration: it lives in record_default
     out = [
         f"-- {version:04d} record projections for {new.schema_id} (Ledger ADR 0009).",
         "--",
@@ -376,9 +394,9 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
     out += [f"--   {p.kind}.{p.field} -> {', '.join(p.columns)}" for p in added]
     # Rows already filed for a kind that gains a projection would read as "not Known": a blank
     # turned into a fact. A kind new to the spec states the field in every row; an older kind's
-    # rows state it only from this schema version on. Either makes the migration refuse, and the
-    # catalog is rebuilt from its packages and registration log (ADR 0002 §4) by a Ledger that
-    # ships it.
+    # rows state it from some version after the old spec's on (a bump may skip versions). Either
+    # makes the migration refuse, and the catalog is rebuilt from its packages and registration
+    # log (ADR 0002 §4) by a Ledger that ships it.
     fresh = sorted({p.kind for p in added} - set(old.kinds))
     grown = sorted({p.kind for p in added} & set(old.kinds))
     tests = []
@@ -386,16 +404,7 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
         tests.append(f"kind IN ({', '.join(repr(k) for k in fresh)})")
     if grown:
         listed = ",\n".join(f"      '{kind}'" for kind in grown)
-        tests.append(f"(schema_version >= {new.major} AND kind IN (\n{listed}))")
-    if grown and new.major > 1:
-        # Rows of these kinds from older versions keep NULL there: NotCovered by their version,
-        # which projection_covered reports (ADR 0011 §6). Never a statement about the record.
-        out += [
-            "--",
-            f"-- Rows of {', '.join(grown)} from schema versions before {new.major} do not state",
-            "-- the field: their NULL is NotCovered by their version (projection_covered,",
-            "-- ADR 0011).",
-        ]
+        tests.append(f"(schema_version > {old.major} AND kind IN (\n{listed}))")
     if tests:
         out += [
             "",

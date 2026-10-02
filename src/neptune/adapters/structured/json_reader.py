@@ -13,8 +13,8 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-from neptune.adapters.config._scalars import decimal_integer, floating
-from neptune.adapters.config._tree import (
+from neptune.adapters.structured.scalars import decimal_integer, floating
+from neptune.adapters.structured.tree import (
     Collection,
     Document,
     Issue,
