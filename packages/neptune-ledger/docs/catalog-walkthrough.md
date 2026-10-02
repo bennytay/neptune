@@ -27,7 +27,10 @@ transaction in the tenant's schema does the rest:
    rebuild uses `replay_tx` with the logged tick instead.
 4. `registration_log`: the tick, the package id, the root locator it was registered from and the
    Ledger's version. Then `package`, with `schema_version` and `receipt_id` from the manifest; the
-   rest is copied from the log row.
+   rest is copied from the log row. Then `schema_version` and `schema_version_projection` for each
+   package-schema version the package states that the tenant has not seen: the drone brings
+   version 1, with the projection mapping it is indexed by
+   ([ADR 0011](adr/0011-schema-version-registry-and-record-kinds-by-package-schema-version.md)).
 5. `source` (once per content id; an existing one with another size is refused) and
    `package_source` (per package) from `manifest.sources`; every example references its sources in
    place (`referenced`).
