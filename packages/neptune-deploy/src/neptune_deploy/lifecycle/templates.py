@@ -7,7 +7,7 @@ A template is JSON, in the style of a mapping file (``mapping.py``)::
       "schema": "neptune-deploy.document-template/1",
       "id": "risk.amr_iso3691_4", "version": "1", "description": "...",
       "kind": "risk_assessment",
-      "formats": ["pdf"],                           # the document formats it reads (default: all)
+      "formats": ["pdf"],                           # formats it reads (default: markdown, pdf)
       "separator": ":",                             # between an inline label and its value
       "zone": "Europe/Berlin",                      # default civil zone for its time fields
       "form": {"label": "Form", "value": "RA-3691-AMR",

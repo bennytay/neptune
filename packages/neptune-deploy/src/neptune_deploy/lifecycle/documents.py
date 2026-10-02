@@ -318,24 +318,32 @@ class _View:
         lead = name + separator
         for block in self.blocks:
             text = _text(block.text)
-            if text is None or _role(block) in _NOT_TEXT or not text.startswith(lead):
+            if text is None or _role(block) in _NOT_TEXT or lead not in text:
                 continue
-            rest = text[len(lead) :]
-            value = rest.strip()
             evidence = block.provenance.evidence
             span = _span(evidence)
+            # A paragraph the extractor wrapped is one block of several lines: a label starts a
+            # line, and its value is the rest of that line (a wrapped value is not followed).
+            exact = span is not None and span.end - span.start == len(text)
             provenance = Provenance(evidence, block.provenance.transform, OBSERVED)
-            if not value:
-                hits.append(_Hit(Unknown(provenance), evidence, block=block.id))
-                continue
-            place = evidence
-            if span is not None:
-                start = span.start + len(lead) + (len(rest) - len(rest.lstrip()))
-                place = EvidenceRef(
-                    evidence.source,
-                    (*evidence.locator[:-1], Span(start, start + len(value))),
-                )
-            hits.append(_Hit(Known(value, provenance), place, block=block.id))
+            offset = 0
+            for line in text.split("\n"):
+                begin, offset = offset, offset + len(line) + 1
+                if not line.startswith(lead):
+                    continue
+                rest = line[len(lead) :]
+                value = rest.strip()
+                if not value:
+                    hits.append(_Hit(Unknown(provenance), evidence, block=block.id))
+                    continue
+                place = evidence
+                if span is not None and exact:
+                    start = span.start + begin + len(lead) + (len(rest) - len(rest.lstrip()))
+                    place = EvidenceRef(
+                        evidence.source,
+                        (*evidence.locator[:-1], Span(start, start + len(value))),
+                    )
+                hits.append(_Hit(Known(value, provenance), place, block=block.id))
         for kv in self.kv:
             for row in kv.rows:
                 if len(row.cells) >= 2 and _text(row.cells[0]) == name:
@@ -397,6 +405,7 @@ class _DocRow(_Values):
         )
         self.read_blocks: set[RecordId] = set()
         self.read_rows: set[tuple[RecordId, int]] = set()
+        self._cells: dict[tuple[str, str], _Cell] = {}
 
     def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
         self.mapper.findings.add(
@@ -421,6 +430,14 @@ class _DocRow(_Values):
             self.read_rows.add(hit.row)
 
     def cell(self, column: str, via: str = "column") -> _Cell:
+        """A reference read once per document: asking again (a part is checked for blankness, then
+        read) gives the same cell and makes no finding twice."""
+        key = (via, column)
+        if key not in self._cells:
+            self._cells[key] = self._read(column, via)
+        return self._cells[key]
+
+    def _read(self, column: str, via: str) -> _Cell:
         if via == "label":
             return self._label(column)
         status, heading, blocks = self._locate(column)
@@ -531,13 +548,45 @@ class _DocRow(_Values):
         kind = self.template.kind.kind
         for table in self.view.tables_named(self.template.tables[specs.table]):
             for index in range(len(table.rows)):
-                row = _Row(self.mapper, table, index, kind, self.record_id)
+                row = _TableRow(self.mapper, table, index, kind, self.record_id, self.table)
                 if row.blank(specs.part):
                     column = ", ".join(sorted(name for _, name in spec_refs(specs.part)))
                     row.finding("item_blank", column, row.evidence)
                     continue
                 out.append(row.part(specs.part, f"{path}/{len(out)}"))
         return tuple(out)
+
+
+class _TableRow(_Row):
+    """A row of a table in a document, read as a part of the document's record: its findings are
+    the document's (ADR 0003 §7), scoped to the document and naming a reference."""
+
+    def __init__(
+        self,
+        mapper: "_TemplateMapper",
+        table: _Table,
+        index: int,
+        kind: str,
+        record_id: RecordId,
+        scope: _Scope,
+    ) -> None:
+        super().__init__(mapper, table, index, kind, record_id)
+        self.scope = scope
+
+    def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
+        self.mapper.findings.add(
+            name, self.scope, subject, key=column, details={"reference": column}
+        )
+
+    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
+        self.mapper.findings.add(
+            name,
+            self.scope,
+            subject,
+            key=f"{self.record.row}|{path}|{column}|{subject.locator_json()}",
+            details={"reference": column, "field": path},
+            record=self.record_id,
+        )
 
 
 # --- One template over its documents ---------------------------------------------------------
@@ -589,12 +638,14 @@ def _judge(view: _View, template: DocumentTemplate) -> _Verdict:
     if template.form is not None:
         form = template.form
         named = view.labels(form.label, separator)
-        if len(named) != 1 or _text(named[0].state) != form.value:
+        # A form shown more than once (say, on every page) is that form if every statement agrees.
+        if not named or any(_text(hit.state) != form.value for hit in named):
             return _Verdict(template, "other")
         seen.append(named[0].place)
         versions = view.labels(form.version_label, separator)
-        found = _text(versions[0].state) if len(versions) == 1 else None
-        if found != form.version:
+        states = sorted({text for hit in versions if (text := _text(hit.state)) is not None})
+        found = states[0] if len(states) == 1 and len(versions) >= 1 else None
+        if found != form.version or any(_text(hit.state) is None for hit in versions):
             return _Verdict(template, "mismatch", seen, found=found)
         seen.append(versions[0].place)
     missing: list[str] = []
@@ -694,7 +745,8 @@ class _TemplateMapper(_Clocks):
             )
         )
         self._unmapped_columns(view, records)
-        unread = self._unread(view, row)
+        # A record the kind refused read only part of the document: its unread text would mislead.
+        unread = self._unread(view, row) if record is not None else []
         if unread:
             self.direct.append(
                 _finding(
@@ -894,7 +946,12 @@ def _explain(
     if mismatches:
         declared = {
             "templates": [
-                {"template": v.template.id, "version": v.template.version, "found": v.found}
+                {
+                    "template": v.template.id,
+                    "version": v.template.version,
+                    # No single version stated (none, a blank one, or several): nothing to name.
+                    **({"found": v.found} if v.found is not None else {}),
+                }
                 for v in sorted(mismatches, key=lambda v: (v.template.id, v.template.version))
             ]
         }

@@ -45,8 +45,9 @@ another. Forces:
 3. **Matching is exact, and it is an observation.** A template applies to a document when:
    - the document's format is one of the template's;
    - if the template declares a `form`: the document shows the form's id label with its value, and the
-     version label with the declared version, exactly, as text. The same id with another version is not
-     a match and never a near one: it is `template_version_mismatch`, no record, naming the version found;
+     version label with the declared version, exactly, as text (a label shown on every page counts once
+     if every statement agrees; one that disagrees is not the form, and two versions are a mismatch).
+     The same id with another version is not a match and never a near one: it is `template_version_mismatch`, no record, naming the version found;
    - every `requires` label, heading and table is present: a label by its text, a heading by its text, a
      table by its exact header cells. A template with a form that lacks structure is
      `template_structure_missing`; one without a form that lacks structure is simply not that document's.
@@ -57,7 +58,9 @@ another. Forces:
    compiler's own statement about evidence (root ADR 0017 §9), which is what an observation is; the
    lifecycle record's values stay `stated`. No lifecycle record is ever the observation itself.
 4. **A field names what it reads by `label`, `section` or, inside a table's rows, `column`.**
-   - `label`: an inline `Label<separator> value` in a paragraph, list item or untyped block, or a row
+   - `label`: an inline `Label<separator> value` at the start of a line of a paragraph, list item or
+     untyped block (an extractor-wrapped block holds several lines; a value is the rest of its own line,
+     a wrapped continuation line is not followed), or a row
      of a headerless table whose first cell is the label (a form's `Field | Value`). The value cites the
      span after the separator, or its cell. A label shown twice is `label_repeated` and `Unknown`; one
      the document lacks is `NotCovered` with `label_absent`; one shown with nothing after it is
@@ -83,6 +86,8 @@ another. Forces:
    record, whose provenance is the document's whole bytes, so a different template, or a template
    edited, is new lineage beside the old. Clocks follow ADR 0002 §5: the template's zone is in the
    transform's config alone, and a `TimestampDomain`'s scope is empty.
+   A table of a document that a template matched is that template's: a mapping file never reads it
+   again, so one cell is never two records.
 7. **Findings, coded `deploy_document_map.*`**, each documented with its severity and category in
    `lifecycle.documents.FINDINGS`: `template_matched`, `template_version_mismatch`,
    `template_structure_missing`, `template_ambiguous`, `document_unmatched`, `no_text_layer`,

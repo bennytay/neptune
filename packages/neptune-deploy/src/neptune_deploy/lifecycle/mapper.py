@@ -831,9 +831,12 @@ def map_tables(
     ids = [mapping.id for mapping in mappings]
     if len(set(ids)) != len(ids):
         raise MappingError(f"two mapping files share an id: {ids}")
-    usable, unnamed = tables_of(base.records)
-    out: list[Any] = []
     taken = set(claimed)
+    # A table of a document a template matched is that template's: no mapping reads it again.
+    named, nameless = tables_of(base.records)
+    usable = [t for t in named if t.record.id not in taken]
+    unnamed = [t for t in nameless if t.id not in taken]
+    out: list[Any] = []
     for mapping in sorted(mappings, key=lambda m: m.sha256):
         mapper = _Mapper(mapping, base.id, usable)
         taken.update(table.record.id for table in mapper.tables)

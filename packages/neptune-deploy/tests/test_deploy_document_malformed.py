@@ -27,6 +27,7 @@ from neptune_deploy.lifecycle import (
     load_template,
     map_files,
     map_package,
+    parse_mapping,
     parse_template,
     preset,
 )
@@ -302,6 +303,86 @@ def test_a_table_with_no_rows_gives_an_empty_list_and_a_statement_with_none_give
     (risk,) = _of(package, "risk_assessment")
     assert risk.hazards == ()
     assert isinstance(risk.configuration, NotCovered)
+
+
+# --- Wrapped paragraphs, repeated forms, claimed tables --------------------------------------
+
+
+def test_a_label_on_a_later_line_of_a_wrapped_block_is_read_from_its_own_line() -> None:
+    edits = _retext("Assessed on: 2026-03-12", "Note: none\nAssessed on: 2026-03-12")
+    package = _mapped(_with(_base("warehouse_amr"), edits))
+    (risk,) = _of(package, "risk_assessment")
+    (plain,) = _of(_mapped(_base("warehouse_amr")), "risk_assessment")
+    assert isinstance(risk.assessed, Known) and isinstance(plain.assessed, Known)
+    assert risk.assessed.value.ticks == plain.assessed.value.ticks
+    assert "label_absent" not in _codes(package)
+    # The form's own labels may share one block too: the template still matches.
+    both = _with(
+        _with(_base("warehouse_amr"), _retext("Revision: 2", "Revision: 2\nForm: RA-3691-AMR")),
+        _retext("Form: RA-3691-AMR", "Note: none"),
+    )
+    assert len(_of(_mapped(both), "risk_assessment")) == 1
+
+
+def test_a_form_shown_twice_is_that_form_if_every_statement_agrees_and_not_otherwise() -> None:
+    agree = _mapped(
+        _with(_base("warehouse_amr"), _retext("Reviewer: R. Okafor", "Form: RA-3691-AMR"))
+    )
+    assert len(_of(agree, "risk_assessment")) == 1
+    differ = _mapped(
+        _with(_base("warehouse_amr"), _retext("Reviewer: R. Okafor", "Form: RA-OTHER"))
+    )
+    assert _of(differ, "risk_assessment") == []
+    assert "document_unmatched" in _codes(differ)
+    two = _mapped(_with(_base("warehouse_amr"), _retext("Reviewer: R. Okafor", "Revision: 3")))
+    assert _of(two, "risk_assessment") == []
+    (finding,) = _codes(two)["template_version_mismatch"]
+    assert "found" not in finding.details["templates"][0]
+
+
+def test_findings_about_a_table_row_of_a_document_name_the_document_not_the_table() -> None:
+    def garble(record: Any) -> Any:
+        if record.kind != "structured_record":
+            return record
+        cells = tuple(
+            replace(c, value="yesterday")
+            if isinstance(c, Known) and isinstance(c.value, str) and c.value[:2] == "20"
+            else c
+            for c in record.cells
+        )
+        return replace(record, cells=cells)
+
+    package = _mapped(_with(_base("manipulator_cell"), garble))
+    documents = {d.id for d in _of(_base("manipulator_cell"), "document_record")}
+    unreadable = _codes(package)["value_unreadable"]
+    assert any(f.details["field"].startswith("/tests/") for f in unreadable)
+    for finding in unreadable:
+        assert finding.details["document"] in documents
+
+
+def test_a_table_of_a_matched_document_is_not_read_again_by_a_mapping_file() -> None:
+    mapping = parse_mapping(
+        json.dumps(
+            {
+                "schema": "neptune-deploy.lifecycle-mapping/1",
+                "id": "pdf.tests",
+                "version": "1",
+                "rules": [
+                    {
+                        "id": "test",
+                        "kind": "risk_assessment",
+                        "requires": ["Test", "Result"],
+                        "fields": {"identifiers": [{"column": "Test", "namespace": "t.test"}]},
+                    }
+                ],
+            }
+        ).encode()
+    )
+    base = _base("manipulator_cell")
+    alone = read_files(map_files(base, [mapping]))
+    assert len(_of(alone, "risk_assessment")) > 1  # the table matches the mapping by itself
+    both = read_files(map_files(base, [mapping], _templates()))
+    assert len(_of(both, "risk_assessment")) == 1  # only the template's: its table is claimed
 
 
 # --- Lineage, determinism, immutability -------------------------------------------------------
