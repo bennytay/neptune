@@ -520,7 +520,7 @@ def test_a_body_without_a_length_is_never_read_as_the_object(tmp_path: Path) -> 
     assert source.findings()[0].details["cause"] == "range_invalid"
 
 
-def test_entries_that_are_not_used_count_toward_the_limit(tmp_path: Path) -> None:
+def test_entries_that_are_not_used_count_toward_the_byte_budget(tmp_path: Path) -> None:
     fake = FakeStore()
     for index in range(5):
         fake.put(f"cell/{index}.csv", b"x")
@@ -531,10 +531,10 @@ def test_entries_that_are_not_used_count_toward_the_limit(tmp_path: Path) -> Non
         return entries + [Entry(key, junk, True) for key in keys]
 
     fake.rewrite = flood
-    with connect(fake, tmp_path, "cell/", max_objects=150, page_size=1) as source:
+    with connect(fake, tmp_path, "cell/", max_listing_bytes=2048, page_size=1) as source:
         listing = source.listing()
-    assert not listing.complete and len(fake.requests) == 2
-    assert len(listing.entries) + len(listing.skipped) <= 150
+    assert not listing.complete and len(fake.requests) == 1
+    assert sum(len(s.raw_key) + len(s.reason) for s in listing.skipped) <= 2048
     assert codes(source) == ["deploy_s3.key_outside_prefix", "deploy_s3.listing_limit"]
 
 
