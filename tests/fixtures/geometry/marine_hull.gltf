@@ -1,0 +1,105 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "neptune fixture generator"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "hull",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "hull_node",
+      "mesh": 0
+    }
+  ],
+  "meshes": [
+    {
+      "name": "hull_mesh",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0
+          },
+          "indices": 1,
+          "material": 0
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "name": "gelcoat",
+      "pbrMetallicRoughness": {
+        "baseColorTexture": {
+          "index": 0
+        }
+      }
+    }
+  ],
+  "textures": [
+    {
+      "source": 0
+    }
+  ],
+  "images": [
+    {
+      "uri": "textures/hull%20diffuse.png"
+    },
+    {
+      "uri": "../shared/barnacle_mask.png"
+    },
+    {
+      "uri": "data:image/png;base64,iVBORw0KGgo="
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 168,
+      "uri": "hull.bin"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 96,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 96,
+      "byteLength": 72,
+      "target": 34963
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 8,
+      "type": "VEC3",
+      "min": [
+        -1.5,
+        -0.5,
+        0.0
+      ],
+      "max": [
+        1.5,
+        0.5,
+        0.75
+      ]
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5123,
+      "count": 36,
+      "type": "SCALAR"
+    }
+  ]
+}

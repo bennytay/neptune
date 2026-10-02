@@ -233,12 +233,16 @@ For registers, geometry, photos, video files and documents:
   provenance. The `tabular` adapter (ADR 0042) is the worked example for CSV, JSON and Parquet.
 - A `Site` or `Asset` per row or feature that names one, with its ids and names each citing its cell or
   span. Don't copy the rest of the row into it.
-- Geometry: a `SpatialArtifact` per file, unit / CRS / frame as declared (`NotCovered` where the format
-  has no place), objects cited by `ObjectLocator`. A CRS is never invented: a stated one is `Known` as
-  written (authority and code verbatim), two different ones `Ambiguous`, an unreadable or absent one
-  `Unknown` with a finding; a format default is `Known` citing the specification, and only where
-  nothing in the file contradicts it. Never reproject, wrap or repair. The `geojson` adapter (ADR 0057)
-  is the worked example: features and their bounds as table rows, ids as hints, never merged.
+- Geometry: a `SpatialArtifact` per file citing the whole file (the lazy handle: nothing is copied), unit /
+  CRS / frame as declared (`NotCovered` where the format has no place), objects cited by `ObjectLocator`.
+  What the record has no field for (bounds, counts, up axis, dependencies) is a cited properties table and
+  dependencies table, each row citing its bytes; a reference is classified by its text and never opened.
+  The `geometry` adapter (ADR 0052) is the worked example for OBJ, STL, PLY, glTF/GLB and USD.
+  A CRS is never invented: a stated one is `Known` as written (authority and code verbatim), two different
+  ones `Ambiguous`, an unreadable or absent one `Unknown` with a finding; a format default is `Known`
+  citing the specification, and only where nothing in the file contradicts it. Never reproject, wrap or
+  repair. The `geojson` adapter (ADR 0057) is the worked example for a vector map: features and their
+  bounds as table rows, ids as hints, never merged.
 - Media: an `Image` per still, a `Video` per video track, `capture` from EXIF / XMP / container metadata.
   Never apply EXIF orientation, never caption.
 - Documents: one `DocumentRecord`, then `DocumentBlock`s in reading order with the text of each exact
