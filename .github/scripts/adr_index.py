@@ -10,7 +10,8 @@ from its ``# NNNN — Title`` heading and the value of its ``- Status:`` line, f
 ``amended by NNNN`` (compiler index only) for every other ADR whose ``- Amends:`` header names it.
 The index is generated so concurrent PRs that each add an ADR never conflict on a hand-edited
 table; they regenerate it after merging main. With ``--check`` nothing is written and the exit
-status is 1 if any index is stale. Standard library only, so CI can run it before anything is installed.
+status is 1 if any index is stale. Standard library only, so CI can run it before anything is
+installed.
 """
 
 from __future__ import annotations
