@@ -408,8 +408,8 @@ class RestSystem:
         value = self._text(attachment, spec["revision"])
         if value is None or not _VALUE.fullmatch(value):
             return Rejected(item_id, "record_invalid")
-        size = self._text(attachment, spec["size"])
-        if size is None or not size.isdigit():
+        size = whole(jsontext.pointer(attachment, spec["size"]))
+        if size is None:
             return Rejected(item_id, "size_invalid")
         path = (
             spec["path"].replace("{record}", quote(record_id)).replace("{attachment}", quote(raw))
@@ -418,8 +418,8 @@ class RestSystem:
             item_id,
             f"{self.profile.kind}:{value}",
             safe_name(self._text(attachment, spec["name"]), raw),
-            int(size),
-            fetch=Fetch(path, (), int(size)),
+            size,
+            fetch=Fetch(path, (), size),
             parent=parent,
         )
 

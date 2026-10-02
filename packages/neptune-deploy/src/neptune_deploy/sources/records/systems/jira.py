@@ -42,6 +42,7 @@ from neptune_deploy.sources.records.systems._pages import (
     obj,
     text,
     text_or_whole,
+    whole,
 )
 from neptune_deploy.sources.records.systems.spec import Plan, Spec
 
@@ -62,7 +63,9 @@ DEFAULT_FIELDS: Final = (
 _PROJECT: Final = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}")
 _FIELD: Final = re.compile(r"[A-Za-z][A-Za-z0-9_.\-]{0,63}")
 _NUMERIC_ID: Final = re.compile(r"[0-9]{1,18}")
-_CURSOR: Final = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d{1,9})?([+-]\d\d:?\d\d|Z)")
+_CURSOR: Final = re.compile(
+    r"[0-9]{4}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9](\.[0-9]{1,9})?([+-][0-9][0-9]:?[0-9][0-9]|Z)"
+)
 ENV: Final = {
     "email": "NEPTUNE_JIRA_EMAIL",
     "api_token": "NEPTUNE_JIRA_API_TOKEN",
@@ -78,7 +81,7 @@ def _api_version(value: Any) -> str:
 
 def _plan(authority: str, path: str, options: Options) -> Plan:
     if not _PROJECT.fullmatch(path):
-        raise RecordConfigError(f"not a Jira project key: {path!r}")
+        raise RecordConfigError("not a Jira project key")
     return Plan(endpoint_for(authority, options), path)
 
 
@@ -209,7 +212,7 @@ class JiraSystem:
         raw = text_or_whole(record.get("id"))
         item_id = f"{parent}/attachment/{raw or ''}"
         created = text(record.get("created"))
-        size = text_or_whole(record.get("size"))
+        size = whole(record.get("size"))
         if raw is None or not _NUMERIC_ID.fullmatch(raw):
             return Rejected(item_id, "id_invalid")
         if not created or not created.isprintable():
@@ -220,10 +223,8 @@ class JiraSystem:
             item_id,
             f"created:{created}",
             safe_name(record.get("filename"), raw),
-            int(size),
-            fetch=Fetch(
-                f"{self.base}/attachment/content/{raw}", (("redirect", "false"),), int(size)
-            ),
+            size,
+            fetch=Fetch(f"{self.base}/attachment/content/{raw}", (("redirect", "false"),), size),
             parent=parent,
         )
 

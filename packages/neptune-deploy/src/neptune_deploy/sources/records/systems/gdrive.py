@@ -33,7 +33,14 @@ from neptune_deploy.sources.records.config import (
 )
 from neptune_deploy.sources.records.http import Api, Auth, ResponseInvalid
 from neptune_deploy.sources.records.model import Fetch, Item, Page, Rejected, safe_name
-from neptune_deploy.sources.records.systems._pages import array, names, obj, text, text_or_whole
+from neptune_deploy.sources.records.systems._pages import (
+    array,
+    names,
+    obj,
+    text,
+    text_or_whole,
+    whole,
+)
 from neptune_deploy.sources.records.systems.spec import Plan, Spec
 
 CONNECTOR_ID: Final = "deploy_gdrive"
@@ -216,7 +223,7 @@ class DriveSystem:
         if version is None or not _MD5.fullmatch(md5.lower()):
             rejected.append(Rejected(item_id, "record_invalid"))
             return
-        size = text_or_whole(record.get("size"))
+        size = whole(record.get("size"))
         if size is None:
             rejected.append(Rejected(item_id, "size_invalid"))
             return
@@ -225,11 +232,11 @@ class DriveSystem:
                 item_id,
                 f"version:{version}",
                 safe_name(record.get("name"), raw),
-                int(size),
+                size,
                 fetch=Fetch(
                     f"/drive/v3/files/{raw}",
                     (("alt", "media"), ("supportsAllDrives", "true")),
-                    int(size),
+                    size,
                     md5.lower(),
                 ),
             )

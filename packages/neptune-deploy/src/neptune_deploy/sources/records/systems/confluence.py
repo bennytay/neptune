@@ -43,7 +43,7 @@ ENV: Final = {
 
 def _plan(authority: str, path: str, options: Options) -> Plan:
     if not _SPACE.fullmatch(path):
-        raise RecordConfigError(f"not a Confluence space id (numeric): {path!r}")
+        raise RecordConfigError("not a Confluence space id (numeric)")
     return Plan(endpoint_for(authority, options), path)
 
 

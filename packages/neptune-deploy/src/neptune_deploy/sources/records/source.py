@@ -63,6 +63,7 @@ from neptune_deploy.sources.records.model import (
     RecordEntry,
     Relation,
     SkippedRecord,
+    sha256_text,
 )
 from neptune_deploy.sources.records.systems import System
 
@@ -70,6 +71,9 @@ CONNECTOR_VERSION: Final = "0.1.0"
 LISTING_TOKEN: Final = "listing"  # the revision token of a finding about the listing itself
 MAX_PAGES: Final = 100_000
 MAX_EXAMPLES: Final = 10  # ids a finding about many ids cites
+MAX_EXAMPLE_BYTES: Final = 256  # of each id a finding cites
+MAX_CURSOR: Final = 4096  # bytes of a continuation cursor; a longer one stops the listing
+_MALFORMED: Final = (ValueError, TypeError, KeyError, IndexError, AttributeError, RecursionError)
 MAX_ID_BYTES: Final = 1024
 MAX_TOKEN_CHARS: Final = 1024
 MAX_SNAPSHOT_BYTES: Final = 8 * 1024 * 1024  # one record's snapshot
@@ -214,7 +218,7 @@ class Discovery:
 
 
 def _hex(raw: str) -> str:
-    return raw.encode("utf-8", "surrogatepass")[:256].hex()
+    return raw.encode("utf-8", "surrogatepass")[:MAX_EXAMPLE_BYTES].hex()
 
 
 class RecordSource:
@@ -255,6 +259,7 @@ class RecordSource:
         config: dict[str, JsonValue] = {
             **self._config,
             "max_attachment_bytes": self.options.max_attachment_bytes,
+            "max_listing_bytes": self.options.max_listing_bytes,
             "max_records": self.options.max_records,
             "max_snapshot_bytes": self.options.max_snapshot_bytes,
             "page_size": self.options.page_size or 0,
@@ -356,7 +361,7 @@ class RecordSource:
             and head.location.object_id.startswith(scope)
         ]
         seen = {scope + entry.id for entry in listing.entries}
-        seen |= {scope + item.raw_id for item in listing.skipped}  # seen, not used: not gone
+        blind = {item.sha256 for item in listing.skipped}  # seen, not used: nothing is known
         gone: dict[str, SourceRevision] = {}
 
         def object_id(head: SourceRevision) -> str:
@@ -365,7 +370,8 @@ class RecordSource:
 
         if listing.mode == "snapshot" and listing.complete:
             for head in heads:
-                if object_id(head) not in seen:
+                name = object_id(head)
+                if name not in seen and sha256_text(name[len(scope) :]) not in blind:
                     gone[head.id] = head
         for removed in listing.removed:  # the system said so: the record and what hangs under it
             target = scope + removed
@@ -376,7 +382,12 @@ class RecordSource:
             prefix = self._children.get(entry.id)
             if prefix is not None:
                 for head in heads:
-                    if object_id(head).startswith(scope + prefix) and object_id(head) not in seen:
+                    name = object_id(head)
+                    if (
+                        name.startswith(scope + prefix)
+                        and name not in seen
+                        and sha256_text(name[len(scope) :]) not in blind
+                    ):
                         gone[head.id] = head
         return tuple(sorted(gone.values(), key=lambda revision: revision.location.key))
 
@@ -463,6 +474,9 @@ class RecordSource:
         except TransportError as exc:
             self.report("read_failed", where, {"cause": exc.code})
             raise ObjectReadError("read_failed", where) from exc
+        except _MALFORMED as exc:  # a system let a malformed answer through: still this item's
+            self.report("read_failed", where, {"cause": "response_invalid"})
+            raise ObjectReadError("read_failed", where) from exc
         if fetch.md5 is not None and hashlib.md5(data, usedforsecurity=False).hexdigest() != (
             fetch.md5
         ):
@@ -520,22 +534,28 @@ class RecordReader:
 
 
 class _Collect:
-    """One pass over a system's feed: the bounded, deduplicated, sorted result and its findings."""
+    """One pass over a system's feed: the bounded, deduplicated, sorted result and its findings.
+
+    Everything held is bounded: records and rejected ids by ``max_records``, the id, token and name
+    bytes by ``max_listing_bytes`` (a rejected id counts as at most 256 bytes), snapshot bodies by
+    ``max_snapshot_bytes``, and cursors are kept as digests.
+    """
 
     def __init__(self, source: RecordSource) -> None:
         self.source = source
         self.options = source.options
         self.kept: dict[str, Item] = {}
         self.duplicated: set[str] = set()
-        self.skipped: dict[tuple[str, str], None] = {}
+        self.skipped: dict[tuple[str, str], SkippedRecord] = {}
         self.removed: dict[str, None] = {}
-        self.total_bytes = 0
+        self.body_bytes = 0
+        self.held = 0  # id, token and name bytes the listing holds
 
     def run(self) -> Listing:
         source = self.source
         options = self.options
         mode = "snapshot" if options.since is None else "incremental"
-        cursors: set[str] = set()
+        cursors: set[bytes] = set()  # digests of the cursors seen, never the cursors themselves
         previous: frozenset[str] = frozenset()
         resume: str | None = None
         complete = partial = False
@@ -543,7 +563,7 @@ class _Collect:
         feed = source.system.pages(options.since)
         while True:
             if pages >= MAX_PAGES:
-                source.report("listing_limit", source.listing_ref, {"pages": pages})
+                self._limit({"pages": pages})
                 break
             try:
                 page = next(feed)
@@ -553,7 +573,15 @@ class _Collect:
             except TransportError as exc:
                 self._failed(exc, pages)
                 break
+            except _MALFORMED:  # a parser met a shape it did not expect: the page is hostile
+                source.report(
+                    "response_invalid", source.listing_ref, {"page": pages, "cause": "malformed"}
+                )
+                break
             pages += 1
+            if page.cursor is not None and len(page.cursor.encode("utf-8", "replace")) > MAX_CURSOR:
+                source.report("response_invalid", source.listing_ref, {"page": pages})
+                break
             ids = frozenset([item.id for item in page.items] + [r.id for r in page.rejected])
             if ids and ids == previous:
                 source.report("pagination_loop", source.listing_ref, {"page": pages})
@@ -564,15 +592,19 @@ class _Collect:
             resume = page.resume
             partial = partial or page.partial
             if page.cursor is not None:
-                if page.cursor in cursors:
+                digest = hashlib.sha256(page.cursor.encode("utf-8", "replace")).digest()
+                if digest in cursors:
                     source.report("pagination_loop", source.listing_ref, {"page": pages})
                     break
-                cursors.add(page.cursor)
+                cursors.add(digest)
         feed.close()
         if partial:
             source.report("listing_partial", source.listing_ref, {"pages": pages})
             complete = False
         return self._finish(mode, complete, resume)
+
+    def _limit(self, details: dict[str, JsonValue]) -> None:
+        self.source.report("listing_limit", self.source.listing_ref, details)
 
     def _failed(self, exc: TransportError, pages: int) -> None:
         source = self.source
@@ -592,22 +624,27 @@ class _Collect:
             source.report("listing_failed", source.listing_ref, {**details, "cause": exc.code})
 
     def _reject(self, reason: str, raw_id: str) -> None:
-        self.skipped[(reason, raw_id)] = None
+        skip = SkippedRecord(raw_id, reason)
+        if (reason, skip.sha256) not in self.skipped:
+            self.skipped[(reason, skip.sha256)] = skip
+            self.held += len(skip.raw_id.encode("utf-8", "replace"))
+
+    def _count(self) -> int:
+        return len(self.kept) + len(self.skipped) + len(self.removed)
 
     def _take(self, page: Page) -> bool:
         """Fold one page in. ``False`` once a limit is reached (the page's remainder is dropped)."""
-        source = self.source
         for rejected in page.rejected:
             self._reject(rejected.reason, rejected.id)
         for removed in page.removed:
-            self.removed[removed] = None
+            if removed not in self.removed:
+                self.removed[removed] = None
+                self.held += len(removed.encode("utf-8", "replace"))
             for gone in [k for k in self.kept if k == removed or k.startswith(removed + "/")]:
                 del self.kept[gone]
         for item in page.items:
-            if len(self.kept) + len(self.skipped) >= self.options.max_records:
-                source.report(
-                    "listing_limit", source.listing_ref, {"max_records": self.options.max_records}
-                )
+            if self._count() >= self.options.max_records:
+                self._limit({"max_records": self.options.max_records})
                 return False
             problem = self._problem(item)
             if problem is not None:
@@ -619,14 +656,14 @@ class _Collect:
                 self.duplicated.add(item.id)
             elif held is None:
                 size = len(item.body) if item.body is not None else 0
-                if self.total_bytes + size > self.options.max_snapshot_bytes:
-                    source.report(
-                        "listing_limit",
-                        source.listing_ref,
-                        {"max_snapshot_bytes": self.options.max_snapshot_bytes},
-                    )
+                if self.body_bytes + size > self.options.max_snapshot_bytes:
+                    self._limit({"max_snapshot_bytes": self.options.max_snapshot_bytes})
                     return False
-                self.total_bytes += size
+                self.held += sum(len(t.encode("utf-8")) for t in (item.id, item.token, item.name))
+                if self.held > self.options.max_listing_bytes:
+                    self._limit({"max_listing_bytes": self.options.max_listing_bytes})
+                    return False
+                self.body_bytes += size
                 self.kept[item.id] = item
         return True
 
@@ -636,6 +673,7 @@ class _Collect:
             id_ok = 0 < len(item.id.encode("utf-8")) <= MAX_ID_BYTES
             token_ok = 0 < len(item.token) <= MAX_TOKEN_CHARS and item.token.isprintable()
             item.token.encode("utf-8")
+            item.name.encode("utf-8")
         except UnicodeEncodeError:
             return "id_invalid"
         if not id_ok:
@@ -678,19 +716,19 @@ class _Collect:
                 source._fetches[key] = item.fetch
             if item.children is not None:
                 source._children[key] = item.children
-        skipped = tuple(SkippedRecord(raw, reason) for reason, raw in sorted(self.skipped))
+        skipped = tuple(sorted(self.skipped.values(), key=lambda skip: skip.order))
         self._report_skipped(skipped)
         return Listing(entries, skipped, tuple(sorted(self.removed)), complete, mode, resume)
 
     def _report_skipped(self, skipped: tuple[SkippedRecord, ...]) -> None:
         """One finding per reason, citing the first ids (as hex) and counting them all."""
-        by_reason: defaultdict[str, list[str]] = defaultdict(list)
+        by_reason: defaultdict[str, list[SkippedRecord]] = defaultdict(list)
         for item in skipped:
-            by_reason[item.reason].append(item.raw_id)
+            by_reason[item.reason].append(item)
         for reason in _SKIP_REASONS:
-            ids = by_reason.get(reason)
-            if ids:
-                examples: list[JsonValue] = [_hex(raw) for raw in ids[:MAX_EXAMPLES]]
+            found = by_reason.get(reason)
+            if found:
+                examples: list[JsonValue] = [_hex(item.raw_id) for item in found[:MAX_EXAMPLES]]
                 self.source.report(
-                    reason, self.source.listing_ref, {"count": len(ids), "ids_hex": examples}
+                    reason, self.source.listing_ref, {"count": len(found), "ids_hex": examples}
                 )

@@ -24,6 +24,7 @@ from neptune_deploy.sources.object_store.transport import DEFAULT_TIMEOUT, Endpo
 DEFAULT_MAX_RECORDS: Final = 100_000
 DEFAULT_MAX_ATTACHMENT_BYTES: Final = 64 * 1024 * 1024
 DEFAULT_MAX_SNAPSHOT_BYTES: Final = 256 * 1024 * 1024
+DEFAULT_MAX_LISTING_BYTES: Final = 64 * 1024 * 1024  # id, token and name bytes a listing may hold
 
 _INSTANCE: Final = re.compile(r"[a-z0-9][a-z0-9\-]{0,62}")
 _HOST: Final = re.compile(r"[a-z0-9][a-z0-9.\-]{0,252}")
@@ -58,6 +59,7 @@ class Options:
     timeout: float = DEFAULT_TIMEOUT
     max_attachment_bytes: int = DEFAULT_MAX_ATTACHMENT_BYTES
     max_snapshot_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES
+    max_listing_bytes: int = DEFAULT_MAX_LISTING_BYTES
     extra: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -78,6 +80,7 @@ class Options:
             "timeout",
             "max_attachment_bytes",
             "max_snapshot_bytes",
+            "max_listing_bytes",
         }
         unknown = sorted(set(given) - common - set(extras))
         if unknown:
@@ -86,7 +89,7 @@ class Options:
         if instance is not None and (
             not isinstance(instance, str) or not _INSTANCE.fullmatch(instance)
         ):
-            raise RecordConfigError(f"not an instance name: {instance!r}")
+            raise RecordConfigError("not an instance name")
         scheme = given.get("scheme", "https")
         if scheme not in ("https", "http"):
             raise RecordConfigError("scheme is https, or http to a loopback host")
@@ -99,6 +102,7 @@ class Options:
             ("page_size", 1, max_page_size, max_page_size),
             ("max_attachment_bytes", 1, 2**34, DEFAULT_MAX_ATTACHMENT_BYTES),
             ("max_snapshot_bytes", 1, 2**36, DEFAULT_MAX_SNAPSHOT_BYTES),
+            ("max_listing_bytes", 1024, 2**40, DEFAULT_MAX_LISTING_BYTES),
         ):
             value = given.get(name, default)
             if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
@@ -116,6 +120,7 @@ class Options:
             timeout=float(timeout),
             max_attachment_bytes=counts["max_attachment_bytes"],
             max_snapshot_bytes=counts["max_snapshot_bytes"],
+            max_listing_bytes=counts["max_listing_bytes"],
             extra={name: check(given[name]) for name, check in extras.items() if name in given},
         )
 
@@ -123,12 +128,16 @@ class Options:
 def split_url(url: str, scheme: str) -> tuple[str, str]:
     """``(authority, path)`` of ``<scheme>://<authority>/<path>``; nothing else rides in a URL."""
     if not isinstance(url, str) or not url.isprintable() or " " in url:
-        raise RecordConfigError(f"not a source URL: {url!r}")
+        raise RecordConfigError("not a source URL")
     head, sep, rest = url.partition("://")
     if not sep or head.lower() != scheme:
         raise RecordConfigError(f"this connector reads {scheme}:// URLs")
+    if "@" in rest.partition("/")[0]:
+        raise RecordConfigError(
+            "a source URL holds no user information; declare credentials instead"
+        )
     if any(ch in rest for ch in "?#@\\"):
-        raise RecordConfigError("a source URL has no query, fragment or user information")
+        raise RecordConfigError("a source URL has no query or fragment")
     authority, _, path = rest.partition("/")
     if not authority:
         raise RecordConfigError("a source URL names its system")
@@ -161,7 +170,7 @@ def instance_name(endpoint: Endpoint, options: Options, *, declared_endpoint: bo
     default = 443 if endpoint.scheme == "https" else 80
     name = endpoint.host if endpoint.port == default else f"{endpoint.host}:{endpoint.port}"
     if not _HOST.fullmatch(endpoint.host):
-        raise RecordConfigError(f"not a host name: {endpoint.host!r}")
+        raise RecordConfigError("not a host name")
     return name
 
 

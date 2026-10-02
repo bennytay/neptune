@@ -18,14 +18,13 @@ record point the client, and its credentials, anywhere.
 """
 
 import base64
+import http.client
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-from neptune_deploy.sources.object_store.sigv4 import quote
 from neptune_deploy.sources.object_store.transport import (
     HttpStatusError,
-    RedirectRefused,
     Response,
     ResponseTooLarge,
     Transport,
@@ -96,32 +95,29 @@ def _retry_after(headers: Mapping[str, str]) -> int | None:
 class RecordTransport(Transport):
     """``Transport`` whose error responses keep what a finding needs (the status, ``Retry-After``).
 
-    It sends what the parent sends (the workspace is asked first, ``GET`` only, ``3xx`` refused)
-    and differs only in the exceptions it raises for ``401``, ``403`` and ``429``.
+    It sends what the parent sends (the workspace is asked first, ``GET`` only, ``3xx`` refused,
+    the whole request under one deadline) and differs only in the exceptions it raises for ``401``,
+    ``403`` and ``429``. It remembers the last response's headers for that.
     """
+
+    _last_headers: dict[str, str] = {}
+
+    def _send(self, *args: Any, **kwargs: Any) -> http.client.HTTPResponse:
+        raw = super()._send(*args, **kwargs)
+        self._last_headers = {k.lower(): v for k, v in raw.getheaders()}
+        return raw
 
     def get(
         self, path: str, query: Sequence[tuple[str, str]] = (), headers: Mapping[str, str] = {}
     ) -> Response:
-        self._network.require_network(self._purpose)
-        pairs = [(quote(k), quote(v)) for k, v in query]
-        target = path + ("?" + "&".join(f"{k}={v}" if v else k for k, v in pairs) if pairs else "")
-        sent = {"Host": self.endpoint.authority, "User-Agent": USER_AGENT, **headers}
-        raw = self._send(target, sent)
-        response = Response(
-            raw.status, {k.lower(): v for k, v in raw.getheaders()}, raw, _transport=self
-        )
-        status = raw.status
-        if 200 <= status < 300:
-            return response
-        response.discard()
-        if 300 <= status < 400:
-            raise RedirectRefused(f"status {status}", status)
-        if status == 429:
-            raise RateLimited("rate limited", status, _retry_after(response.headers))
-        if status in (401, 403):
-            raise AccessDenied(f"status {status}", status)
-        raise HttpStatusError(f"status {status}", status)
+        try:
+            return super().get(path, query, headers)
+        except HttpStatusError as exc:
+            if exc.status == 429:
+                raise RateLimited("rate limited", 429, _retry_after(self._last_headers)) from exc
+            if exc.status in (401, 403):
+                raise AccessDenied(f"status {exc.status}", exc.status) from exc
+            raise
 
 
 class Api:
@@ -141,7 +137,7 @@ class Api:
         """The JSON document at ``path`` and the response headers (names lower-cased)."""
         response = self._get(path, query, "application/json")
         _require_plain(response)
-        if "json" not in response.headers.get("content-type", "").lower():
+        if not _is_json(response.headers.get("content-type", "")):
             response.discard()
             raise ResponseInvalid("the response is not JSON")
         try:
@@ -173,8 +169,20 @@ class Api:
         return self.transport.get(self._base + path, query, self._headers(accept))
 
 
+def _is_json(content_type: str) -> bool:
+    """``application/json`` or an ``application/*+json`` type, parameters ignored; ASCII only."""
+    media = content_type.partition(";")[0].strip()
+    if not media.isascii():
+        return False
+    media = media.lower()
+    return media == "application/json" or (
+        media.startswith("application/") and media.endswith("+json")
+    )
+
+
 def _require_plain(response: Response) -> None:
     """A compressed body is never decoded here: a decompression bomb needs a decompressor."""
-    if response.headers.get("content-encoding", "identity").lower() not in ("identity", ""):
+    encoding = response.headers.get("content-encoding", "identity")
+    if not encoding.isascii() or encoding.strip().lower() not in ("identity", ""):
         response.discard()
         raise ResponseInvalid("the response is compressed")

@@ -62,7 +62,11 @@ def test_a_ticket_with_three_attachments_keeps_each_as_a_source_with_its_parent(
 
 def test_attachment_names_are_hints_and_never_paths(tmp_path: Path) -> None:
     with jira(FakeServer(JiraBackend()), tmp_path) as source:
-        names = {e.id.rsplit("/", 1)[1]: e.name for e in source.listing().entries if "/attachment/" in e.id}
+        names = {
+            e.id.rsplit("/", 1)[1]: e.name
+            for e in source.listing().entries
+            if "/attachment/" in e.id
+        }
         assert names["20003"] == "lidar.log"  # "../../etc/lidar.log" keeps its last component only
 
 
@@ -83,7 +87,9 @@ def test_attachments_are_fetched_by_id_from_the_declared_site_never_from_the_rec
         assert server.other_methods == []
 
 
-def test_an_issue_updated_in_place_is_a_new_revision_and_the_old_one_is_kept(tmp_path: Path) -> None:
+def test_an_issue_updated_in_place_is_a_new_revision_and_the_old_one_is_kept(
+    tmp_path: Path,
+) -> None:
     backend = JiraBackend()
     ledger = SourceLedger()
     with jira(FakeServer(backend), tmp_path) as source:
@@ -97,9 +103,7 @@ def test_an_issue_updated_in_place_is_a_new_revision_and_the_old_one_is_kept(tmp
         second = fingerprint(source, ledger, source.walk())
     assert list(second) == ["issue/10003"]
     assert second["issue/10003"].content_id != first["issue/10003"].content_id
-    chain = [
-        r for r in ledger.revisions() if r.location.key[2] == "@site-a/OPS/issue/10003"
-    ]
+    chain = [r for r in ledger.revisions() if r.location.key[2] == "@site-a/OPS/issue/10003"]
     assert len(chain) == 2  # old and new, linked
     assert chain[0].id in chain[1].supersedes or chain[1].id in chain[0].supersedes
 
@@ -132,13 +136,17 @@ def test_a_removed_attachment_is_gone_when_its_issue_is_listed_again(tmp_path: P
         cursor = source.cursor
     assert first.id == "issue/10001"
     assert cursor == "deploy_jira/1:2026-08-20T12:50:00.000+0200"
-    with jira(FakeServer(backend), tmp_path, since="deploy_jira/1:2026-08-04T10:00:00.000+0200") as source:
+    with jira(
+        FakeServer(backend), tmp_path, since="deploy_jira/1:2026-08-04T10:00:00.000+0200"
+    ) as source:
         assert source.listing().mode == "incremental"
         gone = source.discover(ledger).gone
         assert [g.location.key[2] for g in gone] == ["@site-a/OPS/issue/10001/attachment/20003"]
 
 
-def test_the_change_feed_resumes_from_the_cursor_and_lists_only_what_changed(tmp_path: Path) -> None:
+def test_the_change_feed_resumes_from_the_cursor_and_lists_only_what_changed(
+    tmp_path: Path,
+) -> None:
     backend = JiraBackend()
     server = FakeServer(backend)
     with jira(server, tmp_path) as source:

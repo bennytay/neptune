@@ -42,7 +42,9 @@ def online(tmp_path: Path) -> Workspace:
 
 
 def cmms_profile() -> dict[str, Any]:
-    profile: dict[str, Any] = json.loads((FIXTURES / "cmms_profile.json").read_text(encoding="utf-8"))
+    profile: dict[str, Any] = json.loads(
+        (FIXTURES / "cmms_profile.json").read_text(encoding="utf-8")
+    )
     return profile
 
 

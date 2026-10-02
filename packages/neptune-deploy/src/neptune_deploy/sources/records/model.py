@@ -7,14 +7,16 @@ or how to fetch them (``Fetch``). Everything else (which items are kept, order, 
 discovery, reads) is the source's, so the systems cannot differ in policy.
 """
 
+import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 from neptune.model.ids import ExternalObjectRef
 
 ID_PATTERN: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~:@=+\-]{0,255}")
 MAX_NAME_BYTES: Final = 255
+MAX_SKIPPED_ID_BYTES: Final = 256  # of an id the source does not use
 
 
 @dataclass(frozen=True)
@@ -89,12 +91,34 @@ class RecordEntry:
     parent: ExternalObjectRef | None = None
 
 
+def sha256_text(text: str) -> str:
+    """The digest of ``text`` as UTF-8 (lone surrogates passed through), for ids too long to keep."""
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
 @dataclass(frozen=True)
 class SkippedRecord:
-    """A listed entry the source does not use: its id as listed, and the finding code."""
+    """A listed entry the source does not use, and the finding code saying why.
+
+    Built from the id as listed, it keeps only the first ``MAX_SKIPPED_ID_BYTES`` of it, with the
+    whole id's length and sha256: a system that lists huge unusable ids cannot make the source hold
+    them. ``raw_id`` is therefore a prefix when ``length`` exceeds it.
+    """
 
     raw_id: str
     reason: str
+    length: int = field(init=False)
+    sha256: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        data = self.raw_id.encode("utf-8", "surrogatepass")
+        object.__setattr__(self, "length", len(data))
+        object.__setattr__(self, "sha256", hashlib.sha256(data).hexdigest())
+        object.__setattr__(self, "raw_id", data[:MAX_SKIPPED_ID_BYTES].decode("utf-8", "replace"))
+
+    @property
+    def order(self) -> tuple[str, str, int, str]:
+        return (self.reason, self.raw_id, self.length, self.sha256)
 
 
 @dataclass(frozen=True)

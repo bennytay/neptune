@@ -72,7 +72,7 @@ CHANGE_REQUEST_FIELDS: Final = (
 _TABLE: Final = re.compile(r"[a-z][a-z0-9_]{0,79}")
 _FIELD: Final = re.compile(r"[a-z][a-z0-9_.]{0,79}")
 _SYS_ID: Final = re.compile(r"[0-9a-f]{32}")
-_UPDATED: Final = re.compile(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d")
+_UPDATED: Final = re.compile(r"[0-9]{4}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]")
 _QUERY: Final = re.compile(r"[\x20-\x7e]{1,1000}")
 ENV: Final = {
     "username": "NEPTUNE_SERVICENOW_USERNAME",
@@ -95,7 +95,7 @@ def _filter(value: Any) -> str:
 
 def _plan(authority: str, path: str, options: Options) -> Plan:
     if not _TABLE.fullmatch(path):
-        raise RecordConfigError(f"not a ServiceNow table name: {path!r}")
+        raise RecordConfigError("not a ServiceNow table name")
     return Plan(endpoint_for(authority, options), path)
 
 
@@ -254,15 +254,15 @@ class ServiceNowSystem:
         count = text_or_whole(record.get("sys_mod_count"))
         if updated is None or not _UPDATED.fullmatch(updated) or count is None:
             return Rejected(item_id, "record_invalid")
-        size = text_or_whole(record.get("size_bytes"))
+        size = whole(record.get("size_bytes"))
         if size is None:
             return Rejected(item_id, "size_invalid")
         return Item(
             item_id,
             f"mod_count:{count}@{updated}",
             safe_name(record.get("file_name"), raw),
-            int(size),
-            fetch=Fetch(f"/api/now/attachment/{raw}/file", (), int(size)),
+            size,
+            fetch=Fetch(f"/api/now/attachment/{raw}/file", (), size),
             parent=parent,
         )
 

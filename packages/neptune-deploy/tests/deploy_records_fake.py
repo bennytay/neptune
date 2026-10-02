@@ -174,7 +174,11 @@ class JiraBackend(Backend):
             if request.query.get("redirect") != "false":
                 return Reply(303, headers={"Location": "https://api.media.example/file"})
             data = self.bytes.get(request.path[len(prefix) :])
-            return Reply(200, data, {"Content-Type": "application/octet-stream"}) if data is not None else None
+            return (
+                Reply(200, data, {"Content-Type": "application/octet-stream"})
+                if data is not None
+                else None
+            )
         return None
 
     def _search(self, request: Request) -> Reply:
@@ -193,7 +197,9 @@ class JiraBackend(Backend):
                 {
                     "id": i["id"],
                     "key": i["key"],
-                    "fields": {k: v for k, v in self._with_sizes(i)["fields"].items() if k in wanted},
+                    "fields": {
+                        k: v for k, v in self._with_sizes(i)["fields"].items() if k in wanted
+                    },
                 }
                 for i in page
             ]
@@ -231,7 +237,11 @@ class ServiceNowBackend(Backend):
         for row in self.rows:
             if row["number"] == number:
                 self.deleted.append(
-                    {"documentkey": row["sys_id"], "tablename": "change_request", "sys_created_on": when}
+                    {
+                        "documentkey": row["sys_id"],
+                        "tablename": "change_request",
+                        "sys_created_on": when,
+                    }
                 )
         self.rows = [r for r in self.rows if r["number"] != number]
 
@@ -253,14 +263,20 @@ class ServiceNowBackend(Backend):
         prefix = "/api/now/attachment/"
         if request.path.startswith(prefix) and request.path.endswith("/file"):
             data = self.bytes.get(request.path[len(prefix) : -len("/file")])
-            return Reply(200, data, {"Content-Type": "application/octet-stream"}) if data is not None else None
+            return (
+                Reply(200, data, {"Content-Type": "application/octet-stream"})
+                if data is not None
+                else None
+            )
         return None
 
     def _ordered(self, request: Request, rows: list[dict[str, str]]) -> list[dict[str, str]]:
         query = request.query["sysparm_query"]
         for part in query.split("^"):
             if part.startswith("sys_updated_on>="):
-                rows = [r for r in rows if r["sys_updated_on"] >= part.removeprefix("sys_updated_on>=")]
+                rows = [
+                    r for r in rows if r["sys_updated_on"] >= part.removeprefix("sys_updated_on>=")
+                ]
         return sorted(rows, key=lambda r: (r["sys_updated_on"], r["sys_id"]))
 
     def _table(self, request: Request, rows: list[dict[str, str]]) -> Reply:
@@ -385,7 +401,10 @@ class ConfluenceBackend(Backend):
     def handle(self, request: Request) -> Reply | None:
         if request.path != "/wiki/api/v2/pages" or request.query.get("body-format") != "storage":
             return None
-        pages = sorted((p for p in self.pages if p["spaceId"] == request.query["space-id"]), key=lambda p: int(p["id"]))
+        pages = sorted(
+            (p for p in self.pages if p["spaceId"] == request.query["space-id"]),
+            key=lambda p: int(p["id"]),
+        )
         start = int(request.query.get("cursor") or 0)
         size = int(request.query["limit"])
         results = [
@@ -442,5 +461,9 @@ class RestBackend(Backend):
         parts = request.path.split("/")
         if len(parts) == 8 and parts[3] == "work-orders" and parts[5] == "attachments":
             data = self.bytes.get(parts[6])
-            return Reply(200, data, {"Content-Type": "application/octet-stream"}) if data is not None else None
+            return (
+                Reply(200, data, {"Content-Type": "application/octet-stream"})
+                if data is not None
+                else None
+            )
         return None
