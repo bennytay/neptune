@@ -1,0 +1,32 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "cmms.maximo",
+  "version": "1",
+  "description": "IBM Maximo WORKORDER export (CSV) with the rotating-item serials of the part swapped. WORKTYPE PM and CM are maintenance. Maximo writes times in the exporting user's zone without an offset: declare it in a copy.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "workorder",
+      "kind": "maintenance_event",
+      "requires": ["WONUM", "WORKTYPE"],
+      "where": {"column": "WORKTYPE", "in": ["PM", "CM"]},
+      "ignore": ["STATUS"],
+      "fields": {
+        "identifiers": [{"column": "WONUM", "namespace": "maximo.wonum"}],
+        "machines": [{"column": "ASSETNUM", "namespace": "maximo.assetnum"}],
+        "site": {"column": "SITEID", "namespace": "maximo.siteid"},
+        "performed": {"column": "ACTFINISH", "format": ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"], "required": true},
+        "diagnosis": {"column": "DESCRIPTION"},
+        "related": [{"column": "FAILURECODE", "namespace": "maximo.failurecode"}],
+        "actions": [{"column": "REMEDY", "split": ";"}],
+        "parts": [
+          {
+            "part": {"column": "ITEMNUM"},
+            "removed": [{"column": "ROTSERIAL_REMOVED", "namespace": "serial"}],
+            "installed": [{"column": "ROTSERIAL_INSTALLED", "namespace": "serial"}]
+          }
+        ]
+      }
+    }
+  ]
+}

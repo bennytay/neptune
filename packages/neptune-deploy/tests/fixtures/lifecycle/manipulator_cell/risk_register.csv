@@ -1,0 +1,3 @@
+Assessment ID,Cell,Robot,Assessed,Method,Hazard,Severity,Exposure,Avoidance,PLr,Mitigations,Approved By,Approved On
+RA-CELL3-01,CELL-3,ARM-3A,2026-02-20,ISO 12100,Crushing between gripper and fixture during manual loading,S2,F1,P2,d,Light curtain on loading side; Safety-rated reduced speed when curtain muted,Cell owner,2026-02-24
+RA-CELL3-02,CELL-3,ARM-3A,2026-02-20,ISO 12100,Ejected part on gripper failure,S1,F2,P1,b,Polycarbonate guard panel; Gripper pressure monitoring,Cell owner,2026-02-24

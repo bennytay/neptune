@@ -1,0 +1,33 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "cmms.generic",
+  "version": "1",
+  "description": "A generic CMMS work-order export, one row per work order. WO Type PM (preventive) and CM (corrective) are maintenance; other types are findings. Copy and edit the column names for your CMMS; declare the zone its times are written in.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "work_order",
+      "kind": "maintenance_event",
+      "requires": ["WO Number", "WO Type"],
+      "where": {"column": "WO Type", "in": ["PM", "CM"]},
+      "ignore": ["Technician"],
+      "fields": {
+        "identifiers": [{"column": "WO Number", "namespace": "cmms.work_order"}],
+        "machines": [{"column": "Asset ID", "namespace": "cmms.asset"}],
+        "site": {"column": "Site", "namespace": "cmms.site"},
+        "configuration": {"column": "Firmware After", "namespace": "firmware"},
+        "related": [{"column": "Related", "namespace": "cmms.reference", "split": ";"}],
+        "performed": {"column": "Completed", "format": ["%Y-%m-%d %H:%M", "%Y-%m-%d"], "required": true},
+        "diagnosis": {"column": "Problem"},
+        "actions": [{"column": "Work Performed", "split": ";"}],
+        "parts": [
+          {
+            "part": {"column": "Component"},
+            "removed": [{"column": "Removed Serial", "namespace": "serial"}],
+            "installed": [{"column": "Installed Serial", "namespace": "serial"}]
+          }
+        ]
+      }
+    }
+  ]
+}

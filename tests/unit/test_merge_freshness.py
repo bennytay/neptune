@@ -93,9 +93,13 @@ def test_members_are_read_at_a_git_ref() -> None:
     assert "_template" not in members
 
 
+# ``conformance`` (with the ``harness`` and ``check`` it runs) imports no format subpackage, and a
+# change to it is outside ci_plan's ADAPTER_DIR, so it reaches every member's job. It also imports
+# ``neptune.discovery.reader`` (for ``BytesReader``), which members may not import directly; the
+# reader runs no ingestion, and test_conformance_reaches_no_format_subpackage pins all of this.
 ADAPTER_IMPORT = re.compile(
-    r"neptune\.adapters\.(?!contract\b|registry\b)\w+"
-    r"|from\s+neptune\.adapters\s+import\s+(?!contract\b|registry\b)"
+    r"neptune\.adapters\.(?!contract\b|registry\b|conformance\b)\w+"
+    r"|from\s+neptune\.adapters\s+import\s+(?!contract\b|registry\b|conformance\b)"
     r"|neptune\.(sdk|runtime|discovery)\b"
     r"|from\s+neptune\s+import\s+[^\n]*\b(sdk|runtime|discovery|adapters)\b"
 )
@@ -114,3 +118,27 @@ def test_no_member_imports_a_format_adapter_or_runs_ingestion() -> None:
         and ADAPTER_IMPORT.search(path.read_text(encoding="utf-8"))
     ]
     assert offenders == []
+
+
+# What ``neptune.adapters.conformance`` may load from ``neptune.adapters``: the package itself and
+# the contract machinery, never a format subpackage or ``builtin`` (which imports them all).
+CONFORMANCE_ADAPTER_MODULES = frozenset(
+    {"neptune.adapters"}
+    | {
+        f"neptune.adapters.{name}"
+        for name in ("check", "conformance", "contract", "harness", "registry")
+    }
+)
+
+
+def test_conformance_reaches_no_format_subpackage() -> None:
+    """Members import ``conformance``; its transitive imports must not reach a format adapter."""
+    probe = (
+        "import sys, neptune.adapters.conformance; "
+        "print('\\n'.join(sorted(m for m in sys.modules if m.startswith('neptune.'))))"
+    )
+    run = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+    loaded = set(run.stdout.split())
+    adapters = {m for m in loaded if m == "neptune.adapters" or m.startswith("neptune.adapters.")}
+    assert adapters <= CONFORMANCE_ADAPTER_MODULES, sorted(adapters - CONFORMANCE_ADAPTER_MODULES)
+    assert not {m for m in loaded if m.startswith(("neptune.runtime", "neptune.sdk"))}

@@ -1,7 +1,7 @@
 # Worked examples
 
 Four robots, each with the sources such a team typically has, and the canonical records those
-sources declare (MVL-70). `make examples` rebuilds everything here from `make_examples.py`, and
+sources declare (MVL-70), plus two deployments' lifecycle records (MVL-83, ADR 0051). `make examples` rebuilds everything here from `make_examples.py`, and
 `tests/integration/test_worked_examples.py` checks that the committed files are exactly its output.
 
 | Example | Sources | What it shows |
@@ -10,6 +10,8 @@ sources declare (MVL-70). `make examples` rebuilds everything here from `make_ex
 | `quadruped` | `bag/metadata.yaml` + `bag/walk_0.mcap` (ROS 2 bag), `robot.urdf`, `meshes/body.stl` | a run declared by the bag's metadata; joint states and a body-pose trajectory, each with three clocks; the URDF as frames, transforms and components, naming no machine; the mesh as geometry |
 | `manipulator` | `session.mcap`, `handeye.yaml` | camera frames inside a log as a stream; a hand-eye calibration whose transform direction is `Ambiguous` and whose unit is missing |
 | `mobile_robot` | `drive.bag` (ROS 1), `sites.csv`, `photos/dock.png` | a register with blank cells, its rows and the sites they name, each id and name citing its cell; a photo's pixels and its EXIF capture time, position and camera serial |
+| `warehouse_amr` | `records.json` (a deployment-records export) | AMR-07's warehouse deployment at site S-007: commissioning baseline, authorisation envelope with per-zone speed limits, a remote assist, an incident, the map and zone change that followed, and the risk assessment |
+| `manipulator_cell` | `records.json` (a deployment-records export) | cell CELL-3: commissioning baseline, risk assessment with declared PLr scores, a joint-drive replacement and the requalification that returned it to service |
 
 Each example directory holds `sources/` (the files, as an ingest root) and `records/<kind>.jsonl`:
 one canonical-JSON line per record, sorted by id (ADR 0002), with the ledger (`source_artifact`,
@@ -28,6 +30,9 @@ arrive in M4 to M6. Series rows are Parquet and are not written here (MVL-5, MVL
   plus the duration, on the metadata's own clock.
 - EXIF states latitude and longitude as degrees, minutes and seconds with a hemisphere; the photo's
   position holds them as signed degrees, read exactly and rounded once to a float.
+- Deployment records (ADR 0051) are cited value by value with JSON pointers, all `stated`. Their
+  date-times state an offset, so their ticks are POSIX seconds on one document clock. Severities,
+  scores and decisions stay text; numbers keep their declared unit. They declare no run.
 - EXIF `DateTimeOriginal` has no zone. Its ticks count the stated civil seconds from
   1970-01-01T00:00:00 on the camera's own clock, whose timescale stays `Unknown`.
 

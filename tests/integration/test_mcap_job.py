@@ -101,6 +101,7 @@ def test_every_recording_lands_read_by_mcap_inside_the_sandbox(
             (
                 "neptune.grouping.",
                 "neptune.introspection.",
+                "neptune.clocks.",
                 "neptune.bindings.",
                 "neptune.validate.",
             )

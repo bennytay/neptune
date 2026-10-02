@@ -87,6 +87,7 @@ def test_every_log_lands_read_by_flightlog_inside_the_sandbox(
             (
                 "neptune.grouping.",
                 "neptune.introspection.",
+                "neptune.clocks.",
                 "neptune.bindings.",
                 "neptune.validate.",
             )

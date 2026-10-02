@@ -31,7 +31,7 @@ def test_today_the_compiler_is_real_and_the_rest_are_stubs(tmp_path: Path) -> No
     ]
     ledger = report["stages"][1]
     assert ledger["output"]["contract"] == "catalog-api"
-    assert ledger["output"]["contract_version"] == "1.3.0"
+    assert ledger["output"]["contract_version"] == "1.4.0"
     served = contracts.registry().latest("catalog-api")
     assert served is not None
     assert ledger["output"]["served"] == "goldens"
@@ -51,7 +51,9 @@ def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: 
         assert case["package"].startswith("sha256:")
     # Real ingest, partial success: the drone's ULog is claimed by the flightlog (PX4) adapter,
     # which reports the one sample dropout the log declares. Stream introspection (MVL-21) has no
-    # layout reader for its two streams' encoding, so each is not covered. Its folder holds no
+    # layout reader for its two streams' encoding, so each is not covered. Clock alignment (MVL-36)
+    # maps the boot clock onto the GPS time its fix messages carry, and says the latency between
+    # each fix and its publication is stated nowhere, so the bound is unknown. Its folder holds no
     # configuration, software, hardware or calibration file, so snapshot binding (MVL-38) says the
     # run has no software identity and leaves the other three kinds unresolved. Ingest is
     # deterministic.
@@ -60,6 +62,7 @@ def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: 
         "flightlog.dropout": 1,
         "neptune.bindings.no_software_identity": 1,
         "neptune.bindings.snapshot_unresolved": 3,
+        "neptune.clocks.latency_unbounded": 1,
         "neptune.introspection.encoding_not_covered": 2,
     }
     ids = {case["package"] for case in cases}

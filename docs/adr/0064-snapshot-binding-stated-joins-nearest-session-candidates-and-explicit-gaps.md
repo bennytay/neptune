@@ -63,7 +63,16 @@ never a silent guess. Constraints:
    bound once, while the two locations stay two revisions; nothing is merged, rewritten or chosen
    between. Canonical ids follow ADR 0017 §5; derived ids hash transform, run, snapshot and rule.
    Every table is sorted by id, and the result does not depend on input order.
-8. **Cost** is linear: extents are computed once per proposal, and each run reads its sessions'
+8. **Validity stays `Unknown`, clock mappings notwithstanding.** ADR 0060's mappings relate two
+   clocks; they say nothing about *when a snapshot applied*. A window would have to come from
+   evidence of that (a parameter change logged mid-run, a manifest's start and end), and none of
+   the joins above carries one. Writing the run's own `[first, last]` would assert that the
+   snapshot held for the whole run, which no source states; mapping a calibration's declared
+   `valid_from`/`valid_until` onto the run's clock through an inferred mapping is configuration
+   lineage (MVL-127). A later version states windows where a source declares when a snapshot took
+   effect on a run clock, and uses `neptune.derived.clocks` only to carry such a stated instant
+   across clocks, with its bound.
+9. **Cost** is linear: extents are computed once per proposal, and each run reads its sessions'
    files and its own source's rows; joins are dictionary lookups.
 
 ## Alternatives considered
@@ -89,7 +98,7 @@ never a silent guess. Constraints:
   and one finding per unbound kind per run; one with a stated binding is a schema-version 3 package
   (ADR 0050 §9). Goldens with runs changed accordingly; evidence record ids did not.
 - MVL-34's grouper swaps in behind `Grouping`; bindings re-lineage with it. MVL-36's clock mappings
-  let a later version state validity windows.
+  are not a source of windows (§8); a source stating when a snapshot took effect is.
 - Revisit if conflicts are frequent in real trees (then a sidecar or manifest pin rule, as a new
   version), if hardware or calibration adapters land widely (severity of their gaps), or if a
   consumer needs the rule on the derived record itself.
