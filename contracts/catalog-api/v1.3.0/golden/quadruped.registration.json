@@ -87,6 +87,6 @@
   "root_locator": "/srv/neptune/packages/quadruped",
   "schema_version": {
     "knowledge": "known",
-    "value": 1
+    "value": 3
   }
 }

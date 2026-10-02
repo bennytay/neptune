@@ -20,6 +20,6 @@
   "root_locator": "/srv/neptune/packages/mobile_robot-linked",
   "schema_version": {
     "knowledge": "known",
-    "value": 1
+    "value": 3
   }
 }

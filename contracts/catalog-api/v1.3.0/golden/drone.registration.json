@@ -75,6 +75,6 @@
   "root_locator": "/srv/neptune/packages/drone",
   "schema_version": {
     "knowledge": "known",
-    "value": 1
+    "value": 3
   }
 }

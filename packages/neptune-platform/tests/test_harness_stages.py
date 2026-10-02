@@ -58,10 +58,11 @@ def test_a_version_constant_that_disagrees_with_the_registry_is_a_stub(
 ) -> None:
     import neptune.model.record as record
 
-    monkeypatch.setattr(record, "SCHEMA_VERSION", 3)
+    newer = record.SCHEMA_VERSION + 1
+    monkeypatch.setattr(record, "SCHEMA_VERSION", newer)
     resolution = resolve(COMPILER, contracts.registry())
     assert resolution.mode == "stub"
-    assert "SCHEMA_VERSION is 3" in resolution.reason
+    assert f"SCHEMA_VERSION is {newer}" in resolution.reason
 
 
 def test_a_lock_a_major_behind_makes_the_stage_a_stub(tmp_path: Path) -> None:
