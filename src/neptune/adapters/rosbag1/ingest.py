@@ -12,7 +12,7 @@ from typing import Final
 
 from neptune.adapters.contract import AdapterConfig, Chunk, ChunkOutput, SourceReader
 from neptune.adapters.rosbag1.records import MAGIC, Connection, Text, parse_connection, time_at
-from neptune.adapters.rosbag1.report import Reporter, limits
+from neptune.adapters.rosbag1.report import Limits, Reporter, limits
 from neptune.adapters.rosbag1.scan import (
     ChunkProblem,
     Place,
@@ -21,6 +21,7 @@ from neptune.adapters.rosbag1.scan import (
     read_exact,
     scan,
 )
+from neptune.adapters.rosmsg.streams import HEADER_STAMP, Decoding, NotDecoded, plan_stream
 from neptune.identity.provenance import EvidenceRecord, evidence_record_id
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
@@ -36,6 +37,7 @@ from neptune.model.series import (
     SeriesColumn,
     SeriesProvenance,
     locator_column,
+    state_column,
     step_template,
     time_column,
 )
@@ -44,25 +46,76 @@ from neptune.model.time import NANOSECOND, ClockRole, Timestamp
 TIME_FIELD: Final = "rosbag1:time_field"
 MAGIC_PLACE: Final = Place(((0, len(MAGIC)),))
 TIME: Final = time_column(0)
+HEADER_TIME: Final = time_column(1)
 SCHEMA_ENCODING: Final = "ros1msg"  # the MCAP registry's names for the bag's own formats
 MESSAGE_ENCODING: Final = "ros1"
 # Connection header fields the stream holds elsewhere; every other field is its metadata.
 _ELSEWHERE: Final = (b"message_definition", b"topic", b"type")
 
 
-def columns() -> tuple[tuple[str, ColumnType], ...]:
-    """Every column of a bag stream's series, in name order, with its type.
+def columns(
+    decoding: "Decoding | NotDecoded | None" = None,
+) -> tuple[tuple[str, ColumnType, bool], ...]:
+    """Every column of a bag stream's series, in name order, with its type and whether it is
+    repeated: the message's own, then what its payload decodes to (ADR 0068 §1).
 
     A message lives in a chunk, so a row cites two byte ranges: the Chunk record in the file,
     then the message record in the chunk's uncompressed data.
     """
-    found = [(SEQ, ColumnType.INT64), (TIME, ColumnType.INT64)]
+    found = [(SEQ, ColumnType.INT64, False), (TIME, ColumnType.INT64, False)]
     for step in (0, 1):
         found += [
-            (locator_column(step, "length"), ColumnType.INT64),
-            (locator_column(step, "offset"), ColumnType.INT64),
+            (locator_column(step, "length"), ColumnType.INT64, False),
+            (locator_column(step, "offset"), ColumnType.INT64, False),
         ]
+    if isinstance(decoding, Decoding):
+        found += decoding.series_columns()
+        if decoding.has_header:
+            found += [
+                (HEADER_TIME, ColumnType.INT64, False),
+                (state_column(HEADER_TIME), ColumnType.STRING, False),
+            ]
     return tuple(sorted(found))
+
+
+def decoding_of(connection: Connection, config: AdapterConfig) -> Decoding | NotDecoded:
+    """How a connection's payloads decode, from the type and definition its header states."""
+    kind = connection.text(b"type")
+    field = connection.header.find(b"message_definition")
+    definition = None
+    if field is not None and field.length:
+        definition = connection.header.data[field.start : field.start + field.length]
+    return plan_stream(
+        config=config,
+        message_encoding=MESSAGE_ENCODING,
+        schema_encoding=SCHEMA_ENCODING,
+        schema_name=kind.value if kind is not None else None,
+        definition=definition,
+    )
+
+
+class ConnectionReader:
+    """Reads Connection records by place; the chunk last opened is kept for the next place."""
+
+    def __init__(self, source: SourceReader, limits: Limits) -> None:
+        self.source = source
+        self.limits = limits
+        self._chunk_cache: tuple[tuple[int, int], bytes] | None = None
+
+    def record(self, place: Place) -> bytes:
+        (offset, length), *inner = place.steps
+        if not inner:
+            return read_exact(self.source, offset, length)
+        if self._chunk_cache is None or self._chunk_cache[0] != (offset, length):
+            record = next(scan(self.source, offset, offset + length, self.limits.header_bytes))
+            self._chunk_cache = None  # one chunk held at a time
+            try:
+                opened = open_chunk(self.source, record, self.limits.chunk_bytes)
+            except ChunkProblem as problem:
+                raise ValueError(f"the plan's chunk no longer opens: {problem.reason}") from None
+            self._chunk_cache = ((offset, length), opened.data)
+        start, size = inner[0]
+        return self._chunk_cache[1][start : start + size]
 
 
 def series_template(source: SourceReader) -> SeriesProvenance:
@@ -137,7 +190,7 @@ class Declarations:
         self.records: list[EvidenceRecord] = []
         self.findings: list[IngestFinding] = []
         self.series: list[SeriesBatch] = []
-        self._chunk_cache: tuple[tuple[int, int], bytes] | None = None
+        self.connections = ConnectionReader(source, self.limits)
 
     def finding(
         self,
@@ -292,6 +345,13 @@ class Declarations:
         if conn in counts:
             total, span = counts[conn]
             count = Known(total, cite.provenance(span, kind=AssertionKind.STATED))
+        decoding = decoding_of(connection, cite.config)
+        clocks = [cite.clock]
+        if isinstance(decoding, Decoding) and decoding.has_header:
+            assert isinstance(definition, Known)
+            header = self._header_clock(place, topic, conn, definition.value)
+            clocks.append(header.id)
+            self.records.append(header)
         stream = Stream(
             id=stream_id,
             provenance=cite.provenance(place, kind=AssertionKind.STATED),
@@ -302,7 +362,7 @@ class Declarations:
             schema_definition=definition,
             message_encoding=Known(MESSAGE_ENCODING, spec),
             metadata=metadata,
-            clocks=(cite.clock,),
+            clocks=tuple(clocks),
             message_count=count,
             first=Unknown(),
             last=Unknown(),
@@ -311,19 +371,67 @@ class Declarations:
         self.records.append(stream)
         self.series.append(
             SeriesBatch(
-                stream.id, tuple(SeriesColumn(column, kind, ()) for column, kind in columns())
+                stream.id,
+                tuple(
+                    SeriesColumn(column, kind, (), repeated)
+                    for column, kind, repeated in columns(decoding)
+                ),
             )
         )
-        self.finding(
-            "payload_not_decoded",
-            FindingCategory.UNSUPPORTED,
-            Severity.INFO,
-            place,
-            f"connection {conn}'s message payloads are not decoded; each row cites its message's"
-            " bytes",
-            {"id": conn, "message_encoding": MESSAGE_ENCODING},
-            records=(stream_id,),
+        self._decoding_findings(conn, place, stream_id, decoding)
+
+    def _header_clock(
+        self, place: Place, topic: Knowledge[str], conn: int, definition: EvidenceRef
+    ) -> TimestampDomain:
+        """The clock a leading ``Header``'s stamp reads (ADR 0068 §2): nanosecond ticks, as the
+        definition's ``time`` declares them; role, epoch and timescale are the publisher's and
+        unstated."""
+        cite = self.cite
+        where = (time_field(HEADER_STAMP),)
+        scope = (topic.value,) if isinstance(topic, Known) else ("connection", str(conn))
+        stated = Provenance(definition, cite.transform.id, AssertionKind.STATED)
+        return TimestampDomain(
+            id=cite.record_id(TimestampDomain.kind, place, *where),
+            provenance=cite.provenance(place, *where),
+            field=HEADER_STAMP,
+            scope=scope,
+            role=Unknown(),
+            resolution=Known(NANOSECOND, stated),
+            epoch=Unknown(),
+            timescale=Unknown(),
+            declared_monotonic=Unknown(),
         )
+
+    def _decoding_findings(
+        self, conn: int, place: Place, stream: RecordId, decoding: Decoding | NotDecoded
+    ) -> None:
+        if isinstance(decoding, NotDecoded):
+            self.finding(
+                "payload_not_decoded",
+                FindingCategory.UNSUPPORTED,
+                Severity.INFO,
+                place,
+                f"connection {conn}'s message payloads are not decoded ({decoding.detail}); each"
+                " row cites its message's bytes",
+                {"id": conn, "message_encoding": MESSAGE_ENCODING, "reason": decoding.reason},
+                records=(stream,),
+            )
+        elif decoding.mode != "full":
+            what = (
+                f"only its header is decoded ({decoding.detail})"
+                if decoding.mode == "header_only"
+                else f"{len(decoding.left_out)} field path(s) are walked without a column"
+            )
+            self.finding(
+                "payload_partly_decoded",
+                FindingCategory.UNSUPPORTED,
+                Severity.INFO,
+                place,
+                f"connection {conn}'s payloads are decoded, but {what}; each row still cites its"
+                " message's bytes",
+                {"id": conn, **decoding.details()},  # type: ignore[dict-item]
+                records=(stream,),
+            )
 
     def _metadata(
         self,
@@ -397,16 +505,4 @@ class Declarations:
 
     def _record(self, place: Place) -> bytes:
         """A Connection record's bytes; the chunk last opened is kept for the next place in it."""
-        (offset, length), *inner = place.steps
-        if not inner:
-            return read_exact(self.source, offset, length)
-        if self._chunk_cache is None or self._chunk_cache[0] != (offset, length):
-            record = next(scan(self.source, offset, offset + length, self.limits.header_bytes))
-            self._chunk_cache = None  # one chunk held at a time
-            try:
-                opened = open_chunk(self.source, record, self.limits.chunk_bytes)
-            except ChunkProblem as problem:
-                raise ValueError(f"the plan's chunk no longer opens: {problem.reason}") from None
-            self._chunk_cache = ((offset, length), opened.data)
-        start, size = inner[0]
-        return self._chunk_cache[1][start : start + size]
+        return self.connections.record(place)

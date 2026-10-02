@@ -1,0 +1,503 @@
+"""Decoding ROS payloads into typed series columns: a layout compiled once per stream, then one
+walk per message (ADR 0068 §1).
+
+``compile_layout`` turns a parsed ``Definition`` into the columns a stream's series gains and a
+program that reads a payload into them. A column is named by its field path, as
+``neptune.derived.schemas`` writes paths: segments joined by ``.``, ``[]`` after an array field
+(``transforms[].header.frame_id``). A path under no array is a scalar column; under one array
+level a repeated column, one list per message. Three kinds of path are walked but get no column
+(``LeftOut``): a byte array (``uint8[]``, ``byte[]``, ``char[]``, ``octet``: an image's or a point
+cloud's bytes, which the row already cites whole), a path under two array levels (no column type
+holds a list of lists), and nothing else. ROS 1's ``time`` and ``duration`` are two columns,
+``<path>.secs`` and ``<path>.nsecs``, as the format defines them.
+
+``Decoder.decode`` walks one payload: ROS 2's CDR (the encapsulation header, then XCDR1 with
+alignment counted from after it, either byte order) or ROS 1's serialisation (little-endian,
+packed). Every count and length is checked against the bytes left before anything is read or
+allocated, an array is bounded by ``max_array_items``, a whole message by ``max_message_bytes``;
+a payload that breaks its layout raises ``Malformed``, never anything else. Text that is not
+UTF-8 makes only its own cell unknown.
+"""
+
+import struct
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Final
+
+from neptune.adapters.rosmsg.definitions import (
+    BYTE_NAMES,
+    ArrayKind,
+    Definition,
+    DefinitionError,
+    FieldDef,
+    MessageDef,
+)
+from neptune.model.series import ColumnType
+
+COLUMN_TYPES: Final = {
+    "bool": ColumnType.BOOL,
+    "int8": ColumnType.INT8,
+    "uint8": ColumnType.UINT8,
+    "int16": ColumnType.INT16,
+    "uint16": ColumnType.UINT16,
+    "int32": ColumnType.INT32,
+    "uint32": ColumnType.UINT32,
+    "int64": ColumnType.INT64,
+    "uint64": ColumnType.UINT64,
+    "float32": ColumnType.FLOAT32,
+    "float64": ColumnType.FLOAT64,
+    "string": ColumnType.STRING,
+}
+_CODES: Final = {
+    "bool": "B",
+    "int8": "b",
+    "uint8": "B",
+    "int16": "h",
+    "uint16": "H",
+    "int32": "i",
+    "uint32": "I",
+    "int64": "q",
+    "uint64": "Q",
+    "float32": "f",
+    "float64": "d",
+}
+_U32: Final = (struct.Struct("<I"), struct.Struct(">I"))
+MAX_DEPTH: Final = 32
+NANOS: Final = 1_000_000_000
+
+
+class Malformed(ValueError):
+    """A payload that does not hold its layout. ``limit`` marks one past a decoding limit (an
+    array or a message too large), which is not the payload's fault."""
+
+    def __init__(self, reason: str, limit: bool = False) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.limit = limit
+
+
+class _BadText:
+    """A cell whose text is not UTF-8: unknown, the rest of the row still decoded."""
+
+
+BAD_TEXT: Final = _BadText()
+
+
+@dataclass(frozen=True)
+class Column:
+    path: str
+    type: ColumnType
+    repeated: bool
+
+
+@dataclass(frozen=True)
+class LeftOut:
+    path: str
+    reason: str  # byte_array, nested_array
+
+
+@dataclass(frozen=True)
+class DecodeLimits:
+    max_columns: int = 512
+    max_array_items: int = 65_536
+    max_message_bytes: int = 16 << 20
+
+
+# --- The program --------------------------------------------------------------------------------
+
+
+class _State:
+    """One walk: the payload, where it is, its byte order, where alignment counts from."""
+
+    __slots__ = ("big", "buf", "cdr", "cells", "limits", "origin", "pos")
+
+    def __init__(
+        self,
+        buf: bytes | memoryview,
+        pos: int,
+        cdr: bool,
+        big: bool,
+        cells: list[object],
+        limits: DecodeLimits,
+    ) -> None:
+        self.buf, self.pos, self.cdr, self.big = buf, pos, cdr, big
+        self.origin = pos
+        self.cells = cells
+        self.limits = limits
+
+    def align(self, size: int) -> None:
+        if self.cdr and size > 1:
+            self.pos += -(self.pos - self.origin) % size
+
+    def need(self, size: int) -> None:
+        if size > len(self.buf) - self.pos:
+            raise Malformed("short")
+
+    def count(self) -> int:
+        self.align(4)
+        self.need(4)
+        value: int = _U32[self.big].unpack_from(self.buf, self.pos)[0]
+        self.pos += 4
+        return value
+
+
+class _Node:
+    min_size = 0  # the fewest bytes the node takes on the wire, alignment aside
+
+    def read(self, state: _State, depth: int) -> None:  # pragma: no cover - abstract
+        raise NotImplementedError
+
+
+def _put(state: _State, slot: int | None, depth: int, value: object) -> None:
+    """Store a leaf's value: a scalar column at depth 0, an item of a list at depth 1."""
+    if slot is None:
+        return
+    if depth == 0:
+        state.cells[slot] = value
+    else:
+        cell = state.cells[slot]
+        if isinstance(cell, list):
+            cell.append(value)
+
+
+class _Primitive(_Node):
+    def __init__(self, wire: str, slot: int | None) -> None:
+        code = _CODES[wire]
+        self.size = struct.calcsize(code)
+        self.structs = (struct.Struct("<" + code), struct.Struct(">" + code))
+        self.bool = wire == "bool"
+        self.slot = slot
+        self.min_size = self.size
+
+    def read(self, state: _State, depth: int) -> None:
+        state.align(self.size)
+        state.need(self.size)
+        value = self.structs[state.big].unpack_from(state.buf, state.pos)[0]
+        state.pos += self.size
+        if self.bool:
+            if value > 1:
+                raise Malformed("bool")
+            value = bool(value)
+        _put(state, self.slot, depth, value)
+
+
+class _String(_Node):
+    min_size = 4
+
+    def __init__(self, bound: int | None, slot: int | None) -> None:
+        self.bound = bound
+        self.slot = slot
+
+    def read(self, state: _State, depth: int) -> None:
+        length = state.count()
+        state.need(length)
+        start = state.pos
+        state.pos += length
+        if state.cdr and length:  # CDR counts the terminating NUL
+            if state.buf[state.pos - 1] != 0:
+                raise Malformed("string_terminator")
+            length -= 1
+        if self.bound is not None and length > self.bound:
+            raise Malformed("string_bound")
+        if self.slot is None:
+            return
+        try:
+            text: object = bytes(state.buf[start : start + length]).decode("utf-8")
+        except UnicodeDecodeError:
+            text = BAD_TEXT
+        _put(state, self.slot, depth, text)
+
+
+class _Time(_Node):
+    """ROS 1 ``time`` (two uint32) or ``duration`` (two int32): seconds, nanoseconds."""
+
+    min_size = 8
+
+    def __init__(self, signed: bool, slots: tuple[int | None, int | None]) -> None:
+        self.struct = struct.Struct("<ii" if signed else "<II")
+        self.slots = slots
+
+    def read(self, state: _State, depth: int) -> None:
+        state.need(8)
+        secs, nsecs = self.struct.unpack_from(state.buf, state.pos)
+        state.pos += 8
+        _put(state, self.slots[0], depth, secs)
+        _put(state, self.slots[1], depth, nsecs)
+
+
+class _Struct(_Node):
+    def __init__(self, members: list[_Node]) -> None:
+        self.members = members
+        self.min_size = sum(member.min_size for member in members)
+
+    def read(self, state: _State, depth: int) -> None:
+        for member in self.members:
+            member.read(state, depth)
+
+
+class _Array(_Node):
+    def __init__(self, kind: ArrayKind, length: int | None, element: _Node) -> None:
+        self.kind, self.length, self.element = kind, length, element
+        # Arrays of fixed-size primitives are read in one step.
+        self.packed = element if isinstance(element, _Primitive) else None
+        if kind is ArrayKind.FIXED:
+            self.min_size = (length or 0) * element.min_size
+        else:
+            self.min_size = 4
+
+    def read(self, state: _State, depth: int) -> None:
+        if self.kind is ArrayKind.FIXED:
+            assert self.length is not None
+            count = self.length
+        else:
+            count = state.count()
+            if self.kind is ArrayKind.BOUNDED and self.length is not None and count > self.length:
+                raise Malformed("array_bound")
+        if count > state.limits.max_array_items:
+            raise Malformed("array_limit", limit=True)
+        packed = self.packed
+        if packed is not None:
+            if count:  # an empty sequence's elements add no padding
+                state.align(packed.size)
+            state.need(count * packed.size)
+            slot = packed.slot
+            if slot is not None and depth == 0:
+                code = packed.structs[state.big].format[1:]
+                order = ">" if state.big else "<"
+                values = struct.unpack_from(f"{order}{count}{code}", state.buf, state.pos)
+                if packed.bool:
+                    if any(value > 1 for value in values):
+                        raise Malformed("bool")
+                    values = tuple(bool(value) for value in values)
+                state.cells[slot] = list(values)
+            state.pos += count * packed.size
+            return
+        # a count past what the bytes left could hold is a lie, refused before the walk
+        state.need(count * self.element.min_size)
+        for _ in range(count):
+            self.element.read(state, depth + 1)
+
+
+class _Skip(_Node):
+    """A byte array left out: its count checked, its bytes passed over."""
+
+    def __init__(self, kind: ArrayKind, length: int | None) -> None:
+        self.kind, self.length = kind, length
+        self.min_size = (length or 0) if kind is ArrayKind.FIXED else 4
+
+    def read(self, state: _State, depth: int) -> None:
+        if self.kind is ArrayKind.FIXED:
+            assert self.length is not None
+            count = self.length
+        else:
+            count = state.count()
+            if self.kind is ArrayKind.BOUNDED and self.length is not None and count > self.length:
+                raise Malformed("array_bound")
+        state.need(count)
+        state.pos += count
+
+
+# --- Compiling ----------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class HeaderStamp:
+    """Where a ``std_msgs/Header`` as the root's first field puts its stamp: the seconds and
+    nanoseconds columns (by index), and the frame id's."""
+
+    seconds: int
+    nanoseconds: int
+    frame: int
+
+
+@dataclass(frozen=True)
+class Layout:
+    """The columns a stream's messages decode into, what is walked without a column, and the
+    program. ``header_only``: only the leading header is read (the rest could not be)."""
+
+    root: str
+    columns: tuple[Column, ...]
+    left_out: tuple[LeftOut, ...]
+    header: HeaderStamp | None
+    header_only: bool
+    program: _Struct
+
+
+class _Compiler:
+    def __init__(self, definition: Definition, limits: DecodeLimits, ros1: bool) -> None:
+        self.types = definition.types
+        self.limits = limits
+        self.ros1 = ros1
+        self.columns: list[Column] = []
+        self.left_out: list[LeftOut] = []
+
+    def column(self, path: str, wire: str, arrays: int) -> int | None:
+        if arrays > 1:
+            self.left_out.append(LeftOut(path, "nested_array"))
+            return None
+        if len(self.columns) >= self.limits.max_columns:
+            raise DefinitionError(
+                "column_limit", f"more than {self.limits.max_columns} decoded columns"
+            )
+        self.columns.append(Column(path, COLUMN_TYPES[wire], arrays == 1))
+        return len(self.columns) - 1
+
+    def message(
+        self, message: MessageDef, prefix: str, arrays: int, ancestors: tuple[str, ...]
+    ) -> _Struct:
+        if len(ancestors) > MAX_DEPTH:
+            raise DefinitionError("nesting_limit", f"fields nest deeper than {MAX_DEPTH}")
+        return _Struct([self.field(f, prefix, arrays, ancestors) for f in message.fields])
+
+    def field(self, field: FieldDef, prefix: str, arrays: int, ancestors: tuple[str, ...]) -> _Node:
+        path = prefix + field.name + ("[]" if field.array is not None else "")
+        inner = arrays + (1 if field.array is not None else 0)
+        if field.array is not None and field.declared in BYTE_NAMES:
+            self.left_out.append(LeftOut(path, "byte_array"))
+            return _Skip(field.array, field.length)
+        element = self.element(field, path, inner, ancestors)
+        if field.array is None:
+            return element
+        return _Array(field.array, field.length, element)
+
+    def element(self, field: FieldDef, path: str, arrays: int, ancestors: tuple[str, ...]) -> _Node:
+        wire = field.wire
+        if wire is None:
+            if field.type in ancestors:
+                raise DefinitionError("unsupported", f"{field.type} holds itself")
+            return self.message(
+                self.types[field.type], path + ".", arrays, (*ancestors, field.type)
+            )
+        if wire == "wstring":
+            raise DefinitionError("unsupported", "a wstring field is not decoded")
+        if wire in ("time", "duration"):
+            seconds = self.column(
+                path + ".secs", "int32" if wire == "duration" else "uint32", arrays
+            )
+            nanos = self.column(
+                path + ".nsecs", "int32" if wire == "duration" else "uint32", arrays
+            )
+            return _Time(wire == "duration", (seconds, nanos))
+        slot = self.column(path, wire, arrays)
+        if wire == "string":
+            return _String(field.bound, slot)
+        return _Primitive(wire, slot)
+
+
+def header_field(definition: Definition) -> FieldDef | None:
+    """The root's first field when it is a ``std_msgs/Header`` called ``header`` whose stamp and
+    frame id are what ROS defines: ``stamp`` (ROS 1 ``time``; ROS 2 ``builtin_interfaces/Time``
+    of ``int32 sec`` and ``uint32 nanosec``) and ``string frame_id``."""
+    fields = definition.root_type.fields
+    if not fields:
+        return None
+    first = fields[0]
+    if first.name != "header" or first.type != "std_msgs/Header" or first.array is not None:
+        return None
+    header = definition.types.get("std_msgs/Header")
+    if header is None:
+        return None
+    named = {f.name: f for f in header.fields}
+    stamp, frame = named.get("stamp"), named.get("frame_id")
+    if frame is None or frame.wire != "string" or frame.array is not None or stamp is None:
+        return None
+    if stamp.array is not None:
+        return None
+    if stamp.wire == "time":
+        return first
+    if stamp.wire is None and stamp.type == "builtin_interfaces/Time":
+        time = definition.types.get(stamp.type)
+        if time is not None:
+            parts = [(f.name, f.wire, f.array) for f in time.fields]
+            if parts == [("sec", "int32", None), ("nanosec", "uint32", None)]:
+                return first
+    return None
+
+
+def compile_layout(
+    definition: Definition, limits: DecodeLimits, *, header_only: bool = False
+) -> Layout:
+    """The layout of ``definition``'s root; ``header_only`` reads only a leading header.
+
+    Raises ``DefinitionError`` (``column_limit``, ``nesting_limit``, ``unsupported``) where the
+    layout cannot be built; a caller may then try ``header_only``.
+    """
+    ros1 = definition.encoding == "ros1msg"
+    compiler = _Compiler(definition, limits, ros1)
+    header = header_field(definition)
+    root = definition.root_type
+    if header_only:
+        if header is None:
+            raise DefinitionError("unsupported", "the type has no leading std_msgs/Header")
+        program = _Struct([compiler.field(header, "", 0, (root.name,))])
+    else:
+        program = compiler.message(root, "", 0, (root.name,))
+    stamp = None
+    if header is not None:
+        index = {column.path: i for i, column in enumerate(compiler.columns)}
+        if ros1:
+            seconds, nanos = index["header.stamp.secs"], index["header.stamp.nsecs"]
+        else:
+            seconds, nanos = index["header.stamp.sec"], index["header.stamp.nanosec"]
+        stamp = HeaderStamp(seconds, nanos, index["header.frame_id"])
+    return Layout(
+        root.name,
+        tuple(compiler.columns),
+        tuple(compiler.left_out),
+        stamp,
+        header_only,
+        program,
+    )
+
+
+# --- Decoding -----------------------------------------------------------------------------------
+
+
+class Decoder:
+    """Reads payloads of one layout. ``cdr``: ROS 2's CDR; otherwise ROS 1's serialisation."""
+
+    def __init__(self, layout: Layout, cdr: bool, limits: DecodeLimits) -> None:
+        self.layout = layout
+        self.cdr = cdr
+        self.limits = limits
+        self.repeated = [i for i, column in enumerate(layout.columns) if column.repeated]
+
+    def decode(self, payload: bytes | memoryview) -> list[object]:
+        """One cell per column (``BAD_TEXT`` where text is not UTF-8), or ``Malformed``."""
+        if len(payload) > self.limits.max_message_bytes:
+            raise Malformed("message_limit", limit=True)
+        cells: list[object] = [None] * len(self.layout.columns)
+        for index in self.repeated:
+            cells[index] = []
+        big, start = False, 0
+        if self.cdr:
+            if len(payload) < 4:
+                raise Malformed("short")
+            if payload[0] != 0 or payload[1] not in (0, 1):
+                raise Malformed("encapsulation")
+            big, start = payload[1] == 0, 4
+        state = _State(payload, start, self.cdr, big, cells, self.limits)
+        self.layout.program.read(state, 0)
+        if not self.layout.header_only:
+            trailing = len(payload) - state.pos
+            # CDR may pad a message to four bytes; ROS 1 holds exactly the fields
+            if trailing > (3 if self.cdr else 0):
+                raise Malformed("trailing_bytes")
+        for index in self.repeated:
+            cell = cells[index]
+            if isinstance(cell, list):
+                cells[index] = BAD_TEXT if any(v is BAD_TEXT for v in cell) else tuple(cell)
+        return cells
+
+    def stamp(self, cells: Sequence[object]) -> int | None:
+        """The header stamp as nanosecond ticks; ``None`` without a header, or where the
+        nanoseconds are out of their range ``[0, 10^9)``."""
+        header = self.layout.header
+        if header is None:
+            return None
+        seconds, nanos = cells[header.seconds], cells[header.nanoseconds]
+        if not isinstance(seconds, int) or not isinstance(nanos, int):
+            return None
+        if not 0 <= nanos < NANOS:
+            return None
+        return seconds * NANOS + nanos

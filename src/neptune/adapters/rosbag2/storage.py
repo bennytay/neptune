@@ -21,6 +21,7 @@ chunks are rowid ranges, each with the ``seq`` its topics start from. A chunk wa
 """
 
 from collections import defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
@@ -48,6 +49,17 @@ from neptune.adapters.rosbag2._sqlite import (
     rowid_alias,
     text_value,
 )
+from neptune.adapters.rosmsg.streams import (
+    HEADER_STAMP,
+    KNOWN,
+    LIMIT_REASONS,
+    UNKNOWN,
+    Decoding,
+    NotDecoded,
+    Undecoded,
+    decode_row,
+    plan_stream,
+)
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
@@ -62,6 +74,7 @@ from neptune.model.series import (
     SeriesColumn,
     SeriesProvenance,
     locator_column,
+    state_column,
     step_template,
     time_column,
     value_column,
@@ -78,18 +91,54 @@ TOPIC_REQUIRED: Final = ("name", "type", "serialization_format")
 MESSAGE_REQUIRED: Final = ("topic_id", "timestamp", "data")
 DEFINITION_REQUIRED: Final = ("topic_type", "encoding", "encoded_message_definition")
 MESSAGE_ID, DATA_BYTES = value_column("message_id"), value_column("data_bytes")
-COLUMNS: Final = tuple(
-    sorted(
-        [
-            (SEQ, ColumnType.INT64),
-            (time_column(0), ColumnType.INT64),
-            (MESSAGE_ID, ColumnType.INT64),
-            (DATA_BYTES, ColumnType.INT64),
-            (locator_column(0, "length"), ColumnType.INT64),
-            (locator_column(0, "offset"), ColumnType.INT64),
-        ]
-    )
+HEADER_TIME: Final = time_column(1)
+COLUMNS: Final = (
+    (SEQ, ColumnType.INT64, False),
+    (time_column(0), ColumnType.INT64, False),
+    (MESSAGE_ID, ColumnType.INT64, False),
+    (DATA_BYTES, ColumnType.INT64, False),
+    (locator_column(0, "length"), ColumnType.INT64, False),
+    (locator_column(0, "offset"), ColumnType.INT64, False),
 )
+
+
+def columns(
+    decoding: Decoding | NotDecoded | None = None,
+) -> tuple[tuple[str, ColumnType, bool], ...]:
+    """Every column of a topic's series, in name order, with its type and whether it is
+    repeated: the message's own, then what its payload decodes to (ADR 0068 §1)."""
+    found = list(COLUMNS)
+    if isinstance(decoding, Decoding):
+        found += decoding.series_columns()
+        if decoding.has_header:
+            found += [
+                (HEADER_TIME, ColumnType.INT64, False),
+                (state_column(HEADER_TIME), ColumnType.STRING, False),
+            ]
+    return tuple(sorted(found))
+
+
+def decoding_of(
+    source: SourceReader,
+    topic: "Topic",
+    definitions: "dict[str, Definition]",
+    config: AdapterConfig,
+) -> Decoding | NotDecoded:
+    """How a topic's payloads decode, from its row and its type's ``message_definitions`` row."""
+    kind = topic.values.get("type") or None
+    found = definitions.get(kind or "")
+    text = None
+    if found is not None and found.text is not None:
+        text = source.read(found.text.offset, found.text.length)
+    return plan_stream(
+        config=config,
+        message_encoding=topic.values.get("serialization_format") or None,
+        schema_encoding=found.encoding if found is not None else None,
+        schema_name=kind,
+        definition=text,
+    )
+
+
 PROBLEMS: Final = {
     "unreadable": "a page the file does not hold whole",
     "not_table_page": "a page that is not a table b-tree page",
@@ -157,6 +206,7 @@ class Message:
     stamp: ByteRange  # the bytes of the timestamp (the cell, when its value has none)
     cell: ByteRange
     data_bytes: int
+    payload: bytes | None = None  # the data's bytes when all of them are in the cell's page
 
 
 def decode_message(cell: Cell, columns: dict[str, int]) -> Message | str:
@@ -174,7 +224,9 @@ def decode_message(cell: Cell, columns: dict[str, int]) -> Message | str:
         return "bad_record"
     where = ByteRange(cell.offset, cell.length)
     place = ByteRange(stamp.offset, stamp.size) if stamp.size else where
-    return Message(cell.rowid, topic_id, ticks, place, where, data.size)
+    end = data.at + data.size
+    payload = cell.local[data.at : end] if end <= len(cell.local) else None
+    return Message(cell.rowid, topic_id, ticks, place, where, data.size, payload)
 
 
 @dataclass(frozen=True)
@@ -673,6 +725,13 @@ class _Declarations:
             for key in ("offered_qos_profiles", "type_description_hash")
             if (value := topic.values.get(key))
         )
+        decoding = decoding_of(self.source, topic, definitions, cite.config)
+        clocks = [clock]
+        if isinstance(decoding, Decoding) and decoding.has_header:
+            assert found is not None and found.text is not None
+            header = self._header_clock(topic, name, found.text)
+            clocks.append(header.id)
+            self.records.append(header)
         stream = Stream(
             id=stream_id,
             provenance=provenance,
@@ -683,7 +742,7 @@ class _Declarations:
             schema_definition=definition,
             message_encoding=encoding,
             metadata=metadata,
-            clocks=(clock,),
+            clocks=tuple(clocks),
             message_count=Known(
                 count,
                 cite.provenance(
@@ -696,23 +755,73 @@ class _Declarations:
         )
         self.records.append(stream)
         self.series.append(
-            SeriesBatch(stream_id, tuple(SeriesColumn(n, t, ()) for n, t in COLUMNS))
-        )
-        self.findings.append(
-            cite.finding(
-                "payload_not_decoded",
-                FindingCategory.UNSUPPORTED,
-                Severity.INFO,
-                (topic.place,),
-                f"topic {topic.row.rowid}'s message payloads are not decoded; each row cites its"
-                " message's cell",
-                {
-                    "rowid": topic.row.rowid,
-                    "serialization_format": topic.values.get("serialization_format") or "",
-                },
-                records=(stream_id,),
+            SeriesBatch(
+                stream_id, tuple(SeriesColumn(n, t, (), r) for n, t, r in columns(decoding))
             )
         )
+        self._decoding_findings(topic, stream_id, decoding)
+
+    def _header_clock(
+        self, topic: Topic, name: Knowledge[str], definition: ByteRange
+    ) -> TimestampDomain:
+        """The clock a leading ``std_msgs/Header``'s stamp reads (ADR 0068 §2): nanosecond
+        ticks, as the definition's ``sec`` and ``nanosec`` declare them; role, epoch and
+        timescale are the publisher's and unstated."""
+        cite = self.cite
+        where = adapter_locator(TIME_FIELD, {"name": HEADER_STAMP})
+        scope = (name.value,) if isinstance(name, Known) else ("topic", str(topic.row.rowid))
+        return TimestampDomain(
+            id=cite.record_id(TimestampDomain.kind, topic.place, where),
+            provenance=cite.provenance(topic.place, where),
+            field=HEADER_STAMP,
+            scope=scope,
+            role=Unknown(),
+            resolution=Known(NANOSECOND, cite.provenance(definition, kind=AssertionKind.STATED)),
+            epoch=Unknown(),
+            timescale=Unknown(),
+            declared_monotonic=Unknown(),
+        )
+
+    def _decoding_findings(
+        self, topic: Topic, stream: RecordId, decoding: Decoding | NotDecoded
+    ) -> None:
+        cite = self.cite
+        rowid = topic.row.rowid
+        if isinstance(decoding, NotDecoded):
+            self.findings.append(
+                cite.finding(
+                    "payload_not_decoded",
+                    FindingCategory.UNSUPPORTED,
+                    Severity.INFO,
+                    (topic.place,),
+                    f"topic {rowid}'s message payloads are not decoded ({decoding.detail}); each"
+                    " row cites its message's cell",
+                    {
+                        "reason": decoding.reason,
+                        "rowid": rowid,
+                        "serialization_format": topic.values.get("serialization_format") or "",
+                    },
+                    records=(stream,),
+                )
+            )
+        elif decoding.mode != "full":
+            what = (
+                f"only its header is decoded ({decoding.detail})"
+                if decoding.mode == "header_only"
+                else f"{len(decoding.left_out)} field path(s) are walked without a column"
+            )
+            self.findings.append(
+                cite.finding(
+                    "payload_partly_decoded",
+                    FindingCategory.UNSUPPORTED,
+                    Severity.INFO,
+                    (topic.place,),
+                    f"topic {rowid}'s payloads are decoded, but {what}; each row still cites its"
+                    " message's cell",
+                    {"rowid": rowid, **decoding.details()},  # type: ignore[dict-item]
+                    records=(stream,),
+                )
+            )
 
 
 def series_template(source: SourceReader) -> SeriesProvenance:
@@ -731,6 +840,7 @@ class _Rows:
         layout: Layout,
     ) -> None:
         self.ids = _Streams(source, config)
+        self.source = source
         self.context = chunk.context
         self.db = db
         self.layout = layout
@@ -740,28 +850,73 @@ class _Rows:
         starts = {_ints(t): _ints(s) for t, s in (tuple(p) for p in _pairs(self.context["seq"]))}
         topics, _ = read_topics(self.db, self.layout, Walk())
         streams = {topic.row.rowid: self.ids.stream_id(topic) for topic in topics}
-        rows: dict[int, dict[str, list[int | None]]] = {}
+        definitions = read_definitions(self.db, self.layout)
+        decodings = {
+            topic.row.rowid: decoding_of(self.source, topic, definitions, self.ids.cite.config)
+            for topic in topics
+        }
+        undecoded: dict[int, Undecoded] = {}
+        rows: dict[int, dict[str, list[object]]] = {}
         for cell in self.db.table(self.layout.messages.root, low, high):
             message = decode_message(cell, self.layout.message_columns)
             if isinstance(message, str) or message.topic not in streams:
                 continue
             seq = starts.get(message.topic, 0)
             starts[message.topic] = seq + 1
-            columns = rows.setdefault(message.topic, {name: [] for name, _ in COLUMNS})
-            columns[SEQ].append(seq)
-            columns[time_column(0)].append(message.ticks)
-            columns[MESSAGE_ID].append(message.rowid)
-            columns[DATA_BYTES].append(message.data_bytes)
-            columns[locator_column(0, "length")].append(message.cell.length)
-            columns[locator_column(0, "offset")].append(message.cell.offset)
+            decoding = decodings[message.topic]
+            kinds = columns(decoding)
+            found = rows.setdefault(message.topic, {name: [] for name, _, _ in kinds})
+            found[SEQ].append(seq)
+            found[time_column(0)].append(message.ticks)
+            found[MESSAGE_ID].append(message.rowid)
+            found[DATA_BYTES].append(message.data_bytes)
+            found[locator_column(0, "length")].append(message.cell.length)
+            found[locator_column(0, "offset")].append(message.cell.offset)
+            if isinstance(decoding, Decoding):
+                decoded = decode_row(decoding, message.payload)
+                for name, value in decoded.cells.items():
+                    found[name].append(value)
+                if decoding.has_header:
+                    found[HEADER_TIME].append(decoded.stamp)
+                    found[state_column(HEADER_TIME)].append(
+                        KNOWN if decoded.stamp is not None else UNKNOWN
+                    )
+                reason = decoded.problem.reason if decoded.problem else None
+                if message.payload is None:
+                    reason = "not_local"
+                if reason is not None:
+                    undecoded.setdefault(message.topic, Undecoded()).add(reason, message.cell)
         batches = tuple(
             SeriesBatch(
                 streams[topic],
-                tuple(SeriesColumn(name, kind, tuple(columns[name])) for name, kind in COLUMNS),
+                tuple(
+                    SeriesColumn(name, kind, tuple(found[name]), repeated)  # type: ignore[arg-type]
+                    for name, kind, repeated in columns(decodings[topic])
+                ),
             )
-            for topic, columns in sorted(rows.items())
+            for topic, found in sorted(rows.items())
         )
-        return ChunkOutput(series=batches)
+        return ChunkOutput(series=batches, findings=tuple(self._findings(undecoded, streams)))
+
+    def _findings(
+        self, undecoded: dict[int, Undecoded], streams: dict[int, RecordId]
+    ) -> Iterator[IngestFinding]:
+        """One finding per topic whose payloads this chunk could not all decode."""
+        for rowid, missed in sorted(undecoded.items()):
+            if not isinstance(missed.first, ByteRange):
+                continue
+            limit = set(missed.counts) <= LIMIT_REASONS
+            yield self.ids.cite.finding(
+                "payload_undecodable",
+                FindingCategory.LIMIT if limit else FindingCategory.CORRUPT,
+                Severity.WARNING,
+                (missed.first,),
+                f"{missed.total} payload(s) of topic {rowid} here do not decode by its definition"
+                " (or spill out of their cell's page); their values are unknown (not covered"
+                " past a limit), each row still cites its message's cell",
+                {"counts": dict(sorted(missed.counts.items())), "rowid": rowid},
+                records=(streams[rowid],),
+            )
 
 
 __all__ = ["ingest_storage", "inspect_storage", "plan_storage"]
