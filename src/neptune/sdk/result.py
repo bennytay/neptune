@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+import neptune.sdk.contents as _contents
 from neptune.identity import canonical_json
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
@@ -121,6 +122,11 @@ class IngestResult:
     def read_package(self) -> IngestPackage:
         """The committed package, read back and verified."""
         return read_package(self._committed())
+
+    def contents(self) -> tuple[_contents.RunContents, ...]:
+        """What each run of the committed package contains: streams, declared field paths and
+        inferred semantics, read from its records and derived tables (ADR 0049)."""
+        return _contents.run_contents(self.read_package())
 
 
 # The attribute an interruption carries its job's committed result under (``committed_result``).
