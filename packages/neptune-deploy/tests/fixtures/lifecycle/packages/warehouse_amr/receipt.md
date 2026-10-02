@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:839e4ad3e3c23103cd2e386bbeba170e8204a7238fb7e60021a40221d24ab3d6`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:242aa65d72453c12e5bbe4e5026b858b2427c6e8ef46391afa63e4c53601da9f`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -12,19 +12,19 @@ Receipt `rec:sha256:839e4ad3e3c23103cd2e386bbeba170e8204a7238fb7e60021a40221d24a
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `cmms_work_orders.csv` | 1029 | `sha256:d48d507967c9` | tabular 0.1.0 |
-| `jira_incidents.json` | 1177 | `sha256:99b072271d56` | tabular 0.1.0 |
+| `cmms_work_orders.csv` | 1029 | `sha256:d48d507967c9` | tabular 0.2.0 |
+| `jira_incidents.json` | 1177 | `sha256:99b072271d56` | tabular 0.2.0 |
 | `neptune.yaml` | 149 | `sha256:2c6ff33f9633` | config 0.1.0 |
-| `zone_register.csv` | 500 | `sha256:0d069fc8cce8` | tabular 0.1.0 |
+| `zone_register.csv` | 500 | `sha256:0d069fc8cce8` | tabular 0.2.0 |
 
 ## Adapters
 
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
-| `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:d268e329090f` |
+| `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:c91fc242cc67` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
-| `tabular` | `0.1.0` | `sha256:15487b4cb47e` | pyarrow 25.0.1 | `rec:b4754c46f7fb` |
+| `tabular` | `0.2.0` | `sha256:f3ca9581546a` | pyarrow 25.0.1 | `rec:a849dd895889` |
 
 ## Records
 
@@ -56,8 +56,8 @@ Receipt `rec:sha256:839e4ad3e3c23103cd2e386bbeba170e8204a7238fb7e60021a40221d24a
 
 ## Findings
 
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:89f5df415151`
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:bba0885bbe7c`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:8cddfdd57165`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:e525bde863ed`
 
 ## Ambiguous fields
 

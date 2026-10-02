@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:cafa5a56149f034ad8b983a94f4a8a0cdbe26101dd3d14936cc0548c88e552d7`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:6d595154688b504cdb22c9e95a43d070b8965bc614f579d728a8130dc7177ab2`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -12,7 +12,7 @@ Receipt `rec:sha256:cafa5a56149f034ad8b983a94f4a8a0cdbe26101dd3d14936cc0548c88e5
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `bags/pick_place_2026-08-20/metadata.yaml` | 1480 | `sha256:6af83e864da1` | rosbag2 0.1.0 |
+| `bags/pick_place_2026-08-20/metadata.yaml` | 1480 | `sha256:6af83e864da1` | neptune.grouping 0.2.0, rosbag2 0.1.0 |
 | `bags/pick_place_2026-08-20/pick_place_2026-08-20_0.mcap` | 22273 | `sha256:a6eff07ae440` | mcap 0.1.0 |
 | `calibration/CAL-ARM3A-0226.yaml` | 313 | `sha256:fecc413f15fd` | config 0.1.0 |
 | `calibration/CAL-ARM3A-0415.yaml` | 326 | `sha256:7734a681a3f1` | config 0.1.0 |
@@ -34,7 +34,7 @@ Receipt `rec:sha256:cafa5a56149f034ad8b983a94f4a8a0cdbe26101dd3d14936cc0548c88e5
 |---|---|---|---|---|
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
-| `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:d268e329090f` |
+| `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:09b4728ef397` |
 | `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:e29bd75e0779` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
@@ -52,6 +52,7 @@ Receipt `rec:sha256:cafa5a56149f034ad8b983a94f4a8a0cdbe26101dd3d14936cc0548c88e5
 | `document_record` | 4 |
 | `ingest_finding` | 5 |
 | `run` | 2 |
+| `run_assembly` | 1 |
 | `source_artifact` | 15 |
 | `source_revision` | 15 |
 | `stream` | 2 |

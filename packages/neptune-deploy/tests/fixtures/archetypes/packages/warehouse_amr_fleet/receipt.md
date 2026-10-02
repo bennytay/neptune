@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8bd5f`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:df43f50d07273bd5f7a1a10c3bde8236a84f8f9af5a3840b52a3ba668934866e`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -32,7 +32,7 @@ Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8
 | `runs/S-007/amr-07_2026-04-02.mcap` | 17516 | `sha256:34bb6772f2fd` | mcap 0.1.0 |
 | `runs/S-007/amr-07_2026-04-15.mcap` | 17400 | `sha256:e1987a0b1303` | mcap 0.1.0 |
 | `runs/S-012/amr-08_2026-05-19/amr-08_2026-05-19_0.mcap` | 10088 | `sha256:9ce9e303f7db` | mcap 0.1.0, neptune.introspection 0.1.0 |
-| `runs/S-012/amr-08_2026-05-19/metadata.yaml` | 1940 | `sha256:6a01ea04e416` | rosbag2 0.1.0 |
+| `runs/S-012/amr-08_2026-05-19/metadata.yaml` | 1940 | `sha256:6a01ea04e416` | neptune.grouping 0.2.0, rosbag2 0.1.0 |
 | `runs/S-012/amr-09_2026-03-05.mcap` | 17400 | `sha256:e7e0782cb047` | mcap 0.1.0 |
 | `runs/S-012/amr-10_2026-03-06.mcap` | 17515 | `sha256:a217da2d2bc6` | mcap 0.1.0 |
 | `urdf/lift_150.urdf` | 1757 | `sha256:4ed9c552ac68` | text 0.1.0 |
@@ -45,7 +45,7 @@ Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
 | `geojson` | `0.1.0` | `sha256:542c42fe020a` | none | `rec:2c0e605ea2be` |
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
-| `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:d268e329090f` |
+| `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:09b4728ef397` |
 | `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:e29bd75e0779` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
 | `neptune.validate` | `0.1.0` | `sha256:0a0d08ccf4b7` | none | `rec:c712df3eb7ab` |
@@ -64,6 +64,7 @@ Receipt `rec:sha256:de28f6d767af3e1ff7174c6c419ac5826b4d0b825627407eef05fa6449e8
 | `document_record` | 4 |
 | `ingest_finding` | 34 |
 | `run` | 8 |
+| `run_assembly` | 1 |
 | `source_artifact` | 25 |
 | `source_revision` | 25 |
 | `spatial_artifact` | 2 |

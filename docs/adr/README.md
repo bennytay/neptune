@@ -65,3 +65,4 @@ header).
 | [0056](0056-media-streams-indexed-by-the-series-hydrated-lazily.md) | Media streams: indexed by their series, hydrated lazily | Accepted |
 | [0057](0057-geojson-adapter-crs-never-invented.md) | The GeoJSON adapter: features, bounds and a CRS that is stated, defaulted by the RFC or Unknown | Accepted |
 | [0059](0059-xlsx-workbooks-in-the-tabular-adapter-sheets-as-cited-tables.md) | XLSX workbooks in the tabular adapter: sheets as tables of cited cells | Accepted |
+| [0066](0066-run-assembly-evidence-graph-over-the-layout-reading.md) | Run assembly: an evidence graph over the layout reading | Accepted |
