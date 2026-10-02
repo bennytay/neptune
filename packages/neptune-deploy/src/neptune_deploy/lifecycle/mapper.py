@@ -37,6 +37,7 @@ from neptune.model.provenance import (
     Row,
     Span,
     TransformRecord,
+    adapter_locator,
 )
 from neptune.model.reference import TimestampDomain
 from neptune.model.scalars import NonFinite
@@ -138,7 +139,7 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = {
         Severity.WARNING,
         FindingCategory.LIMIT,
         "a list cell stating more parts than the mapper reads; the record's list holds the first"
-        " of them only, so it is not the whole statement",
+        " of them only, and the cell's text after them is cited as not read",
     ),
     "item_blank": (
         Severity.INFO,
@@ -309,12 +310,13 @@ class _Findings:
         row: int | None = None,
         record: RecordId | None = None,
         related: Sequence[EvidenceRef] = (),
+        times: int = 1,
     ) -> None:
         group = self.groups.setdefault(
             (name, table.record.id, key),
             _Group(subject, {self.scope: table.record.id, **(details or {})}),
         )
-        group.count += 1
+        group.count += times
         if row is not None and len(group.rows) < NAMED:
             group.rows.append(row)
         if record is not None and len(group.records) < NAMED:
@@ -389,6 +391,7 @@ class _Values:
         subject: EvidenceRef,
         related: Sequence[EvidenceRef] = (),
         details: dict[str, JsonValue] | None = None,
+        times: int = 1,
     ) -> None:
         raise NotImplementedError
 
@@ -498,15 +501,21 @@ class _Values:
         if spec.split is None:
             return [(text, cell.place, cell.place)]
         out: list[tuple[str, EvidenceRef, EvidenceRef]] = []
-        start = 0
-        parts = text.split(spec.split)
-        for part in parts:
+        empty, start, separator = 0, 0, spec.split
+        while start <= len(text):
+            stop = text.find(separator, start)
+            stop = len(text) if stop < 0 else stop
+            part = text[start:stop]
             stripped = part.strip()
             if not stripped:
-                self.cell_finding("list_part_empty", spec.column, path, cell.place)
+                empty += 1
             elif len(out) == MAX_LIST_PARTS:
-                details: dict[str, JsonValue] = {"limit": MAX_LIST_PARTS, "parts": len(parts)}
-                self.cell_finding("list_truncated", spec.column, path, cell.place, details=details)
+                # What is not read is cited: the cell's text from this part on (ADR 0005 §3).
+                rest = EvidenceRef(cell.place.source, (*cell.place.locator, Span(start, len(text))))
+                details: dict[str, JsonValue] = {"limit": MAX_LIST_PARTS}
+                self.cell_finding(
+                    "list_truncated", spec.column, path, cell.place, (rest,), details=details
+                )
                 break
             else:
                 begin = start + (len(part) - len(part.lstrip()))
@@ -515,21 +524,27 @@ class _Values:
                 if (begin, end) != (0, len(text)):
                     place = EvidenceRef(place.source, (*place.locator, Span(begin, end)))
                 out.append((stripped, place, cell.place))
-            start += len(part) + len(spec.split)
+            start = stop + len(separator)
+        if empty:
+            self.cell_finding("list_part_empty", spec.column, path, cell.place, times=empty)
         return out
 
     def ids(self, specs: tuple[ListCell, ...], path: str) -> tuple[Knowledge[LogicalId], ...]:
         """Declared ids, sorted, each once: a cell's repeats are kept once and are one finding
-        about the cell, citing the first ``NAMED`` repeats."""
+        about the cell, citing the statement kept and the first repeats (``NAMED`` in all)."""
         found: dict[LogicalId, Knowledge[LogicalId]] = {}
+        first: dict[LogicalId, EvidenceRef] = {}
         for spec in specs:
             assert spec.namespace is not None
             for text, place, cell in self.pieces(spec, path):
                 identifier = LogicalId(spec.namespace, text)
                 if identifier in found:
-                    self.cell_finding("list_id_repeated", spec.column, path, cell, (place,))
+                    # The statement kept, then the repeat (the cell itself when it is unsplit).
+                    related = (first[identifier], place)
+                    self.cell_finding("list_id_repeated", spec.column, path, cell, related)
                     continue
                 found[identifier] = Known(identifier, self.provenance(place))
+                first[identifier] = place
         return tuple(found[key] for key in sorted(found, key=lambda i: (i.namespace, i.value)))
 
     def statements(self, specs: tuple[ListCell, ...], path: str) -> tuple[Knowledge[str], ...]:
@@ -619,6 +634,7 @@ class _Row(_Values):
         subject: EvidenceRef,
         related: Sequence[EvidenceRef] = (),
         details: dict[str, JsonValue] | None = None,
+        times: int = 1,
     ) -> None:
         """One finding per cell, naming the record and field: never capped, never grouped."""
         self.mapper.findings.add(
@@ -630,6 +646,7 @@ class _Row(_Values):
             row=self.record.row,
             record=self.record_id,
             related=related,
+            times=times,
         )
 
     def cell(self, column: str, via: str = "column") -> _Cell:
@@ -725,6 +742,14 @@ class _Clocks:
     ) -> RecordId:
         key = (scope, column, instant, resolution, "" if instant else zone)
         if key not in self.domains:
+            # One place may hold several clocks (an instant, a date, a time of day): the reading
+            # is a step of the clock's citation, as the compiler's time-field steps are (ADR 0005
+            # §7), so each has its own id.
+            reading: dict[str, Any] = {"instant": instant, "resolution": str(resolution)}
+            if not instant:
+                reading["zone"] = zone
+            step = adapter_locator(f"{self.transform.adapter_id}:clock", reading)
+            place = EvidenceRef(place.source, (*place.locator, step))
             provenance = Provenance(place, self.transform.id, STATED)
             self.domains[key] = TimestampDomain(
                 id=evidence_record_id(TimestampDomain.kind, place, self.transform),
@@ -738,6 +763,15 @@ class _Clocks:
                 declared_monotonic=NotCovered(),
             )
         return self.domains[key].id
+
+
+def unique_domains(domains: Iterable[TimestampDomain]) -> dict[RecordId, TimestampDomain]:
+    """Each clock once by id; two different clocks under one id would lose one of them."""
+    out: dict[RecordId, TimestampDomain] = {}
+    for domain in domains:
+        if out.setdefault(domain.id, domain) != domain:
+            raise AssertionError(f"two clocks share the id {domain.id}")
+    return out
 
 
 class _Mapper(_Clocks):
@@ -784,7 +818,7 @@ class _Mapper(_Clocks):
                     if record is not None:
                         records.append(record)
         self._repeated(records)
-        domains = {domain.id: domain for domain in self.domains.values()}
+        domains = unique_domains(self.domains.values())
         return [
             self.transform,
             *records,
@@ -908,6 +942,10 @@ class IndexTable:
 CONTAINER_INDEX_TABLES: Final = (
     # An XLSX workbook's sheet list, sheet states and date system (root ADR 0059 §4).
     IndexTable("tabular", step="tabular:xlsx_workbook"),
+    # A Parquet footer's schema and row groups: the types and chunk layout of the data table
+    # (root ADR 0042). Its key-value metadata is content and stays a candidate.
+    IndexTable("tabular", step="tabular:schema"),
+    IndexTable("tabular", step="tabular:row_groups"),
     # A rosbag2 bag's metadata.yaml: its storage files, topics and counts, which the adapter
     # already reads into the bag's run and streams.
     IndexTable(

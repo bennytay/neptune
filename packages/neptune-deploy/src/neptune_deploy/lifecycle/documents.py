@@ -8,7 +8,7 @@ reads is stated as the document states it and cites the exact span or cell. What
 covers, and what a document shows that no field read, is a finding (ADR 0003 §7).
 """
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
@@ -42,6 +42,7 @@ from neptune_deploy.lifecycle.mapper import (
     _table,
     _Values,
     named_columns,
+    unique_domains,
 )
 from neptune_deploy.lifecycle.mapping import (
     ListCell,
@@ -204,7 +205,7 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = _catalog(
         Severity.WARNING,
         FindingCategory.LIMIT,
         "a list value stating more parts than the mapper reads; the record's list holds the first"
-        " of them only, so it is not the whole statement",
+        " of them only, and the value's text after them is cited as not read",
     ),
     (
         "item_blank",
@@ -487,8 +488,12 @@ class _View:
             return None
         starts, blocks = self._index.get((evidence.source, _page(evidence)), ([], []))
         at = bisect_right(starts, span.start) - 1
-        if at >= 0 and _within(evidence, blocks[at].provenance.evidence):
-            return blocks[at]
+        if at < 0:
+            return None
+        # Blocks that start together (a zero-width block, say) are tried in reading order.
+        for candidate in blocks[bisect_left(starts, starts[at]) : at + 1]:
+            if _within(evidence, candidate.provenance.evidence):
+                return candidate
         return None
 
     @cached_property
@@ -542,6 +547,7 @@ class _DocRow(_Values):
         subject: EvidenceRef,
         related: Sequence[EvidenceRef] = (),
         details: dict[str, JsonValue] | None = None,
+        times: int = 1,
     ) -> None:
         """One finding per value, naming the record and field: never capped, never grouped."""
         self.mapper.findings.add(
@@ -552,6 +558,7 @@ class _DocRow(_Values):
             details={"reference": column, "field": path, **(details or {})},
             record=self.record_id,
             related=related,
+            times=times,
         )
 
     def read(self, hit: _Hit) -> None:
@@ -734,6 +741,7 @@ class _TableRow(_Row):
         subject: EvidenceRef,
         related: Sequence[EvidenceRef] = (),
         details: dict[str, JsonValue] | None = None,
+        times: int = 1,
     ) -> None:
         self.mapper.findings.add(
             name,
@@ -743,6 +751,7 @@ class _TableRow(_Row):
             details={"reference": column, "field": path, **(details or {})},
             record=self.record_id,
             related=related,
+            times=times,
         )
 
 
@@ -850,7 +859,7 @@ class _TemplateMapper(_Clocks):
                 records.append(record)
             self._notes(view, row, verdicts[view.record.id], record)
         self._repeated(records)
-        domains = {domain.id: domain for domain in self.domains.values()}
+        domains = unique_domains(self.domains.values())
         return [
             self.transform,
             *records,

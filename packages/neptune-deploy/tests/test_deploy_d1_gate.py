@@ -139,12 +139,13 @@ def _seconds(package: IngestPackage, stamp: Timestamp) -> tuple[Fraction, Fracti
 def _before(package: IngestPackage, a: State, b: State, one_record: bool = False) -> bool | None:
     """Whether ``a`` is before ``b`` as far as the records say; ``None`` when they do not.
 
-    One clock (the same domain, or two readings of one record) is compared directly. Otherwise
-    the readings are ordered only when more than ``OFFSETS`` and their resolutions apart."""
+    One clock (the same domain, or two wall-clock readings of one record, or two instants) is
+    compared directly. Otherwise the readings are ordered only when more than ``OFFSETS`` and
+    their resolutions apart."""
     if not (isinstance(a, Known) and isinstance(b, Known)):
         return None
-    (x, rx, _), (y, ry, _) = _seconds(package, a.value), _seconds(package, b.value)
-    if a.value.domain_id == b.value.domain_id or one_record:
+    (x, rx, ix), (y, ry, iy) = _seconds(package, a.value), _seconds(package, b.value)
+    if a.value.domain_id == b.value.domain_id or (ix and iy) or (one_record and not ix and not iy):
         return x < y
     margin = OFFSETS + max(rx, ry)
     if x + margin < y:
@@ -636,20 +637,41 @@ def test_container_index_tables_are_neither_mapped_nor_reported() -> None:
     assert len(every) - len(usable) - len(unnamed) == 4
     assert not [f for f in _findings(MAPPED[FLEET], "table_unmapped")]
     # A workbook's sheet index, as the XLSX reader writes it (root ADR 0059 §4), named by the
-    # citation's last step: never a candidate. The same header from a CSV is reported unmapped.
+    # citation's last step: never a candidate. The same table without that step stays one, and
+    # is reported unmapped when no mapping reads it.
     table, _ = _table_like(base, "Envelope ID")
-    tabular = table.provenance.transform
     step = adapter_locator("tabular:xlsx_workbook", {"part": "xl/workbook.xml"})
     evidence = EvidenceRef(
         table.provenance.evidence.source, (*table.provenance.evidence.locator, step)
     )
     workbook = replace(table, provenance=replace(table.provenance, evidence=evidence))
-    assert CONTAINER_INDEX_TABLES[0].holds(workbook, "tabular")
-    assert not CONTAINER_INDEX_TABLES[0].holds(table, "tabular")
     swapped = replace(base, records=tuple(workbook if r is table else r for r in base.records))
-    usable, _ = tables_of(swapped.records)
-    assert table.id not in {t.record.id for t in usable}
-    assert tabular  # the compiler transform names the adapter the list is keyed on
+    assert table.id in {t.record.id for t in tables_of(base.records)[0]}
+    assert table.id not in {t.record.id for t in tables_of(swapped.records)[0]}
+    assert table.id not in {t.id for t in tables_of(swapped.records)[1]}
+    unread = read_files(map_files(base, [preset("cmms_generic")]))
+    assert table.id in {f.details["table"] for f in _findings(unread, "table_unmapped")}
+    quiet = read_files(map_files(swapped, [preset("cmms_generic")]))
+    assert table.id not in {f.details["table"] for f in _findings(quiet, "table_unmapped")}
+    # A Parquet footer's schema and row groups index the data table; only from ``tabular``.
+    for kind in ("tabular:schema", "tabular:row_groups"):
+        footer = replace(
+            table,
+            provenance=replace(
+                table.provenance,
+                evidence=EvidenceRef(evidence.source, (adapter_locator(kind, {}),)),
+            ),
+        )
+        assert any(index.holds(footer, "tabular") for index in CONTAINER_INDEX_TABLES)
+        assert not any(index.holds(footer, "rosbag2") for index in CONTAINER_INDEX_TABLES)
+    key_value = replace(
+        table,
+        provenance=replace(
+            table.provenance,
+            evidence=EvidenceRef(evidence.source, (adapter_locator("tabular:key_value", {}),)),
+        ),
+    )
+    assert not any(index.holds(key_value, "tabular") for index in CONTAINER_INDEX_TABLES)
 
 
 def test_column_unmapped_names_ten_columns_and_counts_them_all() -> None:
@@ -683,7 +705,10 @@ def test_a_list_cell_is_read_into_at_most_a_thousand_parts(
     if truncated:
         (finding,) = found
         assert finding.records == (envelope.id,) and finding.details["field"] == "/machines"
-        assert (finding.details["limit"], finding.details["parts"]) == (1000, 1001)
+        assert finding.details["limit"] == 1000
+        # The text not read is cited: the cell from the 1,001st part on.
+        (rest,) = finding.related
+        assert robots[rest.locator[-1].start : rest.locator[-1].end].strip() == "AMR-1000"
         assert finding.subject.locator[-1].column_name == "Robots"
 
 
@@ -696,6 +721,8 @@ def test_repeated_ids_in_one_cell_are_one_finding_however_many() -> None:
     (finding,) = _findings(package, "list_id_repeated")
     assert finding.details["count"] == 999  # the parts past the thousandth are not read
     assert len(finding.related) == 10 and finding.subject.locator[-1].column_name == "Robots"
+    # The statement kept comes first, then the repeats.
+    assert [ref.locator[-1].start for ref in finding.related[:2]] == [0, len("AMR-07; ")]
     assert len(files["records/ingest_finding.jsonl"]) < 64 * 1024
 
 
@@ -789,3 +816,21 @@ def test_the_lifecycle_adapter_declines_every_archetype_source() -> None:
         result = adapter.probe(head, ProbeHints(path.name, path.stat().st_size))
         assert result.confidence == 0.0, path
         assert [reason.code for reason in result.reasons] == [NO_READER], path
+
+
+def test_one_column_read_at_two_resolutions_is_two_clocks() -> None:
+    """A date-only cell among date-times: each reading has its own clock and id (ADR 0005 §7)."""
+    base = _set_cell(BASES[FLEET], ("WO Number", "WO-26-0302"), "Completed", "2026-03-02")
+    package = _map(FLEET, base)
+    domains = {d.id: d for d in _of(package, "timestamp_domain")}
+    day = _named(package, "maintenance_event", "WO-26-0302").performed.value
+    minute = _named(package, "maintenance_event", "WO-26-0301").performed.value
+    assert day.domain_id != minute.domain_id
+    assert domains[day.domain_id].resolution == Known(Fraction(86400))
+    assert domains[minute.domain_id].resolution == Known(Fraction(1))
+    assert domains[day.domain_id].field == domains[minute.domain_id].field == "Completed"
+    # Both cite the column's first cell; the step after it says how that clock reads.
+    first = [
+        d.provenance.evidence.locator for d in (domains[day.domain_id], domains[minute.domain_id])
+    ]
+    assert first[0][:-1] == first[1][:-1] and first[0][-1] != first[1][-1]

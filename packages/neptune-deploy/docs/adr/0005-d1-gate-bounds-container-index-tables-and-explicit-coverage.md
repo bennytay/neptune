@@ -25,21 +25,26 @@ decided, so that code can be checked against it.
    the table's citation or the names the table states:
    - `tabular` with step `tabular:xlsx_workbook`: an XLSX workbook's sheet list, sheet states and
      date system (root ADR 0059 §4, MVL-201);
+   - `tabular` with steps `tabular:schema` and `tabular:row_groups`: a Parquet file's footer, the
+     types and chunk layout of its data table (root ADR 0042);
    - `rosbag2` with names `rosbag2_bagfile_information`, `topics_with_message_count`, `files` and
      `relative_file_paths`: a bag's `metadata.yaml`, which the adapter already reads into the bag's
      run and streams.
    No mapping applies to these tables, and no finding reports them as unmapped. The base package
    keeps them. A sheet's `formulas` table and an MCAP file's metadata records are content, not an
-   index, so they stay candidates. Mapping files do not change. Adding an entry to the list changes
+   index, so they stay candidates, and so does a Parquet footer's `tabular:key_value` metadata. Mapping files do not change. Adding an entry to the list changes
    the mapper's output, so it is a decision recorded here or in a later ADR.
 2. **Every finding has a bounded size.** `column_unmapped` (from both the mapper and the templates)
    names the first `NAMED` (10) columns and gives `column_count` for all of them. `list_id_repeated` is
-   one finding per cell, as ADR 0002 §6 says. Its subject is the cell, its `related` lists the spans
-   of the first `NAMED` repeats, and its `count` is the number of repeats. Before this, each repeat was
-   its own finding.
+   one finding per cell, as ADR 0002 §6 says. Its subject is the cell. Its `related` lists the
+   statement that was kept and then the repeats, `NAMED` in all, and its `count` is the number of
+   repeats. Before this, each repeat was its own finding. `list_part_empty` is also one finding per
+   cell, with `count` the number of empty parts.
 3. **A list cell is read into at most `MAX_LIST_PARTS` (1,000) parts.** Past that, the record keeps the
    first 1,000 parts and a `list_truncated` finding (warning, category `limit`) names the record, the
-   field and the cell, with `limit` and `parts`. This follows the compiler's precedent (the rosbag2
+   field and the cell, with `limit`. Its `related` cites the cell's text from the first part not
+   read to the end, so what was not read is cited, not counted. The cell is scanned part by part and
+   the scan stops there. This follows the compiler's precedent (the rosbag2
    adapter's `MAX_ROWS` and the XLSX limits): keep what was read, and say so. A thousand ids in one CMMS
    cell is not an export; a hostile cell is, and each part costs about a hundred times its bytes in
    cited output. A list a document states one block per item (a section's list items, a table's rows)
@@ -48,7 +53,8 @@ decided, so that code can be checked against it.
    by block once. The block that holds a table's header is found through a per-page index of block
    spans. The index relies on the compiler's invariant that a page's blocks are disjoint spans (a
    page's text is its blocks with an LF between each, root ADR 0038), so the block with the greatest
-   start at or before a span is the only one that can hold it. On input that breaks the invariant, a
+   start at or before a span is the only one that can hold it. Blocks that share that start are
+   tried in reading order. On input that breaks the invariant, a
    block may go unfound and is then reported in `text_unread`. That is never a wrong value.
 5. **What a declaration does not read is named, lists and parts included.** A scalar a rule does not
    read is `NotCovered` in the record. A list it does not read is `()`, and the model cannot mark a
@@ -66,8 +72,13 @@ decided, so that code can be checked against it.
 7. **A table's clock cites its column's first cell.** Under ADR 0002 §5, a `TimestampDomain` cited the
    first cell read on it. Damaging that one cell made the next cell first, which moved the clock's id
    and so every other record's timestamps. A table clock now cites the column's cell in the first row
-   that has one, whatever that cell holds (amends ADR 0002 §5). A document's clocks are scoped to the
-   document and keep citing what they read.
+   that has one, whatever that cell holds (amends ADR 0002 §5). One column may be read as several
+   clocks (date-times and dates, or wall-clock times and instants). So, as the compiler's MCAP adapter
+   does with its time-field step, the clock's citation ends with a step of the mapper's own,
+   `<mapper id>:clock`, with fields `instant`, `resolution` and (for a wall clock) `zone`. Each clock
+   therefore has its own id. A document's clocks are scoped to the document and cite the first value
+   read, with the same step. Two different clocks under one id are refused as an internal error,
+   never merged.
 8. **`deploy_lifecycle` still declines every source.** Its probe returns confidence 0 with reason
    `deploy_lifecycle.no_reader` for every head, and ADR 0002 §2 keeps the mapper outside the ABI.
    MVL-200's loader (PR #83) admits the adapter and probes every source with it. Its own test,
@@ -101,7 +112,8 @@ decided, so that code can be checked against it.
 
 - Both archetypes' golden lifecycle packages change. The bag metadata's four `table_unmapped` findings
   and their run transform are gone, and `fields_not_covered` findings are added (one per rule and
-  table). Finding ids move with their content.
+  table). Each clock's citation gains its reading step, so clock ids, and the timestamps that name
+  them, move. Finding ids move with their content.
 - An XLSX date column cannot be read as a time yet. The reader keeps a date as its serial number (root
   ADR 0059 §3), and reading the serial needs the workbook's date system, which sits in the skipped
   index table and so would need a join. Such a column is `value_unreadable` today. Revisit when an
