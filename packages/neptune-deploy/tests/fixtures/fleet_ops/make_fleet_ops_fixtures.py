@@ -15,8 +15,15 @@ Everything else under this folder is hand-written JSON. This script writes the r
 Run from the repository root::
 
     uv run python packages/neptune-deploy/tests/fixtures/fleet_ops/make_fleet_ops_fixtures.py
+
+The diagnostics export and the shipped mapping are checked against ROS 2's own message definitions
+with ``rosbags`` (not a project dependency):
+
+    uv run --no-project --with rosbags python \\
+        packages/neptune-deploy/tests/fixtures/fleet_ops/make_fleet_ops_fixtures.py --oracle
 """
 
+import importlib
 import json
 import shutil
 import sqlite3
@@ -165,7 +172,45 @@ def ingest(source: Path, out: Path) -> None:
     sys.stdout.write(f"wrote {out.relative_to(HERE)}\n")
 
 
+def oracle() -> int:
+    """Check the fixture and the preset against ``diagnostic_msgs`` as ROS 2 Humble defines it."""
+    typesys = importlib.import_module("rosbags.typesys")  # not a project dependency
+    store = typesys.get_typestore(typesys.Stores.ROS2_HUMBLE)
+    constants, status_fields = store.fielddefs["diagnostic_msgs/msg/DiagnosticStatus"]
+    codes = {str(value): name for name, _, value in constants}
+    wanted = {name for name, _ in status_fields}
+    pair = {name for name, _ in store.fielddefs["diagnostic_msgs/msg/KeyValue"][1]}
+    stamp = {name for name, _ in store.fielddefs["builtin_interfaces/msg/Time"][1]}
+    preset = json.loads(
+        (
+            HERE.parents[2]
+            / "src"
+            / "neptune_deploy"
+            / "diagnostics"
+            / "presets"
+            / "ros2_diagnostics.json"
+        ).read_text()
+    )
+    assert {
+        code: kind.rsplit(".", 1)[1].upper() for code, kind in preset["levels"].items()
+    } == codes
+    export = json.loads(
+        (HERE / "diagnostics" / "legged_patrol" / "diagnostics_export.json").read_text()
+    )
+    for array in export:
+        assert set(array) == {"header", "status"} and set(array["header"]["stamp"]) == stamp
+        for status in array["status"]:
+            assert set(status) <= wanted
+            assert all(set(item) == pair for item in status["values"])
+    sys.stdout.write(
+        f"fixture and preset agree with ROS 2 diagnostic_msgs: {sorted(codes.items())}\n"
+    )
+    return 0
+
+
 def main() -> int:
+    if "--oracle" in sys.argv:
+        return oracle()
     write_rmf_database()
     bag = write_bag()
     packages = HERE / "diagnostics" / "packages"

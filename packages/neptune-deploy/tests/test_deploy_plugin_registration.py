@@ -36,7 +36,9 @@ def test_deploy_registers_its_adapters_and_nothing_else() -> None:
     }
     assert _entry_points(SOURCES_GROUP) == {  # read-only connectors (ADR 0006)
         "deploy_azure_blob": "neptune_deploy.sources.object_store:azure_source",
+        "deploy_formant": "neptune_deploy.sources.fleet_ops:formant_source",  # ADR 0010
         "deploy_gcs": "neptune_deploy.sources.object_store:gcs_source",
+        "deploy_open_rmf": "neptune_deploy.sources.fleet_ops:open_rmf_source",  # ADR 0010
         "deploy_s3": "neptune_deploy.sources.object_store:s3_source",
     }
 
