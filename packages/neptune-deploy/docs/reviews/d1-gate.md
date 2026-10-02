@@ -7,15 +7,16 @@
   `tests/test_deploy_d1_gate.py`. The tests read the committed base packages and run only the mapper
   (members never ingest). The scale and hostile figures come from
   `tests/fixtures/archetypes/stress_lifecycle_mapper.py` on Linux 7.0, x86_64, Python 3.14, and its
-  output is recorded below. The Platform harness ran twice at `f8f1608` (the branch point): the
-  default corpus, and `--corpus packages/neptune-deploy/tests/fixtures/archetypes/sources`.
+  output is recorded below. The Platform harness ran at the branch point (`f8f1608`) and again at
+  `7727dc1`, each time on the default corpus and on
+  `--corpus packages/neptune-deploy/tests/fixtures/archetypes/sources`.
 - Outcome: lifecycle records answer a safety lead's questions on both archetypes. Each answer is a
   cited `stated` value or an explicit `Unknown`/`NotCovered` that a finding explains. That holds once
   the eight defects below were fixed ([ADR 0005](../adr/0005-d1-gate-bounds-container-index-tables-and-explicit-coverage.md)).
   **Verdict: pass.** D2 may start once this is merged and `main` is tagged `d1-gate`. No D2 issue
   starts before this gate is Done.
-- Harness: green at `f8f1608`. `contracts ok | compiler: real ok | ledger: stub ok | memory: stub ok
-  | context: stub ok`, for both corpora. Over the archetype corpus the compiler stage reproduced both
+- Harness: green at `7727dc1` (and at `f8f1608`): `contracts ok | compiler: real ok | ledger: stub
+  ok | memory: stub ok | context: stub ok`, for both corpora. Over the archetype corpus the compiler stage reproduced both
   committed base packages byte for byte (manifest `sha256:e828a9b2…` for the fleet,
   `sha256:3ec26b9a…` for the cell), so the mapper's input has not drifted from the compiler's output.
 
