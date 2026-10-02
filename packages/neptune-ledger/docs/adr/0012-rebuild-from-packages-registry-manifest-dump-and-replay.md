@@ -57,7 +57,9 @@ order. The guarantee must say what is compared, and in which order a rebuild reg
    the original keys. It also checks the tenant's package roots (ADR 0006 §3), because a manifest
    is input. A logged root that now resolves to another path (a link put on one of its
    directories) is refused as `package_unreadable`, because the rebuilt log would record another
-   root. The catalog borrows the rebuild's connection and writes each registration in a
+   root. A logged root that now holds another package, however intact, is refused as
+   `manifest_digest_mismatch`: replay passes the entry's `package_id` and compares it with the
+   hash of the `manifest.json` it verified, so no other package takes the logged tick. The catalog borrows the rebuild's connection and writes each registration in a
    savepoint. If any entry is not `registered`, the whole transaction rolls back and the old
    catalog stands. The report names the entry and its registration's findings. Readers block on
    the dropped schema's locks until commit, so they never see a partial catalog.

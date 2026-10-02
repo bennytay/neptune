@@ -213,20 +213,25 @@ class PostgresCatalog:
                 raise ManifestNotWritten(registration, exc) from exc
         return registration
 
-    def replay(self, package_root: str, tick: TransactionKey) -> Registration:
+    def replay(self, package_root: str, tick: TransactionKey, package_id: str) -> Registration:
         """Register ``package_root`` at ``tick``, a registration-log entry, on a rebuild.
 
         The clock is advanced with ``replay_tx`` instead of ``next_tx`` (ADR 0002 §4), so the
         rebuilt log holds the logged transaction key. A logged root that now resolves elsewhere
         (a link put on one of its directories) is refused, since the rebuilt log would record
-        another root; the manifest names the new root if the package really moved.
+        another root; the manifest names the new root if the package really moved. A root that
+        now holds a package other than the logged ``package_id``, however intact, is refused with
+        ``manifest_digest_mismatch``: the rebuilt log would record another package at that tick.
         """
         if os.path.realpath(package_root) != package_root:
             return self._unreadable(package_root)
-        return self._register(package_root, tick)
+        return self._register(package_root, tick, package_id)
 
     def _register(
-        self, package_root: str | os.PathLike[str], tick: TransactionKey | None
+        self,
+        package_root: str | os.PathLike[str],
+        tick: TransactionKey | None,
+        expected: str | None = None,
     ) -> Registration:
         raw = Path(package_root)
         given = str(raw.absolute())  # as named, unresolved: a refusal reveals nothing more
@@ -244,6 +249,10 @@ class PostgresCatalog:
             os.close(root_fd)
         if checked.findings:
             return self._refusal(root, checked, list(checked.findings))
+        if expected is not None and checked.package_id != expected:
+            detail = f"it hashes to {checked.package_id}, not the logged package {expected}"
+            finding = CatalogFinding("manifest_digest_mismatch", MANIFEST, detail)
+            return self._refusal(root, checked, [finding])
         try:
             rows = package_rows(str(checked.package_id), checked.manifest, checked.lines)
         except UnindexedVersion as exc:

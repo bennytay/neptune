@@ -140,7 +140,9 @@ def rebuild(
                     )
                     for entry in manifest.registrations:
                         answer = catalog.replay(
-                            entry.root_locator, TransactionKey(entry.tx_seq, entry.tx_time)
+                            entry.root_locator,
+                            TransactionKey(entry.tx_seq, entry.tx_time),
+                            entry.package_id,
                         )
                         if answer.outcome != "registered":
                             raise _Stop(
