@@ -59,15 +59,25 @@ class RerunExport:
 def read_export(path: str, *, limit: int = MAX_EXPORT_BYTES) -> bytes:
     """The bytes of the export file at ``path``: a regular file the operator named, not a symlink,
     at most ``limit`` bytes."""
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)  # a FIFO opens at once and is refused, never waited on
+    )
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
         raise ObjectStoreConfigError("the catalog export cannot be opened") from exc
-    with os.fdopen(descriptor, "rb") as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
             raise ObjectStoreConfigError("the catalog export is not a regular file")
-        data = stream.read(limit + 1)
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            data = stream.read(limit + 1)
+    except OSError as exc:
+        raise ObjectStoreConfigError("the catalog export cannot be read") from exc
+    finally:
+        os.close(descriptor)
     if len(data) > limit:
         raise ObjectStoreConfigError(f"the catalog export is larger than {limit} bytes")
     return data
