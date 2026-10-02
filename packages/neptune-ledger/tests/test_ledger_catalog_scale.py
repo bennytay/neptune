@@ -56,6 +56,9 @@ def test_the_harness_hashes_thread_keys_as_the_api_does() -> None:
 
 
 WORLD_INDEX = "record_stream_world_clock_world_first_world_last_registrati_idx"
+# A thread's members are one range scan on its id: thread_member_by_thread, or the primary key's
+# (tenant_id, thread_id) prefix, whichever the planner costs lower (ADR 0010 §4).
+THREAD_INDEX = "thread_member_by_thread|thread_member_pkey"
 
 
 @pytest.mark.parametrize(
@@ -64,8 +67,8 @@ WORLD_INDEX = "record_stream_world_clock_world_first_world_last_registrati_idx"
         ("thread_declared_typical", "record_logical_id_by_value"),
         ("thread_declared_workhorse", "record_logical_id_by_value"),
         ("thread_declared_sensor", "record_logical_id_by_value"),
-        ("thread_index_typical", "thread_member_by_thread"),
-        ("thread_index_workhorse", "thread_member_by_thread"),
+        ("thread_index_typical", THREAD_INDEX),
+        ("thread_index_workhorse", THREAD_INDEX),
         ("thread_anchored", "record_stream_source_content_id_kind_md5_idx"),
         ("lineage_set", "record_stream_source_content_id_kind_md5_idx"),
         ("window_typical", WORLD_INDEX),
@@ -78,7 +81,7 @@ def test_every_measured_query_uses_its_index(
     report: dict[str, Any], measure: str, index: str
 ) -> None:
     scans = report[measure]["plan"]["scans"]
-    assert any(index in scan for scan in scans), scans
+    assert any(name in scan for scan in scans for name in index.split("|")), scans
     assert not [s for s in scans if s.startswith("Seq Scan record")], scans
 
 

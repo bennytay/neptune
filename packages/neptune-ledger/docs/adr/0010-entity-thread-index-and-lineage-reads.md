@@ -65,8 +65,10 @@ issue. Four facts shape it:
 3. **`transform_upstream.position`** (migration 0007) is the edge's 0-based place in the
    transform's `upstream`, unique per transform. `LineageEdge.position` and chain flattening read
    it.
-4. **Reads.** `thread` reads its members with one index range scan (`THREAD_MEMBERS`, index
-   `thread_member (thread_id, registration_key)`, filtered to `registration_key <= as_of`). World
+4. **Reads.** `thread` reads its members with one index range scan on the thread id
+   (`THREAD_MEMBERS`, filtered to `registration_key <= as_of`): `thread_member (thread_id,
+   registration_key)`, or the primary key's `(tenant_id, thread_id)` prefix when the planner
+   prefers it; both read only the thread's rows. World
    order, transaction order, per-set resolution, collapsing and any merge are pure functions
    (`threads.order`, `threads.merge`) over those rows. Threads are returned whole (ADR 0006 §7).
    - **Current view.** A record id registered by several packages is one entry. Its packages are
