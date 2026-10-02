@@ -1,0 +1,46 @@
+# Plain scalars that YAML 1.1 and YAML 1.2 read differently, and ones they agree on.
+switches:
+  motors: on           # 1.1 bool, 1.2 text
+  lights: off
+  armed: yes
+  answer: n
+permissions: 0755      # 1.1 octal 493, 1.2 decimal 755
+octal_12: 0o17         # 1.1 text, 1.2 octal 15
+binary: 0b1010         # 1.1 int 10, 1.2 text
+grouped: 1_000         # 1.1 int, 1.2 text
+sexagesimal: 1:30      # 1.1 int 90, 1.2 text
+scientific: 1e3        # 1.1 text, 1.2 float
+signed_exp: 1.0e+3     # both floats
+calibrated: 2026-09-01 # 1.1 local date, 1.2 text
+stamp: 2026-09-01T07:15:00Z
+agree:
+  int: 42
+  negative: -17
+  hex: 0x1F
+  float: 0.25
+  inf: .inf
+  nan: .NaN
+  bool: true
+  null_word: null
+  tilde: ~
+  empty:
+  text: base_link
+quoted:
+  single: 'on'
+  double: "0755"
+  folded: >
+    two
+    lines
+  literal: |
+    kept
+    as is
+tagged:
+  str: !!str 0755
+  int: !!int "42"
+  float: !!float 0.5
+  bool: !!bool true
+  null: !!null ~
+  binary: !!binary aGVsbG8gcm9ib3Q=
+  timestamp: !!timestamp 2001-12-14t21:59:43.10-05:00
+  application: !include other.yaml
+  bad_int: !!int forty-two
