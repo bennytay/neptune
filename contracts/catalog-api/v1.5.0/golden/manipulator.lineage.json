@@ -1,0 +1,45 @@
+{
+  "api_version": "1.5.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "edges": [],
+  "findings": [],
+  "kind": {
+    "knowledge": "known",
+    "value": "calibration"
+  },
+  "nodes": [
+    {
+      "transform": {
+        "knowledge": "known",
+        "value": {
+          "adapter_id": "handeye",
+          "adapter_version": "1.0.0",
+          "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "libraries": {}
+        }
+      },
+      "transform_id": "rec:sha256:b067af6b936bfee6cc0672de2e1ea86982eff4ea2e821b27f71b4d8701de85c0"
+    }
+  ],
+  "record_id": "rec:sha256:db51ab20577a4798da4bc4014bb82c195f9ca6e5d3cd7fe9f455c4dbeeb1ec94",
+  "registered_by": [
+    {
+      "kind": "calibration",
+      "line": 1,
+      "package_id": "sha256:b6cba1bf32cb7de4a65c12d4403de38137fb130b76ea551cbb356be2a2dd501a",
+      "record_id": "rec:sha256:db51ab20577a4798da4bc4014bb82c195f9ca6e5d3cd7fe9f455c4dbeeb1ec94"
+    }
+  ],
+  "siblings": [],
+  "status": "found",
+  "transform_id": {
+    "knowledge": "known",
+    "value": "rec:sha256:b067af6b936bfee6cc0672de2e1ea86982eff4ea2e821b27f71b4d8701de85c0"
+  }
+}

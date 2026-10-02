@@ -1,4 +1,4 @@
--- 0007 package-schema version registry (Ledger ADR 0011).
+-- 0008 package-schema version registry (Ledger ADR 0011).
 --
 -- Applied in the same tenant schema, with search_path set to that schema alone. Packages of every
 -- package-schema version stay registered side by side forever (packages are never rewritten), and
@@ -14,7 +14,7 @@
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM package) THEN
-    RAISE EXCEPTION 'packages registered before migration 0007 have no schema-version registry'
+    RAISE EXCEPTION 'packages registered before migration 0008 have no schema-version registry'
       ' rows; rebuild this catalog from its packages and registration log (ADR 0011)';
   END IF;
 END

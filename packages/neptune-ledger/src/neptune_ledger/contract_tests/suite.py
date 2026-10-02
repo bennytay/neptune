@@ -961,7 +961,7 @@ class CatalogContract:
     def test_query_rejects_a_kind_no_schema_version_declares(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
     ) -> None:
-        """A record kind is any table name in the schema (1.4.0); one that no package-schema
+        """A record kind is any table name in the schema (1.5.0); one that no package-schema
         version the catalog reads declares is an argument outside the contract."""
         self.register_all(catalog, packages)
         table = catalog.query(QuerySpec(kinds=("run", "telepathy")))

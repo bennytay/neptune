@@ -4,8 +4,9 @@ The registry (``catalog/projections.json``) holds one projection spec per packag
 each pinned here to the published ``contracts/package-schema`` version it was generated from. The
 two-version fixture is the drone ingested by a schema-1 compiler (the worked example) and by a
 schema-2 compiler (``at_schema_2``: the same flight log re-identified under adapter 2.0.0, plus the
-configuration kinds schema 2 adds). Both are indexed side by side; a version the registry does not
-hold is refused before anything is written.
+configuration kinds schema 2 adds). Both are indexed side by side, as is the schema-4 manipulator
+cell (deployment lifecycle kinds) beside the schema-1 drone; a version the registry does not hold
+is refused before anything is written.
 """
 
 import hashlib
@@ -44,6 +45,7 @@ from neptune_ledger.catalog.projection import (
     add_version,
     read_registry,
     registry_bytes,
+    render_migration,
     schema_version_from,
     shipped_registry,
 )
@@ -53,6 +55,7 @@ from neptune_ledger.contract_tests.examples import (
     at_schema_1,
     at_schema_2,
     evidence_anchor,
+    materialise,
     reparse,
     write,
 )
@@ -128,6 +131,19 @@ def test_each_version_only_adds_to_the_one_before() -> None:
     assert projection_columns(shipped_registry()) == projection_columns(specs[-1])
 
 
+def test_versions_3_and_4_share_the_guard_migration_0006() -> None:
+    """Neither adds a column: 3's run filters and 4's lifecycle sites fill columns 0005 made. 0006
+    was generated from version 2 to version 4 in one step; the registry keeps them apart."""
+    registry = shipped_registry()
+    two, four = registry.spec(2), registry.spec(4)
+    assert two is not None and four is not None
+    shipped = (CATALOG / "migrations" / "0006_projections_schema_4.sql").read_text(encoding="utf-8")
+    assert render_migration(two, four, 6) == shipped
+    assert "ADD COLUMN" not in shipped
+    assert {m.name for m in migrations()} >= {"projections_schema_1", "projections_schema_4"}
+    assert not any(m.name in ("projections_schema_2", "projections_schema_3") for m in migrations())
+
+
 def test_the_registry_round_trips_byte_for_byte() -> None:
     data = (CATALOG / "projections.json").read_bytes()
     assert registry_bytes(read_registry(data)) == data
@@ -161,7 +177,7 @@ def test_an_entry_must_name_its_own_package_schema_version(
     contract: str, digest: str, message: str
 ) -> None:
     with pytest.raises(ProjectionError, match=message):
-        SchemaVersion(contract, digest, shipped_registry().latest.spec)
+        SchemaVersion(contract, digest, shipped_registry().versions[1].spec)  # version 2
 
 
 def test_a_published_version_whose_digest_disagrees_is_refused(tmp_path: Path) -> None:
@@ -404,6 +420,47 @@ def test_packages_of_schema_1_and_2_are_indexed_side_by_side(
     )
 
 
+def test_a_lifecycle_package_is_indexed_beside_a_schema_1_package(
+    catalog: PostgresCatalog, pg: Conn, older: WorkedPackage, tmp_path: Path
+) -> None:
+    """The schema-4 manipulator cell beside the schema-1 drone: each version is recorded by the
+    registration that first states it, a lifecycle record's site fills the site columns, and the
+    schema-1 package's version does not cover the lifecycle kinds (NotCovered, not "none")."""
+    cell = materialise("manipulator_cell", tmp_path / "manipulator_cell")
+    assert cell.schema_version == 4
+    assert catalog.register(older.root).outcome == "registered"
+    assert catalog.register(cell.root).outcome == "registered"
+    # The cell's records state version 1 (sources, transforms, clocks) and 4 (lifecycle kinds).
+    assert rows(
+        pg,
+        "SELECT schema_version, first_registration_key FROM tenant_acme.schema_version ORDER BY 1",
+    ) == [(1, 1), (4, 2)]
+    covered = rows(
+        pg,
+        "SELECT p.schema_version, 'maintenance_event' = ANY(v.kinds) FROM tenant_acme.package p"
+        " JOIN tenant_acme.schema_version v USING (tenant_id, schema_version) ORDER BY 1",
+    )
+    assert covered == [(1, False), (4, True)]
+    sites = rows(
+        pg,
+        "SELECT kind, site_namespace, site_value FROM tenant_acme.record"
+        " WHERE package_id = %s AND schema_version = 4 ORDER BY 1, record_id",
+        cell.package_id,
+    )
+    expected = sorted(
+        (kind, record["site"]["value"]["namespace"], record["site"]["value"]["value"])
+        for kind, _, record in cell.every_record()
+        if record.get("schema_version") == 4
+    )
+    assert sorted(sites) == expected and len(expected) >= 4
+    assert rows(
+        pg,
+        "SELECT tenant_acme.projection_covered('maintenance_event', 4, 'site_value'),"
+        " tenant_acme.projection_covered('maintenance_event', 1, 'site_value'),"
+        " tenant_acme.projection_covered('run', 4, 'site_value')",
+    ) == [(True, False, False)]
+
+
 def test_the_sql_coverage_agrees_with_the_registry_everywhere(
     catalog: PostgresCatalog, pg: Conn, newer: WorkedPackage
 ) -> None:
@@ -464,21 +521,24 @@ def test_a_package_of_a_version_the_registry_lacks_is_refused_and_writes_nothing
 
 
 def test_the_newest_version_is_read_and_the_next_is_refused(
-    catalog: PostgresCatalog, newer: WorkedPackage
+    catalog: PostgresCatalog, tmp_path: Path
 ) -> None:
-    """Boundary: the registry's newest version registers; one past it is a future version."""
-    manifest = dict(newer.manifest)
+    """Boundary: the registry's newest version (the schema-4 manipulator cell) registers; the same
+    package one version past it is a future version."""
+    cell = materialise("manipulator_cell", tmp_path / "manipulator_cell")
+    assert cell.schema_version == shipped_registry().latest.version
+    manifest = dict(cell.manifest)
     manifest["schema_version"] = shipped_registry().latest.version + 1
-    future = newer.root.parent / "drone-v3"
+    future = tmp_path / "manipulator_cell-next"
     future.mkdir()
-    for path, data in newer.files.items():
+    for path, data in cell.files.items():
         (future / path).parent.mkdir(parents=True, exist_ok=True)
         (future / path).write_bytes(
             canonical_json.dumps(manifest) if path == "manifest.json" else data
         )
     refused = catalog.register(future)
     assert [f.code for f in refused.findings] == ["unsupported_schema_version"]
-    assert catalog.register(newer.root).outcome == "registered"
+    assert catalog.register(cell.root).outcome == "registered"
 
 
 def test_a_catalog_that_indexed_a_version_another_way_is_not_extended(
@@ -486,7 +546,7 @@ def test_a_catalog_that_indexed_a_version_another_way_is_not_extended(
 ) -> None:
     """A stored mapping for version 2 that differs from this Ledger's: refuse and say rebuild."""
     assert catalog.register(older.root).outcome == "registered"
-    spec = shipped_registry().latest.spec
+    spec = shipped_registry().versions[1].spec  # version 2
     pg.execute(
         "INSERT INTO tenant_acme.schema_version VALUES"
         " ('acme', 2, %s, '2.0.0', %s, %s, '{}', %s, 1)",

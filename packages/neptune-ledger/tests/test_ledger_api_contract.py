@@ -288,7 +288,7 @@ def test_round_trip_is_byte_stable() -> None:
         lambda d: d.update(outcome="maybe"),
         lambda d: d.update(record_counts=[{"count": True, "kind": "run"}]),
         lambda d: d.update(record_counts=[{"count": -1, "kind": "run"}]),
-        # A kind is a package-schema table name (1.4.0), never a path or another spelling.
+        # A kind is a package-schema table name (1.5.0), never a path or another spelling.
         lambda d: d.update(record_counts=[{"count": 1, "kind": "Run"}]),
         lambda d: d.update(record_counts=[{"count": 1, "kind": "../run"}]),
         lambda d: d.update(record_counts=[{"count": 1, "kind": ""}]),
