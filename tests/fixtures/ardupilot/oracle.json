@@ -1,0 +1,1927 @@
+{
+ "copter.bin": {
+  "formats": {
+   "ARR": [
+    134,
+    75,
+    "Qa",
+    [
+     "TimeUS",
+     "Samples"
+    ]
+   ],
+   "ATT": [
+    131,
+    23,
+    "QccccCC",
+    [
+     "TimeUS",
+     "DesRoll",
+     "Roll",
+     "DesPitch",
+     "Pitch",
+     "DesYaw",
+     "Yaw"
+    ]
+   ],
+   "FMT": [
+    128,
+    89,
+    "BBnNZ",
+    [
+     "Type",
+     "Length",
+     "Name",
+     "Format",
+     "Columns"
+    ]
+   ],
+   "FMTU": [
+    136,
+    44,
+    "QBNN",
+    [
+     "TimeUS",
+     "FmtType",
+     "UnitIds",
+     "MultIds"
+    ]
+   ],
+   "GPS": [
+    132,
+    46,
+    "QBIHBcLLefffB",
+    [
+     "TimeUS",
+     "Status",
+     "GMS",
+     "GWk",
+     "NSats",
+     "HDop",
+     "Lat",
+     "Lng",
+     "Alt",
+     "Spd",
+     "GCrs",
+     "VZ",
+     "U"
+    ]
+   ],
+   "MODE": [
+    133,
+    14,
+    "QMBB",
+    [
+     "TimeUS",
+     "Mode",
+     "ModeNum",
+     "Rsn"
+    ]
+   ],
+   "MSG": [
+    130,
+    75,
+    "QZ",
+    [
+     "TimeUS",
+     "Message"
+    ]
+   ],
+   "MULT": [
+    138,
+    20,
+    "Qbd",
+    [
+     "TimeUS",
+     "Id",
+     "Mult"
+    ]
+   ],
+   "PARM": [
+    129,
+    35,
+    "QNff",
+    [
+     "TimeUS",
+     "Name",
+     "Value",
+     "Default"
+    ]
+   ],
+   "RCOU": [
+    135,
+    19,
+    "QHHHH",
+    [
+     "TimeUS",
+     "C1",
+     "C2",
+     "C3",
+     "C4"
+    ]
+   ],
+   "UNIT": [
+    137,
+    76,
+    "QbZ",
+    [
+     "TimeUS",
+     "Id",
+     "Label"
+    ]
+   ]
+  },
+  "messages": [
+   [
+    "FMT",
+    {
+     "Columns": "Type,Length,Name,Format,Columns",
+     "Format": "BBnNZ",
+     "Length": 89,
+     "Name": "FMT",
+     "Type": 128
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Name,Value,Default",
+     "Format": "QNff",
+     "Length": 35,
+     "Name": "PARM",
+     "Type": 129
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Message",
+     "Format": "QZ",
+     "Length": 75,
+     "Name": "MSG",
+     "Type": 130
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,DesRoll,Roll,DesPitch,Pitch,DesYaw,Yaw",
+     "Format": "QccccCC",
+     "Length": 23,
+     "Name": "ATT",
+     "Type": 131
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Status,GMS,GWk,NSats,HDop,Lat,Lng,Alt,Spd,GCrs,VZ,U",
+     "Format": "QBIHBcLLefffB",
+     "Length": 46,
+     "Name": "GPS",
+     "Type": 132
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Mode,ModeNum,Rsn",
+     "Format": "QMBB",
+     "Length": 14,
+     "Name": "MODE",
+     "Type": 133
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Samples",
+     "Format": "Qa",
+     "Length": 75,
+     "Name": "ARR",
+     "Type": 134
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,C1,C2,C3,C4",
+     "Format": "QHHHH",
+     "Length": 19,
+     "Name": "RCOU",
+     "Type": 135
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,FmtType,UnitIds,MultIds",
+     "Format": "QBNN",
+     "Length": 44,
+     "Name": "FMTU",
+     "Type": 136
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Id,Label",
+     "Format": "QbZ",
+     "Length": 76,
+     "Name": "UNIT",
+     "Type": 137
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Id,Mult",
+     "Format": "Qbd",
+     "Length": 20,
+     "Name": "MULT",
+     "Type": 138
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 45,
+     "Label": "",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 115,
+     "Label": "s",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 100,
+     "Label": "deg",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 109,
+     "Label": "m",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 110,
+     "Label": "m/s",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 105,
+     "Label": "ms",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 119,
+     "Label": "week",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 122,
+     "Label": "Hz",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 45,
+     "Mult": 0.0,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 48,
+     "Mult": 1.0,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 66,
+     "Mult": 0.01,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 70,
+     "Mult": 1e-06,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 71,
+     "Mult": 1e-07,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "FMTU",
+    {
+     "FmtType": 131,
+     "MultIds": "FBBBBBB",
+     "TimeUS": 0,
+     "UnitIds": "sdddddd"
+    }
+   ],
+   [
+    "FMTU",
+    {
+     "FmtType": 132,
+     "MultIds": "F-00-BGGB000-",
+     "TimeUS": 0,
+     "UnitIds": "s-iw--ddmndn-"
+    }
+   ],
+   [
+    "FMTU",
+    {
+     "FmtType": 133,
+     "MultIds": "F---",
+     "TimeUS": 0,
+     "UnitIds": "s---"
+    }
+   ],
+   [
+    "FMTU",
+    {
+     "FmtType": 135,
+     "MultIds": "F0000",
+     "TimeUS": 0,
+     "UnitIds": "szzzz"
+    }
+   ],
+   [
+    "MSG",
+    {
+     "Message": "ArduCopter V4.5.1 (12345678)",
+     "TimeUS": 100
+    }
+   ],
+   [
+    "MSG",
+    {
+     "Message": "Frame: QUAD/X",
+     "TimeUS": 101
+    }
+   ],
+   [
+    "PARM",
+    {
+     "Default": 0.13500000536441803,
+     "Name": "ATC_RAT_RLL_P",
+     "TimeUS": 200,
+     "Value": 0.13500000536441803
+    }
+   ],
+   [
+    "PARM",
+    {
+     "Default": 1.0,
+     "Name": "FRAME_CLASS",
+     "TimeUS": 201,
+     "Value": 1.0
+    }
+   ],
+   [
+    "PARM",
+    {
+     "Default": 1.0,
+     "Name": "SYSID_THISMAV",
+     "TimeUS": 202,
+     "Value": 1.0
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": 0.0,
+     "DesRoll": 0.0,
+     "DesYaw": 90.0,
+     "Pitch": 0.0,
+     "Roll": 0.0,
+     "TimeUS": 1000000,
+     "Yaw": 90.01
+    }
+   ],
+   [
+    "GPS",
+    {
+     "Alt": 520.5,
+     "GCrs": 90.0,
+     "GMS": 400000,
+     "GWk": 2310,
+     "HDop": 0.85,
+     "Lat": 47.397742,
+     "Lng": 8.5255,
+     "NSats": 12,
+     "Spd": 0.5,
+     "Status": 3,
+     "TimeUS": 1000010,
+     "U": 1,
+     "VZ": -0.25
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -0.5,
+     "DesRoll": 1.0,
+     "DesYaw": 90.01,
+     "Pitch": -0.49,
+     "Roll": 0.98,
+     "TimeUS": 1100000,
+     "Yaw": 90.02
+    }
+   ],
+   [
+    "MODE",
+    {
+     "Mode": 5,
+     "ModeNum": 5,
+     "Rsn": 1,
+     "TimeUS": 1100020
+    }
+   ],
+   [
+    "RCOU",
+    {
+     "C1": 1500,
+     "C2": 1501,
+     "C3": 1502,
+     "C4": 1503,
+     "TimeUS": 1100030
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -1.0,
+     "DesRoll": 2.0,
+     "DesYaw": 90.02,
+     "Pitch": -0.98,
+     "Roll": 1.96,
+     "TimeUS": 1200000,
+     "Yaw": 90.03
+    }
+   ],
+   [
+    "GPS",
+    {
+     "Alt": 520.7,
+     "GCrs": 92.0,
+     "GMS": 400400,
+     "GWk": 2312,
+     "HDop": 0.85,
+     "Lat": 47.3977422,
+     "Lng": 8.5254998,
+     "NSats": 12,
+     "Spd": 2.5,
+     "Status": 3,
+     "TimeUS": 1200010,
+     "U": 1,
+     "VZ": -0.25
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -1.5,
+     "DesRoll": 3.0,
+     "DesYaw": 90.03,
+     "Pitch": -1.47,
+     "Roll": 2.94,
+     "TimeUS": 1300000,
+     "Yaw": 90.04
+    }
+   ],
+   [
+    "ARR",
+    {
+     "Samples": [
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34
+     ],
+     "TimeUS": 1300040
+    }
+   ],
+   [
+    "MODE",
+    {
+     "Mode": 6,
+     "ModeNum": 6,
+     "Rsn": 2,
+     "TimeUS": 1300050
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -2.0,
+     "DesRoll": 4.0,
+     "DesYaw": 90.04,
+     "Pitch": -1.96,
+     "Roll": 3.92,
+     "TimeUS": 1400000,
+     "Yaw": 90.05
+    }
+   ],
+   [
+    "GPS",
+    {
+     "Alt": 520.9,
+     "GCrs": 94.0,
+     "GMS": 400800,
+     "GWk": 2314,
+     "HDop": 0.85,
+     "Lat": 47.3977424,
+     "Lng": 8.5254996,
+     "NSats": 12,
+     "Spd": 4.5,
+     "Status": 3,
+     "TimeUS": 1400010,
+     "U": 1,
+     "VZ": -0.25
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -2.5,
+     "DesRoll": 5.0,
+     "DesYaw": 90.05,
+     "Pitch": -2.45,
+     "Roll": 4.9,
+     "TimeUS": 1500000,
+     "Yaw": 90.06
+    }
+   ]
+  ],
+  "mult_lookup": {
+   "-": 0.0,
+   "0": 1.0,
+   "B": 0.01,
+   "F": 1e-06,
+   "G": 1e-07
+  },
+  "unit_lookup": {
+   "-": "",
+   "d": "deg",
+   "i": "ms",
+   "m": "m",
+   "n": "m/s",
+   "s": "s",
+   "w": "week",
+   "z": "Hz"
+  }
+ },
+ "copter_truncated.bin": {
+  "formats": {
+   "ARR": [
+    134,
+    75,
+    "Qa",
+    [
+     "TimeUS",
+     "Samples"
+    ]
+   ],
+   "ATT": [
+    131,
+    23,
+    "QccccCC",
+    [
+     "TimeUS",
+     "DesRoll",
+     "Roll",
+     "DesPitch",
+     "Pitch",
+     "DesYaw",
+     "Yaw"
+    ]
+   ],
+   "FMT": [
+    128,
+    89,
+    "BBnNZ",
+    [
+     "Type",
+     "Length",
+     "Name",
+     "Format",
+     "Columns"
+    ]
+   ],
+   "FMTU": [
+    136,
+    44,
+    "QBNN",
+    [
+     "TimeUS",
+     "FmtType",
+     "UnitIds",
+     "MultIds"
+    ]
+   ],
+   "GPS": [
+    132,
+    46,
+    "QBIHBcLLefffB",
+    [
+     "TimeUS",
+     "Status",
+     "GMS",
+     "GWk",
+     "NSats",
+     "HDop",
+     "Lat",
+     "Lng",
+     "Alt",
+     "Spd",
+     "GCrs",
+     "VZ",
+     "U"
+    ]
+   ],
+   "MODE": [
+    133,
+    14,
+    "QMBB",
+    [
+     "TimeUS",
+     "Mode",
+     "ModeNum",
+     "Rsn"
+    ]
+   ],
+   "MSG": [
+    130,
+    75,
+    "QZ",
+    [
+     "TimeUS",
+     "Message"
+    ]
+   ],
+   "MULT": [
+    138,
+    20,
+    "Qbd",
+    [
+     "TimeUS",
+     "Id",
+     "Mult"
+    ]
+   ],
+   "PARM": [
+    129,
+    35,
+    "QNff",
+    [
+     "TimeUS",
+     "Name",
+     "Value",
+     "Default"
+    ]
+   ],
+   "RCOU": [
+    135,
+    19,
+    "QHHHH",
+    [
+     "TimeUS",
+     "C1",
+     "C2",
+     "C3",
+     "C4"
+    ]
+   ],
+   "UNIT": [
+    137,
+    76,
+    "QbZ",
+    [
+     "TimeUS",
+     "Id",
+     "Label"
+    ]
+   ]
+  },
+  "messages": [
+   [
+    "FMT",
+    {
+     "Columns": "Type,Length,Name,Format,Columns",
+     "Format": "BBnNZ",
+     "Length": 89,
+     "Name": "FMT",
+     "Type": 128
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Name,Value,Default",
+     "Format": "QNff",
+     "Length": 35,
+     "Name": "PARM",
+     "Type": 129
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Message",
+     "Format": "QZ",
+     "Length": 75,
+     "Name": "MSG",
+     "Type": 130
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,DesRoll,Roll,DesPitch,Pitch,DesYaw,Yaw",
+     "Format": "QccccCC",
+     "Length": 23,
+     "Name": "ATT",
+     "Type": 131
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Status,GMS,GWk,NSats,HDop,Lat,Lng,Alt,Spd,GCrs,VZ,U",
+     "Format": "QBIHBcLLefffB",
+     "Length": 46,
+     "Name": "GPS",
+     "Type": 132
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Mode,ModeNum,Rsn",
+     "Format": "QMBB",
+     "Length": 14,
+     "Name": "MODE",
+     "Type": 133
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Samples",
+     "Format": "Qa",
+     "Length": 75,
+     "Name": "ARR",
+     "Type": 134
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,C1,C2,C3,C4",
+     "Format": "QHHHH",
+     "Length": 19,
+     "Name": "RCOU",
+     "Type": 135
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,FmtType,UnitIds,MultIds",
+     "Format": "QBNN",
+     "Length": 44,
+     "Name": "FMTU",
+     "Type": 136
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Id,Label",
+     "Format": "QbZ",
+     "Length": 76,
+     "Name": "UNIT",
+     "Type": 137
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Id,Mult",
+     "Format": "Qbd",
+     "Length": 20,
+     "Name": "MULT",
+     "Type": 138
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 45,
+     "Label": "",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 115,
+     "Label": "s",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 100,
+     "Label": "deg",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 109,
+     "Label": "m",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 110,
+     "Label": "m/s",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 105,
+     "Label": "ms",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 119,
+     "Label": "week",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 122,
+     "Label": "Hz",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 45,
+     "Mult": 0.0,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 48,
+     "Mult": 1.0,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 66,
+     "Mult": 0.01,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 70,
+     "Mult": 1e-06,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 71,
+     "Mult": 1e-07,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "FMTU",
+    {
+     "FmtType": 131,
+     "MultIds": "FBBBBBB",
+     "TimeUS": 0,
+     "UnitIds": "sdddddd"
+    }
+   ],
+   [
+    "FMTU",
+    {
+     "FmtType": 132,
+     "MultIds": "F-00-BGGB000-",
+     "TimeUS": 0,
+     "UnitIds": "s-iw--ddmndn-"
+    }
+   ],
+   [
+    "FMTU",
+    {
+     "FmtType": 133,
+     "MultIds": "F---",
+     "TimeUS": 0,
+     "UnitIds": "s---"
+    }
+   ],
+   [
+    "FMTU",
+    {
+     "FmtType": 135,
+     "MultIds": "F0000",
+     "TimeUS": 0,
+     "UnitIds": "szzzz"
+    }
+   ],
+   [
+    "MSG",
+    {
+     "Message": "ArduCopter V4.5.1 (12345678)",
+     "TimeUS": 100
+    }
+   ],
+   [
+    "MSG",
+    {
+     "Message": "Frame: QUAD/X",
+     "TimeUS": 101
+    }
+   ],
+   [
+    "PARM",
+    {
+     "Default": 0.13500000536441803,
+     "Name": "ATC_RAT_RLL_P",
+     "TimeUS": 200,
+     "Value": 0.13500000536441803
+    }
+   ],
+   [
+    "PARM",
+    {
+     "Default": 1.0,
+     "Name": "FRAME_CLASS",
+     "TimeUS": 201,
+     "Value": 1.0
+    }
+   ],
+   [
+    "PARM",
+    {
+     "Default": 1.0,
+     "Name": "SYSID_THISMAV",
+     "TimeUS": 202,
+     "Value": 1.0
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": 0.0,
+     "DesRoll": 0.0,
+     "DesYaw": 90.0,
+     "Pitch": 0.0,
+     "Roll": 0.0,
+     "TimeUS": 1000000,
+     "Yaw": 90.01
+    }
+   ],
+   [
+    "GPS",
+    {
+     "Alt": 520.5,
+     "GCrs": 90.0,
+     "GMS": 400000,
+     "GWk": 2310,
+     "HDop": 0.85,
+     "Lat": 47.397742,
+     "Lng": 8.5255,
+     "NSats": 12,
+     "Spd": 0.5,
+     "Status": 3,
+     "TimeUS": 1000010,
+     "U": 1,
+     "VZ": -0.25
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -0.5,
+     "DesRoll": 1.0,
+     "DesYaw": 90.01,
+     "Pitch": -0.49,
+     "Roll": 0.98,
+     "TimeUS": 1100000,
+     "Yaw": 90.02
+    }
+   ],
+   [
+    "MODE",
+    {
+     "Mode": 5,
+     "ModeNum": 5,
+     "Rsn": 1,
+     "TimeUS": 1100020
+    }
+   ],
+   [
+    "RCOU",
+    {
+     "C1": 1500,
+     "C2": 1501,
+     "C3": 1502,
+     "C4": 1503,
+     "TimeUS": 1100030
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -1.0,
+     "DesRoll": 2.0,
+     "DesYaw": 90.02,
+     "Pitch": -0.98,
+     "Roll": 1.96,
+     "TimeUS": 1200000,
+     "Yaw": 90.03
+    }
+   ],
+   [
+    "GPS",
+    {
+     "Alt": 520.7,
+     "GCrs": 92.0,
+     "GMS": 400400,
+     "GWk": 2312,
+     "HDop": 0.85,
+     "Lat": 47.3977422,
+     "Lng": 8.5254998,
+     "NSats": 12,
+     "Spd": 2.5,
+     "Status": 3,
+     "TimeUS": 1200010,
+     "U": 1,
+     "VZ": -0.25
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -1.5,
+     "DesRoll": 3.0,
+     "DesYaw": 90.03,
+     "Pitch": -1.47,
+     "Roll": 2.94,
+     "TimeUS": 1300000,
+     "Yaw": 90.04
+    }
+   ],
+   [
+    "ARR",
+    {
+     "Samples": [
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34
+     ],
+     "TimeUS": 1300040
+    }
+   ],
+   [
+    "MODE",
+    {
+     "Mode": 6,
+     "ModeNum": 6,
+     "Rsn": 2,
+     "TimeUS": 1300050
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -2.0,
+     "DesRoll": 4.0,
+     "DesYaw": 90.04,
+     "Pitch": -1.96,
+     "Roll": 3.92,
+     "TimeUS": 1400000,
+     "Yaw": 90.05
+    }
+   ],
+   [
+    "GPS",
+    {
+     "Alt": 520.9,
+     "GCrs": 94.0,
+     "GMS": 400800,
+     "GWk": 2314,
+     "HDop": 0.85,
+     "Lat": 47.3977424,
+     "Lng": 8.5254996,
+     "NSats": 12,
+     "Spd": 4.5,
+     "Status": 3,
+     "TimeUS": 1400010,
+     "U": 1,
+     "VZ": -0.25
+    }
+   ]
+  ],
+  "mult_lookup": {
+   "-": 0.0,
+   "0": 1.0,
+   "B": 0.01,
+   "F": 1e-06,
+   "G": 1e-07
+  },
+  "unit_lookup": {
+   "-": "",
+   "d": "deg",
+   "i": "ms",
+   "m": "m",
+   "n": "m/s",
+   "s": "s",
+   "w": "week",
+   "z": "Hz"
+  }
+ },
+ "legacy_timems.bin": {
+  "formats": {
+   "ATT": [
+    129,
+    19,
+    "IccccCC",
+    [
+     "TimeMS",
+     "DesRoll",
+     "Roll",
+     "DesPitch",
+     "Pitch",
+     "DesYaw",
+     "Yaw"
+    ]
+   ],
+   "FMT": [
+    128,
+    89,
+    "BBnNZ",
+    [
+     "Type",
+     "Length",
+     "Name",
+     "Format",
+     "Columns"
+    ]
+   ]
+  },
+  "messages": [
+   [
+    "FMT",
+    {
+     "Columns": "Type,Length,Name,Format,Columns",
+     "Format": "BBnNZ",
+     "Length": 89,
+     "Name": "FMT",
+     "Type": 128
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeMS,DesRoll,Roll,DesPitch,Pitch,DesYaw,Yaw",
+     "Format": "IccccCC",
+     "Length": 19,
+     "Name": "ATT",
+     "Type": 129
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": 0.0,
+     "DesRoll": 0.0,
+     "DesYaw": 1.0,
+     "Pitch": 0.0,
+     "Roll": 0.0,
+     "TimeMS": 4000,
+     "Yaw": 1.01
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -0.1,
+     "DesRoll": 0.1,
+     "DesYaw": 1.0,
+     "Pitch": -0.09,
+     "Roll": 0.09,
+     "TimeMS": 4020,
+     "Yaw": 1.01
+    }
+   ],
+   [
+    "ATT",
+    {
+     "DesPitch": -0.2,
+     "DesRoll": 0.2,
+     "DesYaw": 1.0,
+     "Pitch": -0.18,
+     "Roll": 0.18,
+     "TimeMS": 4040,
+     "Yaw": 1.01
+    }
+   ]
+  ],
+  "mult_lookup": {},
+  "unit_lookup": {}
+ },
+ "rover.bin": {
+  "formats": {
+   "FMT": [
+    128,
+    89,
+    "BBnNZ",
+    [
+     "Type",
+     "Length",
+     "Name",
+     "Format",
+     "Columns"
+    ]
+   ],
+   "FMTU": [
+    136,
+    44,
+    "QBNN",
+    [
+     "TimeUS",
+     "FmtType",
+     "UnitIds",
+     "MultIds"
+    ]
+   ],
+   "GPS": [
+    133,
+    46,
+    "QBIHBcLLefffB",
+    [
+     "TimeUS",
+     "Status",
+     "GMS",
+     "GWk",
+     "NSats",
+     "HDop",
+     "Lat",
+     "Lng",
+     "Alt",
+     "Spd",
+     "GCrs",
+     "VZ",
+     "U"
+    ]
+   ],
+   "MODE": [
+    134,
+    14,
+    "QMBB",
+    [
+     "TimeUS",
+     "Mode",
+     "ModeNum",
+     "Rsn"
+    ]
+   ],
+   "MSG": [
+    130,
+    75,
+    "QZ",
+    [
+     "TimeUS",
+     "Message"
+    ]
+   ],
+   "MULT": [
+    138,
+    20,
+    "Qbd",
+    [
+     "TimeUS",
+     "Id",
+     "Mult"
+    ]
+   ],
+   "NOTE": [
+    135,
+    27,
+    "QN",
+    [
+     "TimeUS",
+     "Tag"
+    ]
+   ],
+   "PARM": [
+    129,
+    35,
+    "QNff",
+    [
+     "TimeUS",
+     "Name",
+     "Value",
+     "Default"
+    ]
+   ],
+   "STER": [
+    131,
+    27,
+    "Qffff",
+    [
+     "TimeUS",
+     "SteerIn",
+     "SteerOut",
+     "DesTurnRate",
+     "TurnRate"
+    ]
+   ],
+   "UNIT": [
+    137,
+    76,
+    "QbZ",
+    [
+     "TimeUS",
+     "Id",
+     "Label"
+    ]
+   ],
+   "WENC": [
+    132,
+    27,
+    "Qffff",
+    [
+     "TimeUS",
+     "Dist0",
+     "Spd0",
+     "Dist1",
+     "Spd1"
+    ]
+   ]
+  },
+  "messages": [
+   [
+    "FMT",
+    {
+     "Columns": "Type,Length,Name,Format,Columns",
+     "Format": "BBnNZ",
+     "Length": 89,
+     "Name": "FMT",
+     "Type": 128
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Name,Value,Default",
+     "Format": "QNff",
+     "Length": 35,
+     "Name": "PARM",
+     "Type": 129
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Message",
+     "Format": "QZ",
+     "Length": 75,
+     "Name": "MSG",
+     "Type": 130
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,SteerIn,SteerOut,DesTurnRate,TurnRate",
+     "Format": "Qffff",
+     "Length": 27,
+     "Name": "STER",
+     "Type": 131
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Dist0,Spd0,Dist1,Spd1",
+     "Format": "Qffff",
+     "Length": 27,
+     "Name": "WENC",
+     "Type": 132
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Status,GMS,GWk,NSats,HDop,Lat,Lng,Alt,Spd,GCrs,VZ,U",
+     "Format": "QBIHBcLLefffB",
+     "Length": 46,
+     "Name": "GPS",
+     "Type": 133
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Mode,ModeNum,Rsn",
+     "Format": "QMBB",
+     "Length": 14,
+     "Name": "MODE",
+     "Type": 134
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Tag",
+     "Format": "QN",
+     "Length": 27,
+     "Name": "NOTE",
+     "Type": 135
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,FmtType,UnitIds,MultIds",
+     "Format": "QBNN",
+     "Length": 44,
+     "Name": "FMTU",
+     "Type": 136
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Id,Label",
+     "Format": "QbZ",
+     "Length": 76,
+     "Name": "UNIT",
+     "Type": 137
+    }
+   ],
+   [
+    "FMT",
+    {
+     "Columns": "TimeUS,Id,Mult",
+     "Format": "Qbd",
+     "Length": 20,
+     "Name": "MULT",
+     "Type": 138
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 45,
+     "Label": "",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 115,
+     "Label": "s",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 100,
+     "Label": "deg",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 109,
+     "Label": "m",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 110,
+     "Label": "m/s",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 105,
+     "Label": "ms",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 119,
+     "Label": "week",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "UNIT",
+    {
+     "Id": 122,
+     "Label": "Hz",
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 45,
+     "Mult": 0.0,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 48,
+     "Mult": 1.0,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 66,
+     "Mult": 0.01,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 70,
+     "Mult": 1e-06,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "MULT",
+    {
+     "Id": 71,
+     "Mult": 1e-07,
+     "TimeUS": 0
+    }
+   ],
+   [
+    "FMTU",
+    {
+     "FmtType": 131,
+     "MultIds": "F----",
+     "TimeUS": 0,
+     "UnitIds": "s----"
+    }
+   ],
+   [
+    "FMTU",
+    {
+     "FmtType": 132,
+     "MultIds": "F0000",
+     "TimeUS": 0,
+     "UnitIds": "smnmn"
+    }
+   ],
+   [
+    "MSG",
+    {
+     "Message": "ArduRover V4.5.1 (abcdef12)",
+     "TimeUS": 50
+    }
+   ],
+   [
+    "MSG",
+    {
+     "Message": "Frame: BOAT",
+     "TimeUS": 51
+    }
+   ],
+   [
+    "PARM",
+    {
+     "Default": 0.0,
+     "Name": "FRAME_CLASS",
+     "TimeUS": 60,
+     "Value": 2.0
+    }
+   ],
+   [
+    "PARM",
+    {
+     "Default": 2.0,
+     "Name": "WP_RADIUS",
+     "TimeUS": 61,
+     "Value": 2.0
+    }
+   ],
+   [
+    "STER",
+    {
+     "DesTurnRate": 0.0,
+     "SteerIn": 0.0,
+     "SteerOut": 0.0,
+     "TimeUS": 2000000,
+     "TurnRate": 0.0
+    }
+   ],
+   [
+    "WENC",
+    {
+     "Dist0": 0.0,
+     "Dist1": 0.0,
+     "Spd0": 0.0,
+     "Spd1": 0.0,
+     "TimeUS": 2000005
+    }
+   ],
+   [
+    "STER",
+    {
+     "DesTurnRate": 5.0,
+     "SteerIn": 0.10000000149011612,
+     "SteerOut": 0.11999999731779099,
+     "TimeUS": 2050000,
+     "TurnRate": 4.5
+    }
+   ],
+   [
+    "WENC",
+    {
+     "Dist0": 0.4000000059604645,
+     "Dist1": 0.38999998569488525,
+     "Spd0": 0.800000011920929,
+     "Spd1": 0.7799999713897705,
+     "TimeUS": 2050005
+    }
+   ],
+   [
+    "GPS",
+    {
+     "Alt": 10.01,
+     "GCrs": 270.0,
+     "GMS": 500100,
+     "GWk": 2310,
+     "HDop": 0.9,
+     "Lat": -33.6999999,
+     "Lng": 151.0,
+     "NSats": 9,
+     "Spd": 1.5,
+     "Status": 3,
+     "TimeUS": 2050010,
+     "U": 1,
+     "VZ": 0.0
+    }
+   ],
+   [
+    "STER",
+    {
+     "DesTurnRate": 10.0,
+     "SteerIn": 0.20000000298023224,
+     "SteerOut": 0.23999999463558197,
+     "TimeUS": 2100000,
+     "TurnRate": 9.0
+    }
+   ],
+   [
+    "WENC",
+    {
+     "Dist0": 0.800000011920929,
+     "Dist1": 0.7799999713897705,
+     "Spd0": 1.600000023841858,
+     "Spd1": 1.559999942779541,
+     "TimeUS": 2100005
+    }
+   ],
+   [
+    "STER",
+    {
+     "DesTurnRate": 15.0,
+     "SteerIn": 0.30000001192092896,
+     "SteerOut": 0.36000001430511475,
+     "TimeUS": 2150000,
+     "TurnRate": 13.5
+    }
+   ],
+   [
+    "WENC",
+    {
+     "Dist0": 1.2000000476837158,
+     "Dist1": 1.1699999570846558,
+     "Spd0": 2.4000000953674316,
+     "Spd1": 2.3399999141693115,
+     "TimeUS": 2150005
+    }
+   ],
+   [
+    "GPS",
+    {
+     "Alt": 10.03,
+     "GCrs": 270.0,
+     "GMS": 500300,
+     "GWk": 2310,
+     "HDop": 0.9,
+     "Lat": -33.6999997,
+     "Lng": 151.0,
+     "NSats": 9,
+     "Spd": 1.5,
+     "Status": 3,
+     "TimeUS": 2150010,
+     "U": 1,
+     "VZ": 0.0
+    }
+   ],
+   [
+    "STER",
+    {
+     "DesTurnRate": 20.0,
+     "SteerIn": 0.4000000059604645,
+     "SteerOut": 0.47999998927116394,
+     "TimeUS": 2200000,
+     "TurnRate": 18.0
+    }
+   ],
+   [
+    "WENC",
+    {
+     "Dist0": 1.600000023841858,
+     "Dist1": 1.559999942779541,
+     "Spd0": 3.200000047683716,
+     "Spd1": 3.119999885559082,
+     "TimeUS": 2200005
+    }
+   ],
+   [
+    "MODE",
+    {
+     "Mode": 4,
+     "ModeNum": 4,
+     "Rsn": 1,
+     "TimeUS": 2300000
+    }
+   ],
+   [
+    "MSG",
+    {
+     "Message": "bad \u00ff\u00fe bytes",
+     "TimeUS": 2400000
+    }
+   ],
+   [
+    "NOTE",
+    {
+     "Tag": "late",
+     "TimeUS": 9223372036854775813
+    }
+   ]
+  ],
+  "mult_lookup": {
+   "-": 0.0,
+   "0": 1.0,
+   "B": 0.01,
+   "F": 1e-06,
+   "G": 1e-07
+  },
+  "unit_lookup": {
+   "-": "",
+   "d": "deg",
+   "i": "ms",
+   "m": "m",
+   "n": "m/s",
+   "s": "s",
+   "w": "week",
+   "z": "Hz"
+  }
+ }
+}

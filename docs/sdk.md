@@ -84,6 +84,7 @@ async def ingest_with_progress() -> IngestResult:
 | `findings` | the job's own findings (discovery, probe, runtime): unsupported, ambiguous, quarantined |
 | `read_receipt()` | the package's receipt, every adapter's findings included, checked against `receipt` |
 | `read_package()` | the whole package, read and verified |
+| `contents()` | per run, its streams: topic, type, declared field paths and inferred semantic (ADR 0049) |
 | `cache` | per source: adapter, plan and chunks with hit/miss rules; calls per adapter method |
 | `explanation` | a planned dry run's `Explanation` (ADR 0044); `None` otherwise |
 | `ingested`, `job`, `destination`, `durations` | as in `JobOutcome` |
@@ -91,6 +92,12 @@ async def ingest_with_progress() -> IngestResult:
 Same sources + adapters + config ⇒ same `receipt` and `package`, sync or async, cold or warm workspace,
 whatever earlier dry runs or ingests saw: a package lists only its own job's scan (ADR 0035 §9).
 A dry run's `cache` says what is left: chunks with rule `committed` are done, the rest will be parsed.
+
+`run_contents(package)` (or `result.contents()`) answers what a run holds without decoding a message:
+`run.carrying("imu")`, `run.semantics()`, `run.topic("/cmd_vel")`, and per stream `fields` (declared
+paths and types, from the stream's shared `definition` layout), `layout_state`, `semantic` (candidates,
+confidence, rules, evidence) and `carries` / `may_carry` (ties included). It reads the package's records
+and derived tables only. Several lines of one kind for a stream are `Ambiguous`, never one picked.
 
 ## Explain before ingesting
 

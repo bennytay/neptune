@@ -7,7 +7,7 @@ interface under `contracts/`, its version, and the ADR that fixed it. Nothing el
 
 | Contract | Version | Version constant | Registry | Reference | Fixed by |
 |---|---|---|---|---|---|
-| `catalog-api` (register, verify, resolve, thread, threads_of, lineage, query) | **1.3.0** (stable since the L1 gate, MVL-89; 1.2.0 adds package-schema 2's record kinds, MVL-23; 1.3.0 package-schema 3's, MVL-83) | `neptune_ledger.api.CATALOG_API_VERSION` | `contracts/catalog-api/v1.3.0/` | [catalog-api.md](catalog-api.md) | [ADR 0004](adr/0004-catalog-api-error-model-and-versioning.md), [0006](adr/0006-l1-gate-catalog-api-amendments.md), [0002](adr/0002-catalog-data-model.md), [0005](adr/0005-l1-gate-catalog-data-model-amendments.md), [0003](adr/0003-entity-threads-and-the-lineage-current-view.md) |
+| `catalog-api` (register, verify, resolve, thread, threads_of, lineage, query) | **1.4.0** (stable since the L1 gate, MVL-89; 1.2.0 adds package-schema 2's record kinds, MVL-23; 1.3.0 package-schema 3's, MVL-82; 1.4.0 package-schema 4's, MVL-83) | `neptune_ledger.api.CATALOG_API_VERSION` | `contracts/catalog-api/v1.4.0/` | [catalog-api.md](catalog-api.md) | [ADR 0004](adr/0004-catalog-api-error-model-and-versioning.md), [0006](adr/0006-l1-gate-catalog-api-amendments.md), [0002](adr/0002-catalog-data-model.md), [0005](adr/0005-l1-gate-catalog-data-model-amendments.md), [0003](adr/0003-entity-threads-and-the-lineage-current-view.md) |
 
 Lakehouse table contracts are listed here when they land.
 
@@ -15,12 +15,12 @@ Lakehouse table contracts are listed here when they land.
 
 | Contract | Owner | Version built against | Source of truth | Fixed by |
 |---|---|---|---|---|
-| Package schema (canonical records) | `neptune` (compiler) | **3** | `neptune.model.record.SCHEMA_VERSION`; schema id `urn:neptune:schema:canonical:3` (versions 2 and 3 only add kinds: root ADR 0037 §1, MVL-23 / PR #37; root ADR 0051, MVL-83) | root ADR 0017; Ledger [ADR 0001](adr/0001-ledger-place-in-the-programme.md) |
+| Package schema (canonical records) | `neptune` (compiler) | **4** | `neptune.model.record.SCHEMA_VERSION`; schema id `urn:neptune:schema:canonical:4` (versions 2 to 4 only add kinds: root ADR 0037 §1, MVL-23 / PR #37; root ADR 0050, MVL-82; root ADR 0051, MVL-83) | root ADR 0017; Ledger [ADR 0001](adr/0001-ledger-place-in-the-programme.md) |
 
 Rules:
 
-- The Ledger reads package records whose `schema_version` is 1 to 3 (2 adds the configuration kinds, 3 the
-  deployment lifecycle kinds; neither changes an earlier record). It records any other version as a
+- The Ledger reads package records whose `schema_version` is 1 to 4 (2 adds the configuration kinds,
+  3 the alignment kinds, 4 the deployment lifecycle kinds; none changes an earlier record). It records any other version as a
   structured finding and does not guess at its shape.
 - Moving the declared version is a PR in this package that updates this table, cites the owning package's
   bump PR and its `contracts/` goldens, and adds or supersedes an ADR.

@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<!DOCTYPE opencv_storage [<!ENTITY lol "lol">]>
+<opencv_storage>
+<camera_matrix type_id="opencv-matrix"><rows>1</rows><cols>1</cols><dt>d</dt><data>&lol;</data></camera_matrix>
+</opencv_storage>
