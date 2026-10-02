@@ -1,0 +1,247 @@
+{
+  "files": [
+    {
+      "path": "receipt.json",
+      "sha256": "sha256:3129210bacc0fbd74b11112c76aec0eff9c0d3f275a35b33210b5fd5075c8d3f",
+      "size": 6179
+    },
+    {
+      "path": "receipt.md",
+      "sha256": "sha256:8db850f11aced0031e005d6f8e8ae7830eca27d1d641ecf015e417b26d230742",
+      "size": 2228
+    },
+    {
+      "path": "records/asset.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/authorisation_envelope.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/calibration.jsonl",
+      "sha256": "sha256:425796c35fca2a955dd09a10b8ed256cbc8fe3b0cdc6c6a5d3844a85de920439",
+      "size": 1185
+    },
+    {
+      "path": "records/change_record.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/commissioning_baseline.jsonl",
+      "sha256": "sha256:2318893ebcade61b4ea8bed9e723e4c843501608b7f071c74a077b4c56127b69",
+      "size": 13679
+    },
+    {
+      "path": "records/configuration_snapshot.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/configuration_value.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/document_block.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/document_record.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/frame.jsonl",
+      "sha256": "sha256:108dca6c584a076f130d26782a56683b0d9d72fbfea8bda200fd699ac423017b",
+      "size": 2633
+    },
+    {
+      "path": "records/frame_graph.jsonl",
+      "sha256": "sha256:62daae8458d5a0f5b25e270d2db00cd45ffd925f62255965d27c1b3cce6f7731",
+      "size": 423
+    },
+    {
+      "path": "records/frame_transform.jsonl",
+      "sha256": "sha256:a4612496cda1ee82bcdec3f1cafa4d795a59ade6591075e96b7977d7ce7f8dc5",
+      "size": 1135
+    },
+    {
+      "path": "records/hardware_component.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/hardware_configuration.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/image.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/incident_record.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/ingest_finding.jsonl",
+      "sha256": "sha256:4fe8970a990492f6624e29f3845ca2f0eba4406c673935c1021784ea00a9a2a4",
+      "size": 701
+    },
+    {
+      "path": "records/intervention.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/machine.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/maintenance_event.jsonl",
+      "sha256": "sha256:c0cd330ecc29e42bf5fbd73d64bf8fa8d0076121b051a1f6cf62e7b3c49e60ef",
+      "size": 5278
+    },
+    {
+      "path": "records/requalification_record.jsonl",
+      "sha256": "sha256:ed96f30bda3cb0e3a4322335242484e9be01ef5ad0f665fca09fbacaa5e07634",
+      "size": 8843
+    },
+    {
+      "path": "records/risk_assessment.jsonl",
+      "sha256": "sha256:740682cddc8dc5df2f2760894076e8a38663540ef02f0391bea1ebb65024a597",
+      "size": 9999
+    },
+    {
+      "path": "records/run.jsonl",
+      "sha256": "sha256:9b8ec0bafcad1a7f0c7af5490abb1db77d340ae9e0e7762b7c4ed325041448e4",
+      "size": 1367
+    },
+    {
+      "path": "records/site.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/software_configuration.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/source_absence.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/source_artifact.jsonl",
+      "sha256": "sha256:c67b0219c42fb0d9e152361411fb5f759fdd5af1853c800aec0e7a57caed05f2",
+      "size": 752
+    },
+    {
+      "path": "records/source_revision.jsonl",
+      "sha256": "sha256:84878322128df5c6bae210c5e6b236d8da59c46d9ddbfb508bf36f1f7e435622",
+      "size": 851
+    },
+    {
+      "path": "records/spatial_artifact.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/stream.jsonl",
+      "sha256": "sha256:43b19b528fe92c3315262697f27aed5b899b3de095d296e67a5161d72490e64a",
+      "size": 4741
+    },
+    {
+      "path": "records/structured_record.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/structured_table.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    },
+    {
+      "path": "records/timestamp_domain.jsonl",
+      "sha256": "sha256:d3b8ede7389bfc1828149fe8589380e3c1cdab66813711ac0843a465fd593af4",
+      "size": 3727
+    },
+    {
+      "path": "records/transform_record.jsonl",
+      "sha256": "sha256:c18575c80874bc63fd590da849945a12149f5776b4e4df49859e728223c07da5",
+      "size": 929
+    },
+    {
+      "path": "records/video.jsonl",
+      "sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "size": 0
+    }
+  ],
+  "kind": "package_manifest",
+  "receipt": "rec:sha256:aeb9c7db27bbf8a03a4c8d5f628a7bc30b992c84d9b14e46a16fb3a419b79589",
+  "schema_version": 3,
+  "sources": [
+    {
+      "content_id": "sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa",
+      "size": 348,
+      "storage": "referenced"
+    },
+    {
+      "content_id": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9",
+      "size": 3374,
+      "storage": "referenced"
+    },
+    {
+      "content_id": "sha256:d6bebd2e8559a3b41e661de1efb79ea3dbbc183a8c4992b615726606c315a840",
+      "size": 2570,
+      "storage": "referenced"
+    }
+  ],
+  "store": {},
+  "tables": {
+    "asset": 0,
+    "authorisation_envelope": 0,
+    "calibration": 1,
+    "change_record": 0,
+    "commissioning_baseline": 1,
+    "configuration_snapshot": 0,
+    "configuration_value": 0,
+    "document_block": 0,
+    "document_record": 0,
+    "frame": 4,
+    "frame_graph": 1,
+    "frame_transform": 1,
+    "hardware_component": 0,
+    "hardware_configuration": 0,
+    "image": 0,
+    "incident_record": 0,
+    "ingest_finding": 1,
+    "intervention": 0,
+    "machine": 0,
+    "maintenance_event": 1,
+    "requalification_record": 1,
+    "risk_assessment": 1,
+    "run": 1,
+    "site": 0,
+    "software_configuration": 0,
+    "source_absence": 0,
+    "source_artifact": 3,
+    "source_revision": 3,
+    "spatial_artifact": 0,
+    "stream": 2,
+    "structured_record": 0,
+    "structured_table": 0,
+    "timestamp_domain": 5,
+    "transform_record": 3,
+    "video": 0
+  }
+}

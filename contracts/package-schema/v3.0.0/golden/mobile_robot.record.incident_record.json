@@ -1,0 +1,422 @@
+{
+  "assets": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4903,
+              "offset": 0
+            },
+            {
+              "kind": "json_pointer",
+              "pointer": "/incidents/0/assets/0"
+            }
+          ],
+          "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+        },
+        "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      },
+      "value": {
+        "namespace": "siteops.asset",
+        "value": "RACK-R12"
+      }
+    }
+  ],
+  "configuration": {
+    "knowledge": "not_covered"
+  },
+  "description": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/incidents/0/description"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": "low-speed contact with a rack upright while docking"
+  },
+  "id": "rec:sha256:7677efc8e9cb96b357ea013ab6734eb750fcc1d96981c7040f9cc51eed4061df",
+  "identifiers": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4903,
+              "offset": 0
+            },
+            {
+              "kind": "json_pointer",
+              "pointer": "/incidents/0/incident"
+            }
+          ],
+          "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+        },
+        "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      },
+      "value": {
+        "namespace": "siteops.incident",
+        "value": "INC-0007"
+      }
+    }
+  ],
+  "kind": "incident_record",
+  "location": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/incidents/0/location"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": "dock door 4"
+  },
+  "machines": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4903,
+              "offset": 0
+            },
+            {
+              "kind": "json_pointer",
+              "pointer": "/incidents/0/machines/0"
+            }
+          ],
+          "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+        },
+        "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      },
+      "value": {
+        "namespace": "fleet",
+        "value": "AMR-07"
+      }
+    }
+  ],
+  "occurred": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/incidents/0/occurred"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": {
+      "domain_id": "rec:sha256:926bf595c94452c9523525c7a55a1dea9d794213931f406de5d64e30be186e8d",
+      "ticks": 1790273520
+    }
+  },
+  "provenance": {
+    "assertion_kind": "stated",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 4903,
+          "offset": 0
+        },
+        {
+          "kind": "json_pointer",
+          "pointer": "/incidents/0"
+        }
+      ],
+      "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+    },
+    "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+  },
+  "related": [
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4903,
+              "offset": 0
+            },
+            {
+              "kind": "json_pointer",
+              "pointer": "/incidents/0/evidence/0"
+            }
+          ],
+          "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+        },
+        "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      },
+      "value": {
+        "namespace": "siteops.evidence",
+        "value": "VID-20260925-0412"
+      }
+    },
+    {
+      "knowledge": "known",
+      "provenance": {
+        "assertion_kind": "stated",
+        "evidence": {
+          "locator": [
+            {
+              "kind": "byte_range",
+              "length": 4903,
+              "offset": 0
+            },
+            {
+              "kind": "json_pointer",
+              "pointer": "/incidents/0/evidence/1"
+            }
+          ],
+          "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+        },
+        "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      },
+      "value": {
+        "namespace": "siteops.evidence",
+        "value": "drive.bag"
+      }
+    }
+  ],
+  "root_cause": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/incidents/0/root_cause"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": "map offset after rack R12 was moved"
+  },
+  "schema_version": 3,
+  "severity": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/incidents/0/severity"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": "S3"
+  },
+  "site": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/site"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": {
+      "namespace": "register",
+      "value": "S-007"
+    }
+  },
+  "timeline": [
+    {
+      "text": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "stated",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 4903,
+                "offset": 0
+              },
+              {
+                "kind": "json_pointer",
+                "pointer": "/incidents/0/timeline/0/entry"
+              }
+            ],
+            "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+          },
+          "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+        },
+        "value": "AMR-07 touched rack upright R12"
+      },
+      "time": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "stated",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 4903,
+                "offset": 0
+              },
+              {
+                "kind": "json_pointer",
+                "pointer": "/incidents/0/timeline/0/time"
+              }
+            ],
+            "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+          },
+          "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+        },
+        "value": {
+          "domain_id": "rec:sha256:926bf595c94452c9523525c7a55a1dea9d794213931f406de5d64e30be186e8d",
+          "ticks": 1790273520
+        }
+      }
+    },
+    {
+      "text": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "stated",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 4903,
+                "offset": 0
+              },
+              {
+                "kind": "json_pointer",
+                "pointer": "/incidents/0/timeline/1/entry"
+              }
+            ],
+            "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+          },
+          "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+        },
+        "value": "bumper stop; robot halted"
+      },
+      "time": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "stated",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 4903,
+                "offset": 0
+              },
+              {
+                "kind": "json_pointer",
+                "pointer": "/incidents/0/timeline/1/time"
+              }
+            ],
+            "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+          },
+          "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+        },
+        "value": {
+          "domain_id": "rec:sha256:926bf595c94452c9523525c7a55a1dea9d794213931f406de5d64e30be186e8d",
+          "ticks": 1790273521
+        }
+      }
+    }
+  ],
+  "zone": {
+    "knowledge": "known",
+    "provenance": {
+      "assertion_kind": "stated",
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 4903,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/incidents/0/zone"
+          }
+        ],
+        "source": "sha256:5d7a7e18bb8bf413797120a489297316b2a2139d7b62ffdaebfc5d6f4bf283a6"
+      },
+      "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+    },
+    "value": {
+      "namespace": "siteops.zone",
+      "value": "DOCK-1"
+    }
+  }
+}

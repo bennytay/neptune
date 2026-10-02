@@ -1,0 +1,281 @@
+{
+  "absent": [],
+  "ambiguous": [
+    {
+      "pointer": "/direction",
+      "record": "rec:sha256:e2c144c52c3f1c398b3a8f14738901a89d68bd7853dce97e558c112e596044f6"
+    }
+  ],
+  "clocks": [
+    {
+      "field": "publish_time",
+      "id": "rec:sha256:1772985ce7079c89de63ed16217ae03c4a06392e6108517b62b728b0947e0631",
+      "scope": []
+    },
+    {
+      "field": "date-time",
+      "id": "rec:sha256:5e7ad9e089b0f9a3d015d631b3863ba21da6a66144f21ac0a43ed91f72c54a0d",
+      "scope": []
+    },
+    {
+      "field": "log_time",
+      "id": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
+      "scope": []
+    },
+    {
+      "field": "header.stamp",
+      "id": "rec:sha256:bd092bde694838cfde82486bfedfe7c78009e80de79366f2ddb60f19687db227",
+      "scope": [
+        "/wrist_camera/image/compressed"
+      ]
+    },
+    {
+      "field": "header.stamp",
+      "id": "rec:sha256:f209be5d34d07b94ea72608f25a2c6f202259d0f25658c8dfde7b5f7f4bc9dc3",
+      "scope": [
+        "/joint_states"
+      ]
+    }
+  ],
+  "entities": [],
+  "findings": [
+    {
+      "category": "missing",
+      "code": "handeye.unit_undeclared",
+      "id": "rec:sha256:402177b2decbea5aea931fcbca1600ed267ed611b70513ef43c4efd433c372ea",
+      "message": "the transformation states no unit for x, y and z",
+      "severity": "warning"
+    }
+  ],
+  "id": "rec:sha256:aeb9c7db27bbf8a03a4c8d5f628a7bc30b992c84d9b14e46a16fb3a419b79589",
+  "kind": "ingest_receipt",
+  "records": {
+    "asset": 0,
+    "authorisation_envelope": 0,
+    "calibration": 1,
+    "change_record": 0,
+    "commissioning_baseline": 1,
+    "configuration_snapshot": 0,
+    "configuration_value": 0,
+    "document_block": 0,
+    "document_record": 0,
+    "frame": 4,
+    "frame_graph": 1,
+    "frame_transform": 1,
+    "hardware_component": 0,
+    "hardware_configuration": 0,
+    "image": 0,
+    "incident_record": 0,
+    "ingest_finding": 1,
+    "intervention": 0,
+    "machine": 0,
+    "maintenance_event": 1,
+    "requalification_record": 1,
+    "risk_assessment": 1,
+    "run": 1,
+    "site": 0,
+    "software_configuration": 0,
+    "source_absence": 0,
+    "source_artifact": 3,
+    "source_revision": 3,
+    "spatial_artifact": 0,
+    "stream": 2,
+    "structured_record": 0,
+    "structured_table": 0,
+    "timestamp_domain": 5,
+    "transform_record": 3,
+    "video": 0
+  },
+  "runs": [
+    {
+      "first": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 75,
+                "offset": 2458
+              }
+            ],
+            "source": "sha256:d6bebd2e8559a3b41e661de1efb79ea3dbbc183a8c4992b615726606c315a840"
+          },
+          "transform": "rec:sha256:67b6d9921ecc2b3eddbacd46995215202cf549ce5d088600652a661391837b58"
+        },
+        "value": {
+          "domain_id": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
+          "ticks": 1790762401000000000
+        }
+      },
+      "id": "rec:sha256:0cf852d4efcbb869553993f8644de9e5c9cc319cd584b51cd5a00b29b4a9170b",
+      "last": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 75,
+                "offset": 2458
+              }
+            ],
+            "source": "sha256:d6bebd2e8559a3b41e661de1efb79ea3dbbc183a8c4992b615726606c315a840"
+          },
+          "transform": "rec:sha256:67b6d9921ecc2b3eddbacd46995215202cf549ce5d088600652a661391837b58"
+        },
+        "value": {
+          "domain_id": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
+          "ticks": 1790762401020000000
+        }
+      },
+      "logical_id": {
+        "knowledge": "unknown"
+      },
+      "machine": {
+        "knowledge": "unknown"
+      },
+      "streams": 2
+    }
+  ],
+  "schema_version": 3,
+  "sources": [
+    {
+      "content_id": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9",
+      "location": {
+        "kind": "local",
+        "path": "cell/records.json"
+      },
+      "read_by": [
+        "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
+      ],
+      "size": 3374
+    },
+    {
+      "content_id": "sha256:202b5b3f5707b7009e5a6730541261626a376f1d559eb004474970a6d7ed72aa",
+      "location": {
+        "kind": "local",
+        "path": "handeye.yaml"
+      },
+      "read_by": [
+        "rec:sha256:b067af6b936bfee6cc0672de2e1ea86982eff4ea2e821b27f71b4d8701de85c0"
+      ],
+      "size": 348
+    },
+    {
+      "content_id": "sha256:d6bebd2e8559a3b41e661de1efb79ea3dbbc183a8c4992b615726606c315a840",
+      "location": {
+        "kind": "local",
+        "path": "session.mcap"
+      },
+      "read_by": [
+        "rec:sha256:67b6d9921ecc2b3eddbacd46995215202cf549ce5d088600652a661391837b58"
+      ],
+      "size": 2570
+    }
+  ],
+  "streams": [
+    {
+      "clocks": [
+        "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
+        "rec:sha256:1772985ce7079c89de63ed16217ae03c4a06392e6108517b62b728b0947e0631",
+        "rec:sha256:bd092bde694838cfde82486bfedfe7c78009e80de79366f2ddb60f19687db227"
+      ],
+      "first": {
+        "knowledge": "unknown"
+      },
+      "id": "rec:sha256:234161ce7ba7c4f27964ec5aa961fa55324f7ea1a526a6cb609bb39709fa168c",
+      "last": {
+        "knowledge": "unknown"
+      },
+      "message_count": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 75,
+                "offset": 2458
+              }
+            ],
+            "source": "sha256:d6bebd2e8559a3b41e661de1efb79ea3dbbc183a8c4992b615726606c315a840"
+          },
+          "transform": "rec:sha256:67b6d9921ecc2b3eddbacd46995215202cf549ce5d088600652a661391837b58"
+        },
+        "value": 1
+      },
+      "run": "rec:sha256:0cf852d4efcbb869553993f8644de9e5c9cc319cd584b51cd5a00b29b4a9170b",
+      "topic": {
+        "knowledge": "known",
+        "value": "/wrist_camera/image/compressed"
+      }
+    },
+    {
+      "clocks": [
+        "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
+        "rec:sha256:1772985ce7079c89de63ed16217ae03c4a06392e6108517b62b728b0947e0631",
+        "rec:sha256:f209be5d34d07b94ea72608f25a2c6f202259d0f25658c8dfde7b5f7f4bc9dc3"
+      ],
+      "first": {
+        "knowledge": "unknown"
+      },
+      "id": "rec:sha256:9d2fbf06605754da9e8b233eff2384d1328301aadb8cea269ddeed8127779afc",
+      "last": {
+        "knowledge": "unknown"
+      },
+      "message_count": {
+        "knowledge": "known",
+        "provenance": {
+          "assertion_kind": "observed",
+          "evidence": {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 75,
+                "offset": 2458
+              }
+            ],
+            "source": "sha256:d6bebd2e8559a3b41e661de1efb79ea3dbbc183a8c4992b615726606c315a840"
+          },
+          "transform": "rec:sha256:67b6d9921ecc2b3eddbacd46995215202cf549ce5d088600652a661391837b58"
+        },
+        "value": 2
+      },
+      "run": "rec:sha256:0cf852d4efcbb869553993f8644de9e5c9cc319cd584b51cd5a00b29b4a9170b",
+      "topic": {
+        "knowledge": "known",
+        "value": "/joint_states"
+      }
+    }
+  ],
+  "transforms": [
+    {
+      "adapter_id": "deployment_json",
+      "adapter_version": "1.0.0",
+      "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "id": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55",
+      "libraries": {},
+      "upstream": []
+    },
+    {
+      "adapter_id": "mcap",
+      "adapter_version": "1.0.0",
+      "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "id": "rec:sha256:67b6d9921ecc2b3eddbacd46995215202cf549ce5d088600652a661391837b58",
+      "libraries": {},
+      "upstream": []
+    },
+    {
+      "adapter_id": "handeye",
+      "adapter_version": "1.0.0",
+      "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "id": "rec:sha256:b067af6b936bfee6cc0672de2e1ea86982eff4ea2e821b27f71b4d8701de85c0",
+      "libraries": {},
+      "upstream": []
+    }
+  ]
+}
