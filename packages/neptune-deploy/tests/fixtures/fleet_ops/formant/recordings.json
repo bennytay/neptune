@@ -1,0 +1,4 @@
+{"items": [
+  {"id": "file-0001", "deviceId": "dev-amr-07", "name": "amr07_2026-03-01T13.mcap", "size": 4821337, "time": "2026-03-01T13:00:00.000Z"},
+  {"id": "file-0002", "deviceId": "dev-arm-cell3", "name": "cell3_2026-03-01T09.bag", "size": 912004, "time": "2026-03-01T09:00:00.000Z"}
+]}

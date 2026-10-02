@@ -1,0 +1,5 @@
+[
+  {"booking": {"id": "delivery.dispatch-12", "unix_millis_earliest_start_time": 1772372400000, "priority": 0}, "category": "Delivery", "status": "completed", "assigned_to": {"group": "tinyRobot", "name": "AMR-07"}, "unix_millis_start_time": 1772372400000, "unix_millis_finish_time": 1772373300000, "dispatch": {"status": "completed"}},
+  {"booking": {"id": "patrol.dispatch-13", "priority": 1}, "category": "Patrol", "status": "failed", "assigned_to": {"group": "tinyRobot", "name": "AMR-09"}, "unix_millis_start_time": 1772374200000, "unix_millis_finish_time": 1772375400000, "dispatch": {"status": "completed"}},
+  {"category": "Delivery", "status": "queued", "assigned_to": {"group": "tinyRobot", "name": "AMR-07"}, "unix_millis_start_time": 1772375400000}
+]

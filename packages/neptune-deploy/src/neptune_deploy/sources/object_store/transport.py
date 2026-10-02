@@ -2,7 +2,9 @@
 
 - Every request asks the workspace first (``NetworkGate.require_network``), so a local-only
   workspace refuses each one, not only the first.
-- ``GET`` is the only method this module can send. Nothing here can write, delete or acknowledge.
+- ``GET`` is the only method ``Transport`` exposes. Nothing here can write, delete or acknowledge. A
+  connector whose one read is a POST (Foxglove's ``/data/stream`` returns a download link)
+  subclasses it and names that one request; ``_request`` is not a public way to send anything else.
 - Redirects are never followed: ``http.client`` does not follow them, and a ``3xx`` is raised as
   ``RedirectRefused``. Following one would send the request, and its credentials, wherever the
   server says, which is the object store's symlink.
@@ -25,11 +27,13 @@ import threading
 import urllib.parse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Final, Protocol
 
 from neptune_deploy.sources.object_store.sigv4 import quote
 
 DEFAULT_TIMEOUT: Final = 60.0
+MAX_TIMEOUT: Final = 3600.0  # seconds; a huge timeout is an ``OverflowError`` in the socket layer
 USER_AGENT: Final = "neptune-deploy-object-store/0.1.0"
 
 
@@ -212,6 +216,12 @@ class Response:
             raise self._fail(None, DeadlineExceeded("the request outlived its deadline"))
         if len(data) > limit:
             raise self._fail(None, ResponseTooLarge(f"more than {limit} bytes", self.status))
+        declared = self.headers.get("content-length", "")
+        # ``read(n)`` returns a body that ends before its Content-Length without an error.
+        digits = declared.isascii() and declared.isdigit() and len(declared) <= 19
+        expected = int(declared) if digits else -1
+        if len(data) < expected:
+            raise self._fail(None, ShortRead("the body ended early", len(data), expected))
         self._done()
         return data
 
@@ -255,13 +265,19 @@ class Transport:
         *,
         timeout: float = DEFAULT_TIMEOUT,
         tls: ssl.SSLContext | None = None,
+        user_agent: str = USER_AGENT,
     ) -> None:
         self.endpoint = endpoint
         self._network = network
         self._purpose = purpose
         self._timeout = timeout
         self._tls = tls
+        self._user_agent = user_agent
         self._connection: http.client.HTTPConnection | None = None
+        # Our own reference to the connected socket: http.client sets ``connection.sock`` to None
+        # after a ``Connection: close`` or HTTP/1.0 response while the response still reads from
+        # the socket, so ``abort`` could not reach a body that trickles in.
+        self._socket: socket.socket | None = None
         self.requests = 0
 
     def _connect(self) -> http.client.HTTPConnection:
@@ -280,33 +296,45 @@ class Transport:
 
     def abort(self) -> None:
         """Shut the connection's socket down from another thread (a deadline passed)."""
-        connection = self._connection
-        sock = connection.sock if connection is not None else None
-        if isinstance(sock, socket.socket):
+        sock = self._socket
+        if sock is not None:
             with contextlib.suppress(OSError):  # already closed
                 sock.shutdown(socket.SHUT_RDWR)
+            with contextlib.suppress(OSError):
+                sock.close()
 
     def drop(self) -> None:
         """Close the connection; the next request opens a new one."""
         if self._connection is not None:
             self._connection.close()
             self._connection = None
+        self._socket = None
 
     def _send(
-        self, target: str, headers: Mapping[str, str], deadline: _Deadline
+        self,
+        target: str,
+        headers: Mapping[str, str],
+        deadline: _Deadline,
+        method: str = "GET",
+        body: bytes | None = None,
     ) -> http.client.HTTPResponse:
         """One request; sent again, once, on a new connection if a kept-alive one was closed by
-        the server while idle (``GET`` is idempotent, and nothing was received)."""
+        the server while idle (the request is a read, and nothing was received)."""
         for attempt in (0, 1):
             reused = self._connection is not None
             connection = self._connect()
             self.requests += 1
             try:
-                connection.putrequest("GET", target, skip_host=True, skip_accept_encoding=True)
+                if connection.sock is None:
+                    connection.connect()
+                    self._socket = connection.sock  # kept for ``abort`` (see ``__init__``)
+                connection.putrequest(method, target, skip_host=True, skip_accept_encoding=True)
                 for name, value in headers.items():
                     connection.putheader(name, value)
-                connection.endheaders()  # connects, if the connection is new
-                if deadline.expired:  # it passed while connecting, before a socket to shut down
+                if body is not None:
+                    connection.putheader("Content-Length", str(len(body)))
+                connection.endheaders(body)
+                if deadline.expired:  # it passed while connecting or sending
                     self.drop()
                     raise DeadlineExceeded("the request outlived its deadline")
                 return connection.getresponse()
@@ -314,13 +342,18 @@ class Transport:
                 self.drop()
                 if not (reused and attempt == 0) or deadline.expired:
                     raise deadline.error(exc, TransportError(type(exc).__name__)) from exc
-            except (OSError, http.client.HTTPException) as exc:
+            except (OSError, http.client.HTTPException, ValueError) as exc:
+                # ValueError: a header or path http.client cannot encode (a non-Latin-1 etag or
+                # token, a non-ASCII endpoint path) leaves the connection mid-request: drop it.
                 self.drop()
                 raise deadline.error(exc, TransportError(type(exc).__name__)) from exc
         raise AssertionError("unreachable")
 
     def get(
-        self, path: str, query: Sequence[tuple[str, str]] = (), headers: Mapping[str, str] = {}
+        self,
+        path: str,
+        query: Sequence[tuple[str, str]] = (),
+        headers: Mapping[str, str] = MappingProxyType({}),
     ) -> Response:
         """Send ``GET path?query``. ``path`` is percent-encoded already; ``query`` is raw text,
         encoded here as ``sigv4.canonical_query`` encodes it, so what is signed is what is sent.
@@ -330,13 +363,23 @@ class Transport:
         The timeout bounds each socket operation and, as a deadline, the whole request: headers
         and body together (``DeadlineExceeded``).
         """
+        return self._request("GET", path, query, headers)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        query: Sequence[tuple[str, str]] = (),
+        headers: Mapping[str, str] = MappingProxyType({}),
+        body: bytes | None = None,
+    ) -> Response:
         self._network.require_network(self._purpose)
         pairs = [(quote(k), quote(v)) for k, v in query]
         target = path + ("?" + "&".join(f"{k}={v}" if v else k for k, v in pairs) if pairs else "")
-        sent = {"Host": self.endpoint.authority, "User-Agent": USER_AGENT, **headers}
+        sent = {"Host": self.endpoint.authority, "User-Agent": self._user_agent, **headers}
         deadline = _Deadline(self, self._timeout)
         try:
-            raw = self._send(target, sent, deadline)
+            raw = self._send(target, sent, deadline, method, body)
         except BaseException:
             deadline.cancel()
             raise
