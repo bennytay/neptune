@@ -24,12 +24,12 @@ from neptune.model.ids import parse_record_id
 from neptune.model.time import INT64_MAX, INT64_MIN
 from neptune_ledger.api.types import CatalogFinding, TimeWindow
 from neptune_ledger.lake.series import SeriesFile
-from neptune_ledger.lake.store import Location, S3Settings, arrow_s3
+from neptune_ledger.lake.store import LocalObjectStore, Location, S3Settings, arrow_s3
 
-FIXED: Final = ("package_id", "stream_id", "clock", "ticks", "seq")
+FIXED: Final = ("package_id", "stream_id", "clock", "ticks", "ticks_state", "seq")
 _PARTITION: Final = "__partition"
 _SCAN: Final = "__scan"
-_PREFIXES: Final = ("value/", "state/", "locator/")
+_PREFIXES: Final = ("value/", "state/value/", "locator/")
 
 
 class LakeRequestError(ValueError):
@@ -45,6 +45,13 @@ class Scan:
     column: str
     window: TimeWindow | None
     partition: int
+    names: tuple[str, ...]  # the file's columns, as its footer states them
+
+    @property
+    def state_column(self) -> str | None:
+        """The file's state column for the scanned clock, if its ticks are wrapped."""
+        state = f"state/{self.column}"
+        return state if state in self.names else None
 
 
 @dataclass(frozen=True)
@@ -95,6 +102,8 @@ def plan_series(
     every such column all of them share.
     """
     files = list(files)
+    if windows is not None and not windows:
+        raise LakeRequestError("windows is None for whole files, or at least one window")
     by_clock = _check_windows(windows) if windows is not None else None
     findings: list[CatalogFinding] = []
     chosen: list[tuple[SeriesFile, str, TimeWindow | None]] = []
@@ -113,9 +122,17 @@ def plan_series(
     schemas: dict[str, Any] = {}
     readable = []
     for file, clock, window in chosen:
+        if not _unchanged(file):
+            detail = f"{file.location.url} is missing, a link, or not the size its manifest says"
+            findings.append(CatalogFinding("file_missing", file.stream_id, detail))
+            continue
         schema = _schema(file.location)
-        if schema is None:
-            detail = f"{file.location.url} is not readable as Parquet"
+        column = str(file.time_column(clock))
+        if schema is None or not all(
+            name in schema.names and schema.field(name).type == pa.int64()
+            for name in ("seq", column)
+        ):
+            detail = f"{file.location.url} is not Parquet holding int64 seq and {column}"
             findings.append(CatalogFinding("file_digest_mismatch", file.stream_id, detail))
             continue
         schemas[file.stream_id] = schema
@@ -129,11 +146,31 @@ def plan_series(
     # Scans in output order, so a scan's index sorts as (partition, package id, stream id) do.
     readable.sort(key=lambda c: (rank[c[1]], c[0].package_id.encode(), c[0].stream_id.encode()))
     scans = tuple(
-        Scan(file, clock, str(file.time_column(clock)), window, rank[clock])
+        Scan(
+            file,
+            clock,
+            str(file.time_column(clock)),
+            window,
+            rank[clock],
+            tuple(schemas[file.stream_id].names),
+        )
         for file, clock, window in readable
     )
     out = _output_schema([schemas[s.file.stream_id] for s in scans], kept)
     return SeriesPlan(scans, kept, out, tuple(findings))
+
+
+def _unchanged(file: SeriesFile) -> bool:
+    """A local file is still a plain file, reached without a link, of its manifest's size.
+
+    Checked again just before its footer is read, because the engines open the path by name and
+    would follow a link swapped in since ``SeriesCatalog.files``. An object store has no links;
+    its size was checked when the file was resolved.
+    """
+    if file.location.s3 is not None:
+        return True
+    head, _, name = file.location.path.rpartition("/")
+    return LocalObjectStore(head or "/").size(name) == file.size
 
 
 def _schema(location: Location) -> Any:
@@ -141,7 +178,7 @@ def _schema(location: Location) -> Any:
         if location.s3 is None:
             return pq.read_schema(location.path)
         return pq.read_schema(location.path, filesystem=arrow_s3(location.s3))
-    except (pa.ArrowException, OSError):
+    except (pa.ArrowException, OSError, ValueError):
         return None
 
 
@@ -151,7 +188,9 @@ def _columns(schemas: list[Any], columns: Sequence[str] | None) -> tuple[str, ..
             raise LakeRequestError("columns are distinct column names")
         for name in columns:
             if not isinstance(name, str) or not name.startswith(_PREFIXES):
-                raise LakeRequestError(f"only value/, state/ and locator/ columns: {name!r}")
+                # time/<i> and state/time/<i> name a different clock in each file (ADR 0013 §5).
+                detail = f"only value/, state/value/ and locator/ columns: {name!r}"
+                raise LakeRequestError(detail)
             types = {str(s.field(name).type) if name in s.names else None for s in schemas}
             if None in types or len(types) > 1:
                 raise LakeRequestError(f"column {name!r} is not in every file with one type")
@@ -180,6 +219,7 @@ def _output_schema(schemas: list[Any], columns: tuple[str, ...]) -> Any:
         pa.field("stream_id", _ID, nullable=False),
         pa.field("clock", _ID, nullable=False),
         pa.field("ticks", pa.int64()),
+        pa.field("ticks_state", _ID, nullable=False),
         pa.field("seq", pa.int64(), nullable=False),
     ]
     for name in columns:
@@ -212,16 +252,19 @@ def series_sql(plan: SeriesPlan, tables: Sequence[str]) -> str:
     branches = []
     for index, (scan, table) in enumerate(zip(plan.scans, tables, strict=True)):
         ticks = _ident(scan.column)
+        wrapped = scan.state_column
+        state = f"CAST({_ident(wrapped)} AS VARCHAR)" if wrapped else "CAST(NULL AS VARCHAR)"
         values = "".join(f", {_ident(c)}" for c in plan.columns)
         branch = (
             f"SELECT CAST({scan.partition} AS INTEGER) AS {_PARTITION},"
-            f" CAST({index} AS INTEGER) AS {_SCAN}, {ticks} AS ticks, seq{values} FROM {table}"
+            f" CAST({index} AS INTEGER) AS {_SCAN}, {ticks} AS ticks,"
+            f" {state} AS ticks_state, seq{values} FROM {table}"
         )
         if scan.window is not None:
             low, high = _tick(scan.window.first), _tick(scan.window.last)
             branch += f" WHERE {ticks} >= {low} AND {ticks} <= {high}"
         branches.append(branch)
-    keep = ", ".join([_SCAN, "ticks", "seq", *(_ident(c) for c in plan.columns)])
+    keep = ", ".join([_SCAN, "ticks", "ticks_state", "seq", *(_ident(c) for c in plan.columns)])
     union = " UNION ALL ".join(branches)
     return (
         f"SELECT {keep} FROM ({union}) AS rows"
@@ -249,21 +292,32 @@ def _ids(scan_index: Any, per_scan: list[str]) -> Any:
     values = sorted(set(per_scan), key=lambda v: v.encode("utf-8"))
     position = {v: i for i, v in enumerate(values)}
     mapping = pa.array([position[v] for v in per_scan], pa.int32())
-    indices = pc.take(mapping, scan_index.combine_chunks())
-    return pa.DictionaryArray.from_arrays(indices, pa.array(values, pa.string()))
+    return pa.DictionaryArray.from_arrays(pc.take(mapping, scan_index), pa.array(values))
+
+
+def _states(column: Any, rows: int) -> Any:
+    """The ticks' knowledge states: the file's state column where it has one, else ``known``
+    (a time column without a state column holds a value in every row: root ADR 0018 §6)."""
+    if column.null_count == rows:
+        zeros = pa.repeat(pa.scalar(0, pa.int32()), rows)
+        return pa.DictionaryArray.from_arrays(zeros, pa.array(["known"]))
+    filled = pc.fill_null(column.combine_chunks().cast(pa.string()), "known")
+    return filled.dictionary_encode().cast(_ID)
 
 
 def _conform(table: Any, plan: SeriesPlan) -> Any:
     """The engine's table in the plan's schema: the scan index made into id columns, string
     views and list field names normalised."""
-    scan_index = table.column(0).cast(pa.int32())
+    scan_index = table.column(0).cast(pa.int32()).combine_chunks()
     arrays = [
         _ids(scan_index, [s.file.package_id for s in plan.scans]),
         _ids(scan_index, [s.file.stream_id for s in plan.scans]),
         _ids(scan_index, [s.clock for s in plan.scans]),
+        table.column(1).cast(pa.int64()),
+        _states(table.column(2), table.num_rows),
     ]
-    # The engine's columns after the scan index are the schema's after the three id columns.
-    arrays += [table.column(i - 2).cast(f.type) for i, f in enumerate(plan.schema) if i >= 3]
+    # The engine's columns from seq on are the schema's, two places earlier.
+    arrays += [table.column(i - 2).cast(f.type) for i, f in enumerate(plan.schema) if i >= 5]
     return pa.Table.from_arrays(arrays, schema=plan.schema)
 
 
@@ -283,16 +337,19 @@ class DuckDBReader:
             config={"autoinstall_known_extensions": "false", "autoload_known_extensions": "false"},
         )
         tables = []
-        filesystems: dict[S3Settings, Any] = {}
         for index, scan in enumerate(plan.scans):
             name = f"series_{index}"
             location = scan.file.location
+            folded = {n.lower() for n in scan.names}
+            if len(folded) != len(scan.names):
+                # DuckDB matches identifiers without case and renames the later twin, so it
+                # would return one column's data under the other's name.
+                detail = f"{location.url} has columns differing only in case; use DataFusion"
+                raise LakeRequestError(detail)
             if location.s3 is None:
                 con.read_parquet(location.path).create_view(name)
             else:
-                if location.s3 not in filesystems:
-                    filesystems[location.s3] = arrow_s3(location.s3)
-                fs = filesystems[location.s3]
+                fs = arrow_s3(location.s3)
                 con.register(name, ds.dataset(location.path, filesystem=fs, format="parquet"))
             tables.append(name)
         return con, tables

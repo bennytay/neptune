@@ -10,6 +10,7 @@ Two stores exist: ``LocalObjectStore`` (a package directory, opened without foll
 interface; it is kept to what the lakehouse reads need today.
 """
 
+import functools
 import os
 import re
 from dataclasses import dataclass, field
@@ -22,6 +23,8 @@ _KEY: Final = re.compile(r"[^/\\\x00]+(/[^/\\\x00]+)*")
 # Characters both engines read as a glob in a path they are handed (ADR 0013 §5).
 GLOB_CHARACTERS: Final = frozenset("*?[]{}")
 _BUCKET: Final = re.compile(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]")
+# What an engine parsing ``s3://bucket/key`` as a URL would read as a fragment, query or escape.
+_URL_CHARACTERS: Final = frozenset("#%?")
 
 
 class StoreError(ValueError):
@@ -55,6 +58,8 @@ class S3Settings:
     def __post_init__(self) -> None:
         if not isinstance(self.region, str) or not self.region:
             raise StoreError("an S3 region is a non-empty string")
+        if (self.access_key is None) != (self.secret_key is None):
+            raise StoreError("an S3 access key and secret key are given together or not at all")
         if self.endpoint is not None:
             scheme = self.endpoint.split("://", 1)[0]
             if scheme not in ("http", "https") or "://" not in self.endpoint:
@@ -163,10 +168,11 @@ class S3ObjectStore:
         prefix = prefix.strip("/")
         if prefix:
             check_key(prefix)
+            if _URL_CHARACTERS & set(prefix):
+                raise StoreError(f"an S3 key holds none of # % ?: {prefix!r}")
         self._settings = settings
         self._bucket = bucket
         self._prefix = prefix
-        self._fs: Any = None
 
     @property
     def settings(self) -> S3Settings:
@@ -179,22 +185,23 @@ class S3ObjectStore:
 
     def _key(self, key: str) -> str:
         key = check_key(key)
-        return f"{self._prefix}/{key}" if self._prefix else key
+        full = f"{self._prefix}/{key}" if self._prefix else key
+        if _URL_CHARACTERS & set(full):
+            raise StoreError(f"an S3 key holds none of # % ?: {full!r}")
+        return full
 
     def location(self, key: str) -> Location:
         return Location(f"s3://{self._bucket}/{self._key(key)}", self._settings)
 
     def filesystem(self) -> Any:
-        if self._fs is None:
-            self._fs = arrow_s3(self._settings)
-        return self._fs
+        return arrow_s3(self._settings)
 
     def size(self, key: str) -> int | None:
         import pyarrow.fs as pafs
 
         try:
             info = self.filesystem().get_file_info(f"{self._bucket}/{self._key(key)}")
-        except OSError:
+        except (OSError, ValueError):
             return None
         return int(info.size) if info.type == pafs.FileType.File else None
 
@@ -205,13 +212,15 @@ class S3ObjectStore:
         try:
             with self.filesystem().open_input_stream(f"{self._bucket}/{self._key(key)}") as f:
                 data = f.read(limit + 1)
-        except OSError:
+        except (OSError, ValueError):
             return None
         return None if len(data) > limit else bytes(data)
 
 
+@functools.lru_cache(maxsize=32)
 def arrow_s3(settings: S3Settings) -> Any:
-    """A pyarrow S3 filesystem for ``settings``."""
+    """A pyarrow S3 filesystem for ``settings``, one per settings: its client and connection
+    pool are reused by every store, footer read and DuckDB scan that names them."""
     import pyarrow.fs as pafs
 
     endpoint = settings.endpoint

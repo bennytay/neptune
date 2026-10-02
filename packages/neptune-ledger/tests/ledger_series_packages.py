@@ -93,18 +93,26 @@ def battery(n: int) -> dict[str, SeriesColumn]:
 
 
 def batch(
-    stream: Stream, n: int, start: int, step: int, values: Values, *, unknown_last: int = 0
+    stream: Stream,
+    n: int,
+    start: int,
+    step: int,
+    values: Values,
+    *,
+    unknown_last: int = 0,
+    unknown_clock: int = 1,
 ) -> SeriesBatch:
     """``n`` rows of ``stream``: clock 0 at ``start + i * step``; clock ``k`` offset by ``k``
-    ticks. With ``unknown_last``, that many trailing rows have no known clock-1 tick (a wrapped
-    column with its state column), as a header stamp an adapter could not read."""
+    ticks. With ``unknown_last``, that many trailing rows have no known tick on
+    ``unknown_clock`` (a wrapped column with its state column), as a header stamp an adapter
+    could not read. Rows whose clock 0 is unknown sort last, so they are the trailing ones."""
     columns = [SeriesColumn("seq", ColumnType.INT64, tuple(range(n)))]
     for k in range(len(stream.clocks)):
         ticks: tuple[int | None, ...] = tuple(start + i * step + k for i in range(n))
-        if k == 1 and unknown_last:
+        if k == unknown_clock and unknown_last:
             ticks = ticks[: n - unknown_last] + (None,) * unknown_last
             states = ("known",) * (n - unknown_last) + ("unknown",) * unknown_last
-            columns.append(SeriesColumn("state/time/1", ColumnType.STRING, states))
+            columns.append(SeriesColumn(f"state/time/{k}", ColumnType.STRING, states))
         columns.append(SeriesColumn(f"time/{k}", ColumnType.INT64, ticks))
     columns.append(SeriesColumn("locator/0/length", ColumnType.INT64, (64,) * n))
     columns.append(

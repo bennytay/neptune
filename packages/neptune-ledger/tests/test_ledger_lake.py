@@ -299,9 +299,10 @@ def test_a_window_on_a_second_clock_reads_only_streams_that_carry_it(
     assert table.num_rows == 35, "the five rows whose header stamp is unknown never match"
     assert set(table.column("clock").to_pylist()) == {stamp}
     assert table.column("ticks").to_pylist() == [START + 100 * i + 1 for i in range(35)]
-    full = read_all(plan_series(files[:1], columns=["state/time/1"]))
+    assert set(table.column("ticks_state").to_pylist()) == {"known"}
+    full = read_all(plan_series(files[:1]))
     assert full.num_rows == 40 and full.column("ticks").null_count == 0, "clock 0 is known"
-    assert full.column("state/time/1").to_pylist()[-5:] == ["unknown"] * 5
+    assert "state/time/1" not in full.schema.names, "another clock's state is never returned"
 
 
 def test_window_boundaries_are_inclusive_and_an_empty_window_is_an_empty_table(
@@ -312,11 +313,13 @@ def test_window_boundaries_are_inclusive_and_an_empty_window_is_an_empty_table(
     point = read_all(plan_series([file], windows=[TimeWindow(clock, START + 300, START + 300)]))
     assert rows(point, "seq") == [(3,)]
     edge = read_all(plan_series([file], windows=[TimeWindow(clock, START + 301, START + 399)]))
-    assert edge.num_rows == 0 and edge.schema.names[:5] == [
+    assert edge.num_rows == 0
+    assert edge.schema.names[:6] == [
         "package_id",
         "stream_id",
         "clock",
         "ticks",
+        "ticks_state",
         "seq",
     ]
     nothing = plan_series([], windows=[TimeWindow(clock, 0, 1)])
@@ -333,6 +336,8 @@ def test_window_boundaries_are_inclusive_and_an_empty_window_is_an_empty_table(
         ([TimeWindow("rec:sha256:" + "1" * 64, 0, INT64_MAX + 1)], None, "int64"),
         ([TimeWindow("rec:sha256:" + "1" * 64, True, 1)], None, "int64"),
         (None, ["time/1"], "only value/"),
+        (None, ["state/time/1"], "only value/"),
+        ([], None, "at least one window"),
         (None, ["value/linear_x", "value/linear_x"], "distinct"),
         (None, "value/linear_x", "distinct"),
         (None, ["value/data"], "not in every file"),
@@ -599,6 +604,88 @@ def test_series_files_say_which_column_holds_each_clock(
     assert [file.time_column(c) for c in mobile["odom"].clocks] == ["time/0", "time/1"]
     assert file.time_column("rec:sha256:" + "7" * 64) is None
     assert file.settings["row_group_rows"] == 65_536
+
+
+def test_unknown_ticks_sort_last_with_their_state(
+    catalog: PostgresCatalog, series: SeriesCatalog, tmp_path: Path
+) -> None:
+    """A base whose log clock was not read for its last three odometry rows (a wrapped clock 0),
+    beside its battery, whose clock 0 has no state column: every row is known there."""
+    rows_ = subset(*MOBILE)
+    odom, power = stream_of(rows_, "/wheel_odom"), stream_of(rows_, "/battery")
+    package = write(
+        rows_,
+        tmp_path / "gaps",
+        {
+            "/wheel_odom": batch(odom, 6, START, 100, odometry, unknown_last=3, unknown_clock=0),
+            "/battery": batch(power, 2, START + 50, 100, battery),
+        },
+    )
+    register(catalog, tmp_path / "gaps")
+    files = series.files([(package, odom.id), (package, power.id)]).files
+    table = read_all(plan_series(files, columns=[]))
+    got = rows(table, "ticks", "ticks_state", "stream_id")
+    assert got == [
+        (START, "known", odom.id),
+        (START + 50, "known", power.id),
+        (START + 100, "known", odom.id),
+        (START + 150, "known", power.id),
+        (START + 200, "known", odom.id),
+        (None, "unknown", odom.id),
+        (None, "unknown", odom.id),
+        (None, "unknown", odom.id),
+    ]
+    windowed = read_all(plan_series(files, windows=[TimeWindow(odom.clocks[0], 0, INT64_MAX)]))
+    assert windowed.num_rows == 5, "a window never matches an unknown tick"
+
+
+def test_duckdb_refuses_columns_that_differ_only_in_case(
+    catalog: PostgresCatalog, series: SeriesCatalog, tmp_path: Path
+) -> None:
+    """DuckDB matches identifiers without case; DataFusion reads such a file as written."""
+    rows_ = subset(*MOBILE)
+    odom = stream_of(rows_, "/wheel_odom")
+
+    def twins(n: int) -> dict[str, Any]:
+        from neptune.model.series import ColumnType, SeriesColumn
+
+        return {
+            "value/X": SeriesColumn("value/X", ColumnType.INT64, (10,) * n),
+            "value/x": SeriesColumn("value/x", ColumnType.INT64, (30,) * n),
+        }
+
+    package = write(rows_, tmp_path / "twins", {"/wheel_odom": batch(odom, 2, START, 100, twins)})
+    register(catalog, tmp_path / "twins")
+    plan = plan_series(series.files([(package, odom.id)]).files, columns=["value/x"])
+    with pytest.raises(LakeRequestError, match="only in case"):
+        DuckDBReader().read(plan)
+    assert DataFusionReader().read(plan).column("value/x").to_pylist() == [30, 30]
+
+
+def test_a_link_swapped_in_after_resolution_is_caught_before_the_scan(
+    series: SeriesCatalog, mobile: dict[str, Any], tmp_path: Path
+) -> None:
+    (file,) = series.files([(mobile["package"], mobile["odom"].id)]).files
+    _damage(tmp_path / "base", mobile["odom"].id, "link")
+    plan = plan_series([file])
+    assert plan.scans == () and [f.code for f in plan.findings] == ["file_missing"]
+
+
+def test_a_parquet_file_without_the_scanned_columns_is_a_finding(
+    series: SeriesCatalog, mobile: dict[str, Any], tmp_path: Path
+) -> None:
+    """A plain Parquet file in a series file's place, as a ``SeriesFile`` naming it would see."""
+    import dataclasses
+
+    import pyarrow.parquet as pq
+
+    (file,) = series.files([(mobile["package"], mobile["odom"].id)]).files
+    other = tmp_path / "plain.parquet"
+    pq.write_table(pa.table({"time/0": pa.array(["not ticks"])}), other)
+    location = dataclasses.replace(file.location, url=str(other))
+    swapped = dataclasses.replace(file, location=location, size=other.stat().st_size)
+    plan = plan_series([swapped])
+    assert plan.scans == () and [f.code for f in plan.findings] == ["file_digest_mismatch"]
 
 
 # --- the budget: a 10^6-row window under 200 ms ----------------------------------------------

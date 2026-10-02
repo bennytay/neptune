@@ -218,6 +218,10 @@ def test_s3_settings_never_show_credentials() -> None:
         (lambda: S3ObjectStore(S3Settings("r"), "Bad_Bucket"), "bucket"),
         (lambda: S3ObjectStore(S3Settings("r"), "a..b"), "bucket"),
         (lambda: S3ObjectStore(S3Settings("r"), "bucket", "../up"), "key"),
+        (lambda: S3Settings("r", access_key="AK"), "together"),
+        (lambda: S3Settings("r", secret_key="SK"), "together"),
+        (lambda: S3ObjectStore(S3Settings("r"), "bucket", "fleet#a"), "# % ?"),
+        (lambda: S3ObjectStore(S3Settings("r"), "bucket", "run%41"), "# % ?"),
     ],
 )
 def test_s3_settings_and_stores_outside_the_contract_are_refused(make: Any, message: str) -> None:

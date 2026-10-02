@@ -25,7 +25,7 @@ from psycopg import sql
 from neptune.identity import canonical_json
 from neptune.model.ids import parse_record_id
 from neptune.model.jsonvalue import JsonObject
-from neptune.model.package import PackageManifest, package_manifest_from_json
+from neptune.model.package import PackageFile, PackageManifest, package_manifest_from_json
 from neptune.store.package import MANIFEST, series_path, table_path
 from neptune.store.series import SeriesError, check_settings
 from neptune_ledger.api.types import CatalogFinding, Thread
@@ -158,7 +158,7 @@ class SeriesCatalog:
                 detail = "not a (package id, stream record id) pair"
                 findings.append(CatalogFinding("invalid_request", str(stream_id)[:200], detail))
         rows = self._rows(valid)
-        manifests: dict[str, PackageManifest | CatalogFinding] = {}
+        packages: dict[str, _Package] = {}
         found: list[SeriesFile] = []
         for pair in valid:
             row = rows.get(pair)
@@ -166,7 +166,9 @@ class SeriesCatalog:
                 detail = f"no stream {pair[1]} is registered in package {pair[0]}"
                 findings.append(CatalogFinding("unknown_record", pair[1], detail))
                 continue
-            made = self._file(row, manifests)
+            if row.package_id not in packages:
+                packages[row.package_id] = _Package(self._locate(row.package_id, row.root_locator))
+            made = self._file(row, packages[row.package_id])
             if isinstance(made, CatalogFinding):
                 findings.append(made)
             else:
@@ -189,17 +191,13 @@ class SeriesCatalog:
             for p, s, line, digest, clocks, seq, root in fetched
         }
 
-    def _file(
-        self, row: _Row, manifests: dict[str, PackageManifest | CatalogFinding]
-    ) -> SeriesFile | CatalogFinding:
-        store = self._locate(row.package_id, row.root_locator)
-        if row.package_id not in manifests:
-            manifests[row.package_id] = _manifest(store, row.package_id)
-        manifest = manifests[row.package_id]
+    def _file(self, row: _Row, package: "_Package") -> SeriesFile | CatalogFinding:
+        store = package.store
+        manifest = package.manifest(row.package_id)
         if isinstance(manifest, CatalogFinding):
             return manifest
         key = series_path(parse_record_id(row.stream_id))
-        listed = next((f for f in manifest.files if f.path == key), None)
+        listed = package.listed(key)
         if listed is None:
             detail = f"package {row.package_id} holds no series file for this stream"
             return CatalogFinding("file_missing", row.stream_id, detail)
@@ -207,7 +205,7 @@ class SeriesCatalog:
             settings = check_settings(manifest.store.get("series"))
         except SeriesError as exc:
             return CatalogFinding("manifest_invalid", row.package_id, f"store.series: {exc}")
-        clocks = row.clocks if row.clocks is not None else _clocks_from_package(store, row)
+        clocks = row.clocks if row.clocks is not None else _clocks_from_package(package, row)
         if isinstance(clocks, CatalogFinding):
             return clocks
         if not _is_clock_list(clocks):
@@ -268,14 +266,39 @@ def _manifest(store: ObjectStore, package_id: str) -> PackageManifest | CatalogF
         return CatalogFinding("manifest_invalid", package_id, str(exc).splitlines()[0][:300])
 
 
-def _clocks_from_package(store: ObjectStore, row: _Row) -> Any:
+class _Package:
+    """One package's store, with its manifest, file index and stream table read once per call."""
+
+    def __init__(self, store: ObjectStore) -> None:
+        self.store = store
+        self._manifest: PackageManifest | CatalogFinding | None = None
+        self._files: dict[str, PackageFile] = {}
+        self._streams: list[bytes] | None = None
+
+    def manifest(self, package_id: str) -> PackageManifest | CatalogFinding:
+        if self._manifest is None:
+            self._manifest = _manifest(self.store, package_id)
+            if isinstance(self._manifest, PackageManifest):
+                self._files = {f.path: f for f in self._manifest.files}
+        return self._manifest
+
+    def listed(self, path: str) -> PackageFile | None:
+        return self._files.get(path)
+
+    def stream_lines(self) -> list[bytes]:
+        if self._streams is None:
+            data = self.store.read(table_path("stream"), STREAM_TABLE_LIMIT)
+            self._streams = data.split(b"\n") if data is not None else []
+        return self._streams
+
+
+def _clocks_from_package(package: _Package, row: _Row) -> Any:
     """The stream's clocks from its line in the package, when the catalog holds no body for it
     (a string holding U+0000, which ``jsonb`` cannot store: ADR 0009 §1)."""
-    data = store.read(table_path("stream"), STREAM_TABLE_LIMIT)
-    lines = data.split(b"\n") if data is not None else []
+    lines = package.stream_lines()
     line = lines[row.line - 1] if 0 < row.line <= len(lines) else None
     if line is None or "sha256:" + hashlib.sha256(line).hexdigest() != row.body_digest:
-        detail = f"the stream's line in {store.describe()} is missing or changed"
+        detail = f"the stream's line in {package.store.describe()} is missing or changed"
         return CatalogFinding("package_unreadable", row.package_id, detail)
     try:
         return json.loads(line).get("clocks")

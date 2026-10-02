@@ -58,8 +58,12 @@ without a named `ClockMapping` (ADR 0003 §3). Registration accepts only local p
    Keys are package-relative paths: no `..`, `.`, empty part, backslash or NUL.
    `LocalObjectStore` opens every component with `O_NOFOLLOW` (ADR 0006 §3), so a link reads as
    missing. `S3ObjectStore(settings, bucket, prefix)` reads through pyarrow's S3 filesystem,
-   which the compiler's pyarrow already ships, so the Ledger adds no S3 client. `S3Settings`
-   keeps credentials out of `repr`. A plain-HTTP endpoint must be named with `allow_http`.
+   which the compiler's pyarrow already ships, so the Ledger adds no S3 client. There is one
+   filesystem per settings, reused by every store, footer read and scan. Its keys also exclude
+   `#`, `%` and `?`, which an engine parsing `s3://bucket/key` as a URL would read as a
+   fragment, an escape or a query. `S3Settings` keeps credentials out of `repr`, takes an access
+   key and a secret key together or not at all, and needs `allow_http` for a plain-HTTP
+   endpoint.
    Platform X3 will own this interface. It stays at these four calls until a writer needs more.
 4. **`SeriesCatalog` resolves streams to files.** Given `(package id, stream id)` pairs, or
    a `Thread`'s stream entries in every package each entry names, it returns `SeriesFile`s. Each
@@ -92,7 +96,12 @@ without a named `ClockMapping` (ADR 0003 §3). Registration accepts only local p
    so the lake reads it once, from the first registration, and names the others in `also_in`.
    Two different files under one id contradict the compiler's determinism, so neither is read.
    A read checks size, not hash. Hashing a file to read a window of it would defeat pushdown.
-   Full verification stays with `verify` (ADR 0006).
+   Full verification stays with `verify` (ADR 0006). Engines open a local path by name and
+   follow links. So `plan_series` checks each local file again, with no link and the manifest's
+   size, just before reading its footer. It also checks that the footer holds `seq` and the
+   scanned `time/<i>` as int64. A file that fails either check is a finding (`file_missing`,
+   `file_digest_mismatch`), and the read goes on without it. The window left open is between
+   planning and the scan, a few milliseconds.
 5. **Readers: DuckDB and DataFusion, one plan, one result.** `plan_series(files, windows,
    columns)` builds a `SeriesPlan`, and `DuckDBReader` and `DataFusionReader` run it as one
    SQL statement over the files in place. Both return the same `pyarrow.Table`; the tests
@@ -101,7 +110,7 @@ without a named `ClockMapping` (ADR 0003 §3). Registration accepts only local p
      catalog API. There is at most one window per clock. Each file is scanned on the one window
      clock its stream carries, through the `time/<i>` column the `SeriesFile` names. A file
      carrying none is reported as `unknown_clock` and not read. A file carrying two is a
-     `LakeRequestError`, because it would be read twice. Without windows, each file is read
+     `LakeRequestError`, because it would be read twice, and so is an empty window list. Without windows, each file is read
      whole, on its clock 0. Ticks are never converted, and no window is applied across clocks.
    - **Pushdown.** The window is a predicate directly on each file's scan. DuckDB's plan shows
      it as the Parquet scan's `Filters`. DataFusion's shows it as the scan's `predicate` and a
@@ -110,11 +119,17 @@ without a named `ClockMapping` (ADR 0003 §3). Registration accepts only local p
      sorted on `time/0`, a clock-0 window prunes to the row groups it overlaps. The engines
      still sort the result, so a file replaced after registration cannot corrupt the output
      order.
-   - **Result.** The fixed columns are `package_id`, `stream_id` and `clock` (dictionary-encoded
-     strings), `ticks` (int64; null only when clock 0 is not known in a whole-file read) and
-     `seq`. Then come the requested `value/`, `state/` and `locator/` columns. By default these
-     are all such columns that every scanned file has with one type. `time/<i>` of another clock
-     is never returned, because `time/1` of two files means two clocks. Row order is ADR 0003
+   - **Result.** The fixed columns are:
+     - `package_id`, `stream_id` and `clock`, as dictionary-encoded strings;
+     - `ticks` (int64), null only when clock 0 is not known in a whole-file read;
+     - `ticks_state`, the row's knowledge state on the scanned clock: the file's `state/time/<i>`
+       where its ticks are wrapped, else `known`, so a null tick is never a bare blank;
+     - `seq`.
+
+     Then come the requested `value/`, `state/value/` and `locator/` columns. By default these
+     are all such columns that every scanned file has with one type. `time/<i>` and
+     `state/time/<i>` of another clock are never returned, because `time/1` of two files means
+     two clocks. Row order is ADR 0003
      §3's world order applied to rows: one **partition** per clock, partitions sorted by
      (smallest registration key among their files, clock id bytes), and rows within one by
      `(ticks, package id, stream id, seq)`. That is a total order, so a read is deterministic
@@ -123,7 +138,10 @@ without a named `ClockMapping` (ADR 0003 §3). Registration accepts only local p
      sibling, sits on two clocks and is two partitions, one after the other, never interleaved.
      Merging them onto one reference clock through named mappings is left to MVL-97.
    - **Engine access.** DuckDB runs in memory with extension autoinstall and autoload off, so a
-     read never fetches code. It reads local files through its own Parquet reader and S3 objects
+     read never fetches code. DuckDB matches identifiers without case and renames a later twin
+     (`value/X` beside `value/x`), so `DuckDBReader` refuses a file with such twins as a
+     `LakeRequestError` rather than return one column's data under the other's name.
+     DataFusion reads it as written. It reads local files through its own Parquet reader and S3 objects
      as pyarrow datasets over the store's filesystem, which push the filter into the Arrow scan.
      DataFusion reads both through its own Parquet reader, registering an `AmazonS3` object
      store per bucket. One bucket named with two sets of settings in a read is a request error.
