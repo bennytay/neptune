@@ -86,31 +86,107 @@ def test_the_lifecycle_adapter_output_is_deterministic() -> None:
 
 # The leaf rule (root ADR 0008 §4) and the sandbox: an adapter imports the compiler's model,
 # identity and contract only, and nothing that reaches the network, the filesystem or a process.
-ALLOWED = (
-    "neptune.model",
-    "neptune.identity",
-    "neptune.adapters.contract",
-    "neptune_deploy.adapters",
-)
+# Adapters never import each other: a module may import its own subpackage of
+# ``neptune_deploy.adapters`` (and the bare package), never another one. Relative imports are
+# resolved against the module's package and checked like absolute ones.
+ADAPTERS_PACKAGE = "neptune_deploy.adapters"
+ALLOWED = ("neptune.model", "neptune.identity", "neptune.adapters.contract")
 STDLIB_ALLOWED = frozenset({"collections", "dataclasses", "enum", "re", "typing"})
 
 
-def _imports(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def _within(name: str, prefix: str) -> bool:
+    return name == prefix or name.startswith(f"{prefix}.")
+
+
+def _module_of(path: Path) -> tuple[str, bool]:
+    """The dotted module name of ``path`` under ``src/``, and whether it is a package."""
+    parts = path.relative_to(ADAPTERS.parents[1]).with_suffix("").parts
+    if parts[-1] == "__init__":
+        return ".".join(parts[:-1]), True
+    return ".".join(parts), False
+
+
+def _imports(module: str, is_package: bool, text: str) -> list[str]:
+    """Every name ``text`` imports, fully qualified; ``from m import x`` gives ``m.x``."""
+    package = module if is_package else module.rpartition(".")[0]
     names: list[str] = []
-    for node in ast.walk(tree):
+    for node in ast.walk(ast.parse(text)):
         if isinstance(node, ast.Import):
             names.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module is not None:
-            names.append(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                parts = package.split(".")
+                keep = len(parts) - (node.level - 1)
+                if keep < 1:  # beyond the top-level package: never allowed
+                    names.append("." * node.level + (node.module or ""))
+                    continue
+                base = ".".join(parts[:keep])
+                origin = f"{base}.{node.module}" if node.module else base
+            else:
+                origin = node.module or ""
+            names.extend(origin if a.name == "*" else f"{origin}.{a.name}" for a in node.names)
     return names
+
+
+def _violations(module: str, is_package: bool, text: str) -> list[str]:
+    """The imports of ``module`` that break the leaf rule."""
+    parts = module.split(".")
+    own = ".".join(parts[:3]) if _within(module, ADAPTERS_PACKAGE) and len(parts) > 2 else None
+    bad = []
+    for name in _imports(module, is_package, text):
+        if _within(name, ADAPTERS_PACKAGE):
+            ok = name == ADAPTERS_PACKAGE or (own is not None and _within(name, own))
+        else:
+            ok = any(_within(name, prefix) for prefix in ALLOWED)
+            ok = ok or name.split(".")[0] in STDLIB_ALLOWED
+        if not ok:
+            bad.append(name)
+    return bad
 
 
 @pytest.mark.parametrize("path", sorted(ADAPTERS.rglob("*.py")), ids=lambda p: p.stem)
 def test_adapters_are_leaves_with_no_network(path: Path) -> None:
-    for name in _imports(path):
-        allowed = (
-            any(name == prefix or name.startswith(f"{prefix}.") for prefix in ALLOWED)
-            or name.split(".")[0] in STDLIB_ALLOWED
-        )
-        assert allowed, f"{path.relative_to(ADAPTERS)} imports {name}"
+    module, is_package = _module_of(path)
+    assert _violations(module, is_package, path.read_text(encoding="utf-8")) == []
+
+
+LIFECYCLE_MODULE = f"{ADAPTERS_PACKAGE}.lifecycle"
+
+
+@pytest.mark.parametrize(
+    ("text", "is_package", "imported"),
+    [
+        ("from ...sources import connector\n", True, "neptune_deploy.sources.connector"),
+        ("from .. import cmms\n", True, f"{ADAPTERS_PACKAGE}.cmms"),
+        ("from ..cmms.forms import read\n", False, f"{ADAPTERS_PACKAGE}.cmms.forms.read"),
+        ("from .... import x\n", True, "...."),  # beyond the top-level package
+    ],
+)
+def test_a_relative_import_is_resolved_and_checked(
+    text: str, is_package: bool, imported: str
+) -> None:
+    module = LIFECYCLE_MODULE if is_package else f"{LIFECYCLE_MODULE}.forms"
+    assert _violations(module, is_package, text) == [imported]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "import neptune_deploy.adapters.cmms\n",
+        "from neptune_deploy.adapters.cmms import CmmsAdapter\n",
+        "from neptune_deploy.adapters import cmms\n",
+    ],
+)
+def test_an_adapter_never_imports_another_adapter(text: str) -> None:
+    assert _violations(LIFECYCLE_MODULE, True, text) != []
+
+
+def test_an_adapter_may_import_its_own_subpackage_and_the_allowed_modules() -> None:
+    text = (
+        "from . import _fields\n"
+        "from neptune_deploy.adapters.lifecycle._rows import Row\n"
+        "from neptune.model.lifecycle import LIFECYCLE_KINDS\n"
+        "from typing import Final\n"
+    )
+    assert _violations(LIFECYCLE_MODULE, True, text) == []
+    assert _violations(LIFECYCLE_MODULE, True, "import neptune.modelx\n") == ["neptune.modelx"]
