@@ -8,8 +8,8 @@ together — M2's runtime is complete.
 
 | # | Stage | Responsibility | Owner | Issue |
 |---|---|---|---|---|
-| 1 | discover | enumerate candidate sources through a `Source` (local FS now, object store later); apply ignore, symlink and traversal policy | discovery | MVL-2, MVL-45 |
-| 2 | fingerprint | size, magic bytes, streaming sha256 + per-chunk hashes; emit `SourceArtifact` / `SourceRevision` | identity | MVL-2 |
+| 1 | discover | enumerate candidate sources through a `Source`: a local walk (ignore, symlink and traversal policy), or a connector's listing of a URI against its ledger (`discovery.external`, ADR 0067) | discovery | MVL-2, MVL-45 |
+| 2 | fingerprint | size, magic bytes, streaming sha256 + per-chunk hashes; emit `SourceArtifact` / `SourceRevision`. A connector's object whose revision token the ledger knows is carried forward unhashed; the rest are fetched once into the job's spool while hashed; complete listings mark gone objects absent (ADR 0067) | identity | MVL-2, MVL-45 |
 | 3 | probe | done: `discovery.probe.ProbeEngine` sniffs the head, asks every adapter (crashes isolated), applies the registry's rule, opens zip/tar/gzip/bzip2/xz within `ProbePolicy`, and reports ties, unclaimed sources and container problems as `neptune.probe.*` findings (ADR 0027); the job runs it in one sandboxed call per source and re-derives its reply (ADR 0033 §1) | discovery + adapters | MVL-8, MVL-57 |
 | 4 | inspect | cheap per-source summary (streams, extents, counts) without full parse | adapters | MVL-7 |
 | 5 | group | v0 done: `derived.grouping.LayoutGrouper` proposes sessions from the scan's observed layout (`discovery.layout`: locations, links, what names state; never contents or mtimes) by named rules with confidence bands; conflicting readings are contested, never chosen; nested session directories include the inner reading by id, at most 16 deep; every file lies in a proposal or is unassigned; findings `neptune.grouping.*`; proposals reach the package as derived tables (ADR 0036). MVL-34 swaps in the evidence-graph assembler behind the same `Grouper` interface | discovery (layout) + derived (rules) | MVL-13, MVL-34 |
