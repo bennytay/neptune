@@ -25,7 +25,7 @@ from neptune.adapters.contract import SourceReader
 
 _WS: Final = " \t\n\r"
 _DECODER: Final = json.JSONDecoder()
-_BRACKETS: Final = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"|[\[\]{}]', re.DOTALL)
+_STRUCTURE: Final = re.compile(r'["\[\]{}]')
 WINDOW: Final = 1024 * 1024  # bytes a window starts with
 _SLACK: Final = 8192  # an error this close to a window's end may be the window's
 
@@ -80,17 +80,41 @@ def decode_value(text: str, i: int) -> tuple[object, int]:
 
 def bracket_end(text: str, i: int) -> int | None:
     """Where the array or object at ``i`` ends, counting brackets outside strings; ``None`` if
-    it is not closed in ``text``. Iterative, so any depth costs time and not stack."""
+    it is not closed in ``text``. Iterative, so any depth costs time and not stack, and a single
+    left-to-right pass: a string that does not end ends the search, so no byte is read twice."""
     depth = 0
-    for match in _BRACKETS.finditer(text, i):
+    at = i
+    while True:
+        match = _STRUCTURE.search(text, at)
+        if match is None:
+            return None
         char = match.group()
-        if char in "[{":
+        at = match.end()
+        if char == '"':
+            at = _string_end(text, at)
+            if at < 0:
+                return None
+        elif char in "[{":
             depth += 1
-        elif char in "]}":
+        else:
             depth -= 1
             if depth <= 0:
-                return match.end()
-    return None
+                return at
+
+
+def _string_end(text: str, i: int) -> int:
+    """The first character after the string whose opening quote precedes ``i``; -1 if it has no
+    closing quote. A quote closes it unless an odd run of backslashes precedes it."""
+    while True:
+        quote = text.find('"', i)
+        if quote < 0:
+            return -1
+        run = quote
+        while run > i and text[run - 1] == "\\":
+            run -= 1
+        if (quote - run) % 2 == 0:
+            return quote + 1
+        i = quote + 1
 
 
 @dataclass(frozen=True)
