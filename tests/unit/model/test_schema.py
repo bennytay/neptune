@@ -33,7 +33,6 @@ from neptune.model.frames import (
 )
 from neptune.model.ids import ExternalObjectRef, LogicalId, RecordId
 from neptune.model.kinds import KIND_SINCE
-from neptune.model.lists import LIST_STATES_SINCE
 from neptune.model.knowledge import (
     Ambiguous,
     AssertionKind,
@@ -44,6 +43,7 @@ from neptune.model.knowledge import (
     NotCovered,
     Unknown,
 )
+from neptune.model.lists import LIST_STATES_SINCE
 from neptune.model.machine import (
     Calibration,
     CalibrationParameter,
