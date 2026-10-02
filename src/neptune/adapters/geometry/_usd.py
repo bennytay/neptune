@@ -47,12 +47,13 @@ _TOKEN: Final = re.compile(
   | (?P<comment>\#[^\n]*)
   | (?P<text>\"\"\"(?:[^"\\]|\\.|"(?!""))*\"\"\"|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')
   | (?P<asset>@@@.*?@@@|@[^@\n]*@)
-  | (?P<number>[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?(?![A-Za-z0-9_]))
+  | (?P<number>[-+]?(?:[0-9]++(?:\.[0-9]*+)?|\.[0-9]++)(?:[eE][-+]?[0-9]++)?)
   | (?P<name>[A-Za-z_][A-Za-z0-9_:.]*)
   | (?P<punct>[()\[\]{},=;])
     """,
     re.VERBOSE | re.DOTALL,
 )
+_WORD: Final = re.compile(rb"[A-Za-z0-9_]*+")
 Token = tuple[str, bytes, int]  # kind, text, offset
 Found = tuple[bytes, int]  # a value's text and where it starts
 Where = tuple[Locator, ...]
@@ -184,6 +185,13 @@ def _tokens(data: bytes, start: int) -> Iterator[Token]:
             position += skip
             continue
         kind = found.lastgroup or "bad"
+        if kind == "number":
+            word = _WORD.match(data, found.end())
+            if word is not None and word.end() > found.end():
+                # ``1_0`` or ``12ab``: one bad token for the whole run, never a number and a name
+                yield "bad", data[position : word.end()], position
+                position = word.end()
+                continue
         if kind not in ("ws", "comment"):
             yield kind, found.group(), position
         position = found.end()

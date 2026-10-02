@@ -87,7 +87,9 @@ counts, truncated binaries, nesting bombs, and references to `/etc/passwd`.
    one `geometry.malformed` per reason. One damaged structure is a finding and the rest is read
    (non-negotiable 7); a file that is no readable geometry is `geometry.unreadable` and has no record.
    A number in OBJ, STL, PLY or USD is decimal text (`1`, `-.5`, `1e-3`); `1_0`, `nan`,
-   `infinity` and padded forms are not numbers and are counted as malformed, never read as values.
+   `infinity` and padded forms are not numbers and are counted as malformed, never read as values. The matchers are possessive, so a long digit run followed by a letter fails in one pass.
+   A USD sublayer is read losslessly: text that is not UTF-8 is `geometry.reference_unsafe`, never rewritten
+   with replacement characters.
    Names (an OBJ object, an STL solid, a glTF scene, a USD default prim) are copied only as text a
    record can hold: a control character, a lone surrogate, bytes that are not UTF-8 or more than
    `max_value_bytes` make the name `Unknown` with a finding. A byte order mark is skipped in OBJ and

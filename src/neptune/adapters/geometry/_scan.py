@@ -18,7 +18,8 @@ BOM: Final = b"\xef\xbb\xbf"
 LINE_COST: Final = 32  # the least a line is charged against the scan budget, however short
 _LINE: Final = re.compile(rb"[^\r\n]+")
 _BREAK: Final = re.compile(rb"[\r\n]")
-_NUMBER: Final = re.compile(rb"[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?")
+# Possessive and non-overlapping, so a long digit run followed by a letter fails in one pass.
+_NUMBER: Final = re.compile(rb"[-+]?(?:[0-9]++(?:\.[0-9]*+)?|\.[0-9]++)(?:[eE][-+]?[0-9]++)?")
 _INDEX: Final = re.compile(rb"-?[0-9]+")
 
 

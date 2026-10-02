@@ -262,3 +262,33 @@ def test_an_overlong_line_spanning_blocks_is_reported_once_and_the_next_line_is_
         (True, b""),
         (False, b"v 4 5 6"),
     ]
+
+
+# --- Number matching is linear ----------------------------------------------------------------
+
+
+def test_a_long_digit_run_followed_by_a_letter_is_rejected_in_one_pass() -> None:
+    from neptune.adapters.geometry._scan import parse_index, parse_number
+
+    for token in (b"1" * 100_000 + b"x", b"1." + b"1" * 100_000 + b"x", b"1" * 100_000 + b"e"):
+        start = time.perf_counter()
+        assert parse_number(token) is None
+        assert parse_index(token) is None
+        assert time.perf_counter() - start < 1
+
+
+def test_a_long_digit_run_followed_by_a_letter_in_a_usda_token_is_linear() -> None:
+    for run_ in (b"1" * 100_000 + b"x", b"1" * 100_000 + b"_0", b"1." + b"1" * 100_000 + b"x"):
+        data = b"#usda 1.0\n(\n    metersPerUnit = " + run_ + b'\n    upAxis = "Z"\n)\n'
+        start = time.perf_counter()
+        output = run(data)
+        assert time.perf_counter() - start < 1
+        assert cells(output, "meters_per_unit") == ("Unknown",)
+        assert cells(output, "up_axis") == ("Z",)  # what follows the bad token is still read
+
+
+def test_a_long_bad_run_in_an_obj_line_is_linear() -> None:
+    start = time.perf_counter()
+    output = run(b"v 1 2 3\nv " + b"1" * 60_000 + b"x 2 3\n")
+    assert time.perf_counter() - start < 1
+    assert "geometry.malformed" in codes(output)
