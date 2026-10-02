@@ -254,10 +254,10 @@ def register(
             }
             keys = {"tenant_id": tenant, "transform_id": transform["id"]}
             if _insert_once(conn, "transform", keys, fields):
-                for upstream in transform["upstream"]:
+                for position, upstream in enumerate(transform["upstream"]):
                     conn.execute(
-                        "INSERT INTO transform_upstream VALUES (%s, %s, %s)",
-                        (tenant, transform["id"], upstream),
+                        "INSERT INTO transform_upstream VALUES (%s, %s, %s, %s)",
+                        (tenant, transform["id"], upstream, position),
                     )
                 continue
             stored = conn.execute(

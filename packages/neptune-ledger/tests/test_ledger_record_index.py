@@ -358,10 +358,11 @@ def test_unknown_inside_ambiguous_candidates_is_not_a_field() -> None:
 # --- migrations over rows registered before them ----------------------------------------------
 
 
-@pytest.mark.parametrize("before", [4, 5])
+@pytest.mark.parametrize("before", [4, 5, 6])
 def test_a_migration_refuses_rows_it_would_leave_blank(pg: Conn, before: int) -> None:
     """ADR 0009 §1, §3: rows filed before 0004 (bodies) or 0005 (projections) would read as "no
-    Unknown field" or "no Known machine"; the migration refuses, and the catalog is rebuilt."""
+    Unknown field" or "no Known machine", and packages before 0006 would be in no thread (ADR
+    0010 §1); the migration refuses, and the catalog is rebuilt."""
     shipped = migrations()
     apply_migrations(pg, "acme", shipped=shipped[: before - 1])
     package = add_package(pg, "tenant_acme", "sha256:" + "e" * 64, 1)

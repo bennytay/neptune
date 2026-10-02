@@ -10,7 +10,8 @@ from typing import Any
 
 import pytest
 
-from ledger_catalog_scale import EMBODIMENTS, FIXED_KINDS, Scale, run
+from ledger_catalog_scale import EMBODIMENTS, FIXED_KINDS, Scale, machine_thread_id, run
+from neptune_ledger.api.types import DeclaredKey, ThreadKey
 
 pytestmark = pytest.mark.slow
 
@@ -45,6 +46,13 @@ def test_the_generated_catalog_is_the_documented_one(report: dict[str, Any]) -> 
     assert counts["records"] == _expected_records(scale)
     assert counts["transforms"] == 2 * len({adapter for _, adapter, _, _ in EMBODIMENTS})
     assert report["schema_matches_migrations"] is True
+    machine_citers = ("machine", "run", "hardware_configuration", "software_configuration")
+    assert counts["thread_members"] == 1000 * len((*machine_citers, "calibration"))
+
+
+def test_the_harness_hashes_thread_keys_as_the_api_does() -> None:
+    key = ThreadKey("machine", DeclaredKey("spot.serial", "M-3"))
+    assert machine_thread_id("spot.serial", "M-3") == key.thread_id
 
 
 WORLD_INDEX = "record_stream_world_clock_world_first_world_last_registrati_idx"
@@ -56,6 +64,8 @@ WORLD_INDEX = "record_stream_world_clock_world_first_world_last_registrati_idx"
         ("thread_declared_typical", "record_logical_id_by_value"),
         ("thread_declared_workhorse", "record_logical_id_by_value"),
         ("thread_declared_sensor", "record_logical_id_by_value"),
+        ("thread_index_typical", "thread_member_by_thread"),
+        ("thread_index_workhorse", "thread_member_by_thread"),
         ("thread_anchored", "record_stream_source_content_id_kind_md5_idx"),
         ("lineage_set", "record_stream_source_content_id_kind_md5_idx"),
         ("window_typical", WORLD_INDEX),
@@ -79,7 +89,12 @@ def test_a_lookup_without_the_tenant_key_scans(report: dict[str, Any]) -> None:
 
 
 def test_the_budgets_hold_at_this_scale(report: dict[str, Any]) -> None:
-    for measure in ("thread_declared_typical", "thread_declared_sensor", "thread_anchored"):
+    for measure in (
+        "thread_declared_typical",
+        "thread_declared_sensor",
+        "thread_anchored",
+        "thread_index_typical",
+    ):
         assert report[measure]["p95_ms"] < THREAD_P95_MS, measure
     for measure in ("window_typical", "window_long_recording"):
         assert report[measure]["p95_ms"] < WINDOW_P95_MS, measure
