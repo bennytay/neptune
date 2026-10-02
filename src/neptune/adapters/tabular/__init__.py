@@ -1,4 +1,4 @@
-"""Tables as declared: CSV and TSV, JSON and JSON Lines, and Parquet (MVL-30, ADR 0042).
+"""Tables as declared: CSV and TSV, JSON and JSON Lines, Parquet and XLSX (ADR 0042, ADR 0059).
 
 A source becomes one ``StructuredTable`` and one ``StructuredRecord`` per row, every cell a
 ``Knowledge`` state citing its exact place, so a consumer queries values and traces each to its
@@ -13,8 +13,11 @@ row and cell without parsing the file again. Nothing is inferred:
   ``KnownAbsent``; a number nothing exact holds keeps its literal text. See ``_json``.
 - **Parquet** cells keep the declared types; the schema, the row groups' statistics and the
   key-value metadata are tables of their own, citing the footer. See ``_parquet``.
+- **XLSX** workbooks are one table per sheet; each cell is its stored value (a date is its serial,
+  a formula its cached value) citing the part, the cell's bytes and its A1 reference. See ``_xlsx``.
 
-Probing reads content, never names: Parquet's magic; a JSON array whose elements are records, or
+Probing reads content, never names: Parquet's magic; a zip whose parts are a workbook's; a JSON
+array whose elements are records, or
 lines that are each a JSON record (``VERIFIED``, so tabular JSON is never left to a configuration
 reader); text whose records agree on a delimiter (``STRUCTURE``). A JSON object or an array of
 scalars is not a table, and is declined.
@@ -50,7 +53,7 @@ from neptune.adapters.contract import (
     Resources,
     SourceReader,
 )
-from neptune.adapters.tabular import _csv, _json, _parquet
+from neptune.adapters.tabular import _csv, _json, _parquet, _xlsx
 from neptune.adapters.tabular._common import ADAPTER_ID, BOM, CODES, Layout, Limits
 
 if TYPE_CHECKING:
@@ -65,6 +68,9 @@ _TEXT_CONTROLS: Final = frozenset(b"\t\n\x0b\x0c\r\x1b")
 _BINARY: Final = bytes(b for b in range(0x20) if b not in _TEXT_CONTROLS)
 
 
+_ZIP_MAGICS: Final = (b"PK\x03\x04", b"PK\x05\x06")
+
+
 def _pyarrow_version() -> str:
     from importlib.metadata import version
 
@@ -73,9 +79,9 @@ def _pyarrow_version() -> str:
 
 DESCRIPTOR: Final = AdapterDescriptor(
     id=ADAPTER_ID,
-    version="0.1.0",
+    version="0.2.0",
     abi=ABI_VERSION,
-    summary="CSV, TSV, JSON, JSON Lines and Parquet as tables of cells with exact citations.",
+    summary="CSV, TSV, JSON, JSON Lines, Parquet and XLSX as tables of cells with exact citations.",
     formats=(
         FormatSpec("CSV", media_types=("text/csv",), extensions=(".csv",)),
         FormatSpec("TSV", media_types=("text/tab-separated-values",), extensions=(".tsv",)),
@@ -91,6 +97,14 @@ DESCRIPTOR: Final = AdapterDescriptor(
             extensions=(".parquet",),
             magic=(Magic(0, _parquet.MAGIC),),
         ),
+        FormatSpec(
+            "XLSX",
+            media_types=(
+                "application/vnd.ms-excel.sheet.macroEnabled.12",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            extensions=(".xlsm", ".xlsx"),
+        ),
     ),
     record_kinds=("structured_record", "structured_table"),
     config=(
@@ -103,8 +117,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ConfigOption(
             "csv_header",
             "undeclared",
-            "first_row: the CSV's first record is its header; none: it has no header;"
-            " undeclared: nobody says, so the header is Unknown and row 0 is a record",
+            "first_row: the CSV's first record (a sheet's first row, for XLSX) is its header; none:"
+            " it has no header; undeclared: nobody says, so the header is Unknown and the first"
+            " row is a record",
             choices=("first_row", "none", "undeclared"),
         ),
         ConfigOption(
@@ -138,6 +153,52 @@ DESCRIPTOR: Final = AdapterDescriptor(
             100_000_000,
             "rows past this many are not read",
         ),
+        ConfigOption(
+            "xlsx_max_cells",
+            1_000_000,
+            "cells of a worksheet past this many are not read",
+        ),
+        ConfigOption(
+            "xlsx_max_compression_ratio",
+            100,
+            "a workbook, or a part of it, declaring more uncompressed bytes per stored byte is"
+            " not read",
+        ),
+        ConfigOption(
+            "xlsx_max_part_bytes",
+            128 * 1024 * 1024,
+            "a part of a workbook declaring, or inflating to, more bytes is not read",
+        ),
+        ConfigOption(
+            "xlsx_max_parts",
+            10_000,
+            "a workbook zip with more parts is not read",
+        ),
+        ConfigOption(
+            "xlsx_max_shared_string_bytes",
+            32 * 1024 * 1024,
+            "shared strings past this many bytes of text are not covered",
+        ),
+        ConfigOption(
+            "xlsx_max_shared_strings",
+            1_000_000,
+            "shared strings past this many are not covered",
+        ),
+        ConfigOption(
+            "xlsx_max_sheets",
+            256,
+            "sheets past this many are not read",
+        ),
+        ConfigOption(
+            "xlsx_max_styles",
+            100_000,
+            "cell formats and number formats past this many are not read",
+        ),
+        ConfigOption(
+            "xlsx_max_total_bytes",
+            1024 * 1024 * 1024,
+            "a workbook whose parts declare more uncompressed bytes in all is not read",
+        ),
     ),
     libraries=(("pyarrow", _pyarrow_version()),),
     finding_codes=tuple(
@@ -159,6 +220,29 @@ DESCRIPTOR: Final = AdapterDescriptor(
             "tabular:schema",
             "after the footer's byte range: the table of the leaf columns the footer declares,"
             " columns " + ", ".join(_parquet.SCHEMA),
+        ),
+        Documented(
+            "tabular:xlsx_cell",
+            "after the byte range of a worksheet part's stored bytes in the zip and the byte"
+            " range of the cell's XML in the part's inflated bytes: fields part (the part's name),"
+            " sheet (its declared name), ref (the A1 reference), content (value, formula, error,"
+            " empty_string, blank, missing, formula_text) and, for a styled cell, numfmt (its"
+            " number format id) and format (the code, where the workbook defines it)",
+        ),
+        Documented(
+            "tabular:xlsx_formulas",
+            "after the workbook part's stored bytes and the sheet's tag in it: the table of a"
+            " sheet's formulas, columns " + ", ".join(_xlsx.FORMULA_HEADER),
+        ),
+        Documented(
+            "tabular:xlsx_sheet",
+            "after the workbook part's stored bytes and the sheet's tag in it: the table of the"
+            " sheet's cells; fields part and sheet",
+        ),
+        Documented(
+            "tabular:xlsx_workbook",
+            "after the workbook part's stored bytes (and a tag in it): the workbook's own table,"
+            " columns property, value; fields part and, on a row, property",
         ),
     ),
     conventions=(
@@ -205,7 +289,21 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " checks); a JSON array of records or JSON Lines whose head rows all parse as"
             " records: VERIFIED; damaged JSON tables: STRUCTURE; CSV with a consistent delimiter"
             " over 3+ fields, or 2 fields named .csv/.tsv: STRUCTURE, else NAME_ONLY; JSON"
-            " objects, arrays of scalars, empty files and binary: declined",
+            " objects, arrays of scalars, empty files and binary: declined; a zip with parts under"
+            " xl/: SIGNATURE (VERIFIED when the whole file is in the head and holds"
+            " [Content_Types].xml and xl/workbook.xml)",
+        ),
+        Documented(
+            "xlsx",
+            "one table per sheet in workbook order, rows as the sheet numbers them (row r is"
+            " number r + 1), a gap or an absent cell a blank cell, cells citing [part's stored"
+            " bytes, the cell's bytes in the part, tabular:xlsx_cell]; a number as stored (int,"
+            " double, or its text when none holds it exactly), a date its serial; blank, a place"
+            " with no cell and the empty string are Unknown, told apart by the cell step's"
+            " content; a formula cell its cached value (content formula), its text a row of the"
+            " sheet's formulas table; the workbook table holds the date system (1900 or 1904,"
+            " stated), the sheet count and each sheet's name and declared state; the first row is"
+            " the header under csv_header first_row; blocks of 4,096 rows, 32,768 cells or 1 MiB",
         ),
     ),
     resources=Resources(max_memory=512 * 1024 * 1024, streaming=True),
@@ -220,6 +318,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
         " sandbox's memory limit).",
         "pyarrow reads single-threaded through the source reader: no file is opened, nothing is"
         " written, no thread pool is used.",
+        "A workbook is read as a bounded zip: parts and directory size, declared and inflated"
+        " bytes and the compression ratio are limited, and nothing is extracted or written.",
+        "XML is read by expat with a document type declaration refused, so no entity is declared,"
+        " expanded or fetched; only UTF-8 is read; nesting is bounded.",
+        "External links are never followed and a VBA project is never read or run.",
     ),
 )
 
@@ -236,6 +339,8 @@ def _layout(source: SourceReader, limits: Limits) -> Layout:
     head = source.read(0, window)
     if head.startswith(_parquet.MAGIC):
         return Layout.PARQUET
+    if head.startswith(_ZIP_MAGICS):
+        return Layout.XLSX
     shape = _json.classify(head, window == size)
     if window < size and shape.undecided:
         window = min(size, 2 * limits.max_row_bytes + PROBE_HEAD_SIZE)
@@ -308,6 +413,8 @@ class TabularAdapter:
             )
         if head.startswith(_parquet.MAGIC):
             return _probe_parquet(head, hints)
+        if head.startswith(_ZIP_MAGICS):
+            return _xlsx.probe(head, hints)
         text = head[len(BOM) :] if head.startswith(BOM) else head
         if b"\x00" in text or len(text.translate(None, _BINARY)) != len(text):
             return ProbeResult(0.0, (ProbeReason("tabular.binary", "the head is not text"),))
@@ -323,6 +430,8 @@ class TabularAdapter:
         summary: JsonObject = {"layout": layout.value, "size": source.size}
         if layout is Layout.PARQUET:
             summary = {**summary, **_parquet.inspect(source, Limits.of(config))}
+        elif layout is Layout.XLSX:
+            pass
         elif layout is Layout.CSV:
             text = head[len(BOM) :] if head.startswith(BOM) else head
             dialect = _csv.sniff(text, len(head) == source.size)
@@ -341,6 +450,8 @@ class TabularAdapter:
         layout = _layout(source, limits)
         if layout is Layout.PARQUET:
             return _parquet.plan(source, config, limits)
+        if layout is Layout.XLSX:
+            return _xlsx.plan(source, config, limits)
         if layout is Layout.CSV:
             return _csv.plan(source, config, limits)
         return _json.plan(source, config, limits, layout)
@@ -350,6 +461,8 @@ class TabularAdapter:
         limits = Limits.of(config)
         if layout is Layout.PARQUET:
             return _parquet.ingest(source, chunk, config, limits)
+        if layout is Layout.XLSX:
+            return _xlsx.ingest(source, chunk, config, limits)
         if layout is Layout.CSV:
             return _csv.ingest(source, chunk, config, limits)
         return _json.ingest(source, chunk, config, limits)
