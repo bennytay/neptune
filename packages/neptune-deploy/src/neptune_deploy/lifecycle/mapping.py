@@ -67,6 +67,7 @@ class Scalar:
     formats: tuple[str, ...] = ()  # time
     zone: str | None = None  # time
     scheme: str | None = None  # version
+    via: str = "column"  # what ``column`` names: a column, or in a document template a label or section
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ class ListCell:
     column: str
     namespace: str | None = None  # ids
     split: str | None = None
+    via: str = "column"
 
 
 @dataclass(frozen=True)
@@ -87,7 +89,15 @@ class Part:
     score: Scalar | None = None
 
 
-Spec: TypeAlias = Scalar | tuple[ListCell, ...] | Part | tuple[Part, ...]
+@dataclass(frozen=True)
+class Rows:
+    """A document template's list of parts, one per row of the named table (ADR 0003 §4)."""
+
+    table: str
+    part: Part
+
+
+Spec: TypeAlias = Scalar | tuple[ListCell, ...] | Part | tuple[Part, ...] | Rows
 
 
 @dataclass(frozen=True)
@@ -127,18 +137,26 @@ class LifecycleMapping:
     sha256: ContentId
 
 
-def spec_columns(spec: Spec) -> set[str]:
+def spec_refs(spec: Spec) -> set[tuple[str, str]]:
+    """Every ``(via, name)`` a spec reads: columns for a mapping file, labels, sections and the
+    columns of a table's rows for a document template."""
     if isinstance(spec, Scalar):
-        return {spec.column}
+        return {(spec.via, spec.column)}
+    if isinstance(spec, Rows):
+        return spec_refs(spec.part)
     if isinstance(spec, Part):
-        out = {spec.score.column} if spec.score else set()
+        out = {(spec.score.via, spec.score.column)} if spec.score else set()
         for inner in spec.fields.values():
-            out |= spec_columns(inner)
+            out |= spec_refs(inner)
         return out
     out = set()
     for item in spec:
-        out |= spec_columns(item) if isinstance(item, Part) else {item.column}
+        out |= spec_refs(item) if isinstance(item, Part) else {(item.via, item.column)}
     return out
+
+
+def spec_columns(spec: Spec) -> set[str]:
+    return {name for _, name in spec_refs(spec)}
 
 
 # --- Reading -----------------------------------------------------------------------------------
@@ -270,7 +288,30 @@ def _rule(value: Any, where: str, zone: str | None) -> Rule:
     )
 
 
-def _fields(cls: type[Any], value: Any, where: str, zone: str | None) -> dict[str, Spec]:
+@dataclass(frozen=True)
+class Dialect:
+    """What names the thing a spec reads: ``column`` for a mapping file; ``label`` or ``section``
+    for a document template's fields, and ``column`` for the rows of one of its tables."""
+
+    selectors: tuple[str, ...]
+    rows: bool = False  # an items field may be ``{"rows": <table>, "each": <part>}``
+
+
+TABLE: Final = Dialect(("column",))
+DOCUMENT: Final = Dialect(("label", "section"), rows=True)
+DOCUMENT_ROW: Final = Dialect(("column",))
+
+
+def _selector(obj: dict[str, Any], where: str, dialect: Dialect) -> tuple[str, str]:
+    named = [key for key in dialect.selectors if key in obj]
+    if len(named) != 1:
+        raise MappingError(f"{where}: name exactly one of {list(dialect.selectors)}")
+    return named[0], _text(obj[named[0]], f"{where}.{named[0]}")
+
+
+def _fields(
+    cls: type[Any], value: Any, where: str, zone: str | None, dialect: Dialect = TABLE
+) -> dict[str, Spec]:
     shapes = {shape.name: shape for shape in fields_of(cls)}
     if not isinstance(value, dict):
         raise MappingError(f"{where}: expected an object of fields")
@@ -285,15 +326,24 @@ def _fields(cls: type[Any], value: Any, where: str, zone: str | None) -> dict[st
                 if not isinstance(spec, list):
                     raise MappingError(f"{at}: expected a list of cells")
                 ids = shape.shape is Shape.IDS
-                out[name] = tuple(_list_cell(s, f"{at}[{i}]", ids) for i, s in enumerate(spec))
+                out[name] = tuple(
+                    _list_cell(s, f"{at}[{i}]", ids, dialect) for i, s in enumerate(spec)
+                )
             case Shape.PART:
                 assert shape.part is not None
-                out[name] = _part(shape.part, spec, at, zone)
+                out[name] = _part(shape.part, spec, at, zone, dialect)
             case Shape.ITEMS:
                 assert shape.part is not None
+                if dialect.rows and isinstance(spec, dict):
+                    obj = _object(spec, at, {"rows", "each"}, set())
+                    each = _part(shape.part, obj["each"], f"{at}.each", zone, DOCUMENT_ROW)
+                    out[name] = Rows(_text(obj["rows"], f"{at}.rows"), each)
+                    continue
                 if not isinstance(spec, list):
                     raise MappingError(f"{at}: expected a list of parts")
-                items = tuple(_part(shape.part, s, f"{at}[{i}]", zone) for i, s in enumerate(spec))
+                items = tuple(
+                    _part(shape.part, s, f"{at}[{i}]", zone, dialect) for i, s in enumerate(spec)
+                )
                 labels = [item.score.column for item in items if item.score is not None]
                 if len(set(labels)) != len(labels):
                     raise MappingError(f"{at}: a score's name is its column, so columns are unique")
@@ -301,13 +351,15 @@ def _fields(cls: type[Any], value: Any, where: str, zone: str | None) -> dict[st
             case Shape.LABEL:
                 raise MappingError(f"{at}: a label is the column's own name, not mapped")
             case _:
-                out[name] = _scalar(shape.shape, spec, at, zone)
+                out[name] = _scalar(shape.shape, spec, at, zone, dialect)
     return out
 
 
 def _times(spec: Spec) -> list[Scalar]:
     if isinstance(spec, Scalar):
         return [spec] if spec.formats else []
+    if isinstance(spec, Rows):
+        return _times(spec.part)
     if isinstance(spec, Part):
         return [t for inner in spec.fields.values() for t in _times(inner)]
     return [t for item in spec if isinstance(item, Part) for t in _times(item)]
@@ -315,47 +367,56 @@ def _times(spec: Spec) -> list[Scalar]:
 
 def _check_clocks(fields: Mapping[str, Spec], where: str) -> None:
     """A column read as a time twice in one rule is read the same way, so one cell is one clock."""
-    seen: dict[str, tuple[tuple[str, ...], str | None]] = {}
+    seen: dict[tuple[str, str], tuple[tuple[str, ...], str | None]] = {}
     for spec in fields.values():
         for time in _times(spec):
             reading = (time.formats, time.zone)
-            if seen.setdefault(time.column, reading) != reading:
+            if seen.setdefault((time.via, time.column), reading) != reading:
                 raise MappingError(f"{where}: column {time.column!r} is read as two clocks")
 
 
-def _list_cell(value: Any, where: str, ids: bool) -> ListCell:
-    obj = _object(value, where, {"column", "namespace"} if ids else {"column"}, {"split"})
+def _list_cell(value: Any, where: str, ids: bool, dialect: Dialect = TABLE) -> ListCell:
+    obj = _object(value, where, {"namespace"} if ids else set(), {"split", *dialect.selectors})
+    via, name = _selector(obj, where, dialect)
     split = _text(obj["split"], f"{where}.split") if "split" in obj else None
     if split is not None and not split.strip():
         raise MappingError(f"{where}.split: a delimiter is not only whitespace")
+    if via == "section" and (ids or split is not None):
+        raise MappingError(f"{where}: a section lists statements, one per list item; no split")
     namespace = _token(obj["namespace"], f"{where}.namespace") if ids else None
-    return ListCell(_text(obj["column"], f"{where}.column"), namespace, split)
+    return ListCell(name, namespace, split, via)
 
 
-def _part(cls: type[Any], value: Any, where: str, zone: str | None) -> Part:
+def _part(
+    cls: type[Any], value: Any, where: str, zone: str | None, dialect: Dialect = TABLE
+) -> Part:
     if is_score(cls):
-        return Part(cls, {}, _scalar(Shape.TEXT, value, where, zone))
-    return Part(cls, _fields(cls, value, where, zone))
+        return Part(cls, {}, _scalar(Shape.TEXT, value, where, zone, dialect))
+    return Part(cls, _fields(cls, value, where, zone, dialect))
 
 
-def _scalar(shape: Shape, value: Any, where: str, zone: str | None) -> Scalar:
+def _scalar(
+    shape: Shape, value: Any, where: str, zone: str | None, dialect: Dialect = TABLE
+) -> Scalar:
     extra = {
         Shape.ID: {"namespace"},
         Shape.TIME: {"format"},
         Shape.VERSION: {"scheme"},
     }.get(shape, set())
     optional = {"required", "zone"} if shape is Shape.TIME else {"required"}
-    obj = _object(value, where, {"column"} | extra, optional)
+    obj = _object(value, where, extra, optional | set(dialect.selectors))
+    via, name = _selector(obj, where, dialect)
+    if via == "section" and shape is not Shape.TEXT:
+        raise MappingError(f"{where}: a section is free text, so only a text field reads one")
     required = obj.get("required", False)
     if not isinstance(required, bool):
         raise MappingError(f"{where}.required: expected true or false")
-    scalar = Scalar(column=_text(obj["column"], f"{where}.column"), required=required)
     if shape is Shape.ID:
-        return Scalar(scalar.column, required, namespace=_token(obj["namespace"], where))
+        return Scalar(name, required, namespace=_token(obj["namespace"], where), via=via)
     if shape is Shape.VERSION:
         if obj["scheme"] not in VERSION_SCHEMES:
             raise MappingError(f"{where}.scheme: one of {VERSION_SCHEMES}")
-        return Scalar(scalar.column, required, scheme=obj["scheme"])
+        return Scalar(name, required, scheme=obj["scheme"], via=via)
     if shape is Shape.TIME:
         formats = obj["format"] if isinstance(obj["format"], list) else [obj["format"]]
         checked = _texts(formats, f"{where}.format")
@@ -369,8 +430,8 @@ def _scalar(shape: Shape, value: Any, where: str, zone: str | None) -> Scalar:
         declared = _text(obj["zone"], f"{where}.zone") if "zone" in obj else zone
         if declared is None:
             raise MappingError(f"{where}: a time needs its civil zone declared (or 'unstated')")
-        return Scalar(scalar.column, required, formats=checked, zone=declared)
-    return scalar
+        return Scalar(name, required, formats=checked, zone=declared, via=via)
+    return Scalar(name, required, via=via)
 
 
 def config_of(mapping: LifecycleMapping, base_package: ContentId) -> JsonObject:

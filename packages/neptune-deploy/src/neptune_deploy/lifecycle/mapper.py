@@ -230,13 +230,20 @@ class _Group:
 class _Findings:
     """Findings grouped by code, table and detail: one finding names its first rows and records."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        catalog: dict[str, tuple[Severity, FindingCategory, str]] | None = None,
+        producer: str = MAPPER_ID,
+        scope: str = "table",
+    ) -> None:
+        self.catalog = FINDINGS if catalog is None else catalog
+        self.producer, self.scope = producer, scope
         self.groups: dict[tuple[str, str, str], _Group] = {}
 
     def add(
         self,
         name: str,
-        table: _Table,
+        table: Any,
         subject: EvidenceRef,
         *,
         key: str = "",
@@ -247,18 +254,18 @@ class _Findings:
     ) -> None:
         group = self.groups.setdefault(
             (name, table.record.id, key),
-            _Group(subject, {"table": table.record.id, **(details or {})}),
+            _Group(subject, {self.scope: table.record.id, **(details or {})}),
         )
         group.count += 1
         if row is not None and len(group.rows) < NAMED:
             group.rows.append(row)
-            if record is not None:
-                group.records.append(record)
+        if record is not None and len(group.records) < NAMED:
+            group.records.append(record)
         for ref in related:
             if len(group.related) < NAMED and ref not in group.related and ref != group.subject:
                 group.related.append(ref)
 
-    def once(self, name: str, table: _Table, subject: EvidenceRef, column: str) -> None:
+    def once(self, name: str, table: Any, subject: EvidenceRef, column: str) -> None:
         """A finding about a table's column, made once however many rows read it."""
         if (name, table.record.id, column) not in self.groups:
             self.add(name, table, subject, key=column, details={"column": column})
@@ -266,14 +273,14 @@ class _Findings:
     def build(self, transform: TransformRecord) -> list[IngestFinding]:
         out = []
         for (name, _, _), group in sorted(self.groups.items()):
-            severity, category, message = FINDINGS[name]
+            severity, category, message = self.catalog[name]
             details = dict(group.details)
             details["count"] = group.count
             if group.rows:
                 details["rows"] = list(group.rows)
             out.append(
                 ingest_finding(
-                    code=code(name),
+                    code=f"{self.producer}.{name}",
                     category=category,
                     severity=severity,
                     subject=group.subject,
@@ -299,38 +306,30 @@ class _Cell:
     absent_from_table: bool = False
 
 
-class _Row:
-    """One row being mapped by one rule under one transform."""
+class _Values:
+    """Values read into fields, one record at a time, under one transform: the shapes of ADR 0002 §3
+    and §4 over ``cell``, which a subclass says how to find. A table row (``_Row``) and a document
+    (``documents._DocRow``) differ only in what a reference names."""
 
-    def __init__(self, mapper: "_Mapper", table: _Table, index: int) -> None:
-        self.mapper, self.table = mapper, table
-        self.record = table.rows[index]
-        self.pointers = table.pointers[index] if table.header is None else None
-        self.evidence = self.record.provenance.evidence
+    mapper: Any  # has ``transform``, ``findings`` and ``domain``
+    table: Any  # has ``record`` (its ``id`` scopes findings and clocks) and ``evidence``
+    evidence: EvidenceRef  # the record's own evidence
+    pointers: dict[str, int] | None = None
+
+    def cell(self, column: str, via: str = "column") -> _Cell:
+        raise NotImplementedError
+
+    def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
+        raise NotImplementedError
+
+    def blank(self, spec: Part) -> bool:
+        raise NotImplementedError
+
 
     def provenance(self, evidence: EvidenceRef) -> Provenance:
         return Provenance(evidence, self.mapper.transform.id, STATED)
 
-    def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
-        self.mapper.findings.add(
-            name, self.table, subject, key=column, details={"column": column}, row=self.record.row
-        )
 
-    def cell(self, column: str) -> _Cell:
-        table, record = self.table, self.record
-        if not table.has(column):
-            self.mapper.findings.once("column_absent", table, table.evidence, column)
-            return _Cell(None, self.evidence, absent_from_table=True)
-        if self.pointers is not None:
-            index: int | None = self.pointers.get(column)
-        else:
-            index = table.columns[column]
-            if index is None:
-                self.mapper.findings.once("column_repeated", table, table.evidence, column)
-                return _Cell(Unknown(self.provenance(self.evidence)), self.evidence)
-        if index is None or index >= len(record.cells):
-            return _Cell(None, self.evidence)  # a missing key, or a short row
-        return _Cell(record.cells[index], record.cell_evidence(table.record, index))
 
     def label(self, column: str) -> str:
         return column
@@ -338,7 +337,7 @@ class _Row:
     # One cell into one field ---------------------------------------------------------------
 
     def scalar(self, shape: Shape, spec: Scalar) -> Knowledge[Any]:
-        cell = self.cell(spec.column)
+        cell = self.cell(spec.column, spec.via)
         if cell.absent_from_table:
             return NotCovered()
         state, place = cell.state, cell.place
@@ -413,7 +412,12 @@ class _Row:
             return None
         assert spec.zone is not None
         domain = self.mapper.domain(
-            self.table, spec.column, reading.instant, reading.resolution, spec.zone, place
+            self.table.record.id,
+            spec.column,
+            reading.instant,
+            reading.resolution,
+            spec.zone,
+            place,
         )
         return Known(Timestamp(reading.ticks, domain), provenance)
 
@@ -421,7 +425,7 @@ class _Row:
 
     def pieces(self, spec: ListCell) -> list[tuple[str, EvidenceRef]]:
         """The texts a list cell states, each with its citation (a span inside a split cell)."""
-        cell = self.cell(spec.column)
+        cell = self.cell(spec.column, spec.via)
         if cell.absent_from_table or isinstance(cell.state, KnownAbsent):
             return []
         if cell.state is None or isinstance(cell.state, Unknown | NotCovered):
@@ -474,6 +478,75 @@ class _Row:
             )
         return spec.cls(**self.values(spec.cls, spec.fields))
 
+
+    def items(self, specs: Any) -> tuple[Any, ...]:
+        """Parts spelled out field by field; one whose every cell is blank is not listed."""
+        items = []
+        for item in specs:
+            assert isinstance(item, Part)
+            if self.blank(item):
+                column = ", ".join(sorted(spec_columns(item)))
+                self.finding("item_blank", column, self.evidence)
+                continue
+            items.append(self.part(item))
+        return tuple(items)
+
+    def values(self, cls: type[Any], specs: Any) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for shape in fields_of(cls):
+            spec: Any = specs.get(shape.name)
+            match shape.shape:
+                case Shape.IDS:
+                    out[shape.name] = self.ids(spec) if spec else ()
+                case Shape.STATEMENTS:
+                    out[shape.name] = self.statements(spec) if spec else ()
+                case Shape.ITEMS:
+                    out[shape.name] = self.items(spec or ())
+                case Shape.PART:
+                    assert shape.part is not None
+                    out[shape.name] = self.part(
+                        spec if isinstance(spec, Part) else Part(shape.part, {})
+                    )
+                case _:
+                    out[shape.name] = (
+                        self.scalar(shape.shape, spec) if isinstance(spec, Scalar) else NotCovered()
+                    )
+        return out
+
+
+class _Row(_Values):
+    """One row being mapped by one rule under one transform."""
+
+    def __init__(self, mapper: Any, table: _Table, index: int) -> None:
+        self.mapper, self.table = mapper, table
+        self.record = table.rows[index]
+        self.pointers = table.pointers[index] if table.header is None else None
+        self.evidence = self.record.provenance.evidence
+
+
+    def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
+        self.mapper.findings.add(
+            name, self.table, subject, key=column, details={"column": column}, row=self.record.row
+        )
+
+
+    def cell(self, column: str, via: str = "column") -> _Cell:
+        table, record = self.table, self.record
+        if not table.has(column):
+            self.mapper.findings.once("column_absent", table, table.evidence, column)
+            return _Cell(None, self.evidence, absent_from_table=True)
+        if self.pointers is not None:
+            index: int | None = self.pointers.get(column)
+        else:
+            index = table.columns[column]
+            if index is None:
+                self.mapper.findings.once("column_repeated", table, table.evidence, column)
+                return _Cell(Unknown(self.provenance(self.evidence)), self.evidence)
+        if index is None or index >= len(record.cells):
+            return _Cell(None, self.evidence)  # a missing key, or a short row
+        return _Cell(record.cells[index], record.cell_evidence(table.record, index))
+
+
     def blank(self, spec: Part) -> bool:
         """Every cell the part reads is blank or absent in this row."""
         for column in sorted(spec_columns(spec)):
@@ -486,35 +559,6 @@ class _Row:
                 return False
         return True
 
-    def values(self, cls: type[Any], specs: Any) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        for shape in fields_of(cls):
-            spec: Any = specs.get(shape.name)
-            match shape.shape:
-                case Shape.IDS:
-                    out[shape.name] = self.ids(spec) if spec else ()
-                case Shape.STATEMENTS:
-                    out[shape.name] = self.statements(spec) if spec else ()
-                case Shape.ITEMS:
-                    items = []
-                    for item in spec or ():
-                        assert isinstance(item, Part)
-                        if self.blank(item):
-                            column = ", ".join(sorted(spec_columns(item)))
-                            self.finding("item_blank", column, self.evidence)
-                            continue
-                        items.append(self.part(item))
-                    out[shape.name] = tuple(items)
-                case Shape.PART:
-                    assert shape.part is not None
-                    out[shape.name] = self.part(
-                        spec if isinstance(spec, Part) else Part(shape.part, {})
-                    )
-                case _:
-                    out[shape.name] = (
-                        self.scalar(shape.shape, spec) if isinstance(spec, Scalar) else NotCovered()
-                    )
-        return out
 
 
 def _text(value: Any) -> str | None:
@@ -531,7 +575,39 @@ def _text(value: Any) -> str | None:
 # --- The mapper ---------------------------------------------------------------------------------
 
 
-class _Mapper:
+class _Clocks:
+    """The ``TimestampDomain`` of each time field read, one per scope and field (ADR 0002 §5)."""
+
+    transform: TransformRecord
+    domains: dict[tuple[Any, ...], TimestampDomain]
+
+    def domain(
+        self,
+        scope: RecordId,
+        column: str,
+        instant: bool,
+        resolution: Any,
+        zone: str,
+        place: EvidenceRef,
+    ) -> RecordId:
+        key = (scope, column, instant, resolution, "" if instant else zone)
+        if key not in self.domains:
+            provenance = Provenance(place, self.transform.id, STATED)
+            self.domains[key] = TimestampDomain(
+                id=evidence_record_id(TimestampDomain.kind, place, self.transform),
+                provenance=provenance,
+                field=column,
+                scope=() if instant else (f"zone={zone}",),
+                role=Known(ClockRole.DOCUMENT),
+                resolution=Known(resolution),
+                epoch=Known(Epoch.UNIX),
+                timescale=Known(Timescale.POSIX) if instant else Unknown(),
+                declared_monotonic=NotCovered(),
+            )
+        return self.domains[key].id
+
+
+class _Mapper(_Clocks):
     """One mapping applied to one package's tables."""
 
     def __init__(self, mapping: LifecycleMapping, base: ContentId, tables: list[_Table]) -> None:
@@ -550,31 +626,6 @@ class _Mapper:
         )
         self.findings = _Findings()
         self.domains: dict[tuple[Any, ...], TimestampDomain] = {}
-
-    def domain(
-        self,
-        table: _Table,
-        column: str,
-        instant: bool,
-        resolution: Any,
-        zone: str,
-        place: EvidenceRef,
-    ) -> RecordId:
-        key = (table.record.id, column, instant, resolution, "" if instant else zone)
-        if key not in self.domains:
-            provenance = Provenance(place, self.transform.id, STATED)
-            self.domains[key] = TimestampDomain(
-                id=evidence_record_id(TimestampDomain.kind, place, self.transform),
-                provenance=provenance,
-                field=column,
-                scope=() if instant else (f"zone={zone}",),
-                role=Known(ClockRole.DOCUMENT),
-                resolution=Known(resolution),
-                epoch=Known(Epoch.UNIX),
-                timescale=Known(Timescale.POSIX) if instant else Unknown(),
-                declared_monotonic=NotCovered(),
-            )
-        return self.domains[key].id
 
     def run(self) -> list[Any]:
         records: list[Any] = []
