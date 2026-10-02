@@ -1,0 +1,66 @@
+{
+  "id": "rec:sha256:67411581f03e4e549c9af72544b4361e082dc146f4327f1a6fed3abeba68588a",
+  "kind": "run_assembly",
+  "members": [
+    {
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 1818,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/rosbag2_bagfile_information/relative_file_paths/0"
+          }
+        ],
+        "source": "sha256:4b9a6b056ea0d9b9af3f3960afa75caca42063479c9b6d0768b7a175ef9e6da9"
+      },
+      "revision": "rec:sha256:1d9647ca8cd96f5e4892f7370b1050a14815a99ce46aca5ea23491e216a85e1c",
+      "role": "recording"
+    },
+    {
+      "evidence": {
+        "locator": [
+          {
+            "kind": "byte_range",
+            "length": 1818,
+            "offset": 0
+          },
+          {
+            "kind": "json_pointer",
+            "pointer": "/rosbag2_bagfile_information"
+          }
+        ],
+        "source": "sha256:4b9a6b056ea0d9b9af3f3960afa75caca42063479c9b6d0768b7a175ef9e6da9"
+      },
+      "revision": "rec:sha256:34afe442fadf7474dcac97b1596eb5bf78785901f50353d2cce3fde785bf1045",
+      "role": "description"
+    }
+  ],
+  "provenance": {
+    "assertion_kind": "observed",
+    "evidence": {
+      "locator": [
+        {
+          "kind": "byte_range",
+          "length": 1818,
+          "offset": 0
+        },
+        {
+          "kind": "json_pointer",
+          "pointer": "/rosbag2_bagfile_information/relative_file_paths"
+        }
+      ],
+      "source": "sha256:4b9a6b056ea0d9b9af3f3960afa75caca42063479c9b6d0768b7a175ef9e6da9"
+    },
+    "transform": "rec:sha256:3b71f1d5e3ff1d93422c9779e890a374547b3412ea02c7ace78100729e6dd526"
+  },
+  "rule": "rosbag2.metadata",
+  "run": "rec:sha256:5bf3bccba577623acf6104e6d71ed1cf1dc7c0a383a97791f700564511548557",
+  "schema_version": 3,
+  "validity": {
+    "knowledge": "not_applicable"
+  }
+}

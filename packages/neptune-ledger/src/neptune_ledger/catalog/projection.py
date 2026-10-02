@@ -15,7 +15,7 @@ The Ledger keeps one spec per package-schema version it reads, the schema-versio
 and the Ledger version alone. Each record is projected with the spec of the version it states, so
 packages of every version are indexed side by side, and a package of a version the registry does
 not hold is refused. Adding a version is one command over the registry's version directory, which
-appends its spec and writes the next migration when it adds projections::
+appends its spec and writes the next migration when it adds projection columns::
 
     uv run python -m neptune_ledger.catalog.projection contracts/package-schema/v3.0.0/schema.json
 
@@ -357,8 +357,11 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
         {(p.filter, p.columns) for p in new.projections}
         - {(p.filter, p.columns) for p in old.projections}
     )
-    if not added:
-        return ""  # a new kind without hot filters needs no migration: it lives in record_default
+    if not groups:
+        # A new kind without hot filters lives in record_default, and a projection into columns
+        # that exist needs no DDL. No row it would leave blank can exist: registration refuses a
+        # schema version before the registry holds it (ADR 0011 §2).
+        return ""
     out = [
         f"-- {version:04d} record projections for {new.schema_id} (Ledger ADR 0009).",
         "--",
@@ -554,7 +557,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stderr.write("usage: python -m neptune_ledger.catalog.projection SCHEMA_JSON\n")
         return 2
     written = generate(Path(args[0]), Path(__file__).resolve().parent)
-    sys.stdout.write(f"{written or 'registry rewritten; no new projections, so no migration'}\n")
+    sys.stdout.write(
+        f"{written or 'registry rewritten; no new projection columns, so no migration'}\n"
+    )
     return 0
 
 

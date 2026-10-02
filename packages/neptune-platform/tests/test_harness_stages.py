@@ -37,11 +37,11 @@ def test_today_only_the_compiler_resolves_to_real() -> None:
     registry = contracts.registry()
     resolved = {stage.id: resolve(stage, registry) for stage in STAGES}
     assert resolved["compiler"].mode == "real"
-    assert resolved["compiler"].contract_version == "2.0.0"
+    assert resolved["compiler"].contract_version == "3.0.0"
     assert resolved["ledger"].mode == "stub"
     # neptune_ledger.api is importable (MVL-88) but only as a contract and stub: no real driver.
     assert "no real driver for neptune-ledger" in resolved["ledger"].reason
-    assert resolved["ledger"].contract_version == "1.3.0"
+    assert resolved["ledger"].contract_version == "1.4.0"
     assert resolved["context"].mode == "stub"
     assert resolved["memory"].mode == "stub"  # graph-schema 1.0.0 is published; no driver yet
     assert resolved["memory"].contract_version == "1.0.0"
@@ -58,10 +58,11 @@ def test_a_version_constant_that_disagrees_with_the_registry_is_a_stub(
 ) -> None:
     import neptune.model.record as record
 
-    monkeypatch.setattr(record, "SCHEMA_VERSION", 3)
+    newer = record.SCHEMA_VERSION + 1
+    monkeypatch.setattr(record, "SCHEMA_VERSION", newer)
     resolution = resolve(COMPILER, contracts.registry())
     assert resolution.mode == "stub"
-    assert "SCHEMA_VERSION is 3" in resolution.reason
+    assert f"SCHEMA_VERSION is {newer}" in resolution.reason
 
 
 def test_a_lock_a_major_behind_makes_the_stage_a_stub(tmp_path: Path) -> None:

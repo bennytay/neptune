@@ -1,6 +1,6 @@
 """Projection columns generated from the package schema's JSON Schema export (ADR 0009 §3).
 
-The committed registry's newest spec is pinned to the published package-schema v2.0.0 export and
+The committed registry's newest spec is pinned to the newest published package-schema export and
 migration 0005 to the generator's output over the v1.0.0 export (each version's entry is pinned in
 test_ledger_schema_registry.py). A schema-bump fixture adds a record kind, and the migration the
 generator writes for it applies on top of the shipped ones and files the new kind's rows.
@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import re
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Final
 
@@ -40,6 +41,7 @@ Conn = psycopg.Connection[tuple[object, ...]]
 REPO: Final = Path(__file__).resolve().parents[3]
 SCHEMA_V1: Final = REPO / "contracts" / "package-schema" / "v1.0.0" / "schema.json"
 SCHEMA_V2: Final = REPO / "contracts" / "package-schema" / "v2.0.0" / "schema.json"
+BUMPED: Final = shipped_registry().latest.version + 1
 CATALOG: Final = Path(projection.__file__).resolve().parent
 RECORD: Final = "rec:sha256:" + "a" * 64
 STREAM: Final = "rec:sha256:" + "b" * 64
@@ -59,9 +61,10 @@ def schema_v2() -> dict[str, Any]:
 
 
 def bumped_schema() -> dict[str, Any]:
-    """Package schema 2 plus a contact-event kind that states a machine, a stream and a clock."""
+    """A package schema after the newest published one, adding a contact-event kind that states
+    a machine, a stream and a clock."""
     schema = copy.deepcopy(schema_v2())
-    schema["$id"] = "urn:neptune:schema:canonical:3"
+    schema["$id"] = f"urn:neptune:schema:canonical:{BUMPED}"
     schema["$defs"]["ContactEvent"] = {
         "additionalProperties": False,
         "properties": {
@@ -71,7 +74,7 @@ def bumped_schema() -> dict[str, Any]:
             "kind": {"const": "contact_event"},
             "machine": {"$ref": "#/$defs/Knowledge_LogicalId"},
             "provenance": {"$ref": "#/$defs/Provenance"},
-            "schema_version": {"const": 3},
+            "schema_version": {"const": BUMPED},
             "stream": {"$ref": "#/$defs/RecordId"},
         },
         "required": ["clock", "details", "id", "kind", "machine", "provenance", "stream"],
@@ -90,15 +93,16 @@ def migration(version: int, text: str) -> Migration:
 
 
 def test_the_shipped_spec_is_generated_from_the_declared_package_schema() -> None:
-    """The newest spec follows the declared version (2); version 2 only adds kinds with no hot
-    filter, so it needs no migration beyond 0005 (generated from version 1)."""
-    assert shipped_registry().latest.spec == projection_spec(schema_v2())
-    assert shipped_spec() == projection_spec(schema_v2())
+    """The newest spec follows the declared version; version 2 only adds kinds with no hot
+    filter, and version 3's projections fill columns version 1 made, so neither needs a
+    migration beyond 0005 (generated from version 1)."""
+    latest = shipped_registry().latest
+    newest = REPO / "contracts" / "package-schema" / f"v{latest.contract_version}" / "schema.json"
+    assert shipped_spec() == latest.spec == projection_spec(json.loads(newest.read_bytes()))
     assert render_migration(projection_spec(schema_v1()), projection_spec(schema_v2()), 6) == ""
-    assert set(shipped_spec().kinds) - set(BASELINE_KINDS) == {
-        "configuration_snapshot",
-        "configuration_value",
-    }
+    for older, newer in pairwise(shipped_registry().versions):
+        assert render_migration(older.spec, newer.spec, 6) == ""
+    assert {"configuration_snapshot", "configuration_value"} <= set(shipped_spec().kinds)
 
 
 def test_migration_0005_is_the_generated_migration_for_package_schema_1() -> None:
@@ -181,7 +185,7 @@ def test_schema_key_order_does_not_change_the_spec() -> None:
 def test_a_bump_that_adds_a_kind_renders_its_new_columns_only() -> None:
     """No partition: the new kind lives in record_default (ADR 0008; ADR 0009 §6)."""
     text = render_migration(projection_spec(schema_v1()), projection_spec(bumped_schema()), 5)
-    assert text.startswith("-- 0005 record projections for urn:neptune:schema:canonical:3")
+    assert text.startswith(f"-- 0005 record projections for urn:neptune:schema:canonical:{BUMPED}")
     assert "CREATE TABLE" not in text
     assert "IF EXISTS (SELECT 1 FROM record WHERE kind IN ('contact_event')) THEN" in text
     assert "ADD COLUMN stream_ids text[]" in text
@@ -295,14 +299,13 @@ def test_generate_writes_the_spec_and_numbers_the_next_migration(tmp_path: Path)
     assert (catalog / "projections.json").read_bytes() == (
         CATALOG / "projections.json"
     ).read_bytes()
-    written = generate(published(tmp_path / "v3.0.0", bumped_schema(), "3.0.0"), catalog)
-    assert (
-        written == catalog / "migrations" / f"{len(migrations()) + 1:04d}_projections_schema_3.sql"
-    )
+    written = generate(published(tmp_path / "bumped", bumped_schema(), f"{BUMPED}.0.0"), catalog)
+    number = len(migrations()) + 1
+    assert written == catalog / "migrations" / f"{number:04d}_projections_schema_{BUMPED}.sql"
     registry = read_registry((catalog / "projections.json").read_bytes())
-    assert registry.numbers == (1, 2, 3)
+    assert registry.numbers == (*shipped_registry().numbers, BUMPED)
     assert registry.latest.spec == projection_spec(bumped_schema())
-    assert registry.versions[:2] == shipped_registry().versions
+    assert registry.versions[:-1] == shipped_registry().versions
 
 
 def test_the_generator_command_needs_one_schema_path() -> None:

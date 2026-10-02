@@ -13,6 +13,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Iterator
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Final
 
@@ -24,6 +25,7 @@ from ledger_catalog_rows import add_package
 from neptune.identity import canonical_json
 from neptune.model.kinds import kinds_at
 from neptune.model.knowledge import Known
+from neptune.model.record import SCHEMA_VERSION
 from neptune_ledger.api import codec
 from neptune_ledger.catalog import check, projection
 from neptune_ledger.catalog.index import (
@@ -100,7 +102,7 @@ def entry(version: int, spec: Spec) -> SchemaVersion:
 
 def test_each_version_is_generated_from_its_published_package_schema() -> None:
     registry = shipped_registry()
-    assert registry.numbers == (1, 2)
+    assert registry.numbers == tuple(range(1, SCHEMA_VERSION + 1))  # every version it writes
     for shipped in registry.versions:
         directory = PUBLISHED / f"v{shipped.contract_version}"
         assert shipped == schema_version_from(directory / "schema.json")
@@ -115,12 +117,15 @@ def test_each_version_holds_exactly_the_compilers_kinds_of_that_version() -> Non
         assert set(shipped.spec.kinds) == check.kinds_of(shipped.version)
 
 
-def test_version_2_only_adds_kinds_so_version_1_records_project_alike() -> None:
-    first, second = (e.spec for e in shipped_registry().versions)
-    assert set(first.kinds) < set(second.kinds)
-    assert first.projections == second.projections
-    assert first.opaque == second.opaque
-    assert projection_columns(shipped_registry()) == projection_columns(second)
+def test_each_version_only_adds_to_the_one_before() -> None:
+    """The model only grows (root ADR 0037 §1), so the newest spec's columns are every column."""
+    specs = [e.spec for e in shipped_registry().versions]
+    for older, newer in pairwise(specs):
+        assert set(older.kinds) < set(newer.kinds)
+        assert set(older.projections) <= set(newer.projections)
+        assert set(older.opaque) <= set(newer.opaque)
+    assert specs[0].projections == specs[1].projections  # version 2 adds no hot filter
+    assert projection_columns(shipped_registry()) == projection_columns(specs[-1])
 
 
 def test_the_registry_round_trips_byte_for_byte() -> None:
@@ -174,23 +179,28 @@ def test_a_published_version_whose_digest_disagrees_is_refused(tmp_path: Path) -
 
 def test_adding_a_version_appends_it_and_never_remaps_an_indexed_one() -> None:
     registry = shipped_registry()
-    latest = registry.latest.spec
-    three = entry(3, Spec("urn:neptune:schema:canonical:3", latest.kinds, latest.projections, ()))
-    assert add_version(registry, three).numbers == (1, 2, 3)
-    four = entry(4, Spec("urn:neptune:schema:canonical:4", latest.kinds, (), ()))
-    with pytest.raises(ProjectionError, match="skips a version; add 3 first"):
-        add_version(registry, four)
+    latest, n = registry.latest.spec, registry.latest.version
+
+    def at(version: int, spec: Spec) -> Spec:
+        return Spec(f"urn:neptune:schema:canonical:{version}", spec.kinds, spec.projections, ())
+
+    assert add_version(registry, entry(n + 1, at(n + 1, latest))).numbers == (
+        *registry.numbers,
+        n + 1,
+    )
+    with pytest.raises(ProjectionError, match=f"skips a version; add {n + 1} first"):
+        add_version(registry, entry(n + 2, at(n + 2, latest)))
     remapped = Spec(latest.schema_id, latest.kinds, latest.projections[1:], latest.opaque)
     with pytest.raises(ProjectionError, match="already indexed with another mapping"):
-        add_version(registry, entry(2, remapped))
-    # A later registry version of schema 2 with the same mapping only re-points the provenance.
-    repointed = add_version(registry, SchemaVersion("2.1.0", DIGEST, latest))
-    assert repointed.numbers == (1, 2)
-    assert repointed.latest.contract_version == "2.1.0"
+        add_version(registry, entry(n, remapped))
+    # A later registry version of schema n with the same mapping only re-points the provenance.
+    repointed = add_version(registry, SchemaVersion(f"{n}.1.0", DIGEST, latest))
+    assert repointed.numbers == registry.numbers
+    assert repointed.latest.contract_version == f"{n}.1.0"
     assert repointed.latest.mapping_digest == registry.latest.mapping_digest
     assert add_version(registry, registry.latest) == registry  # the same version again
-    with pytest.raises(ProjectionError, match=r"only to a later registry version, not 2\.0\.0"):
-        add_version(repointed, SchemaVersion("2.0.0", DIGEST, latest))
+    with pytest.raises(ProjectionError, match="only to a later registry version, not"):
+        add_version(repointed, SchemaVersion(f"{n}.0.0", DIGEST, latest))
 
 
 def test_the_mapping_is_canonical_json_and_its_digest_pins_it() -> None:
@@ -198,8 +208,8 @@ def test_the_mapping_is_canonical_json_and_its_digest_pins_it() -> None:
         assert shipped.mapping == canonical_json.dumps(shipped.spec.to_json()).decode()
         expected = "sha256:" + hashlib.sha256(shipped.mapping.encode()).hexdigest()
         assert shipped.mapping_digest == expected
-    first, second = shipped_registry().versions
-    assert first.mapping_digest != second.mapping_digest
+    digests = [e.mapping_digest for e in shipped_registry().versions]
+    assert len(set(digests)) == len(digests)
 
 
 # --- which versions the Ledger reads -------------------------------------------------------------
@@ -208,7 +218,7 @@ def test_the_mapping_is_canonical_json_and_its_digest_pins_it() -> None:
 def test_the_ledger_reads_the_registry_versions_the_compiler_reads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    assert check.readable_versions() == (1, 2)
+    assert check.readable_versions() == shipped_registry().numbers
     monkeypatch.setattr(check, "SCHEMA_VERSION", 1)
     assert check.readable_versions() == (1,)
 
@@ -333,7 +343,7 @@ def test_packages_of_schema_1_and_2_are_indexed_side_by_side(
     )
     assert registered == [
         (e.version, e.spec.schema_id, e.contract_version, e.schema_sha256, e.mapping_digest, seq)
-        for e, seq in zip(shipped_registry().versions, (1, 2), strict=True)
+        for e, seq in zip(shipped_registry().versions[:2], (1, 2), strict=True)
     ]
 
     # Lineage siblings (ADR 0003 §4.1): same kind and evidence anchor, another transform.
@@ -379,7 +389,7 @@ def test_packages_of_schema_1_and_2_are_indexed_side_by_side(
         "SELECT tenant_acme.projection_covered('run', 1, 'machine_value'),"
         " tenant_acme.projection_covered('run', 2, 'machine_value'),"
         " tenant_acme.projection_covered('configuration_snapshot', 2, 'machine_value'),"
-        " tenant_acme.projection_covered('run', 3, 'machine_value')",
+        " tenant_acme.projection_covered('run', 99, 'machine_value')",
     ) == [(True, True, False, False)]
     projections = rows(
         pg,
@@ -388,7 +398,7 @@ def test_packages_of_schema_1_and_2_are_indexed_side_by_side(
     )
     assert projections == sorted(
         (e.version, p.kind, p.field, column)
-        for e in shipped_registry().versions
+        for e in shipped_registry().versions[:2]
         for p in e.spec.projections
         for column in p.columns
     )
@@ -398,9 +408,10 @@ def test_the_sql_coverage_agrees_with_the_registry_everywhere(
     catalog: PostgresCatalog, pg: Conn, newer: WorkedPackage
 ) -> None:
     """``projection_covered`` and ``Registry.covered`` answer alike for every kind, version and
-    column, so the Python and SQL readings of NotCovered cannot drift."""
+    column the catalog has seen, so the Python and SQL readings of NotCovered cannot drift. A
+    version it has not seen covers nothing: no record of it is filed."""
     assert catalog.register(newer.root).outcome == "registered"
-    registry = shipped_registry()
+    registry = Registry(shipped_registry().versions[:2])  # what the schema-2 package brought
     cases = [
         (kind, version, column)
         for version in (*registry.numbers, registry.latest.version + 1)

@@ -22,7 +22,7 @@ from neptune.model.knowledge import AssertionKind, Knowledge, Known
 
 # The catalog API's registry version (contracts/catalog-api). It equals the registry version
 # exactly (platform ADR 0002 §3); a reader-incompatible change raises the major (ADR 0004 §5).
-CATALOG_API_VERSION: Final = "1.3.0"
+CATALOG_API_VERSION: Final = "1.4.0"
 API_MAJOR: Final = int(CATALOG_API_VERSION.split(".", 1)[0])
 
 
@@ -304,7 +304,7 @@ class Registration:
       ``NotApplicable``. ``package_id`` is ``Unknown`` when no manifest could be read.
 
     ``schema_version`` is the package-schema version the manifest declares, and every kind in
-    ``record_counts`` is a kind of that version (1.3.0: kinds are named by the package-schema
+    ``record_counts`` is a kind of that version (1.4.0: kinds are named by the package-schema
     contract, Ledger ADR 0011 §4).
     """
 

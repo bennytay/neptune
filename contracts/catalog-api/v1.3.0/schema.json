@@ -153,7 +153,7 @@
     },
     "KindCount": {
       "additionalProperties": false,
-      "description": "How many records of one kind a registered package holds.",
+      "description": "KindCount(kind: Annotated[str, Constraint(name='RecordKind', description='A record kind of package schema 1.', pattern=None, enum=('source_artifact', 'source_revision', 'source_absence', 'transform_record', 'ingest_finding', 'timestamp_domain', 'frame_graph', 'frame', 'frame_transform', 'run', 'stream', 'machine', 'hardware_configuration', 'hardware_component', 'software_configuration', 'calibration', 'configuration_snapshot', 'configuration_value', 'site', 'asset', 'spatial_artifact', 'image', 'video', 'document_record', 'document_block', 'structured_table', 'structured_record', 'identity_link', 'clock_mapping', 'frame_binding', 'run_assembly', 'snapshot_binding'), minimum=None, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)], count: Annotated[int, Constraint(name=None, description=None, pattern=None, enum=None, minimum=0, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)])",
       "properties": {
         "count": {
           "minimum": 0,
@@ -1333,8 +1333,41 @@
       "type": "string"
     },
     "RecordKind": {
-      "description": "A record kind, by the package-schema contract (contracts/package-schema): the kind of a record table at the schema version its package declares. Not enumerated here, so a package-schema version that adds kinds changes no catalog-api version.",
-      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "A record kind of package schema 1.",
+      "enum": [
+        "asset",
+        "calibration",
+        "clock_mapping",
+        "configuration_snapshot",
+        "configuration_value",
+        "document_block",
+        "document_record",
+        "frame",
+        "frame_binding",
+        "frame_graph",
+        "frame_transform",
+        "hardware_component",
+        "hardware_configuration",
+        "identity_link",
+        "image",
+        "ingest_finding",
+        "machine",
+        "run",
+        "run_assembly",
+        "site",
+        "snapshot_binding",
+        "software_configuration",
+        "source_absence",
+        "source_artifact",
+        "source_revision",
+        "spatial_artifact",
+        "stream",
+        "structured_record",
+        "structured_table",
+        "timestamp_domain",
+        "transform_record",
+        "video"
+      ],
       "type": "string"
     },
     "RecordRef": {

@@ -6,7 +6,7 @@
 - Amends: ADR 0008 §2 (which versions registration reads; the `kinds_at` fallback is gone), ADR 0009
   §3 (`projections.json` holds one spec per version; each record is projected with its own
   version's spec), ADR 0002 §5 (two registry tables), ADR 0004 §5 and ADR 0006 §9 (catalog-api
-  1.3.0 names record kinds by the package-schema contract).
+  1.4.0 names record kinds by the package-schema contract).
 
 ## Context
 
@@ -24,8 +24,9 @@ registered side by side forever. Three gaps followed from ADRs 0008 and 0009:
   state for it".
 - **catalog-api embedded the compiler's kind list.** `RecordKind` was an enum of
   `neptune.model.kinds.RECORD_KINDS`, so every additive compiler kind changed the catalog-api
-  export and forced a catalog-api minor version: 1.2.0 for package schema 2, and three more
-  queued (MVL-82, MVL-83, PR #38). Its description still said "package schema 1".
+  export and forced a catalog-api minor version: 1.2.0 for package schema 2, 1.3.0 for
+  schema 3 (MVL-82), and more queued (MVL-83, PR #38). Its description still said "package
+  schema 1".
 
 ## Decision
 
@@ -58,20 +59,20 @@ registered side by side forever. Three gaps followed from ADRs 0008 and 0009:
    columns are the union of every version's projections. A record stating a version the registry
    lacks, or one newer than its package, is `record_invalid`. Packages of every version share one
    `record` table and one set of columns, so lineage sets, threads and windows span versions.
-4. **catalog-api 1.3.0 references the package-schema contract instead of listing kinds.**
+4. **catalog-api 1.4.0 references the package-schema contract instead of listing kinds.**
    `RecordKind` is a table name, `^[a-z][a-z0-9_]*$`, the shape ADR 0008 §1's `CHECK` already
    holds. Its description points at `contracts/package-schema` at the version a package declares
    (`Registration.schema_version`). The kinds are checked where they enter the catalog:
    registration (§2, ADR 0008 §2) and `query`, where a kind no version the Ledger reads declares
    is `invalid_request` (MVL-98 implements it; contract test
    `test_query_rejects_a_kind_no_schema_version_declares`). `KindCount` gains a docstring, so its
-   description no longer prints the kind tuple. From 1.3.0 on, a package-schema version that
+   description no longer prints the kind tuple. From 1.4.0 on, a package-schema version that
    adds kinds changes no catalog-api file; a test proves that a compiler with one more kind
    exports byte-identical catalog-api schema.
    - **A minor version, not a major.** The change only widens one definition, so every earlier
-     1.x golden validates against 1.3.0, which is what platform ADR 0002 §3 calls
+     1.x golden validates against 1.4.0, which is what platform ADR 0002 §3 calls
      reader-compatible. A 1.x reader that decodes kinds strictly already rejected each kind that
-     1.2.0 added as a minor version; ADR 0004 counts an added enum member as minor, and the open
+     1.2.0 and 1.3.0 added as minor versions; ADR 0004 counts an added enum member as minor, and the open
      pattern is the limit of that rule. Readers accept a kind they do not know (catalog-api.md).
 5. **Migration 0007: `schema_version` and `schema_version_projection`.** Registration writes a
    `schema_version` row for each version a package states (its manifest's and its records') the
@@ -110,7 +111,7 @@ registered side by side forever. Three gaps followed from ADRs 0008 and 0009:
 - **Pin catalog-api to one package-schema version (`$ref` into its schema).** Rejected: the
   package-schema major moves with every additive kind (an integer constant is the registry major),
   so the reference would change as often as the enum did.
-- **Drop the kind check from `query`.** Rejected: before 1.3.0 the schema rejected an unknown
+- **Drop the kind check from `query`.** Rejected: before 1.4.0 the schema rejected an unknown
   kind. Keeping that as `invalid_request` keeps a typo from reading as "no records".
 
 ## Consequences

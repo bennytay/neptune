@@ -156,7 +156,7 @@ class CatalogContract:
             _validate(result)
             assert result.outcome == "registered"
             assert result.package_id == Known(package.package_id)
-            assert result.schema_version == Known(1)
+            assert result.schema_version == Known(package.schema_version)
             assert result.record_counts == package.record_counts()
             assert result.root_locator == str(package.root.resolve())
             assert result.findings == ()
@@ -961,7 +961,7 @@ class CatalogContract:
     def test_query_rejects_a_kind_no_schema_version_declares(
         self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
     ) -> None:
-        """A record kind is any table name in the schema (1.3.0); one that no package-schema
+        """A record kind is any table name in the schema (1.4.0); one that no package-schema
         version the catalog reads declares is an argument outside the contract."""
         self.register_all(catalog, packages)
         table = catalog.query(QuerySpec(kinds=("run", "telepathy")))

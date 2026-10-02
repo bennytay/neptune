@@ -11,7 +11,7 @@
   "outcome": "refused",
   "package_id": {
     "knowledge": "known",
-    "value": "sha256:97f31808983a6bb6d1815090e526645704d57a4e1562cd4f585799cf30955155"
+    "value": "sha256:c804f5687845a7958966de0b52d46916240c8b307defa9d1c2cfbfc9efe89f3c"
   },
   "record_counts": [],
   "registration_key": {
@@ -20,6 +20,6 @@
   "root_locator": "/srv/neptune/packages/mobile_robot-linked",
   "schema_version": {
     "knowledge": "known",
-    "value": 1
+    "value": 3
   }
 }

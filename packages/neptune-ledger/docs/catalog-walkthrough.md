@@ -58,10 +58,10 @@ transaction in the tenant's schema does the rest:
 
 | example | tx_seq | package id | package_source | source_location | clock | record |
 |---|---|---|---|---|---|---|
-| drone | 1 | `sha256:757f33c0c11d…` | 1 | 1 | 3 | 17 |
-| quadruped | 2 | `sha256:44b4309877e2…` | 4 | 4 | 5 | 34 |
-| manipulator | 3 | `sha256:74f076160632…` | 2 | 2 | 4 | 21 |
-| mobile_robot | 4 | `sha256:97f31808983a…` | 3 | 3 | 3 | 21 |
+| drone | 1 | `sha256:50704acd9675…` | 1 | 1 | 3 | 21 |
+| quadruped | 2 | `sha256:4ef25575cf89…` | 4 | 4 | 5 | 39 |
+| manipulator | 3 | `sha256:b6cba1bf32cb…` | 2 | 2 | 4 | 23 |
+| mobile_robot | 4 | `sha256:c804f5687845…` | 3 | 3 | 3 | 22 |
 
 Ten `source` rows in all: no source is shared between the examples. The quadruped's four sources
 are its bag's `metadata.yaml` and `walk_0.mcap`, `robot.urdf` and `meshes/body.stl`, each with
@@ -69,7 +69,9 @@ one location.
 
 ## Record rows by partition
 
-Columns are `tx_seq`. Partitions not listed hold no rows for these packages.
+Columns are `tx_seq`. Partitions not listed hold no rows for these packages. The alignment kinds
+(package schema 3, root ADR 0050) have no partition of their own yet: their rows are in
+`record_default`, listed here by kind.
 
 | partition | 1 | 2 | 3 | 4 |
 |---|---|---|---|---|
@@ -93,6 +95,10 @@ Columns are `tx_seq`. Partitions not listed hold no rows for these packages.
 | record_image | 0 | 0 | 0 | 1 |
 | record_structured_table | 0 | 0 | 0 | 1 |
 | record_structured_record | 0 | 0 | 0 | 2 |
+| record_clock_mapping | 0 | 1 | 0 | 0 |
+| record_frame_binding | 0 | 2 | 1 | 0 |
+| record_run_assembly | 1 | 1 | 1 | 1 |
+| record_snapshot_binding | 3 | 1 | 0 | 0 |
 
 Provenance summary, by shape:
 
@@ -107,7 +113,7 @@ Provenance summary, by shape:
   index them. A `source_artifact` row's `record_id` is its content id.
 
 `line` is the record's line in its table, so the drone's two streams are lines 1 and 2 of
-`records/stream.jsonl` in package `sha256:757f33c0c11d…`. Nothing else of the record is copied:
+`records/stream.jsonl` in package `sha256:50704acd9675…`. Nothing else of the record is copied:
 the package is the record.
 
 ## World-time index

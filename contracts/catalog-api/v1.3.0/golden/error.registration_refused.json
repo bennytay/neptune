@@ -11,7 +11,7 @@
   "outcome": "refused",
   "package_id": {
     "knowledge": "known",
-    "value": "sha256:74f0761606322f58fe41abd43b24f12ffda223ecad2996404d7dd20bfd6e0b0f"
+    "value": "sha256:b6cba1bf32cb7de4a65c12d4403de38137fb130b76ea551cbb356be2a2dd501a"
   },
   "record_counts": [],
   "registration_key": {
@@ -20,6 +20,6 @@
   "root_locator": "/srv/neptune/packages/manipulator-tampered",
   "schema_version": {
     "knowledge": "known",
-    "value": 1
+    "value": 3
   }
 }

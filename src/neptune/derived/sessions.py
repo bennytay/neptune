@@ -32,7 +32,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, ClassVar, Final, TypeAlias
 
+from neptune.derived.provenance import DERIVED_SCHEMA_VERSION as DERIVED_SCHEMA_VERSION
 from neptune.derived.provenance import INFERRED
+from neptune.derived.provenance import derived_object as _derived_object
+from neptune.derived.schemas import (
+    DEFINITION_KIND,
+    LAYOUT_KIND,
+    definition_layout_from_json,
+    stream_layout_from_json,
+)
+from neptune.derived.semantics import SEMANTIC_KIND, stream_semantic_from_json
 from neptune.discovery.layout import ROOT
 from neptune.identity.ids import record_id
 from neptune.model._fields import exact_object, json_array, json_str
@@ -41,10 +50,8 @@ from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import AssertionKind
 from neptune.model.source import LocalPath, RawLocalPath, local_location, location_from_json
 
-DERIVED_SCHEMA_VERSION: Final = 1
 PROPOSAL_KIND: Final = "session_proposal"
 UNASSIGNED_KIND: Final = "session_unassigned"
-_ENVELOPE: Final = frozenset({"assertion_kind", "kind", "schema_version"})
 # A session the user declares is their statement, not an inference (ADR 0036 §6).
 STATED: Final = str(AssertionKind.STATED)
 
@@ -426,26 +433,6 @@ def session_proposal(
     )
 
 
-def _derived_object(
-    data: JsonValue, kind: str, keys: set[str], assertions: frozenset[str] = frozenset({INFERRED})
-) -> Mapping[str, JsonValue]:
-    """One derived record's JSON, strictly: this derived version, this kind, one of
-    ``assertions`` (inferred, unless the kind may be stated), ``keys``."""
-    if not isinstance(data, Mapping):
-        raise ValueError(f"a {kind} must be a JSON object, got {type(data).__name__}")
-    if data.get("schema_version") != DERIVED_SCHEMA_VERSION:
-        raise ValueError(
-            f"derived schema version {data.get('schema_version')!r} is not this reader's"
-            f" {DERIVED_SCHEMA_VERSION}"
-        )
-    if data.get("kind") != kind:
-        raise ValueError(f"expected kind {kind!r}, got {data.get('kind')!r}")
-    if data.get("assertion_kind") not in assertions:
-        allowed = " or ".join(sorted(assertions))
-        raise ValueError(f"a {kind} is {allowed}, got {data.get('assertion_kind')!r}")
-    return exact_object(data, kind, keys | _ENVELOPE)
-
-
 def session_proposal_from_json(data: JsonValue) -> SessionProposal:
     """Parse strictly; the id must recompute from the content."""
     obj = _derived_object(
@@ -592,6 +579,9 @@ def unassigned_file_from_json(data: JsonValue) -> UnassignedFile:
 DERIVED_KINDS: Final[Mapping[str, Callable[[JsonValue], Any]]] = {
     PROPOSAL_KIND: session_proposal_from_json,
     UNASSIGNED_KIND: unassigned_file_from_json,
+    DEFINITION_KIND: definition_layout_from_json,  # ADR 0049
+    LAYOUT_KIND: stream_layout_from_json,
+    SEMANTIC_KIND: stream_semantic_from_json,
 }
 
 

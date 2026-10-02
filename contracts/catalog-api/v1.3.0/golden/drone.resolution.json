@@ -11,14 +11,20 @@
     {
       "kind": "calibration",
       "line": 1,
-      "package_id": "sha256:757f33c0c11dfcda68478d0c6909e18c6f17eddbc9afae61a9f77c3b53762b5c",
+      "package_id": "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25",
       "record_id": "rec:sha256:cb6e8583121408782d115b87542894f9fbc326484373ddb29cd9232c14fb102c"
     },
     {
       "kind": "hardware_component",
       "line": 1,
-      "package_id": "sha256:757f33c0c11dfcda68478d0c6909e18c6f17eddbc9afae61a9f77c3b53762b5c",
+      "package_id": "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25",
       "record_id": "rec:sha256:bcf9de6b09e17c8bbdc318a10a7c0fa86be5ad96a8b47f22ee18f0016930feec"
+    },
+    {
+      "kind": "snapshot_binding",
+      "line": 2,
+      "package_id": "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25",
+      "record_id": "rec:sha256:971e05be4ebf05b71448b19ad188d0454ed193d12a398968d922bd8a96028659"
     }
   ],
   "evidence_ref": {
@@ -42,7 +48,7 @@
           "path": "flight.ulg"
         }
       ],
-      "package_id": "sha256:757f33c0c11dfcda68478d0c6909e18c6f17eddbc9afae61a9f77c3b53762b5c",
+      "package_id": "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25",
       "storage": "referenced"
     }
   ],

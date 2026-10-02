@@ -11,7 +11,7 @@
     {
       "kind": "image",
       "line": 1,
-      "package_id": "sha256:97f31808983a6bb6d1815090e526645704d57a4e1562cd4f585799cf30955155",
+      "package_id": "sha256:c804f5687845a7958966de0b52d46916240c8b307defa9d1c2cfbfc9efe89f3c",
       "record_id": "rec:sha256:deec240cd3f458123c480eb7794a21c41facef5588f32c45e3dcd8888fe26006"
     }
   ],
@@ -36,7 +36,7 @@
           "path": "photos/dock.png"
         }
       ],
-      "package_id": "sha256:97f31808983a6bb6d1815090e526645704d57a4e1562cd4f585799cf30955155",
+      "package_id": "sha256:c804f5687845a7958966de0b52d46916240c8b307defa9d1c2cfbfc9efe89f3c",
       "storage": "referenced"
     }
   ],
