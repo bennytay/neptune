@@ -3,6 +3,8 @@
 # stable version by a minor or patch release and fails when it lags by a major release. A major
 # `bump` raises every entry here in the same PR. Draft versions need not be declared.
 
+[neptune-deploy]
+
 [neptune-ledger]
 package-schema = "3.0.0"
 

@@ -9,6 +9,7 @@ resolution-markers = [
 [manifest]
 members = [
     "neptune",
+    "neptune-deploy",
     "neptune-ledger",
     "neptune-memory",
     "neptune-platform",
@@ -565,6 +566,11 @@ dev = [
     { name = "types-jsonschema", specifier = ">=4.23" },
     { name = "types-pyyaml", specifier = ">=6.0" },
 ]
+
+[[package]]
+name = "neptune-deploy"
+version = "0.0.1"
+source = { editable = "packages/neptune-deploy" }
 
 [[package]]
 name = "neptune-ledger"
