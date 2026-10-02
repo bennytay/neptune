@@ -1,0 +1,4 @@
+{"items": [
+  {"id": "ir-0001", "deviceId": "dev-amr-07", "interventionType": "teleop", "message": "AMR-07 stuck at dock door", "authority": "remote operator", "commands": ["clear_obstacle", "resume"], "time": "2026-03-01T13:42:30.000Z", "endTime": "2026-03-01T13:51:00.000Z", "outcome": "resolved"},
+  {"id": "ir-0002", "deviceId": "dev-quad-02", "interventionType": "selection", "message": "choose a route around the spill", "commands": [], "time": "2026-03-02T16:10:00Z", "endTime": "2026-03-02T16:12:30Z", "outcome": "route 2 selected"}
+], "continuationToken": "page-2"}

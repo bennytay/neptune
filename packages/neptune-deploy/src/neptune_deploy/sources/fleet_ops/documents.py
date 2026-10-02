@@ -29,6 +29,7 @@ Nothing here touches the network, a file or a clock.
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
@@ -71,9 +72,18 @@ def parse_json(data: bytes) -> JsonValue:
     def constant(token: str) -> JsonValue:
         raise DocumentInvalid(f"{token} is not JSON")
 
+    def real(text: str) -> JsonValue:
+        value = float(text)
+        if not math.isfinite(value):  # 1e999 is JSON text, and no finite number
+            raise DocumentInvalid("a number is not finite")
+        return value
+
     try:
         value: JsonValue = json.loads(
-            data.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant
+            data.decode("utf-8"),
+            object_pairs_hook=pairs,
+            parse_constant=constant,
+            parse_float=real,
         )
     except DocumentInvalid:
         raise
@@ -187,7 +197,7 @@ class DeclaredClock:
         return found
 
 
-def parse_clock(declared: JsonValue | None) -> DeclaredClock:
+def parse_clock(declared: "JsonValue | None") -> DeclaredClock:
     """A clock declared in options: ``{"epoch": "unix", "timescale": "posix", "resolution":
     "1/1000", "role": "sample"}``, each key optional. Anything else is refused."""
     if declared is None:
@@ -264,6 +274,17 @@ class StatedTable:
     skipped: tuple[tuple[str, int, str], ...] = field(default=())  # (table name, item, reason)
 
 
+def _storable_key(key: str) -> bool:
+    """A header cell is non-empty, valid Unicode text: the table has no other kind of name."""
+    if not key:
+        return False
+    try:
+        key.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _cell(
     document: Document,
     transform: TransformRecord,
@@ -308,7 +329,7 @@ def stated_table(
     """
     clocks = clocks or {}
     items = document.items
-    keys = sorted({key for item in items for key in item})
+    keys = sorted({key for item in items for key in item if _storable_key(key)})
     header = (*keys, *(f"@clock:{column}" for column in sorted(clocks)))
     table_evidence = cite(document, "items")
     table_provenance = Provenance(table_evidence, transform.id, AssertionKind.STATED)
@@ -334,6 +355,8 @@ def stated_table(
                 cells.append(Known(clocks[column].id, provenance))
             else:
                 cells.append(Unknown(provenance))
+        if any(not _storable_key(key) for key in item):
+            reasons.append("key_unrepresentable")
         skipped.extend((name, index, reason) for reason in sorted(set(reasons)))
         evidence = cite(document, "items", index)
         rows.append(

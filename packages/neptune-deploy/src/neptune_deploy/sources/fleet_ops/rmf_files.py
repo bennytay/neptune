@@ -139,7 +139,12 @@ def json_items(data: bytes, max_rows: int, *, whole: bool = False) -> Rows:
 
 
 def _authorizer(action: int, *_args: Any) -> int:
-    allowed = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION}
+    allowed = {
+        sqlite3.SQLITE_SELECT,
+        sqlite3.SQLITE_READ,
+        sqlite3.SQLITE_FUNCTION,
+        sqlite3.SQLITE_RECURSIVE,  # a view's recursive query: still only reads
+    }
     return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
 
 

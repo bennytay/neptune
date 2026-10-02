@@ -49,7 +49,7 @@ MAX_ID_BYTES: Final = 256
 Report = Callable[[str, Any, dict[str, JsonValue]], None]
 
 
-def at(item: Mapping[str, JsonValue], pointer: str) -> JsonValue | None:
+def at(item: Mapping[str, JsonValue], pointer: str) -> "JsonValue | None":
     """The value at an RFC 6901 pointer into ``item``, or ``None`` if the path is not there."""
     if pointer == "":
         return item
@@ -65,7 +65,7 @@ def at(item: Mapping[str, JsonValue], pointer: str) -> JsonValue | None:
     return node
 
 
-def _usable(value: JsonValue | None) -> str | None:
+def _usable(value: "JsonValue | None") -> str | None:
     if (
         not isinstance(value, str)
         or not value

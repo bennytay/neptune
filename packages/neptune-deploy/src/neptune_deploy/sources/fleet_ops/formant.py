@@ -90,7 +90,7 @@ class FormantOptions:
     max_listing_bytes: int
     timeout: float
     time_formats: tuple[str, ...]
-    clock: JsonValue | None
+    clock: Any
 
     @classmethod
     def parse(cls, options: Mapping[str, JsonValue] | None) -> "FormantOptions":
@@ -208,7 +208,6 @@ class FormantSource(FleetOpsSource):
             "max_listing_bytes": o.max_listing_bytes,
             "max_records": o.max_records,
             "organization": self.organization,
-            "page_size": o.page_size,
             "parts": list(o.parts),
             "time_formats": list(o.time_formats),
         }

@@ -45,7 +45,8 @@ CODES: Final[dict[str, tuple[FindingCategory, Severity, str]]] = {
     "part_failed": (
         FindingCategory.FAILED,
         Severity.ERROR,
-        "a part (devices, events, tasks, ...) could not be read; it is absent from the catalog",
+        "a request for a part (devices, events, tasks, ...) failed or looped; the records read"
+        " before that are kept and the rest of the part is not covered",
     ),
     "part_limit": (
         FindingCategory.LIMIT,
@@ -68,6 +69,11 @@ CODES: Final[dict[str, tuple[FindingCategory, Severity, str]]] = {
         Severity.WARNING,
         "a stated value is not in a form its record field reads (a time that no declared format"
         " reads); the field is Unknown and the value stays in the table",
+    ),
+    "part_empty": (
+        FindingCategory.MISSING,
+        Severity.INFO,
+        "a part was read to its end and holds no records; no document or table is made for it",
     ),
     "record_skipped": (
         FindingCategory.MISSING,
@@ -221,6 +227,8 @@ class FleetOpsSource:
             if part.stopped is not None:
                 self._stopped(part)
             if not part.items:
+                if part.stopped is None:
+                    self.report("part_empty", self.part_subject(part.name), {"part": part.name})
                 continue
             document = build_document(self.connector_id, f"{self.scope}{part.name}", part.items)
             if not document.items:

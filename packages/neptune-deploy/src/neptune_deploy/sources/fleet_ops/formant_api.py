@@ -17,9 +17,11 @@ The response shapes are written from Formant's public API documentation. They ha
 against a live tenant (ADR 0010 §8).
 """
 
+import contextlib
 import hashlib
 import http.client
 import re
+import socket
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Final
@@ -27,6 +29,7 @@ from typing import Final
 from neptune.model.jsonvalue import JsonValue
 from neptune_deploy.sources.fleet_ops.documents import DocumentInvalid, dumps, parse_json
 from neptune_deploy.sources.object_store.transport import (
+    DeadlineExceeded,
     Endpoint,
     NetworkGate,
     Response,
@@ -67,6 +70,21 @@ class QueryTransport(Transport):
         super().__init__(endpoint, network, purpose, timeout=timeout)
         self._method = "GET"
         self._body: bytes | None = None
+        self._sock: socket.socket | None = None
+
+    def abort(self) -> None:
+        """Shut the socket down from another thread (a deadline passed).
+
+        ``http.client`` forgets a connection's socket as soon as the response says it will close
+        it (HTTP/1.0, or ``Connection: close``), and then the base class has nothing to shut down:
+        a server that answers that way and trickles its body would outlive the deadline. This
+        class keeps its own reference for the request in flight.
+        """
+        sock = self._sock
+        if sock is not None:
+            with contextlib.suppress(OSError):  # already closed
+                sock.shutdown(socket.SHUT_RDWR)
+        super().abort()
 
     def post_query(self, path: str, body: bytes, headers: Mapping[str, str]) -> Response:
         """``POST`` ``body`` to one of the five query routes, and nowhere else."""
@@ -99,6 +117,10 @@ class QueryTransport(Transport):
                 for name, value in headers.items():
                     connection.putheader(name, value)
                 connection.endheaders(self._body)
+                self._sock = connection.sock
+                if deadline.expired:  # it passed while connecting, before a socket to shut down
+                    self.drop()
+                    raise DeadlineExceeded("the request outlived its deadline")
                 return connection.getresponse()
             except (ConnectionResetError, BrokenPipeError) as exc:
                 self.drop()

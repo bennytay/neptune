@@ -89,7 +89,7 @@ class FileSpec:
 class RmfOptions:
     site: str
     files: tuple[tuple[str, FileSpec], ...]
-    clock: JsonValue | None
+    clock: Any
     task_fields: tuple[tuple[str, str], ...]
     time_fields: tuple[tuple[str, tuple[str, ...]], ...]
     max_rows: int
