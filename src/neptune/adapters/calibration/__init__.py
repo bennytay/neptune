@@ -278,7 +278,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
     conventions=(
         Documented(
             "chunks",
-            "one chunk per file: calibrations are small and a file's frame graph is read whole",
+            "one chunk per file, which reads it once (plan reads nothing, so every finding is the"
+            " chunk's): calibrations are small and a file's frame graph is read whole",
         ),
         Documented(
             "claims",

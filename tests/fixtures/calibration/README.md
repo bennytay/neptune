@@ -16,3 +16,6 @@ the shapes the tools write them; the numbers are plausible, not measured. Four e
 Corrupt and hostile: `truncated_camchain.yaml`, `empty.yaml`, `alias_bomb_camera_info.yaml`,
 `nan_camera_info.yaml`, `short_matrix_camera_info.yaml`, `rov_dtd.xml`, `rov_truncated.xml`.
 Larger and nested inputs are generated in the tests.
+
+The OpenCV files are accepted by OpenCV 4's own `cv2.FileStorage` (checked with
+`uv run --no-project --with opencv-python-headless --with numpy`), which is the oracle for the format.
