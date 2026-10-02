@@ -1,0 +1,2 @@
+# Fixture bytes are cited by content id: never let git rewrite line endings.
+tests/fixtures/lifecycle/** -text

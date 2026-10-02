@@ -1,0 +1,51 @@
+# Workspace member generated from packages/_template by scripts/new-package.sh.
+# Dev tools (ruff, mypy, pytest) come from the root project's `dev` group; `make setup` installs them.
+[project]
+name = "neptune-deploy"
+version = "0.0.1"
+description = "Neptune Deploy: deployment lifecycle evidence (commissioning, authorisation, interventions) as a compiler plugin."
+requires-python = ">=3.11"
+authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
+# The compiler, at package schema 4: the version whose model holds the deployment lifecycle kinds
+# (root ADR 0051). The pin is contracts/lock.toml and PACKAGE_SCHEMA_VERSION (ADR 0001 §3).
+dependencies = ["neptune"]
+
+# The compiler's plugin entry points (ADR 0001 §1). `neptune.adapters`: name = the adapter id,
+# value = a zero-argument callable returning the adapter. `neptune.sources` is reserved for
+# read-only connectors and stays empty until the first one lands.
+[project.entry-points."neptune.adapters"]
+deploy_lifecycle = "neptune_deploy.adapters.lifecycle:LifecycleAdapter"
+
+[tool.uv.sources]
+neptune = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/neptune_deploy"]
+
+# Shared lint rules live in the root pyproject; paths below are relative to this package.
+[tool.ruff]
+extend = "../../pyproject.toml"
+src = ["src", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers --strict-config"
+xfail_strict = true
+markers = [
+  "integration: exercises multiple components against real fixtures",
+  "slow: takes more than a few seconds; excluded by `make test-fast`",
+]

@@ -1,0 +1,82 @@
+{
+  "crs": {
+    "properties": {
+      "name": "local:site-grid-m"
+    },
+    "type": "name"
+  },
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              18.0,
+              0.0
+            ],
+            [
+              18.0,
+              6.0
+            ],
+            [
+              0.0,
+              6.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ]
+        ],
+        "type": "Polygon"
+      },
+      "properties": {
+        "name": "Cross aisle 2",
+        "speed_limit_mps": 0.6,
+        "zone_id": "CROSS-2"
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          [
+            [
+              0.0,
+              12.0
+            ],
+            [
+              18.0,
+              12.0
+            ],
+            [
+              18.0,
+              18.0
+            ],
+            [
+              0.0,
+              18.0
+            ],
+            [
+              0.0,
+              12.0
+            ]
+          ]
+        ],
+        "type": "Polygon"
+      },
+      "properties": {
+        "name": "Pick aisle C",
+        "speed_limit_mps": 1.2,
+        "zone_id": "PICK-C"
+      },
+      "type": "Feature"
+    }
+  ],
+  "name": "S-012_zones",
+  "type": "FeatureCollection"
+}

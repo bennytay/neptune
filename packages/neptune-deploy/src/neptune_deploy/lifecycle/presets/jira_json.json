@@ -1,0 +1,23 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "ticketing.jira-json",
+  "version": "1",
+  "description": "Jira issues exported as a JSON array of {key, fields} (the REST search shape). Issue type Incident is an incident record; other types are findings. Custom fields differ per instance: map them in a copy.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "incident",
+      "kind": "incident_record",
+      "requires": ["/key", "/fields/issuetype/name"],
+      "where": {"column": "/fields/issuetype/name", "in": ["Incident"]},
+      "ignore": ["/fields/summary", "/fields/status/name", "/fields/labels/**"],
+      "fields": {
+        "identifiers": [{"column": "/key", "namespace": "jira.issue"}],
+        "occurred": {"column": "/fields/created", "format": "%Y-%m-%dT%H:%M:%S.%f%z", "required": true},
+        "severity": {"column": "/fields/priority/name"},
+        "location": {"column": "/fields/environment"},
+        "description": {"column": "/fields/description"}
+      }
+    }
+  ]
+}
