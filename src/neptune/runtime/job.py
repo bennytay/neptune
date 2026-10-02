@@ -55,7 +55,7 @@ from datetime import UTC, datetime
 from functools import partial
 from itertools import pairwise
 from pathlib import Path
-from typing import Final, TypeVar
+from typing import Any, Final, TypeVar
 
 from neptune.adapters.check import check_chunk_output, check_plan
 from neptune.adapters.contract import (
@@ -75,6 +75,7 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatus
+from neptune.context import ContextExtraction, extract_context
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
@@ -1973,12 +1974,18 @@ class IngestJob:
             if self._grouping is not None:  # its derived tables name its transform
                 cited.add(self._grouping.transform.id)
                 derived = dict(self._grouping.tables())
-            if (introspection := self._introspect()) is not None:
+            admitted = self._admitted_records()
+            if (introspection := self._introspect(admitted)) is not None:
                 cited.add(introspection.transform.id)
                 derived = {**(derived or {}), **introspection.tables()}
+            context = self._contextualise(admitted)
+            if context is not None:
+                cited.update(transform.id for transform in context.transforms)
+                derived = {**(derived or {}), **context.tables()}
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
+                *(context.records if context is not None else ()),
             ]
             assert self.destination is not None  # ``run`` refuses to start without one
             try:
@@ -2002,22 +2009,42 @@ class IngestJob:
                 Phase.ASSEMBLE, {"quarantined": quarantined, "sources": len(self._ingested)}
             )
 
-    def _introspect(self) -> Introspection | None:
-        """Stage 9a, before the package is staged: read the admitted sources' streams' declared
-        definitions into layouts and infer what each stream carries (ADR 0049). Only cited byte
-        ranges are read, each through a verified reader; no message is decoded and no adapter
-        called. A package with no stream gets no introspection, so no tables and no transform."""
-        streams: list[Stream] = []
+    def _admitted_records(self) -> list[Any]:
+        """Every record the admitted sources' committed chunks hold: what the package-level
+        passes (introspection, context) read, loaded once."""
+        records: list[Any] = []
         try:
             for content, transform in sorted(set(self._ingested)):
                 plan = self.workspace.load_plan(content, transform)
                 if plan is None:
                     continue  # staging refuses the package and says why
                 for chunk in plan.chunks:
-                    output = self.workspace.load(str(chunk["id"]))
-                    streams.extend(r for r in output.records if isinstance(r, Stream))
+                    records.extend(self.workspace.load(str(chunk["id"])).records)
         except (WorkspaceError, ValueError, OSError) as exc:
             raise JobError(f"the package cannot be assembled: {exc}") from exc
+        return records
+
+    def _contextualise(self, admitted: list[Any]) -> ContextExtraction | None:
+        """Stage 9b, before the package is staged: the sites, assets, briefs, requirements,
+        procedure steps and work orders the admitted documents, tables and configurations
+        explicitly declare, and the candidates that only look like one (ADR 0063). Reads records
+        only; no source byte is read and no adapter called."""
+        found = extract_context(admitted)
+        if found is None:
+            return None
+        for transform in found.transforms:
+            self._producers[transform.id] = transform
+        for finding in found.findings:
+            self._record(finding, self._producers[finding.transform])
+        self._emit(events.CONTEXT_EXTRACTED, found.summary())
+        return found
+
+    def _introspect(self, admitted: list[Any]) -> Introspection | None:
+        """Stage 9a, before the package is staged: read the admitted sources' streams' declared
+        definitions into layouts and infer what each stream carries (ADR 0049). Only cited byte
+        ranges are read, each through a verified reader; no message is decoded and no adapter
+        called. A package with no stream gets no introspection, so no tables and no transform."""
+        streams = [record for record in admitted if isinstance(record, Stream)]
         if not streams:
             return None
         items = {item.content_id: item for item in self._sources}
