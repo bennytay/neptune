@@ -67,4 +67,5 @@ header).
 | [0058](0058-plugin-adapters-and-sources-from-entry-points.md) | Plugin adapters and Sources from entry points, in a fixed order, refused as findings | Accepted |
 | [0059](0059-xlsx-workbooks-in-the-tabular-adapter-sheets-as-cited-tables.md) | XLSX workbooks in the tabular adapter: sheets as tables of cited cells | Accepted |
 | [0060](0060-clock-alignment-fitted-mappings-found-clocks-and-bounded-instants.md) | Clock alignment: fitted mappings, found clocks and bounded instants | Accepted |
+| [0064](0064-snapshot-binding-stated-joins-nearest-session-candidates-and-explicit-gaps.md) | Snapshot binding: stated joins, nearest session candidates, explicit gaps | Accepted |
 | [0066](0066-run-assembly-evidence-graph-over-the-layout-reading.md) | Run assembly: an evidence graph over the layout reading | Accepted |

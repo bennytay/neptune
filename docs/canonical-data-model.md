@@ -252,7 +252,13 @@ a bug, not a value.
 - `RunAssembly {run, rule, members}`: each member a `SourceRevision` id, a role (`recording`,
   `description`, `context`) and the `EvidenceRef` that places it in the run.
 - `SnapshotBinding {run, snapshot, snapshot_kind}`: the hardware, software, calibration or configuration
-  snapshot a run ran with, over a window on one of its clocks (MVL-38).
+  snapshot a run ran with, over a window on one of its clocks. The `neptune.bindings` pass (ADR 0064) writes
+  a canonical one where the run's own source names the snapshot by content id, full commit or digest
+  (verbatim), and derived ones where it names it by a path relative to the recording or a firmware version,
+  or for the nearest of the run's own snapshots of its kind and file name (its recording unit's: by run
+  assembly, recording stem or the one recording below; never another recording's sidecar). It adds a
+  finding for every tie (`conflicting_snapshots`), every file as near to several runs (`shared_snapshot`)
+  and every kind left unbound (`snapshot_unresolved`; `no_software_identity` for software).
 
 ## World and record context (ADR 0020; `model/world.py`)
 
@@ -315,9 +321,10 @@ a bug, not a value.
   `stream_layout` and `stream_semantic` (a distinct definition's declared field paths and types, written once;
   each stream's line naming it; and what the stream carries, inferred; ADR 0049), `media_stream` (a stream
   carrying images, video or point clouds: its media kind, frame count, hydrator and derivative states; its
-  frames are its series rows, queried and hydrated lazily by `neptune.sdk.media`; ADR 0056), and
+  frames are its series rows, queried and hydrated lazily by `neptune.sdk.media`; ADR 0056),
   `timestamp_domain` and `clock_mapping` (a clock found in a stream's values, and a mapping fitted from sync
-  anchors; ADR 0060). Present and empty means the producer ran and inferred nothing, absent means it did not
+  anchors; ADR 0060), and `snapshot_binding` (a run's nearest session snapshot of a kind and file name,
+  inferred; ADR 0064). Present and empty means the producer ran and inferred nothing, absent means it did not
   run.
 
 ## Serialization (ADR 0002)
