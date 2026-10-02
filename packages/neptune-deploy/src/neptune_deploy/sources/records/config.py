@@ -61,6 +61,7 @@ class Options:
     max_snapshot_bytes: int = DEFAULT_MAX_SNAPSHOT_BYTES
     max_listing_bytes: int = DEFAULT_MAX_LISTING_BYTES
     extra: Mapping[str, Any] = field(default_factory=dict)
+    named: str | None = None  # a name the URL gives, where the API host is shared (Linear)
 
     @classmethod
     def parse(
@@ -159,9 +160,12 @@ def is_loopback(endpoint: Endpoint) -> bool:
 
 def instance_name(endpoint: Endpoint, options: Options, *, declared_endpoint: bool = False) -> str:
     """The identity of the instance: its host, or the name the operator declared (required for a
-    loopback host or a declared endpoint, which no one else shares)."""
+    loopback host or a declared endpoint, which no one else shares). ``named`` is a name the
+    URL gives (``options.named``: a Linear workspace shares one API host with every other)."""
     if options.instance is not None:
         return f"@{options.instance}"
+    if options.named is not None:
+        return f"@{options.named}"
     if declared_endpoint or is_loopback(endpoint):
         raise RecordConfigError(
             "a loopback host or declared endpoint needs a declared instance name: it is part of"

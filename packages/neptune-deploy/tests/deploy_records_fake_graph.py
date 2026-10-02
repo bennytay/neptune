@@ -4,6 +4,7 @@ real HTTP, and the redirect target is a pre-authenticated path on the same loopb
 refuses any request that carries an ``Authorization`` header."""
 
 import hashlib
+import json
 import urllib.parse
 from typing import Any
 
@@ -138,3 +139,54 @@ class GraphBackend(Backend):
         else:
             body["@odata.deltaLink"] = f"{link}?token=t{len(self.log)}"
         return reply_json(body)
+
+
+class LinearBackend(Backend):
+    """The Linear GraphQL endpoint: one ``POST /graphql``, the ``issues`` connection newest first,
+    and the workspace the answer is for."""
+
+    auth_header = "Authorization"
+    auth_value = "lin_api_key-never-printed"  # a personal key is sent bare
+    accepts_post = True
+
+    def __init__(self) -> None:
+        data = fixture("linear_issues.json")
+        self.workspace: str = data["workspace"]
+        self.issues: list[dict[str, Any]] = data["issues"]
+        self.documents: list[str] = []
+
+    def edit(self, identifier: str, updated: str, **fields: Any) -> None:
+        for issue in self.issues:
+            if issue["identifier"] == identifier:
+                issue.update(fields, updatedAt=updated)
+
+    def trash(self, identifier: str, updated: str) -> None:
+        self.edit(identifier, updated, trashed=True)
+
+    def handle(self, request: Request) -> Reply | None:
+        if request.method != "POST" or request.path != "/graphql":
+            return None
+        asked = json.loads(request.body)
+        self.documents.append(asked["query"])
+        variables = asked["variables"]
+        rows = [i for i in self.issues if i["team"]["key"] == variables["team"]]
+        if "since" in variables:
+            rows = [i for i in rows if i["updatedAt"] >= variables["since"]]
+        rows.sort(key=lambda i: (i["updatedAt"], i["id"]), reverse=True)  # newest first
+        start = int(str(variables.get("after") or "cursor:0").split(":")[1])
+        size = variables["first"]
+        more = start + size < len(rows)
+        return reply_json(
+            {
+                "data": {
+                    "organization": {"urlKey": self.workspace},
+                    "issues": {
+                        "nodes": rows[start : start + size],
+                        "pageInfo": {
+                            "hasNextPage": more,
+                            "endCursor": f"cursor:{start + size}" if more else None,
+                        },
+                    },
+                }
+            }
+        )

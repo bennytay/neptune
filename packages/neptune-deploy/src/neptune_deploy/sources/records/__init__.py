@@ -10,6 +10,7 @@ factory with the one signature of ADR 0006 §1:
 entry point            URL                                         reads
 =====================  ==========================================  ================================
 ``deploy_jira``        ``jira://<site host>/<PROJECT>``            issues, attachments
+``deploy_linear``      ``linear://<workspace url key>/<TEAM>``     issues (GraphQL queries only)
 ``deploy_servicenow``  ``servicenow://<instance host>/<table>``    table records, attachments
 ``deploy_gdrive``      ``gdrive://<shared drive id or my-drive>``  files with bytes; change feed
 ``deploy_onedrive``    ``onedrive://<Graph drive id>``             files with bytes; delta feed
@@ -31,6 +32,7 @@ called.
 """
 
 import os
+from dataclasses import replace
 from collections.abc import Mapping
 from typing import Protocol
 
@@ -52,6 +54,7 @@ from neptune_deploy.sources.records.systems import (
     confluence,
     gdrive,
     jira,
+    linear,
     onedrive,
     rest,
     servicenow,
@@ -73,6 +76,7 @@ __all__ = [
     "confluence_source",
     "gdrive_source",
     "jira_source",
+    "linear_source",
     "onedrive_source",
     "record_source",
     "rest_source",
@@ -83,6 +87,7 @@ SPECS: dict[str, Spec] = {
     spec.connector_id: spec
     for spec in (
         jira.SPEC,
+        linear.SPEC,
         servicenow.SPEC,
         gdrive.SPEC,
         onedrive.SPEC,
@@ -112,6 +117,7 @@ def record_source(
     plan = spec.plan(authority, path, parsed)
     found = config.credentials(spec.env, credentials, os.environ if environ is None else environ)
     auth = spec.auth(found, parsed)
+    parsed = replace(parsed, named=plan.instance)
     instance = config.instance_name(plan.endpoint, parsed, declared_endpoint=plan.declared_endpoint)
     transport = RecordTransport(
         plan.endpoint, network, f"reading {connector_id} sources", timeout=parsed.timeout
@@ -184,6 +190,11 @@ confluence_source = _factory(
     "deploy_confluence",
     "confluence_source",
     "``deploy_confluence``: a Confluence Cloud space (``confluence://<site>/<space id>``).",
+)
+linear_source = _factory(
+    "deploy_linear",
+    "linear_source",
+    "``deploy_linear``: a Linear team's issues (``linear://<workspace url key>/<TEAM KEY>``).",
 )
 onedrive_source = _factory(
     "deploy_onedrive",

@@ -196,6 +196,11 @@ class RecordTransport(Transport):
         except HttpStatusError as exc:
             if exc.status == 429:
                 raise RateLimited("rate limited", 429, _retry_after(self._last_headers)) from exc
+            if exc.status == 400 and "0" in (
+                self._last_headers.get("x-ratelimit-requests-remaining"),
+                self._last_headers.get("x-ratelimit-complexity-remaining"),
+            ):  # Linear answers 400, not 429, and says so only in these headers
+                raise RateLimited("rate limited", 400, None) from exc
             if exc.status in (401, 403):
                 raise AccessDenied(f"status {exc.status}", exc.status) from exc
             raise

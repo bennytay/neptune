@@ -16,7 +16,8 @@ from typing import Any
 import pytest
 
 from deploy_records_fake import FakeServer, JiraBackend, RestBackend, ServiceNowBackend
-from deploy_records_support import jira, rest, servicenow
+from deploy_records_fake_graph import LinearBackend
+from deploy_records_support import jira, linear, rest, servicenow
 from neptune.store.package import IngestPackage, read_package
 from neptune_deploy.lifecycle import preset
 from neptune_deploy.lifecycle.run import map_records
@@ -99,3 +100,14 @@ def test_cmms_work_orders_become_maintenance_events_through_the_existing_preset(
     base = ingest(sources, tmp_path / "package", tmp_path / "ws")
     counts = kinds(map_records(base, [preset("cmms_generic")]))
     assert counts["maintenance_event"] == 3
+
+
+def test_linear_issues_become_intervention_records_through_the_existing_preset(
+    tmp_path: Path,
+) -> None:
+    sources = tmp_path / "sources"
+    with linear(FakeServer(LinearBackend()), tmp_path) as source:
+        write_snapshots(source, sources, "linear")
+    base = ingest(sources, tmp_path / "package", tmp_path / "ws")
+    counts = kinds(map_records(base, [preset("linear_csv")]))
+    assert counts["intervention"] == 3  # the trashed issue is not listed

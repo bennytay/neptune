@@ -20,6 +20,7 @@ class Plan:
     endpoint: Endpoint
     what: str
     declared_endpoint: bool = False
+    instance: str | None = None  # a name the URL gives, where the API host is shared
 
 
 @dataclass(frozen=True)
