@@ -14,6 +14,7 @@ signature and version bytes and its content is NotCovered.
 
 import re
 from collections.abc import Iterator
+from dataclasses import dataclass, field
 from typing import Final
 
 from neptune.adapters.geometry._context import Context, Problems
@@ -28,6 +29,7 @@ from neptune.adapters.geometry._emit import (
 )
 from neptune.adapters.geometry._scan import LimitHit, Unreadable
 from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotCovered, Unknown
+from neptune.model.provenance import Locator
 from neptune.model.units import Unit, unit_from_text
 from neptune.model.world import SpatialCategory
 
@@ -50,6 +52,8 @@ _TOKEN: Final = re.compile(
     re.VERBOSE | re.DOTALL,
 )
 Token = tuple[str, bytes, int]  # kind, text, offset
+Found = tuple[bytes, int]  # a value's text and where it starts
+Where = tuple[Locator, ...]
 
 
 def read_crate(ctx: Context) -> Geometry:
@@ -83,56 +87,49 @@ def read_layer(ctx: Context) -> Geometry:
     if first is None:
         raise Unreadable("a usda layer starts #usda 1.0", 0, min(ctx.size, 16))
     problems = Problems()
-    declared, end = _metadata(ctx, head, first.end(), problems)
+    layer, end = _metadata(ctx, head, first.end(), problems)
     block = ctx.span(first.end(), end - first.end())
-    problems.report(ctx)
     prov = out.provenance(block, STATED)
-    axis, meters = declared.get("upAxis"), declared.get("metersPerUnit")
-    prim = declared.get("defaultPrim")
-    deps = [Dep("sublayer", text.decode("utf-8", "replace"), ctx.span(at, len(text)))
-            for text, at in declared.get("subLayers", ())]  # fmt: skip
     props: list[Prop] = [
         known("encoding", ("usda",), whole, OBSERVED),
         known("format_version", (first.group(1).decode(),), ctx.span(0, first.end()), STATED),
+        _declared(ctx, "up_axis", layer.up_axis, block),
     ]
-    props.append(_text("up_axis", axis, block))
-    scale: float | None = None
-    if meters is not None:
-        try:
-            scale = float(meters[0])
-        except ValueError:
-            scale = None
-        if scale is None:
-            problems = Problems()
-            problems.add("metersPerUnit values that are not numbers", meters[1])
-            problems.report(ctx)
-    props.append(
-        known("meters_per_unit", (scale,), ctx.span(meters[1], len(meters[0])), STATED)
-        if meters is not None and scale is not None
-        else missing("meters_per_unit", "unknown", block, STATED)
-    )
     unit: Knowledge[Unit] = Unknown(prov)
-    if meters is not None and scale is not None:
-        symbol = STANDARD_LENGTHS.get(scale)
-        where = ctx.span(meters[1], len(meters[0]))
-        if symbol is None:
-            out.finding(
-                UNIT_UNMAPPED,
-                where,
-                "metersPerUnit is not one of the standard lengths",
-                {"meters_per_unit": scale},
-            )
+    scale = _number(layer.meters)
+    if layer.meters is None:
+        props.append(missing("meters_per_unit", "unknown", block, STATED))
+    else:
+        where = ctx.span(layer.meters[1], len(layer.meters[0]))
+        if scale is None:
+            problems.add("metersPerUnit values that are not numbers", layer.meters[1])
+            props.append(missing("meters_per_unit", "unknown", where, STATED))
         else:
-            unit = unit_from_text(symbol, provenance=out.provenance(where, STATED))
-    name: Known[str] | Unknown = Unknown(prov)
-    if prim is not None and prim[0]:
+            props.append(known("meters_per_unit", (scale,), where, STATED))
+            symbol = STANDARD_LENGTHS.get(scale)
+            if symbol is None:
+                out.finding(
+                    UNIT_UNMAPPED,
+                    where,
+                    "metersPerUnit is not one of the standard lengths",
+                    {"meters_per_unit": scale},
+                )
+            else:
+                unit = unit_from_text(symbol, provenance=out.provenance(where, STATED))
+    problems.report(ctx)
+    name: Knowledge[str] = Unknown(prov)
+    if layer.prim is not None and layer.prim[0]:
+        text, at = layer.prim
         name = Known(
-            prim[0].decode("utf-8", "replace"),
-            out.provenance(ctx.span(prim[1], len(prim[0])), STATED),
+            text.decode("utf-8", "replace"), out.provenance(ctx.span(at, len(text)), STATED)
         )
+    deps = tuple(
+        Dep("sublayer", text.decode("utf-8", "replace"), ctx.span(at, len(text)))
+        for text, at in layer.sublayers
+    )
     out.finding(
         NOT_COVERED,
-        ctx.span(end, 1) if end < ctx.size else ctx.span(max(end - 1, 0), 1),
+        ctx.span(min(end, ctx.size - 1), 1),
         "USD prims, meshes and references after the layer metadata are not read: the vertex"
         " count and bounds are NotCovered",
     )
@@ -140,18 +137,24 @@ def read_layer(ctx: Context) -> Geometry:
         missing(n, "not_covered", whole, OBSERVED)
         for n in ("vertex_count", "bounds_min", "bounds_max")
     )
-    return Geometry("usda", SpatialCategory.SCENE, name, unit, tuple(props), tuple(deps))
+    return Geometry("usda", SpatialCategory.SCENE, name, unit, tuple(props), deps)
 
 
-def _text(name: str, found: tuple[bytes, int] | None, block: tuple) -> Prop:  # type: ignore[type-arg]
+def _number(found: Found | None) -> float | None:
+    if found is None:
+        return None
+    try:
+        return float(found[0])
+    except ValueError:
+        return None
+
+
+def _declared(ctx: Context, name: str, found: Found | None, block: Where) -> Prop:
+    """A text value the layer states, as written, or Unknown when it does not."""
     if found is None:
         return missing(name, "unknown", block, STATED)
-    return known(
-        name,
-        (found[0].decode("utf-8", "replace"),),
-        (type(block[0])(found[1], len(found[0])),),
-        STATED,
-    )
+    text, at = found
+    return known(name, (text.decode("utf-8", "replace"),), ctx.span(at, len(text)), STATED)
 
 
 def _tokens(data: bytes, start: int) -> Iterator[Token]:
@@ -168,59 +171,63 @@ def _tokens(data: bytes, start: int) -> Iterator[Token]:
         position = found.end()
 
 
-def _unquote(token: bytes) -> tuple[bytes, int]:
-    """A string or asset token's text without its delimiters, and where that text starts."""
+def _unquote(token: bytes) -> Found:
+    """A string or asset token's text without its delimiters, and how far in that text starts."""
     for quote in (b'"""', b"@@@", b'"', b"'", b"@"):
         if token.startswith(quote) and token.endswith(quote) and len(token) >= 2 * len(quote):
             return token[len(quote) : -len(quote)], len(quote)
     return token, 0
 
 
-def _metadata(ctx: Context, data: bytes, start: int, problems: Problems) -> tuple[dict, int]:  # type: ignore[type-arg]
-    """The layer metadata's values by key, and the offset where the block ends.
+@dataclass
+class Layer:
+    """The layer metadata's values, each as ``(text, offset)``."""
 
-    Each value is ``(text, offset)``; ``subLayers`` is a list of them. Without a block the keys
-    are empty and the end is ``start``.
-    """
-    found: dict = {}  # type: ignore[type-arg]
+    up_axis: Found | None = None
+    meters: Found | None = None
+    prim: Found | None = None
+    sublayers: list[Found] = field(default_factory=list)
+
+
+def _metadata(ctx: Context, data: bytes, start: int, problems: Problems) -> tuple[Layer, int]:
+    """The layer metadata's values, and the offset where the block ends (``start`` without one)."""
+    layer = Layer()
     tokens = _tokens(data, start)
     opening = next(tokens, None)
     if opening is None or opening[:2] != ("punct", b"("):
-        return found, start
-    depth, key, end = 1, None, len(data)
-    pending: list[tuple[bytes, int]] | None = None
-    closed = False
+        return layer, start
+    depth, key, end, closed = 1, None, len(data), False
     for kind, text, at in tokens:
         if kind == "bad":
             problems.add("bytes the USD grammar does not allow in the layer metadata", at)
-        if kind == "punct":
-            if text in b"([{":
+        elif kind == "punct":
+            if text in (b"(", b"[", b"{"):
                 depth += 1
                 if depth > ctx.max_json_depth:
                     raise LimitHit("max_json_depth", ctx.max_json_depth)
-            elif text in b")]}":
+            elif text in (b")", b"]", b"}"):
                 depth -= 1
-                if depth == 1 and text == b"]" and key == "subLayers" and pending is not None:
-                    found["subLayers"] = pending
-                    pending = None
                 if depth == 0:
                     end, closed = at + 1, True
                     break
-            continue
-        if depth == 1 and kind == "name":
+        elif depth == 1 and kind == "name":
             key = text.decode("latin-1")
-        elif depth == 2 and key == "subLayers" and kind == "asset":
+        elif depth == 1 and kind == "text" and key in ("upAxis", "defaultPrim"):
             inner, skip = _unquote(text)
-            pending = (pending or []) + [(inner, at + skip)]
-        elif depth == 1 and key in ("upAxis", "defaultPrim") and kind == "text":
+            found = (inner, at + skip)
+            if key == "upAxis":
+                layer.up_axis = found
+            else:
+                layer.prim = found
+            key = None
+        elif depth == 1 and kind == "number" and key == "metersPerUnit":
+            layer.meters = (text, at)
+            key = None
+        elif depth == 2 and kind == "asset" and key == "subLayers":
             inner, skip = _unquote(text)
-            found[key] = (inner, at + skip)
-            key = None
-        elif depth == 1 and key == "metersPerUnit" and kind == "number":
-            found[key] = (text, at)
-            key = None
+            layer.sublayers.append((inner, at + skip))
     if not closed:
         if len(data) >= ctx.max_header_bytes and ctx.size > ctx.max_header_bytes:
             raise LimitHit("max_header_bytes", ctx.max_header_bytes)
         ctx.truncated(ctx.span(start, len(data) - start), "its layer metadata block")
-    return found, end
+    return layer, end

@@ -98,7 +98,8 @@ def chassis_ply() -> bytes:
         "ply", "format ascii 1.0", "comment mobile base chassis, metres",
         "comment TextureFile chassis_paint.png",
         f"element vertex {len(corners)}", "property float x", "property float y",
-        "property float z", f"element face {len(quads)}", "property list uchar int vertex_indices", "end_header",
+        "property float z", f"element face {len(quads)}",
+        "property list uchar int vertex_indices", "end_header",
     ]  # fmt: skip
     lines += [f"{x} {y} {z}" for x, y, z in corners]
     lines += [f"4 {a} {b} {c} {d}" for a, b, c, d in quads]
@@ -203,7 +204,7 @@ def amr_chassis() -> bytes:
     return b'''#usda 1.0
 (
     defaultPrim = "chassis"
-    doc = """AMR chassis. A doc string may say upAxis = "Y" and metersPerUnit = 1 without meaning it."""
+    doc = """AMR chassis. A doc may say upAxis = "Y" and metersPerUnit = 1 without meaning it."""
     metersPerUnit = 0.01
     subLayers = [
         @./materials/steel.usda@,

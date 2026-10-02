@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from neptune.adapters.geometry._context import Bounds, Context, Problems, floats
-from neptune.adapters.geometry._emit import NOT_COVERED, Dep, Geometry, known, missing
+from neptune.adapters.geometry._emit import NOT_COVERED, Dep, Geometry, Prop, known, missing
 from neptune.adapters.geometry._scan import LimitHit, Unreadable
 from neptune.model.knowledge import AssertionKind, Unknown
 from neptune.model.world import SpatialCategory
@@ -126,10 +126,10 @@ def _header(
                 raise LimitHit("max_entries", ctx.max_entries)
             name = words[1].decode("latin-1")
             elements.append(Element(name, int(words[2]), at, len(line)))
-        elif keyword == b"property" and elements and _property(elements[-1], words):
-            continue
-        elif keyword == b"end_header":
-            continue
+        elif keyword == b"end_header" or (
+            keyword == b"property" and elements and _property(elements[-1], words)
+        ):
+            pass
         elif keyword == b"comment":
             _comment(ctx, line, at, deps)
         elif keyword in (b"obj_info", b"format", b"element", b"property"):
@@ -171,7 +171,7 @@ def _measure(
     elements: list[Element],
     vertex: Element | None,
     face: Element | None,
-) -> list:  # type: ignore[type-arg]
+) -> list[Prop]:
     """The properties measured from the data section: vertex count, faces, bounds."""
     data = ctx.span(start, ctx.size - start)
     if vertex is None:
@@ -207,7 +207,7 @@ def _binary(
     elements: list[Element],
     vertex: Element,
     face: Element | None,
-) -> list:  # type: ignore[type-arg]
+) -> list[Prop]:
     before = 0
     for element in elements:
         if element is vertex:
@@ -221,7 +221,7 @@ def _binary(
     stride = vertex.stride()
     unknown = before < 0 or columns is None or stride is None
     first = start + before
-    props: list = []  # type: ignore[type-arg]
+    props: list[Prop] = []
     if face is not None:
         props.append(
             missing("face_count", "not_covered", ctx.span(start, ctx.size - start), OBSERVED)
@@ -270,7 +270,7 @@ def _binary(
     ]  # fmt: skip
 
 
-def _ascii(ctx: Context, start: int, elements: list[Element], vertex: Element) -> list:  # type: ignore[type-arg]
+def _ascii(ctx: Context, start: int, elements: list[Element], vertex: Element) -> list[Prop]:
     columns = _positions(vertex)
     scalars = not vertex.has_list
     bounds, problems = Bounds(), Problems()
@@ -327,7 +327,7 @@ def _ascii(ctx: Context, start: int, elements: list[Element], vertex: Element) -
         else missing("vertex_count", "not_covered", where, OBSERVED),
         *bounds.props(ctx, where, complete=complete),
         *(
-            [known("face_count", (seen["face"],), ctx.span(last, 0), OBSERVED)]
+            [known("face_count", (seen["face"],), ctx.span(start, ctx.size - start), OBSERVED)]
             if complete and "face" in seen
             else []
         ),

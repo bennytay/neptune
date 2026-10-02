@@ -1,7 +1,7 @@
 #usda 1.0
 (
     defaultPrim = "chassis"
-    doc = """AMR chassis. A doc string may say upAxis = "Y" and metersPerUnit = 1 without meaning it."""
+    doc = """AMR chassis. A doc may say upAxis = "Y" and metersPerUnit = 1 without meaning it."""
     metersPerUnit = 0.01
     subLayers = [
         @./materials/steel.usda@,
