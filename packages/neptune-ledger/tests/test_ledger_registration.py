@@ -89,9 +89,10 @@ def test_the_same_packages_in_two_empty_ledgers_give_identical_tables(
     """Acceptance: registering the same packages into two empty Ledgers gives identical tables.
 
     Transaction times are the host clock read at registration (ADR 0002 §4) and are the only
-    columns left out; the registration log replays them on a rebuild.
+    columns left out; the registration log replays them on a rebuild. The schema-4 manipulator
+    cell rides along, so the lifecycle kinds are covered too.
     """
-    packages = [materialise(name, tmp_path / name) for name in EXAMPLES]
+    packages = [materialise(name, tmp_path / name) for name in (*EXAMPLES, "manipulator_cell")]
     dumps = []
     for _ in range(2):
         uri = new_database(pg_server)
@@ -214,6 +215,41 @@ def test_a_fifo_in_a_package_is_an_unsafe_entry_and_never_opened(
     result = catalog.register(drone.root)
     assert result.outcome == "refused"
     assert _codes(result) == [("unsafe_entry", "records/pipe")]
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a directory whatever its mode")
+def test_a_directory_the_ledger_may_not_read_is_unreadable_not_unsafe(
+    catalog: PostgresCatalog, drone: WorkedPackage
+) -> None:
+    """PR #68 review: EACCES is a permission problem, not a link or a device (ADR 0006 §1)."""
+    records = drone.root / "records"
+    records.chmod(0)
+    try:
+        result = catalog.register(drone.root)
+    finally:
+        records.chmod(0o755)
+    assert result.outcome == "refused"
+    assert _codes(result) == [("package_unreadable", "records")]
+
+
+def test_verify_hashes_a_replaced_manifest_without_holding_it(
+    catalog: PostgresCatalog, drone: WorkedPackage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR #68 review: a manifest that no longer hashes to the id is streamed, never buffered."""
+    from neptune_ledger.catalog import check
+
+    catalog.register(drone.root)
+    (drone.root / "manifest.json").write_bytes(b" " * (8 * 1024 * 1024))
+
+    def never(*_: object) -> bytes:
+        raise AssertionError("the replaced manifest was read into memory")
+
+    monkeypatch.setattr(check, "_read_small", never)
+    report = catalog.verify(drone.package_id)
+    assert (report.verdict, _codes(report)) == (
+        "damaged",
+        [("manifest_digest_mismatch", "manifest.json")],
+    )
 
 
 def test_a_symlink_in_volatile_is_an_unsafe_entry(
