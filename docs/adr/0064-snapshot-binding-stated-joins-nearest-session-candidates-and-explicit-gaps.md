@@ -37,9 +37,9 @@ never a silent guess. Constraints:
 2. **Stated: the run's own source names the snapshot by a value that reads the same under any
    root** (canonical `records/snapshot_binding`, `stated`, provenance citing the naming row;
    validity `Unknown`, as nothing states a window). A text cell of the run's source equals,
-   verbatim, the snapshot source's content id (`sha256:<hex>` or bare hex), or, among the run's own
-   snapshots (§4), a full git commit or a stated checkpoint or image digest a software record
-   declares. An exact join of declared identities is evidence (ADR 0050 §2). A snapshot the run's
+   verbatim, the snapshot source's content id (`sha256:<hex>` or bare hex), or a full git commit
+   or a stated checkpoint or image digest a software record declares: among the run's own
+   snapshots (§4) first, else anywhere in the package (several there is a conflict, §5). An exact join of declared identities is evidence (ADR 0050 §2). A snapshot the run's
    own source declares is stated as well, citing its own declaration (`same_source`). Only for a
    source that declares exactly one run: with several, which run a row is about is not stated.
    **Declared, but inferred** (`derived/snapshot_binding`, rule `declared_by_run`, citing the
@@ -56,15 +56,18 @@ never a silent guess. Constraints:
    snapshot). A run's candidates are scoped per run, never per session:
    - A **recording unit** is the run's source, joined with every file a `RunAssembly` lists for
      its run as a recording or description (a rosbag2 bag's metadata and storage are one unit).
-   - A snapshot file belongs to at most one unit: the unit a `RunAssembly` lists it in as context;
-     else the recording in its own directory whose name stem its name extends at a `_` or `-`
-     (`ep_7_hw.yaml` beside `ep_7.mcap`; the longest stem wins); else the one unit below the
-     nearest directory above it that holds any. It must also share a proposal of the grouping
-     with that unit, so a directory boundary the grouper keeps is never crossed.
+   - A snapshot file belongs to at most one unit: the unit a `RunAssembly` lists it in as context
+     (evidence, wherever the file is); else the recording in its own directory whose name stem its
+     name extends at a `_` or `-` (`ep_7_hw.yaml` beside `ep_7.mcap`; the longest stem wins, and a
+     stem another recording there extends too, `run` of `run_2.mcap`, is no one's alone); else the
+     one unit below the nearest directory above it that holds any. Save for an assembly's
+     placement, it must also share a proposal of the grouping with that unit, so a directory
+     boundary the grouper keeps is never crossed. A snapshot a unit member declares itself is that
+     unit's own: `same_source` for its own run, a candidate for its unit-mates.
    - A file as near to several units (a stem two recordings share, or a directory holding several
      units and no stem match) is no unit's own: it is bound to none, and one
      `neptune.bindings.shared_snapshot` finding (ambiguous, info) names it, the directory, how many
-     recordings are below it and up to 64 of their runs. Other recordings' sidecars are never a
+     recordings are below it and up to 64 of their runs. A run that names it (§2) still binds it. Other recordings' sidecars are never a
      run's candidates.
    Within a unit, candidates compete by **slot**, kind and file name: two `nav_params.yaml`
    compete; `nav_params.yaml` and `fleet.yaml` both apply. Nearness is the number of directories a

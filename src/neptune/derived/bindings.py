@@ -8,9 +8,9 @@ ADR 0064. The pass relates every ``Run`` in a package to the machine-context sna
   snapshot by a value that reads the same wherever the tree is rooted. A text a recording declares
   (an MCAP metadata entry, any ``StructuredRecord`` cell of the run's source) equals, verbatim, the
   snapshot's content id (``sha256:<hex>`` or the bare hex), or a full git commit or a checkpoint
-  or image digest one of the run's own snapshots declares. The join adds no reading (ADR 0050
-  §2). A snapshot the run's own source declares is stated too. Provenance cites the declaring
-  cell's row, or the snapshot's own declaration.
+  or image digest a snapshot declares (the run's own first, else any in the package). The join
+  adds no reading (ADR 0050 §2). A snapshot the run's own source declares is stated too.
+  Provenance cites the declaring cell's row, or the snapshot's own declaration.
 - **Inferred** (``InferredSnapshotBinding``, ``derived/snapshot_binding``), by a named rule.
   ``declared_by_run``: a text of the run's source is a path, relative to the recording's
   directory, that the snapshot's bytes are at (which assumes the robot's working directory), or a
@@ -19,11 +19,13 @@ ADR 0064. The pass relates every ``Run`` in a package to the machine-context sna
 - **A run's own snapshots** belong to its *recording unit*: the run's source, joined with the files
   a ``RunAssembly`` lists for its run (MVL-34). A snapshot file belongs to the unit a
   ``RunAssembly`` places it in; else to the recording in its directory whose name stem its own
-  name extends (``ep_7_hw.yaml`` beside ``ep_7.mcap``); else to the one unit below the nearest
-  directory above it that holds any. It must also share a session the grouper proposes with the
-  unit (the ``Grouping`` interface: a directory boundary is never crossed by a guess). A file as
-  near to several units is no unit's own: it is bound to none, and one ``shared_snapshot`` finding
-  names it and the runs below it. Other recordings' sidecars are never a run's candidates. Within
+  name extends (``ep_7_hw.yaml`` beside ``ep_7.mcap``), unless another recording there extends
+  that stem too; else to the one unit below the nearest directory above it that holds any. Save
+  for an assembly's placement, it must also share a session the grouper proposes with the unit
+  (the ``Grouping`` interface: a directory boundary is never crossed by a guess). What a unit
+  member declares itself is its unit-mates' candidate. A file as near to several units is no
+  unit's own: no run binds it by nearness, and one ``shared_snapshot`` finding names it and the
+  runs below it. Other recordings' sidecars are never a run's candidates. Within
   a unit, snapshots compete by *slot*, their kind and file name; the one sharing the deepest
   directory with the recording wins its slot, and candidates tied for nearest are a conflict.
 - **Unresolved** is explicit: a run with no binding of a kind gets a finding naming the run and
@@ -352,6 +354,21 @@ class _Shared:
     count: int
 
 
+@dataclass
+class _Index:
+    """The units by directory, built in one pass: each directory's recording stems and the stems
+    a longer recording name there extends, how many units are below each directory and the first
+    of them, and the units a run assembly places each content in as context."""
+
+    stems: dict[bytes, dict[bytes, set[ContentId]]] = field(
+        default_factory=lambda: defaultdict(lambda: defaultdict(set))
+    )
+    extended: dict[bytes, set[bytes]] = field(default_factory=lambda: defaultdict(set))
+    count: dict[bytes, int] = field(default_factory=lambda: defaultdict(int))
+    below: dict[bytes, list[ContentId]] = field(default_factory=lambda: defaultdict(list))
+    context: dict[ContentId, set[ContentId]] = field(default_factory=lambda: defaultdict(set))
+
+
 class _Binder:
     def __init__(
         self,
@@ -418,11 +435,20 @@ class _Binder:
             for path in self._extent(proposal, by_id):
                 if (content := self.content_at.get(path)) is not None:
                     self.sessions_of[content].add(proposal.id)
-        # Content ids a run may name, whole or as the bare digest: the same under any root.
+        # Content ids a run may name, whole or as the bare digest, and the full commits and
+        # digests snapshots declare: the same under any root.
         self.by_content: dict[bytes, ContentId] = {}
-        for content in self.snapshots:
+        identities: dict[bytes, set[ContentId]] = defaultdict(set)
+        for content, entries in self.snapshots.items():
             self.by_content[content.encode()] = content
             self.by_content[content.removeprefix("sha256:").encode()] = content
+            for snapshot, _ in entries:
+                for identity, stated in _identities(snapshot):
+                    if stated:
+                        identities[identity.encode()].add(content)
+        self.identities: dict[bytes, tuple[ContentId, ...]] = {
+            key: tuple(sorted(found)) for key, found in identities.items()
+        }
         self.findings: list[IngestFinding] = []
         self.stated: dict[RecordId, SnapshotBinding] = {}
         self.inferred: dict[RecordId, InferredSnapshotBinding] = {}
@@ -458,7 +484,7 @@ class _Binder:
             for run in self.runs
             if isinstance(source := run.provenance.evidence.source, str)
         }
-        context: dict[ContentId, set[ContentId]] = defaultdict(set)
+        index = _Index()
         for assembly in sorted(assemblies, key=lambda record: record.id):
             if (anchor := run_source.get(assembly.run)) is None:
                 continue
@@ -466,7 +492,7 @@ class _Binder:
                 if (held := content_of.get(member.revision)) is None:
                     continue
                 if member.role is MemberRole.CONTEXT:
-                    context[held].add(anchor)
+                    index.context[held].add(anchor)
                 else:
                     union.add(held)
                     union.union(anchor, held)
@@ -487,62 +513,65 @@ class _Binder:
         for unit in self.units.values():
             unit.runs.sort(key=lambda run: run.id)
         # One index, one pass: each directory's recording stems, and the units below it.
-        stems: dict[bytes, dict[bytes, set[ContentId]]] = defaultdict(lambda: defaultdict(set))
-        count: dict[bytes, int] = defaultdict(int)
-        below: dict[bytes, list[ContentId]] = defaultdict(list)
         for root, unit in self.units.items():
             above: set[bytes] = set()
             for path in unit.paths:
-                stems[parent(path)][name_signals(basename(path)).base].add(root)
+                directory, base = parent(path), name_signals(basename(path)).base
+                index.stems[directory][base].add(root)
+                index.extended[directory].update(list(_stems(base))[1:])
                 above.update(ancestors(path))
             for directory in above:
-                count[directory] += 1
-                if len(below[directory]) < _LISTED:
-                    below[directory].append(root)
+                index.count[directory] += 1
+                if len(index.below[directory]) < _LISTED:
+                    index.below[directory].append(root)
         for content in sorted(self.snapshots):
-            if content in self.unit_of:
-                continue  # a recording's own declarations: ``same_source``, never a candidate
+            if (mate := self.unit_of.get(content)) is not None:
+                # A unit member's own declarations: its source's ``same_source``, and its
+                # unit-mates' (a bag's metadata and storage) own candidates.
+                for path in self.paths.get(content, ()):
+                    self._own(self.units[mate], content, path)
+                continue
             owned = False
             shared: _Shared | None = None
+            held_in = self.sessions_of.get(content, set())
             for path in self.paths.get(content, ()):
-                owner, where = self._owner(content, path, context, stems, count, below)
+                owner, placed, where = self._owner(content, path, index)
                 if owner is not None:
-                    if self.units[owner].sessions & self.sessions_of.get(content, set()):
+                    # A run assembly's placement is evidence; else a session must hold both.
+                    if placed or self.units[owner].sessions & held_in:
                         self._own(self.units[owner], content, path)
                         owned = True
                 elif shared is None:
                     shared = where
-            if not owned and shared is not None:
+            if not owned and shared is not None and held_in:
                 self._shared(content, shared)
 
     def _owner(
-        self,
-        content: ContentId,
-        path: bytes,
-        context: Mapping[ContentId, set[ContentId]],
-        stems: Mapping[bytes, Mapping[bytes, set[ContentId]]],
-        count: Mapping[bytes, int],
-        below: Mapping[bytes, list[ContentId]],
-    ) -> tuple[ContentId | None, _Shared | None]:
-        """The unit a snapshot file belongs to, or where it is shared (module docstring)."""
-        if anchors := context.get(content):  # a run assembly places it
+        self, content: ContentId, path: bytes, index: _Index
+    ) -> tuple[ContentId | None, bool, _Shared | None]:
+        """The unit a snapshot file belongs to and whether a run assembly placed it there, or
+        where it is shared (module docstring)."""
+        if anchors := index.context.get(content):  # a run assembly places it
             roots = sorted({self.unit_of[anchor] for anchor in anchors})
             if len(roots) == 1:
-                return roots[0], None
-            return None, _Shared(parent(path), tuple(roots[:_LISTED]), len(roots))
+                return roots[0], True, None
+            return None, False, _Shared(parent(path), tuple(roots[:_LISTED]), len(roots))
         directory = parent(path)
-        if here := stems.get(directory):  # a recording's sidecar, by the stem its name extends
-            for stem in _stems(name_signals(basename(path)).base):
+        if here := index.stems.get(directory):  # a sidecar, by the recording stem it extends
+            base = name_signals(basename(path)).base
+            for stem in _stems(base):
+                if stem != base and stem in index.extended[directory]:
+                    break  # another recording here extends this stem too: no sidecar's alone
                 if roots := sorted(here.get(stem, ())):
                     if len(roots) == 1:
-                        return roots[0], None
-                    return None, _Shared(directory, tuple(roots[:_LISTED]), len(roots))
+                        return roots[0], False, None
+                    return None, False, _Shared(directory, tuple(roots[:_LISTED]), len(roots))
         for above in ancestors(path):  # the one unit below the nearest directory holding any
-            if (found := count.get(above, 0)) == 1:
-                return below[above][0], None
+            if (found := index.count.get(above, 0)) == 1:
+                return index.below[above][0], False, None
             if found > 1:
-                return None, _Shared(above, tuple(below[above]), found)
-        return None, None
+                return None, False, _Shared(above, tuple(index.below[above]), found)
+        return None, False, None
 
     def _own(self, unit: _Unit, content: ContentId, path: bytes) -> None:
         """``content``, at ``path``, is one of ``unit``'s own snapshots."""
@@ -556,11 +585,9 @@ class _Binder:
                 (unit.identities if stated else unit.versions)[identity.encode()].add(content)
 
     def _shared(self, content: ContentId, shared: _Shared) -> None:
-        """One finding for a snapshot file as near to several units: bound to none of them."""
-        sessions = self.sessions_of.get(content, set())
+        """One finding for a snapshot file in a session that is as near to several units: no run
+        binds it by nearness (a run that names it still binds it, ADR 0064 §2)."""
         units = [self.units[root] for root in shared.units]
-        if not any(unit.sessions & sessions for unit in units):
-            return  # no session holds it with them: the grouping already reports it
         runs = [run.id for unit in units for run in unit.runs][:_LISTED]
         snapshots = self.snapshots[content]
         directory = shared.directory.decode("utf-8", "backslashreplace")
@@ -575,7 +602,7 @@ class _Binder:
                 transform=self.transform,
                 message=(
                     f"the {', '.join(kinds)} file is as near to {shared.count} recordings in"
-                    f" {where}, so it is no one run's own; it is bound to none"
+                    f" {where}, so it is no one run's own: no run binds it by nearness"
                 ),
                 details={
                     "candidates": self._candidates([content], None),
@@ -609,7 +636,8 @@ class _Binder:
                 if not isinstance(cell, Known) or not isinstance(cell.value, str):
                     continue
                 raw = cell.value.encode("utf-8", "surrogatepass")
-                stated = set(unit.identities.get(raw, ()))
+                # Identities among the run's own snapshots first, else anywhere in the package.
+                stated = set(unit.identities.get(raw, ()) or self.identities.get(raw, ())[:_LISTED])
                 if (whole := self.by_content.get(raw)) is not None:
                     stated.add(whole)
                 named = stated | unit.versions.get(raw, set())

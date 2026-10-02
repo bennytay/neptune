@@ -450,17 +450,27 @@ def test_a_file_as_near_to_several_recordings_is_bound_to_none() -> None:
 
 def test_a_run_assembly_makes_one_unit_of_its_files() -> None:
     """A rosbag2 bag: the metadata's run and its storage's run are one unit by the assembly, so
-    the session's parameters are theirs, not shared; a context member is the unit's own."""
+    what one member declares is its unit-mate's too; a context member is the unit's own even
+    outside the session; the session's parameters are still above another recording."""
     paths = [
         "run_011/bag/metadata.yaml",
         "run_011/bag/bag_0.mcap",
         "run_011/params.yaml",
-        "run_011/notes/cam.yaml",
+        "elsewhere/cam.yaml",
         "run_011/other.mcap",
     ]
     described, stored, other = run(paths[0]), run(paths[1]), run(paths[4])
-    records: list[Any] = [described, stored, other, hardware(paths[2]), calibration(paths[3])]
-    assert SHARED_SNAPSHOT in codes(bind(paths, records))  # three recordings below run_011
+    records: list[Any] = [
+        described,
+        stored,
+        other,
+        hardware(paths[2]),
+        calibration(paths[3]),
+        firmware(paths[1], "v1"),  # the storage file declares its software itself
+    ]
+    alone = bind(paths, records)
+    assert SHARED_SNAPSHOT in codes(alone)  # three recordings below run_011
+    assert kinds(alone, described.id) == {}
     members = [
         RunMember(rid("rev", paths[0]), MemberRole.DESCRIPTION, cite(paths[0]).evidence),
         RunMember(rid("rev", paths[1]), MemberRole.RECORDING, cite(paths[0], Row(0)).evidence),
@@ -478,6 +488,31 @@ def test_a_run_assembly_makes_one_unit_of_its_files() -> None:
     for member in (described, stored):
         assert kinds(found, member.id) == {
             SnapshotKind.CALIBRATION: {rid("cal", paths[3])},  # the assembly places it
+            SnapshotKind.SOFTWARE_CONFIGURATION: {rid("sw", paths[1])},  # the unit declares it
         }
+    assert [b.run for b in found.stated] == [stored.id]  # its own source: same_source, stated
     assert kinds(found, other.id) == {}
     assert SHARED_SNAPSHOT in codes(found)  # params.yaml: above the bag and other.mcap
+
+
+def test_a_sidecar_whose_recording_is_absent_is_never_a_shorter_stems() -> None:
+    paths = ["run_012/run.mcap", "run_012/run_2.mcap", "run_012/run_3_params.yaml"]
+    first, second = run(paths[0]), run(paths[1])
+    found = bind(paths, [first, second, hardware(paths[2])])
+    assert not found.inferred  # ``run`` is a stem ``run_2`` extends too: no one's sidecar alone
+    assert SHARED_SNAPSHOT in codes(found)
+
+
+def test_a_full_commit_names_a_build_outside_the_run_and_is_stated() -> None:
+    """A fleet-wide build file above two robots is neither's own, but a run that states its
+    exact commit names it: that is stated, wherever the file is."""
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    paths = ["run_013/a/rec.mcap", "run_013/b/rec.mcap", "run_013/build.yaml"]
+    a, b = run(paths[0]), run(paths[1])
+    statement = row(paths[0], 0, "commit", commit)
+    found = bind(paths, [a, b, build(paths[2], commit)], [statement])
+    (stated,) = found.stated
+    assert (stated.run, stated.snapshot) == (a.id, rid("sw", paths[2]))
+    assert kinds(found, b.id) == {}
+    (shared,) = [f for f in found.findings if f.code == SHARED_SNAPSHOT]
+    assert "no run binds it by nearness" in shared.message
