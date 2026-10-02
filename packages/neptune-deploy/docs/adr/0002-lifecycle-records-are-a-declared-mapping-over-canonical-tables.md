@@ -60,21 +60,34 @@ where that happens:
    held as `KnownAbsent` stays `KnownAbsent`. A column the table lacks is `NotCovered`, and so is a field
    the mapping does not map. Nothing is converted, ranked, normalised or defaulted, and no value is
    written into a mapping file to stand for one the source lacks.
+   - A typed cell read as text (a text, id or `where` field over JSON or Parquet) is its canonical JSON
+     text: `3`, `true`, `1.5`. That rendering is lossless. A non-finite double has no JSON text, so it
+     is unreadable.
+   - A number is read only when a double holds it exactly, by root ADR 0042 §3's rule: the double's
+     shortest digits equal the declared value. `9007199254740993` (2^53 + 1) and `1e-400` do not pass.
+     They are `Unknown` with a `value_unreadable` finding citing the cell, never a nearby double.
 5. **Times keep their declared civil clock** (root ADR 0023 §2). Text with an offset or `Z` is an
    instant, counted as POSIX ticks (timescale `posix`). Text without one is counted from
    1970-01-01T00:00:00 of its own civil clock, with timescale `Unknown`, and is never moved to UTC. A
-   date alone counts days. The zone the mapping declares for the column is recorded twice: in the
-   transform's config, as part of the mapping, and as the `TimestampDomain`'s scope,
-   `("zone=<declared zone>",)`, so every clock names its zone. The domain's role is `document`, its
+   date alone counts days. The zone the mapping declares for the column (a zone name, or `unstated`)
+   lives only in the transform's config, as part of the mapping. It is never written into the
+   `TimestampDomain`: the domain's `scope` names a part of the source verbatim, and a zone there would
+   be a sentinel where the value is unknown. The domain's scope is `()`, its role is `document`, its
    `field` is the column, and it cites the first cell read on it. The model has no field for a civil
-   zone, and this convention stands in for one. A zone field is a compiler change (§Consequences).
+   zone. Adding one is a compiler change (MVL-202).
 6. **Nothing is dropped silently, and nothing is guessed.** These are findings, coded `deploy_lifecycle_map.*`:
    - a row of a matched table that no rule matches (`row_unmatched`);
    - a row two rules match (`rule_ambiguous`), which gets no record;
    - a column neither mapped nor ignored (`column_unmapped`);
    - a mapped column the table lacks (`column_absent`);
    - a cell that does not read under its declared format (`value_unreadable`), whose field is `Unknown`;
-   - a blank cell in a list field (`list_cell_blank`), because a list cannot hold `Unknown`;
+   - a blank cell in a list field (`list_cell_blank`), because a list cannot hold `Unknown`. There is
+     one finding per cell, with no cap, naming the record id, the field (a JSON pointer into the
+     record) and the cell. Every list the blank emptied is therefore traceable and never reads as "none";
+   - an empty part between split delimiters (`list_part_empty`), which is dropped, and an id a record's
+     list states twice (`list_id_repeated`), which is kept once. Each is one finding naming the cell;
+   - a cell that does not read (`value_unreadable`), which is one finding per cell naming its record
+     and field;
    - two records of one mapping stating the same identifier (`identifier_repeated`), which are kept
      apart: identity is MVL-35's;
    - a table no mapping applies to, or one with no column names to map (`table_unmapped`), and a
@@ -89,8 +102,8 @@ where that happens:
    give a byte-identical package. A changed mapping file or a new mapper version gives new record ids,
    which is new lineage beside the old.
 8. **Entry points.** The library calls are `map_files(base, mappings)`, which returns the new package's
-   files, and `map_package(base_root, mappings, out)`, which writes them and returns the package id. The
-   command line is `python -m neptune_deploy map <package> --mapping <file>... --out <dir>`. A console
+   files, and `map_package(base_root, mappings, out)`, which writes them and returns the package id.
+   `map_package` refuses an `out` equal to, or inside, the base package. The command line is `python -m neptune_deploy map <package> --mapping <file>... --out <dir>`. A console
    script would add an entry-point group, and ADR 0001 §1 allows only the compiler's two.
 
 ## Alternatives considered
@@ -118,8 +131,9 @@ where that happens:
 - One row is one record. A record spread over several rows (a risk register with one row per hazard and
   one assessment id) becomes one record per row, each with one hazard, until grouping by a declared key
   is decided.
-- The model has no `Unknown` list and no civil-zone field. A blank list cell is a finding beside an empty
-  list, and the zone rides in the domain's scope. Both are compiler requests for a later schema.
+- The model has no `Unknown` list and no civil-zone field. A blank list cell is a per-record finding
+  beside an empty list, and the zone is only in the transform config. Both are compiler requests for a
+  later schema (MVL-202 for the zone).
 - Test fixtures are packages the compiler wrote (`neptune ingest`, by
   `tests/fixtures/lifecycle/make_fixture_packages.py`) and committed. Deploy's tests read them and never
   run ingestion, so an adapter-only compiler change cannot break Deploy's job unseen. Regenerating them

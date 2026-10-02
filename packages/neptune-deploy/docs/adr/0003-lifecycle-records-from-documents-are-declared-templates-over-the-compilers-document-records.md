@@ -82,13 +82,16 @@ another. Forces:
    transform (config: the base package and every template's hash). A document and a template make one
    record, whose provenance is the document's whole bytes, so a different template, or a template
    edited, is new lineage beside the old. Clocks follow ADR 0002 §5: the template's zone is in the
-   transform's config and in the `TimestampDomain` scope.
+   transform's config alone, and a `TimestampDomain`'s scope is empty.
 7. **Findings, coded `deploy_document_map.*`**, each documented with its severity and category in
    `lifecycle.documents.FINDINGS`: `template_matched`, `template_version_mismatch`,
    `template_structure_missing`, `template_ambiguous`, `document_unmatched`, `no_text_layer`,
    `page_rotated`, `text_unread`, `column_unmapped`, `label_absent`, `label_repeated`, `section_absent`,
    `section_repeated`, `section_not_contiguous`, `value_unreadable`, `value_blank`, `list_cell_blank`,
-   `item_blank`, `identifier_repeated`, `record_unrepresentable`. In particular:
+   `list_part_empty`, `list_id_repeated`, `item_blank`, `identifier_repeated`,
+   `record_unrepresentable`. `value_unreadable`, `list_cell_blank`, `list_part_empty` and
+   `list_id_repeated` are one finding per value, naming the record and the field's JSON pointer, never
+   capped (ADR 0002 §6); the number, text and list rules are the table mapper's. In particular:
    - `no_text_layer`: a document with no text and no table (a scan, or one the compiler could not
      read) is a finding and has no record; OCR is a derived annotation and never done here.
    - `page_rotated`: a declared rotation changes no span and no value, because spans index extracted

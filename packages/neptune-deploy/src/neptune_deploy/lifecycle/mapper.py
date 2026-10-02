@@ -6,12 +6,15 @@ mapping file is one transform; each row one rule matches is one record, whose pr
 row's and whose every value cites its cell. What does not map is a finding (ADR 0002 §6).
 """
 
+import math
 import re
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from typing import Any, Final
 
+from neptune.identity import canonical_json
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import evidence_record_id, transform_record
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
@@ -112,7 +115,20 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = {
     "list_cell_blank": (
         Severity.WARNING,
         FindingCategory.MISSING,
-        "blank cells read into a list field; a list holds no unknown, so the list lacks them",
+        "a blank cell read into a list field: a list holds no unknown, so this record's list lacks"
+        " what the cell would have stated; the list is not a statement of none",
+    ),
+    "list_part_empty": (
+        Severity.INFO,
+        FindingCategory.MISSING,
+        "an empty part between declared delimiters in a list cell; it states nothing and is not"
+        " listed",
+    ),
+    "list_id_repeated": (
+        Severity.INFO,
+        FindingCategory.INCONSISTENT,
+        "an identifier stated again in a record's list; a declared-id list holds each once, so the"
+        " first statement is kept",
     ),
     "item_blank": (
         Severity.INFO,
@@ -165,23 +181,29 @@ class _Table:
     header: tuple[str, ...] | None  # a headed table's header; None for a table of JSON objects
     columns: dict[str, int | None] = field(default_factory=dict)  # name -> index, None if repeated
     pointers: list[dict[str, int]] = field(default_factory=list)  # JSON: per row
+    # Every column name in first-seen order, computed once: lookups never scan the rows.
+    ordered: tuple[str, ...] = ()
+    present: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        if self.header is not None:
+            seen = dict.fromkeys(name for name in self.header if name)
+        else:
+            seen = {}
+            for row in self.pointers:
+                seen.update(dict.fromkeys(row))
+        self.ordered = tuple(seen)
+        self.present = frozenset(seen)
 
     @property
     def evidence(self) -> EvidenceRef:
         return self.record.provenance.evidence
 
     def has(self, column: str) -> bool:
-        if self.header is not None:
-            return column in self.columns
-        return any(column in row for row in self.pointers)
+        return column in self.present
 
     def names(self) -> list[str]:
-        if self.header is not None:
-            return list(dict.fromkeys(name for name in self.header if name))
-        seen: dict[str, None] = {}
-        for row in self.pointers:
-            seen.update(dict.fromkeys(row))
-        return list(seen)
+        return list(self.ordered)
 
 
 def _json_pointer(cell: Knowledge[Any]) -> str | None:
@@ -315,12 +337,16 @@ class _Values:
     mapper: Any  # has ``transform``, ``findings`` and ``domain``
     table: Any  # has ``record`` (its ``id`` scopes findings and clocks) and ``evidence``
     evidence: EvidenceRef  # the record's own evidence
+    record_id: RecordId  # the id the lifecycle record will have: findings about its values name it
     pointers: dict[str, int] | None = None
 
     def cell(self, column: str, via: str = "column") -> _Cell:
         raise NotImplementedError
 
     def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
+        raise NotImplementedError
+
+    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
         raise NotImplementedError
 
     def blank(self, spec: Part) -> bool:
@@ -334,7 +360,7 @@ class _Values:
 
     # One cell into one field ---------------------------------------------------------------
 
-    def scalar(self, shape: Shape, spec: Scalar) -> Knowledge[Any]:
+    def scalar(self, shape: Shape, spec: Scalar, path: str) -> Knowledge[Any]:
         cell = self.cell(spec.column, spec.via)
         if cell.absent_from_table:
             return NotCovered()
@@ -349,12 +375,12 @@ class _Values:
         if isinstance(state, NotCovered):
             return NotCovered(self.provenance(place))
         if not isinstance(state, Known):
-            self.finding("value_unreadable", spec.column, place)
+            self.cell_finding("value_unreadable", spec.column, path, place)
             return Unknown(self.provenance(place))
         provenance = self.provenance(place)
         value = self._convert(shape, spec, state.value, place, provenance)
         if value is None:
-            self.finding("value_unreadable", spec.column, place)
+            self.cell_finding("value_unreadable", spec.column, path, place)
             return Unknown(provenance)
         return value
 
@@ -367,20 +393,8 @@ class _Values:
         provenance: Provenance,
     ) -> Knowledge[Any] | None:
         if shape is Shape.NUMBER:
-            if isinstance(value, bool):
-                return None
-            if isinstance(value, int):
-                return Known(float(value), provenance)
-            if isinstance(value, float | NonFinite):
-                return Known(value, provenance)
-            if _DECIMAL.fullmatch(value):
-                number = float(value)
-                return (
-                    Known(number, provenance)
-                    if number not in (float("inf"), float("-inf"))
-                    else None
-                )
-            return None
+            number = _number(value)
+            return None if number is None else Known(number, provenance)
         text = _text(value)
         if text is None:
             return None
@@ -421,17 +435,17 @@ class _Values:
 
     # Cells into lists ----------------------------------------------------------------------
 
-    def pieces(self, spec: ListCell) -> list[tuple[str, EvidenceRef]]:
+    def pieces(self, spec: ListCell, path: str) -> list[tuple[str, EvidenceRef]]:
         """The texts a list cell states, each with its citation (a span inside a split cell)."""
         cell = self.cell(spec.column, spec.via)
         if cell.absent_from_table or isinstance(cell.state, KnownAbsent):
             return []
         if cell.state is None or isinstance(cell.state, Unknown | NotCovered):
-            self.finding("list_cell_blank", spec.column, cell.place)
+            self.cell_finding("list_cell_blank", spec.column, path, cell.place)
             return []
         text = _text(cell.state.value) if isinstance(cell.state, Known) else None
         if text is None:
-            self.finding("value_unreadable", spec.column, cell.place)
+            self.cell_finding("value_unreadable", spec.column, path, cell.place)
             return []
         if spec.split is None:
             return [(text, cell.place)]
@@ -439,7 +453,9 @@ class _Values:
         start = 0
         for part in text.split(spec.split):
             stripped = part.strip()
-            if stripped:
+            if not stripped:
+                self.cell_finding("list_part_empty", spec.column, path, cell.place)
+            else:
                 begin = start + (len(part) - len(part.lstrip()))
                 end = begin + len(stripped)
                 place = cell.place
@@ -449,64 +465,71 @@ class _Values:
             start += len(part) + len(spec.split)
         return out
 
-    def ids(self, specs: tuple[ListCell, ...]) -> tuple[Knowledge[LogicalId], ...]:
+    def ids(self, specs: tuple[ListCell, ...], path: str) -> tuple[Knowledge[LogicalId], ...]:
+        """Declared ids, sorted, each once: a repeat is kept once and is a finding."""
         found: dict[LogicalId, Knowledge[LogicalId]] = {}
         for spec in specs:
             assert spec.namespace is not None
-            for text, place in self.pieces(spec):
-                found.setdefault(
-                    LogicalId(spec.namespace, text),
-                    Known(LogicalId(spec.namespace, text), self.provenance(place)),
-                )
+            for text, place in self.pieces(spec, path):
+                identifier = LogicalId(spec.namespace, text)
+                if identifier in found:
+                    self.cell_finding("list_id_repeated", spec.column, path, place)
+                    continue
+                found[identifier] = Known(identifier, self.provenance(place))
         return tuple(found[key] for key in sorted(found, key=lambda i: (i.namespace, i.value)))
 
-    def statements(self, specs: tuple[ListCell, ...]) -> tuple[Knowledge[str], ...]:
+    def statements(self, specs: tuple[ListCell, ...], path: str) -> tuple[Knowledge[str], ...]:
         return tuple(
             Known(text, self.provenance(place))
             for spec in specs
-            for text, place in self.pieces(spec)
+            for text, place in self.pieces(spec, path)
         )
 
     # Parts and records ---------------------------------------------------------------------
 
-    def part(self, spec: Part) -> Any:
+    def part(self, spec: Part, path: str) -> Any:
         if spec.score is not None:
             return spec.cls(
-                name=self.label(spec.score.column), value=self.scalar(Shape.TEXT, spec.score)
+                name=self.label(spec.score.column),
+                value=self.scalar(Shape.TEXT, spec.score, f"{path}/value"),
             )
-        return spec.cls(**self.values(spec.cls, spec.fields))
+        return spec.cls(**self.values(spec.cls, spec.fields, path))
 
-    def items(self, specs: Any) -> tuple[Any, ...]:
+    def items(self, specs: Any, path: str) -> tuple[Any, ...]:
         """Parts spelled out field by field; one whose every cell is blank is not listed."""
-        items = []
+        items: list[Any] = []
         for item in specs:
             assert isinstance(item, Part)
             if self.blank(item):
                 column = ", ".join(sorted(spec_columns(item)))
                 self.finding("item_blank", column, self.evidence)
                 continue
-            items.append(self.part(item))
+            items.append(self.part(item, f"{path}/{len(items)}"))
         return tuple(items)
 
-    def values(self, cls: type[Any], specs: Any) -> dict[str, Any]:
+    def values(self, cls: type[Any], specs: Any, path: str = "") -> dict[str, Any]:
+        """Every field of ``cls``; ``path`` is where ``cls`` sits in the record (JSON pointer)."""
         out: dict[str, Any] = {}
         for shape in fields_of(cls):
             spec: Any = specs.get(shape.name)
+            at = f"{path}/{shape.name}"
             match shape.shape:
                 case Shape.IDS:
-                    out[shape.name] = self.ids(spec) if spec else ()
+                    out[shape.name] = self.ids(spec, at) if spec else ()
                 case Shape.STATEMENTS:
-                    out[shape.name] = self.statements(spec) if spec else ()
+                    out[shape.name] = self.statements(spec, at) if spec else ()
                 case Shape.ITEMS:
-                    out[shape.name] = self.items(spec or ())
+                    out[shape.name] = self.items(spec or (), at)
                 case Shape.PART:
                     assert shape.part is not None
                     out[shape.name] = self.part(
-                        spec if isinstance(spec, Part) else Part(shape.part, {})
+                        spec if isinstance(spec, Part) else Part(shape.part, {}), at
                     )
                 case _:
                     out[shape.name] = (
-                        self.scalar(shape.shape, spec) if isinstance(spec, Scalar) else NotCovered()
+                        self.scalar(shape.shape, spec, at)
+                        if isinstance(spec, Scalar)
+                        else NotCovered()
                     )
         return out
 
@@ -514,15 +537,36 @@ class _Values:
 class _Row(_Values):
     """One row being mapped by one rule under one transform."""
 
-    def __init__(self, mapper: Any, table: _Table, index: int) -> None:
+    def __init__(
+        self,
+        mapper: Any,
+        table: _Table,
+        index: int,
+        kind: str,
+        record_id: RecordId | None = None,
+    ) -> None:
         self.mapper, self.table = mapper, table
         self.record = table.rows[index]
         self.pointers = table.pointers[index] if table.header is None else None
         self.evidence = self.record.provenance.evidence
+        # The id the lifecycle record will have: findings about its cells name it.
+        self.record_id = record_id or evidence_record_id(kind, self.evidence, mapper.transform)
 
     def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
         self.mapper.findings.add(
             name, self.table, subject, key=column, details={"column": column}, row=self.record.row
+        )
+
+    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
+        """One finding per cell, naming the record and field: never capped, never grouped."""
+        self.mapper.findings.add(
+            name,
+            self.table,
+            subject,
+            key=f"{self.record.row}|{path}|{column}|{subject.locator_json()}",
+            details={"column": column, "field": path},
+            row=self.record.row,
+            record=self.record_id,
         )
 
     def cell(self, column: str, via: str = "column") -> _Cell:
@@ -554,14 +598,38 @@ class _Row(_Values):
         return True
 
 
-def _text(value: Any) -> str | None:
-    """A cell's value as text: text as is, an integer or boolean as JSON writes it."""
+def _number(value: Any) -> float | NonFinite | None:
+    """A cell's value as a double, only when the double holds it exactly (root ADR 0042 §3).
+
+    A typed double (JSON, Parquet) already passed that rule in the compiler. An integer, or a
+    decimal literal in text, is read only when the double's shortest digits equal its value:
+    ``2^53 + 1`` or ``1e-400`` would become another number, so they are not read.
+    """
     if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, str) and value:
+        return None
+    if isinstance(value, float | NonFinite):
         return value
+    if isinstance(value, int):
+        literal = str(value)
+    elif isinstance(value, str) and _DECIMAL.fullmatch(value):
+        literal = value
+    else:
+        return None
+    try:
+        number = float(literal)
+        exact = Decimal(repr(number)) == Decimal(literal)
+    except (OverflowError, ValueError, InvalidOperation):
+        return None
+    return number if exact and math.isfinite(number) else None
+
+
+def _text(value: Any) -> str | None:
+    """A cell's value as text: text as is; a typed integer, boolean or double as its canonical
+    JSON text, a lossless rendering (ADR 0002 §4). A non-finite double has no JSON text."""
+    if isinstance(value, str):
+        return value or None
+    if isinstance(value, bool | int) or (isinstance(value, float) and math.isfinite(value)):
+        return canonical_json.dumps(value).decode("utf-8")
     return None
 
 
@@ -590,7 +658,7 @@ class _Clocks:
                 id=evidence_record_id(TimestampDomain.kind, place, self.transform),
                 provenance=provenance,
                 field=column,
-                scope=() if instant else (f"zone={zone}",),
+                scope=(),  # the declared zone is the mapping's, in the transform config
                 role=Known(ClockRole.DOCUMENT),
                 resolution=Known(resolution),
                 epoch=Known(Epoch.UNIX),
@@ -682,12 +750,12 @@ class _Mapper(_Clocks):
             )
 
     def _record(self, rule: Rule, table: _Table, index: int) -> Any:
-        row = _Row(self, table, index)
+        row = _Row(self, table, index, rule.kind.kind)
         evidence = row.evidence
         try:
             values = row.values(rule.kind, rule.fields)
             return rule.kind(
-                id=evidence_record_id(rule.kind.kind, evidence, self.transform),
+                id=row.record_id,
                 provenance=Provenance(evidence, self.transform.id, STATED),
                 **values,
             )

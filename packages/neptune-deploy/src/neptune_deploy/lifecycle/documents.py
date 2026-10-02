@@ -169,6 +169,20 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = _catalog(
         "blank values read into a list field; a list holds no unknown, so the list lacks them",
     ),
     (
+        "list_part_empty",
+        Severity.INFO,
+        FindingCategory.MISSING,
+        "an empty part between declared delimiters in a list value; it states nothing and is not"
+        " listed",
+    ),
+    (
+        "list_id_repeated",
+        Severity.INFO,
+        FindingCategory.INCONSISTENT,
+        "an identifier stated again in a record's list; a declared-id list holds each once, so the"
+        " first statement is kept",
+    ),
+    (
         "item_blank",
         Severity.INFO,
         FindingCategory.MISSING,
@@ -377,12 +391,27 @@ class _DocRow(_Values):
         self.mapper, self.view, self.template = mapper, view, mapper.template
         self.table = view.scope
         self.evidence = view.evidence
+        # The id the lifecycle record will have: findings about its values name it.
+        self.record_id = evidence_record_id(
+            self.template.kind.kind, self.evidence, mapper.transform
+        )
         self.read_blocks: set[RecordId] = set()
         self.read_rows: set[tuple[RecordId, int]] = set()
 
     def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
         self.mapper.findings.add(
             name, self.table, subject, key=column, details={"reference": column}
+        )
+
+    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
+        """One finding per value, naming the record and field: never capped, never grouped."""
+        self.mapper.findings.add(
+            name,
+            self.table,
+            subject,
+            key=f"{path}|{column}|{subject.locator_json()}",
+            details={"reference": column, "field": path},
+            record=self.record_id,
         )
 
     def read(self, hit: _Hit) -> None:
@@ -474,9 +503,9 @@ class _DocRow(_Values):
         text = "\n".join(t for t in texts if t is not None)
         return text, EvidenceRef(first.source, (*prefix, Span(head.start, tail.end)))
 
-    def pieces(self, spec: ListCell) -> list[tuple[str, EvidenceRef]]:
+    def pieces(self, spec: ListCell, path: str) -> list[tuple[str, EvidenceRef]]:
         if spec.via != "section":
-            return super().pieces(spec)
+            return super().pieces(spec, path)
         status, heading, blocks = self._locate(spec.column)
         if status != "ok" or heading is None:
             return []
@@ -495,18 +524,19 @@ class _DocRow(_Values):
                 return False
         return True
 
-    def items(self, specs: Any) -> tuple[Any, ...]:
+    def items(self, specs: Any, path: str) -> tuple[Any, ...]:
         if not isinstance(specs, Rows):
-            return super().items(specs)
-        out = []
+            return super().items(specs, path)
+        out: list[Any] = []
+        kind = self.template.kind.kind
         for table in self.view.tables_named(self.template.tables[specs.table]):
             for index in range(len(table.rows)):
-                row = _Row(self.mapper, table, index)
+                row = _Row(self.mapper, table, index, kind, self.record_id)
                 if row.blank(specs.part):
                     column = ", ".join(sorted(name for _, name in spec_refs(specs.part)))
                     row.finding("item_blank", column, row.evidence)
                     continue
-                out.append(row.part(specs.part))
+                out.append(row.part(specs.part, f"{path}/{len(out)}"))
         return tuple(out)
 
 
@@ -627,7 +657,7 @@ class _TemplateMapper(_Clocks):
         try:
             values = row.values(kind, self.template.fields)
             return kind(
-                id=evidence_record_id(kind.kind, evidence, self.transform),
+                id=row.record_id,
                 provenance=Provenance(evidence, self.transform.id, STATED),
                 **values,
             )

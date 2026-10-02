@@ -271,6 +271,23 @@ def test_two_documents_stating_one_identifier_are_both_kept_with_a_finding() -> 
     assert len(finding.related) == 1
 
 
+def test_list_findings_are_one_per_value_and_name_the_record_and_the_field() -> None:
+    blank = _mapped(_with(_base("warehouse_amr"), _retext("Assets: PAL-5521; RACK-14B", "Assets:")))
+    (incident,) = _of(blank, "incident_record")
+    assert incident.assets == ()
+    (finding,) = _codes(blank)["list_cell_blank"]
+    assert finding.details["field"] == "/assets" and finding.records == (incident.id,)
+    edits = _retext("Assets: PAL-5521; RACK-14B", "Assets: PAL-5521; ; PAL-5521")
+    package = _mapped(_with(_base("warehouse_amr"), edits))
+    (incident,) = _of(package, "incident_record")
+    assert [a.value.value for a in incident.assets] == ["PAL-5521"]
+    codes = _codes(package)
+    (empty,) = codes["list_part_empty"]
+    (again,) = codes["list_id_repeated"]
+    assert empty.details["field"] == again.details["field"] == "/assets"
+    assert empty.records == again.records == (incident.id,)
+
+
 def test_a_table_with_no_rows_gives_an_empty_list_and_a_statement_with_none_gives_none() -> None:
     base = _base("warehouse_amr")
     table = next(
@@ -348,16 +365,19 @@ def test_a_changed_template_is_new_lineage_beside_the_old() -> None:
     assert [h.hazard.value for h in a.hazards] == [h.hazard.value for h in b.hazards]
 
 
-def test_each_time_field_has_a_clock_that_names_its_declared_zone_and_is_never_moved_to_utc() -> (
-    None
-):
+def test_each_time_field_has_a_clock_and_the_declared_zone_is_in_the_config_never_applied() -> None:
     package = _mapped(_base("warehouse_amr"))
     domains = _of(package, "timestamp_domain")
     assert {d.field for d in domains} == {"Assessed on", "Approved on", "Occurred at", "Time"}
     for domain in domains:
-        assert domain.scope == ("zone=Europe/Berlin",)
         assert domain.role.value == "document"
         assert not isinstance(domain.timescale, Known)  # a civil clock: its scale is unknown
+    zones = {
+        t.config["template"]["id"]: t.config["template"]["zone"]
+        for t in _of(package, "transform_record")
+        if t.adapter_id == DOCUMENT_MAPPER_ID and "template" in t.config
+    }
+    assert zones == {"risk.amr_iso3691_4": "Europe/Berlin", "incident.amr_report": "Europe/Berlin"}
 
 
 # --- Entry points -----------------------------------------------------------------------------
