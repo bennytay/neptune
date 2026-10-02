@@ -497,6 +497,17 @@ def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[JsonObje
     return problems
 
 
+# Declared rows snapshot binding holds per source while it reads a source with no run yet.
+_HELD_ROWS: Final = 65_536
+
+
+def _declared_rows(records: Iterable[object]) -> Iterator[StructuredRecord | StructuredTable]:
+    """The rows and tables a source declares: what snapshot binding reads of a run's source."""
+    for record in records:
+        if isinstance(record, StructuredRecord | StructuredTable):
+            yield record
+
+
 class IngestJob:
     """One ingest of ``root`` into a package at ``destination``, through ``workspace``.
 
@@ -2069,19 +2080,28 @@ class IngestJob:
                 if plan is None:
                     continue  # staging refuses the package and says why
                 # One read serves assembly and snapshot binding (ADR 0064 §1): binding keeps runs
-                # and snapshots, and the declared rows of a source only once it holds a run.
-                rows: list[StructuredRecord | StructuredTable] = []
+                # and snapshots, and the declared rows of a source that holds a run. Rows are held
+                # while reading; a source past ``_HELD_ROWS`` with no run yet (a large table) is
+                # not held, and read for its rows again only if a run turns up after all.
+                rows: list[StructuredRecord | StructuredTable] | None = []
                 holds_run = False
                 for chunk in plan.chunks:
                     records = self.workspace.load(str(chunk["id"])).records
                     evidence.add(records)
-                    for record in records:
-                        if isinstance(record, StructuredRecord | StructuredTable):
-                            rows.append(record)
                     for record in binding_inputs(records):
                         self._binding_inputs.append(record)
                         holds_run = holds_run or isinstance(record, Run)
+                    if rows is not None:
+                        rows.extend(_declared_rows(records))
+                        if not holds_run and len(rows) > _HELD_ROWS:
+                            rows = None
                 if holds_run:
+                    if rows is None:
+                        rows = [
+                            row
+                            for chunk in plan.chunks
+                            for row in _declared_rows(self.workspace.load(str(chunk["id"])).records)
+                        ]
                     self._statements.extend(rows)
         except (WorkspaceError, ValueError, OSError) as exc:
             raise JobError(f"the package cannot be assembled: {exc}") from exc
