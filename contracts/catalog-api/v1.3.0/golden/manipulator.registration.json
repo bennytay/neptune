@@ -1,0 +1,76 @@
+{
+  "api_version": "1.3.0",
+  "findings": [],
+  "ledger_version": "0.0.1",
+  "outcome": "registered",
+  "package_id": {
+    "knowledge": "known",
+    "value": "sha256:b6cba1bf32cb7de4a65c12d4403de38137fb130b76ea551cbb356be2a2dd501a"
+  },
+  "record_counts": [
+    {
+      "count": 1,
+      "kind": "calibration"
+    },
+    {
+      "count": 4,
+      "kind": "frame"
+    },
+    {
+      "count": 1,
+      "kind": "frame_binding"
+    },
+    {
+      "count": 1,
+      "kind": "frame_graph"
+    },
+    {
+      "count": 1,
+      "kind": "frame_transform"
+    },
+    {
+      "count": 1,
+      "kind": "ingest_finding"
+    },
+    {
+      "count": 1,
+      "kind": "run"
+    },
+    {
+      "count": 1,
+      "kind": "run_assembly"
+    },
+    {
+      "count": 2,
+      "kind": "source_artifact"
+    },
+    {
+      "count": 2,
+      "kind": "source_revision"
+    },
+    {
+      "count": 2,
+      "kind": "stream"
+    },
+    {
+      "count": 4,
+      "kind": "timestamp_domain"
+    },
+    {
+      "count": 2,
+      "kind": "transform_record"
+    }
+  ],
+  "registration_key": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 2,
+      "tx_time": "2026-10-02T00:00:02.000000Z"
+    }
+  },
+  "root_locator": "/srv/neptune/packages/manipulator",
+  "schema_version": {
+    "knowledge": "known",
+    "value": 3
+  }
+}

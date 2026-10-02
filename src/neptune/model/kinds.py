@@ -12,6 +12,18 @@ each kind of ``kinds_at(v)``, and no other (ADR 0037 §1).
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, Final
 
+from neptune.model.alignment import (
+    ClockMapping,
+    FrameBinding,
+    IdentityLink,
+    RunAssembly,
+    SnapshotBinding,
+    clock_mapping_from_json,
+    frame_binding_from_json,
+    identity_link_from_json,
+    run_assembly_from_json,
+    snapshot_binding_from_json,
+)
 from neptune.model.configuration import (
     ConfigurationSnapshot,
     ConfigurationValue,
@@ -107,6 +119,11 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (DocumentBlock, document_block_from_json),
         (StructuredTable, structured_table_from_json),
         (StructuredRecord, structured_record_from_json),
+        (IdentityLink, identity_link_from_json),
+        (ClockMapping, clock_mapping_from_json),
+        (FrameBinding, frame_binding_from_json),
+        (RunAssembly, run_assembly_from_json),
+        (SnapshotBinding, snapshot_binding_from_json),
     )
 }
 
