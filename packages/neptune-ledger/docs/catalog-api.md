@@ -121,7 +121,18 @@ Clock-merge and `mapping_out_of_range` tests are deferred to MVL-92. They need M
 `ClockMapping` records, which no package carries yet. It needs pytest and jsonschema (the `contract-tests` extra). Outside this repository, set
 `NEPTUNE_WORKED_EXAMPLES` to the compiler's `tests/fixtures/model`.
 
-This package runs the suite against `StubCatalog` as strict expected failures
-(`tests/contract/`): each test must fail with `NotImplementedError`. The registry goldens in
+This package runs the suite twice (`tests/contract/test_ledger_catalog_contract.py`): against
+`StubCatalog` as strict expected failures, where each test must fail with `NotImplementedError`,
+and against the real `neptune_ledger.catalog.registry.PostgresCatalog`. There, `register` and
+`verify` pass. Each test that reaches a call not implemented yet is listed by name with its
+owning issue (`resolve`: MVL-91; `thread`, `threads_of`, `lineage`: MVL-92; `query`: MVL-98)
+and is a strict expected failure until that call lands. `make_catalog` must return a catalog
+with no package-root limit, because the tests register from `tmp_path`.
+
+Referenced sources are re-hashed on request by `PostgresCatalog.verify_sources`, outside this
+contract, because 1.1.0 has no finding code for a source location
+([ADR 0007](adr/0007-registration-implementation-boundaries-and-source-checks.md)). The `ledger`
+command (`ledger register <root>`, `ledger verify <id> [--source-root DIR]`) is a thin front end
+over it. The registry goldens in
 `contracts/catalog-api/v1.2.0/golden/` come from `contract_tests/goldens.py`. They are example
 documents valued from the worked examples, with fixed illustrative transaction keys.

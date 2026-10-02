@@ -10,6 +10,10 @@ authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 # pyarrow: query() returns a pyarrow.Table (catalog API, ADR 0004); same floor as the compiler.
 dependencies = ["neptune", "psycopg[binary]==3.3.6", "pyarrow>=25.0.1"]
 
+# `ledger register <root>`, `ledger verify <id>` (MVL-90); a thin front end until access/ lands.
+[project.scripts]
+ledger = "neptune_ledger.cli:main"
+
 # What a downstream package needs to run neptune_ledger.contract_tests against its implementation.
 [project.optional-dependencies]
 contract-tests = ["jsonschema>=4.23", "pytest>=8.3"]
