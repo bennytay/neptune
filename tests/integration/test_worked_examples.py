@@ -29,6 +29,8 @@ from neptune.identity.hashing import content_id
 from neptune.identity.provenance import check_evidence_record_id, check_transform_record
 from neptune.model.finding import ingest_finding_from_json
 from neptune.model.jsonvalue import JsonValue
+from neptune.model.kinds import RECORD_KINDS
+from neptune.model.lifecycle import LIFECYCLE_KINDS
 from neptune.model.machine import (
     calibration_from_json,
     hardware_component_from_json,
@@ -93,6 +95,7 @@ READERS: Final[dict[str, Callable[[JsonValue], Any]]] = {
     "structured_table": structured_table_from_json,
     "timestamp_domain": timestamp_domain_from_json,
     "transform_record": transform_record_from_json,
+    **{cls.kind: RECORD_KINDS[cls.kind][1] for cls in LIFECYCLE_KINDS},
 }
 
 
@@ -305,6 +308,22 @@ REPRESENTED_AS: Final = {
     ("mobile_robot", "drive.bag"): {"run", "stream", "timestamp_domain"},
     ("mobile_robot", "sites.csv"): {"site", "structured_record", "structured_table"},
     ("mobile_robot", "photos/dock.png"): {"image", "timestamp_domain"},
+    ("manipulator", "cell/records.json"): {
+        "commissioning_baseline",
+        "maintenance_event",
+        "requalification_record",
+        "risk_assessment",
+        "timestamp_domain",
+    },
+    ("mobile_robot", "deployment/records.json"): {
+        "authorisation_envelope",
+        "change_record",
+        "commissioning_baseline",
+        "incident_record",
+        "intervention",
+        "risk_assessment",
+        "timestamp_domain",
+    },
 }
 
 
@@ -381,3 +400,34 @@ def test_declared_times_are_what_the_bytes_say() -> None:
     assert match is not None
     fields = [int(group) for group in match.groups()]
     assert image.capture.time.value.ticks == calendar.timegm((*fields, 0, 0, 0))
+
+
+# --- Deployment lifecycle records (ADR 0051) ---------------------------------------------------
+
+
+def test_the_two_deployments_hold_every_lifecycle_kind_as_stated() -> None:
+    found = {
+        kind: example
+        for example in ("mobile_robot", "manipulator")
+        for kind, _, record in records(example)
+        if kind in {cls.kind for cls in LIFECYCLE_KINDS}
+        and record.provenance.assertion_kind.value == "stated"
+    }
+    assert set(found) == {cls.kind for cls in LIFECYCLE_KINDS}
+
+
+def test_lifecycle_values_are_what_the_forms_say() -> None:
+    export = json.loads(source_files("mobile_robot")["deployment/records.json"])
+    incident = _record("mobile_robot", "incident_record")
+    assert incident.severity.value == export["incidents"][0]["severity"] == "S3"
+    envelope = _record("mobile_robot", "authorisation_envelope")
+    limit = envelope.zones[0].speed_limit
+    assert (limit.value.value, limit.unit.value.symbol) == (1.5, "m.s^-1")  # as declared, m/s
+    occurred = calendar.timegm((2026, 9, 24, 18, 12, 0, 0, 0, 0))  # 04:12 at +10:00
+    assert incident.occurred.value.ticks == occurred
+    cell = json.loads(source_files("manipulator")["cell/records.json"])
+    risk = _record("manipulator", "risk_assessment")
+    hazard = cell["risk_assessment"]["hazards"][0]
+    assert [(s.name, s.value.value) for s in risk.hazards[0].scores] == [
+        (name, hazard[name]) for name in ("severity", "exposure", "avoidance", "PLr")
+    ]

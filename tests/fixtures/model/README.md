@@ -8,8 +8,8 @@ sources declare (MVL-70). `make examples` rebuilds everything here from `make_ex
 |---|---|---|
 | `drone` | `flight.ulg` (PX4 ULog) | boot time and GPS time as separate clocks; the vehicle by its `sys_uuid`; board, sensor ids, firmware commit and accelerometer calibration; a dropout and an unstated release as findings |
 | `quadruped` | `bag/metadata.yaml` + `bag/walk_0.mcap` (ROS 2 bag), `robot.urdf`, `meshes/body.stl` | a run declared by the bag's metadata; joint states and a body-pose trajectory, each with three clocks; the URDF as frames, transforms and components, naming no machine; the mesh as geometry |
-| `manipulator` | `session.mcap`, `handeye.yaml` | camera frames inside a log as a stream; a hand-eye calibration whose transform direction is `Ambiguous` and whose unit is missing |
-| `mobile_robot` | `drive.bag` (ROS 1), `sites.csv`, `photos/dock.png` | a register with blank cells, its rows and the sites they name, each id and name citing its cell; a photo's pixels and its EXIF capture time, position and camera serial |
+| `manipulator` | `session.mcap`, `handeye.yaml`, `cell/records.json` | camera frames inside a log as a stream; a hand-eye calibration whose transform direction is `Ambiguous` and whose unit is missing; the cell's commissioning, risk assessment, joint-drive replacement and requalification as stated lifecycle records |
+| `mobile_robot` | `drive.bag` (ROS 1), `sites.csv`, `photos/dock.png`, `deployment/records.json` | a register with blank cells, its rows and the sites they name, each id and name citing its cell; a photo's pixels and its EXIF capture time, position and camera serial; the warehouse deployment's commissioning, authorisation envelope, remote assist, incident, change and risk assessment |
 
 Each example directory holds `sources/` (the files, as an ingest root) and `records/<kind>.jsonl`:
 one canonical-JSON line per record, sorted by id (ADR 0002), with the ledger (`source_artifact`,
@@ -28,6 +28,9 @@ arrive in M4 to M6. Series rows are Parquet and are not written here (MVL-5, MVL
   plus the duration, on the metadata's own clock.
 - EXIF states latitude and longitude as degrees, minutes and seconds with a hemisphere; the photo's
   position holds them as signed degrees, read exactly and rounded once to a float.
+- Deployment records (ADR 0051) are JSON exports cited value by value with JSON pointers, all
+  `stated`. Their date-times state an offset, so their ticks are POSIX seconds on one document
+  clock. Severities, scores and decisions stay text; numbers keep their declared unit.
 - EXIF `DateTimeOriginal` has no zone. Its ticks count the stated civil seconds from
   1970-01-01T00:00:00 on the camera's own clock, whose timescale stays `Unknown`.
 

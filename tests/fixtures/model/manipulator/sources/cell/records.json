@@ -1,0 +1,137 @@
+{
+  "cell": "CELL-3",
+  "commissioning": {
+    "record": "CC-3-001",
+    "robot": "UR10e-20415",
+    "configuration": "CELL3-CFG-A",
+    "date": "2026-09-14T08:30:00+10:00",
+    "hardware": [
+      {
+        "item": "arm",
+        "model": "UR10e",
+        "serial": "20415"
+      },
+      {
+        "item": "gripper",
+        "model": "2F-140",
+        "serial": "G140-7781"
+      },
+      {
+        "item": "light curtain",
+        "model": "C4000",
+        "serial": "LC-55102"
+      }
+    ],
+    "software": [
+      {
+        "item": "PolyScope",
+        "version": "5.15.2"
+      },
+      {
+        "item": "cell PLC program",
+        "version": "rev 7"
+      }
+    ],
+    "calibrations": [
+      "HE-0930"
+    ],
+    "tests": [
+      {
+        "test": "protective stop response",
+        "result": "PASS",
+        "date": "2026-09-14T10:05:00+10:00"
+      },
+      {
+        "test": "light curtain muting",
+        "result": "PASS",
+        "date": "2026-09-14T10:40:00+10:00"
+      }
+    ],
+    "constraints": [
+      "collaborative operation disabled",
+      "tool speed <= 250 mm/s in zone Z2"
+    ],
+    "signed_off_by": "Integrator commissioning engineer",
+    "signed_off": "2026-09-14T15:00:00+10:00",
+    "acceptance": "accepted"
+  },
+  "risk_assessment": {
+    "record": "RA-CELL3",
+    "robot": "UR10e-20415",
+    "configuration": "CELL3-CFG-A",
+    "method": "ISO 12100 risk graph",
+    "date": "2026-09-10T13:00:00+10:00",
+    "hazards": [
+      {
+        "hazard": "crush between gripper and fixture",
+        "severity": "S2",
+        "exposure": "F1",
+        "avoidance": "P2",
+        "PLr": "d",
+        "mitigations": [
+          "light curtain C4000 at cell entry",
+          "reduced speed in zone Z2"
+        ]
+      },
+      {
+        "hazard": "ejected part on gripper loss",
+        "severity": "S1",
+        "exposure": "F2",
+        "avoidance": "P1",
+        "PLr": "b",
+        "mitigations": [
+          "polycarbonate guarding"
+        ]
+      }
+    ],
+    "approved_by": "Plant safety officer",
+    "approved": "2026-09-11T09:00:00+10:00",
+    "decision": "accepted"
+  },
+  "maintenance": {
+    "work_order": "WO-55190",
+    "robot": "UR10e-20415",
+    "date": "2026-09-29T07:10:00+10:00",
+    "diagnosis": "joint 3 encoder fault: 14 protective stops over two shifts",
+    "actions": [
+      "replace joint 3 drive",
+      "re-run joint calibration"
+    ],
+    "parts": [
+      {
+        "part": "joint 3 drive",
+        "removed": "J3-118842",
+        "installed": "J3-120077"
+      }
+    ],
+    "as_maintained_configuration": "CELL3-CFG-A.1"
+  },
+  "requalification": {
+    "record": "RQ-0019",
+    "robot": "UR10e-20415",
+    "configuration": "CELL3-CFG-A.1",
+    "work_order": "WO-55190",
+    "date": "2026-09-29T13:30:00+10:00",
+    "cause": "joint 3 drive replaced under WO-55190",
+    "corrective_actions": [
+      "joint calibration",
+      "payload and TCP re-entered"
+    ],
+    "tests": [
+      {
+        "test": "protective stop response",
+        "result": "PASS",
+        "date": "2026-09-29T14:00:00+10:00"
+      },
+      {
+        "test": "joint 3 stopping distance",
+        "result": "118 mm",
+        "date": "2026-09-29T14:20:00+10:00"
+      }
+    ],
+    "result": "pass",
+    "return_to_service": "returned to service",
+    "returned_by": "Maintenance supervisor",
+    "returned": "2026-09-29T15:00:00+10:00"
+  }
+}

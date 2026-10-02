@@ -1,10 +1,10 @@
 # Ingest receipt
 
-Receipt `rec:sha256:971334e9d806d9305d4dee824d03b6b2b19297bfc15164af4b26631074407ce5`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:aeb9c7db27bbf8a03a4c8d5f628a7bc30b992c84d9b14e46a16fb3a419b79589`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
-- Sources: 2 seen, 2 read, 0 not read, 0 gone
+- Sources: 3 seen, 3 read, 0 not read, 0 gone
 - Runs: 1; streams: 2; entities: 0
 - Findings: 0 errors, 1 warnings, 0 info; ambiguous fields: 1
 
@@ -12,6 +12,7 @@ Receipt `rec:sha256:971334e9d806d9305d4dee824d03b6b2b19297bfc15164af4b2663107440
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
+| `cell/records.json` | 3374 | `sha256:c5ebbba39b83` | deployment_json 1.0.0 |
 | `handeye.yaml` | 348 | `sha256:202b5b3f5707` | handeye 1.0.0 |
 | `session.mcap` | 2570 | `sha256:d6bebd2e8559` | mcap 1.0.0 |
 
@@ -19,6 +20,7 @@ Receipt `rec:sha256:971334e9d806d9305d4dee824d03b6b2b19297bfc15164af4b2663107440
 
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
+| `deployment_json` | `1.0.0` | `sha256:44136fa355b3` | none | `rec:538dcf592361` |
 | `handeye` | `1.0.0` | `sha256:44136fa355b3` | none | `rec:b067af6b936b` |
 | `mcap` | `1.0.0` | `sha256:44136fa355b3` | none | `rec:67b6d9921ecc` |
 
@@ -27,16 +29,20 @@ Receipt `rec:sha256:971334e9d806d9305d4dee824d03b6b2b19297bfc15164af4b2663107440
 | Kind | Records |
 |---|---|
 | `calibration` | 1 |
+| `commissioning_baseline` | 1 |
 | `frame` | 4 |
 | `frame_graph` | 1 |
 | `frame_transform` | 1 |
 | `ingest_finding` | 1 |
+| `maintenance_event` | 1 |
+| `requalification_record` | 1 |
+| `risk_assessment` | 1 |
 | `run` | 1 |
-| `source_artifact` | 2 |
-| `source_revision` | 2 |
+| `source_artifact` | 3 |
+| `source_revision` | 3 |
 | `stream` | 2 |
-| `timestamp_domain` | 4 |
-| `transform_record` | 2 |
+| `timestamp_domain` | 5 |
+| `transform_record` | 3 |
 
 ## Runs
 
