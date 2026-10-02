@@ -82,12 +82,18 @@ rule is harder: the store is remote, mutable, paginated and hostile.
    sizes from 1 to 1,000, pages shuffled, and gets identical results for each provider.
    - A key listed twice is one object if both entries agree, and is dropped with `key_duplicated` if
      they do not: no arrival order decides.
-   - A cursor seen before stops the listing (`pagination_loop`). Pages are limited to 100,000, and
-     distinct keys, used or not, to `max_objects` (default 1,000,000): each limit is a
-     `listing_limit` finding, and keys a store lists but the source cannot use cannot grow a listing
-     without bound.
-   - A listing stopped by `max_objects` keeps the first `max_objects` keys below the greatest key it
-     saw, and drops every finding about later keys. Stores list in key order, so every key below the
+   - A cursor seen before stops the listing (`pagination_loop`). Only a sha256 digest of each cursor
+     is kept for this, never the cursor. A continuation token or marker longer than 4 KiB stops the
+     listing (`response_invalid`).
+   - Pages are limited to 100,000. Distinct keys, used or not, are limited to `max_objects` (default
+     1,000,000). The bytes the listing holds are limited to `max_listing_bytes` (default 256 MiB):
+     kept keys and tokens whole, and each unused key as at most its first 256 bytes, with its length
+     and sha256. Each limit is a `listing_limit` finding naming the last key covered
+     (`covered_through_hex`); every key after it is not covered. A store that lists huge or unusable
+     keys therefore cannot grow a listing without bound: 20,000 keys of 30 KB outside the prefix hold
+     about 5 MB, where they would otherwise hold 600 MB.
+   - A listing stopped by a limit keeps the first `max_objects` keys below the greatest key it saw,
+     and drops every finding about later keys. Stores list in key order, so every key below the
      greatest has been seen whole, duplicates included, and a limited listing is the same for every
      page size. A listing stopped by a failure or a loop depends on where it stopped, and its finding
      says where.
@@ -114,8 +120,14 @@ rule is harder: the store is remote, mutable, paginated and hostile.
    - The transport's only method is `GET`. It never follows a redirect: `http.client` does not, and any
      `3xx` is `redirect_refused`. Following one would send the request and its signature wherever the
      server says, which is the object store's symlink.
-   - An endpoint is `https` with the default verified TLS context, or `http` to a loopback host only. A
-     URL holding user information, a query or a fragment is refused.
+   - An endpoint is `https` with the default verified TLS context, or `http` to a loopback host only. An
+     endpoint holding user information is refused at configuration time with a fixed message:
+     credentials are declared, never put in a URL. A query or fragment is refused too. An error names
+     a URL only as scheme, host and port, never its user information, path or query. No error,
+     finding or transform holds a credential, and a test checks every exception chain.
+   - The timeout (default 60 s) bounds each socket operation, and also the whole request as a
+     deadline. When the deadline passes, the socket is shut down, so a server that sends a byte every
+     59 s cannot hold a read or a page open (`deadline_exceeded`).
    - Credentials are the ones declared to the factory or, if none are declared, the `NEPTUNE_*`
      variables: `NEPTUNE_S3_ACCESS_KEY_ID`, `NEPTUNE_S3_SECRET_ACCESS_KEY`, `NEPTUNE_S3_SESSION_TOKEN`,
      `NEPTUNE_GCS_ACCESS_TOKEN`, `NEPTUNE_AZURE_SAS_TOKEN`. The ambient `AWS_*`, `GOOGLE_*` and
@@ -129,7 +141,7 @@ rule is harder: the store is remote, mutable, paginated and hostile.
    - When Platform X2 secrets land, a superseding ADR moves the credential source there. The factory
      signature does not change.
 7. **Declared, closed options.** `endpoint` with `store` (both or neither), `anonymous`, `max_objects`,
-   `page_size` (1 to 1,000), `timeout`; S3 adds `region`, `addressing` (`virtual` by default on AWS, `path` for a declared
+   `max_listing_bytes`, `page_size` (1 to 1,000), `timeout`; S3 adds `region`, `addressing` (`virtual` by default on AWS, `path` for a declared
    endpoint) and `versions`. An unknown option is refused. A dotted bucket over https must be
    path-style, because the wildcard certificate does not cover a dotted host.
 8. **Hostile input.**
@@ -140,6 +152,10 @@ rule is harder: the store is remote, mutable, paginated and hostile.
      `Content-Range` must cover exactly the bytes asked for. An intermediary that normalised `a/../b` to
      `b` therefore fails the read (`object_gone` or `object_changed`). It never serves a neighbour's
      bytes. The test that reads every hostile key back gets each key's own bytes.
+   - Every number a store states (a size, a `Content-Range`, a `Content-Length`) must be 1 to 19 ASCII
+     digits before it is read as one. `²`, a sign or 5,000 digits make that one read `read_failed`,
+     with a finding for that object only, never a bare `ValueError`. A range or length that disagrees
+     with the listing is `object_changed`.
    - A key that is not UTF-8 (`key_not_utf8`) is not used. Neither is one longer than 1,024 bytes
      (`key_too_long`), one outside the requested prefix (`key_outside_prefix`), or one with no usable
      token or size (`revision_invalid`, `size_invalid`). Each reason is one finding citing at most ten

@@ -33,6 +33,7 @@ SCHEMES: Final = {"s3": Provider.S3, "gs": Provider.GCS, "az": Provider.AZURE}
 MAX_KEY_BYTES: Final = 1024  # S3's and GCS's limit on a key; Azure's names are shorter still
 DEFAULT_MAX_OBJECTS: Final = 1_000_000
 DEFAULT_PAGE_SIZE: Final = 1000
+DEFAULT_MAX_LISTING_BYTES: Final = 256 * 1024 * 1024  # key and token bytes a listing may hold
 
 ENV: Final = {
     "s3_access_key_id": "NEPTUNE_S3_ACCESS_KEY_ID",
@@ -97,7 +98,7 @@ def parse_url(url: str, provider: Provider) -> StoreLocation:
     if provider is Provider.AZURE:
         account, _, rest = rest.partition("/")
         if not _AZURE_ACCOUNT.fullmatch(account):
-            raise ObjectStoreConfigError(f"not an Azure storage account name: {account!r}")
+            raise ObjectStoreConfigError("not an Azure storage account name")
     bucket, _, prefix = rest.partition("/")
     pattern = {
         Provider.S3: _S3_BUCKET,
@@ -105,7 +106,9 @@ def parse_url(url: str, provider: Provider) -> StoreLocation:
         Provider.AZURE: _AZURE_CONTAINER,
     }[provider]
     if not pattern.fullmatch(bucket) or ".." in bucket:
-        raise ObjectStoreConfigError(f"not a bucket or container name: {bucket!r}")
+        raise ObjectStoreConfigError(
+            "not a bucket or container name (a URL holds no user information)"
+        )
     try:
         encoded = prefix.encode("utf-8")
     except UnicodeEncodeError as exc:
@@ -133,6 +136,7 @@ class Options:
     versions: bool = True
     anonymous: bool = False
     max_objects: int = DEFAULT_MAX_OBJECTS
+    max_listing_bytes: int = DEFAULT_MAX_LISTING_BYTES
     page_size: int = DEFAULT_PAGE_SIZE
     timeout: float = DEFAULT_TIMEOUT
 
@@ -140,7 +144,15 @@ class Options:
     def parse(cls, options: Mapping[str, JsonValue] | None, provider: Provider) -> "Options":
         given = dict(options or {})
         s3_only = {"region", "addressing", "versions"}
-        known = {"endpoint", "store", "anonymous", "max_objects", "page_size", "timeout"}
+        known = {
+            "endpoint",
+            "store",
+            "anonymous",
+            "max_objects",
+            "max_listing_bytes",
+            "page_size",
+            "timeout",
+        }
         allowed = known | s3_only if provider is Provider.S3 else known
         unknown = sorted(set(given) - allowed)
         if unknown:
@@ -156,10 +168,10 @@ class Options:
                 " unique per store, so the store is part of every object's identity"
             )
         if store is not None and (not isinstance(store, str) or not _STORE.fullmatch(store)):
-            raise ObjectStoreConfigError(f"not a store name: {store!r}")
+            raise ObjectStoreConfigError("not a store name")
         region = given.get("region", parsed.region)
         if not isinstance(region, str) or not _REGION.fullmatch(region):
-            raise ObjectStoreConfigError(f"not a region: {region!r}")
+            raise ObjectStoreConfigError("not a region")
         addressing = given.get("addressing")
         if addressing is not None and addressing not in tuple(Addressing):
             raise ObjectStoreConfigError(f"addressing is one of {[a.value for a in Addressing]}")
@@ -170,7 +182,11 @@ class Options:
                 raise ObjectStoreConfigError(f"{name} is true or false")
             flags[name] = value
         counts = {}
-        for name, low, high in (("max_objects", 1, 10**8), ("page_size", 1, 1000)):
+        for name, low, high in (
+            ("max_objects", 1, 10**8),
+            ("max_listing_bytes", 1024, 2**40),
+            ("page_size", 1, 1000),
+        ):
             value = given.get(name, getattr(parsed, name))
             if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
                 raise ObjectStoreConfigError(f"{name} is an integer from {low} to {high}")
@@ -186,6 +202,7 @@ class Options:
             versions=flags["versions"],
             anonymous=flags["anonymous"],
             max_objects=counts["max_objects"],
+            max_listing_bytes=counts["max_listing_bytes"],
             page_size=counts["page_size"],
             timeout=float(timeout),
         )
