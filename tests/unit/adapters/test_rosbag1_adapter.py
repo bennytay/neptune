@@ -252,7 +252,7 @@ def test_the_run_cites_the_bag_header_and_its_extent_the_chunk_info_fields() -> 
 
 
 def test_the_record_time_is_one_clock_on_the_recorder_never_converted() -> None:
-    domains = {domain.field: [] for domain in of(BAG, TimestampDomain)}
+    domains: dict[str, list[TimestampDomain]] = {d.field: [] for d in of(BAG, TimestampDomain)}
     for found in of(BAG, TimestampDomain):
         domains[found.field].append(found)
     (domain,) = domains["time"]

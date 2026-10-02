@@ -324,7 +324,7 @@ def test_every_undecoded_stream_has_a_payload_finding_and_nothing_else_is_report
     payloads = [f for f in ROBOT.findings() if f.code == "mcap.payload_not_decoded"]
     # /battery and /diagnostics are JSON; both Imu channels decode by their ros2msg definition
     assert len(payloads) == 2 and all(len(f.records) == 1 for f in payloads)
-    assert sorted(f.details["reason"] for f in payloads) == ["message_encoding"] * 2
+    assert [f.details["reason"] for f in payloads] == ["message_encoding"] * 2
 
 
 # --- Every message a row, every row its bytes ----------------------------------------------------
