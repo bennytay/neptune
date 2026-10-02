@@ -51,10 +51,15 @@ def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: 
         assert case["package"].startswith("sha256:")
     # Real ingest, partial success: the drone's ULog is claimed by the flightlog (PX4) adapter,
     # which reports the one sample dropout the log declares. Stream introspection (MVL-21) has no
-    # layout reader for its two streams' encoding, so each is not covered. Ingest is deterministic.
+    # layout reader for its two streams' encoding, so each is not covered. Its folder holds no
+    # configuration, software, hardware or calibration file, so snapshot binding (MVL-38) says the
+    # run has no software identity and leaves the other three kinds unresolved. Ingest is
+    # deterministic.
     drone = cases[0]
     assert drone["findings"] == {
         "flightlog.dropout": 1,
+        "neptune.bindings.no_software_identity": 1,
+        "neptune.bindings.snapshot_unresolved": 3,
         "neptune.introspection.encoding_not_covered": 2,
     }
     ids = {case["package"] for case in cases}
@@ -92,8 +97,14 @@ def test_a_corrupt_source_is_a_finding_not_a_failed_run(tmp_path: Path) -> None:
     report, code = run(tmp_path / "run", owner_tests=False, corpus_root=tmp_path / "corpus")
     row = report["stages"][0]["output"]["cases"][0]
     assert code == 0 and row["state"] == "committed"
-    # The adapter's finding, and validation's roll-up of the source it cut short (ADR 0054).
-    assert row["findings"] == {"mcap.truncated": 1, "neptune.validate.source_incomplete": 1}
+    # The adapter's finding, validation's roll-up of the source it cut short (ADR 0054), and the
+    # run's unbound snapshots (ADR 0064): no software identity, three kinds unresolved.
+    assert row["findings"] == {
+        "mcap.truncated": 1,
+        "neptune.bindings.no_software_identity": 1,
+        "neptune.bindings.snapshot_unresolved": 3,
+        "neptune.validate.source_incomplete": 1,
+    }
     assert report["corpus"]["name"] == "custom"
 
 
