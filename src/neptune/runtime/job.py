@@ -78,7 +78,8 @@ from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatu
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
 from neptune.derived.media import MediaIndex, index_media
-from neptune.derived.temporal import ClockAlignment, align_clocks, clock_records
+from neptune.derived.spatial import FrameAlignment, align_frames, frame_records
+from neptune.derived.temporal import ClockAlignment, RowReader, align_clocks, clock_records
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.layout import Layout, layout_from_scan
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
@@ -306,6 +307,14 @@ class _Source:
     def key(self) -> tuple[ContentId, RecordId]:
         assert self.config is not None  # only selected sources have a key
         return (self.content_id, self.config.transform.id)
+
+
+@dataclass(frozen=True)
+class _AlignmentInputs:
+    """The records and series rows the alignment passes read (stages 9c and 9d)."""
+
+    records: list[object]
+    rows: RowReader
 
 
 class _Opener:
@@ -2007,9 +2016,13 @@ class IngestJob:
                 if (media := self._index_media(streams, introspection, frames)) is not None:
                     cited.add(media.transform.id)
                     derived = {**derived, **media.tables()}
-            if (clocks := self._align_clocks()) is not None:
+            inputs = self._alignment_inputs()
+            if (clocks := self._align_clocks(inputs)) is not None:
                 cited.add(clocks.transform.id)
                 derived = {**(derived or {}), **clocks.tables()}
+            if (frames_found := self._align_frames(inputs)) is not None:
+                cited.add(frames_found.transform.id)
+                derived = {**(derived or {}), **frames_found.tables()}
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
@@ -2090,10 +2103,9 @@ class IngestJob:
         self._emit(events.STREAMS_INTROSPECTED, found.summary())
         return found
 
-    def _align_clocks(self) -> ClockAlignment | None:
-        """Stage 9c, before the package is staged: relate the admitted sources' clocks (ADR 0060).
-        Reads only the time and value columns of the committed runs its rules name; writes no
-        tick. A package with fewer than two clocks gets no alignment: no tables, no transform."""
+    def _alignment_inputs(self) -> _AlignmentInputs:
+        """What the alignment passes read, loaded once: the admitted sources' records of the
+        kinds they read (the rest is dropped here) and each stream's committed runs."""
         records: list[object] = []
         runs: dict[RecordId, list[Path]] = defaultdict(list)
         try:
@@ -2103,7 +2115,9 @@ class IngestJob:
                     continue  # staging refuses the package and says why
                 for chunk in plan.chunks:
                     output = self.workspace.load(str(chunk["id"]))
-                    records.extend(clock_records(output.records))  # the rest is dropped here
+                    kept = {id(r): r for r in clock_records(output.records)}
+                    kept.update((id(r), r) for r in frame_records(output.records))
+                    records.extend(kept.values())
                     for stream, run in sorted(output.runs.items()):
                         runs[stream].append(run)
         except (WorkspaceError, ValueError, OSError) as exc:
@@ -2113,8 +2127,14 @@ class IngestJob:
             for run in runs.get(stream.id, ()):
                 yield from read_rows(run, columns)
 
+        return _AlignmentInputs(records, rows)
+
+    def _align_clocks(self, inputs: _AlignmentInputs) -> ClockAlignment | None:
+        """Stage 9c, before the package is staged: relate the admitted sources' clocks (ADR 0060).
+        Reads only the time and value columns of the committed runs its rules name; writes no
+        tick. A package with fewer than two clocks gets no alignment: no tables, no transform."""
         try:
-            found = align_clocks(records, rows)
+            found = align_clocks(clock_records(inputs.records), inputs.rows)
         except (SeriesError, OSError) as exc:  # the runs were checked when committed
             raise JobError(f"the package cannot be assembled: {exc}") from exc
         if found is None:
@@ -2123,6 +2143,23 @@ class IngestJob:
         for finding in found.findings:
             self._record(finding, found.transform)
         self._emit(events.CLOCKS_ALIGNED, found.summary())
+        return found
+
+    def _align_frames(self, inputs: _AlignmentInputs) -> FrameAlignment | None:
+        """Stage 9d, before the package is staged: align the admitted sources' frames (ADR 0068):
+        run trees from decoded transforms and headers, links, groups and spatial references.
+        Reads only the frame and transform columns of the committed runs; composes nothing. A
+        package with nothing spatial gets no alignment: no tables, no transform."""
+        try:
+            found = align_frames(frame_records(inputs.records), inputs.rows)
+        except (SeriesError, OSError) as exc:  # the runs were checked when committed
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+        if found is None:
+            return None
+        self._producers[found.transform.id] = found.transform
+        for finding in found.findings:
+            self._record(finding, found.transform)
+        self._emit(events.FRAMES_ALIGNED, found.summary())
         return found
 
     def _index_media(
