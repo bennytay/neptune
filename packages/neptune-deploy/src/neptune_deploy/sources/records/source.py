@@ -326,7 +326,7 @@ class RecordSource:
         """Each attachment's declared parent, in child id order."""
         by_id = {entry.id: entry for entry in self.listing().entries}
         return tuple(
-            Relation(entry.location, entry.parent)
+            Relation(entry.location, entry.parent, locator=entry.locator)
             for entry in by_id.values()
             if entry.parent is not None
         )
@@ -507,7 +507,7 @@ class RecordSource:
 
 
 def _retry(exc: RateLimited) -> dict[str, JsonValue]:
-    details: dict[str, JsonValue] = {"status": 429}
+    details: dict[str, JsonValue] = {"status": exc.status or 429}
     if exc.retry_after is not None:
         details["retry_after"] = exc.retry_after
     return details
@@ -604,7 +604,10 @@ class _Collect:
             # An ordered feed may state one item twice in a row (a page of one): that is a loop only
             # if it states the same revision.
             ids = frozenset(
-                [item.id + ("\0" + item.token if item.later_wins else "") for item in page.items]
+                [
+                    item.id + ("\0" + item.token if item.later_wins else "")
+                    for item in page.updates()
+                ]
                 + [r.id for r in page.rejected]
             )
             if ids and ids == previous:
@@ -672,54 +675,61 @@ class _Collect:
             if self._full():
                 return False
             self._reject(rejected.reason, rejected.id)
-        for removed in page.removed:
+        for event in page.stream():  # in the order the system stated them: the last one wins
             if self._full():
                 return False
-            if removed not in self.removed:
-                self.removed[removed] = None
-                self.held += len(removed.encode("utf-8", "replace"))
-            self.kept.pop(removed, None)
-            self.duplicated.discard(removed)  # the system says it is gone: no longer ambiguous
-            for child in self.children.pop(removed, ()):  # what hung under it goes too
-                self.kept.pop(child, None)
-                self.duplicated.discard(child)
-        for item in page.items:
-            if self._full():
+            if isinstance(event, str):
+                self._remove(event)
+            elif not self._update(event):
                 return False
-            problem = self._problem(item)
-            if problem is not None:
-                self._reject(problem, item.id)
-                continue
-            self.removed.pop(item.id, None)
-            held = self.kept.get(item.id)
-            if held is not None and held != item and item.later_wins and held.later_wins:
-                # an ordered feed's later statement replaces the earlier
-                size = len(item.body) if item.body is not None else 0
-                before = len(held.body) if held.body is not None else 0
-                if self.body_bytes - before + size > self.options.max_snapshot_bytes:
-                    self._limit({"max_snapshot_bytes": self.options.max_snapshot_bytes})
-                    return False
-                self.body_bytes += size - before
-                self.kept[item.id] = item
-                self.held += sum(len(t.encode("utf-8")) for t in (item.token, item.name))
-                if self.held > self.options.max_listing_bytes:
-                    self._limit({"max_listing_bytes": self.options.max_listing_bytes})
-                    return False
-            elif held is not None and held != item:
-                self.duplicated.add(item.id)
-            elif held is None:
-                size = len(item.body) if item.body is not None else 0
-                if self.body_bytes + size > self.options.max_snapshot_bytes:
-                    self._limit({"max_snapshot_bytes": self.options.max_snapshot_bytes})
-                    return False
-                self.held += sum(len(t.encode("utf-8")) for t in (item.id, item.token, item.name))
-                if self.held > self.options.max_listing_bytes:
-                    self._limit({"max_listing_bytes": self.options.max_listing_bytes})
-                    return False
-                self.body_bytes += size
-                self.kept[item.id] = item
-                if item.parent is not None:
-                    self.children[item.parent].append(item.id)
+        return True
+
+    def _remove(self, removed: str) -> None:
+        if removed not in self.removed:
+            self.removed[removed] = None
+            self.held += len(removed.encode("utf-8", "replace"))
+        self.kept.pop(removed, None)
+        self.duplicated.discard(removed)  # the system says it is gone: no longer ambiguous
+        for child in self.children.pop(removed, ()):  # what hung under it goes too
+            self.kept.pop(child, None)
+            self.duplicated.discard(child)
+
+    def _update(self, item: Item) -> bool:
+        """Fold one updated item in. ``False`` once a limit is reached."""
+        problem = self._problem(item)
+        if problem is not None:
+            self._reject(problem, item.id)
+            return True
+        self.removed.pop(item.id, None)  # stated again after a deletion: it is live
+        held = self.kept.get(item.id)
+        if held is not None and held != item and item.later_wins and held.later_wins:
+            # an ordered feed's later statement replaces the earlier
+            size = len(item.body) if item.body is not None else 0
+            before = len(held.body) if held.body is not None else 0
+            if self.body_bytes - before + size > self.options.max_snapshot_bytes:
+                self._limit({"max_snapshot_bytes": self.options.max_snapshot_bytes})
+                return False
+            self.body_bytes += size - before
+            self.kept[item.id] = item
+            self.held += sum(len(t.encode("utf-8")) for t in (item.token, item.name))
+            if self.held > self.options.max_listing_bytes:
+                self._limit({"max_listing_bytes": self.options.max_listing_bytes})
+                return False
+        elif held is not None and held != item:
+            self.duplicated.add(item.id)
+        elif held is None:
+            size = len(item.body) if item.body is not None else 0
+            if self.body_bytes + size > self.options.max_snapshot_bytes:
+                self._limit({"max_snapshot_bytes": self.options.max_snapshot_bytes})
+                return False
+            self.held += sum(len(t.encode("utf-8")) for t in (item.id, item.token, item.name))
+            if self.held > self.options.max_listing_bytes:
+                self._limit({"max_listing_bytes": self.options.max_listing_bytes})
+                return False
+            self.body_bytes += size
+            self.kept[item.id] = item
+            if item.parent is not None:
+                self.children[item.parent].append(item.id)
         return True
 
     def _problem(self, item: Item) -> str | None:
@@ -761,6 +771,7 @@ class _Collect:
                 key,
                 item.name,
                 refs.get(item.parent) if item.parent is not None else None,
+                item.locator,
             )
             for key, item in sorted(self.kept.items())
         )

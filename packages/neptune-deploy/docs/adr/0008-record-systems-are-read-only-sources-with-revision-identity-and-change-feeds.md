@@ -52,7 +52,9 @@ them to record systems and records where those rules had to bend.
    - A document revised in place is therefore a new token at the same location. The ledger chains it as a
      new `SourceRevision` and keeps the old one. Identical bytes under a new token are no new revision.
      An attachment's id begins with its parent's, so its parent is also a declared relation
-     (`relations()`, `attachment_of`, stated by the system), the compiler having nowhere for one yet.
+     (`relations()`: `attachment_of`, `assertion_kind: stated`, and a `locator`, the JSON pointer within the record
+     that stated the link: the parent's `/fields/attachment/<n>` for Jira, its declared attachments pointer for
+     REST, the attachment's own `/table_sys_id` for ServiceNow), the compiler having nowhere for one yet.
 4. **The systems.** Each system knows its wire format and nothing else; limits, order, findings, discovery
    and reads are the source's, so no two differ in policy.
    - **Jira Cloud**: enhanced JQL `search/jql` for a project, `attachment/content/{id}?redirect=false`.
@@ -93,7 +95,9 @@ them to record systems and records where those rules had to bend.
    receipt is durable. `discover(ledger)` sorts items into new, changed (a different token), unchanged
    (never fetched) and gone. Gone is: a complete snapshot's absences; ids the system said were deleted
    (and what hangs under them); and an attachment that its parent's own full list no longer holds. An item
-   that was seen and could not be used is never called gone. A listing that stopped early is incomplete and
+   that was seen and could not be used is never called gone. A feed that states updates and deletions in one stream (Drive `changes.list`, Graph delta) is read as
+   one ordered stream per page, and the last statement for an id wins: an edit then a deletion is a deletion, a
+   deletion then a restore is live, within a page or across pages. A listing that stopped early is incomplete and
    asserts nothing gone, and one with a page the system called incomplete states no cursor at all, since
    a cursor from its end would skip what was missed.
 6. **The network boundary and read-only credentials.** ADR 0006 §6 holds: the workspace is asked before the
@@ -101,8 +105,11 @@ them to record systems and records where those rules had to bend.
    endpoint is https, or http to loopback only, with no user information; a timeout is also a deadline.
    A URL a system states (a Jira attachment's `content`, a Confluence `_links.next`) is never requested:
    requests are built from validated ids and the declared endpoint's base path, so a hostile record cannot point the client, or its credentials,
-   anywhere. Nothing sleeps or retries: a `429` is a finding with the system's integer `Retry-After`, and the
-   listing stops and says where. Two narrow exceptions, each for a system whose API has no other form:
+   anywhere. Nothing sleeps or retries: a throttled request is a finding with the system's integer `Retry-After`
+   (bounded; a date or nonsense is not used), and the listing stops and says where. Throttling is `429`
+   everywhere; Graph's `503` and `509` too; Drive's `403` whose JSON error states `rateLimitExceeded` or
+   `userRateLimitExceeded` (the only 403 body read, bounded to 64 KiB, nothing else of it kept); and Linear's `400`.
+   Any other `403` is `access_denied`, and any other `503` is `listing_failed`. Two narrow exceptions, each for a system whose API has no other form:
    - **GraphQL queries by `POST` (Linear).** `Api.graphql` sends a constant query document of the module
      with variables in the JSON body, and refuses before sending any document that is not a `query` or
      that contains `mutation` or `subscription`. No value enters a document. A query is a read, so a stale
@@ -114,7 +121,10 @@ them to record systems and records where those rules had to bend.
      `302`, `303` or `307`, to a host the operator allows (`download_hosts`; default Microsoft's domains
      `sharepoint.com`, `.us`, `.de`, `.cn`, `1drv.com`, `microsoftpersonalcontent.com`, each matched as the
      domain or a subdomain, never a prefix), over https on port 443 (http to loopback), without user
-     information or a fragment, with a plain path. The request carries no `Authorization` header, uses the
+     information or a fragment, with a plain path. The query is passed on exactly as the system wrote it (a pre-authenticated URL is signed over its bytes, so
+     nothing decodes and re-encodes it, and a literal `+` stays one). The allow-list matches host names: the
+     connector does no DNS and does not check what a listed name resolves to, which is no worse than the
+     credential-free, size-bounded GET it permits. The request carries no `Authorization` header, uses the
      same workspace gate, timeout and size check, and its own redirect is refused. Any other target is
      `redirect_refused` and no request is sent to it. A bare top-level domain is refused as an allowed
      host. The credential never goes anywhere but the declared endpoint.

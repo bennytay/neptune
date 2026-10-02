@@ -175,26 +175,22 @@ class DriveSystem:
                 raise ResponseInvalid("the last page of changes names no new start token")
             if following is not None and not _TOKEN.fullmatch(following):
                 raise ResponseInvalid("not a page token")
-            items: list[Item] = []
+            events: list[Item | str] = []
             rejected: list[Rejected] = []
-            removed: list[str] = []
             for change in array(root.get("changes")):
-                self._change(change, items, rejected, removed)
+                self._change(change, events, rejected)
             resume = following if following is not None else final
             yield Page(
-                tuple(items),
                 cursor=following,
                 resume=cursor_text(CONNECTOR_ID, resume) if resume else None,
-                removed=tuple(removed),
                 rejected=tuple(rejected),
+                events=tuple(events),  # an edit then a deletion, or the reverse: the last wins
             )
             if following is None:
                 return
             token = following
 
-    def _change(
-        self, change: Any, items: list[Item], rejected: list[Rejected], removed: list[str]
-    ) -> None:
+    def _change(self, change: Any, events: list[Item | str], rejected: list[Rejected]) -> None:
         record = change if isinstance(change, dict) else {}
         file = record.get("file")
         file_id = text(record.get("fileId")) or (
@@ -206,9 +202,11 @@ class DriveSystem:
         if record.get("removed") is True or (
             isinstance(file, dict) and file.get("trashed") is True
         ):
-            removed.append(f"file/{file_id}")
+            events.append(f"file/{file_id}")
         elif isinstance(file, dict):
-            self._file(file, items, rejected, later_wins=True)  # the feed is in time order
+            updated: list[Item] = []
+            self._file(file, updated, rejected, later_wins=True)  # the feed is in time order
+            events.extend(updated)
 
     def _file(
         self, entry: Any, items: list[Item], rejected: list[Rejected], *, later_wins: bool = False

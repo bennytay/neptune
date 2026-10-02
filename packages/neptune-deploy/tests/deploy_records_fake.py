@@ -37,6 +37,7 @@ class Request:
     query: dict[str, str]
     headers: dict[str, str]
     body: bytes = b""
+    target: str = ""  # the request target exactly as sent: path and raw query
 
 
 @dataclass
@@ -109,7 +110,9 @@ class FakeServer:
                 parts = urllib.parse.urlsplit(self.path)
                 query = dict(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
                 headers = {k.lower(): v for k, v in self.headers.items()}
-                reply = server._respond(Request("GET", parts.path, query, headers))
+                reply = server._respond(
+                    Request("GET", parts.path, query, headers, target=self.path)
+                )
                 self.send_response(reply.status)
                 length = len(reply.body) if reply.declared_length is None else reply.declared_length
                 for name, value in reply.headers.items():
@@ -138,7 +141,7 @@ class FakeServer:
                 length = int(self.headers.get("Content-Length", "0"))
                 body = self.rfile.read(length)
                 headers = {k.lower(): v for k, v in self.headers.items()}
-                reply = server._respond(Request("POST", parts.path, {}, headers, body))
+                reply = server._respond(Request("POST", parts.path, {}, headers, body, self.path))
                 self.send_response(reply.status)
                 for name, value in reply.headers.items():
                     self.send_header(name, value)
@@ -351,24 +354,28 @@ class DriveBackend(Backend):
         f = self.files[file_id]
         f["content"] = content
         f["version"] = str(int(f["version"]) + 1)
-        self.changes.append({"fileId": file_id, "removed": False})
+        self.changes.append({"fileId": file_id, "removed": False, "meta": self._meta(f)})
 
     def touch(self, file_id: str) -> None:
         """A version bump with the same bytes (a share, a rename): Drive's version still moves."""
         f = self.files[file_id]
         f["version"] = str(int(f["version"]) + 1)
-        self.changes.append({"fileId": file_id, "removed": False})
+        self.changes.append({"fileId": file_id, "removed": False, "meta": self._meta(f)})
 
     def add(self, file_id: str, name: str, content: bytes, mime: str = "application/pdf") -> None:
         self.files[file_id] = {
             "id": file_id, "name": name, "mimeType": mime, "content": content,
             "version": "1", "trashed": False,
         }  # fmt: skip
-        self.changes.append({"fileId": file_id, "removed": False})
+        self.changes.append(
+            {"fileId": file_id, "removed": False, "meta": self._meta(self.files[file_id])}
+        )
 
     def trash(self, file_id: str) -> None:
         self.files[file_id]["trashed"] = True
-        self.changes.append({"fileId": file_id, "removed": False})
+        self.changes.append(
+            {"fileId": file_id, "removed": False, "meta": self._meta(self.files[file_id])}
+        )
 
     def remove(self, file_id: str) -> None:
         del self.files[file_id]
@@ -408,10 +415,9 @@ class DriveBackend(Backend):
         start, size = int(request.query["pageToken"]), int(request.query["pageSize"])
         out = []
         for change in self.changes[start : start + size]:
-            f = self.files.get(change["fileId"])
             entry: dict[str, Any] = {"fileId": change["fileId"], "removed": change["removed"]}
-            if f is not None and not change["removed"]:
-                entry["file"] = self._meta(f)
+            if not change["removed"]:
+                entry["file"] = change["meta"]  # the file as it was when the change was made
             out.append(entry)
         body: dict[str, Any] = {"changes": out}
         if start + size < len(self.changes):

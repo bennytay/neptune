@@ -22,8 +22,11 @@ class GraphBackend(Backend):
                 item["content"] = item["content"].encode()
         self.shortcut = data["shortcut"]
         self.log: list[str] = []  # item ids in the order they changed: a delta token indexes it
+        self.history: list[dict[str, Any]] = []  # each change as it was stated when it happened
+        self.verbatim = False  # a delta that states every change, not the last one per item
         self.link_param = "$skiptoken"  # what a nextLink carries; OneDrive Personal uses "token"
         self.stale: dict[str, dict[str, Any]] = {}  # an older statement to emit before the item
+        self.redirect_query: str | None = None  # a raw query for the pre-authenticated URL
         self.redirect_to: str | None = None  # a Location to answer with, instead of the own host
         self.hide_hashes = False
         self.downloads: list[Request] = []
@@ -36,27 +39,31 @@ class GraphBackend(Backend):
         head = item["ctag"].rsplit(",", 1)[0]
         item["content"] = content
         item["ctag"] = f'{head},{number}"'
-        self.log.append(item_id)
+        self._logged(item_id)
 
     def rename(self, item_id: str, name: str) -> None:
         """A rename moves the eTag but not the cTag: the bytes are the same."""
         item = self.items[item_id]
         item["name"] = name
         item["etag"] = item["etag"].replace("},", "},9")
-        self.log.append(item_id)
+        self._logged(item_id)
 
     def add(self, item_id: str, name: str, content: bytes) -> None:
         self.items[item_id] = {
             "id": item_id, "name": name, "content": content,
             "ctag": f'"c:{{{item_id}}},1"', "etag": f'"{{{item_id}}},1"',
         }  # fmt: skip
-        self.log.append(item_id)
+        self._logged(item_id)
 
     def delete(self, item_id: str) -> None:
         self.items[item_id] = {"id": item_id, "deleted": {"state": "deleted"}}
-        self.log.append(item_id)
+        self._logged(item_id)
 
     # --- The wire shapes -----------------------------------------------------------------------
+
+    def _logged(self, item_id: str) -> None:
+        self.log.append(item_id)
+        self.history.append(self._meta(self.items[item_id]))
 
     def _meta(self, item: dict[str, Any]) -> dict[str, Any]:
         out: dict[str, Any] = {"id": item["id"]}
@@ -88,9 +95,8 @@ class GraphBackend(Backend):
             item = self.items.get(item_id)
             if item is None or "content" not in item:
                 return None
-            where = self.redirect_to or (
-                f"http://{request.headers['host']}/dl/{item_id}?tempauth=a%2Bb%3D%3D&e=2026"
-            )
+            query = self.redirect_query or "tempauth=a%2Bb%3D%3D&e=2026"
+            where = self.redirect_to or f"http://{request.headers['host']}/dl/{item_id}?{query}"
             return Reply(302, b"", {"Location": where})
         if request.path.startswith("/dl/"):
             self.downloads.append(request)
@@ -108,6 +114,8 @@ class GraphBackend(Backend):
         return super().authorised(request)
 
     def _flat(self, kind: str, start: int) -> list[dict[str, Any]]:
+        if kind == "i" and self.verbatim:
+            return list(self.history[start:])  # every statement, in order, as Graph may
         if kind == "i":  # what changed since log position ``start``
             return [self._meta(self.items[i]) for i in sorted({*self.log[start:]})]
         flat = [self._meta(i) for i in sorted(self.items.values(), key=lambda i: i["id"])]

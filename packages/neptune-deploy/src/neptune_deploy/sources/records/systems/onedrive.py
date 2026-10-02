@@ -48,6 +48,9 @@ from neptune_deploy.sources.records.systems.spec import Plan, Spec
 CONNECTOR_ID: Final = "deploy_onedrive"
 MAX_PAGE_SIZE: Final = 200
 DEFAULT_ENDPOINT: Final = "https://graph.microsoft.com"
+THROTTLE_STATUSES: Final = frozenset(
+    {429, 503, 509}
+)  # Graph's throttling answers, with Retry-After
 DEFAULT_DOWNLOAD_HOSTS: Final = (
     "1drv.com",
     "microsoftpersonalcontent.com",
@@ -142,25 +145,21 @@ class OneDriveSystem:
                 raise ResponseInvalid("a page names neither a next page nor a delta link")
             if following is not None and final is not None:
                 raise ResponseInvalid("a page names both a next page and a delta link")
-            items: list[Item] = []
+            events: list[Item | str] = []
             rejected: list[Rejected] = []
-            removed: list[str] = []
             for entry in array(root.get("value")):
-                self._entry(entry, items, rejected, removed)
+                self._entry(entry, events, rejected)
             yield Page(
-                tuple(items),
                 cursor=following[1] if following is not None else None,
                 resume=cursor_text(CONNECTOR_ID, final[1]) if final is not None else None,
-                removed=tuple(removed),
                 rejected=tuple(rejected),
+                events=tuple(events),  # an edit then a deletion, or the reverse: the last wins
             )
             if following is None:
                 return
             step = following
 
-    def _entry(
-        self, entry: Any, items: list[Item], rejected: list[Rejected], removed: list[str]
-    ) -> None:
+    def _entry(self, entry: Any, events: list[Item | str], rejected: list[Rejected]) -> None:
         record = entry if isinstance(entry, dict) else {}
         raw = text(record.get("id"))
         item_id = f"item/{raw or ''}"
@@ -168,7 +167,7 @@ class OneDriveSystem:
             rejected.append(Rejected(item_id, "id_invalid"))
             return
         if isinstance(record.get("deleted"), dict):
-            removed.append(item_id)
+            events.append(item_id)
             return
         facet = record.get("file")
         if not isinstance(facet, dict):
@@ -192,7 +191,7 @@ class OneDriveSystem:
                     rejected.append(Rejected(item_id, "record_invalid"))
                     return
                 digests[graph_name.removesuffix("Hash")] = value.lower()
-        items.append(
+        events.append(
             Item(
                 item_id,
                 token,
@@ -216,6 +215,7 @@ class OneDriveSystem:
 
 def _build(api: Api, what: str, options: Options) -> tuple[OneDriveSystem, dict[str, JsonValue]]:
     hosts = tuple(options.extra.get("download_hosts") or DEFAULT_DOWNLOAD_HOSTS)
+    api.transport.throttle_statuses = THROTTLE_STATUSES
     system = OneDriveSystem(api, what, hosts, options.page_size or MAX_PAGE_SIZE)
     config: dict[str, JsonValue] = {
         "download_hosts": list(hosts),

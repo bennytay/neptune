@@ -50,6 +50,9 @@ _MAX_RETRY_AFTER: Final = 7 * 24 * 3600
 FOLLOWED_REDIRECTS: Final = (302, 303, 307)  # a download redirect; never any other 3xx
 _MAX_LOCATION: Final = 8192
 _PATH: Final = re.compile(r"/[A-Za-z0-9._~!$&'()*+,;=:@/%\-]*")
+_RAW_QUERY: Final = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:@/?%\-]*")
+_QUOTA_REASONS: Final = frozenset({"rateLimitExceeded", "userRateLimitExceeded"})
+_MAX_ERROR_BODY: Final = 64 * 1024
 _READ_ONLY_OPERATION: Final = re.compile(r"\s*query\b")
 _WRITING_OPERATION: Final = re.compile(r"\b(mutation|subscription)\b")
 
@@ -127,6 +130,9 @@ class RecordTransport(Transport):
         super().__init__(*args, **kwargs)
         self._last_headers: dict[str, str] = {}
         self._body: bytes | None = None  # a GraphQL query, for the one request that sends it
+        self._error_reason: str | None = None  # the reason a 403 states, if it states one
+        # Statuses this system answers a throttled request with (a Retry-After comes with them).
+        self.throttle_statuses: frozenset[int] = frozenset({429})
 
     @property
     def last_location(self) -> str | None:
@@ -135,9 +141,11 @@ class RecordTransport(Transport):
 
     def derive(self, endpoint: Endpoint) -> "RecordTransport":
         """A transport to another endpoint under the same gate, purpose, timeout and TLS."""
-        return RecordTransport(
+        other = RecordTransport(
             endpoint, self._network, self._purpose, timeout=self._timeout, tls=self._tls
         )
+        other.throttle_statuses = self.throttle_statuses
+        return other
 
     def _send(
         self, target: str, headers: Mapping[str, str], deadline: _Deadline
@@ -149,7 +157,28 @@ class RecordTransport(Transport):
             else self._send_query(target, headers, body, deadline)
         )
         self._last_headers = {k.lower(): v for k, v in raw.getheaders()}
+        self._error_reason = self._reason_of(raw) if raw.status == 403 else None
         return raw
+
+    @staticmethod
+    def _reason_of(raw: http.client.HTTPResponse) -> str | None:
+        """The ``reason`` a 403's JSON error states (Google: ``error.errors[0].reason``), if it
+        is one of the quota reasons. The body is read bounded and only for a 403; anything else it
+        holds is never kept."""
+        try:
+            body = raw.read(_MAX_ERROR_BODY + 1)
+            if len(body) > _MAX_ERROR_BODY:
+                return None
+            document = jsontext.loads(body)
+        except (OSError, http.client.HTTPException, jsontext.JsonTextError):
+            return None
+        error = document.get("error") if isinstance(document, dict) else None
+        listed = error.get("errors") if isinstance(error, dict) else None
+        for entry in listed if isinstance(listed, list) else ():
+            reason = entry.get("reason") if isinstance(entry, dict) else None
+            if isinstance(reason, str) and reason in _QUOTA_REASONS:
+                return str(reason)
+        return None
 
     def _send_query(
         self, target: str, headers: Mapping[str, str], body: bytes, deadline: _Deadline
@@ -194,8 +223,12 @@ class RecordTransport(Transport):
         try:
             return super().get(path, query, headers)
         except HttpStatusError as exc:
-            if exc.status == 429:
-                raise RateLimited("rate limited", 429, _retry_after(self._last_headers)) from exc
+            if exc.status in self.throttle_statuses or (
+                exc.status == 403 and self._error_reason is not None
+            ):  # Drive states a quota stop as a 403 whose reason says so
+                raise RateLimited(
+                    "rate limited", exc.status or 0, _retry_after(self._last_headers)
+                ) from exc
             if exc.status == 400 and "0" in (
                 self._last_headers.get("x-ratelimit-requests-remaining"),
                 self._last_headers.get("x-ratelimit-complexity-remaining"),
@@ -263,11 +296,11 @@ class Api:
                 raise
             location = self.transport.last_location
             status = exc.status
-        endpoint, target, pairs = pre_authenticated(location, hosts, status)
+        endpoint, target = pre_authenticated(location, hosts, status)
         other = self.transport.derive(endpoint)
         try:
             return _exactly(
-                other.get(target, pairs, {"Accept": "*/*", "User-Agent": USER_AGENT}), size
+                other.get(target, (), {"Accept": "*/*", "User-Agent": USER_AGENT}), size
             )
         finally:
             other.drop()
@@ -278,10 +311,12 @@ class Api:
 
 def pre_authenticated(
     location: str | None, hosts: Sequence[str], status: int
-) -> tuple[Endpoint, str, list[tuple[str, str]]]:
-    """``(endpoint, path, query)`` of a redirect target, or ``RedirectRefused`` if it is not one
+) -> tuple[Endpoint, str]:
+    """``(endpoint, target)`` of a redirect target, or ``RedirectRefused`` if it is not one
     the operator allowed: a host of ``hosts`` (or a subdomain of one), https on port 443 (http to a
-    loopback host), no user information, no fragment, a plain path."""
+    loopback host), no user information, no fragment, a plain path. ``target`` is the path and the
+    query exactly as the system wrote them: a pre-authenticated URL is signed over its bytes, so
+    nothing here decodes and re-encodes it (a literal ``+`` stays a ``+``)."""
 
     def refuse() -> RedirectRefused:
         return RedirectRefused(f"status {status}", status)
@@ -297,14 +332,19 @@ def pre_authenticated(
     try:
         parts = urllib.parse.urlsplit(location)
         endpoint = Endpoint.parse(f"{parts.scheme}://{parts.netloc}")
-        pairs = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
     except ValueError as exc:
         raise refuse() from exc
     allowed = any(endpoint.host == h or endpoint.host.endswith("." + h) for h in hosts)
     default = 443 if endpoint.scheme == "https" else endpoint.port
-    if not allowed or parts.fragment or endpoint.port != default or not _PATH.fullmatch(parts.path):
+    if (
+        not allowed
+        or parts.fragment
+        or endpoint.port != default
+        or not _PATH.fullmatch(parts.path)
+        or not _RAW_QUERY.fullmatch(parts.query)
+    ):
         raise refuse()
-    return endpoint, parts.path, pairs
+    return endpoint, parts.path + ("?" + parts.query if parts.query else "")
 
 
 def _json_of(response: Response) -> tuple[Any, Mapping[str, str]]:

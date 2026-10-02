@@ -200,8 +200,8 @@ class JiraSystem:
                 children=f"{item_id}/attachment/" if isinstance(listed, list) else None,
             )
         )
-        for attachment in listed if isinstance(listed, list) else ():
-            made = self._attachment(item_id, attachment)
+        for number, attachment in enumerate(listed if isinstance(listed, list) else ()):
+            made = self._attachment(item_id, attachment, number)
             if isinstance(made, Rejected):
                 rejected.append(made)
             else:
@@ -209,7 +209,7 @@ class JiraSystem:
         moment = _instant(updated)
         return (moment, updated) if moment is not None else None
 
-    def _attachment(self, parent: str, attachment: Any) -> Item | Rejected:
+    def _attachment(self, parent: str, attachment: Any, number: int) -> Item | Rejected:
         record = attachment if isinstance(attachment, dict) else {}
         raw = text_or_whole(record.get("id"))
         item_id = f"{parent}/attachment/{raw or ''}"
@@ -228,6 +228,7 @@ class JiraSystem:
             size,
             fetch=Fetch(f"{self.base}/attachment/content/{raw}", (("redirect", "false"),), size),
             parent=parent,
+            locator=f"/fields/attachment/{number}",
         )
 
     def download(self, fetch: Fetch) -> bytes:

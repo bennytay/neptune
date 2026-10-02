@@ -379,8 +379,8 @@ class RestSystem:
                 children=f"{item_id}/attachment/" if isinstance(listed, list) else None,
             )
         )
-        for attachment in listed if isinstance(listed, list) else ():
-            made = self._attachment(item_id, raw, attachment)
+        for number, attachment in enumerate(listed if isinstance(listed, list) else ()):
+            made = self._attachment(item_id, raw, attachment, number)
             if isinstance(made, Rejected):
                 rejected.append(made)
             else:
@@ -398,7 +398,9 @@ class RestSystem:
         writer.writerow([jsontext.cell(jsontext.pointer(row, ptr)) for ptr in columns.values()])
         return out.getvalue().encode("utf-8")
 
-    def _attachment(self, parent: str, record_id: str, attachment: Any) -> Item | Rejected:
+    def _attachment(
+        self, parent: str, record_id: str, attachment: Any, number: int
+    ) -> Item | Rejected:
         spec = self.profile.attachments
         assert spec is not None
         raw = self._text(attachment, spec["id"])
@@ -421,6 +423,7 @@ class RestSystem:
             size,
             fetch=Fetch(path, (), size),
             parent=parent,
+            locator=f"{spec['pointer'].rstrip('/')}/{number}",
         )
 
     def download(self, fetch: Fetch) -> bytes:

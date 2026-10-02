@@ -60,6 +60,7 @@ class Item:
     parent: str | None = None
     children: str | None = None
     later_wins: bool = False
+    locator: str | None = None
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,12 @@ class Page:
     """One page of a feed. ``cursor`` names the next page (``None`` on the last): a cursor seen
     twice is a loop. ``resume`` is where a later run may continue if this page is the last one
     processed (``None`` when the feed has no such point); ``partial`` says the system itself
-    declared this page incomplete. ``removed`` are ids the system says no longer exist."""
+    declared this page incomplete. ``removed`` are ids the system says no longer exist.
+
+    ``events`` is for a feed that states updates and deletions in one ordered stream (Drive
+    changes, Graph delta): an ``Item`` is an update and a ``str`` is the id of a deletion, in the
+    order the system stated them, and the last event for an id wins. A page that has ``events``
+    has no ``items`` or ``removed``; one that does not has all its removals before its items."""
 
     items: tuple[Item, ...] = ()
     cursor: str | None = None
@@ -83,6 +89,14 @@ class Page:
     removed: tuple[str, ...] = ()
     rejected: tuple[Rejected, ...] = ()
     partial: bool = False
+    events: tuple[Item | str, ...] = ()
+
+    def stream(self) -> tuple[Item | str, ...]:
+        """Every update and deletion of the page, in the order they apply."""
+        return self.events or (*self.removed, *self.items)
+
+    def updates(self) -> tuple[Item, ...]:
+        return tuple(event for event in self.stream() if isinstance(event, Item))
 
 
 @dataclass(frozen=True)
@@ -97,6 +111,7 @@ class RecordEntry:
     id: str
     name: str
     parent: ExternalObjectRef | None = None
+    locator: str | None = None
 
 
 def sha256_text(text: str) -> str:
@@ -133,7 +148,10 @@ class SkippedRecord:
 class Relation:
     """A declared parent link: ``child`` is an attachment of ``parent``, as the system lists it.
 
-    A relation is the system's statement (``stated``), never an inference. The compiler has no
+    A relation is the system's statement (``assertion_kind`` is always ``stated``), never an
+    inference. ``locator`` is the JSON pointer, within the record the system stated the link in,
+    to where it did: the parent's ``/fields/attachment/<n>`` (Jira), its declared attachments
+    pointer (REST), or the attachment's own ``/table_sys_id`` (ServiceNow). The compiler has no
     place for relations between sources yet (ADR 0008 compiler gaps), so this is the source's own
     output, and the parent's object id is also the prefix of the child's.
     """
@@ -141,6 +159,8 @@ class Relation:
     child: ExternalObjectRef
     parent: ExternalObjectRef
     kind: str = "attachment_of"
+    assertion_kind: str = "stated"  # never inferred here: the system lists the link
+    locator: str | None = None  # a JSON pointer within the record that states the link
 
 
 @dataclass(frozen=True)

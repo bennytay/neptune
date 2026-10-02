@@ -279,6 +279,7 @@ class ServiceNowSystem:
             size,
             fetch=Fetch(f"/api/now/attachment/{raw}/file", (), size),
             parent=parent,
+            locator="/table_sys_id",  # the attachment's own record states whose it is
         )
 
     def _deletions(self, cursor: str, high: str | None) -> Page:
