@@ -1,0 +1,82 @@
+{
+  "crs": {
+    "properties": {
+      "name": "local:site-grid-m"
+    },
+    "type": "name"
+  },
+  "features": [
+    {
+      "geometry": {
+        "coordinates": [
+          [
+            [
+              0.0,
+              0.0
+            ],
+            [
+              18.0,
+              0.0
+            ],
+            [
+              18.0,
+              6.0
+            ],
+            [
+              0.0,
+              6.0
+            ],
+            [
+              0.0,
+              0.0
+            ]
+          ]
+        ],
+        "type": "Polygon"
+      },
+      "properties": {
+        "name": "Outbound dock",
+        "speed_limit_mps": 0.8,
+        "zone_id": "DOCK-1"
+      },
+      "type": "Feature"
+    },
+    {
+      "geometry": {
+        "coordinates": [
+          [
+            [
+              0.0,
+              12.0
+            ],
+            [
+              18.0,
+              12.0
+            ],
+            [
+              18.0,
+              18.0
+            ],
+            [
+              0.0,
+              18.0
+            ],
+            [
+              0.0,
+              12.0
+            ]
+          ]
+        ],
+        "type": "Polygon"
+      },
+      "properties": {
+        "name": "Pick aisle A",
+        "speed_limit_mps": 1.5,
+        "zone_id": "PICK-A"
+      },
+      "type": "Feature"
+    }
+  ],
+  "name": "S-007_zones",
+  "type": "FeatureCollection"
+}

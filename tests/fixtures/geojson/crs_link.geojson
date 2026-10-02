@@ -1,0 +1,1 @@
+{"type": "FeatureCollection", "crs": {"type": "link", "properties": {"href": "http://example.org/crs.wkt", "type": "ogcwkt"}}, "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [1.0, 2.0]}, "properties": {}}]}

@@ -1,0 +1,55 @@
+{
+  "schema": "neptune-deploy.document-template/1",
+  "id": "commissioning.cell_report",
+  "version": "1",
+  "description": "Plant 2's commissioning report for a manipulator cell: labelled header fields, hardware, software and acceptance-test tables, a constraints list and a sign-off. Times are on the plant's wall clock.",
+  "kind": "commissioning_baseline",
+  "formats": ["pdf"],
+  "zone": "America/Detroit",
+  "tables": {
+    "hardware": ["Item", "Model", "Serial", "Firmware"],
+    "software": ["Component", "Version"],
+    "tests": ["Test", "Result", "Performed"]
+  },
+  "requires": {
+    "labels": ["Report no", "Commissioned on"],
+    "headings": ["Hardware", "Acceptance tests"],
+    "tables": ["hardware", "tests"]
+  },
+  "ignore": {"headings": ["Commissioning report: Cell 3 palletising", "Hardware", "Software", "Acceptance tests", "Sign-off"]},
+  "fields": {
+    "identifiers": [{"label": "Report no", "namespace": "plant2.commissioning"}],
+    "site": {"label": "Cell", "namespace": "plant2.cell"},
+    "machines": [{"label": "Robot", "namespace": "plant2.robot", "split": ";"}],
+    "configuration": {"label": "Configuration baseline", "namespace": "plant2.configuration"},
+    "commissioned": {"label": "Commissioned on", "format": "%Y-%m-%d %H:%M", "required": true},
+    "hardware": {
+      "rows": "hardware",
+      "each": {
+        "name": {"column": "Item"},
+        "model": {"column": "Model"},
+        "identifiers": [{"column": "Serial", "namespace": "plant2.serial"}],
+        "version": {"column": "Firmware", "scheme": "firmware"}
+      }
+    },
+    "software": {
+      "rows": "software",
+      "each": {"name": {"column": "Component"}, "version": {"column": "Version", "scheme": "declared"}}
+    },
+    "calibrations": [{"label": "Calibration records", "namespace": "plant2.calibration", "split": ";"}],
+    "tests": {
+      "rows": "tests",
+      "each": {
+        "name": {"column": "Test"},
+        "result": {"column": "Result"},
+        "performed": {"column": "Performed", "format": "%Y-%m-%d %H:%M"}
+      }
+    },
+    "constraints": [{"section": "Constraints"}],
+    "sign_off": {
+      "decision": {"label": "Sign-off"},
+      "authority": {"label": "Signed by"},
+      "time": {"label": "Signed on", "format": "%Y-%m-%d %H:%M"}
+    }
+  }
+}
