@@ -235,9 +235,10 @@ class _Findings:
         catalog: dict[str, tuple[Severity, FindingCategory, str]] | None = None,
         producer: str = MAPPER_ID,
         scope: str = "table",
+        field_key: str = "column",
     ) -> None:
         self.catalog = FINDINGS if catalog is None else catalog
-        self.producer, self.scope = producer, scope
+        self.producer, self.scope, self.field_key = producer, scope, field_key
         self.groups: dict[tuple[str, str, str], _Group] = {}
 
     def add(
@@ -268,7 +269,7 @@ class _Findings:
     def once(self, name: str, table: Any, subject: EvidenceRef, column: str) -> None:
         """A finding about a table's column, made once however many rows read it."""
         if (name, table.record.id, column) not in self.groups:
-            self.add(name, table, subject, key=column, details={"column": column})
+            self.add(name, table, subject, key=column, details={self.field_key: column})
 
     def build(self, transform: TransformRecord) -> list[IngestFinding]:
         out = []
@@ -325,11 +326,8 @@ class _Values:
     def blank(self, spec: Part) -> bool:
         raise NotImplementedError
 
-
     def provenance(self, evidence: EvidenceRef) -> Provenance:
         return Provenance(evidence, self.mapper.transform.id, STATED)
-
-
 
     def label(self, column: str) -> str:
         return column
@@ -478,7 +476,6 @@ class _Values:
             )
         return spec.cls(**self.values(spec.cls, spec.fields))
 
-
     def items(self, specs: Any) -> tuple[Any, ...]:
         """Parts spelled out field by field; one whose every cell is blank is not listed."""
         items = []
@@ -523,12 +520,10 @@ class _Row(_Values):
         self.pointers = table.pointers[index] if table.header is None else None
         self.evidence = self.record.provenance.evidence
 
-
     def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
         self.mapper.findings.add(
             name, self.table, subject, key=column, details={"column": column}, row=self.record.row
         )
-
 
     def cell(self, column: str, via: str = "column") -> _Cell:
         table, record = self.table, self.record
@@ -546,7 +541,6 @@ class _Row(_Values):
             return _Cell(None, self.evidence)  # a missing key, or a short row
         return _Cell(record.cells[index], record.cell_evidence(table.record, index))
 
-
     def blank(self, spec: Part) -> bool:
         """Every cell the part reads is blank or absent in this row."""
         for column in sorted(spec_columns(spec)):
@@ -558,7 +552,6 @@ class _Row(_Values):
             if cell.state is not None and not isinstance(cell.state, Unknown):
                 return False
         return True
-
 
 
 def _text(value: Any) -> str | None:
@@ -758,9 +751,12 @@ def tables_of(records: Iterable[Any]) -> tuple[list[_Table], list[StructuredTabl
     return usable, unnamed
 
 
-def map_records(base: IngestPackage, mappings: Sequence[LifecycleMapping]) -> list[Any]:
-    """Every record of the mapped package: the base's source ledger and the transforms its
-    records name, then each mapping's transform, lifecycle records, clocks and findings."""
+def map_tables(
+    base: IngestPackage, mappings: Sequence[LifecycleMapping], claimed: Iterable[RecordId] = ()
+) -> list[Any]:
+    """Each mapping's transform, lifecycle records, clocks and findings, then findings about the
+    tables no mapping applies to. ``claimed`` are tables something else (a document template)
+    already accounts for."""
     hashes = [mapping.sha256 for mapping in mappings]
     if len(set(hashes)) != len(hashes):
         raise MappingError("the same mapping file is given twice")
@@ -769,15 +765,20 @@ def map_records(base: IngestPackage, mappings: Sequence[LifecycleMapping]) -> li
         raise MappingError(f"two mapping files share an id: {ids}")
     usable, unnamed = tables_of(base.records)
     out: list[Any] = []
-    claimed: set[RecordId] = set()
+    taken = set(claimed)
     for mapping in sorted(mappings, key=lambda m: m.sha256):
         mapper = _Mapper(mapping, base.id, usable)
-        claimed.update(table.record.id for table in mapper.tables)
+        taken.update(table.record.id for table in mapper.tables)
         out.extend(mapper.run())
     out.extend(
-        _run_findings(base.id, hashes, [t for t in usable if t.record.id not in claimed], unnamed)
+        _run_findings(
+            base.id,
+            hashes,
+            [t for t in usable if t.record.id not in taken],
+            [t for t in unnamed if t.id not in taken],
+        )
     )
-    return [*_carried(base, out), *out]
+    return out
 
 
 def _run_findings(
@@ -810,17 +811,17 @@ def _run_findings(
     return [transform, *findings.build(transform)]
 
 
-def _carried(base: IngestPackage, records: list[Any]) -> list[Any]:
+def carried(base: IngestPackage, records: list[Any]) -> list[Any]:
     """The base package's source ledger, and every base transform the new records' transforms
     name upstream, with theirs in turn: the new package's lineage is whole."""
     transforms = {r.id: r for r in base.records if r.kind == "transform_record"}
     wanted = [u for r in records if r.kind == "transform_record" for u in r.upstream]
-    carried: dict[RecordId, Any] = {}
+    kept: dict[RecordId, Any] = {}
     while wanted:
         current = wanted.pop()
-        if current in carried or current not in transforms:
+        if current in kept or current not in transforms:
             continue
-        carried[current] = transforms[current]
+        kept[current] = transforms[current]
         wanted.extend(transforms[current].upstream)
     ledger = [r for r in base.records if r.kind in LEDGER_KINDS]
-    return [*ledger, *carried.values()]
+    return [*ledger, *kept.values()]

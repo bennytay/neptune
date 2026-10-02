@@ -1,0 +1,29 @@
+{
+  "schema": "neptune-deploy.document-template/1",
+  "id": "incident.amr_report",
+  "version": "1",
+  "description": "The AMR fleet's incident report: labelled header fields, a timeline table, and two free-text sections (description and root cause) kept verbatim under their span, never summarised.",
+  "kind": "incident_record",
+  "formats": ["pdf"],
+  "zone": "Europe/Berlin",
+  "tables": {"timeline": ["Time", "Event"]},
+  "requires": {"labels": ["Incident no", "Occurred at"], "headings": ["Timeline"], "tables": ["timeline"]},
+  "ignore": {"headings": ["Incident report INC-HH-0092", "Timeline"]},
+  "fields": {
+    "identifiers": [{"label": "Incident no", "namespace": "hh.incident"}],
+    "site": {"label": "Site", "namespace": "hh.site"},
+    "machines": [{"label": "Machine", "namespace": "hh.amr", "split": ";"}],
+    "related": [{"label": "Related records", "namespace": "hh.record", "split": ";"}],
+    "occurred": {"label": "Occurred at", "format": "%Y-%m-%d %H:%M", "required": true},
+    "severity": {"label": "Severity"},
+    "zone": {"label": "Zone", "namespace": "hh.zone"},
+    "location": {"label": "Location"},
+    "assets": [{"label": "Assets", "namespace": "hh.asset", "split": ";"}],
+    "timeline": {
+      "rows": "timeline",
+      "each": {"time": {"column": "Time", "format": "%Y-%m-%d %H:%M"}, "text": {"column": "Event"}}
+    },
+    "description": {"section": "Description"},
+    "root_cause": {"section": "Root cause"}
+  }
+}

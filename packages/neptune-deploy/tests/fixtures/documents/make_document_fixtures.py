@@ -101,7 +101,9 @@ class _Page:
         self.mcid += 1
 
 
-def _elem(pdf: object, kind: str, parent: object, kids: list[object], page: object = None) -> object:
+def _elem(
+    pdf: object, kind: str, parent: object, kids: list[object], page: object = None
+) -> object:
     ref = pdf.reserve()  # type: ignore[attr-defined]
     element: dict[str, object] = {"Type": W.Name("StructElem"), "S": W.Name(kind), "P": parent}
     if page is not None:
@@ -132,9 +134,7 @@ def tagged_pdf(title: str, pages: Sequence[PageSpec]) -> bytes:
                 case Heading(text, level):
                     size = 18 if level == 1 else 13
                     owner = _elem(pdf, f"H{level}", document, [page.mcid], ref)
-                    page._mark(
-                        f"H{level}", W.text("F2", size, 54, page.y, _latin1(text)), owner
-                    )
+                    page._mark(f"H{level}", W.text("F2", size, 54, page.y, _latin1(text)), owner)
                     top.append(owner)
                     page.y -= size + 14
                 case Para(lines):
@@ -196,7 +196,9 @@ def tagged_pdf(title: str, pages: Sequence[PageSpec]) -> bytes:
             },
         )
         parent_entries += [index, list(page.owners)]
-    pdf.set(document, {"Type": W.Name("StructElem"), "S": W.Name("Document"), "P": root_elem, "K": top})
+    pdf.set(
+        document, {"Type": W.Name("StructElem"), "S": W.Name("Document"), "P": root_elem, "K": top}
+    )
     parent_tree = pdf.add({"Nums": parent_entries})
     pdf.set(
         root_elem,
@@ -496,7 +498,10 @@ def sop() -> bytes:
 
 # One folder per embodiment; each becomes one compiler package.
 SOURCES: dict[str, dict[str, bytes]] = {
-    "warehouse_amr": {"risk_amr_iso3691_4.pdf": risk_amr(), "incident_amr_collision.pdf": incident()},
+    "warehouse_amr": {
+        "risk_amr_iso3691_4.pdf": risk_amr(),
+        "incident_amr_collision.pdf": incident(),
+    },
     "manipulator_cell": {
         "risk_cell_arm.pdf": risk_cell(),
         "commissioning_cell3.pdf": commissioning(),

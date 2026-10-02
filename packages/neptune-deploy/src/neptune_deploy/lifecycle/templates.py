@@ -15,7 +15,8 @@ A template is JSON, in the style of a mapping file (``mapping.py``)::
       "tables": {"hazards": ["Hazard", "Severity"]},  # tables, by their exact header cells
       "requires": {"labels": ["Assessment No"], "headings": ["Hazard analysis"],
                    "tables": ["hazards"]},          # the structure a document must have
-      "ignore": {"labels": ["Reviewer"], "headings": [], "tables": []},   # read on purpose by no field
+      "ignore": {"labels": ["Reviewer"], "headings": ["Hazard analysis"], "tables": [],
+                 "columns": {"hazards": ["Task"]}},  # left unread on purpose, never silently
       "fields": {...}
     }
 
@@ -87,6 +88,7 @@ class DocumentTemplate:
     ignore_labels: tuple[str, ...]
     ignore_headings: tuple[str, ...]
     ignore_tables: tuple[str, ...]
+    ignore_columns: Mapping[str, tuple[str, ...]]
     fields: Mapping[str, Spec]
     document: JsonObject
     sha256: ContentId
@@ -181,7 +183,9 @@ def _template(document: Any, sha256: ContentId) -> DocumentTemplate:
     form = _form(obj["form"]) if "form" in obj else None
     tables = _tables(obj.get("tables", {}))
     requires = _object(obj.get("requires", {}), "requires", set(), {"labels", "headings", "tables"})
-    ignore = _object(obj.get("ignore", {}), "ignore", set(), {"labels", "headings", "tables"})
+    ignore = _object(
+        obj.get("ignore", {}), "ignore", set(), {"labels", "headings", "tables", "columns"}
+    )
     require_labels = _texts(requires.get("labels", []), "requires.labels")
     require_headings = _texts(requires.get("headings", []), "requires.headings")
     require_tables = _texts(requires.get("tables", []), "requires.tables")
@@ -199,7 +203,10 @@ def _template(document: Any, sha256: ContentId) -> DocumentTemplate:
     for table, columns in rows:
         missing = sorted(set(columns) - set(tables[table]))
         if missing:
-            raise MappingError(f"rows of table {table!r} read columns it has no header for: {missing}")
+            raise MappingError(
+                f"rows of table {table!r} read columns it has no header for: {missing}"
+            )
+    ignore_columns = _ignored_columns(ignore.get("columns", {}), tables, {t for t, _ in rows})
     return DocumentTemplate(
         id=_token(obj["id"], "id"),
         version=_text(obj["version"], "version"),
@@ -214,6 +221,7 @@ def _template(document: Any, sha256: ContentId) -> DocumentTemplate:
         ignore_labels=_texts(ignore.get("labels", []), "ignore.labels"),
         ignore_headings=_texts(ignore.get("headings", []), "ignore.headings"),
         ignore_tables=ignore_tables,
+        ignore_columns=ignore_columns,
         fields=fields,
         document=document,
         sha256=sha256,
@@ -235,6 +243,31 @@ def _tables(value: Any) -> dict[str, tuple[str, ...]]:
         if not cells:
             raise MappingError(f"tables.{name}: name at least one header cell")
         out[name] = cells
+    return out
+
+
+def _ignored_columns(
+    value: Any, tables: Mapping[str, tuple[str, ...]], read: set[str]
+) -> dict[str, tuple[str, ...]]:
+    if not isinstance(value, dict):
+        raise MappingError("ignore.columns: expected an object of column lists by table")
+    out: dict[str, tuple[str, ...]] = {}
+    for name, columns in value.items():
+        if name not in read:
+            raise MappingError(f"ignore.columns: table {name!r} has no rows field reading it")
+        cells = _texts(columns, f"ignore.columns.{name}")
+        missing = sorted(set(cells) - set(tables[name]))
+        if missing:
+            raise MappingError(f"ignore.columns.{name}: no header cells {missing}")
+        out[name] = cells
+    return out
+
+
+def rows_read(template: DocumentTemplate) -> dict[str, set[str]]:
+    """The tables whose rows fields read, with the columns each reads."""
+    out: dict[str, set[str]] = {}
+    for table, columns in _row_tables(template.fields):
+        out.setdefault(table, set()).update(columns)
     return out
 
 

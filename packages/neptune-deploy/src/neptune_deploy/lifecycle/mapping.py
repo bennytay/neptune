@@ -67,7 +67,9 @@ class Scalar:
     formats: tuple[str, ...] = ()  # time
     zone: str | None = None  # time
     scheme: str | None = None  # version
-    via: str = "column"  # what ``column`` names: a column, or in a document template a label or section
+    via: str = (
+        "column"  # what ``column`` names: a column, or in a document template a label or section
+    )
 
 
 @dataclass(frozen=True)
