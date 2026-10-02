@@ -35,13 +35,16 @@ without re-parsing the corpus. Forces:
      produced, and its id (`evidence_record_id`) moves only when that lineage does. A transform that
      declared nothing is not written; a package with no declarations gains no transform or table.
    - It emits a `context_extracted` event with its counts. Its findings are `context.*` (§8).
+   - It holds only what it reads: streams, documents and their blocks, configurations, tables, and
+     only the rows of tables that can declare something (a register's, an undeclared table's first
+     row, a JSON row whose keys name a kind). A telemetry table's rows are streamed past.
 2. **Registers and manifests (tables and configurations) → `Site`, `Asset`, `TaskBrief`,
    `Requirement`, `WorkOrder`.**
    - Keys are compared case-folded with runs of spaces and dashes as `_` (`Asset ID` = `asset_id`).
    - A table is a register only when its header is declared (`Known`: a CSV read with
      `csv_header=first_row`, a Markdown or Parquet table). The first of `requirement_id`,
-     `work_order_id`, `asset_id`, `task_id`, `site_id` among its columns names the kind; the others
-     are references. A JSON table names each cell's column by its own pointer's key.
+     `work_order_id`, `task_id`, `asset_id`, `site_id` among its columns names the kind; the others
+     are references (a task register lists its assets; a work order names its task). A JSON table names each cell's column by its own pointer's key.
    - A configuration document whose root mapping has a `site`/`sites`, `asset(s)`, `task(s)`,
      `requirement(s)` or `work_order(s)` section declares one entry per mapping in it, keyed by
      `id`. Nesting is the only relation read from structure: a site's own `assets` are at that site,
@@ -104,8 +107,11 @@ without re-parsing the corpus. Forces:
    `context.requirement_without_text` (missing; the record keeps `text` `Unknown`),
    `context.unnamed_declaration` (missing; no record), `context.section_not_entries`
    (unsupported), `context.coordinate_not_decimal` (unrepresentable; location `Unknown`),
-   `context.value_not_text` (unsupported; the field `Unknown`). All patterns are anchored with
-   bounded repetition, so a hostile line costs time linear in its length.
+   `context.value_not_text` (unsupported; the field `Unknown`), `context.crs_not_a_code`
+   (unrepresentable; the CRS `Unknown`). A decimal no finite double holds is not a coordinate. If a
+   reader still fails on one document, table or configuration, what it wrote is dropped and
+   `context.failed` (failed, error) names that holder; the rest of the package is unaffected. All
+   patterns are anchored with bounded repetition, so a hostile line costs time linear in its length.
 9. **Schema version 4, provisional** (ADR 0037 §1): the four kinds are `since` 4, so packages that
    hold none of them keep their bytes. Package-schema 4.0.0, catalog-api 1.4.0 (programme rule:
    the integer is the registry major). The coordinator renumbers at merge if another kind-adding

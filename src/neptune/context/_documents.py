@@ -58,8 +58,8 @@ _REQUIREMENT: Final = re.compile(
     r"(?P<id>[A-Za-z0-9][A-Za-z0-9._/\-]{0,63})[ \t]*:(?P<text>.*)"
 )
 _STEP: Final = re.compile(
-    r"(?i:step)[ \t]+(?P<number>\d{1,9}(?:\.\d{1,9}){0,8})[ \t]*"
-    r"[:.)\-\u2013\u2014][ \t]*(?P<title>\S.*)"
+    r"(?i:step)[ \t]+(?P<number>\d{1,9}(?:\.\d{1,9}){0,8})(?!\.?\d)"  # the whole number
+    r"(?:[ \t]*[:.)\-\u2013\u2014][ \t]*|[ \t]+)(?P<title>\S.*)"
 )
 _NUMBERED: Final = re.compile(r"\d{1,9}(?:\.\d{1,9}){0,8}[.)][ \t]+\S")
 _MODAL: Final = re.compile(r"\b(?:shall|must)\b", re.IGNORECASE)

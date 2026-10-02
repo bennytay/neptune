@@ -436,3 +436,103 @@ def test_a_hostile_line_costs_linear_time() -> None:
     _, records = document([(BlockRole.PARAGRAPH, None, long), (None, None, "shall " * 50_000)])
     found = extract_context(records)  # bounded patterns: linear in the line, never backtracking
     assert found is not None
+
+
+def test_hostile_numbers_and_codes_cost_findings_never_the_job() -> None:
+    _, sites = table(
+        ["site_id", "latitude", "longitude", "crs"],
+        [
+            ["S-1", "9" * 400, "1.0", "EPSG:4326"],  # a double reads it as infinite
+            ["S-2", "1.0", "2.0", "EPSG:" + "7" * 80],  # longer than any registry code
+        ],
+    )
+    found = extract_context(sites)
+    assert found is not None
+    located = {s.identifiers[0].value.value: s.location for s in of(found, Site)}
+    assert isinstance(located["S-1"], Unknown)
+    assert isinstance(located["S-2"].value.crs, Unknown)
+    assert sorted(f.code for f in found.findings) == [
+        "context.coordinate_not_decimal",
+        "context.crs_not_a_code",
+    ]
+
+
+def test_typed_numbers_are_coordinates_and_a_task_register_lists_assets() -> None:
+    source = content_id(b"parquet")
+    whole = EvidenceRef(source, (ByteRange(0, 7),))
+    header: Known[tuple[str, ...]] = Known(("asset_id", "latitude", "longitude"))
+    tbl = StructuredTable(
+        evidence_record_id("structured_table", whole, TABULAR),
+        observed(whole, TABULAR),
+        NotCovered(),
+        header,
+    )
+    at = EvidenceRef(source, (Row(0),))
+    row = StructuredRecord(
+        evidence_record_id("structured_record", at, TABULAR),
+        observed(at, TABULAR),
+        tbl.id,
+        0,
+        (Known("A-1"), Known(51.5), Known(-0.1)),
+    )
+    _, tasks = table(["task_id", "asset_id", "name"], [["T-1", "A-1; A-2", "Pick"]])
+    found = extract_context([tbl, row, *tasks])
+    assert found is not None
+    (asset,) = of(found, Asset)
+    assert (asset.location.value.latitude, asset.location.value.longitude) == (51.5, -0.1)
+    (task,) = of(found, TaskBrief)
+    assert task.name.value == "Pick"
+    assert [a.value.value for a in task.assets] == ["A-1", "A-2"]
+    assert not found.findings
+
+
+def test_a_step_number_is_kept_whole() -> None:
+    _, records = document(
+        [
+            (BlockRole.HEADING, 2, "Step 4.2 Calibrate gripper"),
+            (BlockRole.HEADING, 2, "Step 5. Home the arm"),
+            (BlockRole.HEADING, 2, "Step 6.1.3 - Verify"),
+        ]
+    )
+    found = extract_context(records)
+    assert found is not None
+    steps = sorted(of(found, SOPSection), key=lambda s: s.order)
+    assert [(s.number.value, s.title.value) for s in steps] == [
+        ("4.2", "Calibrate gripper"),
+        ("5", "Home the arm"),
+        ("6.1.3", "Verify"),
+    ]
+
+
+def test_a_reader_that_fails_costs_its_holder_and_a_finding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import neptune.context as context
+
+    def broken(*_: Any) -> None:
+        raise RuntimeError("unforeseen")
+
+    _, sop = document(SOP)
+    _, register = table(REGISTER, [["AMR-07", "Tugger 7", "AMR", "WH-3", None, None, None]])
+    monkeypatch.setattr(context, "read_table", broken)
+    found = extract_context([*sop, *register])
+    assert found is not None
+    assert not of(found, Asset)  # the register's reader failed: nothing from it
+    assert of(found, SOPSection)  # the procedure is unaffected
+    (failure,) = [f for f in found.findings if f.code == "context.failed"]
+    assert failure.details == {"error": "RuntimeError"}
+
+
+def test_only_the_rows_the_pass_reads_are_wanted() -> None:
+    from neptune.context import row_wanted
+
+    _, register = table(REGISTER, [["AMR-07", "Tugger 7", "AMR", "WH-3", None, None, None]])
+    _, telemetry = table(["t", "speed"], [["0.1", "1.0"], ["0.2", "1.1"]])
+    _, undeclared = table(None, [["a", "b"], ["c", "d"]])
+    for records, wanted in (
+        (register, [True]),
+        (telemetry, [False, False]),
+        (undeclared, [True, False]),
+    ):
+        tbl, *rows = records
+        assert [row_wanted(tbl, row) for row in rows] == wanted

@@ -75,7 +75,7 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatus
-from neptune.context import ContextExtraction, extract_context
+from neptune.context import CONTEXT_INPUTS, ContextExtraction, extract_context, row_wanted
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
@@ -111,6 +111,7 @@ from neptune.model.source import (
     SourceArtifact,
     local_location,
 )
+from neptune.model.world import StructuredRecord, StructuredTable
 from neptune.runtime import events, explain, lineage, sandbox, wire
 from neptune.runtime.cache import (
     VERDICT_FILE,
@@ -2009,20 +2010,40 @@ class IngestJob:
                 Phase.ASSEMBLE, {"quarantined": quarantined, "sources": len(self._ingested)}
             )
 
-    def _admitted_records(self) -> list[Any]:
-        """Every record the admitted sources' committed chunks hold: what the package-level
-        passes (introspection, context) read, loaded once."""
-        records: list[Any] = []
+    def _chunk_records(self) -> Iterator[list[Any]]:
+        """Each committed chunk's records, for every admitted source, one chunk at a time."""
         try:
             for content, transform in sorted(set(self._ingested)):
                 plan = self.workspace.load_plan(content, transform)
                 if plan is None:
                     continue  # staging refuses the package and says why
                 for chunk in plan.chunks:
-                    records.extend(self.workspace.load(str(chunk["id"])).records)
+                    yield list(self.workspace.load(str(chunk["id"])).records)
         except (WorkspaceError, ValueError, OSError) as exc:
             raise JobError(f"the package cannot be assembled: {exc}") from exc
-        return records
+
+    def _admitted_records(self) -> list[Any]:
+        """The admitted records the package-level passes read: streams (introspection) and
+        documents, tables and configurations (context). A table's rows are kept only where the
+        context pass reads them, so a large telemetry table is streamed past, never held."""
+        kept: list[Any] = []
+        tables: dict[RecordId, StructuredTable] = {}
+        for records in self._chunk_records():
+            for record in records:
+                if isinstance(record, StructuredTable):
+                    tables[record.id] = record
+                if isinstance(record, (Stream, *CONTEXT_INPUTS)) and not isinstance(
+                    record, StructuredRecord
+                ):
+                    kept.append(record)
+        if tables:  # rows may sit in other chunks than their table: a second pass
+            for records in self._chunk_records():
+                for record in records:
+                    if isinstance(record, StructuredRecord):
+                        table = tables.get(record.table)
+                        if table is not None and row_wanted(table, record):
+                            kept.append(record)
+        return kept
 
     def _contextualise(self, admitted: list[Any]) -> ContextExtraction | None:
         """Stage 9b, before the package is staged: the sites, assets, briefs, requirements,

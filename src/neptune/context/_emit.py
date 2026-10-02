@@ -1,7 +1,7 @@
 """What one context transform writes, and the helpers every reader shares (ADR 0063 §6)."""
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Final
 
 from neptune.derived.context import ContextCandidate, candidate_id
@@ -60,6 +60,26 @@ class Output:
         self.records: dict[RecordId, Any] = {}
         self.candidates: dict[RecordId, ContextCandidate] = {}
         self.findings: dict[RecordId, IngestFinding] = {}
+
+    def guarded(self, subject: EvidenceRef, read: Callable[[], None]) -> None:
+        """Run one declaration-holder's reader; if it fails, drop what it wrote and say so.
+
+        The readers are written not to raise, but one unforeseen document must cost its own
+        records and a finding, never the job (non-negotiable 7).
+        """
+        before = (dict(self.records), dict(self.candidates), dict(self.findings))
+        try:
+            read()
+        except Exception as exc:
+            self.records, self.candidates, self.findings = before
+            self.finding(
+                "failed",
+                FindingCategory.FAILED,
+                subject,
+                "the context pass failed on this declaration's holder; nothing was read from it",
+                {"error": type(exc).__name__},
+                severity=Severity.ERROR,
+            )
 
     def prov(self, evidence: EvidenceRef) -> Provenance:
         return Provenance(evidence, self.transform.id, STATED)

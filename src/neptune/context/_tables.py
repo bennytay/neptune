@@ -8,6 +8,7 @@ own key instead. A CSV whose header is undeclared states no column names: if its
 like a register's header, that is a candidate, never a register.
 """
 
+import math
 from collections.abc import Sequence
 from typing import Any, Final
 
@@ -42,6 +43,8 @@ def _cell_value(state: Knowledge[Any], evidence: EvidenceRef) -> Value:
             return Value(evidence, not_text=True)
         case Known(value=int() as number):
             return Value(evidence, str(number))  # a declared integer's digits, exactly
+        case Known(value=float() as number) if math.isfinite(number):
+            return Value(evidence, not_text=True, number=number)  # a typed number: a coordinate
         case Known():
             return Value(evidence, not_text=True)
         case KnownAbsent(provenance=Provenance(evidence=defined)):
@@ -71,6 +74,22 @@ def _kind(entry: Entry) -> str | None:
         if key in entry:
             return kind
     return None
+
+
+def row_wanted(table: StructuredTable, row: StructuredRecord) -> bool:
+    """Whether the pass reads ``row`` of ``table``: every row of a register, the first row of
+    an undeclared table, and a JSON row whose own keys name a kind. A telemetry table's millions
+    of rows need never be held for it."""
+    match table.header:
+        case Unknown():
+            return row.row == 0
+        case Known(value=header):
+            return any(field_key(name) in _ID_KEYS for name in header)
+        case _:
+            return _kind(_entry(table, row)) is not None
+
+
+_ID_KEYS: Final = frozenset(key for key, _ in KIND_KEYS)
 
 
 def read_table(out: Output, table: StructuredTable, rows: Sequence[StructuredRecord]) -> None:

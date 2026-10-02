@@ -8,6 +8,7 @@ that site, and a task's own ``requirements`` are for that task. Neptune's own ma
 ``neptune`` key, ADR 0047) is not read here.
 """
 
+import math
 from collections.abc import Sequence
 from typing import Final
 
@@ -41,6 +42,15 @@ _SECTIONS: Final = {
 }
 # What an entry of each kind may hold nested, and what the nested entries inherit from it.
 _NESTED: Final = {"site": ("asset", "site"), "task": ("requirement", "task")}
+
+
+def _double(number: float) -> float | None:
+    """A number as a double, or ``None`` when no finite double holds it (a 400-digit int)."""
+    try:
+        value = float(number)
+    except OverflowError:
+        return None
+    return value if math.isfinite(value) else None
 
 
 def _unknown(out: Output, evidence: EvidenceRef) -> Knowledge[object]:
@@ -93,11 +103,12 @@ class _Document:
         if found.type is ScalarType.BOOL or found.type is ScalarType.BINARY:
             return Value(evidence, not_text=True)
         if found.type is ScalarType.INT and isinstance(found.value, int):
-            return Value(evidence, written, number=float(found.value))
+            return Value(evidence, written, number=_double(found.value))
         if found.type is ScalarType.FLOAT:
             number = found.value
             usable = isinstance(number, float) and not isinstance(number, NonFinite)
-            return Value(evidence, written, number=float(number) if usable else None)
+            double = _double(number) if usable and isinstance(number, float) else None
+            return Value(evidence, written, number=double)
         return Value(evidence, written)  # a date or time: its text as written
 
     def entry(self, node: ConfigurationValue) -> dict[str, Value]:

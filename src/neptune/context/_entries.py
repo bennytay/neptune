@@ -6,6 +6,7 @@ kind calls for. Keys are matched against short fixed lists; a key that is not on
 the row or the configuration, cited there, and is never guessed at.
 """
 
+import math
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -26,8 +27,8 @@ from neptune.model.world import Asset, Site
 KIND_KEYS: Final = (
     ("requirement_id", "requirement"),
     ("work_order_id", "work_order"),
+    ("task_id", "task"),  # a task register lists the assets it involves, not the reverse
     ("asset_id", "asset"),
-    ("task_id", "task"),
     ("site_id", "site"),
 )
 # Keys naming another thing's id: references, never an identifier of the entry itself.
@@ -180,11 +181,12 @@ class _Reader:
         value = _first(self.entry, keys)
         if value is None:
             return None
-        if value.number is not None:
-            return value.number
-        if value.text is not None and _DECIMAL.fullmatch(value.text.strip()):
-            return float(value.text.strip())
-        if value.text is not None or value.not_text:
+        number = value.number
+        if number is None and value.text is not None and _DECIMAL.fullmatch(value.text.strip()):
+            number = float(value.text.strip())
+        if number is not None and math.isfinite(number):
+            return number  # a decimal too long for a double reads as infinite: not usable
+        if value.text is not None or value.not_text or number is not None:
             self.out.finding(
                 "coordinate_not_decimal",
                 FindingCategory.UNREPRESENTABLE,
@@ -208,10 +210,17 @@ class _Reader:
         crs: Knowledge[CrsCode] = crs_text  # type: ignore[assignment]  # every state but Known
         if isinstance(crs_text, Known):
             authority, colon, code = crs_text.value.partition(":")
+            crs = Unknown(crs_text.provenance)
             if colon and authority.strip() and code.strip():
-                crs = crs_text.map(lambda _: CrsCode(authority.strip(), code.strip()))
-            else:
-                crs = Unknown(crs_text.provenance)
+                try:
+                    crs = crs_text.map(lambda _: CrsCode(authority.strip(), code.strip()))
+                except ValueError:  # longer than any registry's code: not a CRS code
+                    self.out.finding(
+                        "crs_not_a_code",
+                        FindingCategory.UNREPRESENTABLE,
+                        self.evidence,
+                        f"the {self.kind}'s crs is not an authority:code pair; it is unknown",
+                    )
         return self.out.known(
             GeodeticPosition(
                 latitude=latitude,

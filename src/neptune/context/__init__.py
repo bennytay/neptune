@@ -14,12 +14,13 @@ only looks like a declaration is a ``context_candidate`` in ``derived/`` (ADR 00
 
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Final
 
 from neptune.context._configs import read_config
 from neptune.context._documents import read_document
 from neptune.context._emit import Output
-from neptune.context._tables import read_table, rows_by_table
+from neptune.context._tables import read_table, row_wanted, rows_by_table
 from neptune.derived.context import CANDIDATE_KIND, ContextCandidate
 from neptune.identity.provenance import transform_record
 from neptune.model.configuration import ConfigurationSnapshot, ConfigurationValue
@@ -32,6 +33,8 @@ from neptune.model.world import DocumentBlock, DocumentRecord, StructuredRecord,
 CONTEXT_ID: Final = "neptune.context"
 CONTEXT_VERSION: Final = "0.1.0"
 
+__all__ = ["CONTEXT_INPUTS", "ContextExtraction", "extract_context", "row_wanted"]
+
 _INPUTS: Final = (
     DocumentRecord,
     DocumentBlock,
@@ -40,6 +43,10 @@ _INPUTS: Final = (
     ConfigurationSnapshot,
     ConfigurationValue,
 )
+
+
+# The record types the pass reads; of ``StructuredRecord``s only those ``row_wanted`` keeps.
+CONTEXT_INPUTS: Final = _INPUTS
 
 
 @dataclass(frozen=True)
@@ -92,15 +99,19 @@ def extract_context(records: Iterable[Any]) -> ContextExtraction | None:
         for block in group.get(DocumentBlock, []):
             blocks.setdefault(block.document, []).append(block)
         for document in sorted(group.get(DocumentRecord, []), key=lambda r: r.id):
-            read_document(out, document, blocks.get(document.id, []))
+            read = partial(read_document, out, document, blocks.get(document.id, []))
+            out.guarded(document.provenance.evidence, read)
         rows = rows_by_table(group.get(StructuredRecord, []))
         for table in sorted(group.get(StructuredTable, []), key=lambda r: r.id):
-            read_table(out, table, rows.get(table.id, []))
+            out.guarded(
+                table.provenance.evidence, partial(read_table, out, table, rows.get(table.id, []))
+            )
         values: dict[RecordId, list[ConfigurationValue]] = {}
         for value in group.get(ConfigurationValue, []):
             values.setdefault(value.snapshot, []).append(value)
         for snapshot in sorted(group.get(ConfigurationSnapshot, []), key=lambda r: r.id):
-            read_config(out, snapshot, values.get(snapshot.id, []))
+            read = partial(read_config, out, snapshot, values.get(snapshot.id, []))
+            out.guarded(snapshot.provenance.evidence, read)
         if out.records or out.candidates or out.findings:
             outputs.append(out)
     if not outputs:
