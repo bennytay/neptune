@@ -20,6 +20,7 @@ cell ``unknown``.
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Final
 
 from neptune.adapters.contract import AdapterConfig, ConfigOption
@@ -167,11 +168,32 @@ def plan_stream(
     if definition is None or not schema_name:
         return NotDecoded("definition_absent", "the stream declares no definition to decode by")
     assert schema_encoding is not None
+    return _planned(
+        bytes(definition),
+        schema_encoding,
+        schema_name,
+        limits_of(config),
+        message_encoding == "cdr",
+        reserved,
+    )
+
+
+@lru_cache(maxsize=64)
+def _planned(
+    definition: bytes,
+    schema_encoding: str,
+    schema_name: str,
+    limits: DecodeLimits,
+    cdr: bool,
+    reserved: frozenset[str],
+) -> Decoding | NotDecoded:
+    """One parse and layout per distinct definition in a call: channels sharing a schema (often
+    hundreds) share it. Both are pure functions of these arguments."""
     try:
         parsed = parse_definition(definition, schema_encoding, schema_name, Limits())
     except DefinitionError as exc:
         return NotDecoded(f"definition_{exc.reason}", str(exc))
-    return _layout(parsed, limits_of(config), message_encoding == "cdr", reserved)
+    return _layout(parsed, limits, cdr, reserved)
 
 
 def _layout(

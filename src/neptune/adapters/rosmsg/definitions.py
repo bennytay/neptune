@@ -313,6 +313,7 @@ def _parse_msg(text: str, root: str, ros2: bool, limits: Limits) -> dict[str, Me
     for name, lines in sections:
         package = name.split("/", 1)[0]
         fields: list[FieldDef] = []
+        seen: set[str] = set()
         for line in lines:
             count += 1
             if count > limits.max_fields:
@@ -320,8 +321,9 @@ def _parse_msg(text: str, root: str, ros2: bool, limits: Limits) -> dict[str, Me
             field = _msg_field(line, package, ros2, limits)
             if field is None:
                 continue
-            if any(f.name == field.name for f in fields):
+            if field.name in seen:
                 raise DefinitionError("malformed", f"{name} declares {field.name} twice")
+            seen.add(field.name)
             fields.append(field)
         declared = MessageDef(name, tuple(fields))
         if name in types and types[name] != declared:
@@ -530,6 +532,7 @@ class _Idl:
             return
         self.take("{")
         fields: list[FieldDef] = []
+        seen: set[str] = set()
         while self.peek() != "}":
             self.skip_annotations()
             if self.peek() == "}":
@@ -542,8 +545,9 @@ class _Idl:
                     raise DefinitionError(
                         "field_limit", f"more than {self.limits.max_fields} fields"
                     )
-                if any(f.name == field.name for f in fields):
+                if field.name in seen:
                     raise DefinitionError("malformed", f"{name} declares {field.name} twice")
+                seen.add(field.name)
                 fields.append(field)
                 if self.peek() != ",":
                     break
