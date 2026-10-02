@@ -10,20 +10,25 @@
             print(stream.topic, stream.schema_name, [p.path for p in stream.fields])
 
 Each run lists its streams as declared (topic, type, encoding, declared count), each with its
-``stream_layout`` (the declared definition's field paths and types: observed) and its
-``stream_semantic`` (what it carries: inferred, with confidence, rules and evidence). Both are the
-package's derived tables; a package without them (no streams, or written before ADR 0049) gives
-``None`` for both, never a guess.
+``stream_layout`` (observed), the ``definition_layout`` that line names (the declared
+definition's field paths and types, shared by every stream declaring the same definition), and
+its ``stream_semantic`` (what it carries: inferred, with confidence, rules and evidence). All are
+the package's derived tables; a package without them (no streams, or written before ADR 0049)
+gives ``None``, never a guess. A package holding several lines of one kind for a stream (two
+introspection transforms, say) gives ``Ambiguous`` with every line as a candidate: none is
+chosen.
 """
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import TypeVar
 
-from neptune.derived.schemas import FieldPath, LayoutState, StreamLayout
+from neptune.derived.schemas import DefinitionLayout, FieldPath, LayoutState, StreamLayout
 from neptune.derived.semantics import Semantic, SemanticState, StreamSemantic
 from neptune.derived.sessions import read_derived
 from neptune.model.ids import RecordId
-from neptune.model.knowledge import Known
+from neptune.model.knowledge import Ambiguous, Candidate, KnowledgeState, Known
 from neptune.model.run import Run, Stream
 from neptune.sdk.errors import InvalidRequestError, PackageInvalidError
 from neptune.store.package import IngestPackage
@@ -45,11 +50,17 @@ def _text(knowledge: object) -> str | None:
 
 @dataclass(frozen=True)
 class StreamContents:
-    """One stream: its record, its declared layout and its inferred semantic."""
+    """One stream: its record, its declared layout and its inferred semantic.
+
+    ``layout`` and ``semantic`` are the stream's line of each kind: ``None`` without one,
+    ``Ambiguous`` with several. ``definition`` is the ``definition_layout`` a single ``known``
+    ``layout`` names, else ``None``.
+    """
 
     stream: Stream
-    layout: StreamLayout | None
-    semantic: StreamSemantic | None
+    layout: StreamLayout | Ambiguous[StreamLayout] | None
+    semantic: StreamSemantic | Ambiguous[StreamSemantic] | None
+    definition: DefinitionLayout | None = None
 
     @property
     def id(self) -> RecordId:
@@ -78,30 +89,46 @@ class StreamContents:
         return count.value if isinstance(count, Known) else None
 
     @property
-    def layout_state(self) -> LayoutState | None:
+    def layout_state(self) -> LayoutState | KnowledgeState | None:
+        """The layout's state; ``KnowledgeState.AMBIGUOUS`` when the package holds several."""
+        if isinstance(self.layout, Ambiguous):
+            return KnowledgeState.AMBIGUOUS
         return None if self.layout is None else self.layout.state
 
     @property
     def fields(self) -> tuple[FieldPath, ...]:
         """Every field path the declared definition gives a message; empty unless ``known``."""
-        return () if self.layout is None else self.layout.paths
+        return () if self.definition is None else self.definition.paths
 
     @property
     def semantic_state(self) -> SemanticState | None:
+        """The semantic's state; ``ambiguous`` also when the package holds several lines."""
+        if isinstance(self.semantic, Ambiguous):
+            return SemanticState.AMBIGUOUS
         return None if self.semantic is None else self.semantic.state
 
     def carries(self, semantic: Semantic | str) -> bool:
         """Whether the stream's inferred semantic is ``semantic`` (``known`` only)."""
         wanted = _semantic(semantic)
-        return self.semantic is not None and self.semantic.semantic == wanted
+        return isinstance(self.semantic, StreamSemantic) and self.semantic.semantic == wanted
 
     def may_carry(self, semantic: Semantic | str) -> bool:
-        """Whether ``semantic`` is the stream's semantic or ties for it (``ambiguous``)."""
+        """Whether ``semantic`` is the stream's semantic or ties for it (``ambiguous``), in any
+        of the package's lines for the stream."""
         wanted = _semantic(semantic)
-        if self.semantic is None or not self.semantic.candidates:
+        if self.semantic is None:
             return False
-        top = self.semantic.candidates[0].confidence
-        return any(c.semantic == wanted and c.confidence == top for c in self.semantic.candidates)
+        lines = (
+            [c.value for c in self.semantic.candidates]
+            if isinstance(self.semantic, Ambiguous)
+            else [self.semantic]
+        )
+        for line in lines:
+            if line.candidates:
+                top = line.candidates[0].confidence
+                if any(c.semantic == wanted and c.confidence == top for c in line.candidates):
+                    return True
+        return False
 
 
 @dataclass(frozen=True)
@@ -132,9 +159,19 @@ class RunContents:
         """Every ``known`` semantic in the run, with its streams."""
         found: dict[Semantic, list[StreamContents]] = defaultdict(list)
         for stream in self.streams:
-            if stream.semantic is not None and stream.semantic.semantic is not None:
+            if isinstance(stream.semantic, StreamSemantic) and stream.semantic.semantic is not None:
                 found[stream.semantic.semantic].append(stream)
         return {semantic: tuple(found[semantic]) for semantic in sorted(found)}
+
+
+_Line = TypeVar("_Line", StreamLayout, StreamSemantic)
+
+
+def _one(lines: Sequence[_Line]) -> _Line | Ambiguous[_Line] | None:
+    """A stream's one line of a kind; several are ``Ambiguous``, in id order, none chosen."""
+    if len(lines) < 2:
+        return lines[0] if lines else None
+    return Ambiguous(tuple(Candidate(line) for line in sorted(lines, key=lambda r: r.id)))
 
 
 def run_contents(package: IngestPackage) -> tuple[RunContents, ...]:
@@ -144,15 +181,29 @@ def run_contents(package: IngestPackage) -> tuple[RunContents, ...]:
         derived = read_derived(package.derived)
     except (ValueError, TypeError, KeyError) as exc:
         raise PackageInvalidError(f"the package's derived tables cannot be read: {exc}") from exc
-    layouts = {r.stream: r for r in derived if isinstance(r, StreamLayout)}
-    semantics = {r.stream: r for r in derived if isinstance(r, StreamSemantic)}
+    definitions = {r.id: r for r in derived if isinstance(r, DefinitionLayout)}
+    layouts: dict[RecordId, list[StreamLayout]] = defaultdict(list)
+    semantics: dict[RecordId, list[StreamSemantic]] = defaultdict(list)
+    for line in derived:
+        if isinstance(line, StreamLayout):
+            layouts[line.stream].append(line)
+        elif isinstance(line, StreamSemantic):
+            semantics[line.stream].append(line)
     runs = {r.id: r for r in package.records if isinstance(r, Run)}
     streams: dict[RecordId, list[StreamContents]] = defaultdict(list)
     for record in package.records:
         if isinstance(record, Stream):
             if record.run not in runs:
                 raise PackageInvalidError(f"stream {record.id} names a run the package lacks")
-            entry = StreamContents(record, layouts.get(record.id), semantics.get(record.id))
+            layout = _one(layouts.get(record.id, []))
+            definition = None
+            if isinstance(layout, StreamLayout) and layout.layout is not None:
+                definition = definitions.get(layout.layout)
+                if definition is None:
+                    raise PackageInvalidError(
+                        f"stream layout {layout.id} names a definition layout the package lacks"
+                    )
+            entry = StreamContents(record, layout, _one(semantics.get(record.id, [])), definition)
             streams[record.run].append(entry)
     return tuple(
         RunContents(

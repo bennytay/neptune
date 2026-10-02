@@ -6,24 +6,47 @@ arm-and-base bag's joint states, odometry and transforms), plus an MCAP whose sc
 is read back through the SDK only.
 """
 
+import dataclasses
 import importlib.util
 import json
 import shutil
 import sys
+import tracemalloc
 from pathlib import Path
 from types import ModuleType
 from typing import Final
 
 import pytest
 
-from neptune.derived.introspection import IntrospectionConfig, introspect
-from neptune.derived.schemas import LayoutState, PathKind, SchemaLimits
-from neptune.derived.semantics import KNOWN_TYPE, KNOWN_TYPE_UNCHECKED, Semantic, SemanticState
-from neptune.model.knowledge import Known
+from neptune.derived.introspection import DefinitionReader, IntrospectionConfig, introspect
+from neptune.derived.schemas import (
+    LayoutState,
+    PathKind,
+    SchemaLimits,
+    StreamLayout,
+    layout_id,
+    stream_layout_from_json,
+)
+from neptune.derived.semantics import (
+    KNOWN_TYPE,
+    KNOWN_TYPE_UNCHECKED,
+    Semantic,
+    SemanticState,
+    StreamSemantic,
+    semantic_id,
+    stream_semantic_from_json,
+)
+from neptune.identity import canonical_json
+from neptune.identity.hashing import content_id
+from neptune.model.finding import IngestFinding
+from neptune.model.ids import RecordId
+from neptune.model.knowledge import Ambiguous, KnowledgeState, Known, Unknown
 from neptune.model.provenance import ByteRange, EvidenceRef
+from neptune.model.run import Stream
 from neptune.sdk import (
     InvalidRequestError,
     Neptune,
+    PackageInvalidError,
     RunContents,
     StreamContents,
     Workspace,
@@ -103,11 +126,17 @@ def test_every_stream_has_a_layout_and_a_semantic(
     _, runs = ingested
     assert streams(runs)
     for stream in streams(runs):
-        assert stream.layout is not None and stream.semantic is not None, stream.topic
+        assert isinstance(stream.layout, StreamLayout) and isinstance(
+            stream.semantic, StreamSemantic
+        ), stream.topic
         # The layout cites the very definition the stream declares; it never re-reads messages.
         definition = stream.stream.schema_definition
         if isinstance(definition, Known):
             assert stream.layout.definition == definition.value
+        # A known layout names the one definition_layout line its definition parses to.
+        named = stream.definition.id if stream.definition is not None else None
+        assert named == stream.layout.layout
+        assert (named is not None) == (stream.layout_state is LayoutState.KNOWN)
 
 
 def test_a_run_answers_which_streams_carry_what(
@@ -122,7 +151,7 @@ def test_a_run_answers_which_streams_carry_what(
     paths = [field.path for field in imu.fields]
     assert paths[:3] == ["header.stamp.sec", "header.stamp.nanosec", "header.frame_id"]
     assert "angular_velocity.z" in paths and "linear_acceleration.x" in paths
-    assert imu.semantic is not None
+    assert isinstance(imu.semantic, StreamSemantic)
     best = imu.semantic.candidates[0]
     assert best.rules[0].rule == KNOWN_TYPE and best.confidence == 0.9
     assert {(u.field, u.unit) for u in best.units} >= {("angular_velocity", "rad/s")}
@@ -132,9 +161,9 @@ def test_a_run_answers_which_streams_carry_what(
         ("percentage", "number"),
         ("voltage", "number"),
     ]
-    assert battery.semantic is not None and battery.semantic.candidates[0].rules[0].rule == (
-        "shape_battery"
-    )
+    assert isinstance(battery.semantic, StreamSemantic) and battery.semantic.candidates[0].rules[
+        0
+    ].rule == ("shape_battery")
     (diagnostics,) = robot.topic("/diagnostics")
     assert diagnostics.layout_state is LayoutState.KNOWN_ABSENT
     assert diagnostics.semantic_state is SemanticState.UNKNOWN
@@ -169,14 +198,17 @@ def test_hostile_and_uncovered_definitions_are_findings_not_failures(
     work, runs = ingested
     hostile = {s.topic: s for s in streams(runs) if (s.topic or "").startswith("/hostile_")}
     broken, tree, deep, imu, foxglove, legged = (hostile[f"/hostile_{i}"] for i in range(1, 7))
-    assert broken.layout is not None and broken.layout.problem is not None
+    assert isinstance(broken.layout, StreamLayout) and broken.layout.problem is not None
     assert (broken.layout_state, broken.layout.problem.reason) == (LayoutState.UNKNOWN, "malformed")
     assert [(f.path, f.kind) for f in tree.fields] == [("root.children[]", PathKind.RECURSIVE)]
-    assert deep.layout is not None and deep.layout.problem is not None
-    assert deep.layout.problem.reason == "nesting_limit"
+    assert isinstance(deep.layout, StreamLayout) and deep.layout.problem is not None
+    assert (deep.layout_state, deep.layout.problem.reason) == (
+        LayoutState.NOT_COVERED,
+        "nesting_limit",
+    )
     assert imu.semantic_state is SemanticState.UNKNOWN  # its definition contradicts its name
     assert foxglove.layout_state is LayoutState.NOT_COVERED
-    assert foxglove.semantic is not None and foxglove.carries(Semantic.POSE)
+    assert isinstance(foxglove.semantic, StreamSemantic) and foxglove.carries(Semantic.POSE)
     assert foxglove.semantic.candidates[0].rules[0].rule == KNOWN_TYPE_UNCHECKED
     assert legged.carries(Semantic.JOINT_STATE)
     (pose,) = by_topic(runs, "/pose")  # unknown_encoding.mcap's own IDL
@@ -287,4 +319,183 @@ def test_a_ros1_bag_reads_its_joints_odometry_and_transforms(
     assert odom.schema_encoding == "ros1msg"
     assert "pose.pose.position.x" in [f.path for f in odom.fields]
     (joints,) = bag.topic("/joint_states")
-    assert joints.semantic is not None and joints.semantic.candidates[0].units == ()
+    assert isinstance(joints.semantic, StreamSemantic) and joints.semantic.candidates[0].units == ()
+
+
+# --- bounded output: the review of PR #66's repros, end to end ---------------------------------
+
+
+def run_job(work: Path, schema: bytes, channels: int) -> tuple[bool, Path, int, int]:
+    """Ingest an MCAP of one ``ros2msg`` schema shared by ``channels`` channels: whether it
+    committed, the package, the MCAP's size and the job's peak traced memory."""
+    schemas = (MCAP.Schema(1, "pkg/msg/A", "ros2msg", schema),)
+    declared = tuple(MCAP.Channel(i, 1, f"/t{i:04d}", "cdr") for i in range(1, channels + 1))
+    data, _ = MCAP.write(MCAP.Options(schemas=schemas, channels=declared, messages=(), chunks=()))
+    root = work / "root"
+    root.mkdir(parents=True)
+    (root / "x.mcap").write_bytes(bytes(data))
+    tracemalloc.start()
+    try:
+        result = Neptune(workspace=Workspace(work / "home")).ingest(root, work / "package")
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    return result.committed, work / "package", len(data), peak
+
+
+def derived_bytes(package: Path) -> dict[str, int]:
+    return {path.name: path.stat().st_size for path in (package / "derived").iterdir()}
+
+
+@pytest.mark.slow
+def test_channels_sharing_a_schema_share_one_layout(tmp_path: Path) -> None:
+    # Was: a 182 KB MCAP (one 60 KB schema, 300 channels) wrote a 117 MB stream_layout table
+    # (the whole layout once per channel) in 32 s and 926 MB RSS.
+    schema = "".join(f"float64 field_number_{i:05d}\n" for i in range(3000)).encode()
+    committed, package, size, peak = run_job(tmp_path, schema, 300)
+    assert committed
+    sizes = derived_bytes(package)
+    assert sizes["stream_layout.jsonl"] < 300 * 1024  # one small line per stream
+    assert sizes["definition_layout.jsonl"] < 8 * len(schema)  # the layout, once
+    assert sum(sizes.values()) < 8 * size
+    assert peak < 128 << 20
+    (run,) = run_contents(read_package(package))
+    assert len(run.streams) == 300
+    assert len({s.definition.id for s in run.streams if s.definition is not None}) == 1
+    assert all(len(s.fields) == 3000 for s in run.streams)
+
+
+def test_a_name_past_the_limit_costs_its_layout_not_the_package(tmp_path: Path) -> None:
+    # Was: a 176 KB MCAP whose 4096 fields share a type with a 40 KB field name wrote a 164 MB
+    # stream_layout line (930x) at 1.35 GB RSS.
+    root = "".join(f"pkg/B f{i}\n" for i in range(4096))
+    schema = f"{root}{SEP}\nMSG: pkg/B\nfloat64 a{'b' * 40_000}\n".encode()
+    committed, package, _, peak = run_job(tmp_path, schema, 1)
+    assert committed
+    assert sum(derived_bytes(package).values()) < 16 * 1024
+    assert peak < 64 << 20
+    (run,) = run_contents(read_package(package))
+    (stream,) = run.streams
+    assert isinstance(stream.layout, StreamLayout) and stream.layout.problem is not None
+    assert (stream.layout_state, stream.layout.problem.reason) == (
+        LayoutState.NOT_COVERED,
+        "name_limit",
+    )
+    assert stream.fields == () and stream.definition is None
+    (finding,) = [
+        f
+        for f in read_package(package).records
+        if isinstance(f, IngestFinding) and f.code == "neptune.introspection.definition_limit"
+    ]
+    assert finding.details["reason"] == "name_limit"
+    assert finding.details["counts"] == {"bytes": 40_001, "limit": 1024}
+    assert finding.subject == stream.layout.definition  # it cites the definition
+
+
+def distinct_definitions(work: Path, count: int) -> tuple[list[Stream], DefinitionReader]:
+    """``count`` streams over ``count`` distinct definitions of equal size, ingested, and a
+    reader of their bytes: ``introspect`` under any config, without a job."""
+    schemas = tuple(
+        MCAP.Schema(
+            i, f"pkg/msg/T{i}", "ros2msg", "".join(f"float64 t{i}_{j}\n" for j in range(9)).encode()
+        )
+        for i in range(1, count + 1)
+    )
+    channels = tuple(MCAP.Channel(i, i, f"/t{i}", "cdr") for i in range(1, count + 1))
+    data, _ = MCAP.write(MCAP.Options(schemas=schemas, channels=channels, messages=(), chunks=()))
+    source = bytes(data)
+    (work / "root").mkdir(parents=True)
+    (work / "root" / "x.mcap").write_bytes(source)
+    result = Neptune(workspace=Workspace(work / "home")).ingest(work / "root", work / "package")
+    records = [s.stream for s in streams(result.contents())]
+
+    def read(ref: EvidenceRef) -> bytes | None:
+        step = ref.locator[0]
+        assert ref.source == content_id(source) and isinstance(step, ByteRange)
+        return source[step.offset : step.offset + step.length]
+
+    return records, read
+
+
+def test_the_package_output_budget_stops_further_layouts_and_says_so(tmp_path: Path) -> None:
+    records, read = distinct_definitions(tmp_path, 4)
+    full = introspect(records, read)
+    sizes = {len(canonical_json.dumps(d.to_json())) + 1 for d in full.definitions}
+    (size,) = sizes  # equal definitions, equal layouts
+    budget = IntrospectionConfig(max_output_bytes=size * 5 // 2)
+    found = introspect(records, read, budget)
+    assert len(found.definitions) == 2
+    states = sorted(str(line.state) for line in found.layouts)
+    assert states == ["known", "known", "not_covered", "not_covered"]
+    reasons = {line.problem.reason for line in found.layouts if line.problem is not None}
+    assert reasons == {"output_budget"}
+    limits = [f for f in found.findings if f.code == "neptune.introspection.definition_limit"]
+    assert len(limits) == 2  # one per definition not written, each citing it
+    counts = limits[0].details["counts"]
+    assert isinstance(counts, dict)
+    assert (counts["bytes"], counts["limit"], counts["written"]) == (size, size * 5 // 2, 2 * size)
+    assert introspect(list(reversed(records)), read, budget) == found  # which two: by stream id
+    assert found.transform.id != full.transform.id
+
+
+def test_a_layout_line_past_its_limit_is_not_written(tmp_path: Path) -> None:
+    records, read = distinct_definitions(tmp_path, 1)
+    (definition,) = introspect(records, read).definitions
+    size = len(canonical_json.dumps(definition.to_json())) + 1
+    tight = IntrospectionConfig(SchemaLimits(max_layout_bytes=size - 1))
+    found = introspect(records, read, tight)
+    assert found.definitions == ()
+    (line,) = found.layouts
+    assert line.state is LayoutState.NOT_COVERED and line.problem is not None
+    assert line.problem.reason == "layout_limit"
+    assert dict(line.problem.counts) == {"bytes": size, "limit": size - 1, "paths": 9, "types": 1}
+
+
+def test_a_stream_with_a_definition_but_no_known_encoding_says_so(tmp_path: Path) -> None:
+    records, read = distinct_definitions(tmp_path, 1)
+    (stream,) = records
+    unknown = dataclasses.replace(stream, schema_encoding=Unknown())
+    (line,) = introspect([unknown], read).layouts
+    assert line.problem is not None and line.problem.reason == "unknown_encoding"
+    absent = dataclasses.replace(stream, schema_definition=Unknown())
+    (line,) = introspect([absent], read).layouts
+    assert line.problem is not None and line.problem.reason == "no_definition"
+
+
+def test_several_lines_for_a_stream_are_ambiguous_never_one_picked(
+    ingested: tuple[Path, tuple[RunContents, ...]],
+) -> None:
+    work, _ = ingested
+    package = read_package(work / "package")
+    other = RecordId("rec:sha256:" + "7" * 64)
+    semantics = [stream_semantic_from_json(line) for line in package.derived["stream_semantic"]]
+    layouts = [stream_layout_from_json(line) for line in package.derived["stream_layout"]]
+    imu = next(line for line in semantics if line.semantic is Semantic.IMU)
+    again = dataclasses.replace(imu, transform=other, id=semantic_id(other, imu.stream))
+    layout = next(line for line in layouts if line.stream == imu.stream)
+    moved = dataclasses.replace(layout, transform=other, id=layout_id(other, layout.stream))
+    doubled = dataclasses.replace(
+        package,
+        derived={
+            **package.derived,
+            "stream_semantic": (*package.derived["stream_semantic"], again.to_json()),
+            "stream_layout": (*package.derived["stream_layout"], moved.to_json()),
+        },
+    )
+    (stream,) = [s for run in run_contents(doubled) for s in run.streams if s.id == imu.stream]
+    assert isinstance(stream.semantic, Ambiguous) and isinstance(stream.layout, Ambiguous)
+    assert {c.value.id for c in stream.semantic.candidates} == {imu.id, again.id}
+    assert stream.semantic_state is SemanticState.AMBIGUOUS
+    assert stream.layout_state is KnowledgeState.AMBIGUOUS
+    assert not stream.carries(Semantic.IMU) and stream.may_carry(Semantic.IMU)
+    assert stream.definition is None and stream.fields == ()
+
+
+def test_a_layout_naming_a_missing_definition_is_an_invalid_package(
+    ingested: tuple[Path, tuple[RunContents, ...]],
+) -> None:
+    work, _ = ingested
+    package = read_package(work / "package")
+    broken = dataclasses.replace(package, derived={**package.derived, "definition_layout": ()})
+    with pytest.raises(PackageInvalidError, match="names a definition layout"):
+        run_contents(broken)

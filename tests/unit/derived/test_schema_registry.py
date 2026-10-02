@@ -1,25 +1,39 @@
 """The schema registry: declared definitions parsed into layouts, bounded on hostile input."""
 
 import json
+import time
+import tracemalloc
+from collections.abc import Callable, Iterator, Mapping
+from typing import TYPE_CHECKING
 
 import pytest
 
+from neptune.derived import schemas
 from neptune.derived.schemas import (
+    LIMIT_REASONS,
     ROOT_NAME,
     ArrayKind,
+    DefinitionLayout,
     Layout,
     LayoutState,
     PathKind,
     SchemaLimits,
     StreamLayout,
     canonical_type_name,
+    definition_layout_from_json,
+    definition_layout_id,
     layout_id,
     parse_definition,
+    problem,
     stream_layout_from_json,
 )
 from neptune.identity import canonical_json
+from neptune.identity.hashing import content_id
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.provenance import ByteRange, EvidenceRef
+
+if TYPE_CHECKING:
+    from neptune.model.jsonvalue import JsonObject, JsonValue
 
 LIMITS = SchemaLimits()
 SEP = "=" * 80
@@ -256,10 +270,10 @@ def test_an_exponential_fan_out_is_cut_at_the_path_limit() -> None:
         (SchemaLimits(max_types=3), chain(5), "type_limit"),
     ],
 )
-def test_limits_make_a_definition_unknown(limits: SchemaLimits, text: str, reason: str) -> None:
+def test_limits_make_a_definition_not_covered(limits: SchemaLimits, text: str, reason: str) -> None:
     parsed = parse_definition("ros2msg", "pkg/Root", text.encode(), limits)
-    assert parsed.state is LayoutState.UNKNOWN and parsed.problem is not None
-    assert parsed.problem.reason == reason
+    assert parsed.state is LayoutState.NOT_COVERED and parsed.layout is None
+    assert parsed.problem is not None and parsed.problem.reason == reason
 
 
 def test_too_many_fields_is_a_field_limit() -> None:
@@ -353,10 +367,11 @@ def test_json_field_names_with_path_characters_are_escaped() -> None:
         (b'{"x": 1' + b"0" * 5000 + b"}", "malformed"),
     ],
 )
-def test_hostile_json_schemas_are_unknown(data: bytes, reason: str) -> None:
+def test_hostile_json_schemas_are_unknown_or_past_a_limit(data: bytes, reason: str) -> None:
     parsed = parse_definition("jsonschema", "x", data, LIMITS)
-    assert parsed.state is LayoutState.UNKNOWN and parsed.problem is not None
-    assert parsed.problem.reason == reason
+    limit = reason in LIMIT_REASONS
+    assert parsed.state is (LayoutState.NOT_COVERED if limit else LayoutState.UNKNOWN)
+    assert parsed.problem is not None and parsed.problem.reason == reason
 
 
 def test_brackets_inside_json_strings_do_not_count_as_nesting() -> None:
@@ -384,49 +399,105 @@ def test_the_same_bytes_parse_to_the_same_layout() -> None:
     assert first == second
 
 
+def definition_line(encoding: str, name: str, text: str) -> DefinitionLayout:
+    parsed = parse_definition(encoding, name, text.encode(), LIMITS)
+    assert parsed.layout is not None
+    content = content_id(text.encode())
+    line_id = definition_layout_id(TRANSFORM_ID, content, encoding, parsed.layout.root)
+    return DefinitionLayout(line_id, TRANSFORM_ID, content, encoding, parsed.layout)
+
+
+def test_a_definition_layout_line_round_trips_canonically() -> None:
+    line = definition_line("ros2msg", "sensor_msgs/msg/Imu", IMU)
+    data = canonical_json.loads(canonical_json.dumps(line.to_json()))
+    assert isinstance(data, dict)
+    assert definition_layout_from_json(data) == line
+    assert data["assertion_kind"] == "observed" and data["root"] == "sensor_msgs/Imu"
+    for broken in (
+        {**data, "assertion_kind": "inferred"},
+        {**data, "root": "other/Root"},  # the id no longer recomputes
+        {**data, "content": "sha256:" + "4" * 64},
+        {**data, "extra": 1},
+        {k: v for k, v in data.items() if k != "types"},
+    ):
+        with pytest.raises((ValueError, TypeError)):
+            definition_layout_from_json(broken)
+
+
+def test_a_definition_layout_is_keyed_by_content_encoding_and_root() -> None:
+    text = "int8 x\n"
+    first = definition_line("ros2msg", "pkg/msg/A", text)
+    assert definition_line("ros2msg", "pkg/A", text).id == first.id  # the same root
+    assert definition_line("ros1msg", "pkg/A", text).id != first.id
+    assert definition_line("ros2msg", "pkg/B", text).id != first.id
+    assert definition_line("ros2msg", "pkg/A", text + "\n").id != first.id
+
+
 @pytest.mark.parametrize(
-    ("encoding", "text"),
-    [("ros2msg", IMU), ("ros2msg", "float64\n"), ("protobuf", "x"), ("jsonschema", "{}")],
+    ("state", "layout", "found"),
+    [
+        (LayoutState.KNOWN, "definition", None),
+        (LayoutState.KNOWN_ABSENT, None, None),
+        (LayoutState.NOT_COVERED, None, None),
+        (LayoutState.NOT_COVERED, None, problem("layout_limit", "big", None, {"bytes": 9})),
+        (LayoutState.UNKNOWN, None, problem("malformed", "bad", 3)),
+    ],
 )
-def test_a_layout_line_round_trips_canonically(encoding: str, text: str) -> None:
-    parsed = parse_definition(encoding, "sensor_msgs/msg/Imu", text.encode(), LIMITS)
+def test_a_stream_layout_line_round_trips_canonically(
+    state: LayoutState, layout: str | None, found: object
+) -> None:
     line = StreamLayout(
         id=layout_id(TRANSFORM_ID, STREAM),
         transform=TRANSFORM_ID,
         stream=STREAM,
         schema_name="sensor_msgs/msg/Imu",
-        schema_encoding=encoding,
+        schema_encoding="ros2msg",
         definition=REF,
-        state=parsed.state,
-        layout=parsed.layout,
-        problem=parsed.problem,
+        state=state,
+        layout=None if layout is None else definition_line("ros2msg", "a/B", IMU).id,
+        problem=found,  # type: ignore[arg-type]
     )
     data = canonical_json.loads(canonical_json.dumps(line.to_json()))
     assert isinstance(data, dict)
     assert stream_layout_from_json(data) == line
     assert data["assertion_kind"] == "observed"
+    assert "types" not in data and "paths" not in data  # the layout is the definition's line
 
 
-def test_a_layout_line_is_read_strictly() -> None:
-    parsed = parse_definition("ros2msg", "pkg/A", b"int8 x\n", LIMITS)
+def test_a_stream_layout_line_is_read_strictly() -> None:
+    definition = definition_line("ros2msg", "pkg/A", "int8 x\n").id
     line = StreamLayout(
-        layout_id(TRANSFORM_ID, STREAM), TRANSFORM_ID, STREAM, None, None, None,
-        parsed.state, parsed.layout, None,
+        layout_id(TRANSFORM_ID, STREAM), TRANSFORM_ID, STREAM, None, None, REF,
+        LayoutState.KNOWN, definition, None,
     )  # fmt: skip
     good = dict(line.to_json())
+    no_counts: JsonValue = {"message": "m", "reason": "r", "counts": {}}
+    broken: JsonObject
     for broken in (
         {**good, "assertion_kind": "inferred"},
         {**good, "id": "rec:sha256:" + "9" * 64},
         {**good, "state": "unknown"},
         {**good, "extra": 1},
-        {k: v for k, v in good.items() if k != "types"},
+        {**good, "types": []},
+        {**good, "problem": no_counts},
+        {k: v for k, v in good.items() if k != "layout"},
     ):
         with pytest.raises((ValueError, TypeError)):
             stream_layout_from_json(broken)
     with pytest.raises(ValueError, match="exactly when"):
         StreamLayout(
+            layout_id(TRANSFORM_ID, STREAM), TRANSFORM_ID, STREAM, None, None, REF,
+            LayoutState.UNKNOWN, definition, None,
+        )  # fmt: skip
+    with pytest.raises(ValueError, match="says why"):
+        StreamLayout(
+            layout_id(TRANSFORM_ID, STREAM), TRANSFORM_ID, STREAM, None, None, REF,
+            LayoutState.UNKNOWN, None, None,
+        )  # fmt: skip
+    with pytest.raises(ValueError, match="only an unknown or not covered"):
+        StreamLayout(
             layout_id(TRANSFORM_ID, STREAM), TRANSFORM_ID, STREAM, None, None, None,
-            LayoutState.UNKNOWN, parsed.layout, None,
+            LayoutState.KNOWN_ABSENT, None, problem("malformed", "x"),
         )  # fmt: skip
 
 
@@ -449,7 +520,7 @@ def test_a_max_depth_of_one_still_expands_root_fields() -> None:
     assert [(p.path, p.kind) for p in layout.paths] == [("next.next", PathKind.DEPTH)]
 
 
-@pytest.mark.parametrize("token", ["\u00b2", "1" + "0" * 5000, "01x", ""])
+@pytest.mark.parametrize("token", ["\u00b2", "1" + "0" * 3000, "01x", ""])
 def test_hostile_pointer_tokens_leave_a_reference_unresolved(token: str) -> None:
     document = '{"allOf":[{}],"properties":{"a":{"$ref":"#/allOf/' + token + '"}}}'
     layout = known("jsonschema", "x", document)
@@ -504,3 +575,152 @@ def test_a_root_reference_is_followed_and_a_root_composition_is_not_parsed() -> 
     assert parsed.problem is not None and parsed.problem.reason == "composition_not_parsed"
     nested = schema({"properties": {"c": {"oneOf": [{"type": "number"}, {"type": "string"}]}}})
     assert known("jsonschema", "x", nested).paths[0].kind is PathKind.UNRESOLVED
+
+
+# --- hostile size: names, pointers, layout bytes (review of PR #66) -----------------------------
+
+
+def peak_bytes(run: Callable[[], object]) -> int:
+    tracemalloc.start()
+    try:
+        run()
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+def fan_out(name: str, fields: int = 4096) -> str:
+    """A root of ``fields`` fields of one type whose single field is called ``name``: every path
+    repeats ``name``, so the paths are ``fields`` times its length."""
+    root = "\n".join(f"pkg/B f{index}" for index in range(fields))
+    return f"{root}\n{SEP}\nMSG: pkg/B\nfloat64 {name}\n"
+
+
+@pytest.mark.parametrize(
+    ("encoding", "text"),
+    [
+        ("ros2msg", fan_out("a" + "b" * 40_000)),  # a field name: the repro's 930x MCAP
+        ("ros2msg", "pkg/" + "T" * 2000 + " x\n"),  # a field type
+        ("ros2msg", "int8 " + "C" * 2000 + "=1\n"),  # a constant name
+        ("ros2msg", f"pkg/B b\n{SEP}\nMSG: pkg/" + "B" * 2000 + "\nint8 x\n"),  # a type name
+        ("jsonschema", json.dumps({"properties": {"p" * 2000: {"type": "number"}}})),
+    ],
+)
+def test_a_name_past_the_limit_is_not_covered_never_shortened(encoding: str, text: str) -> None:
+    parsed = parse_definition(encoding, "pkg/A", text.encode(), LIMITS)
+    assert (parsed.state, parsed.layout) == (LayoutState.NOT_COVERED, None)
+    assert parsed.problem is not None and parsed.problem.reason == "name_limit"
+    assert dict(parsed.problem.counts)["limit"] == LIMITS.max_name_bytes
+    assert len(parsed.problem.message) < 200  # a message quotes no hostile name whole
+
+
+def test_a_root_name_past_the_limit_is_not_covered() -> None:
+    parsed = parse_definition("ros2msg", "pkg/" + "A" * 2000, b"int8 x\n", LIMITS)
+    assert parsed.problem is not None and parsed.problem.reason == "name_limit"
+
+
+def test_a_pointer_past_the_limit_is_not_covered_and_split_never() -> None:
+    # The repro: 14k properties naming one definition whose own $ref is a 600 KB pointer took
+    # 16 s and held 10.8 GB of type text; it is one pointer_limit now.
+    long_pointer = "#/" + "a/" * 300_000
+    document = {
+        "properties": {f"p{index}": {"$ref": "#/$defs/d0"} for index in range(14_000)},
+        "$defs": {"d0": {"$ref": long_pointer}},
+    }
+    data = json.dumps(document, separators=(",", ":")).encode()
+    assert len(data) <= LIMITS.max_definition_bytes
+    started = time.perf_counter()
+    parsed = parse_definition("jsonschema", "pkg/A", data, LIMITS)
+    assert time.perf_counter() - started < 5
+    assert parsed.state is LayoutState.NOT_COVERED
+    assert parsed.problem is not None and parsed.problem.reason == "pointer_limit"
+
+
+def test_each_pointer_is_resolved_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    resolve = schemas._resolve
+
+    def counting(root: Mapping[str, object], pointer: str) -> object:
+        calls.append(pointer)
+        return resolve(root, pointer)
+
+    monkeypatch.setattr(schemas, "_resolve", counting)
+    document = {
+        "properties": {f"p{index}": {"$ref": "#/$defs/a"} for index in range(5000)},
+        "$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"type": "number", "unit": "m"}},
+    }
+    layout = known("jsonschema", "pkg/A", json.dumps(document))
+    assert len(layout.paths) == 4096 and layout.paths[0].unit == "m"
+    assert sorted(calls) == ["#/$defs/a", "#/$defs/b"]
+
+
+def test_a_layout_past_its_byte_limit_is_not_covered_with_counts_in_bounded_memory() -> None:
+    # Names under the limit still multiply: 4096 paths x 2 x ~2 KB is 16 MB of path text.
+    name = "n" * 1000
+    text = fan_out(name).replace(
+        f"float64 {name}\n", f"pkg/C {name}\n{SEP}\nMSG: pkg/C\nfloat64 {name}\nfloat64 m{name}\n"
+    )
+    found: list[object] = []
+    peak = peak_bytes(
+        lambda: found.append(parse_definition("ros2msg", "pkg/A", text.encode(), LIMITS))
+    )
+    (parsed,) = found
+    assert isinstance(parsed, schemas.Parsed)
+    assert (parsed.state, parsed.layout) == (LayoutState.NOT_COVERED, None)
+    assert parsed.problem is not None and parsed.problem.reason == "layout_limit"
+    counts = dict(parsed.problem.counts)
+    assert counts["limit"] == LIMITS.max_layout_bytes < counts["bytes"]
+    assert 0 < counts["paths"] < 4096 and counts["types"] == 3
+    assert peak < 3 * LIMITS.max_layout_bytes  # stopped as the paths reached the limit
+
+
+def test_types_past_the_layout_limit_stop_before_flattening() -> None:
+    # 16k properties all typed by one 3 KB unresolved pointer: 48 MB of type text when written.
+    document = {
+        "properties": {f"p{index}": {"$ref": "#/$defs/d0"} for index in range(16_000)},
+        "$defs": {"d0": {"$ref": "#/" + "a/" * 1500}},
+    }
+    parsed = parse_definition("jsonschema", "pkg/A", json.dumps(document).encode(), LIMITS)
+    assert parsed.problem is not None and parsed.problem.reason == "layout_limit"
+    assert dict(parsed.problem.counts)["paths"] == 0
+
+
+def test_a_small_layout_limit_applies_and_is_config() -> None:
+    small = SchemaLimits(max_layout_bytes=200)
+    parsed = parse_definition("ros2msg", "sensor_msgs/Imu", IMU.encode(), small)
+    assert parsed.problem is not None and parsed.problem.reason == "layout_limit"
+    assert small.to_json()["max_layout_bytes"] == 200
+    assert {"max_name_bytes", "max_pointer_bytes"} <= set(small.to_json())
+
+
+def test_flatten_reads_each_type_s_fields_once() -> None:
+    # The review's flatten_cpu repro: 4096 visits to a type of 12k constants re-scanned them all
+    # on every visit. Each type's fields are now read once, however often it is visited.
+    reads: dict[str, int] = {}
+
+    class Counted(tuple[schemas.Field, ...]):
+        name = ""
+
+        def __iter__(self) -> Iterator[schemas.Field]:
+            reads[self.name] = reads.get(self.name, 0) + 1
+            return super().__iter__()
+
+    def counted(declared: schemas.MessageType) -> schemas.MessageType:
+        fields = Counted(declared.fields)
+        fields.name = declared.name
+        return schemas.MessageType(declared.name, fields)
+
+    text = fan_out("v").replace(
+        "float64 v\n", "".join(f"int8 C{i}=1\n" for i in range(12_000)) + "float64 v\n"
+    )
+    layout = known("ros2msg", "pkg/A", text)
+    types = [counted(t) for t in layout.types]
+    flattened = schemas._flatten("pkg/A", types, LIMITS)
+    assert len(flattened.paths) == 4096
+    assert max(reads.values()) <= 2  # once for its size, once for its members
+
+
+def test_messages_quote_hostile_text_briefly() -> None:
+    parsed = parse_definition("ros2msg", "pkg/A", b"f@" + b"x" * 900 + b" y\n", LIMITS)
+    assert parsed.problem is not None and parsed.problem.reason == "malformed"
+    assert len(parsed.problem.message) < 200

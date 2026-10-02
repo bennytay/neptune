@@ -35,7 +35,12 @@ from typing import Any, ClassVar, Final, TypeAlias
 from neptune.derived.provenance import DERIVED_SCHEMA_VERSION as DERIVED_SCHEMA_VERSION
 from neptune.derived.provenance import INFERRED
 from neptune.derived.provenance import derived_object as _derived_object
-from neptune.derived.schemas import LAYOUT_KIND, stream_layout_from_json
+from neptune.derived.schemas import (
+    DEFINITION_KIND,
+    LAYOUT_KIND,
+    definition_layout_from_json,
+    stream_layout_from_json,
+)
 from neptune.derived.semantics import SEMANTIC_KIND, stream_semantic_from_json
 from neptune.discovery.layout import ROOT
 from neptune.identity.ids import record_id
@@ -574,7 +579,8 @@ def unassigned_file_from_json(data: JsonValue) -> UnassignedFile:
 DERIVED_KINDS: Final[Mapping[str, Callable[[JsonValue], Any]]] = {
     PROPOSAL_KIND: session_proposal_from_json,
     UNASSIGNED_KIND: unassigned_file_from_json,
-    LAYOUT_KIND: stream_layout_from_json,  # ADR 0049
+    DEFINITION_KIND: definition_layout_from_json,  # ADR 0049
+    LAYOUT_KIND: stream_layout_from_json,
     SEMANTIC_KIND: stream_semantic_from_json,
 }
 
