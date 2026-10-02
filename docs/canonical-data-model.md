@@ -22,6 +22,7 @@ domains.
 | `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration` | `model/machine.py` (ADR 0019) |
 | `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord` | `model/world.py` (ADR 0020) |
 | `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
+| `alignment` | `IdentityLink`, `ClockMapping`, `FrameBinding`, `RunAssembly`, `SnapshotBinding` (since 4) | `model/alignment.py` (ADR 0050) |
 
 `IngestReceipt` is the package-level account of an ingest run, not a record table: one document per package,
 beside `PackageManifest` and the volatile `ReceiptEnvelope` (`model/package.py`, ADR 0022).
@@ -102,8 +103,8 @@ a bug, not a value.
   `scope` (where the ticks are read, verbatim) and `Knowledge`-wrapped `role` (receive / publish / sample /
   document), `resolution` (exact `Fraction` seconds per tick), `epoch`, `timescale` and `declared_monotonic`.
 - MCAP `log_time` and `publish_time`, ROS `header.stamp` and receive time, PX4 boot-time and GPS time are
-  separate domains. Mappings between domains are `ClockAlignment` records produced in MVL-36 with method,
-  evidence and error bounds.
+  separate domains. Mappings between domains are `ClockMapping` records (ADR 0050, below): stated ones are
+  canonical, estimated ones (MVL-36) derived.
 - Civil date-times (ADR 0023 §2): with a stated offset, ticks are POSIX seconds of the exact instant (epoch
   `unix`, timescale `posix`); with no zone, POSIX-style seconds on the source's own civil clock (epoch `unix`,
   timescale `Unknown`); a date alone counts days.
@@ -198,6 +199,26 @@ a bug, not a value.
 - Which configuration or calibration applied to which run is a binding (MVL-38); nothing here points
   at a run.
 
+## Alignment (ADR 0050; `model/alignment.py`)
+
+- Relations between records other families declare, only as far as cited evidence states them. An
+  exact join of declared values (two declarations giving one id) is evidence; anything estimated is
+  `inferred` and lives in `derived/<kind>.jsonl` with the same fields. Nothing merges or re-times.
+- `validity`: `Knowledge[ValidityWindow]`, `{clock, start, end}` on one `TimestampDomain`, start
+  inclusive and end exclusive; `KnownAbsent` bound = stated open, `Unknown` = not stated.
+- `IdentityLink {left, right, basis, identifier, evidence}`: `right` `Known` or `Ambiguous`, never `left`;
+  `co_declared` (one declaration, two ids) or `shared_identifier` (two declarations, one `identifier`).
+  Never a merge: both ids stay keys.
+- `ClockMapping {source, target, method, anchor, rate, residual_bound}`:
+  `target(t) = anchor.target + rate * (t - anchor.source)` in ticks, `rate` an exact positive fraction,
+  `residual_bound` a `Duration` on the target clock, `validity` on the source clock.
+- `FrameBinding {parent, child, transform, basis, calibration}`: the `FrameTransform` that gives one graph
+  edge its value (`robot_description`, `calibration`, `transform_message`).
+- `RunAssembly {run, rule, members}`: each member a `SourceRevision` id, a role (`recording`,
+  `description`, `context`) and the `EvidenceRef` that places it in the run.
+- `SnapshotBinding {run, snapshot, snapshot_kind}`: the hardware, software or calibration snapshot a run
+  ran with, over a window on one of its clocks (MVL-38).
+
 ## World and record context (ADR 0020; `model/world.py`)
 
 - `Site` / `Asset`: a place or thing one declaration names (a register row, a manifest entry, a GeoJSON
@@ -262,10 +283,10 @@ a bug, not a value.
 
 | Example | Sources | Records |
 |---|---|---|
-| drone | PX4 ULog | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings |
-| quadruped | ROS 2 bag, URDF, STL mesh | run from bag metadata, joint and trajectory streams with three clocks each, URDF frames, transforms and components, the mesh as geometry |
-| manipulator | MCAP, hand-eye YAML | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit |
-| mobile robot | ROS 1 bag, site register CSV, PNG photo | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture |
+| drone | PX4 ULog, fleet register JSON | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings; a co-declared identity link and three snapshot bindings |
+| quadruped | ROS 2 bag, URDF, STL mesh | run from bag metadata, joint and trajectory streams with three clocks each, URDF frames, transforms and components, the mesh as geometry; the bag's file list, its stated `starting_time` → `log_time` clock mapping, URDF edge bindings |
+| manipulator | MCAP, hand-eye YAML | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit; the calibration's edge binding |
+| mobile robot | ROS 1 bag, site register CSV, PNG photo | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture; the bag as its run's one member |
 
 Every source is a real file, and every record resolves back to it: citations land on real records, pointers,
 rows and cells resolve, and every id a record names is in the example.
