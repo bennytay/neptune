@@ -421,7 +421,7 @@ def commissioning() -> bytes:
 def incident(split: bool = False) -> bytes:
     """The incident report. With ``split`` the description's second paragraph starts page 2, so the
     section crosses a page and no single span can cite it."""
-    description = [
+    description: list[Element] = [
         Heading("Description"),
         Para(
             [
@@ -430,7 +430,9 @@ def incident(split: bool = False) -> bytes:
             ]
         ),
     ]
-    more = [Para(["No person was in the aisle. The aisle was closed for 24 minutes."])]
+    more: list[Element] = [
+        Para(["No person was in the aisle. The aisle was closed for 24 minutes."])
+    ]
     first = PageSpec(
         [
             Heading("Incident report INC-HH-0092", 1),
@@ -454,12 +456,12 @@ def incident(split: bool = False) -> bytes:
                 ],
                 (150, 540),
             ),
-            *(description if split else []),
+            *(description if split else ()),
         ]
     )
     second = PageSpec(
         [
-            *([] if split else description),
+            *(() if split else description),
             *more,
             Heading("Root cause"),
             Para(
