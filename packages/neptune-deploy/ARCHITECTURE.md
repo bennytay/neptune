@@ -6,6 +6,7 @@ flowchart LR
   subgraph P["neptune-deploy"]
     SRC["sources/ read-only connectors"]
     LIF["adapters/lifecycle"]
+    MAP["lifecycle/ mapper · mapping files · vendor presets"]
     PACKS["packs/ evidence-pack compiler"]
     CONSOLE["console/"]
   end
@@ -13,6 +14,7 @@ flowchart LR
     EP["entry points: neptune.adapters · neptune.sources"]
     CONF["adapters.conformance"]
     MODEL["model: lifecycle kinds · schema 4"]
+    STORE["store.package: read · write"]
   end
   CON[("contracts/")]
 
@@ -21,6 +23,9 @@ flowchart LR
   LIF --> EP
   CONF -.->|CI gate| LIF
   MODEL -->|record kinds| LIF
+  STORE -->|tables of a package| MAP
+  MAP -->|new package of lifecycle records| STORE
+  MODEL -->|record kinds| MAP
   CON -->|package-schema 4.0.0| PACKS
   PACKS --> CONSOLE
 
@@ -35,7 +40,7 @@ flowchart LR
   classDef partial fill:#c09a5b26,stroke:#c09a5b,stroke-width:2px
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
-  class K1,CONF,MODEL built
+  class K1,CONF,MODEL,STORE,MAP built
   class K2,LIF,EP partial
   class SRC,PACKS,CONSOLE,K3 todo
   class CON,EXT ext
