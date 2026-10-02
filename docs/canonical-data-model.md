@@ -245,7 +245,11 @@ a bug, not a value.
 - `RunAssembly {run, rule, members}`: each member a `SourceRevision` id, a role (`recording`,
   `description`, `context`) and the `EvidenceRef` that places it in the run.
 - `SnapshotBinding {run, snapshot, snapshot_kind}`: the hardware, software, calibration or configuration
-  snapshot a run ran with, over a window on one of its clocks (MVL-38).
+  snapshot a run ran with, over a window on one of its clocks. The `neptune.bindings` pass (ADR 0064) writes
+  a canonical one where the run's own source names the snapshot (content id, path, commit, digest or firmware
+  version, verbatim), a derived one for the nearest snapshot of its kind and file name in the run's sessions,
+  and a finding for every tie (`conflicting_snapshots`) and every kind left unbound (`snapshot_unresolved`;
+  `no_software_identity` for software).
 
 ## World and record context (ADR 0020; `model/world.py`)
 
@@ -290,7 +294,8 @@ a bug, not a value.
   The store checks their structure; `neptune.derived` reads their meaning and refuses kinds it does not define.
   The kinds are `session_proposal` and `session_unassigned` (run/session grouping), and `definition_layout`,
   `stream_layout` and `stream_semantic` (a distinct definition's declared field paths and types, written once;
-  each stream's line naming it; and what the stream carries, inferred; ADR 0049). Present and empty means the
+  each stream's line naming it; and what the stream carries, inferred; ADR 0049), and `snapshot_binding` (a
+  run's nearest session snapshot of a kind and file name, inferred; ADR 0064). Present and empty means the
   producer ran and inferred nothing, absent means it did not run.
 
 ## Serialization (ADR 0002)
