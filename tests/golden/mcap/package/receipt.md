@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:b55e57be389a4fd0e84c34b481d307765e4cdc195989ef6ca8c5a9557f1942e7`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:7a4229a60b2d97d9fc5bd26806e16218a41f3cb6c49f7a42b88a2633a8e980e3`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -19,7 +19,7 @@ Receipt `rec:sha256:b55e57be389a4fd0e84c34b481d307765e4cdc195989ef6ca8c5a9557f19
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
 | `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
-| `neptune.bindings` | `0.1.0` | `sha256:4b524a213cd8` | none | `rec:911ceed0fb15` |
+| `neptune.bindings` | `0.1.0` | `sha256:dbfdd73f0250` | none | `rec:be06a14505bc` |
 | `neptune.clocks` | `0.1.0` | `sha256:8abe788c243b` | none | `rec:c63eb19977e6` |
 | `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:e338a1172927` |
 | `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:e29bd75e0779` |
@@ -61,15 +61,15 @@ Receipt `rec:sha256:b55e57be389a4fd0e84c34b481d307765e4cdc195989ef6ca8c5a9557f19
 
 ## Findings
 
-- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:5c921c6f798d`
-- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:4e31746cb50b`
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:986bb2654b8b`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:6b0471f9a1ab`
 - **info** `mcap.attachment_not_extracted` (unsupported): an attachment of 50 bytes is an embedded file no record kind holds yet; it is cited here, its name and media type in the details · `rec:3840bb82b683`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded; each row cites its message's bytes · `rec:24c920d14f41`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded; each row cites its message's bytes · `rec:2a04449178fd`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 4's message payloads are not decoded; each row cites its message's bytes · `rec:542c3cbcba95`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:5e30cda4992d`
-- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:297d41ddb381`
-- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:387088b9bb0a`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:2161478b64ed`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:ea291a1de32c`
 - **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:048955c70ef7`
 - **info** `neptune.clocks.latency_unbounded` (missing): 3 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:de7fea67ff46`
 - **info** `neptune.clocks.unsynchronised` (missing): the package's clocks form 2 groups that no clock mapping joins; times in different groups cannot be compared · `rec:ab32b6b269d2`

@@ -3,14 +3,15 @@
 A real job, with the real sandbox and grouping, reads four sites across embodiments:
 
 - an AMR fleet: one session directory, two robots, each with its own recording, navigation
-  parameters and git build revision, and a fleet configuration both share;
-- a manipulator cell whose recording's own MCAP metadata names its gripper firmware version, its
-  policy checkpoint by hash and its controller configuration by path;
+  parameters and git build revision, and a fleet configuration above both, which is neither's own;
+- a manipulator cell whose recording's own MCAP metadata names its policy checkpoint by hash
+  (stated), and its gripper firmware version and controller configuration by relative path
+  (inferred: a version names a release, and a path assumes the robot's working directory);
 - a quadruped trot with parameters and no software identity at all;
 - an arm whose session holds two different ``params.yaml``, equally near its recording.
 
-Stated bindings are canonical records; inferred ones are a derived table; every gap and conflict
-is a finding naming the run. Nothing is mocked, and a second job writes the same package.
+Stated bindings are canonical records; inferred ones are a derived table; every gap, conflict and
+shared file is a finding naming the run. Nothing is mocked, and a second job writes the same package.
 """
 
 import hashlib
@@ -28,6 +29,7 @@ from neptune.adapters.registry import AdapterRegistry
 from neptune.derived.bindings import (
     CONFLICTING_SNAPSHOTS,
     NO_SOFTWARE_IDENTITY,
+    SHARED_SNAPSHOT,
     SNAPSHOT_UNRESOLVED,
     InferredSnapshotBinding,
 )
@@ -183,19 +185,24 @@ def test_each_fleet_robot_gets_its_own_parameters_and_build(package: Any) -> Non
         assert _bound(package, run) == {
             f"fleet/run_001/{robot}/nav_params.yaml": ("inferred", CONFIG),
             f"fleet/run_001/{robot}/REVISION": ("inferred", SOFTWARE_KIND),
-            "fleet/run_001/fleet.yaml": ("inferred", CONFIG),
         }
-        assert _codes(package, run) == UNRESOLVED_REST
+        # fleet.yaml is as near to both robots: bound to neither, and said so once.
+        assert _codes(package, run) == sorted([(SHARED_SNAPSHOT, ""), *UNRESOLVED_REST])
+    (shared,) = [
+        f for f in package.records if isinstance(f, IngestFinding) and f.code == SHARED_SNAPSHOT
+    ]
+    assert shared.details["directory"] == "fleet/run_001"
+    assert shared.details["recordings"] == 2
 
 
-def test_the_cell_recording_states_its_firmware_checkpoint_and_configuration(
+def test_the_cell_recording_names_its_firmware_checkpoint_and_configuration(
     package: Any,
 ) -> None:
     run = _runs(package)["cell/run_007/arm.mcap"]
     assert _bound(package, run) == {
-        "cell/run_007/firmware/gripper.bin": ("stated", SOFTWARE_KIND),
+        "cell/run_007/firmware/gripper.bin": ("inferred", SOFTWARE_KIND),
         "cell/run_007/models/policy.safetensors": ("stated", SOFTWARE_KIND),
-        "cell/run_007/config/controller.yaml": ("stated", CONFIG),
+        "cell/run_007/config/controller.yaml": ("inferred", CONFIG),
     }
     assert _codes(package, run) == UNRESOLVED_REST
     stated = [r for r in package.records if isinstance(r, SnapshotBinding) and r.run == run.id]
