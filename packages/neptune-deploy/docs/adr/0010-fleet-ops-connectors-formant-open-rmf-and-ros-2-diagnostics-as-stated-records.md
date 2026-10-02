@@ -59,11 +59,11 @@ more than it says.
    - Limits as ADR 0006 and 0009: a page is at most 8 MiB of strict UTF-8 JSON, a continuation token at most 4 KiB
      and a repeated one stops the part (`pagination_loop`), at most 100,000 pages, `max_records` records and
      `max_listing_bytes` bytes. No redirect is followed. Every request has a deadline.
-   - **The deadline holds against HTTP/1.0 and `Connection: close`.** `http.client` forgets a connection's socket
-     as soon as the response says it will close it, so ADR 0006's `Transport.abort()` finds nothing to shut down,
-     and a server that answers that way and trickles its body outlives the deadline. `QueryTransport` keeps its
-     own reference to the socket of the request in flight. The same flaw is in `Transport` itself; see
-     Consequences.
+   - `QueryTransport` is the shared `Transport` (ADR 0006 §6, with the hardening of MVL-154) plus one method,
+     `post_query`, which sends `_request("POST", ...)` to the five exact query routes (an allow-list) and
+     refuses any other path, as the Roboto and record-system transports name their one `POST`. The deadline,
+     its `abort()` against HTTP/1.0 and `Connection: close`, `ShortRead` and the `ValueError` handling are the
+     shared ones. A `timeout` is above 0 and at most `MAX_TIMEOUT`; `inf` and `nan` are refused.
 3. **Documents and stated records.** Each part's objects become one **document**, `{"items": [...]}` in a fixed
    byte form (sorted keys, ASCII, items sorted by their bytes and de-duplicated), so it is a function of what was
    returned and not of page size, page order or row order. Its revision token is `records:<sha256>`: a changed
@@ -233,14 +233,8 @@ more than it says.
   came from; ROS 2 statuses are event rows with the strings a mapping declares.
 - **Compiler gaps, for the compiler's backlog:** a `Task` record kind (Open-RMF tasks are `Run`s until then);
   decoding `diagnostic_msgs/DiagnosticArray` (and message payloads generally) into a package's series, so a
-  bag's diagnostics can be mapped without an export; ingesting plugin Sources (ADR 0006, gap 2), which makes
+  bag's diagnostics can be mapped without an export; ingesting plugin Sources (ADR 0006, gap 2; MVL-45, PR #103), which makes
   `walk()` and `open()` reachable from `neptune ingest`.
-- **A flaw in ADR 0006's `Transport`:** `abort()` shuts down `connection.sock`, which `http.client` sets to
-  `None` once a response says it will close the connection (HTTP/1.0 or `Connection: close`), so an object store
-  that answers that way can hold a read open past its deadline. Fixing it is a change to `object_store/transport.py`
-  (keep a reference to the socket in `_send`, as `QueryTransport` does); MVL-154 (#101) owns the fix.
-- `QueryTransport` duplicates `RobotoTransport`. Both are to switch to the shared transport once its
-  `abort()` fix (MVL-154, #101) is on `main`.
 - D3 follow-up (MVL-137): check the transform's `levels` and `names` values against the registered event
   vocabulary, and file findings for the strings it does not hold. The records are unchanged by it.
 - Revisit when a live Formant tenant or an Open-RMF api-server disagrees with the recorded shapes, when the

@@ -28,10 +28,10 @@ import re
 import urllib.parse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Final
 
 from neptune_deploy.sources.object_store.transport import (
-    DeadlineExceeded,
     Endpoint,
     HttpStatusError,
     RedirectRefused,
@@ -129,7 +129,6 @@ class RecordTransport(Transport):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._last_headers: dict[str, str] = {}
-        self._body: bytes | None = None  # a GraphQL query, for the one request that sends it
         self._error_reason: str | None = None  # the reason a 403 states, if it states one
         # Statuses this system answers a throttled request with (a Retry-After comes with them).
         self.throttle_statuses: frozenset[int] = frozenset({429})
@@ -148,14 +147,14 @@ class RecordTransport(Transport):
         return other
 
     def _send(
-        self, target: str, headers: Mapping[str, str], deadline: _Deadline
+        self,
+        target: str,
+        headers: Mapping[str, str],
+        deadline: _Deadline,
+        method: str = "GET",
+        body: bytes | None = None,
     ) -> http.client.HTTPResponse:
-        body, self._body = self._body, None
-        raw = (
-            super()._send(target, headers, deadline)
-            if body is None
-            else self._send_query(target, headers, body, deadline)
-        )
+        raw = super()._send(target, headers, deadline, method, body)
         self._last_headers = {k.lower(): v for k, v in raw.getheaders()}
         self._error_reason = self._reason_of(raw) if raw.status == 403 else None
         return raw
@@ -180,48 +179,25 @@ class RecordTransport(Transport):
                 return str(reason)
         return None
 
-    def _send_query(
-        self, target: str, headers: Mapping[str, str], body: bytes, deadline: _Deadline
-    ) -> http.client.HTTPResponse:
-        """``POST`` of a GraphQL query: a read, so sent again once on a new connection if a
-        kept-alive one was closed by the server while idle, as ``GET`` is."""
-        for attempt in (0, 1):
-            reused = self._connection is not None
-            connection = self._connect()
-            self.requests += 1
-            try:
-                connection.putrequest("POST", target, skip_host=True, skip_accept_encoding=True)
-                for name, value in headers.items():
-                    connection.putheader(name, value)
-                connection.putheader("Content-Type", "application/json")
-                connection.putheader("Content-Length", str(len(body)))
-                connection.endheaders(body)
-                if deadline.expired:
-                    self.drop()
-                    raise DeadlineExceeded("the request outlived its deadline")
-                return connection.getresponse()
-            except (ConnectionResetError, BrokenPipeError) as exc:
-                self.drop()
-                if not (reused and attempt == 0) or deadline.expired:
-                    raise deadline.error(exc, TransportError(type(exc).__name__)) from exc
-            except (OSError, http.client.HTTPException) as exc:
-                self.drop()
-                raise deadline.error(exc, TransportError(type(exc).__name__)) from exc
-        raise AssertionError("unreachable")
+    def post_query(
+        self, path: str, body: bytes, headers: Mapping[str, str] = MappingProxyType({})
+    ) -> Response:
+        """``POST`` a GraphQL query document (``Api.graphql`` builds and checks it): a read, sent
+        again once on a new connection if a kept-alive one was closed while idle, as ``GET`` is."""
+        return self._request(
+            "POST", path, (), {**headers, "Content-Type": "application/json"}, body
+        )
 
-    def post_query(self, path: str, body: bytes, headers: Mapping[str, str] = {}) -> Response:
-        """``POST`` a GraphQL query document (``Api.graphql`` builds and checks it)."""
-        self._body = body
-        try:
-            return self.get(path, (), headers)
-        finally:
-            self._body = None
-
-    def get(
-        self, path: str, query: Sequence[tuple[str, str]] = (), headers: Mapping[str, str] = {}
+    def _request(
+        self,
+        method: str,
+        path: str,
+        query: Sequence[tuple[str, str]] = (),
+        headers: Mapping[str, str] = MappingProxyType({}),
+        body: bytes | None = None,
     ) -> Response:
         try:
-            return super().get(path, query, headers)
+            return super()._request(method, path, query, headers, body)
         except HttpStatusError as exc:
             if exc.status in self.throttle_statuses or (
                 exc.status == 403 and self._error_reason is not None

@@ -21,7 +21,7 @@ from neptune_deploy.sources.object_store.config import (
     MAX_KEY_BYTES,
     ObjectStoreConfigError,
 )
-from neptune_deploy.sources.object_store.transport import DEFAULT_TIMEOUT, Endpoint
+from neptune_deploy.sources.object_store.transport import DEFAULT_TIMEOUT, MAX_TIMEOUT, Endpoint
 from neptune_deploy.sources.stated_records import DeclaredClock, parse_clock
 
 CONNECTOR_ID: Final = "deploy_roboto"
@@ -143,8 +143,12 @@ class RobotoOptions:
                 raise ObjectStoreConfigError(f"{name} is an integer from {low} to {high}")
             counts[name] = value
         timeout = given.get("timeout", base.timeout)
-        if isinstance(timeout, bool) or not isinstance(timeout, int | float) or not timeout > 0:
-            raise ObjectStoreConfigError("timeout is a positive number of seconds")
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, int | float)
+            or not 0 < timeout <= MAX_TIMEOUT
+        ):
+            raise ObjectStoreConfigError(f"timeout is from 0 to {MAX_TIMEOUT} seconds")
         try:
             clock = parse_clock(given.get("event_clock"))
         except ValueError as exc:

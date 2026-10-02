@@ -17,24 +17,20 @@ The response shapes are written from Formant's public API documentation. They ha
 against a live tenant (ADR 0010 §8).
 """
 
-import contextlib
 import hashlib
-import http.client
 import re
-import socket
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Final
 
 from neptune.model.jsonvalue import JsonValue
 from neptune_deploy.sources.object_store.transport import (
-    DeadlineExceeded,
     Endpoint,
     NetworkGate,
     Response,
     Transport,
     TransportError,
-    _Deadline,
 )
 from neptune_deploy.sources.stated_records import DocumentInvalid, dumps, parse_json
 
@@ -62,79 +58,28 @@ def valid_token(token: str) -> bool:
 
 
 class QueryTransport(Transport):
-    """``Transport`` that can also send the documented read-only queries, as ``POST``."""
+    """The shared ``Transport``, which can also send Formant's five read-only queries as ``POST``.
+
+    Everything else (the deadline and its ``abort``, redirects, ``ShortRead``, the workspace gate)
+    is the shared transport's; this class only names the one ``POST`` it may send, as the Roboto
+    and record-system transports do.
+    """
 
     def __init__(
         self, endpoint: Endpoint, network: NetworkGate, purpose: str, *, timeout: float
     ) -> None:
         super().__init__(endpoint, network, purpose, timeout=timeout)
-        self._method = "GET"
-        self._body: bytes | None = None
-        self._sock: socket.socket | None = None
 
-    def abort(self) -> None:
-        """Shut the socket down from another thread (a deadline passed).
-
-        ``http.client`` forgets a connection's socket as soon as the response says it will close
-        it (HTTP/1.0, or ``Connection: close``), and then the base class has nothing to shut down:
-        a server that answers that way and trickles its body would outlive the deadline. This
-        class keeps its own reference for the request in flight.
-        """
-        sock = self._sock
-        if sock is not None:
-            with contextlib.suppress(OSError):  # already closed
-                sock.shutdown(socket.SHUT_RDWR)
-        super().abort()
-
-    def drop(self) -> None:
-        """Close the connection and forget its socket, so a later ``abort`` hits nothing stale."""
-        self._sock = None
-        super().drop()
-
-    def post_query(self, path: str, body: bytes, headers: Mapping[str, str]) -> Response:
+    def post_query(
+        self, path: str, body: bytes, headers: Mapping[str, str] = MappingProxyType({})
+    ) -> Response:
         """``POST`` ``body`` to one of the five query routes, and nowhere else."""
         route = path.removeprefix(self.endpoint.base_path)
         if not _QUERY_ROUTE.fullmatch(route):
             raise ValueError("POST is sent to the five documented query routes only")
-        self._method, self._body = "POST", body
-        try:
-            return self.get(
-                path,
-                (),
-                {**headers, "Content-Type": "application/json", "Content-Length": str(len(body))},
-            )
-        finally:
-            self._method, self._body = "GET", None
-
-    def _send(
-        self, target: str, headers: Mapping[str, str], deadline: _Deadline
-    ) -> http.client.HTTPResponse:
-        # Transport._send with a method and a body. A kept-alive connection the server closed while
-        # idle is reopened once: a query is idempotent, and nothing was received.
-        for attempt in (0, 1):
-            reused = self._connection is not None
-            connection = self._connect()
-            self.requests += 1
-            try:
-                connection.putrequest(
-                    self._method, target, skip_host=True, skip_accept_encoding=True
-                )
-                for name, value in headers.items():
-                    connection.putheader(name, value)
-                connection.endheaders(self._body)
-                self._sock = connection.sock
-                if deadline.expired:  # it passed while connecting, before a socket to shut down
-                    self.drop()
-                    raise DeadlineExceeded("the request outlived its deadline")
-                return connection.getresponse()
-            except (ConnectionResetError, BrokenPipeError) as exc:
-                self.drop()
-                if not (reused and attempt == 0) or deadline.expired:
-                    raise deadline.error(exc, TransportError(type(exc).__name__)) from exc
-            except (OSError, http.client.HTTPException) as exc:
-                self.drop()
-                raise deadline.error(exc, TransportError(type(exc).__name__)) from exc
-        raise AssertionError("unreachable")
+        return self._request(
+            "POST", path, (), {**headers, "Content-Type": "application/json"}, body
+        )
 
 
 @dataclass

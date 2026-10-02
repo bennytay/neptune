@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from typing import Final
 
 from neptune.model.jsonvalue import JsonValue
+from neptune_deploy.sources.object_store.transport import MAX_TIMEOUT
 
 MAX_LIST: Final = 256
 
@@ -38,9 +39,15 @@ def integer(options: Mapping[str, JsonValue], name: str, default: int, low: int,
 
 
 def seconds(options: Mapping[str, JsonValue], name: str, default: float) -> float:
+    """A timeout: above 0 and at most the transport's ``MAX_TIMEOUT``. A larger one is an
+    ``OverflowError`` in the socket layer, and ``inf`` and ``nan`` are no number of seconds."""
     value = options.get(name, default)
-    if isinstance(value, bool) or not isinstance(value, int | float) or not 0 < value <= 3600:
-        raise FleetOpsConfigError(f"{name} is a number of seconds from 0 to 3600")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not 0 < value <= MAX_TIMEOUT
+    ):
+        raise FleetOpsConfigError(f"{name} is a number of seconds from 0 to {MAX_TIMEOUT}")
     return float(value)
 
 
