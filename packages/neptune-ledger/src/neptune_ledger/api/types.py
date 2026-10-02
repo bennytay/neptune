@@ -19,7 +19,7 @@ from typing import Annotated, Any, ClassVar, Final, Literal, TypeAlias
 
 from neptune.identity import canonical_json
 from neptune.model.kinds import RECORD_KINDS
-from neptune.model.knowledge import AssertionKind, Knowledge, Known, Unknown
+from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotCovered
 
 # The catalog API's registry version (contracts/catalog-api). It equals the registry version
 # exactly (platform ADR 0002 §3); a reader-incompatible change raises the major (ADR 0004 §5).
@@ -596,7 +596,8 @@ class ThreadLink:
     ``from_key`` and ``to_key`` are the link's left and right ids as keys of the thread that
     lists it: their ``kind`` is the kind the caller asked for, a lookup, not something the link
     states. ``entity_kind`` is what the evidence states about the kind of thing the two ids
-    name: ``Unknown`` for every link of package schema 3, which has no such field (ADR 0010 §8).
+    name: ``NotCovered`` for every link of package schema 3, which has no field to state it in
+    (ADR 0010 §8).
     """
 
     link_record_id: RecordId
@@ -605,7 +606,7 @@ class ThreadLink:
     to_key: ThreadKey
     assertion_kind: Literal["observed", "stated"]
     state: Literal["ambiguous", "known", "not_applicable", "not_covered", "unknown"]
-    entity_kind: Knowledge[EntityKind] = field(default_factory=Unknown)
+    entity_kind: Knowledge[EntityKind] = field(default_factory=NotCovered)
 
 
 @dataclass(frozen=True)

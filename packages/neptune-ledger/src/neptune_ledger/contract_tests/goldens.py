@@ -271,7 +271,7 @@ def goldens() -> dict[str, dict[str, Any]]:
             request.key, "world", History(), merge=ClockMerge(clock, (mapping,))
         )
         # The shape of a thread's identity-link edge (1.5.0): no worked example states a link
-        # (root ADR 0050 §10), so ids are placeholders. The entity kind is Unknown.
+        # (root ADR 0050 §10), so ids are placeholders. The entity kind is NotCovered.
         documents["thread_link.example.json"] = ThreadLink(
             "rec:sha256:" + "b" * 64,
             drone.package_id,

@@ -31,7 +31,7 @@ from ledger_thread_packages import (
 )
 from neptune.model.alignment import ClockMapping as ClockMappingRecord
 from neptune.model.kinds import RECORD_KINDS
-from neptune.model.knowledge import Unknown
+from neptune.model.knowledge import NotCovered
 from neptune_ledger.api.types import (
     ClockMerge,
     DeclaredKey,
@@ -320,7 +320,7 @@ def test_an_identity_link_is_listed_on_both_threads_and_joins_neither(
     by_serial = catalog.thread(serial, "world", History())
     validate(by_manifest)
     assert by_manifest.links == by_serial.links == (edge,)
-    assert edge.entity_kind == Unknown(), "a link states no kind; the keys' kind is the lookup"
+    assert edge.entity_kind == NotCovered(), "no field states a kind; the keys' kind is a lookup"
     runs = {one(rows, "run")["id"] for rows in (split_run["part0"], split_run["part1"])}
     assert {r for r, _ in entries(by_manifest)} == runs
     assert by_serial.partitions == (), "a link never brings another thread's records"

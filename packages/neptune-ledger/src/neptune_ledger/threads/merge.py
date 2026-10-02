@@ -10,6 +10,7 @@ window holds the interval, within a step budget (ADR 0010 §6). Stored ticks are
 """
 
 import math
+from bisect import bisect_right
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
@@ -186,15 +187,72 @@ class _Search:
     exhausted: bool
 
 
+_FAR: Final = float("inf")
+
+
+class _Outgoing:
+    """One clock's outgoing hops, indexed for the stabbing query "which windows hold [lo, hi]".
+
+    Hops with a window are sorted by window start (an open start first); ``reach[i]`` is the
+    largest window end among the first ``i + 1``. The hops whose start is at or before ``lo``
+    are a prefix found by ``bisect``; walking it backwards stops as soon as no earlier window
+    ends after ``hi``. For piecewise windows (one per sync window, not overlapping) that is
+    about log(windows) comparisons and one hit. A hop whose window cannot be checked (None)
+    holds no interval and is only ever named as tried.
+    """
+
+    def __init__(self, found: Sequence[Hop]) -> None:
+        def start(hop: Hop) -> Fraction | float:
+            assert hop.window is not None
+            return -_FAR if hop.window[0] is None else Fraction(hop.window[0])
+
+        def end(hop: Hop) -> Fraction | float:
+            assert hop.window is not None
+            return _FAR if hop.window[1] is None else Fraction(hop.window[1])
+
+        windowed = [h for h in found if h.window is not None]
+        windowed.sort(key=lambda h: (start(h), h.mapping_id.encode("utf-8"), h.target))
+        self.hops = windowed
+        self.starts = [start(h) for h in windowed]
+        self.ends = [end(h) for h in windowed]
+        self.reach: list[Fraction | float] = []
+        for value in self.ends:
+            self.reach.append(max(value, self.reach[-1]) if self.reach else value)
+        self.unchecked = [h for h in found if h.window is None]
+
+    def holding(self, lo: Fraction, hi: Fraction) -> tuple[list[Hop], list[Hop], int]:
+        """The hops whose half-open window holds ``[lo, hi]`` in mapping-id order, the hops
+        nearest it that do not (named if the entry ends up unmerged), and the comparisons made."""
+        k = bisect_right(self.starts, lo)
+        held: list[Hop] = []
+        steps = 1
+        i = k - 1
+        while i >= 0 and self.reach[i] > hi:
+            steps += 1
+            if self.ends[i] > hi:
+                held.append(self.hops[i])
+            i -= 1
+        held.sort(key=lambda h: (h.mapping_id.encode("utf-8"), h.target.encode("utf-8")))
+        near = list(self.unchecked)
+        if not held:
+            near += [self.hops[j] for j in (k - 1, k) if 0 <= j < len(self.hops)]
+        return held, near, steps
+
+
+def _index(edges: Mapping[str, Sequence[Hop]]) -> dict[str, _Outgoing]:
+    return {clock: _Outgoing(found) for clock, found in edges.items()}
+
+
 def _search(
-    clock: str, reference: str, s: int, edges: Mapping[str, Sequence[Hop]], budget: _Budget
+    clock: str, reference: str, s: int, index: Mapping[str, _Outgoing], budget: _Budget
 ) -> _Search:
     """The highest-ranked usable path for an entry starting at ``s`` (ADR 0003 §3.3-3.4).
 
     A depth-first walk that follows a hop only when its validity window holds the interval as it
     stands, which is exactly what makes a path usable, so every complete walk is a usable path
-    and the best-ranked of them is the answer ``paths`` + ``Path.interval`` give. Windows prune
-    piecewise mappings (one per sync window) to the hops that cover the entry.
+    and the best-ranked of them is the answer ``paths`` + ``Path.interval`` give. Each clock's
+    windows are indexed (``_Outgoing``), so a step finds the windows that hold the interval
+    without checking the others. The step budget is a backstop for windows that overlap a lot.
     """
     if clock == reference:
         return _Search((Path(()), (s, s)), (), False)
@@ -207,15 +265,19 @@ def _search(
     ]
     while stack:
         at, seen, used, lo, hi = stack.pop()
-        for hop in reversed(edges.get(at, ())):
+        outgoing = index.get(at)
+        if outgoing is None:
+            continue
+        held, near, cost = outgoing.holding(lo, hi)
+        steps += cost
+        budget.left -= cost
+        if steps > MAX_ENTRY_STEPS or budget.left < 0:
+            return _Search(None, tuple(sorted(tried)), True)
+        tried.update(
+            tuple(h.mapping_id for h in (*used, hop)) for hop in near if hop.target not in seen
+        )
+        for hop in reversed(held):
             if hop.target in seen:
-                continue
-            if steps >= MAX_ENTRY_STEPS or budget.left <= 0:
-                return _Search(None, tuple(sorted(tried)), True)
-            steps += 1
-            budget.left -= 1
-            if not _inside(lo, hi, hop.window):
-                tried.add(tuple(h.mapping_id for h in (*used, hop)))
                 continue
             path = (*used, hop)
             next_lo, next_hi = hop.apply(lo) - hop.bound, hop.apply(hi) + hop.bound
@@ -263,6 +325,7 @@ def merge(
         if not m.usable
     ]
     edges = _edges(mappings)
+    index = _index(edges)
     budget = _Budget(MAX_MERGE_STEPS)
     reaches: dict[str, bool] = {}
     searched: dict[tuple[str, int], _Search] = {}
@@ -285,7 +348,7 @@ def merge(
             assert world is not None
             ticks = world.start.ticks
             if (clock, ticks) not in searched:
-                searched[clock, ticks] = _search(clock, reference, ticks, edges, budget)
+                searched[clock, ticks] = _search(clock, reference, ticks, index, budget)
             result = searched[clock, ticks]
             if result.best is None:
                 stay.append(entry)

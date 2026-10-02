@@ -65,8 +65,9 @@ ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 - **Merge.** It never merges identities, threads, clocks or packages. Two identical URDFs are two
   packages, and co-declared keys are two threads. An `IdentityLink` is reported as an edge
   (`ThreadLink`) on the thread of each id it names, never as entries. A link states no entity
-  kind, so `entity_kind` is `Unknown`; the kind in `from_key` and `to_key` is the listing
-  thread's (the caller's lookup), not the link's (ADR 0010 §8).
+  kind (package schema 3 has no field for one), so `entity_kind` is `NotCovered`; the kind in
+  `from_key` and `to_key` is the listing thread's (the caller's lookup), not the link's
+  (ADR 0010 §8).
 - **Mutate.** It never edits a package or a catalog row. Registration only appends, and
   supersession is computed when the catalog is read (ADR 0003 §5).
 - **Infer.** It never stores or returns an inferred meaning. Membership comes only from `Known`
