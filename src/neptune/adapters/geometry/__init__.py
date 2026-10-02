@@ -43,6 +43,7 @@ from neptune.adapters.contract import (
     Resources,
     SourceReader,
     make_chunk,
+    read_pieces,
 )
 from neptune.adapters.geometry import _detect, _gltf, _obj, _ply, _stl, _usd
 from neptune.adapters.geometry._context import Context
@@ -250,13 +251,12 @@ def _context(source: SourceReader, config: AdapterConfig) -> Context:
 def _read(source: SourceReader, config: AdapterConfig) -> Context:
     """Every record and finding of ``source``: the whole of this adapter's work."""
     ctx = _context(source, config)
-    head = ctx.scan.read(0, min(source.size, PROBE_HEAD_SIZE))
-    ctx.scan.spent = 0
+    head = b"".join(read_pieces(source, 0, min(source.size, PROBE_HEAD_SIZE)))
     found = _detect.lenient(head, source.size)
     if found is None:
         ctx.out.finding(
             UNREADABLE,
-            ctx.whole if source.size else (),
+            ctx.whole,
             "the bytes start no geometry format this adapter reads",
         )
         return ctx

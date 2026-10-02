@@ -83,6 +83,8 @@ class Scanner:
                     break
                 if skipping:
                     skipping = False
+                elif newline - position > MAX_LINE:
+                    yield Line(at + position, b"", overlong=True)
                 else:
                     yield Line(at + position, buffer[position:newline].rstrip(b"\r"))
                 position = newline + 1

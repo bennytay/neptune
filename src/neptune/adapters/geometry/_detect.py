@@ -129,18 +129,54 @@ def _obj(head: bytes, size: int) -> bool:
     return vertex
 
 
+def _plausible_facet(head: bytes, size: int) -> bool:
+    """Binary STL with a size that disagrees with its count: is it still one? Its count is
+    positive and its first facet, if any is present, has finite coordinates and a normal that is
+    zero or of unit length (what writers emit). Random bytes almost never pass."""
+    if size < 84 or len(head) < 84:
+        return False
+    (count,) = struct.unpack("<I", head[80:84])
+    if count == 0:
+        return False
+    if len(head) < 134:
+        return True
+    facet = struct.unpack("<12f", head[84:132])
+    if not all(abs(value) < 1e30 for value in facet):  # NaN fails every comparison
+        return False
+    length = sum(value * value for value in facet[:3]) ** 0.5
+    return bool(length == 0.0 or abs(length - 1.0) < 0.05)
+
+
+def _obj_like(head: bytes, size: int) -> bool:
+    """A text head with at least one vertex of three numbers, whatever else its lines say."""
+    if b"\x00" in head:
+        return False
+    lines = head.decode("utf-8", errors="ignore").split("\n")
+    if len(head) < size:
+        lines = lines[:-1]
+    for line in lines[:400]:
+        words = line.split("#", 1)[0].split()
+        if len(words) >= 4 and words[0] == "v":
+            try:
+                [float(word) for word in words[1:4]]
+            except ValueError:
+                continue
+            return True
+    return False
+
+
 def lenient(head: bytes, size: int) -> Detected | None:
-    """What ``ingest`` reads a source as: a detected format, else binary STL for bytes that are
-    not text. Only reached for a source this adapter was chosen for (by name, when nothing else
-    explained it): a binary STL whose size disagrees with its count is a damaged one, read as far
-    as it holds."""
+    """What ``ingest`` reads a source as: a detected format, else a damaged one it can still read
+    (a binary STL whose size disagrees with its count, an OBJ with statements of other kinds, an
+    ASCII STL cut short). Only reached for a source this adapter was chosen for; a file is never
+    called geometry for being damaged unless its first bytes are shaped like one."""
     found = detect(head, size)
     if found is not None:
         return found
-    if (
-        size >= 84
-        and len(head) >= 84
-        and (b"\x00" in head[:84] or any(b > 0x7F for b in head[:84]))
-    ):
-        return Detected(STL_BINARY, NAME_ONLY, "binary bytes read as a damaged binary STL")
+    if _plausible_facet(head, size):
+        return Detected(STL_BINARY, NAME_ONLY, "a damaged binary STL")
+    if head.lstrip()[:5].lower() == b"solid" and b"\x00" not in head:
+        return Detected(STL_ASCII, NAME_ONLY, "an ASCII STL with no facets")
+    if _obj_like(head, size):
+        return Detected(OBJ, NAME_ONLY, "an OBJ with statements that are not OBJ's")
     return None
