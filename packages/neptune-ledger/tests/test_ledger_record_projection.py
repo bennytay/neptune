@@ -1,4 +1,4 @@
-"""Projection columns generated from the package schema's JSON Schema export (ADR 0008 §3).
+"""Projection columns generated from the package schema's JSON Schema export (ADR 0009 §3).
 
 The committed spec and migration 0004 are pinned to the generator's output over the published
 package-schema v1.0.0 export. A schema-bump fixture adds a record kind, and the migration the
@@ -99,7 +99,7 @@ def test_the_baseline_kinds_are_migration_0001s_partitions() -> None:
 
 def test_the_shipped_spec_knows_the_compilers_schema_1_kinds() -> None:
     """The spec covers every kind of the schema it was read from; a kind outside it (a newer
-    compiler's) is still indexed, without projections (ADR 0008 §3)."""
+    compiler's) is still indexed, without projections (ADR 0009 §3)."""
     assert set(shipped_spec().kinds) == set(BASELINE_KINDS)
     record = {"machine": {"knowledge": "known", "value": {"namespace": "a", "value": "b"}}}
     assert projected(shipped_spec(), "contact_event", record) == (None,) * len(projection_columns())

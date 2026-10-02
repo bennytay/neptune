@@ -1,4 +1,4 @@
-"""The catalog on PostgreSQL: ``register``, ``verify``, ``resolve`` (Ledger ADRs 0002, 0004-0008).
+"""The catalog on PostgreSQL: ``register``, ``verify``, ``resolve`` (Ledger ADRs 0002, 0004-0009).
 
 ``PostgresCatalog`` serves one tenant's schema. ``register`` verifies the whole package first,
 outside any transaction and without following a link (``check``), then writes the
@@ -84,7 +84,7 @@ _CORE_STEPS: Final = frozenset(
 )
 Verdict = Literal["damaged", "intact", "unknown_package", "unreachable"]
 
-# Every record column registration writes (ADR 0002 §5, ADR 0005 §2, ADR 0008), in this order.
+# Every record column registration writes (ADR 0002 §5, ADR 0005 §2, ADR 0009), in this order.
 _RECORD_COLUMNS: Final = (
     "tenant_id",
     "kind",
@@ -110,7 +110,7 @@ _INSERT_RECORD: Final = "INSERT INTO record ({}) VALUES ({})".format(
     ", ".join(_RECORD_COLUMNS),
     ", ".join("%s::jsonb" if column == "body" else "%s" for column in _RECORD_COLUMNS),
 )
-# Rows per executemany call (ADR 0008 §4): fixed, so a package is written the same way every time.
+# Rows per executemany call (ADR 0009 §4): fixed, so a package is written the same way every time.
 BATCH_ROWS: Final = 1000
 
 
@@ -693,7 +693,7 @@ def _report(
 
 
 def _batches(rows: Sequence[T]) -> Iterator[Sequence[T]]:
-    """``rows`` in consecutive slices of ``BATCH_ROWS`` (ADR 0008 §4)."""
+    """``rows`` in consecutive slices of ``BATCH_ROWS`` (ADR 0009 §4)."""
     for start in range(0, len(rows), BATCH_ROWS):
         yield rows[start : start + BATCH_ROWS]
 

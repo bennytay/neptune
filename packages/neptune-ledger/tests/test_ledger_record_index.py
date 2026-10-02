@@ -1,4 +1,4 @@
-"""Every record kind of every worked example, indexed by registration (MVL-91, ADR 0008).
+"""Every record kind of every worked example, indexed by registration (MVL-91, ADR 0009).
 
 Counts match each manifest's ``tables``; bodies, pointer lists and projection columns are checked
 against oracles written here from the package bytes; indexing is a pure function of the package
@@ -91,7 +91,7 @@ def _states(value: Any, state: str, pointer: str = "") -> list[str]:
 
 
 def _expected_projection(kind: str, record: dict[str, Any]) -> dict[str, Any]:
-    """Package schema 1's hot filters, written out by hand (ADR 0008 §3's table)."""
+    """Package schema 1's hot filters, written out by hand (ADR 0009 §3's table)."""
     out: dict[str, Any] = dict.fromkeys(projection_columns())
 
     def logical(name: str, field: dict[str, Any]) -> None:
@@ -350,7 +350,7 @@ def test_unknown_inside_ambiguous_candidates_is_not_a_field() -> None:
 
 @pytest.mark.parametrize("before", [4, 5])
 def test_a_migration_refuses_rows_it_would_leave_blank(pg: Conn, before: int) -> None:
-    """ADR 0008 §1, §3: rows filed before 0004 (bodies) or 0005 (projections) would read as "no
+    """ADR 0009 §1, §3: rows filed before 0004 (bodies) or 0005 (projections) would read as "no
     Unknown field" or "no Known machine"; the migration refuses, and the catalog is rebuilt."""
     shipped = migrations()
     apply_migrations(pg, "acme", shipped=shipped[: before - 1])

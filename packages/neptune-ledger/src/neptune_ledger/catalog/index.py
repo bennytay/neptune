@@ -1,10 +1,10 @@
-"""The catalog rows one verified package produces (Ledger ADR 0002 §5, ADR 0005 §2, §3, ADR 0008).
+"""The catalog rows one verified package produces (Ledger ADR 0002 §5, ADR 0005 §2, §3, ADR 0009).
 
 A pure function of the package's bytes and this Ledger version: every value comes from the record
 lines that registration hashed, read once, and the kind-specific projections come from the spec
 this Ledger ships (``projection.shipped_spec``), never from the compiler's live schema. So the same
 package gives the same rows in any catalog, whatever was registered before it. Records are ordered
-by kind, then record id (ADR 0008 §4).
+by kind, then record id (ADR 0009 §4).
 """
 
 import hashlib
@@ -43,7 +43,7 @@ class RecordRow:
     ambiguous_pointers: tuple[str, ...]
     body_digest: str
     logical_ids: tuple[tuple[str, str, str], ...]  # (pointer, namespace, value)
-    # ADR 0008: the body as canonical JSON text for the jsonb column (None when it holds U+0000),
+    # ADR 0009: the body as canonical JSON text for the jsonb column (None when it holds U+0000),
     # the Unknown pointers, and one value per ``projection_columns()`` column, in that order.
     body: str | None = None
     unknown_pointers: tuple[str, ...] = ()
@@ -85,7 +85,7 @@ def package_rows(
 ) -> PackageRows:
     """The rows of one package whose manifest and record lines were verified."""
     spec = shipped_spec()
-    # Every table the package holds: the compiler's kind list is not closed (ADR 0008 §3). A kind
+    # Every table the package holds: the compiler's kind list is not closed (ADR 0009 §3). A kind
     # the spec does not know is indexed with its common columns and no projections.
     tables: dict[str, list[Any]] = {
         kind: [canonical_json.loads(line) for line in lines[kind]] for kind in lines
@@ -169,7 +169,7 @@ def _record_row(spec: Spec, kind: str, number: int, line: bytes, record: Any) ->
 
 
 def projected(spec: Spec, kind: str, record: Any) -> tuple[Any, ...]:
-    """One value per projection column (ADR 0008 §3); None where the kind does not fill it.
+    """One value per projection column (ADR 0009 §3); None where the kind does not fill it.
 
     A logical id fills ``<filter>_namespace`` and ``<filter>_value`` only when Known; a record id
     or record id list fills ``<filter>_ids`` as stated, in order.
@@ -227,7 +227,7 @@ def _walk(
 
     An ``Ambiguous`` value is yielded but not entered: its candidates are not fields. ``opaque``
     names top-level fields the schema declares free-form (``transform_record.config``,
-    ``ingest_finding.details``): their content is data, not fields, so it is not walked (ADR 0008
+    ``ingest_finding.details``): their content is data, not fields, so it is not walked (ADR 0009
     §2) and a Knowledge-shaped object in it is never mistaken for a field's state.
     """
     if isinstance(value, dict):
@@ -275,7 +275,7 @@ def ambiguous_pointers(record: Any, opaque: frozenset[str] = frozenset()) -> lis
 
 
 def unknown_pointers(record: Any, opaque: frozenset[str] = frozenset()) -> list[str]:
-    """JSON pointers of every ``Unknown`` field, outside ``Ambiguous`` candidates (ADR 0008 §2)."""
+    """JSON pointers of every ``Unknown`` field, outside ``Ambiguous`` candidates (ADR 0009 §2)."""
     return fields(record, opaque)[1]
 
 

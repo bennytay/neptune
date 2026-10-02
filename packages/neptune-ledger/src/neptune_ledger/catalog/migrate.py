@@ -100,7 +100,7 @@ def apply_migrations(
     ``conn`` must not be inside a transaction. A migration already recorded with different bytes
     raises ``MigrationError``: shipped migrations are never edited, a change is a new migration.
     ``shipped`` replaces this package's migrations, in version order; it is for testing a
-    generated migration before it is committed (ADR 0008 §3).
+    generated migration before it is committed (ADR 0009 §3).
     """
     schema = tenant_schema(tenant_id)
     shipped = migrations() if shipped is None else tuple(shipped)

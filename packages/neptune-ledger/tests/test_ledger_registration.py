@@ -114,7 +114,7 @@ def test_registration_writes_exactly_the_walkthrough_rows(
     apply_migrations(pg, "harness")
     for name in ("drone", "quadruped", "manipulator", "mobile_robot"):
         harness_register(pg, "tenant_harness", load_package(name))
-    # The harness applies ADR 0002 §5's mapping; ADR 0008's columns are checked against their
+    # The harness applies ADR 0002 §5's mapping; ADR 0009's columns are checked against their
     # own oracle in test_ledger_record_index.py.
     skip = (*TX_COLUMNS, "root_locator", "body", "unknown_pointers", *projection_columns())
     assert dump(pg, "tenant_acme", skip) == dump(pg, "tenant_harness", skip)

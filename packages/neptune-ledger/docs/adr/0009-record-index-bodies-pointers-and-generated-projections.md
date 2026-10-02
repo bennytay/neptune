@@ -1,4 +1,4 @@
-# 0008 — Record index: stored bodies, Unknown pointers, schema-generated projection columns and fixed ordering
+# 0009 — Record index: stored bodies, Unknown pointers, schema-generated projection columns and fixed ordering
 
 - Status: Accepted
 - Date: 2026-10-02
