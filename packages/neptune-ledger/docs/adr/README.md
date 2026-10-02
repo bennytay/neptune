@@ -16,3 +16,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0007](0007-registration-implementation-boundaries-and-source-checks.md) | Registration: the indexing boundary, local package roots, and on-request source checks behind a read-only store | Accepted |
 | [0008](0008-a-default-record-partition-for-declared-kinds.md) | A default record partition for declared kinds; registration decides which kinds a package holds | Accepted |
 | [0009](0009-record-index-bodies-pointers-and-generated-projections.md) | Record index: stored bodies, Unknown pointers, schema-generated projection columns and fixed ordering | Accepted |
+| [0010](0010-entity-thread-index-and-lineage-reads.md) | Entity thread index: membership at registration, whole-thread reads, identity links and clock mappings | Accepted |

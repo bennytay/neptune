@@ -1,0 +1,2535 @@
+{
+  "$defs": {
+    "ApiVersion": {
+      "description": "The catalog API version that produced the document; any version of this major.",
+      "pattern": "^1\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "AsRegisteredBy": {
+      "additionalProperties": false,
+      "description": "``current(as_registered_by(package id))``: the transform that package used per set.",
+      "properties": {
+        "package_id": {
+          "$ref": "#/$defs/PackageId"
+        },
+        "preference": {
+          "const": "as_registered_by"
+        }
+      },
+      "required": [
+        "package_id",
+        "preference"
+      ],
+      "type": "object"
+    },
+    "CatalogFinding": {
+      "additionalProperties": false,
+      "description": "A structured refusal or warning. Calls report evidence and request problems this way.",
+      "properties": {
+        "code": {
+          "enum": [
+            "as_of_out_of_range",
+            "conflicting_id",
+            "file_digest_mismatch",
+            "file_missing",
+            "invalid_request",
+            "manifest_digest_mismatch",
+            "manifest_invalid",
+            "mapping_out_of_range",
+            "package_unreadable",
+            "preference_required",
+            "record_invalid",
+            "unexpected_file",
+            "unknown_clock",
+            "unknown_mapping",
+            "unknown_package",
+            "unknown_record",
+            "unresolvable_evidence",
+            "unsafe_entry",
+            "unsupported_mapping",
+            "unsupported_schema_version"
+          ],
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "paths_tried": {
+          "items": {
+            "$ref": "#/$defs/MappingPath"
+          },
+          "type": "array"
+        },
+        "subject": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail",
+        "subject"
+      ],
+      "type": "object"
+    },
+    "ClockMerge": {
+      "additionalProperties": false,
+      "description": "A caller-named reference clock and the ``ClockMapping`` record ids to merge with (§3).",
+      "properties": {
+        "mappings": {
+          "items": {
+            "$ref": "#/$defs/TierTwoId"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "reference_clock": {
+          "$ref": "#/$defs/TierTwoId"
+        }
+      },
+      "required": [
+        "mappings",
+        "reference_clock"
+      ],
+      "type": "object"
+    },
+    "ContentId": {
+      "description": "A tier-1 id: sha256 of complete bytes.",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "DeclaredKey": {
+      "additionalProperties": false,
+      "description": "A declared identifier: a ``LogicalId`` or a software content identifier (ADR 0003 §1).",
+      "properties": {
+        "namespace": {
+          "$ref": "#/$defs/Token"
+        },
+        "value": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "namespace",
+        "value"
+      ],
+      "type": "object"
+    },
+    "EntityKind": {
+      "description": "The kind of entity a link's ids name (a thread kind).",
+      "enum": [
+        "asset",
+        "configuration",
+        "document",
+        "machine",
+        "person",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "type": "string"
+    },
+    "EvidenceAnchor": {
+      "additionalProperties": false,
+      "description": "A source content id plus a locator: a record-level ``EvidenceRef`` (ADR 0003 §1).",
+      "properties": {
+        "locator": {
+          "items": {
+            "$ref": "#/$defs/LocatorStep"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "source": {
+          "$ref": "#/$defs/ContentId"
+        }
+      },
+      "required": [
+        "locator",
+        "source"
+      ],
+      "type": "object"
+    },
+    "History": {
+      "additionalProperties": false,
+      "description": "``history()``: every entry, nothing collapsed or hidden (ADR 0003 §4.2).",
+      "properties": {
+        "preference": {
+          "const": "history"
+        }
+      },
+      "required": [
+        "preference"
+      ],
+      "type": "object"
+    },
+    "KindCount": {
+      "additionalProperties": false,
+      "description": "KindCount(kind: Annotated[str, Constraint(name='RecordKind', description='A record kind of package schema 1.', pattern=None, enum=('source_artifact', 'source_revision', 'source_absence', 'transform_record', 'ingest_finding', 'timestamp_domain', 'frame_graph', 'frame', 'frame_transform', 'run', 'stream', 'machine', 'hardware_configuration', 'hardware_component', 'software_configuration', 'calibration', 'configuration_snapshot', 'configuration_value', 'site', 'asset', 'spatial_artifact', 'image', 'video', 'document_record', 'document_block', 'structured_table', 'structured_record', 'identity_link', 'clock_mapping', 'frame_binding', 'run_assembly', 'snapshot_binding', 'commissioning_baseline', 'authorisation_envelope', 'intervention', 'maintenance_event', 'requalification_record', 'incident_record', 'change_record', 'risk_assessment', 'assertion'), minimum=None, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)], count: Annotated[int, Constraint(name=None, description=None, pattern=None, enum=None, minimum=0, maximum=None, min_length=None, min_items=None, unique_items=False, required=(), as_stated=False)])",
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/RecordKind"
+        }
+      },
+      "required": [
+        "count",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "KnowledgeOfEntityKind": {
+      "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/EntityKind"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "$ref": "#/$defs/EntityKind"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "KnowledgeOfInteger": {
+      "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "KnowledgeOfPackageId": {
+      "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/PackageId"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "$ref": "#/$defs/PackageId"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "KnowledgeOfRecordKind": {
+      "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/RecordKind"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "$ref": "#/$defs/RecordKind"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "KnowledgeOfString": {
+      "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "KnowledgeOfTierTwoId": {
+      "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/TierTwoId"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "$ref": "#/$defs/TierTwoId"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "KnowledgeOfTransactionKey": {
+      "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/TransactionKey"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "$ref": "#/$defs/TransactionKey"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "KnowledgeOfTransformInfo": {
+      "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/TransformInfo"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "$ref": "#/$defs/TransformInfo"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "KnowledgeOfWorldTime": {
+      "description": "A Knowledge state of the Ledger's own (no provenance; never known_absent).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "value": {
+              "$ref": "#/$defs/WorldTime"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "value": {
+                    "$ref": "#/$defs/WorldTime"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "LatestTransform": {
+      "additionalProperties": false,
+      "description": "``current(latest_transform)``: the undominated transform per lineage set (ADR 0003 §4.4).",
+      "properties": {
+        "preference": {
+          "const": "latest_transform"
+        }
+      },
+      "required": [
+        "preference"
+      ],
+      "type": "object"
+    },
+    "LineageEdge": {
+      "additionalProperties": false,
+      "description": "``transform_id`` consumed ``upstream_id``; ``position`` is its place in ``upstream``.",
+      "properties": {
+        "position": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transform_id": {
+          "$ref": "#/$defs/TierTwoId"
+        },
+        "upstream_id": {
+          "$ref": "#/$defs/TierTwoId"
+        }
+      },
+      "required": [
+        "position",
+        "transform_id",
+        "upstream_id"
+      ],
+      "type": "object"
+    },
+    "LineageGraph": {
+      "additionalProperties": false,
+      "description": "The lineage behind one record id (root ADR 0016; Ledger ADR 0003 §4.1).",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/ApiVersion"
+        },
+        "as_of": {
+          "$ref": "#/$defs/KnowledgeOfTransactionKey"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/LineageEdge"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/CatalogFinding"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/KnowledgeOfRecordKind"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/LineageNode"
+          },
+          "type": "array"
+        },
+        "record_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "registered_by": {
+          "items": {
+            "$ref": "#/$defs/RecordRef"
+          },
+          "type": "array"
+        },
+        "siblings": {
+          "items": {
+            "$ref": "#/$defs/RecordRef"
+          },
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "found",
+            "unknown_record"
+          ],
+          "type": "string"
+        },
+        "transform_id": {
+          "$ref": "#/$defs/KnowledgeOfTierTwoId"
+        }
+      },
+      "required": [
+        "api_version",
+        "as_of",
+        "edges",
+        "findings",
+        "kind",
+        "nodes",
+        "record_id",
+        "registered_by",
+        "siblings",
+        "status",
+        "transform_id"
+      ],
+      "type": "object"
+    },
+    "LineageNode": {
+      "additionalProperties": false,
+      "description": "A transform in the DAG; ``transform`` is ``NotCovered`` when an edge names a transform that no registered package holds (the edge is kept, ADR 0002 §5).",
+      "properties": {
+        "transform": {
+          "$ref": "#/$defs/KnowledgeOfTransformInfo"
+        },
+        "transform_id": {
+          "$ref": "#/$defs/TierTwoId"
+        }
+      },
+      "required": [
+        "transform",
+        "transform_id"
+      ],
+      "type": "object"
+    },
+    "LineageRequest": {
+      "additionalProperties": false,
+      "description": "``lineage(record_id)``: the transform DAG behind one record and its lineage siblings.",
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/TxSeq"
+        },
+        "record_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "record_id"
+      ],
+      "type": "object"
+    },
+    "LineageSet": {
+      "additionalProperties": false,
+      "description": "``(thread, record kind, source content id)`` and how this view resolved it (§4.1, §4.3).",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "resolution": {
+          "$ref": "#/$defs/KnowledgeOfTierTwoId"
+        },
+        "source": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "transforms": {
+          "items": {
+            "$ref": "#/$defs/TierTwoId"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "kind",
+        "resolution",
+        "source",
+        "transforms"
+      ],
+      "type": "object"
+    },
+    "LocatorStep": {
+      "description": "One locator step exactly as the package states it (package-schema EvidenceRef).",
+      "properties": {
+        "kind": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "MappedInterval": {
+      "additionalProperties": false,
+      "description": "An entry's interval on the reference clock and the mapping ids of its path (§3.4-3.5).",
+      "properties": {
+        "hi": {
+          "$ref": "#/$defs/Ticks"
+        },
+        "lo": {
+          "$ref": "#/$defs/Ticks"
+        },
+        "path": {
+          "items": {
+            "$ref": "#/$defs/TierTwoId"
+          },
+          "type": "array"
+        },
+        "reference_clock": {
+          "$ref": "#/$defs/TierTwoId"
+        }
+      },
+      "required": [
+        "hi",
+        "lo",
+        "path",
+        "reference_clock"
+      ],
+      "type": "object"
+    },
+    "MappingPath": {
+      "additionalProperties": false,
+      "description": "One path of ``ClockMapping`` record ids, from an entry's clock to the reference clock.",
+      "properties": {
+        "mappings": {
+          "items": {
+            "$ref": "#/$defs/TierTwoId"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "mappings"
+      ],
+      "type": "object"
+    },
+    "Membership": {
+      "additionalProperties": false,
+      "description": "One thread a record is a member of, in one registering package, with its roles.",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/ThreadKey"
+        },
+        "package_id": {
+          "$ref": "#/$defs/PackageId"
+        },
+        "roles": {
+          "items": {
+            "enum": [
+              "cites",
+              "part_of",
+              "subject"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "thread_id": {
+          "$ref": "#/$defs/ContentId"
+        }
+      },
+      "required": [
+        "key",
+        "package_id",
+        "roles",
+        "thread_id"
+      ],
+      "type": "object"
+    },
+    "PackageId": {
+      "description": "A package's id: the sha256 of its manifest.json.",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Partition": {
+      "additionalProperties": false,
+      "description": "A run of entries whose adjacency means something (ADR 0003 §3).",
+      "properties": {
+        "clock_key": {
+          "$ref": "#/$defs/TierTwoId"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/ThreadEntry"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "clock",
+            "merged",
+            "transaction",
+            "untimed"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "entries",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "Pinned": {
+      "additionalProperties": false,
+      "description": "``current(pinned(transform id))``: that transform where it appears; ``NotCovered`` else.",
+      "properties": {
+        "preference": {
+          "const": "pinned"
+        },
+        "transform_id": {
+          "$ref": "#/$defs/TierTwoId"
+        }
+      },
+      "required": [
+        "preference",
+        "transform_id"
+      ],
+      "type": "object"
+    },
+    "QueryCursor": {
+      "additionalProperties": false,
+      "description": "A ``query`` row's sort key; ``QuerySpec.after`` returns the rows strictly after it.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "package_id": {
+          "$ref": "#/$defs/PackageId"
+        },
+        "record_id": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "kind",
+        "package_id",
+        "record_id"
+      ],
+      "type": "object"
+    },
+    "QueryMeta": {
+      "additionalProperties": false,
+      "description": "What a ``query`` result's Arrow schema metadata carries besides its rows.",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/ApiVersion"
+        },
+        "as_of": {
+          "$ref": "#/$defs/KnowledgeOfTransactionKey"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/CatalogFinding"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "api_version",
+        "as_of",
+        "findings"
+      ],
+      "type": "object"
+    },
+    "QueryRequest": {
+      "additionalProperties": false,
+      "description": "``query(spec)``.",
+      "properties": {
+        "spec": {
+          "$ref": "#/$defs/QuerySpec"
+        }
+      },
+      "required": [
+        "spec"
+      ],
+      "type": "object"
+    },
+    "QueryRow": {
+      "additionalProperties": false,
+      "description": "One row of a ``query`` result; the Arrow columns are these fields, in this order.",
+      "properties": {
+        "assertion_kind": {
+          "enum": [
+            "observed",
+            "stated"
+          ],
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "package_id": {
+          "$ref": "#/$defs/PackageId"
+        },
+        "record_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "registration_seq": {
+          "$ref": "#/$defs/TxSeq"
+        },
+        "source_content_id": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "source_locator": {
+          "type": "string"
+        },
+        "transform_id": {
+          "$ref": "#/$defs/TierTwoId"
+        },
+        "world_clock": {
+          "$ref": "#/$defs/TierTwoId"
+        },
+        "world_first": {
+          "$ref": "#/$defs/Ticks"
+        },
+        "world_last": {
+          "$ref": "#/$defs/Ticks"
+        }
+      },
+      "required": [
+        "kind",
+        "line",
+        "package_id",
+        "record_id",
+        "registration_seq"
+      ],
+      "type": "object"
+    },
+    "QuerySpec": {
+      "additionalProperties": false,
+      "description": "The filter contract ``query`` implements (MVL-98): kinds, a window, a thread, packages.",
+      "properties": {
+        "after": {
+          "$ref": "#/$defs/QueryCursor"
+        },
+        "as_of": {
+          "$ref": "#/$defs/TxSeq"
+        },
+        "kinds": {
+          "items": {
+            "$ref": "#/$defs/RecordKind"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "limit": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/PackageId"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "thread_id": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "window": {
+          "$ref": "#/$defs/TimeWindow"
+        }
+      },
+      "required": [
+        "kinds"
+      ],
+      "type": "object"
+    },
+    "RecordId": {
+      "description": "A record's key in its table: a tier-2 id, or a content id for source_artifact.",
+      "pattern": "^(rec:)?sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "RecordKind": {
+      "description": "A record kind of package schema 1.",
+      "enum": [
+        "assertion",
+        "asset",
+        "authorisation_envelope",
+        "calibration",
+        "change_record",
+        "clock_mapping",
+        "commissioning_baseline",
+        "configuration_snapshot",
+        "configuration_value",
+        "document_block",
+        "document_record",
+        "frame",
+        "frame_binding",
+        "frame_graph",
+        "frame_transform",
+        "hardware_component",
+        "hardware_configuration",
+        "identity_link",
+        "image",
+        "incident_record",
+        "ingest_finding",
+        "intervention",
+        "machine",
+        "maintenance_event",
+        "requalification_record",
+        "risk_assessment",
+        "run",
+        "run_assembly",
+        "site",
+        "snapshot_binding",
+        "software_configuration",
+        "source_absence",
+        "source_artifact",
+        "source_revision",
+        "spatial_artifact",
+        "stream",
+        "structured_record",
+        "structured_table",
+        "timestamp_domain",
+        "transform_record",
+        "video"
+      ],
+      "type": "string"
+    },
+    "RecordRef": {
+      "additionalProperties": false,
+      "description": "One catalogued record in one package: ``line`` is its 1-based line in its table.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "line": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "package_id": {
+          "$ref": "#/$defs/PackageId"
+        },
+        "record_id": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "kind",
+        "line",
+        "package_id",
+        "record_id"
+      ],
+      "type": "object"
+    },
+    "Region": {
+      "additionalProperties": false,
+      "description": "The innermost locator step, which says what part of the source is cited.",
+      "properties": {
+        "addressing": {
+          "enum": [
+            "adapter",
+            "byte_range",
+            "frame",
+            "image_region",
+            "json_pointer",
+            "object",
+            "page",
+            "page_region",
+            "record_range",
+            "row",
+            "row_cell",
+            "span",
+            "video_frame"
+          ],
+          "type": "string"
+        },
+        "step": {
+          "$ref": "#/$defs/LocatorStep"
+        }
+      },
+      "required": [
+        "addressing",
+        "step"
+      ],
+      "type": "object"
+    },
+    "RegisterRequest": {
+      "additionalProperties": false,
+      "description": "``register(package_root)``: catalogue the package at a local directory.",
+      "properties": {
+        "package_root": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_root"
+      ],
+      "type": "object"
+    },
+    "Registration": {
+      "additionalProperties": false,
+      "description": "The outcome of one ``register`` call (ADR 0002 §4, §6).",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/ApiVersion"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/CatalogFinding"
+          },
+          "type": "array"
+        },
+        "ledger_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "already_registered",
+            "refused",
+            "registered"
+          ],
+          "type": "string"
+        },
+        "package_id": {
+          "$ref": "#/$defs/KnowledgeOfPackageId"
+        },
+        "record_counts": {
+          "items": {
+            "$ref": "#/$defs/KindCount"
+          },
+          "type": "array"
+        },
+        "registration_key": {
+          "$ref": "#/$defs/KnowledgeOfTransactionKey"
+        },
+        "root_locator": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "schema_version": {
+          "$ref": "#/$defs/KnowledgeOfInteger"
+        }
+      },
+      "required": [
+        "api_version",
+        "findings",
+        "ledger_version",
+        "outcome",
+        "package_id",
+        "record_counts",
+        "registration_key",
+        "root_locator",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "Resolution": {
+      "additionalProperties": false,
+      "description": "What the catalog knows about one evidence anchor.",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/ApiVersion"
+        },
+        "as_of": {
+          "$ref": "#/$defs/KnowledgeOfTransactionKey"
+        },
+        "cited_by": {
+          "items": {
+            "$ref": "#/$defs/RecordRef"
+          },
+          "type": "array"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/EvidenceAnchor"
+        },
+        "fetch": {
+          "items": {
+            "$ref": "#/$defs/SourceLocation"
+          },
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/CatalogFinding"
+          },
+          "type": "array"
+        },
+        "region": {
+          "$ref": "#/$defs/Region"
+        },
+        "size": {
+          "$ref": "#/$defs/KnowledgeOfInteger"
+        },
+        "status": {
+          "enum": [
+            "resolved",
+            "unresolvable"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "api_version",
+        "as_of",
+        "cited_by",
+        "evidence_ref",
+        "fetch",
+        "findings",
+        "region",
+        "size",
+        "status"
+      ],
+      "type": "object"
+    },
+    "ResolveRequest": {
+      "additionalProperties": false,
+      "description": "``resolve(evidence_ref)``: where cited evidence lives and how to fetch it.",
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/TxSeq"
+        },
+        "evidence_ref": {
+          "$ref": "#/$defs/EvidenceAnchor"
+        }
+      },
+      "required": [
+        "evidence_ref"
+      ],
+      "type": "object"
+    },
+    "RevisionEdge": {
+      "additionalProperties": false,
+      "description": "``(thread, kind, source) revises (thread, kind, revises)`` through two source revisions.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "revised_revision": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "revises": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "source": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "source_revision": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "kind",
+        "revised_revision",
+        "revises",
+        "source",
+        "source_revision"
+      ],
+      "type": "object"
+    },
+    "SourceLocation": {
+      "additionalProperties": false,
+      "description": "One package's route to the source bytes (ADR 0002 ``package_source``, ``source_location``).",
+      "properties": {
+        "blob_path": {
+          "$ref": "#/$defs/KnowledgeOfString"
+        },
+        "locations": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "package_id": {
+          "$ref": "#/$defs/PackageId"
+        },
+        "storage": {
+          "enum": [
+            "materialised",
+            "referenced"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "blob_path",
+        "locations",
+        "package_id",
+        "storage"
+      ],
+      "type": "object"
+    },
+    "StatedKnowledgeOfTimePoint": {
+      "description": "A package field's Knowledge state restated verbatim, provenance included.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known"
+            },
+            "provenance": {
+              "description": "The package's provenance object, verbatim (package-schema).",
+              "properties": {
+                "assertion_kind": {
+                  "enum": [
+                    "observed",
+                    "stated"
+                  ]
+                }
+              },
+              "required": [
+                "assertion_kind"
+              ],
+              "type": "object"
+            },
+            "value": {
+              "$ref": "#/$defs/TimePoint"
+            }
+          },
+          "required": [
+            "knowledge",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "unknown"
+            },
+            "provenance": {
+              "description": "The package's provenance object, verbatim (package-schema).",
+              "properties": {
+                "assertion_kind": {
+                  "enum": [
+                    "observed",
+                    "stated"
+                  ]
+                }
+              },
+              "required": [
+                "assertion_kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_covered"
+            },
+            "provenance": {
+              "description": "The package's provenance object, verbatim (package-schema).",
+              "properties": {
+                "assertion_kind": {
+                  "enum": [
+                    "observed",
+                    "stated"
+                  ]
+                }
+              },
+              "required": [
+                "assertion_kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "not_applicable"
+            }
+          },
+          "required": [
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "candidates": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "provenance": {
+                    "description": "The package's provenance object, verbatim (package-schema).",
+                    "properties": {
+                      "assertion_kind": {
+                        "enum": [
+                          "observed",
+                          "stated"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "assertion_kind"
+                    ],
+                    "type": "object"
+                  },
+                  "value": {
+                    "$ref": "#/$defs/TimePoint"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              },
+              "minItems": 2,
+              "type": "array"
+            },
+            "knowledge": {
+              "const": "ambiguous"
+            },
+            "provenance": {
+              "description": "The package's provenance object, verbatim (package-schema).",
+              "properties": {
+                "assertion_kind": {
+                  "enum": [
+                    "observed",
+                    "stated"
+                  ]
+                }
+              },
+              "required": [
+                "assertion_kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "candidates",
+            "knowledge"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "knowledge": {
+              "const": "known_absent"
+            },
+            "provenance": {
+              "description": "The package's provenance object, verbatim (package-schema).",
+              "properties": {
+                "assertion_kind": {
+                  "enum": [
+                    "observed",
+                    "stated"
+                  ]
+                }
+              },
+              "required": [
+                "assertion_kind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "knowledge",
+            "provenance"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Thread": {
+      "additionalProperties": false,
+      "description": "One thread at one catalog point, in the requested order and view (ADR 0003 §3-§5).",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/ApiVersion"
+        },
+        "as_of": {
+          "$ref": "#/$defs/KnowledgeOfTransactionKey"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/CatalogFinding"
+          },
+          "type": "array"
+        },
+        "key": {
+          "$ref": "#/$defs/ThreadKey"
+        },
+        "lineage_sets": {
+          "items": {
+            "$ref": "#/$defs/LineageSet"
+          },
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/ThreadLink"
+          },
+          "type": "array"
+        },
+        "merge": {
+          "$ref": "#/$defs/ClockMerge"
+        },
+        "order": {
+          "enum": [
+            "transaction",
+            "world"
+          ],
+          "type": "string"
+        },
+        "partitions": {
+          "items": {
+            "$ref": "#/$defs/Partition"
+          },
+          "type": "array"
+        },
+        "preference": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/History"
+            },
+            {
+              "$ref": "#/$defs/LatestTransform"
+            },
+            {
+              "$ref": "#/$defs/Pinned"
+            },
+            {
+              "$ref": "#/$defs/AsRegisteredBy"
+            }
+          ]
+        },
+        "revisions": {
+          "items": {
+            "$ref": "#/$defs/RevisionEdge"
+          },
+          "type": "array"
+        },
+        "thread_id": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "unresolved": {
+          "items": {
+            "$ref": "#/$defs/UnresolvedMember"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "api_version",
+        "as_of",
+        "findings",
+        "key",
+        "lineage_sets",
+        "links",
+        "order",
+        "partitions",
+        "revisions",
+        "thread_id",
+        "unresolved"
+      ],
+      "type": "object"
+    },
+    "ThreadEntry": {
+      "additionalProperties": false,
+      "description": "One entry: a record id, its roles, and every package that registered it in this view.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "lineage_source": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "mapped": {
+          "$ref": "#/$defs/MappedInterval"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/PackageId"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "record_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "registration_key": {
+          "$ref": "#/$defs/TransactionKey"
+        },
+        "roles": {
+          "items": {
+            "enum": [
+              "cites",
+              "part_of",
+              "subject"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "transform_id": {
+          "$ref": "#/$defs/TierTwoId"
+        },
+        "world": {
+          "$ref": "#/$defs/KnowledgeOfWorldTime"
+        }
+      },
+      "required": [
+        "kind",
+        "lineage_source",
+        "packages",
+        "record_id",
+        "registration_key",
+        "roles",
+        "transform_id",
+        "world"
+      ],
+      "type": "object"
+    },
+    "ThreadKey": {
+      "additionalProperties": false,
+      "description": "``ThreadKey(kind, key)`` (ADR 0003 §1). Its JSON form is what ``thread_id`` hashes.",
+      "properties": {
+        "key": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DeclaredKey"
+            },
+            {
+              "$ref": "#/$defs/EvidenceAnchor"
+            }
+          ]
+        },
+        "kind": {
+          "enum": [
+            "asset",
+            "configuration",
+            "document",
+            "machine",
+            "person",
+            "run",
+            "sensor",
+            "site",
+            "software_version",
+            "stream",
+            "task",
+            "zone"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "kind"
+      ],
+      "type": "object"
+    },
+    "ThreadLink": {
+      "additionalProperties": false,
+      "description": "An ``IdentityLink`` record relating two declared ids; never a merge (§1.5).",
+      "properties": {
+        "assertion_kind": {
+          "enum": [
+            "observed",
+            "stated"
+          ],
+          "type": "string"
+        },
+        "entity_kind": {
+          "$ref": "#/$defs/KnowledgeOfEntityKind"
+        },
+        "from_key": {
+          "$ref": "#/$defs/ThreadKey"
+        },
+        "link_record_id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "package_id": {
+          "$ref": "#/$defs/PackageId"
+        },
+        "state": {
+          "enum": [
+            "ambiguous",
+            "known",
+            "not_applicable",
+            "not_covered",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        "to_key": {
+          "$ref": "#/$defs/ThreadKey"
+        }
+      },
+      "required": [
+        "assertion_kind",
+        "entity_kind",
+        "from_key",
+        "link_record_id",
+        "package_id",
+        "state",
+        "to_key"
+      ],
+      "type": "object"
+    },
+    "ThreadRequest": {
+      "additionalProperties": false,
+      "description": "``thread(key, order, preference)``; ``merge`` and ``as_of`` are optional.",
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/TxSeq"
+        },
+        "key": {
+          "$ref": "#/$defs/ThreadKey"
+        },
+        "merge": {
+          "$ref": "#/$defs/ClockMerge"
+        },
+        "order": {
+          "enum": [
+            "transaction",
+            "world"
+          ],
+          "type": "string"
+        },
+        "preference": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/History"
+            },
+            {
+              "$ref": "#/$defs/LatestTransform"
+            },
+            {
+              "$ref": "#/$defs/Pinned"
+            },
+            {
+              "$ref": "#/$defs/AsRegisteredBy"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "order",
+        "preference"
+      ],
+      "type": "object"
+    },
+    "ThreadsOf": {
+      "additionalProperties": false,
+      "description": "Every thread of one record id, sorted by thread id then package id. Co-declared keys give several memberships; the Ledger reports them and never unions the threads.",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/ApiVersion"
+        },
+        "as_of": {
+          "$ref": "#/$defs/KnowledgeOfTransactionKey"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/CatalogFinding"
+          },
+          "type": "array"
+        },
+        "memberships": {
+          "items": {
+            "$ref": "#/$defs/Membership"
+          },
+          "type": "array"
+        },
+        "record_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "found",
+            "unknown_record"
+          ],
+          "type": "string"
+        },
+        "unresolved": {
+          "items": {
+            "$ref": "#/$defs/UnresolvedMembership"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "api_version",
+        "as_of",
+        "findings",
+        "memberships",
+        "record_id",
+        "status",
+        "unresolved"
+      ],
+      "type": "object"
+    },
+    "ThreadsOfRequest": {
+      "additionalProperties": false,
+      "description": "``threads_of(record_id)``: every thread a record belongs to (ADR 0003 §1.4).",
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/TxSeq"
+        },
+        "record_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "record_id"
+      ],
+      "type": "object"
+    },
+    "Ticks": {
+      "description": "Integer ticks on one clock, exactly as the package states them; never converted.",
+      "maximum": 9223372036854775807,
+      "minimum": -9223372036854775808,
+      "type": "integer"
+    },
+    "TierTwoId": {
+      "description": "A tier-2 id: a transform, a timestamp domain (clock key) or a clock mapping.",
+      "pattern": "^rec:sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "TimePoint": {
+      "additionalProperties": false,
+      "description": "A timestamp as a package states it: ticks on one clock (root ADR 0005). Never converted.",
+      "properties": {
+        "domain_id": {
+          "$ref": "#/$defs/TierTwoId"
+        },
+        "ticks": {
+          "$ref": "#/$defs/Ticks"
+        }
+      },
+      "required": [
+        "domain_id",
+        "ticks"
+      ],
+      "type": "object"
+    },
+    "TimeWindow": {
+      "additionalProperties": false,
+      "description": "``[first, last]`` ticks, both inclusive, on one clock. Never applied across clocks.",
+      "properties": {
+        "clock": {
+          "$ref": "#/$defs/TierTwoId"
+        },
+        "first": {
+          "$ref": "#/$defs/Ticks"
+        },
+        "last": {
+          "$ref": "#/$defs/Ticks"
+        }
+      },
+      "required": [
+        "clock",
+        "first",
+        "last"
+      ],
+      "type": "object"
+    },
+    "Token": {
+      "description": "A machine token.",
+      "pattern": "^[a-z][a-z0-9_.\\-]*$",
+      "type": "string"
+    },
+    "TransactionKey": {
+      "additionalProperties": false,
+      "description": "A point in the catalog's transaction order (ADR 0002 §4): one registration's tick.",
+      "properties": {
+        "tx_seq": {
+          "$ref": "#/$defs/TxSeq"
+        },
+        "tx_time": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{6}Z$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tx_seq",
+        "tx_time"
+      ],
+      "type": "object"
+    },
+    "TransformInfo": {
+      "additionalProperties": false,
+      "description": "A registered ``TransformRecord``'s fields, as stated (ADR 0002 ``transform``).",
+      "properties": {
+        "adapter_id": {
+          "$ref": "#/$defs/Token"
+        },
+        "adapter_version": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "config_hash": {
+          "$ref": "#/$defs/ContentId"
+        },
+        "libraries": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "adapter_id",
+        "adapter_version",
+        "config_hash",
+        "libraries"
+      ],
+      "type": "object"
+    },
+    "TxSeq": {
+      "description": "A catalog transaction sequence number (ADR 0002 §4).",
+      "minimum": 1,
+      "type": "integer"
+    },
+    "UnresolvedMember": {
+      "additionalProperties": false,
+      "description": "A record whose ``Ambiguous`` field names this thread among its candidates (§2).",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "package_id": {
+          "$ref": "#/$defs/PackageId"
+        },
+        "pointer": {
+          "type": "string"
+        },
+        "record_id": {
+          "$ref": "#/$defs/RecordId"
+        }
+      },
+      "required": [
+        "kind",
+        "package_id",
+        "pointer",
+        "record_id"
+      ],
+      "type": "object"
+    },
+    "UnresolvedMembership": {
+      "additionalProperties": false,
+      "description": "A thread a record's ``Ambiguous`` field (at ``pointer``) names as a candidate.",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/ThreadKey"
+        },
+        "package_id": {
+          "$ref": "#/$defs/PackageId"
+        },
+        "pointer": {
+          "type": "string"
+        },
+        "thread_id": {
+          "$ref": "#/$defs/ContentId"
+        }
+      },
+      "required": [
+        "key",
+        "package_id",
+        "pointer",
+        "thread_id"
+      ],
+      "type": "object"
+    },
+    "VerifyReport": {
+      "additionalProperties": false,
+      "description": "Whether a registered package's bytes still match its id and its manifest.",
+      "properties": {
+        "api_version": {
+          "$ref": "#/$defs/ApiVersion"
+        },
+        "as_of": {
+          "$ref": "#/$defs/KnowledgeOfTransactionKey"
+        },
+        "files_checked": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/CatalogFinding"
+          },
+          "type": "array"
+        },
+        "package_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "registration_key": {
+          "$ref": "#/$defs/KnowledgeOfTransactionKey"
+        },
+        "root_locator": {
+          "$ref": "#/$defs/KnowledgeOfString"
+        },
+        "verdict": {
+          "enum": [
+            "damaged",
+            "intact",
+            "unknown_package",
+            "unreachable"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "api_version",
+        "as_of",
+        "files_checked",
+        "findings",
+        "package_id",
+        "registration_key",
+        "root_locator",
+        "verdict"
+      ],
+      "type": "object"
+    },
+    "VerifyRequest": {
+      "additionalProperties": false,
+      "description": "``verify(package_id)``: re-hash a registered package where it was registered from.",
+      "properties": {
+        "as_of": {
+          "$ref": "#/$defs/TxSeq"
+        },
+        "package_id": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "package_id"
+      ],
+      "type": "object"
+    },
+    "WorldTime": {
+      "additionalProperties": false,
+      "description": "An entry's world time (ADR 0003 §3): its start ``s`` and its end ``e`` as stated.",
+      "properties": {
+        "end": {
+          "$ref": "#/$defs/StatedKnowledgeOfTimePoint"
+        },
+        "start": {
+          "$ref": "#/$defs/TimePoint"
+        }
+      },
+      "required": [
+        "end",
+        "start"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "urn:neptune:catalog-api:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Requests and responses of the Neptune Ledger catalog API (packages/neptune-ledger/docs/catalog-api.md). Validate a document against #/$defs/<RecordName>.",
+  "title": "Neptune catalog API 1.x"
+}

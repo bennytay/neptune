@@ -1,0 +1,26 @@
+{
+  "api_version": "1.6.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "files_checked": 0,
+  "findings": [
+    {
+      "code": "unknown_package",
+      "detail": "no package with this id is registered",
+      "subject": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "package_id": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "registration_key": {
+    "knowledge": "not_covered"
+  },
+  "root_locator": {
+    "knowledge": "not_covered"
+  },
+  "verdict": "unknown_package"
+}

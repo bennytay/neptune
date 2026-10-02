@@ -8,16 +8,21 @@ the L1 gate's amendments, [ADR 0005](adr/0005-l1-gate-catalog-data-model-amendme
 bodies, clock checks, collation, scale) and
 [ADR 0006](adr/0006-l1-gate-catalog-api-amendments.md) (hostile packages, moved packages and
 sources, tenant roots, paging, merge order). The gate's review is
-[reviews/l1-stress-test.md](reviews/l1-stress-test.md).
+[reviews/l1-stress-test.md](reviews/l1-stress-test.md). How the real catalog serves `thread`,
+`threads_of` and `lineage` (the derived thread index, request checks, how `IdentityLink` and
+`ClockMapping` records become links and merges) is
+[ADR 0010](adr/0010-entity-thread-index-and-lineage-reads.md).
 
-- **Version:** `1.5.0`, `neptune_ledger.api.CATALOG_API_VERSION`, **stable**, in
-  `contracts/catalog-api/v1.5.0/`. 1.0.0 was the pre-gate draft; 1.1.0 adds the `unsafe_entry`
+- **Version:** `1.6.0`, `neptune_ledger.api.CATALOG_API_VERSION`, **stable**, in
+  `contracts/catalog-api/v1.6.0/`. 1.0.0 was the pre-gate draft; 1.1.0 adds the `unsafe_entry`
   finding, the `unreachable` verdict and `QuerySpec.after`, and accepts every 1.0.0 document;
   1.2.0 adds package schema 2's `configuration_snapshot` and `configuration_value` record kinds
   (root ADR 0037) and accepts every 1.1.0 document; 1.3.0 adds package schema 3's alignment
   record kinds (root ADR 0050) and accepts every 1.2.0 document; 1.4.0 adds package schema 4's
-  eight deployment lifecycle record kinds (root ADR 0051) and accepts every 1.3.0 document; 1.5.0
-  adds package schema 5's `assertion` record kind (root ADR 0062) and accepts every 1.4.0 document.
+  eight deployment lifecycle record kinds (root ADR 0051) and accepts every 1.3.0 document;
+  1.5.0 adds `ThreadLink.entity_kind` (ADR 0010 §8) and accepts every 1.4.0 document; 1.6.0
+  adds package schema 5's `assertion` record kind (root ADR 0062) and accepts every 1.5.0
+  document.
 - **Code:** `neptune_ledger.api`. It holds the `CatalogApi` protocol, the request and response
   records, `catalog_schema()` (JSON Schema 2020-12, one `$defs` entry per record),
   `QUERY_RESULT_SCHEMA` (Arrow), `to_json` / `from_json` / `dumps` / `loads`, and `StubCatalog`.
@@ -60,7 +65,11 @@ ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 ## What the API never does
 
 - **Merge.** It never merges identities, threads, clocks or packages. Two identical URDFs are two
-  packages, and co-declared keys are two threads. An `IdentityLink` is reported as an edge.
+  packages, and co-declared keys are two threads. An `IdentityLink` is reported as an edge
+  (`ThreadLink`) on the thread of each id it names, never as entries. A link states no entity
+  kind (package schema 3 has no field for one), so `entity_kind` is `NotCovered`; the kind in
+  `from_key` and `to_key` is the listing thread's (the caller's lookup), not the link's
+  (ADR 0010 §8).
 - **Mutate.** It never edits a package or a catalog row. Registration only appends, and
   supersession is computed when the catalog is read (ADR 0003 §5).
 - **Infer.** It never stores or returns an inferred meaning. Membership comes only from `Known`
@@ -83,10 +92,10 @@ ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 | `unknown_record` | lineage, threads_of | No registered package holds the record id |
 | `unresolvable_evidence` | resolve | No registered package holds the source |
 | `preference_required` | thread | The preference was missing |
-| `unknown_clock`, `unknown_mapping` | thread | The merge names a clock or mapping that the catalog does not hold |
+| `unknown_clock`, `unknown_mapping` | thread | The merge names a clock, or a `clock_mapping` record id, that no package registered by the catalog point holds (ADR 0010 §5) |
 | `unsupported_mapping`, `mapping_out_of_range` | thread | ADR 0003 §3: a mapping that is not usable, or an entry that no usable path covers; `mapping_out_of_range` lists the paths it tried in `paths_tried` |
 | `as_of_out_of_range` | read calls | `as_of` is beyond the latest committed point |
-| `invalid_request` | any | An argument outside the contract, for example a window with `first > last` |
+| `invalid_request` | any | An argument outside the contract, for example a window with `first > last`, or a merge on `transaction` order |
 
 ## Running the contract tests against an implementation
 
@@ -120,16 +129,18 @@ The suite contains:
 - determinism checks: the same call twice gives identical bytes, and `as_of` replays an earlier
   point.
 
-Clock-merge and `mapping_out_of_range` tests are deferred to MVL-92. They need MVL-82
-`ClockMapping` records, which no package carries yet. It needs pytest and jsonschema (the `contract-tests` extra). Outside this repository, set
+The clock-merge contract test merges the quadruped worked example's stated `ClockMapping`
+(package schema 3). The merge rules, `unsupported_mapping` and `mapping_out_of_range` are
+property-tested inside the Ledger (ADR 0003 §7, P7; ADR 0010 §6), and windows and links are
+tested over registered packages there (`test_ledger_thread_alignment.py`). The suite needs pytest and jsonschema (the `contract-tests` extra). Outside this repository, set
 `NEPTUNE_WORKED_EXAMPLES` to the compiler's `tests/fixtures/model`.
 
 This package runs the suite twice (`tests/contract/test_ledger_catalog_contract.py`): against
 `StubCatalog` as strict expected failures, where each test must fail with `NotImplementedError`,
 and against the real `neptune_ledger.catalog.registry.PostgresCatalog`. There, `register`,
-`verify` and `resolve` pass. Each test that reaches a call not implemented yet is listed by name
-with its owning issue (`thread`, `threads_of`, `lineage`: MVL-92; `query`: MVL-98)
-and is a strict expected failure until that call lands. `make_catalog` must return a catalog
+`verify`, `resolve`, `thread`, `threads_of` and `lineage` pass. Each test that reaches a call not
+implemented yet is listed by name with its owning issue (`query`: MVL-98) and is a strict
+expected failure until that call lands. `make_catalog` must return a catalog
 with no package-root limit, because the tests register from `tmp_path`.
 
 Referenced sources are re-hashed on request by `PostgresCatalog.verify_sources`, outside this
@@ -137,5 +148,5 @@ contract, because 1.1.0 has no finding code for a source location
 ([ADR 0007](adr/0007-registration-implementation-boundaries-and-source-checks.md)). The `ledger`
 command (`ledger register <root>`, `ledger verify <id> [--source-root DIR]`) is a thin front end
 over it. The registry goldens in
-`contracts/catalog-api/v1.5.0/golden/` come from `contract_tests/goldens.py`. They are example
+`contracts/catalog-api/v1.6.0/golden/` come from `contract_tests/goldens.py`. They are example
 documents valued from the worked examples, with fixed illustrative transaction keys.
