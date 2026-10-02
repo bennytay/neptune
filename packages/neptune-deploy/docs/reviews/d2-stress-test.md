@@ -112,12 +112,27 @@ their own: their content is in the listing.
   That turned "not known" into "absent", against package non-negotiable 3, and the old
   `test_a_redirect_is_refused_and_never_followed` asserted it. Found by tabulating every
   connector's findings under every attack. A key whose listing did not complete is now
-  `object_unresolved` (category `failed`), and only a complete listing without the key is
-  `object_not_found`. Regression tests: `test_an_object_whose_listing_failed_is_unresolved_never_not_found`
+  `object_unresolved` (category `failed`), as is a key the store listed but the source could not
+  use. Only a listing that shows the key absent is `object_not_found`: a complete one, or a probe
+  stopped at its limit after a key that sorts past it. Regression tests: `test_an_object_whose_listing_failed_is_unresolved_never_not_found`
   (a redirect and a refused page; fails without the fix), and the gate's check that no attacked
   listing, of any connector, reports anything `missing`.
 
-The gate's own changes were reviewed with `/code-review`, and confirmed findings were fixed.
+The gate's own changes were reviewed with `/code-review` at high effort. Confirmed and fixed:
+
+- B1 had a second half. A deadline timer starved past its request's end could still shut down the
+  *next* request's socket, because `Timer.cancel` cannot stop a running timer thread. A deadline now
+  aborts only while its request is running (a lock and a flag). Regression:
+  `test_a_deadline_that_fires_after_its_request_ended_touches_nothing`.
+- B2 had two edges. A key the store listed but the source could not use (`key_duplicated`) still read
+  `object_not_found`. And an absent key with more than 64 siblings read `object_unresolved`, though the
+  listing showed it absent. Regressions: `test_a_key_listed_but_unusable_is_unresolved_not_missing`,
+  `test_a_key_absent_among_many_siblings_is_not_found_even_past_the_probe_limit`.
+- The gate's namespace check allowed `deploy_s3.*` findings from every connector; it now allows them
+  for Rerun only. The live test now searches for every spelling of a secret, Basic pairs included,
+  as the gate does. The slow and trickle attacks and the hash-seed run are marked `slow`.
+- Not taken: a claim that `Response.exact()` reports `ShortRead` after the deadline. It routes through
+  the same `deadline.error`, so it reports `DeadlineExceeded`.
 
 ### Decisions (ADR 0011)
 

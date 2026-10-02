@@ -41,14 +41,22 @@ plugin Source end to end (compiler PR #103, MVL-45, is open).
    thread had run yet. Under CPU load that is scheduling, so one silent server gave
    `cause: transport_failed` in some runs and `deadline_exceeded` in others, and therefore two finding
    ids for one input (B1, measured at 10 of 25 runs under load). A `TimeoutError` is now always
-   `DeadlineExceeded`. This changes only which of two codes a timed-out request reports, and only
-   where the race used to pick the other one.
+   `DeadlineExceeded`. That includes a connection that is not accepted in time: the request outlived
+   its deadline, whatever stage it was at. A refused connection stays `transport_failed`. This changes
+   only which of two codes a timed-out request reports, and only where the race used to pick the
+   other one. The gate's review found the same race one step later: `Timer.cancel` cannot stop a timer
+   thread that is already running, so a starved timer could shut down the socket of the request sent
+   after its own. A deadline now checks, under a lock, that its request is still running before it
+   aborts anything.
 3. **A failed storage listing is not an absent object (amends ADR 0009 §5 and §8).** Rerun resolves
    each storage URL with one exact-key listing. It reported `object_not_found` (category `missing`)
    whenever that key was not listed, including when the listing was refused, invalid or stopped at a
    limit (B2). That asserted an absence where nothing was known, against package non-negotiable 3. A
-   key that a *complete* listing lacks is still `object_not_found`. A key whose listing did not
-   complete is `object_unresolved` (category `failed`), next to the store's own finding saying why,
+   key that a *complete* listing lacks is still `object_not_found`. So is a key absent from a probe
+   that stopped at its 64-entry limit after listing a key that sorts past it: stores list in byte
+   order, and the exact key sorts first among the keys it prefixes. A key whose listing did not
+   complete, or that the store listed but the source could not use (listed twice differently, too
+   long), is `object_unresolved` (category `failed`), next to the store's own finding saying why,
    and the object is not read. The gate now checks, for every connector, that a listing the remote
    broke reports nothing `missing`.
 4. **GCS and Azure are verified against their emulators and stay registered (closes ADR 0006 §2's
@@ -81,7 +89,9 @@ plugin Source end to end (compiler PR #103, MVL-45, is open).
    other connector declares one: they are chosen by name (`--connector`). Nothing here imports or
    depends on #103. `d2-gate` does not wait for it.
 7. **Connector versions stay `0.1.0` through `d2-gate`.** B1 changes no finding a run without the race
-   produced, B2 renames a finding only where the old one was wrong, and nothing was released (ADR 0005 §9's precedent). From the tag on, any change to a
+   produced, and B2 renames a finding only where the old one was wrong. No historical record carries
+   the old output: the compiler cannot ingest a plugin Source until #103 merges, so no package holds
+   a connector's findings, and nothing was released (ADR 0005 §9's precedent). From the tag on, any change to a
    connector's output bumps its `CONNECTOR_VERSION`.
 
 ## Alternatives considered

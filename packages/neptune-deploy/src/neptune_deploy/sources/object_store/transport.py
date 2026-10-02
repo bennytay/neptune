@@ -12,7 +12,8 @@
 - Bodies are read with a bound. A body shorter than its ``Content-Length`` is ``ShortRead``.
 - One connection is kept open between requests and dropped after any failure.
 - The timeout bounds each socket operation, and the whole request as a deadline: a server that
-  trickles bytes cannot hold a request open past it.
+  trickles bytes cannot hold a request open past it. Either running out is ``DeadlineExceeded``
+  (both are the same length, and the deadline's clock starts first).
 
 No error text, URL or header from here reaches a finding: the source turns each error into a code
 and a status.
@@ -68,7 +69,8 @@ class ResponseTooLarge(TransportError):
 
 
 class DeadlineExceeded(TransportError):
-    """The request as a whole took longer than its timeout (a server trickling bytes)."""
+    """The request as a whole took longer than its timeout: no connection in time, no answer, or
+    a server that answers slowly or trickles bytes. A refused connection is not this."""
 
     code = "deadline_exceeded"
 
@@ -173,15 +175,26 @@ class _Deadline:
     def __init__(self, transport: "Transport", seconds: float) -> None:
         self.expired = False
         self._transport = transport
+        self._lock = threading.Lock()
+        self._finished = False
         self._timer = threading.Timer(seconds, self._expire)
         self._timer.daemon = True
         self._timer.start()
 
     def _expire(self) -> None:
-        self.expired = True
-        self._transport.abort()
+        # ``Timer.cancel`` cannot stop a timer thread that is already running. Without the flag, a
+        # timer starved past its request's end (the socket timed out first, under load) would shut
+        # down the socket of whatever request the transport had sent next. The lock makes "this
+        # request is still running" and "abort its socket" one step (D2 gate review).
+        with self._lock:
+            if self._finished:
+                return
+            self.expired = True
+            self._transport.abort()
 
     def cancel(self) -> None:
+        with self._lock:
+            self._finished = True
         self._timer.cancel()
 
     def error(self, exc: BaseException, default: TransportError) -> TransportError:

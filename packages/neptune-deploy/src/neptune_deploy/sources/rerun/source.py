@@ -20,6 +20,7 @@ word until an adapter reads the file's own.
 method to check that every attribute it reads is set.
 """
 
+import hashlib
 from collections.abc import Mapping
 from functools import cached_property
 from typing import Final
@@ -309,7 +310,13 @@ class RerunSource(ObjectStoreSource):
         for entry in listing.entries:
             if entry.key == key:
                 return inner, entry
-        return listing.complete
+        raw = key.encode("utf-8", "surrogateescape")
+        digest = hashlib.sha256(raw).hexdigest()
+        if any(skipped.sha256 == digest for skipped in listing.skipped):
+            return False  # listed, but not usable (duplicated, too long, ...): not known
+        # The store lists in byte order and the exact key sorts first among the keys it prefixes,
+        # so a listed key past it shows it absent even when the probe stopped at its limit.
+        return listing.complete or any(e.key.encode("utf-8") > raw for e in listing.entries)
 
     @cached_property
     def _segment_rows(self) -> tuple[Mapping[str, JsonValue], ...]:

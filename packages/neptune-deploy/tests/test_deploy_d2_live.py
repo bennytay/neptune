@@ -38,6 +38,7 @@ from deploy_d2_support import (
     ledger_json,
     location_of,
     no_sockets,
+    spellings,
 )
 from neptune.identity.hashing import digest_stream
 from neptune.identity.revisions import SourceLedger
@@ -70,8 +71,19 @@ def _factory(connector: str) -> Any:
     return found.load()
 
 
-def _secrets() -> list[str]:
-    return [v for k, v in os.environ.items() if SECRET_NAME.match(k) and len(v) >= 8]
+def _secrets() -> set[str]:
+    """Every ``NEPTUNE_*`` secret as it could leak: verbatim, percent-encoded, and paired with
+    each ``*_EMAIL`` or ``*_USERNAME`` as an HTTP Basic credential's base64."""
+    users = [
+        v for k, v in os.environ.items() if re.match(r"^NEPTUNE_(?!TEST_).*_(EMAIL|USERNAME)$", k)
+    ]
+    found: set[str] = set()
+    for name, value in os.environ.items():
+        if SECRET_NAME.match(name) and len(value) >= 8:
+            found |= spellings(value)
+            for user in users:
+                found |= spellings(value, user=user)
+    return found
 
 
 @pytest.mark.parametrize("connector", CONNECTORS)

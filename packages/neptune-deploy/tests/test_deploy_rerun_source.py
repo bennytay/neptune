@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from deploy_object_store_fake import FakeStore
+from deploy_object_store_fake import Entry, FakeStore, Version
 from neptune.identity.hashing import digest_stream
 from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ExternalObjectRef
@@ -723,3 +723,39 @@ def test_ref_names_an_object_as_the_connector_of_its_store_does(tmp_path: Path) 
         assert source.ref("az://acct01/cont/k", "etag:1") == ExternalObjectRef(
             "deploy_azure_blob", "acct01/cont/k", "etag:1"
         )
+
+
+def test_a_key_listed_but_unusable_is_unresolved_not_missing(tmp_path: Path) -> None:
+    """The store lists the key twice with different tokens: the object-store source drops it
+    (``key_duplicated``), and the store's own listing says it is there, so it is not missing."""
+    fake = store()
+    target = b"episodes/legged01_slip.rrd"
+
+    def twice(number: int, entries: list[Entry]) -> list[Entry]:
+        found = [e for e in entries if e.key == target]
+        if found:
+            other = Version(b"other bytes", "v-other", 1)
+            return [*entries, Entry(target, other, True)]
+        return entries
+
+    fake.rewrite = twice
+    with connect(fake, tmp_path) as source:
+        source.listing()
+        found = codes(source)
+    assert "deploy_rerun.object_unresolved" in found
+    assert "deploy_rerun.object_not_found" not in found
+
+
+def test_a_key_absent_among_many_siblings_is_not_found_even_past_the_probe_limit(
+    tmp_path: Path,
+) -> None:
+    """The exact-key probe keeps 64 entries. With the key gone and 100 keys it prefixes, the
+    first listed sibling sorts after the key, which shows the key absent: ``object_not_found``."""
+    fake = store()
+    fake.delete("episodes/legged01_slip.rrd")
+    fake.bulk({f"episodes/legged01_slip.rrd.{n:03d}".encode(): b"x" for n in range(100)})
+    with connect(fake, tmp_path) as source:
+        source.listing()
+        found = codes(source)
+    assert "deploy_rerun.object_not_found" in found
+    assert "deploy_rerun.object_unresolved" not in found

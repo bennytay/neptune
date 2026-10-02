@@ -53,6 +53,10 @@ from neptune_deploy.diagnostics import load_mapping, map_diagnostics_files
 from neptune_deploy.sources.fleet_ops import FleetOpsConfigError, open_rmf_source
 
 TESTS = Path(__file__).parent
+# The slow and trickle attacks wait out timeouts by design: marked slow (``make test-fast`` skips).
+ATTACK_PARAMS = [
+    pytest.param(a, marks=pytest.mark.slow) if a in ("slow", "trickle") else a for a in ATTACKS
+]
 HOSTILE_TIMEOUT = 0.5  # seconds: the connector's own declared timeout under attack
 BOUND = 60.0  # seconds any one hostile run may take before the gate calls it a hang
 
@@ -304,7 +308,7 @@ def test_g5_open_rmf_takes_no_credentials(tmp_path: Path) -> None:
 # --- 6. A hostile remote produces findings, not exceptions or hangs -----------------------------
 
 
-@pytest.mark.parametrize("attack", ATTACKS)
+@pytest.mark.parametrize("attack", ATTACK_PARAMS)
 def test_g6_a_hostile_listing_is_findings_never_an_exception_or_a_hang(
     remote: Rig, attack: str
 ) -> None:
@@ -323,18 +327,21 @@ def test_g6_a_hostile_listing_is_findings_never_an_exception_or_a_hang(
         assert proxy.requests()
     findings = source.findings()
     assert findings, f"{remote.connector} met {attack} and said nothing"
-    assert all(
-        f.code.startswith(f"{remote.connector}.") or f.code.startswith("deploy_s3.")
-        for f in findings
+    # Rerun's storage reads are reported by the store's connector (ADR 0009 §8); nobody else's are.
+    own = (
+        (f"{remote.connector}.", "deploy_s3.")
+        if remote.connector == "deploy_rerun"
+        else (f"{remote.connector}.",)
     )
-    assert entries(walked) == [] or remote.connector == "deploy_open_rmf"
+    assert all(f.code.startswith(own) for f in findings)
+    assert entries(walked) == []
     # A listing the remote broke says nothing is missing: what was not read is not known (B2).
     assert not [f.code for f in findings if f.category is FindingCategory.MISSING]
     assert not [s for s in remote.leak_spellings() if s in text]
     assert elapsed < BOUND
 
 
-@pytest.mark.parametrize("attack", ATTACKS)
+@pytest.mark.parametrize("attack", ATTACK_PARAMS)
 def test_g6_a_hostile_read_fails_that_object_with_a_finding(remote: Rig, attack: str) -> None:
     """The listing is clean; then every byte read meets ``attack``. Each failed read raises the
     source's ``OSError`` (so the caller quarantines that object and nothing else) and is a finding;
@@ -387,7 +394,7 @@ def test_g7_two_clean_syncs_emit_identical_bytes(name: str, tmp_path: Path) -> N
     assert clean_sync(name, tmp_path / "a") == clean_sync(name, tmp_path / "b")
 
 
-@pytest.mark.parametrize("attack", ATTACKS)
+@pytest.mark.parametrize("attack", ATTACK_PARAMS)
 def test_g7_a_hostile_run_is_as_deterministic_as_a_clean_one(
     remote: Rig, attack: str, tmp_path: Path
 ) -> None:
@@ -402,6 +409,7 @@ def test_g7_a_hostile_run_is_as_deterministic_as_a_clean_one(
     assert runs[0] == runs[1]
 
 
+@pytest.mark.slow
 def test_g7_every_connector_is_identical_under_other_hash_seeds() -> None:
     outputs = []
     for seed in ("0", "4242"):
