@@ -1,12 +1,12 @@
 # Ingest receipt
 
-Receipt `rec:sha256:a6b4dcc6e5e974d05c087ff18b1f51426ea186e09d865a3930907d5fcd3d01a6`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:963823053b85bd034e1ad8b533d04b625793429a09d49268996c6225a0cf1005`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 15 seen, 8 read, 7 not read, 0 gone
 - Runs: 0; streams: 0; entities: 0
-- Findings: 0 errors, 5 warnings, 8 info; ambiguous fields: 0
+- Findings: 0 errors, 5 warnings, 11 info; ambiguous fields: 0
 
 ## Sources
 
@@ -51,7 +51,7 @@ Receipt `rec:sha256:a6b4dcc6e5e974d05c087ff18b1f51426ea186e09d865a3930907d5fcd3d
 | `change_record` | 2 |
 | `commissioning_baseline` | 1 |
 | `incident_record` | 1 |
-| `ingest_finding` | 13 |
+| `ingest_finding` | 16 |
 | `maintenance_event` | 5 |
 | `requalification_record` | 3 |
 | `risk_assessment` | 1 |
@@ -83,11 +83,14 @@ Receipt `rec:sha256:a6b4dcc6e5e974d05c087ff18b1f51426ea186e09d865a3930907d5fcd3d
 - **warning** `deploy_lifecycle_map.row_unmatched` (unsupported): rows of a mapped table that no rule of the mapping applies to; they have no lifecycle record · `rec:6af418a6033c`
 - **warning** `deploy_lifecycle_map.value_blank` (missing): blank cells in columns the mapping declares required; the fields are unknown · `rec:2a5364a70c4a`
 - **info** `deploy_document_map.document_unmatched` (unsupported): a document no template matches; it has no lifecycle record · `rec:c4ab9f08b996`
-- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:1de6767ff081`
 - **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:45bd5d673b84`
+- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:476a7cd02c49`
 - **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:817a2f7853d5`
 - **info** `deploy_document_map.text_unread` (unsupported): text and tables of a matched document that no field of the template reads; they stay in the base package only · `rec:1a9c62afa2ff`
 - **info** `deploy_document_map.text_unread` (unsupported): text and tables of a matched document that no field of the template reads; they stay in the base package only · `rec:dcc4d55dcd9f`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:40fd514126fb`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:9422e319e659`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:deb8950089d1`
 - **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:5219483e3cf4`
 - **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:99f346b0dd8d`
 

@@ -1,12 +1,12 @@
 # Ingest receipt
 
-Receipt `rec:sha256:f93812286d5cfe5dcdf1dc748354e700e4bda9c5dd622a6c9a4ad28ca30719ca`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:e53dba7048ef96f25b3ba3d298153410eb8aecb61b16675df6d21663acc1187c`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 25 seen, 10 read, 15 not read, 0 gone
 - Runs: 0; streams: 0; entities: 0
-- Findings: 0 errors, 13 warnings, 8 info; ambiguous fields: 0
+- Findings: 0 errors, 13 warnings, 11 info; ambiguous fields: 0
 
 ## Sources
 
@@ -59,7 +59,7 @@ Receipt `rec:sha256:f93812286d5cfe5dcdf1dc748354e700e4bda9c5dd622a6c9a4ad28ca307
 | `authorisation_envelope` | 4 |
 | `change_record` | 6 |
 | `incident_record` | 2 |
-| `ingest_finding` | 21 |
+| `ingest_finding` | 24 |
 | `maintenance_event` | 12 |
 | `requalification_record` | 2 |
 | `source_artifact` | 25 |
@@ -103,6 +103,9 @@ Receipt `rec:sha256:f93812286d5cfe5dcdf1dc748354e700e4bda9c5dd622a6c9a4ad28ca307
 - **info** `deploy_document_map.document_unmatched` (unsupported): a document no template matches; it has no lifecycle record · `rec:eb874865d6d0`
 - **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:25033f6db4a2`
 - **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:e890597554d9`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:81964dbfde83`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:8b4bf22560b9`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:e1570e958d10`
 - **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:9154f12997a6`
 - **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:9ad74a27081b`
 

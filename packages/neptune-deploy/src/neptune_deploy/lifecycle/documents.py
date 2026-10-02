@@ -43,8 +43,14 @@ from neptune_deploy.lifecycle.mapper import (
     _Values,
     named_columns,
 )
-from neptune_deploy.lifecycle.mapping import ListCell, MappingError, Part, Rows, spec_refs
-from neptune_deploy.lifecycle.shapes import fields_of
+from neptune_deploy.lifecycle.mapping import (
+    ListCell,
+    MappingError,
+    Part,
+    Rows,
+    spec_refs,
+    uncovered,
+)
 from neptune_deploy.lifecycle.templates import DocumentTemplate, config_of, rows_read
 
 DOCUMENT_MAPPER_ID: Final = "deploy_document_map"
@@ -877,8 +883,7 @@ class _TemplateMapper(_Clocks):
         leaves out, what no field read, and any declared page rotation."""
         template, evidence = self.template, view.evidence
         records = [record.id] if record is not None else []
-        mapped = {name for name in self.template.fields}
-        not_covered = [s.name for s in fields_of(template.kind) if s.name not in mapped]
+        not_covered = uncovered(template.kind, template.fields)
         self.direct.append(
             _finding(
                 "template_matched",

@@ -55,6 +55,7 @@ from neptune_deploy.lifecycle.mapping import (
     config_of,
     match_pattern,
     spec_columns,
+    uncovered,
 )
 from neptune_deploy.lifecycle.shapes import Shape, fields_of
 from neptune_deploy.lifecycle.times import read_time
@@ -153,6 +154,12 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = {
         Severity.ERROR,
         FindingCategory.UNREPRESENTABLE,
         "rows whose mapped values the lifecycle kind refuses; they have no lifecycle record",
+    ),
+    "fields_not_covered": (
+        Severity.INFO,
+        FindingCategory.MISSING,
+        "fields of a rule's lifecycle kind that the rule does not read, in every record it made:"
+        " an unread value is not covered, and an unread list is empty without stating none",
     ),
     "table_unmapped": (
         Severity.INFO,
@@ -725,6 +732,7 @@ class _Mapper(_Clocks):
         )
         self.findings = _Findings()
         self.domains: dict[tuple[Any, ...], TimestampDomain] = {}
+        self.not_covered = {rule.id: uncovered(rule.kind, rule.fields) for rule in mapping.rules}
 
     def run(self) -> list[Any]:
         records: list[Any] = []
@@ -790,7 +798,7 @@ class _Mapper(_Clocks):
         evidence = row.evidence
         try:
             values = row.values(rule.kind, rule.fields)
-            return rule.kind(
+            record = rule.kind(
                 id=row.record_id,
                 provenance=Provenance(evidence, self.transform.id, STATED),
                 **values,
@@ -805,6 +813,19 @@ class _Mapper(_Clocks):
                 row=table.rows[index].row,
             )
             return None
+        not_covered = self.not_covered[rule.id]
+        if not_covered:
+            details: dict[str, JsonValue] = {"rule": rule.id, "kind": rule.kind.kind}
+            self.findings.add(
+                "fields_not_covered",
+                table,
+                table.evidence,
+                key=rule.id,
+                details={**details, "not_covered": list(not_covered)},
+                row=row.record.row,
+                record=record.id,
+            )
+        return record
 
     def _repeated(self, records: list[Any]) -> None:
         """Two records of this mapping stating one identifier: both kept, one finding."""
