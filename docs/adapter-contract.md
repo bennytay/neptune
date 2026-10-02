@@ -139,7 +139,8 @@ need finer locators (an adapter step if necessary), never a counter.
 - **Civil date-times.** With a stated offset or `Z`, a time is an exact instant: count POSIX seconds from
   1970-01-01T00:00:00Z (epoch `unix`, timescale `posix`). With no zone, count the same way on the source's own
   civil clock: epoch `unix`, timescale `Unknown`. A date alone counts days (resolution 86,400 s). Never assume
-  UTC or the site's zone.
+  UTC or the site's zone. Where the source (or your transform's configuration) declares the clock's zone,
+  write a `CivilTimeZone` naming the domain, with the IANA name verbatim; never convert (ADR 0061).
 - **Several fields, one value.** A value read from several fields (start plus duration, latitude plus longitude
   columns) cites the smallest part that holds them all.
 - **Degrees, minutes and seconds** with a hemisphere (EXIF GPS) are read into signed degrees, exactly and then

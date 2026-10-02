@@ -32,6 +32,7 @@ from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.kinds import KIND_SINCE as _KIND_SINCE
 from neptune.model.kinds import RECORD_KINDS as _KINDS
 from neptune.model.knowledge import Known
+from neptune.model.lists import LIST_STATES_SINCE, ListedMarker
 from neptune.model.package import IngestReceipt, PackageManifest, ReceiptEnvelope
 from neptune.model.provenance import (
     AdapterLocator,
@@ -106,6 +107,10 @@ class _Builder:
         if tp is float:
             return {"type": "number"}
         origin, args = typing.get_origin(tp), typing.get_args(tp)
+        if origin is typing.Annotated:
+            if any(isinstance(meta, ListedMarker) for meta in tp.__metadata__):
+                return self._listed(tp.__origin__)
+            return self.schema(tp.__origin__)
         if origin in (typing.Union, types.UnionType):
             return self._union(args)
         if origin is tuple:
@@ -134,6 +139,15 @@ class _Builder:
             # Sorted (name, value) pairs are written as a JSON object: metadata, libraries.
             return {"additionalProperties": self.schema(typing.get_args(item)[1]), "type": "object"}
         return {"items": self.schema(item), "type": "array"}
+
+    def _listed(self, knowledge: Any) -> JsonObject:
+        """A ``Listed`` field (ADR 0061 §5): the bare array, or a state whose value is one."""
+        (known,) = [arg for arg in typing.get_args(knowledge) if typing.get_origin(arg) is Known]
+        (items,) = typing.get_args(known)
+        name = "Listed_" + _name(typing.get_args(items)[0])
+        return self.ref(
+            name, lambda: {"anyOf": [self._tuple(typing.get_args(items)), self._knowledge(items)]}
+        )
 
     def _knowledge(self, value_type: Any) -> JsonObject:
         """``Knowledge[T]`` (ADR 0011): six states, tagged by ``knowledge``."""
@@ -170,7 +184,7 @@ class _Builder:
         return self.ref(name, build)
 
     def _dataclass(self, cls: type) -> JsonObject:
-        hints = typing.get_type_hints(cls, localns=_JSON_NAMES)
+        hints = typing.get_type_hints(cls, localns=_JSON_NAMES, include_extras=True)
         # A document's ``version`` is written as its envelope's ``schema_version``, below.
         properties: dict[str, JsonValue] = {
             field.name: self.schema(hints[field.name])
@@ -188,7 +202,12 @@ class _Builder:
         # The envelope (ADR 0017 §2): a record at the version that added its kind, a package's
         # document at the package's version (ADR 0037 §1).
         if hasattr(cls, "family") and isinstance(kind, str):
-            properties["schema_version"] = _const_int(_KIND_SINCE[kind])
+            since = _KIND_SINCE[kind]
+            if isinstance(getattr(cls, "schema_version", None), property):
+                # Written at a later version when it uses a later shape (ADR 0061 §6).
+                properties["schema_version"] = {"enum": sorted({since, LIST_STATES_SINCE})}
+            else:
+                properties["schema_version"] = _const_int(since)
         elif cls in DOCUMENT_KINDS:
             versions: JsonObject = {
                 "maximum": SCHEMA_VERSION,
@@ -215,6 +234,9 @@ def _name(tp: Any) -> str:
     if origin is tuple:
         return "list_of_" + _name(args[0])
     if origin in (typing.Union, types.UnionType):
+        known = [arg for arg in args if typing.get_origin(arg) is Known]
+        if known:  # Knowledge[T]
+            return "Knowledge_" + _name(typing.get_args(known[0])[0])
         return "_or_".join(_name(arg) for arg in args)
     raise TypeError(f"no name for {tp!r}")
 

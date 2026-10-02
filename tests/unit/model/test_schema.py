@@ -33,6 +33,7 @@ from neptune.model.frames import (
 )
 from neptune.model.ids import ExternalObjectRef, LogicalId, RecordId
 from neptune.model.kinds import KIND_SINCE
+from neptune.model.lists import LIST_STATES_SINCE
 from neptune.model.knowledge import (
     Ambiguous,
     AssertionKind,
@@ -136,7 +137,12 @@ def test_every_record_kind_in_the_model_is_in_the_schema() -> None:
     for kind in RECORD_KINDS:
         properties = defs[kind.__name__]["properties"]
         assert properties["kind"] == {"const": getattr(kind, "kind")}  # noqa: B009
-        assert properties["schema_version"] == {"const": KIND_SINCE[kind.kind]}  # type: ignore[attr-defined]
+        since = KIND_SINCE[kind.kind]  # type: ignore[attr-defined]
+        if isinstance(getattr(kind, "schema_version", None), property):
+            # A kind whose lists may hold states is written at their version too (ADR 0061 §6).
+            assert properties["schema_version"] == {"enum": [since, LIST_STATES_SINCE]}
+        else:
+            assert properties["schema_version"] == {"const": since}
 
 
 # --- Values the examples do not use ------------------------------------------------------------

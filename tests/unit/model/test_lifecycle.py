@@ -81,6 +81,10 @@ CLOCK: Final = TimestampDomain(
 def sample(tp: Any, name: str, *, sparse: bool = False) -> Any:
     """A value of type ``tp``: every state stated (``sparse``: every state Unknown, lists empty)."""
     origin, args = typing.get_origin(tp), typing.get_args(tp)
+    if args and typing.get_origin(args[0]) is Known:
+        (value_type,) = typing.get_args(args[0])
+        if typing.get_origin(value_type) is tuple:  # a Listed field: the list, Known
+            return Known(sample(value_type, name, sparse=sparse))
     if origin is tuple:
         if sparse:
             return ()
@@ -228,12 +232,12 @@ def test_severity_and_scores_are_declared_text_never_ranked() -> None:
     assert IncidentRecord.from_json(data) == incident
     hazard = Hazard(
         hazard=Known("crush between arm and fixture"),
-        scores=(Score("PLr", Known("d")), Score("severity", Known("S2"))),
-        mitigations=(Known("light curtain"),),
+        scores=Known((Score("PLr", Known("d")), Score("severity", Known("S2")))),
+        mitigations=Known((Known("light curtain"),)),
     )
     assert Hazard.from_json(hazard.to_json()) == hazard
     with pytest.raises(ValueError, match="unique"):
-        replace(hazard, scores=(Score("PLr", Known("d")), Score("PLr", Known("e"))))
+        replace(hazard, scores=Known((Score("PLr", Known("d")), Score("PLr", Known("e")))))
 
 
 def test_quantities_keep_their_declared_number_and_unit() -> None:
@@ -257,14 +261,30 @@ BAD: Final = [
     ("an id that is not a LogicalId", "zone", Known("PICK-A")),
     ("a bare text, not a state", "severity", "S2"),
     ("a bare id, not a state", "zone", LogicalId("site.zone", "DOCK-1")),
-    ("a list, not a tuple", "assets", []),
-    ("an unstated id", "assets", (Unknown(),)),
+    ("a list, not a tuple", "assets", Known([])),
+    ("a bare tuple, not a state", "assets", ()),
+    ("a declared-empty list as KnownAbsent", "assets", KnownAbsent(at("/assets"))),
+    ("an unstated id", "assets", Known((Unknown(),))),
     (
         "unsorted ids",
         "machines",
-        (Known(LogicalId("m", "b")), Known(LogicalId("m", "a"))),
+        Known((Known(LogicalId("m", "b")), Known(LogicalId("m", "a")))),
     ),
-    ("a repeated id", "machines", (Known(LogicalId("m", "a")), Known(LogicalId("m", "a")))),
+    (
+        "a repeated id",
+        "machines",
+        Known((Known(LogicalId("m", "a")), Known(LogicalId("m", "a")))),
+    ),
+    (
+        "a repeated id in one candidate",
+        "machines",
+        Ambiguous[tuple[Any, ...]](
+            (
+                Candidate((Known(LogicalId("m", "a")), Known(LogicalId("m", "a")))),
+                Candidate(()),
+            )
+        ),
+    ),
 ]
 
 
@@ -284,11 +304,11 @@ def test_malformed_parts_are_refused() -> None:
     with pytest.raises(ValueError, match="non-empty"):
         Score("", Known("d"))
     with pytest.raises(ValueError, match="states"):
-        Hazard(Known("pinch"), (), (Unknown(),))
+        Hazard(Known("pinch"), Known(()), Known((Unknown(),)))
     with pytest.raises(ValueError):
         ZoneLimit.from_json({"zone": {"knowledge": "unknown"}})
     with pytest.raises(TypeError):
-        record(IncidentRecord, timeline=(Score("t", Known("x")),))
+        record(IncidentRecord, timeline=Known((Score("t", Known("x")),)))
 
 
 def test_a_lifecycle_record_is_stated_never_observed_or_inferred() -> None:

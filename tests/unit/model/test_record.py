@@ -270,6 +270,7 @@ def test_kinds_are_unique_tokens_and_each_has_one_family() -> None:
         "transform_record": "lineage",
         "ingest_finding": "finding",
         "timestamp_domain": "reference",
+        "civil_time_zone": "reference",
         "frame_graph": "reference",
         "frame": "reference",
         "frame_transform": "reference",
@@ -338,7 +339,9 @@ def test_record_object_reports_the_version_before_the_keys() -> None:
     }
     assert record_object(frame, "frame", {"ref"})
     with pytest.raises(SchemaVersionError):
-        record_object({"kind": "frame_v2", "schema_version": 5, "other": 1}, "frame", {"ref"})
+        record_object(
+            {"kind": "frame_v2", "schema_version": SCHEMA_VERSION + 1, "other": 1}, "frame", {"ref"}
+        )
     with pytest.raises(ValueError, match="kind"):
         record_object({**frame, "kind": "frames"}, "frame", {"ref"})
     with pytest.raises(ValueError, match="JSON object"):

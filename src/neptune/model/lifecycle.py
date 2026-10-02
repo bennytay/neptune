@@ -20,7 +20,10 @@ Every kind shares the fields that place a record in its deployment, as declared 
   answers, a video an incident links, a change a rollback undoes).
 
 Linking a declared id to the record it names is identity resolution's (MVL-35), never this
-module's. A list of stated values is structural: an empty list means the declaration states none.
+module's. Every list is a ``Listed`` state (ADR 0061 §4): ``Known(())`` means the declaration
+states none, and a blank list is ``Unknown``, never ``()``. A record whose lists are all ``Known``
+and inherit its provenance is written at ``LIFECYCLE_SINCE``, as before; one holding any other
+list state at ``LIST_STATES_SINCE``.
 """
 
 from collections.abc import Callable, Mapping
@@ -28,7 +31,6 @@ from dataclasses import dataclass, fields
 from typing import Any, ClassVar, Final, Generic, TypeAlias, TypeVar
 
 from neptune.model._fields import (
-    Identifiers,
     check_identifiers,
     check_text_values,
     check_type,
@@ -39,6 +41,7 @@ from neptune.model._fields import (
     json_str,
     text_decoder,
     unit_json,
+    values_of,
 )
 from neptune.model.ids import LogicalId, RecordId, check_text, logical_id_from_json
 from neptune.model.jsonvalue import JsonObject, JsonValue
@@ -54,6 +57,13 @@ from neptune.model.knowledge import (
     from_json,
     to_json,
 )
+from neptune.model.lists import (
+    Listed,
+    check_listed,
+    listed_from_json,
+    listed_to_json,
+    listed_version,
+)
 from neptune.model.provenance import (
     Provenance,
     check_evidence_record,
@@ -61,7 +71,7 @@ from neptune.model.provenance import (
     evidence_record_object,
     provenance_from_json,
 )
-from neptune.model.record import Family
+from neptune.model.record import OLDEST_READABLE_VERSION, Family, SchemaVersionError
 from neptune.model.scalars import NonFinite, Real, real_from_json, real_to_json
 from neptune.model.time import Timestamp, timestamp_from_json
 from neptune.model.units import Unit, unit_from_json
@@ -72,7 +82,9 @@ LIFECYCLE_SINCE: Final = 4
 
 # Stated texts in source order, each ``Known`` or ``Ambiguous`` and non-empty: commands issued,
 # corrective actions, mitigations. Order is the declaration's; a text may repeat (two resets).
-Statements: TypeAlias = tuple[Knowledge[str], ...]
+Statements: TypeAlias = Listed[Knowledge[str]]
+# Declared ids (ADR 0019 §2): sorted, each once; the whole list a state (ADR 0061 §4).
+Ids: TypeAlias = Listed[Knowledge[LogicalId]]
 
 T = TypeVar("T")
 
@@ -87,6 +99,8 @@ class _Codec(Generic[T]):
     check: Callable[[str, T], None]
     encode: Callable[[T], JsonValue]
     decode: Callable[[JsonValue, str], T]
+    # The lowest schema version whose readers read the value's JSON (ADR 0061 §6).
+    version: Callable[[T], int] = lambda _value: OLDEST_READABLE_VERSION
 
 
 def _check_state(name: str, value: Knowledge[Any]) -> None:
@@ -125,7 +139,7 @@ def _text_codec() -> _Codec[Knowledge[str]]:
     )
 
 
-def _check_statements(name: str, statements: Statements) -> None:
+def _check_statements(name: str, statements: tuple[Knowledge[str], ...]) -> None:
     if not isinstance(statements, tuple):
         raise TypeError(f"{name} must be a tuple, got {type(statements).__name__}")
     for statement in statements:
@@ -147,17 +161,40 @@ TIME: Final = _knowledge(Timestamp, Timestamp.to_json, timestamp_from_json)
 VERSION: Final = _knowledge(VersionPrimitive, version_to_json, version_from_json)
 NUMBER: Final = _knowledge(float | NonFinite, real_to_json, real_from_json)
 UNIT: Final = _knowledge(Unit, unit_json, unit_from_json)
-REFS: Final[_Codec[Identifiers]] = _Codec(
-    check_identifiers,
-    identifiers_to_json,
-    lambda data, _name: identifiers_from_json(data, provenance_from_json),
+
+
+def _listed(items: _Codec[tuple[Any, ...]]) -> _Codec[Knowledge[tuple[Any, ...]]]:
+    """A list field as a state (``neptune.model.lists``); ``items`` checks each list it holds."""
+
+    def version(state: Knowledge[tuple[Any, ...]]) -> int:
+        return max([listed_version(state), *(items.version(value) for value in values_of(state))])
+
+    return _Codec(
+        lambda name, state: check_listed(name, state, items.check),
+        lambda state: listed_to_json(state, items.encode),
+        lambda data, name: listed_from_json(
+            data, lambda value: items.decode(value, name), provenance_from_json, name
+        ),
+        version,
+    )
+
+
+REFS: Final = _listed(
+    _Codec(
+        check_identifiers,
+        identifiers_to_json,
+        lambda data, _name: identifiers_from_json(data, provenance_from_json),
+    )
 )
-STATEMENTS: Final[_Codec[Statements]] = _Codec(
-    _check_statements,
-    lambda statements: [to_json(statement) for statement in statements],
-    lambda data, name: tuple(
-        from_json(item, text_decoder(name), provenance_from_json) for item in json_array(data, name)
-    ),
+STATEMENTS: Final = _listed(
+    _Codec(
+        _check_statements,
+        lambda statements: [to_json(statement) for statement in statements],
+        lambda data, name: tuple(
+            from_json(item, text_decoder(name), provenance_from_json)
+            for item in json_array(data, name)
+        ),
+    )
 )
 
 
@@ -177,6 +214,10 @@ class _Declared:
     @classmethod
     def _fields_from_json(cls, obj: Mapping[str, JsonValue]) -> dict[str, Any]:
         return {name: codec.decode(obj[name], name) for name, codec in cls._CODECS.items()}
+
+    def _version(self) -> int:
+        """The lowest schema version whose readers read every field's JSON."""
+        return max(codec.version(getattr(self, name)) for name, codec in self._CODECS.items())
 
 
 V = TypeVar("V", bound="_Value")
@@ -199,8 +240,8 @@ class _Value(_Declared):
         return cls(**cls._fields_from_json(obj))
 
 
-def _items(cls: type[V]) -> _Codec[tuple[V, ...]]:
-    """A tuple of ``cls`` values in source order."""
+def _items(cls: type[V]) -> _Codec[Knowledge[tuple[Any, ...]]]:
+    """A list of ``cls`` values in source order, as a state."""
 
     def check(name: str, items: tuple[V, ...]) -> None:
         if not isinstance(items, tuple):
@@ -209,10 +250,13 @@ def _items(cls: type[V]) -> _Codec[tuple[V, ...]]:
             if not isinstance(item, cls):
                 raise TypeError(f"{name} holds {cls.__name__} values, got {item!r}")
 
-    return _Codec(
-        check,
-        lambda items: [item.to_json() for item in items],
-        lambda data, name: tuple(cls.from_json(item) for item in json_array(data, name)),
+    return _listed(
+        _Codec(
+            check,
+            lambda items: [item.to_json() for item in items],
+            lambda data, name: tuple(cls.from_json(item) for item in json_array(data, name)),
+            lambda items: max((item._version() for item in items), default=OLDEST_READABLE_VERSION),
+        )
     )
 
 
@@ -221,7 +265,12 @@ def _value(cls: type[V]) -> _Codec[V]:
         if not isinstance(value, cls):
             raise TypeError(f"{name} must be a {cls.__name__}, got {value!r}")
 
-    return _Codec(check, lambda value: value.to_json(), lambda data, _name: cls.from_json(data))
+    return _Codec(
+        check,
+        lambda value: value.to_json(),
+        lambda data, _name: cls.from_json(data),
+        lambda value: value._version(),
+    )
 
 
 # --- Parts -------------------------------------------------------------------------------------
@@ -261,7 +310,7 @@ class InventoryItem(_Value):
     _WHAT: ClassVar[str] = "inventory item"
     name: Knowledge[str]
     model: Knowledge[str]
-    identifiers: Identifiers
+    identifiers: Ids
     version: Knowledge[VersionPrimitive]
     _CODECS: ClassVar[Mapping[str, _Codec[Any]]] = {
         "identifiers": REFS,
@@ -304,8 +353,8 @@ class PartReplacement(_Value):
 
     _WHAT: ClassVar[str] = "part replacement"
     part: Knowledge[str]
-    removed: Identifiers
-    installed: Identifiers
+    removed: Ids
+    installed: Ids
     _CODECS: ClassVar[Mapping[str, _Codec[Any]]] = {
         "installed": REFS,
         "part": TEXT,
@@ -358,7 +407,7 @@ class Hazard(_Value):
 
     _WHAT: ClassVar[str] = "hazard"
     hazard: Knowledge[str]
-    scores: tuple[Score, ...]
+    scores: Listed[Score]
     mitigations: Statements
     _CODECS: ClassVar[Mapping[str, _Codec[Any]]] = {
         "hazard": TEXT,
@@ -368,9 +417,10 @@ class Hazard(_Value):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        names = [score.name for score in self.scores]
-        if len(set(names)) != len(names):
-            raise ValueError(f"a hazard's score names are unique: {names}")
+        for scores in values_of(self.scores):
+            names = [score.name for score in scores]
+            if len(set(names)) != len(names):
+                raise ValueError(f"a hazard's score names are unique: {names}")
 
 
 # --- Records -----------------------------------------------------------------------------------
@@ -404,18 +454,33 @@ class _Lifecycle(_Declared):
             )
         self._check_fields()
 
+    @property
+    def schema_version(self) -> int:
+        """The version this record is written at: its kind's, or ``LIST_STATES_SINCE`` when a
+        list holds a state other than an inherited ``Known`` (ADR 0061 §6)."""
+        return max(self.since, self._version())
+
     def to_json(self) -> JsonObject:
         return evidence_record_json(
-            self.kind, self.id, self.provenance, self._fields_json(), self.since
+            self.kind, self.id, self.provenance, self._fields_json(), self.schema_version
         )
 
     @classmethod
     def from_json(cls: type[R], data: JsonValue) -> R:
-        """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
+        """Parse strictly: unexpected or missing keys and wrongly typed values are errors.
+
+        A line declaring a version older than its content needs is refused by version.
+        """
         obj, record_id, provenance = evidence_record_object(
             data, cls.kind, set(cls._CODECS), cls.since
         )
-        return cls(id=record_id, provenance=provenance, **cls._fields_from_json(obj))
+        record = cls(id=record_id, provenance=provenance, **cls._fields_from_json(obj))
+        declared = obj["schema_version"]
+        if not isinstance(declared, int) or declared < record.schema_version:
+            raise SchemaVersionError(
+                f"this {cls.kind} uses schema version {record.schema_version}, not {declared}"
+            )
+        return record
 
 
 @dataclass(frozen=True)
@@ -431,16 +496,16 @@ class CommissioningBaseline(_Lifecycle):
 
     kind: ClassVar[str] = "commissioning_baseline"
     family: ClassVar[Family] = Family.WORLD
-    identifiers: Identifiers
+    identifiers: Ids
     site: Knowledge[LogicalId]
-    machines: Identifiers
+    machines: Ids
     configuration: Knowledge[LogicalId]
-    related: Identifiers
+    related: Ids
     commissioned: Knowledge[Timestamp]
-    hardware: tuple[InventoryItem, ...]
-    software: tuple[InventoryItem, ...]
-    calibrations: Identifiers
-    tests: tuple[TestResult, ...]
+    hardware: Listed[InventoryItem]
+    software: Listed[InventoryItem]
+    calibrations: Ids
+    tests: Listed[TestResult]
     constraints: Statements
     sign_off: Decision
     _CODECS: ClassVar[Mapping[str, _Codec[Any]]] = {
@@ -469,15 +534,15 @@ class AuthorisationEnvelope(_Lifecycle):
 
     kind: ClassVar[str] = "authorisation_envelope"
     family: ClassVar[Family] = Family.WORLD
-    identifiers: Identifiers
+    identifiers: Ids
     site: Knowledge[LogicalId]
-    machines: Identifiers
+    machines: Ids
     configuration: Knowledge[LogicalId]
-    related: Identifiers
+    related: Ids
     missions: Statements
     payload_min: Quantity
     payload_max: Quantity
-    zones: tuple[ZoneLimit, ...]
+    zones: Listed[ZoneLimit]
     supervision: Knowledge[str]
     dependencies: Statements
     valid_from: Knowledge[Timestamp]
@@ -508,11 +573,11 @@ class Intervention(_Lifecycle):
 
     kind: ClassVar[str] = "intervention"
     family: ClassVar[Family] = Family.WORLD
-    identifiers: Identifiers
+    identifiers: Ids
     site: Knowledge[LogicalId]
-    machines: Identifiers
+    machines: Ids
     configuration: Knowledge[LogicalId]
-    related: Identifiers
+    related: Ids
     mode: Knowledge[str]
     authority: Knowledge[str]
     reason: Knowledge[str]
@@ -540,15 +605,15 @@ class MaintenanceEvent(_Lifecycle):
 
     kind: ClassVar[str] = "maintenance_event"
     family: ClassVar[Family] = Family.WORLD
-    identifiers: Identifiers
+    identifiers: Ids
     site: Knowledge[LogicalId]
-    machines: Identifiers
+    machines: Ids
     configuration: Knowledge[LogicalId]
-    related: Identifiers
+    related: Ids
     performed: Knowledge[Timestamp]
     diagnosis: Knowledge[str]
     actions: Statements
-    parts: tuple[PartReplacement, ...]
+    parts: Listed[PartReplacement]
     _CODECS: ClassVar[Mapping[str, _Codec[Any]]] = {
         **_COMMON,
         "actions": STATEMENTS,
@@ -566,15 +631,15 @@ class RequalificationRecord(_Lifecycle):
 
     kind: ClassVar[str] = "requalification_record"
     family: ClassVar[Family] = Family.WORLD
-    identifiers: Identifiers
+    identifiers: Ids
     site: Knowledge[LogicalId]
-    machines: Identifiers
+    machines: Ids
     configuration: Knowledge[LogicalId]
-    related: Identifiers
+    related: Ids
     performed: Knowledge[Timestamp]
     cause: Knowledge[str]
     corrective_actions: Statements
-    tests: tuple[TestResult, ...]
+    tests: Listed[TestResult]
     result: Knowledge[str]
     return_to_service: Decision
     _CODECS: ClassVar[Mapping[str, _Codec[Any]]] = {
@@ -601,17 +666,17 @@ class IncidentRecord(_Lifecycle):
 
     kind: ClassVar[str] = "incident_record"
     family: ClassVar[Family] = Family.WORLD
-    identifiers: Identifiers
+    identifiers: Ids
     site: Knowledge[LogicalId]
-    machines: Identifiers
+    machines: Ids
     configuration: Knowledge[LogicalId]
-    related: Identifiers
+    related: Ids
     occurred: Knowledge[Timestamp]
     severity: Knowledge[str]
     zone: Knowledge[LogicalId]
     location: Knowledge[str]
-    assets: Identifiers
-    timeline: tuple[TimelineEntry, ...]
+    assets: Ids
+    timeline: Listed[TimelineEntry]
     description: Knowledge[str]
     root_cause: Knowledge[str]
     _CODECS: ClassVar[Mapping[str, _Codec[Any]]] = {
@@ -634,12 +699,12 @@ class ChangeRecord(_Lifecycle):
 
     kind: ClassVar[str] = "change_record"
     family: ClassVar[Family] = Family.WORLD
-    identifiers: Identifiers
+    identifiers: Ids
     site: Knowledge[LogicalId]
-    machines: Identifiers
+    machines: Ids
     configuration: Knowledge[LogicalId]
-    related: Identifiers
-    changes: tuple[ChangeItem, ...]
+    related: Ids
+    changes: Listed[ChangeItem]
     approval: Decision
     effective: Knowledge[Timestamp]
     rollback: Knowledge[LogicalId]
@@ -660,14 +725,14 @@ class RiskAssessment(_Lifecycle):
 
     kind: ClassVar[str] = "risk_assessment"
     family: ClassVar[Family] = Family.WORLD
-    identifiers: Identifiers
+    identifiers: Ids
     site: Knowledge[LogicalId]
-    machines: Identifiers
+    machines: Ids
     configuration: Knowledge[LogicalId]
-    related: Identifiers
+    related: Ids
     assessed: Knowledge[Timestamp]
     method: Knowledge[str]
-    hazards: tuple[Hazard, ...]
+    hazards: Listed[Hazard]
     approval: Decision
     _CODECS: ClassVar[Mapping[str, _Codec[Any]]] = {
         **_COMMON,

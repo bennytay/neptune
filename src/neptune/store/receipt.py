@@ -16,7 +16,7 @@ from neptune.identity.ids import record_id
 from neptune.model.finding import IngestFinding, Severity
 from neptune.model.ids import ContentId, LogicalId, RecordId
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.kinds import RECORD_KINDS, kinds_at, package_version
+from neptune.model.kinds import RECORD_KINDS, kinds_at, record_version, records_version
 from neptune.model.knowledge import Ambiguous, Knowledge, Known, KnownAbsent
 from neptune.model.package import (
     SEVERITY_ORDER,
@@ -107,7 +107,7 @@ def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestR
     """The receipt core of a package holding ``records`` (ledger, transforms, records, findings).
 
     ``version`` is the package's schema version: by default the lowest that holds the records
-    (``package_version``). The receipt counts the kinds of that version (ADR 0037 §1).
+    (``records_version``). The receipt counts the kinds of that version (ADR 0037 §1).
     """
     by_kind: dict[str, list[Any]] = defaultdict(list)
     for record in records:
@@ -116,11 +116,18 @@ def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestR
     if unknown:
         raise ValueError(f"not record kinds: {sorted(unknown)}")
     if version is None:
-        version = package_version(by_kind)
+        version = records_version(record for members in by_kind.values() for record in members)
     kinds = kinds_at(version)
     newer = sorted(set(by_kind) - set(kinds))
     if newer:
         raise ValueError(f"a schema version {version} package cannot hold {newer}")
+    later = sorted(
+        kind
+        for kind, members in by_kind.items()
+        if any(record_version(r) > version for r in members)
+    )
+    if later:
+        raise ValueError(f"a schema version {version} package cannot hold later {later} records")
     artifacts = {artifact.content_id: artifact for artifact in by_kind["source_artifact"]}
     revisions, absences = by_kind["source_revision"], by_kind["source_absence"]
     superseded = {previous for entry in (*revisions, *absences) for previous in entry.supersedes}

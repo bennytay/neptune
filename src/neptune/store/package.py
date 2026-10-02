@@ -49,7 +49,7 @@ from neptune.identity.hashing import content_id
 from neptune.identity.provenance import check_evidence_record_id, check_transform_record
 from neptune.model.ids import ContentId, RecordId, parse_content_id, parse_record_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.kinds import RECORD_KINDS, kinds_at, package_version, record_key
+from neptune.model.kinds import RECORD_KINDS, kinds_at, record_key, records_version
 from neptune.model.package import (
     IngestReceipt,
     PackageFile,
@@ -181,9 +181,9 @@ def package_contents(
         if not isinstance(kind, str) or kind not in RECORD_KINDS:
             raise PackageError(f"not a record of a known kind: {record!r}")
         held[kind].append(record)
-    # The lowest schema version that holds these records: a package that uses no later kind is
-    # what a version 1 writer wrote, byte for byte (ADR 0037 §1).
-    version = package_version(held)
+    # The lowest schema version that holds these records: a package that uses no later kind or
+    # shape is what a version 1 writer wrote, byte for byte (ADR 0037 §1, ADR 0061 §6).
+    version = records_version(record for members in held.values() for record in members)
     tables: dict[str, list[Any]] = {kind: held.get(kind, []) for kind in kinds_at(version)}
     files: dict[str, Content] = {}
     for kind, members in tables.items():
@@ -464,14 +464,6 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
             f"the manifest must count a table for every record kind of schema version"
             f" {manifest.version}, and no other"
         )
-    # A package is written at the lowest version that holds its records (ADR 0037 §1), so the same
-    # records have one package: a higher version would be a second package of them.
-    held = package_version(kind for kind, count in manifest.tables if count)
-    if manifest.version != held:
-        raise PackageError(
-            f"the manifest says schema version {manifest.version}, but its records are of version"
-            f" {held}: a package is written at the lowest version that holds its records"
-        )
 
     records: list[Any] = []
     for kind in kinds:
@@ -488,6 +480,14 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
         if len(members) != dict(manifest.tables)[kind]:
             raise PackageError(f"{path} holds {len(members)} records, the manifest says otherwise")
         records.extend(members)
+    # A package is written at the lowest version that holds its records (ADR 0037 §1, ADR 0061
+    # §6), so the same records have one package: a higher version would be a second package.
+    held = records_version(records)
+    if manifest.version != held:
+        raise PackageError(
+            f"the manifest says schema version {manifest.version}, but its records are of version"
+            f" {held}: a package is written at the lowest version that holds its records"
+        )
     _check_lineage(records)
 
     series: dict[RecordId, Content] = {}
