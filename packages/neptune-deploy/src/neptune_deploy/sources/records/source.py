@@ -490,11 +490,16 @@ class RecordSource:
         except _MALFORMED as exc:  # a system let a malformed answer through: still this item's
             self.report("read_failed", where, {"cause": "response_invalid"})
             raise ObjectReadError("read_failed", where) from exc
-        if fetch.md5 is not None and hashlib.md5(data, usedforsecurity=False).hexdigest() != (
-            fetch.md5
+        for algorithm, stated in (
+            ("md5", fetch.md5),
+            ("sha1", fetch.sha1),
+            ("sha256", fetch.sha256),
         ):
-            self.report("object_changed", where, {**span, "checksum": "md5"})
-            raise ObjectReadError("object_changed", where)
+            if stated is not None and (
+                hashlib.new(algorithm, data, usedforsecurity=False).hexdigest() != stated
+            ):
+                self.report("object_changed", where, {**span, "checksum": algorithm})
+                raise ObjectReadError("object_changed", where)
         self._cache[entry.id] = data
         while len(self._cache) > CACHED_BODIES:
             self._cache.popitem(last=False)
@@ -596,7 +601,12 @@ class _Collect:
             if page.cursor is not None and len(page.cursor.encode("utf-8", "replace")) > MAX_CURSOR:
                 source.report("response_invalid", source.listing_ref, {"page": pages})
                 break
-            ids = frozenset([item.id for item in page.items] + [r.id for r in page.rejected])
+            # An ordered feed may state one item twice in a row (a page of one): that is a loop only
+            # if it states the same revision.
+            ids = frozenset(
+                [item.id + ("\0" + item.token if item.later_wins else "") for item in page.items]
+                + [r.id for r in page.rejected]
+            )
             if ids and ids == previous:
                 source.report("pagination_loop", source.listing_ref, {"page": pages})
                 break
@@ -679,7 +689,15 @@ class _Collect:
                 continue
             self.removed.pop(item.id, None)
             held = self.kept.get(item.id)
-            if held is not None and held != item:
+            if (
+                held is not None and held != item and item.later_wins and held.later_wins
+            ):  # fetch-only
+                self.kept[item.id] = item  # an ordered feed's later statement replaces the earlier
+                self.held += sum(len(t.encode("utf-8")) for t in (item.token, item.name))
+                if self.held > self.options.max_listing_bytes:
+                    self._limit({"max_listing_bytes": self.options.max_listing_bytes})
+                    return False
+            elif held is not None and held != item:
                 self.duplicated.add(item.id)
             elif held is None:
                 size = len(item.body) if item.body is not None else 0

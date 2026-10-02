@@ -23,14 +23,19 @@ MAX_SKIPPED_ID_BYTES: Final = 256  # of an id the source does not use
 class Fetch:
     """How to download an item's bytes: a path built from validated ids, never a system's URL.
 
-    ``size`` is the length the listing stated; a body of another length is refused. ``md5`` (lower
-    hex), if the system states one, must equal the body's.
+    ``size`` is the length the listing stated; a body of another length is refused. ``md5``,
+    ``sha1`` and ``sha256`` (lower hex), if the system states them, must equal the body's.
+    ``redirect`` says the system answers with a redirect to a pre-authenticated download URL on
+    another host, which is followed only under ``http.PreAuthenticated``'s rules (ADR 0008 §6).
     """
 
     path: str
     query: tuple[tuple[str, str], ...]
     size: int
     md5: str | None = None
+    sha1: str | None = None
+    sha256: str | None = None
+    redirect: bool = False
 
 
 @dataclass(frozen=True)
@@ -41,7 +46,9 @@ class Item:
     ``issue/10042/attachment/9`` (the parent's id is its prefix). ``token`` is the revision token,
     ``<kind>:<value>`` with the value as the system wrote it. ``name`` is advisory. ``children``,
     on a parent whose attachments the system listed in full, is the id prefix of those attachments:
-    a revision under it that the listing no longer holds is gone.
+    a revision under it that the listing no longer holds is gone. ``later_wins`` is for a feed the
+    system documents as ordered, which may state one item more than once: the last statement is
+    the item, where for any other feed two different statements of one id are ambiguous.
     """
 
     id: str
@@ -52,6 +59,7 @@ class Item:
     fetch: Fetch | None = None
     parent: str | None = None
     children: str | None = None
+    later_wins: bool = False
 
 
 @dataclass(frozen=True)

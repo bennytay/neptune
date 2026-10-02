@@ -17,6 +17,7 @@ from neptune_deploy.sources.records import (
     confluence_source,
     gdrive_source,
     jira_source,
+    onedrive_source,
     rest_source,
     servicenow_source,
 )
@@ -24,12 +25,14 @@ from neptune_deploy.sources.records import (
 JIRA_CREDENTIALS = {"email": "ops@example.com", "api_token": "jira-secret"}
 SERVICENOW_CREDENTIALS = {"username": "integration", "password": "sn-secret"}
 DRIVE_CREDENTIALS = {"access_token": "drive-token-never-printed"}
+ONEDRIVE_CREDENTIALS = {"access_token": "onedrive-token-never-printed"}
 CONFLUENCE_CREDENTIALS = {"email": "wiki@example.com", "api_token": "wiki-secret"}
 REST_CREDENTIALS = {"api_key": "cmms-session-token-never-printed"}
 SECRETS = (
     "jira-secret",
     "sn-secret",
     "drive-token-never-printed",
+    "onedrive-token-never-printed",
     "wiki-secret",
     "cmms-session-token-never-printed",
 )
@@ -91,6 +94,22 @@ def gdrive(
             ledger=ledger,
             options=_options(endpoint=f"http://{host}", **options),
             credentials=DRIVE_CREDENTIALS,
+        )
+
+
+@contextmanager
+def onedrive(
+    server: FakeServer, tmp_path: Path, *, ledger: SourceLedger | None = None, **options: Any
+) -> Iterator[RecordSource]:
+    with server.serve() as host:
+        yield onedrive_source(
+            "onedrive://b!siteA_lib01",
+            network=online(tmp_path),
+            ledger=ledger,
+            options=_options(
+                endpoint=f"http://{host}", **{"download_hosts": ["127.0.0.1"], **options}
+            ),
+            credentials=ONEDRIVE_CREDENTIALS,
         )
 
 

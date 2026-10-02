@@ -36,6 +36,7 @@ class Request:
     path: str
     query: dict[str, str]
     headers: dict[str, str]
+    body: bytes = b""
 
 
 @dataclass
@@ -56,6 +57,7 @@ class Backend:
 
     auth_header = "Authorization"
     auth_value = "Bearer token-never-printed"
+    accepts_post = False  # a GraphQL system takes POST, and nothing else
 
     def handle(self, request: Request) -> Reply | None:  # pragma: no cover - overridden
         raise NotImplementedError
@@ -128,13 +130,29 @@ class FakeServer:
                 if reply.declared_length is not None:
                     self.close_connection = True
 
+            def do_POST(self) -> None:
+                if not server.backend.accepts_post:
+                    self._other()
+                    return
+                parts = urllib.parse.urlsplit(self.path)
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length)
+                headers = {k.lower(): v for k, v in self.headers.items()}
+                reply = server._respond(Request("POST", parts.path, {}, headers, body))
+                self.send_response(reply.status)
+                for name, value in reply.headers.items():
+                    self.send_header(name, value)
+                self.send_header("Content-Length", str(len(reply.body)))
+                self.end_headers()
+                self.wfile.write(reply.body)
+
             def _other(self) -> None:
                 server.other_methods.append(self.command)
                 self.send_response(405)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
 
-            do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = _other
+            do_PUT = do_DELETE = do_PATCH = do_HEAD = _other
 
             def log_message(self, *args: Any) -> None:
                 pass

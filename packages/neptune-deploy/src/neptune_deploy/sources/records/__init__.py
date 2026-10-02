@@ -12,6 +12,7 @@ entry point            URL                                         reads
 ``deploy_jira``        ``jira://<site host>/<PROJECT>``            issues, attachments
 ``deploy_servicenow``  ``servicenow://<instance host>/<table>``    table records, attachments
 ``deploy_gdrive``      ``gdrive://<shared drive id or my-drive>``  files with bytes; change feed
+``deploy_onedrive``    ``onedrive://<Graph drive id>``             files with bytes; delta feed
 ``deploy_confluence``  ``confluence://<site host>/<space id>``     current pages (storage format)
 ``deploy_rest``        ``rest://<host>`` + a declared profile      a CMMS or EAM REST API
 =====================  ==========================================  ================================
@@ -47,7 +48,14 @@ from neptune_deploy.sources.records.model import (
     SkippedRecord,
 )
 from neptune_deploy.sources.records.source import Discovery, RecordReader, RecordSource
-from neptune_deploy.sources.records.systems import confluence, gdrive, jira, rest, servicenow
+from neptune_deploy.sources.records.systems import (
+    confluence,
+    gdrive,
+    jira,
+    onedrive,
+    rest,
+    servicenow,
+)
 from neptune_deploy.sources.records.systems.spec import Spec
 
 __all__ = [
@@ -65,6 +73,7 @@ __all__ = [
     "confluence_source",
     "gdrive_source",
     "jira_source",
+    "onedrive_source",
     "record_source",
     "rest_source",
     "servicenow_source",
@@ -72,7 +81,14 @@ __all__ = [
 
 SPECS: dict[str, Spec] = {
     spec.connector_id: spec
-    for spec in (jira.SPEC, servicenow.SPEC, gdrive.SPEC, confluence.SPEC, rest.SPEC)
+    for spec in (
+        jira.SPEC,
+        servicenow.SPEC,
+        gdrive.SPEC,
+        onedrive.SPEC,
+        confluence.SPEC,
+        rest.SPEC,
+    )
 }
 CONNECTOR_IDS = tuple(sorted(SPECS))
 
@@ -168,6 +184,11 @@ confluence_source = _factory(
     "deploy_confluence",
     "confluence_source",
     "``deploy_confluence``: a Confluence Cloud space (``confluence://<site>/<space id>``).",
+)
+onedrive_source = _factory(
+    "deploy_onedrive",
+    "onedrive_source",
+    "``deploy_onedrive``: a OneDrive or SharePoint document library (``onedrive://<drive id>``).",
 )
 rest_source = _factory(
     "deploy_rest",
