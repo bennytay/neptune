@@ -61,11 +61,12 @@ MAX_PAGES: Final = 100_000
 MAX_EXAMPLES: Final = 10  # keys a finding about many keys cites
 MAX_EXAMPLE_BYTES: Final = 256  # of each key a finding cites
 MAX_SKIPPED_KEY_BYTES: Final = 256  # of a key the source does not use, kept with length and digest
-# What one listing entry, used or not, holds besides its key and token or reason bytes: the entry
-# object, its set or dict slot, its digest and the string and int headers. tracemalloc measures
-# 226 B for an unused key and 176 B for a used one (CPython 3.12, slotted entries, short keys);
-# rounded up with margin, so ``max_listing_bytes`` bounds what the listing holds, not just its keys.
-_ENTRY_OVERHEAD_BYTES: Final = 320
+# What one listing entry, used or not, holds besides the characters of its strings and its key
+# bytes: the entry objects, their set, dict or tuple slots, and the string, bytes and int headers.
+# tracemalloc measures 162 B for an unused key and 275 to 332 B for a used one as the listing keeps
+# it (ASCII to non-Latin-1 strings; CPython 3.12, slotted entries); rounded up with margin. With
+# ``_stored_bytes`` this makes ``max_listing_bytes`` bound what the listing holds, not only keys.
+_ENTRY_OVERHEAD_BYTES: Final = 384
 MIN_WINDOW: Final = 64 * 1024
 MAX_WINDOW: Final = 8 * 1024 * 1024  # the most one ranged GET of a stream asks for
 READER_CACHE: Final = 4  # checked chunks an ObjectReader keeps
@@ -217,6 +218,15 @@ class SkippedObject:
     def order(self) -> KeyOrder:
         """How unused keys are listed: by their kept prefix, then length and digest."""
         return self.raw_key, self.length, self.sha256
+
+
+def _stored_bytes(text: str) -> int:
+    """The bytes CPython keeps for the characters of ``text``: 1, 2 or 4 per character, by the
+    widest one. A fixed rule, the same on every Python version, unlike ``sys.getsizeof``."""
+    if not text:
+        return 0
+    widest = max(map(ord, text))
+    return len(text) * (1 if widest < 0x100 else 2 if widest < 0x10000 else 4)
 
 
 def _arrival_order(pair: tuple[bytes, Listed | SkippedObject]) -> tuple[bytes, int, str]:
@@ -378,17 +388,26 @@ class ObjectStoreSource:
                     arrived.append((raw, SkippedObject(raw, "key_too_long")))
                 else:
                     arrived.append((raw, item))
-            for raw, entry in sorted(arrived, key=_arrival_order):
+            for _, entry in sorted(arrived, key=_arrival_order):
                 if isinstance(entry, SkippedObject):
                     if entry in skipped:
                         continue
-                    cost = len(entry.raw_key) + len(entry.reason)
+                    cost = (
+                        len(entry.raw_key)
+                        + _stored_bytes(entry.reason)
+                        + _stored_bytes(entry.sha256)
+                    )
                 elif entry.key in kept:
                     if kept[entry.key] != entry:
                         duplicated.add(entry.key)
                     continue
                 else:
-                    cost = len(raw) + len(entry.token)
+                    # Kept: the key, its token, and the object id (scope + key) its entry holds.
+                    cost = (
+                        _stored_bytes(entry.key)
+                        + _stored_bytes(self.location.object_id(entry.key))
+                        + _stored_bytes(entry.token)
+                    )
                 # A new entry, used or not: it counts against both limits, and costs what it holds.
                 if len(kept) + len(skipped) >= limit:
                     stopped = {"max_objects": limit}

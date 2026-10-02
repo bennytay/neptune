@@ -87,13 +87,16 @@ rule is harder: the store is remote, mutable, paginated and hostile.
      listing (`response_invalid`).
    - Pages are limited to 100,000. Entries, used or not, are limited to `max_objects` together
      (default 1,000,000). The bytes the listing holds are limited to `max_listing_bytes` (default
-     256 MiB). That budget charges every entry a fixed overhead (320 bytes: the entry object, its
-     slot, digest and headers, measured with tracemalloc at 176 to 226 bytes and rounded up), plus
-     each used key and its token whole, and each unused key as at most its first 256 bytes and its
-     reason. Unused keys keep only those bytes, with their length and sha256. A store that lists
-     huge, unusable or very many keys therefore cannot grow a listing past the budget: 20,000 keys
-     of 30 KB outside the prefix hold about 10 MB, not 600 MB, and a test checks that 40,000 short
-     ones hold at most twice a 1 MiB budget.
+     256 MiB). That budget charges every entry a fixed overhead (384 bytes: the entry objects, their
+     slots and the string headers, measured with tracemalloc at 162 to 332 bytes and rounded up),
+     plus the characters of every string it keeps as CPython stores them: 1, 2 or 4 bytes each, by
+     the string's widest character (a fixed rule, not `sys.getsizeof`, so the cut is the same on
+     every Python version). A used entry keeps its key twice (the key and the object id, scope +
+     key) and its token. An unused one keeps at most the first 256 bytes of its key, its reason,
+     its length and its sha256. A store that lists huge, wide, unusable or very many keys therefore
+     cannot grow a listing past the budget: 20,000 keys of 30 KB outside the prefix hold about
+     10 MB, not 600 MB. Tests check that 40,000 short unused keys, and used keys of 1 KB ASCII,
+     with one emoji, or with emoji tokens, hold at most twice a 1 MiB budget.
    - A limit is checked entry by entry, never per page. Within a page, entries are taken in byte
      order of their keys. Stores list in key order, so this is one sequence of entries whatever the
      page size. The listing stops at the first entry that would pass a limit, and that entry is not
