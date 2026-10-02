@@ -4,7 +4,7 @@
 - Date: 2026-10-02
 - Issue: MVL-33
 - Extends: ADR 0020 §1 (who writes `Site` and `Asset`), ADR 0017 §4 (the `task` family's kinds),
-  ADR 0037 §1 (schema version 4, provisional), ADR 0036 §8 (a new derived table)
+  ADR 0037 §1 (schema version 5, provisional), ADR 0036 §8 (a new derived table)
 
 ## Context
 
@@ -78,7 +78,7 @@ without re-parsing the corpus. Forces:
      heading at its level or above (any heading, when the step block is not a heading). Its
      `procedure` is the document's `Procedure ID`, else `Unknown`. Its text stays in its blocks.
    - The title of a brief or order is its `Title:` label, else the title the document declares.
-4. **Four kinds in the `task` family, since schema version 4** (`model/task.py`). Every one carries
+4. **Four kinds in the `task` family, since schema version 5** (`model/task.py`). Every one carries
    `declared_in`: the `DocumentRecord`, `StructuredTable` or `ConfigurationSnapshot` holding the
    declaration. All references are declared `LogicalId`s.
    - `TaskBrief` (`task_brief`): `identifiers`, `name`, `objective`, `site`, `assets`, `machines`.
@@ -112,10 +112,12 @@ without re-parsing the corpus. Forces:
    reader still fails on one document, table or configuration, what it wrote is dropped and
    `context.failed` (failed, error) names that holder; the rest of the package is unaffected. All
    patterns are anchored with bounded repetition, so a hostile line costs time linear in its length.
-9. **Schema version 4, provisional** (ADR 0037 §1): the four kinds are `since` 4, so packages that
-   hold none of them keep their bytes. Package-schema 4.0.0, catalog-api 1.4.0 (programme rule:
-   the integer is the registry major). The coordinator renumbers at merge if another kind-adding
-   change lands first.
+9. **Schema version 5, provisional** (ADR 0037 §1): the four kinds are `since` 5, so packages that
+   hold none of them keep their bytes. Package-schema 5.0.0, catalog-api 1.5.0 (programme rule:
+   the integer is the registry major). The Ledger's projections (Ledger ADR 0009) are regenerated
+   by its tool: `task_brief.site` and `work_order.site` fill the existing site columns, so
+   migration 0007 is a guard. The coordinator renumbers at merge if another kind-adding change
+   lands first.
 
 ## Alternatives considered
 
