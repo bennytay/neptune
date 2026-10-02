@@ -238,9 +238,10 @@ a bug, not a value.
   canonical lines sorted by id, each `assertion_kind` `inferred` (`stated` for a session the user declared,
   `observed` for a stream's parsed definition) and naming a transform in the package, listed in the manifest.
   The store checks their structure; `neptune.derived` reads their meaning and refuses kinds it does not define.
-  The kinds are `session_proposal` and `session_unassigned` (run/session grouping), and `stream_layout` and
-  `stream_semantic` (a stream's declared field paths and types, and what it carries, inferred; ADR 0049). Present
-  and empty means the producer ran and inferred nothing, absent means it did not run.
+  The kinds are `session_proposal` and `session_unassigned` (run/session grouping), and `definition_layout`,
+  `stream_layout` and `stream_semantic` (a distinct definition's declared field paths and types, written once;
+  each stream's line naming it; and what the stream carries, inferred; ADR 0049). Present and empty means the
+  producer ran and inferred nothing, absent means it did not run.
 
 ## Serialization (ADR 0002)
 

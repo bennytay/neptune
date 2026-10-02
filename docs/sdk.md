@@ -95,8 +95,9 @@ A dry run's `cache` says what is left: chunks with rule `committed` are done, th
 
 `run_contents(package)` (or `result.contents()`) answers what a run holds without decoding a message:
 `run.carrying("imu")`, `run.semantics()`, `run.topic("/cmd_vel")`, and per stream `fields` (declared
-paths and types), `layout_state`, `semantic` (candidates, confidence, rules, evidence) and `carries` /
-`may_carry` (ties included). It reads the package's records and derived tables only.
+paths and types, from the stream's shared `definition` layout), `layout_state`, `semantic` (candidates,
+confidence, rules, evidence) and `carries` / `may_carry` (ties included). It reads the package's records
+and derived tables only. Several lines of one kind for a stream are `Ambiguous`, never one picked.
 
 ## Explain before ingesting
 

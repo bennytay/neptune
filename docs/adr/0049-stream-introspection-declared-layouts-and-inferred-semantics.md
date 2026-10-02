@@ -25,20 +25,32 @@ and another follows it. A new canonical record kind or field would collide with 
 ## Decision
 
 1. **No canonical change.** `Stream` already holds every declared fact: name, encoding and the
-   definition's citation. This work adds two **derived** kinds (derived schema version 1, ADR 0036
+   definition's citation. This work adds three **derived** kinds (derived schema version 1, ADR 0036
    §8). The store checks their structure only, the package schema and its contract do not change,
    and `records/` holds no interpretation.
-2. **`stream_layout`** (`neptune.derived.schemas`): one line per stream, `assertion_kind`
-   `observed`. Its provenance is the stream's `schema_definition` (`definition`) under the
-   `neptune.introspection` transform. The line is a decoding of the declared bytes, and so a
+2. **Layouts** (`neptune.derived.schemas`), both `assertion_kind` `observed`, under the
+   `neptune.introspection` transform. A layout is a decoding of the declared bytes, and so a
    provenanced derivative, which is why it sits in `derived/` and not on the `Stream`.
+   - **`definition_layout`**: one line per *distinct definition*, never per stream. Its id is the
+     content id (sha256) of the definition's bytes, the encoding, and the root type name they are
+     parsed under (the three inputs of a parse), plus the transform. It holds `content`,
+     `encoding`, `root`, `types`, `paths` and `truncated`. 300 MCAP channels on one schema, or
+     the same `.msg` in two bags, give one line.
+   - **`stream_layout`**: one line per stream. It holds the stream's declared name and encoding,
+     `definition` (the stream's `schema_definition`: where its copy of the bytes sits, which
+     carries the layout's provenance to a source and range), `state`, `problem`, and `layout`,
+     the `definition_layout` id, present exactly when `state` is `known`. It holds no types or
+     paths, so its size is the stream record's, whatever the definition.
    - `state`:
-     - `known`: parsed.
+     - `known`: parsed, and its `definition_layout` written.
      - `known_absent`: the stream declares no schema.
      - `not_covered`: an encoding the registry does not parse, such as `protobuf`, `flatbuffer`,
-       `ros2idl` or `omgidl`.
-     - `unknown`: there is no definition, or it is unreadable, malformed or past a limit. A
-       `problem` gives the reason and, for `.msg`, the line.
+       `ros2idl` or `omgidl`; or a definition past a limit or budget (§4), with a `problem`
+       whose `counts` say by how much. Neptune chose not to cover it; nothing is cut short into
+       a `known` layout.
+     - `unknown`: there is no definition (`no_definition`), no known encoding
+       (`unknown_encoding`), or it is unreadable or malformed. A `problem` gives the reason and,
+       for `.msg`, the line.
    - `types`: every type the definition declares, fields in declaration order. A field records:
      - its type (a primitive, or `pkg/Name`);
      - its array kind and length (`fixed`, `bounded` or `unbounded`);
@@ -93,9 +105,29 @@ and another follows it. A new canonical record kind or field would collide with 
      definition ranges, through the job's verified `LocalReader`. Pure-Python parsers are bounded
      like grouping, so no adapter call and no sandbox is needed.
    - Streams that share a definition are read and parsed once.
-   - Limits are the transform's config, so changing one is a new lineage: 1 MiB per definition,
-     64 MiB per package, 1024 types, 16384 fields, JSON nesting 64, path depth 32, 4096 paths.
-     Every parser is iterative, and JSON nesting is checked before `json.loads`.
+   - Streams that share bytes are parsed once and their layout written once (§2): what a
+     package holds grows with distinct definitions, not with channels.
+   - Limits are the transform's config, so changing one is a new lineage. Reading: 1 MiB per
+     definition, 64 MiB per package. Parsing: 1024 types, 16384 fields, JSON nesting 64, path
+     depth 32, 4096 paths. Every parser is iterative, and JSON nesting is checked before
+     `json.loads`.
+   - Output is bounded as well as input, because a small definition can name a lot of text: every
+     path repeats its prefix, and every field typed by one `$ref` repeats the pointer.
+     - **Caps**: a type, field, constant or property name is at most 1 KiB (`max_name_bytes`,
+       reason `name_limit`), and a JSON pointer, as a `$ref` or as a nested object's type name,
+       at most 4 KiB (`max_pointer_bytes`, `pointer_limit`). Path depth is `max_depth`.
+     - **Per layout**: a `definition_layout` line is at most 4 MiB (`max_layout_bytes`,
+       `layout_limit`). The parser counts type and path text as it builds it and stops at the
+       limit, so it never holds more; the line's exact size is checked before it is written.
+     - **Per package**: all `definition_layout` lines together are at most 32 MiB
+       (`max_output_bytes`, `output_budget`), charged in stream id order, so which definitions
+       are written is deterministic.
+     - Past any of them, the definition is `not_covered` for every stream that declares it, with
+       one `definition_limit` finding citing the definition and giving the counts (bytes, the
+       limit, paths, types, bytes already written). The job still commits.
+     - Each `$ref` pointer is checked and resolved once per definition, and each schema's chain
+       followed once; flattening reads each type's fields once. Messages quote at most 64
+       characters of any input name.
    - Findings:
      - `definition_malformed`: corrupt or unrepresentable bytes, or a parser that raised
        (`parser_failed`, caught per definition), warning;
@@ -115,11 +147,15 @@ and another follows it. A new canonical record kind or field would collide with 
    - `neptune.sdk.run_contents(package)` and `IngestResult.contents()` return `RunContents` per
      run.
    - Each `RunContents` lists `StreamContents`: the record, topic, type, encodings, declared
-     count, `fields`, `layout_state`, `semantic_state`, `carries(...)` and `may_carry(...)`
-     (ties included). A run also offers `topic(...)`, `carrying(...)` and `semantics()`.
+     count, its `definition` layout and `fields`, `layout_state`, `semantic_state`,
+     `carries(...)` and `may_carry(...)` (ties included). A run also offers `topic(...)`, `carrying(...)` and `semantics()`.
    - The surface reads records and derived tables only. It reads no series, no source and no
      payload.
    - A package without the tables gives `None` rather than a guess.
+   - A stream with several lines of one kind (two introspection transforms in one package, say)
+     gets `Ambiguous` with every line as a candidate, in id order. None is chosen: `carries` is
+     false, `may_carry` reads them all, and the state is `ambiguous`. A `stream_layout` naming a
+     `definition_layout` the package lacks makes the package invalid.
 
 ## Alternatives considered
 
@@ -133,6 +169,14 @@ and another follows it. A new canonical record kind or field would collide with 
   no longer answer, which fails the acceptance.
 - **Classify by topic name** (`/imu`, `/battery`). Topics are free text. The fixtures publish a
   `std_msgs/Float32` on `/battery_voltage`, which carries no battery semantics.
+- **The layout on every stream's line.** Simplest to read, but N channels on one schema write N
+  copies, so a 182 KB MCAP of 300 channels wrote a 117 MB table. Keyed by content, the layout is
+  written once and costs a stream one id.
+- **Shorten a name or cut a layout at its limit.** A shortened name is a value the definition
+  never declared, and a layout missing fields would read as `known`; the shape rules would
+  misread it. Past a limit the layout is `not_covered`, with the counts in a finding.
+  (`max_paths` still lists the first paths with `truncated`, as before: every listed path is
+  whole and true.)
 - **Resolve ties by rule order.** That would be a silent choice (non-negotiable 4). A tie is
   `ambiguous`, with every reading kept.
 - **Units from `.msg` comments** (`# m/s`). They are free text and no grammar governs them.
@@ -143,8 +187,9 @@ and another follows it. A new canonical record kind or field would collide with 
 
 ## Consequences
 
-- Every job package with streams gains `derived/stream_layout.jsonl`,
-  `derived/stream_semantic.jsonl` and the `neptune.introspection` transform, so those package ids
+- Every job package with streams gains `derived/definition_layout.jsonl`,
+  `derived/stream_layout.jsonl`, `derived/stream_semantic.jsonl` and the `neptune.introspection`
+  transform, so those package ids
   change once. The MCAP golden package gains the transform; evidence ids do not change.
 - Downstream code (MVL-22's lazy hydration, retrieval, memory) can pick streams by semantic and
   field without decoding, and can see why each was classified.
