@@ -58,10 +58,12 @@ REQUIRED: Final = ("assertion_type", "author", "authored_at", "id", "scope")
 OPTIONAL: Final = ("authored_zone", "payload", "rationale", "retracts", "signature", "ticket")
 DAY: Final = 86_400
 
-# RFC 3339's date-time (upper-case T and Z only), or a full date alone (ADR 0062 §3).
+# RFC 3339's date-time (upper-case T and Z only), or a full date alone (ADR 0062 §3). ASCII
+# digits only, as RFC 3339's DIGIT is: Arabic-Indic or full-width digits are not a time.
 _DATE_TIME: Final = re.compile(
-    r"(\d{4})-(\d{2})-(\d{2})"
-    r"(?:T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:(Z)|([+-])(\d{2}):(\d{2}))?)?"
+    r"([0-9]{4})-([0-9]{2})-([0-9]{2})"
+    r"(?:T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,9}))?"
+    r"(?:(Z)|([+-])([0-9]{2}):([0-9]{2}))?)?"
 )
 
 
@@ -206,6 +208,7 @@ class Reader:
         items = tree.children.get(entries, [])
         for position, index in enumerate(items[: self.max_assertions]):
             _Entry(self, tree, position, index).read()
+        self._shared_ids()
         if len(items) > self.max_assertions:
             first = items[self.max_assertions]
             self.finding(
@@ -216,6 +219,28 @@ class Reader:
                 f"the file holds {len(items)} assertions, over max_assertions"
                 f" ({self.max_assertions}); those from {self.max_assertions} on are not read",
                 {"assertions": len(items), "max_assertions": self.max_assertions},
+            )
+
+    def _shared_ids(self) -> None:
+        """Entries that declare one id are each kept as declared, and reported once per id."""
+        by_id: dict[LogicalId, list[Assertion]] = {}
+        for record in self.out.records:
+            if isinstance(record, Assertion) and isinstance(record.identifier, Known):
+                by_id.setdefault(record.identifier.value, []).append(record)
+        for identifier, records in by_id.items():
+            if len(records) < 2:
+                continue
+            first, *rest = records
+            self.finding(
+                "duplicate_assertion_id",
+                FindingCategory.INCONSISTENT,
+                Severity.WARNING,
+                first.provenance.evidence.locator,
+                f"{len(records)} assertions declare the id {identifier.namespace}:"
+                f"{identifier.value}; each is kept, and a retraction naming it is ambiguous",
+                {"assertions": len(records)},
+                tuple(sorted(record.id for record in records)),
+                tuple(record.provenance.evidence for record in rest),
             )
 
     def _not_assertions(self, tree: _Tree, why: str) -> None:
@@ -354,6 +379,16 @@ class _Entry:
             signature=self.text("signature"),
             ticket=self.logical_id("ticket", required=False),
         )
+        identifier, retracts = record.identifier, record.retracts
+        known = isinstance(identifier, Known) and isinstance(retracts, Known)
+        if known and retracts.value == identifier.value:  # type: ignore[union-attr]
+            node = self.member("retracts")
+            self.warn(
+                "self_retraction",
+                FindingCategory.INCONSISTENT,
+                node if isinstance(node, int) else None,
+                "it retracts its own id; it is kept as declared",
+            )
         self.reader.out.records.append(record)
 
     def nodes(self, key: str) -> list[int]:
@@ -511,7 +546,7 @@ class _Entry:
         if isinstance(node, _Absent):
             return Unknown()  # the format has a place for a zone; the entry does not state one
         if isinstance(self.tree.node(node).value, Null):
-            return Unknown(self.stated(node))
+            return self.missing("authored_zone", node, "is null")
         text = self.tree.scalar(node, ScalarType.STRING)
         if not isinstance(text, str) or not is_iana_zone(text):
             return self.invalid("authored_zone", node, "is not spelled as an IANA zone name")

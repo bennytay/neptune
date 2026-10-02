@@ -58,6 +58,11 @@ _NAMES_FORMAT: Final = re.compile(r'\s*:\s*"neptune\.assertions"')
 FINDING_CODES: Final = (
     ("byte_order_mark", "a byte-order mark JSON does not define; read past (inconsistent, info)"),
     (
+        "duplicate_assertion_id",
+        "several assertions of one file declare one id; each is kept as declared, and a"
+        " retraction naming that id is ambiguous (inconsistent, warning)",
+    ),
+    (
         "duplicate_key",
         "an assertion writes a key more than once; none is chosen, the field is Unknown"
         " (inconsistent, warning)",
@@ -75,8 +80,8 @@ FINDING_CODES: Final = (
     ),
     (
         "missing_field",
-        "a required key is missing or null, or a text is blank; the field is Unknown (missing,"
-        " warning)",
+        "a required key is missing or null, a text is blank, or authored_zone is null; the field"
+        " is Unknown (missing, warning)",
     ),
     ("mixed_line_endings", "the file mixes LF, CR LF and lone CR line breaks (inconsistent, info)"),
     ("no_document", "the file is empty or blank (missing, info)"),
@@ -102,6 +107,10 @@ FINDING_CODES: Final = (
         "retracts_not_applicable",
         "an assertion other than a retract names one it retracts; retracts is NotApplicable and"
         " the value stays in the file (inconsistent, warning)",
+    ),
+    (
+        "self_retraction",
+        "a retract names its own id; it is kept as declared (inconsistent, warning)",
     ),
     ("syntax_error", "the text is not JSON from the cited place on; not read (corrupt, error)"),
     ("too_deep", "the file nests deeper than max_depth; not read (limit, error)"),

@@ -89,7 +89,8 @@ earlier statement. Nothing in the model can hold one. Forces:
      member of its own, not of a nested value (a long or broken file). This beats the config
      adapter's `STRUCTURE` claim on the same bytes.
 4. **Time and zone, as declared.** `authored_at` is RFC 3339 (`T`, `Z` upper-case; fraction up to
-   nine digits) or a date alone, counted by ADR 0023 §2: with `Z` or an offset, POSIX ticks
+   nine digits; ASCII digits only, so Arabic-Indic or full-width digits are
+   `assertion.invalid_value`) or a date alone, counted by ADR 0023 §2: with `Z` or an offset, POSIX ticks
    (timescale `posix`); without, ticks of its own civil clock (timescale `Unknown`); a date alone,
    days. A leap second (second 60, valid RFC 3339) has no tick on a count of 86,400-second days:
    it is `Unknown` with `assertion.value_not_read`, never moved to a neighbouring second. Each
@@ -98,8 +99,9 @@ earlier statement. Nothing in the model can hold one. Forces:
    `authored_zone` is the IANA zone name exactly as written, checked by spelling only and never
    looked up or applied: whether a tz release has the name depends on the release, and record
    bytes may not. Overlap with ADR 0061: its `CivilTimeZone` companion states a *clock's* zone.
-   When it lands, a later adapter version may also emit one for each `authored_at` domain;
-   `authored_zone` stays, since fields never change (ADR 0023 §1), and holds the same declared text.
+   When it lands, a later adapter version may also emit one, but only for an `authored_at`
+   written without an offset or `Z` (a civil clock): ADR 0061 rules out a zone companion on an
+   instant whose offset is stated. `authored_zone` stays, since fields never change (ADR 0023 §1), and holds the same declared text.
    The Ledger's transaction time (when the package holding the assertion was registered) is the
    Ledger's, added on registration; it is not a field of this record, and a record carrying one
    is refused.
@@ -108,7 +110,9 @@ earlier statement. Nothing in the model can hold one. Forces:
    lineage-scoped and change with a parser upgrade, the declared id does not. `retracts` is
    `NotApplicable` for every other type (an adapter that meets one reports
    `assertion.retracts_not_applicable` and the value stays in the cited bytes), and may be
-   either where the type was not read. A retraction of a retraction is allowed. Whether and when
+   either where the type was not read. A retraction of a retraction is allowed. A retract naming its own id, and entries of one
+   file that share a declared id, are kept as declared and reported
+   (`assertion.self_retraction`, `assertion.duplicate_assertion_id`). Whether and when
    a retraction takes effect, and what a retraction of an unknown id means, is Memory's.
 6. **Version.** The kind is `since` 5, so `SCHEMA_VERSION` is 5 and the package-schema contract
    publishes **5.0.0** (an integer owner constant is the registry major, platform ADR 0002 §3);

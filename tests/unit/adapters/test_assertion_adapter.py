@@ -291,6 +291,51 @@ def test_a_negative_limit_reads_nothing_and_says_so() -> None:
     assert finding.details == {"assertions": 2, "max_assertions": 0}
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "\u0662\u0660\u0662\u0666-\u0660\u0669-\u0661\u0664T10:30:00Z",  # Arabic-Indic digits
+        "\uff12\uff10\uff12\uff16-09-14T10:30:00Z",  # full-width digits
+        "2026-09-14T10:30:00.\uff11\uff12Z",
+        "2026-09-14T10:30:00+\u0660\u0662:00",
+    ],
+)
+def test_non_ascii_digits_are_not_a_time(text: str) -> None:
+    output = run(assertions_file(entry(authored_at=text)))
+    assert isinstance(only(output).authored_at, Unknown)
+    assert domains(output) == {}
+    assert codes(output) == ["assertion.invalid_value"]
+
+
+def test_a_null_zone_is_unknown_with_a_finding() -> None:
+    output = run(assertions_file(entry(authored_zone=None)))
+    assert isinstance(only(output).authored_zone, Unknown)
+    assert codes(output) == ["assertion.missing_field"]
+
+
+def test_a_self_retraction_is_kept_and_reported() -> None:
+    own = {"namespace": "acme.console", "value": "A-1"}
+    output = run(assertions_file(entry(assertion_type="retract", retracts=own)))
+    record = only(output)
+    assert isinstance(record.retracts, Known) and record.retracts.value == LogicalId(**own)
+    assert codes(output) == ["assertion.self_retraction"]
+    (finding,) = output.findings()
+    assert finding.records == (record.id,)
+
+
+def test_entries_sharing_a_declared_id_are_kept_and_reported_once() -> None:
+    shared = {"namespace": "acme.console", "value": "A-7"}
+    other = {"namespace": "acme.console", "value": "A-8"}
+    output = run(assertions_file(entry(id=shared), entry(id=other), entry(id=shared)))
+    found = records(output)
+    assert len(found) == 3
+    assert codes(output) == ["assertion.duplicate_assertion_id"]
+    (finding,) = output.findings()
+    assert finding.details == {"assertions": 2}
+    assert set(finding.records) == {found[0].id, found[2].id}
+    assert finding.subject.locator == (JsonPointer("/assertions/0"),)  # type: ignore[union-attr]
+
+
 def test_a_repeated_key_chooses_nothing() -> None:
     raw = (
         '[{"id": {"namespace": "a", "value": "1"}, "assertion_type": "annotate",'
