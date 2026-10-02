@@ -6,7 +6,7 @@
     from neptune.sdk.media import FileSource, Hydrator, media_window
 
     window = media_window(read_package(path), "log_time", t, t + 10 * 10**9)
-    with FileSource(source_path) as source:
+    with FileSource(source_path, window.frames[0].handle.source) as source:
         frames = Hydrator(source)
         for frame in window.frames:
             print(frame.stream, frame.seq, frame.times, len(frames.payload(frame)))
@@ -216,6 +216,10 @@ def _rows(
     return matched, tuple(frames)
 
 
+_INT64_MIN = -(2**63)
+_INT64_MAX = 2**63 - 1
+
+
 def media_window(
     package: IngestPackage,
     clock: str,
@@ -236,6 +240,9 @@ def media_window(
     for name, value in (("start", start), ("end", end), ("max_frames", max_frames)):
         if isinstance(value, bool) or not isinstance(value, int):
             raise InvalidRequestError(f"{name} must be an integer, got {value!r}")
+    for name, value in (("start", start), ("end", end)):
+        if not _INT64_MIN <= value <= _INT64_MAX:
+            raise InvalidRequestError(f"{name} is outside the int64 ticks of a clock: {value}")
     if start > end:
         raise InvalidRequestError(f"the window starts after it ends: {start} > {end}")
     if max_frames < 0:
@@ -579,6 +586,8 @@ def image_thumbnail(
     """A nearest-neighbour thumbnail of a raw ``sensor_msgs/Image`` payload, at most ``side``
     pixels on its long side. ``not_covered`` (with a reason) for compressed or video frames, an
     encoding not in the table, or a payload that does not hold its declared pixels."""
+    if isinstance(side, bool) or not isinstance(side, int) or side < 1:
+        raise InvalidRequestError(f"side must be an integer of at least 1, got {side!r}")
     transform = thumbnail_transform(media, side)
 
     def refused(reason: str) -> Thumbnail:

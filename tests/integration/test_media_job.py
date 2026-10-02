@@ -352,3 +352,27 @@ def test_hostile_handles_and_payloads_are_refused_not_trusted(
         media_window(package, "log_time", 2, 1)
     with pytest.raises(InvalidRequestError):
         media_window(package, "log_time", 0, 1, media=["hologram"])
+
+
+@pytest.mark.parametrize("bound", [2**64, 2**63, -(2**63) - 1])
+def test_a_window_bound_outside_int64_is_an_invalid_request(
+    media: tuple[IngestPackage, Path], bound: int
+) -> None:
+    package, _ = media
+    with pytest.raises(InvalidRequestError):
+        media_window(package, "log_time", 0, bound)
+    with pytest.raises(InvalidRequestError):
+        media_window(package, "log_time", bound, 2**63 - 1)
+    assert media_window(package, "log_time", -(2**63), 2**63 - 1).streams  # the int64 edges serve
+
+
+@pytest.mark.parametrize("side", [0, -1, 1.5, True])
+def test_a_thumbnail_side_below_one_is_an_invalid_request(
+    media: tuple[IngestPackage, Path], side: int
+) -> None:
+    package, _ = media
+    lines = media_streams(package)
+    window = media_window(package, "log_time", T0, T0 + 10 * SECOND)
+    line = {line.stream: line for line in lines}[window.frames[0].stream]
+    with pytest.raises(InvalidRequestError):
+        image_thumbnail(window.frames[0], b"", line, side)
