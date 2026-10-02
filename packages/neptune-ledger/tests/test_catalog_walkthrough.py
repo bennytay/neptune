@@ -21,7 +21,6 @@ import psycopg
 import pytest
 
 import neptune_ledger
-from neptune.model.kinds import RECORD_KINDS
 from neptune_ledger.catalog.migrate import apply_migrations
 
 Conn = psycopg.Connection[tuple[object, ...]]
@@ -65,7 +64,7 @@ def load_package(name: str) -> Package:
     manifest = json.loads(manifest_bytes)
     pinned = {f["path"]: f["sha256"] for f in manifest["files"]}
     tables: dict[str, list[dict[str, Any]]] = {}
-    for kind in RECORD_KINDS:
+    for kind in sorted(manifest["tables"]):  # the package's own tables (Ledger ADR 0008 §2)
         path = RECORDS / name / "records" / f"{kind}.jsonl"
         data = path.read_bytes() if path.exists() else b""
         assert pinned[f"records/{kind}.jsonl"] == "sha256:" + hashlib.sha256(data).hexdigest()
@@ -374,7 +373,8 @@ def test_the_walkthrough_partition_table_matches_the_catalog(catalog: Conn) -> N
     actual: Counter[tuple[str, int]] = Counter()
     for seq, kind, count in rows:
         actual[(str(kind), int(str(seq)))] = int(str(count))
-    for kind in RECORD_KINDS:
+    kinds = sorted({kind for name in EXAMPLES for kind in load_package(name).manifest["tables"]})
+    for kind in kinds:
         cells = [str(actual[(kind, seq)]) for seq in range(1, len(EXAMPLES) + 1)]
         assert cells == expected.get(f"record_{kind}", ["0"] * len(EXAMPLES)), kind
     assert sum(actual.values()) == sum(int(c) for cells in expected.values() for c in cells)
@@ -532,10 +532,9 @@ def _snapshot(conn: Conn, schema: str, *, tx: bool = True) -> dict[str, list[str
 
 def test_a_body_digest_is_the_sha256_of_the_records_line() -> None:
     for name in EXAMPLES:
-        for kind in RECORD_KINDS:
+        for kind, records in load_package(name).tables.items():
             path = RECORDS / name / "records" / f"{kind}.jsonl"
             lines = path.read_bytes().splitlines() if path.exists() else []
-            records = load_package(name).tables[kind]
             assert [canonical(r).encode("utf-8") for r in records] == lines
             assert [body_digest(r) for r in records] == [
                 "sha256:" + hashlib.sha256(line).hexdigest() for line in lines
@@ -572,3 +571,58 @@ def test_an_existing_record_id_with_another_body_is_refused(catalog: Conn) -> No
     with pytest.raises(psycopg.errors.RaiseException, match="catalogued with body"):
         register(catalog, "tenant_acme", hostile)
     assert _count(catalog, "SELECT count(*) FROM tenant_acme.package") == 1
+
+
+def _with_a_later_kind(package: Package) -> Package:
+    """``package`` as a newer schema version would write it: one more table, of a kind that has
+    no partition of its own (a schema-2-style ``configuration_snapshot``, root ADR 0037).
+
+    Its one record is the package's first stream, renamed: the harness indexes any kind by the
+    shared columns, which is all a kind without a projection gets (ADR 0008 §1).
+    """
+    stream = dict(package.tables["stream"][0])
+    snapshot = {**stream, "kind": "configuration_snapshot", "schema_version": 2}
+    tables = {**package.tables, "configuration_snapshot": [snapshot]}
+    manifest = json.loads(package.manifest_bytes)
+    manifest["schema_version"] = 2
+    manifest["tables"] = {**manifest["tables"], "configuration_snapshot": 1}
+    return _altered(package, manifest, tables)
+
+
+def test_a_kind_without_its_own_partition_is_stored_in_the_default(catalog: Conn) -> None:
+    """Acceptance (MVL-91): a declared kind with no partition yet is stored, not refused."""
+    later = _with_a_later_kind(load_package("drone"))
+    _, seq, created = register(catalog, "tenant_acme", later)
+    assert created and seq == 1
+    rows = catalog.execute(
+        "SELECT tableoid::regclass::text, kind, line, schema_version, registration_key"
+        " FROM tenant_acme.record WHERE kind = 'configuration_snapshot'"
+    ).fetchall()
+    assert rows == [("tenant_acme.record_default", "configuration_snapshot", 1, 2, 1)]
+    in_default = _count(catalog, "SELECT count(*) FROM tenant_acme.record_default")
+    assert in_default == 1  # every kind with a partition of its own stays in it
+    total = _count(catalog, "SELECT count(*) FROM tenant_acme.record")
+    assert total == sum(len(records) for records in later.tables.values())
+
+
+def test_replaying_a_log_with_a_later_kind_rebuilds_byte_for_byte(catalog: Conn) -> None:
+    """The default partition is static schema: a rebuild files every row where it was."""
+    packages = [load_package("quadruped"), _with_a_later_kind(load_package("drone"))]
+    for package in packages:
+        register(catalog, "tenant_acme", package)
+    log = catalog.execute(
+        "SELECT tx_seq, tx_time, package_id, root_locator, ledger_version"
+        " FROM tenant_acme.registration_log ORDER BY tx_seq"
+    ).fetchall()
+    apply_migrations(catalog, "rebuilt")
+    by_id = {package.package_id: package for package in packages}
+    for entry in log:
+        register(catalog, "tenant_rebuilt", by_id[str(entry[2])], logged=entry)
+    assert _snapshot(catalog, "tenant_acme") == _snapshot(catalog, "tenant_rebuilt")
+    placed = (
+        "SELECT c.relname, r.kind, r.record_id, r.package_id FROM {}.record r"
+        " JOIN pg_class c ON c.oid = r.tableoid ORDER BY 2, 3, 4"
+    )
+    original = catalog.execute(placed.format("tenant_acme")).fetchall()
+    assert original == catalog.execute(placed.format("tenant_rebuilt")).fetchall()
+    assert ("record_default", "configuration_snapshot") in {row[:2] for row in original}

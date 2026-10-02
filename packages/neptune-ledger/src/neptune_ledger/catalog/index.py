@@ -2,8 +2,10 @@
 
 A pure function of the package's bytes: every value comes from the record lines that registration
 hashed, read once, so the same package gives the same rows in any catalog. These are the rows
-migrations 0001 and 0002 define. Kind-specific projections and the derived thread index belong to
-later migrations (MVL-91, ADR 0005 §6); they extend ``package_rows`` without changing these.
+migrations 0001 to 0003 define, over the package's own tables: exactly the kinds of its schema
+version (Ledger ADR 0008 §2), never the compiler's whole list. Kind-specific projections and the
+derived thread index belong to later migrations (MVL-91, ADR 0005 §6); they extend
+``package_rows`` without changing these.
 """
 
 import hashlib
@@ -12,7 +14,6 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from neptune.identity import canonical_json
-from neptune.model.kinds import RECORD_KINDS
 
 # The fields that state an entry's world time (ADR 0003 §3): start, end, and the fallback that
 # stands in for both when neither is Known.
@@ -78,11 +79,11 @@ def package_rows(
 ) -> PackageRows:
     """The rows of one package whose manifest and record lines were verified."""
     tables: dict[str, list[Any]] = {
-        kind: [canonical_json.loads(line) for line in lines[kind]] for kind in RECORD_KINDS
+        kind: [canonical_json.loads(line) for line in lines[kind]] for kind in sorted(lines)
     }
     records = tuple(
         _record_row(kind, number, line, body)
-        for kind in sorted(RECORD_KINDS)
+        for kind in sorted(lines)
         for number, (line, body) in enumerate(zip(lines[kind], tables[kind], strict=True), 1)
     )
     return PackageRows(

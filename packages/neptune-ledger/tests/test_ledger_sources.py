@@ -15,7 +15,7 @@ from typing import BinaryIO
 import psycopg
 import pytest
 
-from neptune_ledger.catalog.migrate import apply_migrations
+from neptune_ledger.catalog.migrate import apply_migrations, migrations
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.catalog.sources import LocalSourceStore, SourceStore
 from neptune_ledger.cli import main
@@ -168,7 +168,8 @@ def test_the_cli_registers_and_verifies(
     roots = tmp_path / "packages"
     drone: WorkedPackage = materialise("drone", roots / "drone")
     db = ("--dsn", pg_uri, "--tenant", "acme")
-    assert _run(capsys, *db, "migrate") == (0, [{"applied": [1, 2]}])
+    shipped = [m.version for m in migrations()]
+    assert _run(capsys, *db, "migrate") == (0, [{"applied": shipped}])
     code, (registration,) = _run(
         capsys, *db, "register", str(drone.root), "--package-root", str(roots)
     )
