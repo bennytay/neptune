@@ -51,8 +51,11 @@ registered side by side forever. Three gaps followed from ADRs 0008 and 0009:
      rebuild.
    - The generator command takes the version's directory:
      `python -m neptune_ledger.catalog.projection contracts/package-schema/v<N>.0.0/schema.json`
-     appends version N and writes the next migration only when N adds a hot-filter projection,
-     rendered against version N−1's spec as before (ADR 0009 §3).
+     appends version N and writes the next migration only when N adds a projection *column*,
+     rendered against version N−1's spec as before (ADR 0009 §3). A projection into columns
+     that already exist needs no migration and no guard: registration refuses version N until
+     the registry holds it, so no row of N can have been filed blank. Package schema 3 is such a
+     version (`run_assembly.run`, `snapshot_binding.run` fill `run_ids`).
 3. **Each record is projected with its own version's spec.** A package of version V holds records
    of versions up to V (a record is written at the version that added its kind, root ADR 0037 §1).
    `index.package_rows` looks up each record's spec by the version the record states. The record
