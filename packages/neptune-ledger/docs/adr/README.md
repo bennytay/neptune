@@ -13,3 +13,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0004](0004-catalog-api-error-model-and-versioning.md) | Catalog API: call names, error model, absence, versioning and contract tests | Accepted |
 | [0005](0005-l1-gate-catalog-data-model-amendments.md) | L1 gate: catalog data model amendments for record bodies, constant-time clock checks, byte-order collation and the scale budget | Accepted |
 | [0006](0006-l1-gate-catalog-api-amendments.md) | L1 gate: catalog API amendments for hostile packages, moved evidence, tenant roots and paging; catalog-api 1.1.0 stable | Accepted |
+| [0007](0007-registration-implementation-boundaries-and-source-checks.md) | Registration: the indexing boundary, local package roots, and on-request source checks behind a read-only store | Accepted |
