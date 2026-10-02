@@ -1,0 +1,27 @@
+{
+  "schema": "neptune-deploy.document-template/1",
+  "id": "maintenance.sop_record",
+  "version": "1",
+  "description": "A maintenance SOP as it was carried out: the procedure's steps as the actions stated, and a work record naming the work order, the machine, when it was done, the diagnosis and the parts swapped. A blank SOP with no work record has no Work order label, so it does not match: a procedure is not an event.",
+  "kind": "maintenance_event",
+  "zone": "Europe/Zurich",
+  "tables": {"parts": ["Part", "Removed", "Installed"]},
+  "requires": {"labels": ["Work order", "Performed on"], "headings": ["Procedure", "Parts replaced"], "tables": ["parts"]},
+  "ignore": {"labels": ["Performed by"], "headings": ["SOP-MP-031 Foot pad replacement", "Work record", "Parts replaced"]},
+  "fields": {
+    "identifiers": [{"label": "Work order", "namespace": "qd.work_order"}],
+    "related": [{"label": "Procedure", "namespace": "qd.sop"}],
+    "machines": [{"label": "Machine", "namespace": "qd.robot"}],
+    "performed": {"label": "Performed on", "format": "%Y-%m-%d", "required": true},
+    "diagnosis": {"label": "Diagnosis"},
+    "actions": [{"section": "Procedure"}],
+    "parts": {
+      "rows": "parts",
+      "each": {
+        "part": {"column": "Part"},
+        "removed": [{"column": "Removed", "namespace": "qd.part"}],
+        "installed": [{"column": "Installed", "namespace": "qd.part"}]
+      }
+    }
+  }
+}
