@@ -8,9 +8,11 @@ Everything else under this folder is hand-written JSON. This script writes the r
   topic. The payload bytes are placeholders: nothing under test decodes them, because the compiler
   does not decode messages into packages yet (ADR 0010 §7). The bag's metadata is what the
   compiler reads.
-- ``diagnostics/packages/legged_patrol`` and ``.../arm_cell_bag``: the compiler's own package for
-  each, written by ``neptune ingest``, without ``volatile/``. Deploy's tests read them and never
-  run ingestion, so a compiler change reaches them only through a deliberate regeneration PR.
+- ``diagnostics/packages/legged_patrol``, ``.../arm_cell_bag`` and ``.../arm_cell_levels`` (an arm
+  cell's export whose levels are a float, text, a boolean, a negative and digits as text): the
+  compiler's own package for each, written by ``neptune ingest``, without ``volatile/``. Deploy's
+  tests read them and never run ingestion, so a compiler change reaches them only through a
+  deliberate regeneration PR.
 
 Run from the repository root::
 
@@ -216,6 +218,7 @@ def main() -> int:
     packages = HERE / "diagnostics" / "packages"
     ingest(HERE / "diagnostics" / "legged_patrol", packages / "legged_patrol")
     ingest(bag, packages / "arm_cell_bag")
+    ingest(HERE / "diagnostics" / "arm_cell_levels", packages / "arm_cell_levels")
     return 0
 
 

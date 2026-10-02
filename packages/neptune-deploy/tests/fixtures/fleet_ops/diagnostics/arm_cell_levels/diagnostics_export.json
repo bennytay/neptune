@@ -1,0 +1,10 @@
+[
+  {"header": {"stamp": {"sec": 1772366400, "nanosec": 0}, "frame_id": ""}, "status": [
+    {"level": 1.0, "name": "/arm/joint_4", "message": "level written as a float", "hardware_id": "arm-j4", "values": []},
+    {"level": "x", "name": "/arm/gripper", "message": "level written as text", "hardware_id": "arm-grip", "values": []},
+    {"level": true, "name": "/arm/estop", "message": "level written as a boolean", "hardware_id": "arm-estop", "values": []},
+    {"level": -1, "name": "/arm/torque", "message": "a negative level", "hardware_id": "arm-torque", "values": []},
+    {"level": "3", "name": "/arm/camera", "message": "an integer written as text", "hardware_id": "arm-cam", "values": []},
+    {"level": 2, "name": "/arm/controller", "message": "a valid level", "hardware_id": "arm-ctl", "values": []}
+  ]}
+]

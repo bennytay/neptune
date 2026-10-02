@@ -24,6 +24,7 @@ anything else:
 import contextlib
 import math
 import os
+import re
 import sqlite3
 import stat
 import urllib.parse
@@ -37,7 +38,7 @@ from neptune_deploy.sources.stated_records import DocumentInvalid, parse_json
 SQLITE_MAGIC: Final = b"SQLite format 3\x00"
 PROGRESS_STEP: Final = 10_000  # VM instructions between progress callbacks
 MAX_PROGRESS_CALLS: Final = 20_000  # about 200 million instructions in all
-FETCH: Final = 1000
+_VIRTUAL: Final = re.compile(r"\s*CREATE\s+VIRTUAL\s", re.IGNORECASE)
 
 
 class FileRefused(Exception):
@@ -55,6 +56,7 @@ class Rows:
     items: list[JsonValue] = field(default_factory=list)
     stopped: str | None = None
     counts: dict[str, int] = field(default_factory=dict)  # finding detail counts, by name
+    bytes_read: int = 0  # what a SQLite read charged to its budget (cells, as stored)
 
 
 def safe_path(root: str, relative: str) -> str:
@@ -155,6 +157,16 @@ def _authorizer(action: int, *_args: Any) -> int:
     return sqlite3.SQLITE_OK if action in allowed else sqlite3.SQLITE_DENY
 
 
+def _size(raw: object) -> int:
+    """What one stored cell costs against the read budget: its bytes (text as UTF-8), 8 for a
+    number. A fixed rule, so a cut does not depend on the Python version."""
+    if isinstance(raw, bytes):
+        return len(raw)
+    if isinstance(raw, str):
+        return len(raw.encode("utf-8", "surrogatepass"))
+    return 8
+
+
 def _value(raw: object, parse: bool, rows: Rows) -> tuple[bool, Any]:
     """``(has a value, the value)`` of one stored cell."""
     if raw is None:
@@ -181,6 +193,8 @@ def sqlite_items(
     max_rows: int,
     max_bytes: int,
     *,
+    max_cell_bytes: int,
+    max_read_bytes: int,
     timeout: float = 5.0,
 ) -> Rows:
     """The rows of ``table`` in the database at ``path``, read-only (see the module docstring).
@@ -189,13 +203,18 @@ def sqlite_items(
     ``max_bytes``, the SQLite magic). SQLite then opens the path itself, as it must for ``mode=ro``,
     so a path swapped in between is not excluded; what is read is discarded unless the file at the
     path afterwards is the very file that was checked (``file_changed``).
+
+    Three bounds keep a hostile database from costing memory (ADR 0010 §5): only an ordinary table
+    is read; SQLite's own ``SQLITE_LIMIT_LENGTH`` is ``max_cell_bytes``, so a value or row longer
+    than that is never built (``cell_limit``); and the cells read are charged to ``max_read_bytes``,
+    after which the read stops with the rows so far (``byte_limit``).
     """
     fd = open_regular(path, max_bytes)
     try:
         if os.pread(fd, len(SQLITE_MAGIC), 0) != SQLITE_MAGIC:
             raise FileRefused("not_sqlite")
         checked = os.fstat(fd)
-        rows = _query(path, table, json_columns, max_rows, timeout)
+        rows = _query(path, table, json_columns, max_rows, max_cell_bytes, max_read_bytes, timeout)
         now = Path(path).lstat()
         if (now.st_dev, now.st_ino) != (checked.st_dev, checked.st_ino) or not stat.S_ISREG(
             now.st_mode
@@ -206,8 +225,34 @@ def sqlite_items(
         os.close(fd)
 
 
+def _ordinary(connection: sqlite3.Connection, table: str) -> bool:
+    """``table`` is an ordinary table: not a view, not a virtual table, and no trigger on it.
+
+    A view or a virtual table is code the database's author wrote, run when it is read; an ordinary
+    table is stored data. ``FileRefused("table_missing")`` if there is no such object at all.
+    """
+    found = connection.execute(
+        "SELECT type, sql FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?", (table,)
+    ).fetchone()
+    if found is None:
+        raise FileRefused("table_missing")
+    kind, sql = found
+    if kind != "table" or (isinstance(sql, str) and _VIRTUAL.match(sql)):
+        return False
+    triggers = connection.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?", (table,)
+    ).fetchone()
+    return bool(triggers[0] == 0)
+
+
 def _query(
-    path: str, table: str, json_columns: tuple[str, ...], max_rows: int, timeout: float
+    path: str,
+    table: str,
+    json_columns: tuple[str, ...],
+    max_rows: int,
+    max_cell_bytes: int,
+    max_read_bytes: int,
+    timeout: float,
 ) -> Rows:
     rows = Rows()
     uri = "file:" + urllib.parse.quote(str(Path(path).absolute())) + "?mode=ro"
@@ -224,36 +269,36 @@ def _query(
 
     try:
         connection.execute("PRAGMA query_only = ON")
+        connection.setlimit(sqlite3.SQLITE_LIMIT_LENGTH, max_cell_bytes)
         connection.set_authorizer(_authorizer)
         connection.set_progress_handler(progress, PROGRESS_STEP)
-        found = connection.execute(
-            "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?", (table,)
-        ).fetchone()
-        if found is None:
-            raise FileRefused("table_missing")
+        if not _ordinary(connection, table):
+            raise FileRefused("table_not_ordinary")
         quoted = '"' + table.replace('"', '""') + '"'
         cursor = connection.execute(f"SELECT * FROM {quoted}")
         names = [column[0] for column in cursor.description]
         parsed = {name: name in json_columns for name in names}
-        while True:
-            batch = cursor.fetchmany(FETCH)
-            if not batch:
+        # One row at a time: a row is at most ``max_cell_bytes``. The driver steps one row ahead,
+        # so an oversized cell is met while the row before it is handed over: that row is lost too.
+        for record in cursor:
+            if len(rows.items) >= max_rows:
+                rows.stopped = "row_limit"
                 break
-            for record in batch:
-                if len(rows.items) >= max_rows:
-                    rows.stopped = "row_limit"
-                    return rows
-                item: dict[str, JsonValue] = {}
-                for name, raw in zip(names, record, strict=True):
-                    has, value = _value(raw, parsed[name], rows)
-                    if has:
-                        item[name] = value
-                rows.items.append(item)
+            cost = sum(_size(raw) for raw in record)
+            if rows.bytes_read + cost > max_read_bytes:
+                rows.stopped = "byte_limit"
+                break
+            rows.bytes_read += cost
+            item: dict[str, JsonValue] = {}
+            for name, raw in zip(names, record, strict=True):
+                has, value = _value(raw, parsed[name], rows)
+                if has:
+                    item[name] = value
+            rows.items.append(item)
     except sqlite3.OperationalError as exc:
-        if "interrupted" in str(exc):
-            rows.stopped = "work_limit"
-        else:
-            rows.stopped = "sqlite_error"
+        rows.stopped = "work_limit" if "interrupted" in str(exc) else "sqlite_error"
+    except sqlite3.DataError:  # "string or blob too big": a cell or row over SQLITE_LIMIT_LENGTH
+        rows.stopped = "cell_limit"
     except sqlite3.DatabaseError:
         rows.stopped = "file_invalid"
     finally:

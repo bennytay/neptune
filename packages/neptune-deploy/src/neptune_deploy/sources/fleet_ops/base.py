@@ -136,6 +136,7 @@ class Part:
     clock: DeclaredClock = field(default_factory=DeclaredClock)
     stopped: str | None = None  # why it is incomplete: a cause, never error text
     status: int | None = None
+    details: dict[str, JsonValue] = field(default_factory=dict)  # facts a stop finding adds
 
 
 class FleetOpsSource:
@@ -211,7 +212,15 @@ class FleetOpsSource:
         }
         if part.status is not None:
             details["status"] = part.status
-        if cause in {"record_limit", "byte_limit", "page_limit", "row_limit", "work_limit"}:
+        details.update(part.details)
+        if cause in {
+            "record_limit",
+            "byte_limit",
+            "page_limit",
+            "row_limit",
+            "work_limit",
+            "cell_limit",
+        }:
             self.report("part_limit", self.part_subject(part.name), details)
         elif cause in {"response_invalid", "file_invalid"}:
             self.report("part_invalid", self.part_subject(part.name), details)

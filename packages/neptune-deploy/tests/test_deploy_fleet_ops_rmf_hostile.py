@@ -6,6 +6,7 @@ One corrupt file is a finding about that part; the other parts are read as if it
 import json
 import os
 import sqlite3
+import tracemalloc
 from pathlib import Path
 from typing import Any
 
@@ -226,7 +227,7 @@ def test_a_table_name_is_matched_not_spliced(tmp_path: Path) -> None:
     )
 
 
-def test_a_view_that_never_ends_is_stopped_by_work_not_by_the_clock(tmp_path: Path) -> None:
+def test_a_view_that_never_ends_is_refused_before_it_runs(tmp_path: Path) -> None:
     db = database(tmp_path)
     db.execute(
         "CREATE VIEW task_state AS WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c)"
@@ -235,16 +236,30 @@ def test_a_view_that_never_ends_is_stopped_by_work_not_by_the_clock(tmp_path: Pa
     db.commit()
     db.close()
     source = sql(tmp_path)
-    assert list(source.walk()) == []
-    assert codes(source)["part_limit"][0].details["cause"] == "work_limit"
+    assert list(source.walk()) == [] and causes(source) == {"tasks": "table_not_ordinary"}
 
 
-def test_a_view_that_yields_forever_stops_at_the_row_limit(tmp_path: Path) -> None:
+def test_a_read_that_does_too_much_work_is_stopped_by_work_not_by_the_clock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from neptune_deploy.sources.fleet_ops import rmf_files
+
     db = database(tmp_path)
-    db.execute(
-        "CREATE VIEW task_state AS WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c)"
-        " SELECT x AS id_ FROM c"
-    )
+    db.execute("CREATE TABLE task_state(id_ TEXT)")
+    db.executemany("INSERT INTO task_state VALUES (?)", [(str(n),) for n in range(5000)])
+    db.commit()
+    db.close()
+    monkeypatch.setattr(rmf_files, "PROGRESS_STEP", 10)
+    monkeypatch.setattr(rmf_files, "MAX_PROGRESS_CALLS", 5)
+    source = sql(tmp_path)
+    source.catalog()
+    assert limit(source).details["cause"] == "work_limit"
+
+
+def test_a_table_with_endless_rows_stops_at_the_row_limit(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    db.execute("CREATE TABLE task_state(id_ TEXT)")
+    db.executemany("INSERT INTO task_state VALUES (?)", [(str(n),) for n in range(500)])
     db.commit()
     db.close()
     source = sql(tmp_path, max_rows=50)
@@ -309,6 +324,137 @@ def test_a_map_level_name_stated_twice_builds_no_frame_and_a_bad_map_is_a_findin
     reasons = sorted(f.details["reason"] for f in codes(source)["record_skipped"])
     assert reasons == ["level_invalid_or_repeated", "map_has_no_levels_object"]
     assert len(catalog.documents[0].items) == 3  # the document keeps all three levels as stated
+
+
+# --- Bytes: a hostile database cannot make the reader hold more than its bounds -------------------
+
+
+def peak_bytes(source: OpenRmfSource) -> int:
+    """The most Python memory ``source.catalog()`` held, by tracemalloc."""
+    tracemalloc.start()
+    try:
+        source.catalog()
+        return tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+
+
+def limit(source: OpenRmfSource) -> Any:
+    (found,) = codes(source)["part_limit"]
+    return found
+
+
+def test_a_view_is_never_read_so_its_giant_cell_is_never_built(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    db.execute("CREATE VIEW task_state AS SELECT hex(zeroblob(150000000)) AS id_")
+    db.commit()
+    db.close()
+    assert (tmp_path / "rmf.db").stat().st_size < 64 * 1024  # a few KB that would be 300 MB
+    source = sql(tmp_path)
+    assert peak_bytes(source) < 8 * 1024 * 1024
+    assert list(source.walk()) == [] and causes(source) == {"tasks": "table_not_ordinary"}
+
+
+def test_a_virtual_table_and_a_table_with_a_trigger_are_not_read_either(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    db.execute("CREATE TABLE plain(id_ TEXT)")
+    db.execute("INSERT INTO plain VALUES ('a')")
+    db.execute("CREATE TABLE audited(id_ TEXT)")
+    db.execute("CREATE TRIGGER t AFTER INSERT ON audited BEGIN INSERT INTO plain VALUES ('b'); END")
+    try:
+        db.execute("CREATE VIRTUAL TABLE docs USING fts5(body)")
+        names = ["docs", "audited"]
+    except sqlite3.OperationalError:  # a SQLite built without FTS5
+        names = ["audited"]
+    db.commit()
+    db.close()
+    for name in names:
+        source = src(tmp_path, {"tasks": {"file": "rmf.db", "table": name}})
+        assert list(source.walk()) == [] and causes(source) == {"tasks": "table_not_ordinary"}
+    ok = src(tmp_path, {"tasks": {"file": "rmf.db", "table": "plain"}})
+    assert [e.part for e in ok.walk()] == ["tasks"]
+
+
+def test_a_cell_over_the_limit_stops_the_read_and_keeps_the_rows_before_it(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    db.execute("CREATE TABLE task_state(id_ TEXT, raw BLOB)")
+    for number in range(5):
+        db.execute("INSERT INTO task_state VALUES (?, zeroblob(100))", (f"t{number}",))
+    db.execute("INSERT INTO task_state VALUES ('big', zeroblob(3000000))")
+    db.execute("INSERT INTO task_state VALUES ('after', zeroblob(100))")
+    db.commit()
+    db.close()
+    source = sql(tmp_path, max_cell_bytes=4096)
+    peak = peak_bytes(source)
+    assert peak < 1024 * 1024  # the 3 MB blob was never built
+    found = limit(source)
+    assert found.details["cause"] == "cell_limit" and found.details["max_cell_bytes"] == 4096
+    # Partial, and stated: the driver steps one row ahead, so the failure is met while the row
+    # before the oversized one is being handed over, and that row is not kept either.
+    assert found.details["records"] == 4 and found.details["bytes_read"] > 0
+    assert limit(source).details["records"] == len(source.catalog().documents[0].items)
+
+
+def test_a_generated_column_that_would_build_a_giant_value_is_stopped_by_the_cell_limit(
+    tmp_path: Path,
+) -> None:
+    db = database(tmp_path)
+    db.execute(
+        "CREATE TABLE task_state(id_ TEXT,"
+        " fat TEXT GENERATED ALWAYS AS (hex(zeroblob(150000000))) VIRTUAL)"
+    )
+    db.execute("INSERT INTO task_state(id_) VALUES ('a')")
+    db.commit()
+    db.close()
+    source = sql(tmp_path)  # the default cell limit, 16 MiB
+    assert peak_bytes(source) < 8 * 1024 * 1024
+    assert limit(source).details["cause"] == "cell_limit"
+    assert list(source.walk()) == []
+
+
+def test_many_rows_that_exceed_the_budget_stop_it_with_the_rows_already_read(
+    tmp_path: Path,
+) -> None:
+    db = database(tmp_path)
+    db.execute("CREATE TABLE task_state(id_ TEXT, note TEXT)")
+    for number in range(400):
+        db.execute("INSERT INTO task_state VALUES (?, ?)", (f"t{number}", "n" * 10_000))
+    db.commit()
+    db.close()
+    source = sql(tmp_path, max_read_bytes=100_000)
+    peak = peak_bytes(source)
+    assert peak < 2 * 1024 * 1024  # not the 4 MB of the whole table, and certainly not more
+    found = limit(source)
+    kept = found.details["records"]
+    assert found.details["cause"] == "byte_limit" and 5 <= kept < 400
+    assert found.details["bytes_read"] <= 100_000 == found.details["max_read_bytes"]
+    assert len(source.catalog().documents[0].items) == kept
+
+
+def test_one_budget_covers_every_part_read_from_one_database(tmp_path: Path) -> None:
+    db = database(tmp_path)
+    for name in ("task_state", "fleet_state"):
+        db.execute(f"CREATE TABLE {name}(id_ TEXT, note TEXT)")
+        for number in range(20):
+            db.execute(f"INSERT INTO {name} VALUES (?, ?)", (f"t{number}", "n" * 5_000))
+    db.commit()
+    db.close()
+    files = {
+        "tasks": {"file": "rmf.db", "table": "task_state"},
+        "fleet_states": {"file": "rmf.db", "table": "fleet_state"},
+    }
+    source = src(tmp_path, files, max_read_bytes=120_000)
+    source.catalog()
+    (found,) = codes(source)["part_limit"]  # the first part fits, the second is cut
+    assert found.details["part"] == "fleet_states" and found.details["cause"] == "byte_limit"
+
+
+@pytest.mark.parametrize(
+    "option", [{"max_cell_bytes": 10}, {"max_cell_bytes": 10**10}, {"max_read_bytes": 0}]
+)
+def test_the_byte_bounds_are_themselves_bounded(tmp_path: Path, option: dict[str, int]) -> None:
+    with pytest.raises(FleetOpsConfigError):
+        sql(tmp_path, **option)
 
 
 def test_the_authoriser_allows_reading_and_nothing_else() -> None:

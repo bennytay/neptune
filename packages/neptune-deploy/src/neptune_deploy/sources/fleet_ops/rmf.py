@@ -18,7 +18,7 @@ declared and is the operator's name for the deployment: two deployments that bot
 Options are declared and closed: ``site``; ``files``, the part-to-file map (JSON, JSON Lines or a
 SQLite table with its JSON columns); ``clock`` for the integer time fields; ``task_fields`` for
 where a task states its id, robot and times (the api-server's by default); ``max_rows``,
-``max_file_bytes``.
+``max_file_bytes``; for SQLite also ``max_cell_bytes`` and ``max_read_bytes``.
 """
 
 import os
@@ -65,7 +65,17 @@ _TIME_FIELDS: Final = {
     "map": (),
 }
 _OPTIONS: Final = frozenset(
-    {"clock", "files", "max_file_bytes", "max_rows", "site", "task_fields", "time_fields"}
+    {
+        "clock",
+        "files",
+        "max_cell_bytes",
+        "max_file_bytes",
+        "max_read_bytes",
+        "max_rows",
+        "site",
+        "task_fields",
+        "time_fields",
+    }
 )
 _FILE_KEYS: Final = frozenset({"file", "json_columns", "table"})
 
@@ -94,6 +104,8 @@ class RmfOptions:
     time_fields: tuple[tuple[str, tuple[str, ...]], ...]
     max_rows: int
     max_file_bytes: int
+    max_cell_bytes: int
+    max_read_bytes: int
 
     @classmethod
     def parse(cls, options: Mapping[str, JsonValue] | None) -> "RmfOptions":
@@ -153,6 +165,12 @@ class RmfOptions:
             task_fields=tuple(sorted(fields.items())),
             time_fields=tuple(sorted(times.items())),
             max_rows=opt.integer(given, "max_rows", 1_000_000, 1, 100_000_000),
+            max_cell_bytes=opt.integer(
+                given, "max_cell_bytes", 16 * 1024 * 1024, 1024, 256 * 1024**2
+            ),
+            max_read_bytes=opt.integer(
+                given, "max_read_bytes", 256 * 1024 * 1024, 1024, 4 * 1024**3
+            ),
             max_file_bytes=opt.integer(
                 given, "max_file_bytes", 256 * 1024 * 1024, 1024, 4 * 1024**3
             ),
@@ -192,13 +210,16 @@ class OpenRmfSource(FleetOpsSource):
         self.options = options
         self.scope = f"{options.site}/"
         self._clock: DeclaredClock = parse_clock(options.clock)
+        self._read_bytes: dict[str, int] = {}
 
     def config(self) -> dict[str, JsonValue]:
         o = self.options
         return {
             "clock": self._clock.config(),
             "files": {part: spec.config() for part, spec in o.files},
+            "max_cell_bytes": o.max_cell_bytes,
             "max_file_bytes": o.max_file_bytes,
+            "max_read_bytes": o.max_read_bytes,
             "max_rows": o.max_rows,
             "site": o.site,
             "task_fields": dict(o.task_fields),
@@ -208,13 +229,19 @@ class OpenRmfSource(FleetOpsSource):
     def _read(self, part: str, spec: FileSpec) -> Rows:
         path = safe_path(self._root, spec.file)
         if spec.table is not None:
-            return sqlite_items(
+            # One budget per database file, shared by every part read from it.
+            left = self.options.max_read_bytes - self._read_bytes.get(spec.file, 0)
+            rows = sqlite_items(
                 path,
                 spec.table,
                 spec.json_columns,
                 self.options.max_rows,
                 self.options.max_file_bytes,
+                max_cell_bytes=self.options.max_cell_bytes,
+                max_read_bytes=max(left, 0),
             )
+            self._read_bytes[spec.file] = self._read_bytes.get(spec.file, 0) + rows.bytes_read
+            return rows
         return json_items(
             read_bytes(path, self.options.max_file_bytes),
             self.options.max_rows,
@@ -250,6 +277,13 @@ class OpenRmfSource(FleetOpsSource):
                 items = self._levels(items)
             part = Part(name, items, times.get(name, ()), self._clock)
             part.stopped = rows.stopped
+            if rows.stopped in ("byte_limit", "cell_limit"):
+                # Partial coverage, stated: the rows kept, and the bounds that stopped the read.
+                part.details = {
+                    "bytes_read": rows.bytes_read,
+                    "max_cell_bytes": self.options.max_cell_bytes,
+                    "max_read_bytes": self.options.max_read_bytes,
+                }
             parts.append(part)
         return parts
 

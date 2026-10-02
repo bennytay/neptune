@@ -24,6 +24,7 @@ It reads a compiler package's records and nothing else: never a bag, never a sou
 The base package is never changed; the same package and mapping give byte-identical records.
 """
 
+import json
 import re
 from collections import defaultdict
 from collections.abc import Sequence
@@ -75,6 +76,12 @@ FINDINGS: Final[dict[str, tuple[Severity, FindingCategory, str]]] = {
         "a diagnostic status code is outside the vendor mapping; it stays as declared and its"
         " event kind is Unknown (unless its name is mapped)",
     ),
+    "level_invalid": (
+        Severity.WARNING,
+        FindingCategory.CORRUPT,
+        "a diagnostic status states a level that is not an integer level; it stays as declared and"
+        " its event kind is Unknown (unless its name is mapped)",
+    ),
     "level_missing": (
         Severity.WARNING,
         FindingCategory.MISSING,
@@ -107,15 +114,24 @@ def _known(value: Any) -> Knowledge[Any]:
     return Unknown() if value is None else Known(value)
 
 
+_LEVEL: Final = re.compile(r"0|[1-9][0-9]*")
+
+
 def _text_of(value: object) -> str | None:
-    """A level as the declared text a code is looked up by."""
+    """A level as the declared text a code is looked up by: an integer, or text that is one
+    written canonically. ``None`` for anything else (``1.0``, ``"x"``, a boolean)."""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
-        return str(value)
-    if isinstance(value, str) and value:
+        return str(value) if value >= 0 else None
+    if isinstance(value, str) and _LEVEL.fullmatch(value):
         return value
     return None
+
+
+def _declared(value: object) -> str:
+    """How a stated value that is no level is written in a finding: its JSON text, capped."""
+    return json.dumps(value, default=str, ensure_ascii=True)[:64]
 
 
 def _inside(evidence: EvidenceRef, pointer: str) -> EvidenceRef:
@@ -343,7 +359,19 @@ class _Run:
             Known(kind, self.prov(cited)) if kind is not None else Unknown(self.prov(cited))
         )
         record_id = evidence_record_id(StructuredRecord.kind, status, self.transform)
-        if level is None:
+        if level is None and isinstance(level_state, Known):
+            # A level is stated and is no integer level (``1.0``, ``"x"``): the row keeps it as
+            # declared and its kind is Unknown, but it is not a missing level.
+            self.findings.add(
+                "level_invalid",
+                table,
+                row.cell_evidence(table.record, level_cell or 0),
+                key=_declared(level_state.value),
+                details={"level": _declared(level_state.value)},
+                row=position,
+                record=record_id,
+            )
+        elif level is None:
             self.findings.add("level_missing", table, status, row=position, record=record_id)
         elif level not in mapping.levels:
             self.findings.add(

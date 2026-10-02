@@ -118,7 +118,20 @@ more than it says.
      spliced into a statement as given (`table_missing`). The file is opened and checked by descriptor first
      (not a symlink, regular, within the limit, the SQLite magic); SQLite then opens the path itself, as
      `mode=ro` requires, so a path swapped in between is not excluded, and what was read is discarded unless the
-     file at the path afterwards is the one that was checked (`file_changed`). At most `max_rows` rows are read (`row_limit`), in the
+     file at the path afterwards is the one that was checked (`file_changed`).
+   - **SQLite bytes are bounded three ways.** (a) Only an ordinary table is read: `type` in `sqlite_master`
+     must be `table`, not a virtual table (`CREATE VIRTUAL`), with no trigger on it; a view or anything else
+     is `table_not_ordinary` and is never run, because a view is code its author wrote (a 12 KB database
+     whose view is `hex(zeroblob(150000000))` would otherwise build a 300 MB cell). (b)
+     `SQLITE_LIMIT_LENGTH` is set to `max_cell_bytes` (default 16 MiB, 1 KiB to 256 MiB), so SQLite
+     never builds a value or row longer than that, a generated column included; the error is `cell_limit`.
+     The driver steps one row ahead, so the row before the oversized one is not kept either. (c) A running
+     budget `max_read_bytes` (default 256 MiB, 1 KiB to 4 GiB) is charged each row's cell bytes (text as
+     UTF-8, 8 for a number), one budget per database file whatever the number of parts read from it, and
+     rows are read one at a time. A read over it stops with the rows already read (`byte_limit`). Both stops
+     are `part_limit` findings whose details state the partial coverage: records kept, bytes read and the two
+     bounds. Tests assert a finding and tracemalloc peaks of a few MB for the hostile view, an oversized
+     blob, a generated column and many rows over the budget. At most `max_rows` rows are read (`row_limit`), in the
      file's scan order, so a cut depends on the file. The database is never written or changed, and a test
      checks its bytes and its directory afterwards.
    - **Rows.** A row is an object of column to value as stored. A column the operator declares as JSON
@@ -179,8 +192,9 @@ more than it says.
      whose upstream is the tabular adapter's.
    - **A status outside the mapping is a finding and stays as declared.** The code is looked up as the level's
      declared text. A level not in `levels` is `status_unmapped` (the code, a count, the first rows, the records),
-     the row keeps the level as written, and its `event_kind` is `Unknown` unless its name is in `names`. A status
-     with no level is `level_missing`. Nothing is guessed.
+     the row keeps the level as written, and its `event_kind` is `Unknown` unless its name is in `names`. A level is an integer, or digits written as text; a stated level that is neither (`1.0`, `"x"`, a
+     boolean, a negative) is `level_invalid`: the row keeps it as declared and its kind is `Unknown`
+     unless its name maps. A status with no level at all is `level_missing`. Nothing is guessed.
    - **Bags.** A bag's `/diagnostics` is a `Stream` of its package. The compiler does not decode message payloads
      into packages, so there is nothing to map: each diagnostics stream (a topic in the mapping's `topics`, or
      schema `diagnostic_msgs/msg/DiagnosticArray`) is a `bag_payload_not_decoded` finding and the bag is not
@@ -192,7 +206,7 @@ more than it says.
 8. **Findings** are `deploy_formant.*` and `deploy_open_rmf.*`: `part_failed`, `part_limit`, `part_invalid`,
    `part_empty`, `value_unrepresentable`, `value_unreadable`, `record_skipped`, plus `recording_not_fetched`
    (Formant) and `file_refused`, `cells_not_recorded`, `map_keys_not_recorded` (Open-RMF); and
-   `deploy_diagnostics_map.*`: `status_unmapped`, `level_missing`, `bag_payload_not_decoded`, `nothing_to_map`.
+   `deploy_diagnostics_map.*`: `status_unmapped`, `level_invalid`, `level_missing`, `bag_payload_not_decoded`, `nothing_to_map`.
    They carry codes, counts, statuses, field names and pointers, never an error text, URL, path, header or token.
 9. **Fixtures and oracles.** One fixture per source, each spread across embodiments: Formant records are an AMR,
    a manipulator cell and a legged robot (`tests/fixtures/fleet_ops/formant`); Open-RMF is a warehouse AMR fleet

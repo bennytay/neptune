@@ -267,6 +267,7 @@ def test_a_wrong_mapping_file_fails_loudly_before_any_record_is_read(
 def test_the_finding_catalogue_is_what_the_mapper_can_report() -> None:
     assert set(FINDINGS) == {
         "status_unmapped",
+        "level_invalid",
         "level_missing",
         "bag_payload_not_decoded",
         "nothing_to_map",
@@ -290,3 +291,27 @@ def test_a_mapping_file_is_strict_json() -> None:
         parse_mapping(text.replace('"version": "2"', '"version": NaN').encode())
     with pytest.raises(MappingError, match="strict"):
         parse_mapping(text.replace('"version": "2"', '"version": 1e999').encode())
+
+
+def test_a_stated_level_that_is_no_integer_is_invalid_not_missing() -> None:
+    out = mapped("arm_cell_levels", preset("ros2_diagnostics"))
+    events, rows = table(out, "diagnostic events")
+    by_name = {r.cells[events.header.value.index("name")].value: r for r in rows}
+    levels = {n: r.cells[events.header.value.index("level")] for n, r in by_name.items()}
+    # The value stays as declared, whatever its type, and its kind is not guessed.
+    assert levels["/arm/joint_4"].value == 1.0 and isinstance(levels["/arm/joint_4"].value, float)
+    assert levels["/arm/gripper"].value == "x"
+    assert levels["/arm/estop"].value is True
+    assert levels["/arm/torque"].value == -1
+    for name in ("/arm/joint_4", "/arm/gripper", "/arm/estop", "/arm/torque"):
+        assert isinstance(by_name[name].cells[0], Unknown), name
+    # Integers, written as an int or as canonical digits, are levels and are looked up.
+    assert by_name["/arm/camera"].cells[0].value == "diagnostic.stale"
+    assert by_name["/arm/controller"].cells[0].value == "diagnostic.error"
+    found = codes(out)
+    assert "level_missing" not in found and "status_unmapped" not in found
+    declared = sorted(f.details["level"] for f in found["level_invalid"])
+    assert declared == ['"x"', "-1", "1.0", "true"]
+    for finding in found["level_invalid"]:
+        assert finding.details["count"] == 1 and finding.records  # the row it qualifies
+        assert finding.subject.locator[-1].pointer.endswith("/level")
