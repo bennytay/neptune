@@ -47,6 +47,7 @@ from fractions import Fraction
 from typing import Final
 
 from neptune.derived.grouping import (
+    _LISTED,
     BAG_METADATA,
     BAG_STORAGE,
     CONFIDENCE,
@@ -57,6 +58,7 @@ from neptune.derived.grouping import (
     Grouping,
     GroupingConfig,
     Rule,
+    _location_json,
     _Proposer,
     check_grouping,
 )
@@ -101,7 +103,6 @@ FILE_LIST_TABLE: Final = "relative_file_paths"
 MIN_NAME: Final = 6
 MAX_WORDS: Final = 100_000
 _WORD: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]*")
-_LISTED: Final = 64
 
 # Clocks whose declared epoch makes one clock of every domain that states it with one timescale.
 _SHARED_EPOCHS: Final = frozenset({Epoch.UNIX, Epoch.GPS})
@@ -178,7 +179,6 @@ class Interval:
 class SourceEvidence:
     """What the records committed from one source's bytes say that assembly reads."""
 
-    runs: list[RecordId] = field(default_factory=list)
     machines: set[LogicalId] = field(default_factory=set)
     software: set[tuple[str, str]] = field(default_factory=set)
     intervals: list[Interval] = field(default_factory=list)
@@ -225,7 +225,8 @@ class EvidenceBuilder:
     """Gathers evidence from records as they are read, chunk by chunk, keeping only what
     assembly reads: a document's words (at most ``MAX_WORDS`` per source), not its blocks; the
     rows of rosbag2 file-list tables (each in the batch of its table, as the adapter emits them
-    in one chunk), not every table's rows. So memory grows with runs and names, never with a source's size."""
+    in one chunk), not every table's rows. So memory grows with runs and names, never with a
+    source's size."""
 
     def __init__(self) -> None:
         self.by_source: dict[ContentId, SourceEvidence] = defaultdict(SourceEvidence)
@@ -266,7 +267,6 @@ class EvidenceBuilder:
             return
         if isinstance(record, Run):
             self.runs[content].append(record)
-            found.runs.append(record.id)
             if isinstance(record.machine, Known):
                 found.machines.add(record.machine.value)
         elif isinstance(record, Machine):
@@ -276,10 +276,10 @@ class EvidenceBuilder:
                 found.machines.add(record.machine.value)
             for item in record.software:
                 if isinstance(item.name, Known):
-                    for version in (item.commit, item.release):
+                    # Commits compare with commits and releases with releases, never across.
+                    for kind, version in (("commit", item.commit), ("release", item.release)):
                         if isinstance(version, Known):
-                            found.software.add((item.name.value, str(version.value)))
-                            break
+                            found.software.add((f"{item.name.value} {kind}", str(version.value)))
         elif isinstance(record, ConfigurationSnapshot):
             found.configuration = True
         elif isinstance(record, DocumentBlock):
@@ -397,10 +397,6 @@ class RunAssembler:
         return self.assemble(layout).grouping
 
 
-def _location_json(path: bytes) -> JsonObject:
-    return local_location(path).to_json()
-
-
 def _locations(paths: Iterable[bytes]) -> list[JsonValue]:
     return [_location_json(path) for path in sorted(paths)[:_LISTED]]
 
@@ -412,16 +408,32 @@ def _text(path: bytes) -> str | None:
         return None
 
 
-def _listed_path(directory: bytes, text: str) -> bytes | None:
-    """A listed part's root-relative path, read lexically against the bag's directory; ``None``
-    for one that is empty, absolute, holds a backslash or leaves the directory (the adapter's
-    ``unsafe_part_path`` says why)."""
-    if not text or text.startswith("/") or "\\" in text or "\x00" in text:
+def _identifier(text: str) -> bool:
+    """A name a document's word may join on: at least ``MIN_NAME`` characters and shaped like an
+    identifier (a digit, ``_``, ``-`` or ``.`` in it), so prose words (``camera``) never join."""
+    return len(text) >= MIN_NAME and any(c.isdigit() or c in "_-." for c in text)
+
+
+def _listed_path(directory: bytes, text: str, files: Mapping[bytes, object]) -> bytes | None:
+    """A listed part's root-relative path; ``None`` for one the rosbag2 adapter calls unsafe
+    (empty, NUL, absolute or a drive letter, a backslash, a ``..`` segment: ``unsafe_part_path``)
+    and so never opens. Bags of metadata version 3 and earlier list parts with the bag's own
+    directory name first (``rec/rec_0.db3``), as rosbag2's reader resolves them; such a path is
+    read against the bag's parent when only that reading names a file this scan saw."""
+    if not text or "\x00" in text or "\\" in text or text.startswith("/"):
         return None
-    joined = os.path.normpath((directory + b"/" if directory else b"") + text.encode("utf-8"))
-    inside = directory + b"/" if directory else b""
-    if not joined.startswith(inside) or joined == directory or joined.startswith(b".."):
+    if re.match(r"[A-Za-z]:", text) or ".." in text.split("/"):
         return None
+    relative = os.path.normpath(text.encode("utf-8"))
+    if relative in (b".", b""):
+        return None
+    joined = directory + b"/" + relative if directory else relative
+    name = basename(directory) if directory else b""
+    if joined not in files and name and relative.startswith(name + b"/"):
+        older = parent(directory)
+        legacy = older + b"/" + relative if older else relative
+        if legacy in files:
+            return legacy
     return joined
 
 
@@ -501,7 +513,7 @@ class _Assembler(_Proposer):
         directory = parent(metadata)
         listed: dict[bytes, EvidenceRef] = {}
         for text, evidence in stated.entries:
-            path = _listed_path(directory, text)
+            path = _listed_path(directory, text, self.files)
             if path is not None:
                 listed.setdefault(path, evidence)
         present = sorted(path for path in listed if path in self.files)
@@ -617,12 +629,18 @@ class _Assembler(_Proposer):
 
     def _machines(self, index: int, recordings: list[bytes], edges: list[Edge]) -> bool:
         draft = self.drafts[index]
+        # A file that names several machines in one namespace (a fleet log) says nothing about
+        # which it is, so it is left out of that namespace's comparison.
         by_namespace: dict[str, dict[str, list[bytes]]] = defaultdict(lambda: defaultdict(list))
         for path in recordings:
             found = self._of(path)
             assert found is not None
+            named: dict[str, list[str]] = defaultdict(list)
             for machine in found.machines:
-                by_namespace[machine.namespace][machine.value].append(path)
+                named[machine.namespace].append(machine.value)
+            for namespace, held in named.items():
+                if len(held) == 1:
+                    by_namespace[namespace][held[0]].append(path)
         mixed = sorted(ns for ns, values in by_namespace.items() if len(values) > 1)
         shared = sorted(
             ns
@@ -825,7 +843,6 @@ class _Assembler(_Proposer):
                     made.add(units)
                     self._merge(position, units, namespace, value, family)
                 chain, reach = [index], end
-        return
 
     def _together(self, units: Sequence[int]) -> bool:
         """Whether some reading already holds all of these units' recordings."""
@@ -870,7 +887,7 @@ class _Assembler(_Proposer):
                 if role is not Role.RECORDING or basename(path) == BAG_METADATA:
                     continue
                 for key in (basename(path), self._sig(path).stem):
-                    if (text := _text(key)) is not None and len(text) >= MIN_NAME:
+                    if (text := _text(key)) is not None and _identifier(text):
                         names[text].add(index)
             if (
                 draft.rule
@@ -882,12 +899,12 @@ class _Assembler(_Proposer):
                 and draft.directory != ROOT
             ):
                 text = _text(basename(draft.directory))
-                if text is not None and len(text) >= MIN_NAME:
+                if text is not None and _identifier(text):
                     names[text].add(index)
         if not names:
             return
         for path, (reason, _) in sorted(self.unassigned.items()):
-            if reason in (SHARED_REFERENCE, TOO_MANY_SESSIONS):
+            if reason == TOO_MANY_SESSIONS:
                 continue
             found = self._of(path)
             if found is None or not found.words:
@@ -912,6 +929,24 @@ class _Assembler(_Proposer):
 
     # --- 6. shared configuration ---------------------------------------------------------------
 
+    def _separate(self, indices: Sequence[int]) -> int:
+        """How many sessions these readings are: readings that share a file (contested readings
+        of one session) count once."""
+        root = {index: index for index in indices}
+
+        def find(index: int) -> int:
+            while root[index] != index:
+                root[index] = root[root[index]]
+                index = root[index]
+            return index
+
+        owner: dict[bytes, int] = {}
+        for index in indices:
+            for path in self._extent(index):
+                if (other := owner.setdefault(path, index)) != index:
+                    root[find(index)] = find(other)
+        return len({find(index) for index in indices})
+
     def _shared(self) -> None:
         below: dict[bytes, list[int]] = defaultdict(list)
         for index, draft in enumerate(self.drafts):
@@ -927,9 +962,11 @@ class _Assembler(_Proposer):
             found = self._of(path)
             if found is None or not found.configuration:
                 continue
+            if any(path in draft.members for draft in self.drafts):
+                continue  # a declaration holds it: it is placed, not shared
             sessions = sorted(set(below.get(parent(path), ())))
-            if len(sessions) < 2:
-                continue
+            if self._separate(sessions) < 2:
+                continue  # readings of one session: nothing to share between
             self._ambiguous(path, SHARED_REFERENCE, sessions)
             if len(sessions) > _LISTED:
                 continue  # too many to name: unknown, as v0 says

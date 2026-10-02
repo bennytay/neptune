@@ -69,7 +69,7 @@ def run_id(path: str) -> RecordId:
 def file_list(metadata: str, *listed: str) -> SourceEvidence:
     entries = tuple((name, cite(metadata, 10 + n)) for n, name in enumerate(listed))
     stated = FileList(run_id(metadata), cite(metadata, 0), cite(metadata, 5), entries)
-    return SourceEvidence(runs=[run_id(metadata)], file_lists=[stated])
+    return SourceEvidence(file_lists=[stated])
 
 
 def machine(value: str, *intervals: Interval) -> SourceEvidence:
@@ -406,7 +406,9 @@ def test_the_same_tree_and_evidence_give_the_same_assembly() -> None:
     assert first.grouping.transform.config == {"gap_seconds": 30, "sessions": []}
 
 
-@pytest.mark.parametrize("text", ["", "/abs.mcap", "..", "a\\b.mcap", "../x.mcap"])
+@pytest.mark.parametrize(
+    "text", ["", "/abs.mcap", "..", "a\\b.mcap", "../x.mcap", "sub/../x.mcap", "C:/x.mcap", "."]
+)
 def test_unsafe_listed_paths_are_never_resolved(text: str) -> None:
     tree = layout("bag/metadata.yaml", "bag/bag_0.mcap", "x.mcap")
     listed = file_list("bag/metadata.yaml", "bag_0.mcap", text)
@@ -416,3 +418,69 @@ def test_unsafe_listed_paths_are_never_resolved(text: str) -> None:
     [stated] = assembly.records
     assert revision("x.mcap") not in {m.revision for m in stated.members}
     assert not [f for f in assembly.grouping.findings if f.code == LISTED_PART_MISSING]
+
+
+def test_old_bags_list_parts_under_their_own_directory_name() -> None:
+    # rosbag2 metadata version 3 and earlier: ``rec/rec_0.db3`` for a part of ``rec/``.
+    tree = layout("logs/rec/metadata.yaml", "logs/rec/rec_0.db3")
+    listed = file_list("logs/rec/metadata.yaml", "rec/rec_0.db3")
+    assembly = RunAssembler(
+        evidence=Evidence({content("logs/rec/metadata.yaml"): listed}, ())
+    ).assemble(tree)
+    [proposal] = assembly.grouping.proposals
+    assert proposal.rule == Rule.ROSBAG2_FILE_LIST and len(proposal.members) == 2
+    assert not assembly.grouping.findings
+
+
+def test_a_file_naming_several_machines_is_not_a_mixed_reading() -> None:
+    fleet = SourceEvidence(machines={LogicalId("robot", "a"), LogicalId("robot", "b")})
+    tree = layout("run_1/fleet.mcap", "run_1/a.mcap")
+    found = Evidence(
+        {
+            content("run_1/fleet.mcap"): fleet,
+            content("run_1/a.mcap"): SourceEvidence(machines={LogicalId("robot", "a")}),
+        },
+        (),
+    )
+    grouping = RunAssembler(evidence=found).propose(tree)
+    assert not by_rule(grouping.proposals, Rule.MACHINE_SPLIT)
+    assert not grouping.findings
+
+
+def test_a_commit_is_never_compared_with_a_release() -> None:
+    tree = layout("run_1/a.ulg", "run_1/b.ulg")
+    found = Evidence(
+        {
+            content("run_1/a.ulg"): SourceEvidence(
+                software={("nav commit", "abc123"), ("nav release", "1.2.0")}
+            ),
+            content("run_1/b.ulg"): SourceEvidence(software={("nav release", "1.2.0")}),
+        },
+        (),
+    )
+    [session] = RunAssembler(evidence=found).propose(tree).proposals
+    assert session.confidence == 0.68
+    assert not any(r.rule == Edge.SOFTWARE_DIFFERS for r in session.reasons)
+
+
+def test_a_configuration_above_one_contested_session_is_not_shared() -> None:
+    tree = layout(
+        "site/config.yaml",
+        "site/run_2024-05-01_10-00-00/a_2024-05-01_10-00-00.mcap",
+        "site/run_2024-05-01_10-00-00/b_2024-05-01_12-00-00.mcap",
+    )
+    found = Evidence({content("site/config.yaml"): SourceEvidence(configuration=True)}, ())
+    grouping = RunAssembler(evidence=found).propose(tree)
+    assert len(grouping.proposals) > 1  # the directory and its time clusters, contested
+    [config] = grouping.unassigned
+    assert config.reason == NO_SESSION and config.placement is Placement.UNKNOWN
+
+
+def test_prose_words_never_place_a_document() -> None:
+    tree = layout("media/camera.mp4", "media/camera.mcap", "docs/sop.md")
+    found = Evidence(
+        {content("docs/sop.md"): SourceEvidence(words={"clean", "the", "camera", "lens"})}, ()
+    )
+    grouping = RunAssembler(evidence=found).propose(tree)
+    [sop] = [u for u in grouping.unassigned if u.location == LocalPath("docs/sop.md")]
+    assert sop.reason == NO_SESSION

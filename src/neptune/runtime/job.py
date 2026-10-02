@@ -2027,6 +2027,7 @@ class IngestJob:
         evidence = EvidenceBuilder()
         try:
             for content, transform in sorted(set(self._ingested)):
+                self._check_cancel()  # each source's records are read whole: a checkpoint between
                 plan = self.workspace.load_plan(content, transform)
                 if plan is None:
                     continue  # staging refuses the package and says why
