@@ -150,6 +150,17 @@ def test_golden_generator_is_deterministic(golden_documents: dict[str, dict[str,
     assert goldens.goldens() == golden_documents
 
 
+def test_published_goldens_are_the_generators_output(
+    golden_documents: dict[str, dict[str, Any]],
+) -> None:
+    """A golden committed under this version is what the generator writes now: a stale file
+    would publish an immutable contract that the code no longer produces."""
+    published = CONTRACT / f"v{CATALOG_API_VERSION}" / "golden"
+    assert {path.name for path in published.iterdir()} == set(golden_documents)
+    for name, entry in golden_documents.items():
+        assert json.loads((published / name).read_text("utf-8")) == entry["value"], name
+
+
 def test_registry_holds_this_version_and_schema() -> None:
     contract = tomllib.loads((CONTRACT / "contract.toml").read_text("utf-8"))
     assert contract["owner"]["version_constant"] == "neptune_ledger.api:CATALOG_API_VERSION"

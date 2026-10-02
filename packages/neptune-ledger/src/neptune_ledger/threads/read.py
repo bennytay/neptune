@@ -13,7 +13,7 @@ from typing import Any, Final, cast
 import psycopg
 
 from neptune.model import knowledge
-from neptune.model.knowledge import Knowledge, Known, NotApplicable, Unknown
+from neptune.model.knowledge import Knowledge, Known, NotApplicable, NotCovered, Unknown
 from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
     CatalogFinding,
@@ -201,7 +201,7 @@ def links(conn: Conn, tenant: str, key: ThreadKey, limit: int) -> tuple[ThreadLi
     """The identity links that name this thread's declared id on either side (ADR 0003 §1.5,
     ADR 0010 §8), registered by ``limit``: one edge per link, package and right-side id, from the
     link's left id to that right id. The keys take this thread's kind because it is the lookup;
-    the link's own ``entity_kind`` is ``Unknown``. Listed by ``(registration key, link record id,
+    the link's own ``entity_kind`` is ``NotCovered``. Listed by ``(registration key, link record id,
     package id, right id)``. Never a merge: no other thread's record is read."""
     if key.kind not in LINKED_KINDS or not isinstance(key.key, DeclaredKey):
         return ()
@@ -221,7 +221,7 @@ def links(conn: Conn, tenant: str, key: ThreadKey, limit: int) -> tuple[ThreadLi
             to_key=link_key(key.kind, str(right)),
             assertion_kind=cast("Any", str(assertion)),
             state=cast("Any", str(state)),
-            entity_kind=Unknown(),  # a schema-3 IdentityLink states no kind (ADR 0010 §8)
+            entity_kind=NotCovered(),  # schema 3's IdentityLink has no kind field (ADR 0010 §8)
         )
         for package, record, _, left, right, state, assertion in rows
     )
