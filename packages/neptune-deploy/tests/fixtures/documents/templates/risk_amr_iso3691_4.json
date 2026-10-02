@@ -1,0 +1,41 @@
+{
+  "schema": "neptune-deploy.document-template/1",
+  "id": "risk.amr_iso3691_4",
+  "version": "2",
+  "description": "The AMR fleet's ISO 3691-4 style risk estimate: severity, exposure, avoidance and the risk reduction each hazard needs, one table row per hazard. The form declares itself and its revision; the site writes dates in ISO order on its wall clock.",
+  "kind": "risk_assessment",
+  "formats": ["pdf"],
+  "zone": "Europe/Berlin",
+  "form": {"label": "Form", "value": "RA-3691-AMR", "version_label": "Revision", "version": "2"},
+  "tables": {"hazards": ["Hazard", "Severity", "Exposure", "Avoidance", "Risk reduction", "Mitigation"]},
+  "requires": {"labels": ["Assessment No"], "headings": ["Hazard analysis"], "tables": ["hazards"]},
+  "ignore": {
+    "labels": ["Reviewer"],
+    "headings": ["Risk assessment: AMR fleet, Hamburg DC 2", "Hazard analysis", "Approval"]
+  },
+  "fields": {
+    "identifiers": [{"label": "Assessment No", "namespace": "hh.risk_assessment"}],
+    "site": {"label": "Site", "namespace": "hh.site"},
+    "machines": [{"label": "Machines", "namespace": "hh.amr", "split": ";"}],
+    "assessed": {"label": "Assessed on", "format": "%Y-%m-%d", "required": true},
+    "method": {"label": "Method"},
+    "hazards": {
+      "rows": "hazards",
+      "each": {
+        "hazard": {"column": "Hazard"},
+        "scores": [
+          {"column": "Severity"},
+          {"column": "Exposure"},
+          {"column": "Avoidance"},
+          {"column": "Risk reduction"}
+        ],
+        "mitigations": [{"column": "Mitigation", "split": ";"}]
+      }
+    },
+    "approval": {
+      "decision": {"label": "Approval decision"},
+      "authority": {"label": "Approved by"},
+      "time": {"label": "Approved on", "format": "%Y-%m-%d"}
+    }
+  }
+}

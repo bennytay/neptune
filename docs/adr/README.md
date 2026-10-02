@@ -62,6 +62,7 @@ header).
 | [0052](0052-geometry-adapter-meshes-and-scenes-as-referenced-objects.md) | The geometry adapter: meshes and scenes as referenced objects, nothing copied, nothing guessed | Accepted |
 | [0054](0054-integrity-and-data-quality-rules-over-the-stored-package.md) | Integrity and data-quality rules run over the stored package | Accepted |
 | [0055](0055-calibration-adapter-ros-kalibr-opencv-and-shared-structured-readers.md) | The calibration adapter: ROS, Kalibr and OpenCV files as calibrations, extrinsics and a file-local frame graph, over shared structured readers | Accepted |
+| [0056](0056-media-streams-indexed-by-the-series-hydrated-lazily.md) | Media streams: indexed by their series, hydrated lazily | Accepted |
 | [0057](0057-geojson-adapter-crs-never-invented.md) | The GeoJSON adapter: features, bounds and a CRS that is stated, defaulted by the RFC or Unknown | Accepted |
 | [0059](0059-xlsx-workbooks-in-the-tabular-adapter-sheets-as-cited-tables.md) | XLSX workbooks in the tabular adapter: sheets as tables of cited cells | Accepted |
 | [0062](0062-assertion-records-human-assertions-as-stated-evidence.md) | Assertion records: human assertions, acceptances and retractions as stated evidence | Accepted |

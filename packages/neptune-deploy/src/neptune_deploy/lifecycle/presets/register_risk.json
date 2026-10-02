@@ -1,0 +1,32 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "register.risk",
+  "version": "1",
+  "description": "A risk register, one row per hazard: each row is a risk assessment record with one hazard, its scores named by their columns, and its mitigations.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "hazard",
+      "kind": "risk_assessment",
+      "requires": ["Assessment ID", "Hazard"],
+      "fields": {
+        "identifiers": [{"column": "Assessment ID", "namespace": "register.risk_assessment"}],
+        "site": {"column": "Cell", "namespace": "register.site"},
+        "machines": [{"column": "Robot", "namespace": "register.robot"}],
+        "assessed": {"column": "Assessed", "format": "%Y-%m-%d", "required": true},
+        "method": {"column": "Method"},
+        "hazards": [
+          {
+            "hazard": {"column": "Hazard"},
+            "scores": [{"column": "Severity"}, {"column": "Exposure"}, {"column": "Avoidance"}, {"column": "PLr"}],
+            "mitigations": [{"column": "Mitigations", "split": ";"}]
+          }
+        ],
+        "approval": {
+          "authority": {"column": "Approved By"},
+          "time": {"column": "Approved On", "format": "%Y-%m-%d"}
+        }
+      }
+    }
+  ]
+}
