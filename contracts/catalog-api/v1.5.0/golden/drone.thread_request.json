@@ -1,0 +1,13 @@
+{
+  "key": {
+    "key": {
+      "namespace": "px4.sys_uuid",
+      "value": "000200000000343233345117003a0027"
+    },
+    "kind": "machine"
+  },
+  "order": "world",
+  "preference": {
+    "preference": "history"
+  }
+}

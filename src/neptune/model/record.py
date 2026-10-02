@@ -26,13 +26,13 @@ from neptune.model._fields import exact_object, is_int
 from neptune.model.jsonvalue import JsonObject, JsonValue
 
 # The newest version of the canonical model: what this code reads and can write. It became 1 at
-# the M1 gate (ADR 0023), 2 with the configuration kinds (ADR 0037) and 3 with the alignment kinds
-# (ADR 0050), and 4 with the task kinds (ADR 0063). The model only grows: a
-# newer version adds record kinds, enum members or locator steps, through an ADR, and never changes
-# an existing field. A record of any version from OLDEST_READABLE_VERSION on is therefore valid as
-# it is: its migration is the identity. A record is written at the version that added its kind,
+# the M1 gate (ADR 0023), 2 with the configuration kinds (ADR 0037), 3 with the alignment kinds
+# (ADR 0050), 4 with the deployment lifecycle kinds (ADR 0051) and 5 with the task kinds (ADR 0063).
+# The model only grows: a newer version adds record kinds, enum members or locator steps, through an
+# ADR, and never changes an existing field. A record of any version from OLDEST_READABLE_VERSION on
+# is therefore valid as it is: its migration is the identity. A record is written at the version that added its kind,
 # so an addition never changes the bytes of records that do not use it (ADR 0037 §1).
-SCHEMA_VERSION: Final = 4
+SCHEMA_VERSION: Final = 5
 OLDEST_READABLE_VERSION: Final = 1
 ENVELOPE_KEYS: Final = frozenset({"kind", "schema_version"})
 

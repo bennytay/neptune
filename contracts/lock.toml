@@ -4,7 +4,7 @@
 # `bump` raises every entry here in the same PR. Draft versions need not be declared.
 
 [neptune-ledger]
-package-schema = "4.0.0"
+package-schema = "5.0.0"
 
 [neptune-memory]
 catalog-api = "1.1.0"

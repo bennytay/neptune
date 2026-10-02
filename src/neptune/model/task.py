@@ -51,7 +51,7 @@ from neptune.model.record import Family
 
 # The schema version that added these kinds (ADR 0063, ADR 0037 §1). Provisional: the coordinator
 # renumbers it at merge when another kind-adding change lands first.
-TASK_SINCE: Final = 4
+TASK_SINCE: Final = 5
 
 
 def _record_id(data: JsonValue) -> RecordId:
