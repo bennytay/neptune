@@ -111,6 +111,17 @@ def test_the_baseline_kinds_are_migration_0001s_partitions() -> None:
     assert tuple(sorted(partitions)) == BASELINE_KINDS
 
 
+def test_a_record_of_an_older_version_without_the_field_projects_nothing() -> None:
+    """A hot-filter field a later schema version adds is absent from older records: NULL."""
+    spec = Spec(
+        "urn:neptune:schema:canonical:3",
+        ("stream",),
+        (Projection("stream", "machine", "machine", "logical_id"),),
+        (),
+    )
+    assert projected(spec, "stream", {"run": RECORD}) == (None, None)
+
+
 def test_a_kind_outside_the_spec_has_no_projections() -> None:
     """The compiler's kind list is not closed: a kind the spec does not name is still indexed,
     with every projection column NULL (ADR 0009 §3)."""
@@ -130,7 +141,12 @@ def test_package_schema_1_projects_the_hot_filters_by_name_and_shape() -> None:
         ("stream", "run", "run", "record_id"),
         ("video", "clock", "clock", "record_id"),
     }
-    assert spec.opaque == (("ingest_finding", "details"), ("transform_record", "config"))
+    assert spec.opaque == (
+        ("ingest_finding", "details"),
+        ("stream", "metadata"),
+        ("transform_record", "config"),
+        ("transform_record", "libraries"),
+    )
     assert projection_columns(spec) == (
         "clock_ids",
         "machine_namespace",
@@ -184,10 +200,10 @@ def test_a_removal_needs_an_adr(change: str) -> None:
         render_migration(old, new, 5)
 
 
-def test_a_free_form_field_that_gains_a_description_stops_being_free_form_loudly() -> None:
+def test_a_free_form_field_that_gains_named_properties_stops_being_free_form_loudly() -> None:
     schema = schema_v1()
     schema["$defs"]["TransformRecord"]["properties"]["config"] = {
-        "description": "adapter options",
+        "properties": {"rate": {"type": "integer"}},
         "type": "object",
     }
     with pytest.raises(ProjectionError, match=r"free-form fields \['transform_record\.config'\]"):

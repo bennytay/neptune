@@ -44,8 +44,11 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
    `Unknown`, except one inside an `Ambiguous` field's candidates, since candidates are not
    fields. One walk yields all three lists (`ambiguous_pointers`, `unknown_pointers`, logical
    ids), and it tightens what counts as a field's state:
-   - It skips the record's free-form objects. The schema declares those as a top-level property
-     `{"type": "object"}`; the spec lists them (`opaque`, §3).
+   - It skips the record's free-form objects: top-level properties the schema types as
+     `object` without naming their keys (`{"type": "object"}` or a map with
+     `additionalProperties`). In package schema 2 these are `transform_record.config` and
+     `libraries`, `ingest_finding.details` and `stream.metadata`. The spec lists them (`opaque`,
+     §3).
    - It counts an object as a Knowledge value only if its keys are a subset of `knowledge`,
      `value`, `provenance` and `candidates`. An adapter locator step may carry a `knowledge`
      property (`AdapterLocator` admits any extra scalar), and it is not a field.
@@ -85,13 +88,14 @@ The catalog API docs also assign `resolve` to MVL-91 (catalog-api.md, contract `
      export.
    - A hot-filter field in an unknown shape, or a kind, projection or free-form field that
      disappears, raises `ProjectionError`. A new shape or a removal needs an ADR. A free-form
-     field that gains a `description` stops matching, so it fails loudly instead of being walked
-     again.
+     field that gains named properties stops matching, so it fails loudly instead of being
+     walked again.
    - A generated migration refuses to apply over rows its projections would leave blank: any row
      of a kind new to the spec (a kind states its fields from the version that introduced it),
      and rows of the new schema version or later for a kind that gains a field. Such rows would
      read as not Known. Rows of older versions do not state the field, so NULL is their truth.
      The catalog is then rebuilt (ADR 0002 §4) by a Ledger that ships the migration.
+   - A record of an older schema version that lacks a projected field gets NULL there.
    - The compiler's kind list is not closed. A table of a kind the spec does not name is indexed
      with the common columns and no projections, in `record_default` (ADR 0008 §1, §3).
 4. **Order and batches.** `package_rows` orders records by `(kind, record_id, line)`.

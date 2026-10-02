@@ -83,7 +83,6 @@ BASELINE_KINDS: Final = (
 
 # A partition is record_<kind>: an unquoted identifier within PostgreSQL's 63-byte limit.
 _KIND: Final = re.compile(r"[a-z][a-z0-9_]{0,55}")
-_FREE_FORM: Final = {"type": "object"}
 SPEC_FILE: Final = "projections.json"
 _MIGRATION: Final = re.compile(r"(\d{4})_[a-z0-9_]+\.sql")
 _SCHEMA_ID: Final = re.compile(r"urn:neptune:schema:canonical:([1-9][0-9]{0,8})")
@@ -175,6 +174,17 @@ def column_types(shape: Shape) -> tuple[str, ...]:
     return ("text", "text") if shape == "logical_id" else ("text[]",)
 
 
+def _free_form(field_schema: Any) -> bool:
+    """An object whose keys the schema does not name (``{"type": "object"}``, or a map with
+    ``additionalProperties``): its content is data, never a record's fields (ADR 0009 §2)."""
+    return (
+        isinstance(field_schema, Mapping)
+        and field_schema.get("type") == "object"
+        and "properties" not in field_schema
+        and "$ref" not in field_schema
+    )
+
+
 def projection_spec(schema: Mapping[str, Any]) -> Spec:
     """The spec one package-schema JSON Schema gives. Raises ``ProjectionError`` when unsure."""
     try:
@@ -199,7 +209,7 @@ def projection_spec(schema: Mapping[str, Any]) -> Spec:
             raise ProjectionError(f"record kind {kind!r} is defined twice")
         kinds.append(kind)
         for field, field_schema in sorted(properties.items()):
-            if field_schema == _FREE_FORM:
+            if _free_form(field_schema):
                 opaque.append((kind, field))
             for filter_name, names in HOT_FILTERS.items():
                 if field not in names:

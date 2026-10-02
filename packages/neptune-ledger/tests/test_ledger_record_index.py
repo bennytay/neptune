@@ -30,6 +30,7 @@ from neptune_ledger.catalog.index import (
     unknown_pointers,
 )
 from neptune_ledger.catalog.migrate import apply_migrations, migrations
+from neptune_ledger.catalog.projection import shipped_spec
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.contract_tests.examples import (
     EXAMPLES,
@@ -329,6 +330,14 @@ def test_an_adapter_locator_step_with_a_knowledge_property_is_not_a_field() -> N
         "site": {"knowledge": "known", "value": {"namespace": "n", "value": "v"}, "kind": "x"},
     }
     assert fields(record) == ([], ["/machine"], [])
+
+
+def test_a_free_form_string_map_is_data_not_fields() -> None:
+    """``stream.metadata`` maps any key to a string; ``{"knowledge": "unknown"}`` there is data."""
+    record = {"metadata": {"knowledge": "unknown"}, "topic": {"knowledge": "unknown"}}
+    opaque = shipped_spec().opaque_fields("stream")
+    assert opaque == frozenset({"metadata"})
+    assert fields(record, opaque) == ([], ["/topic"], [])
 
 
 def test_unknown_inside_ambiguous_candidates_is_not_a_field() -> None:

@@ -179,7 +179,9 @@ def projected(spec: Spec, kind: str, record: Any) -> tuple[Any, ...]:
     for p in spec.projections:
         if p.kind != kind:
             continue
-        stated = record[p.field]
+        stated = record.get(p.field)
+        if stated is None:  # a package of an older schema version does not state the field
+            continue
         if p.shape == "logical_id":
             if _state(stated) == "known":
                 namespace, value = p.columns
