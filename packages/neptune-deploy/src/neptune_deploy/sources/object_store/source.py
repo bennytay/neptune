@@ -26,10 +26,10 @@ that object and nothing else.
 
 import io
 from collections import OrderedDict, defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from functools import cached_property
-from typing import BinaryIO, Final
+from typing import BinaryIO, Final, Protocol, TypeVar
 
 from neptune.identity.findings import ingest_finding
 from neptune.identity.hashing import content_id
@@ -208,6 +208,69 @@ class Discovery:
     def to_probe(self) -> tuple[ObjectEntry, ...]:
         """New and changed objects, in key order: the only ones a job fetches and probes."""
         return tuple(sorted((*self.new, *self.changed), key=lambda entry: entry.key))
+
+
+class Located(Protocol):
+    """Anything a ledger can be asked about: an entry with its external location."""
+
+    @property
+    def location(self) -> ExternalObjectRef: ...
+
+
+E = TypeVar("E", bound=Located)
+
+
+def classify(
+    entries: Sequence[E], ledger: SourceLedger
+) -> tuple[tuple[E, ...], tuple[E, ...], tuple[tuple[E, SourceRevision], ...]]:
+    """Entries sorted against ``ledger``: new (no head, or an absent head), changed (a head with
+    another revision token) and unchanged (a head with the same token), each in the order given.
+    Shared by every connector, so they cannot differ in what "changed" means (ADR 0006 §5)."""
+    new: list[E] = []
+    changed: list[E] = []
+    unchanged: list[tuple[E, SourceRevision]] = []
+    for entry in entries:
+        head = ledger.head(entry.location)
+        if not isinstance(head, SourceRevision):
+            new.append(entry)  # never seen, or seen absent
+        elif (
+            isinstance(head.location, ExternalObjectRef)
+            and head.location.revision_token == entry.location.revision_token
+        ):
+            unchanged.append((entry, head))
+        else:
+            changed.append(entry)
+    return tuple(new), tuple(changed), tuple(unchanged)
+
+
+def absent_candidates(
+    ledger: SourceLedger, connector_id: str, scope: str, seen: set[str]
+) -> tuple[SourceRevision, ...]:
+    """Ledger revisions of ``connector_id`` whose object id starts with ``scope`` and is not in
+    ``seen``, by location. The caller decides whether the listing was complete enough to say they
+    are gone."""
+    gone: list[SourceRevision] = []
+    for head in ledger.heads():
+        where = head.location
+        if (
+            isinstance(head, SourceRevision)
+            and isinstance(where, ExternalObjectRef)
+            and where.connector_id == connector_id
+            and where.object_id.startswith(scope)
+            and where.object_id not in seen
+        ):
+            gone.append(head)
+    return tuple(sorted(gone, key=lambda revision: revision.location.key))
+
+
+class RangedSource(Protocol):
+    """What a stream or an adapter reader needs of a source: ranged fetches and findings."""
+
+    def fetch(self, entry: ObjectEntry, start: int, length: int) -> bytes: ...
+
+    def report(
+        self, code: str, subject: ExternalObjectRef, details: dict[str, JsonValue]
+    ) -> None: ...
 
 
 class ObjectStoreSource:
@@ -391,25 +454,11 @@ class ObjectStoreSource:
         tuple[tuple[ObjectEntry, SourceRevision], ...],
     ]:
         """New, changed and unchanged objects, each in key order."""
-        new: list[ObjectEntry] = []
-        changed: list[ObjectEntry] = []
-        unchanged: list[tuple[ObjectEntry, SourceRevision]] = []
-        for entry in listing.entries:
-            head = ledger.head(entry.location)
-            if not isinstance(head, SourceRevision):
-                new.append(entry)  # never seen, or seen absent
-            elif (
-                isinstance(head.location, ExternalObjectRef)
-                and head.location.revision_token == entry.location.revision_token
-            ):
-                unchanged.append((entry, head))
-            else:
-                changed.append(entry)
-        return tuple(new), tuple(changed), tuple(unchanged)
+        return classify(listing.entries, ledger)
 
     def _gone(self, listing: Listing, ledger: SourceLedger) -> tuple[SourceRevision, ...]:
         """Ledger revisions under this scope and prefix that a complete listing no longer holds."""
-        gone: list[SourceRevision] = []
+        gone: tuple[SourceRevision, ...] = ()
         if listing.complete:
             seen = {entry.location.object_id for entry in listing.entries}
             for item in listing.skipped:  # seen but not used: nothing is known of them
@@ -418,17 +467,8 @@ class ObjectStoreSource:
                 except UnicodeDecodeError:
                     continue
             scope = self.location.scope + self.location.prefix
-            for head in ledger.heads():
-                where = head.location
-                if (
-                    isinstance(head, SourceRevision)
-                    and isinstance(where, ExternalObjectRef)
-                    and where.connector_id == self.connector_id
-                    and where.object_id.startswith(scope)
-                    and where.object_id not in seen
-                ):
-                    gone.append(head)
-        return tuple(sorted(gone, key=lambda revision: revision.location.key))
+            gone = absent_candidates(ledger, self.connector_id, scope, seen)
+        return gone
 
     # --- The Source protocol ---------------------------------------------------------------------
 
@@ -474,7 +514,7 @@ class ObjectStoreSource:
         Buffered, so ``read(n)`` returns ``n`` bytes unless the object ends first, as a local
         file's stream does; no single request asks for more than 8 MiB.
         """
-        return io.BufferedReader(_ObjectIO(self, self.entry(location)), MIN_WINDOW)
+        return io.BufferedReader(ObjectStream(self, self.entry(location)), MIN_WINDOW)
 
     def reader(self, location: SourceLocation, artifact: SourceArtifact) -> "ObjectReader":
         """An adapter's reader over ``location``, whose bytes were fingerprinted as ``artifact``."""
@@ -509,11 +549,11 @@ class ObjectStoreSource:
         return got.data
 
 
-class _ObjectIO(io.RawIOBase):
+class ObjectStream(io.RawIOBase):
     """A listed object as a seekable stream. Sequential reads fetch growing windows (64 KiB up to
     8 MiB), so a probe's head costs one small request and hashing the object a few large ones."""
 
-    def __init__(self, source: ObjectStoreSource, entry: ObjectEntry) -> None:
+    def __init__(self, source: RangedSource, entry: ObjectEntry) -> None:
         super().__init__()
         self._source = source
         self._entry = entry
@@ -565,9 +605,7 @@ class ObjectReader:
     never downloads more of an object than the chunks it reads.
     """
 
-    def __init__(
-        self, source: ObjectStoreSource, entry: ObjectEntry, artifact: SourceArtifact
-    ) -> None:
+    def __init__(self, source: RangedSource, entry: ObjectEntry, artifact: SourceArtifact) -> None:
         if artifact.size != entry.size:
             raise ValueError(f"the artifact has {artifact.size} bytes, the object {entry.size}")
         self._source = source

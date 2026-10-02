@@ -2,7 +2,9 @@
 
 - Every request asks the workspace first (``NetworkGate.require_network``), so a local-only
   workspace refuses each one, not only the first.
-- ``GET`` is the only method this module can send. Nothing here can write, delete or acknowledge.
+- ``GET`` is the only method ``Transport`` exposes. Nothing here can write, delete or acknowledge. A
+  connector whose one read is a POST (Foxglove's ``/data/stream`` returns a download link)
+  subclasses it and names that one request; ``_request`` is not a public way to send anything else.
 - Redirects are never followed: ``http.client`` does not follow them, and a ``3xx`` is raised as
   ``RedirectRefused``. Following one would send the request, and its credentials, wherever the
   server says, which is the object store's symlink.
@@ -223,18 +225,26 @@ class Transport:
             self._connection.close()
             self._connection = None
 
-    def _send(self, target: str, headers: Mapping[str, str]) -> http.client.HTTPResponse:
+    def _send(
+        self,
+        target: str,
+        headers: Mapping[str, str],
+        method: str = "GET",
+        body: bytes | None = None,
+    ) -> http.client.HTTPResponse:
         """One request; sent again, once, on a new connection if a kept-alive one was closed by
-        the server while idle (``GET`` is idempotent, and nothing was received)."""
+        the server while idle (the request is a read, and nothing was received)."""
         for attempt in (0, 1):
             reused = self._connection is not None
             connection = self._connect()
             self.requests += 1
             try:
-                connection.putrequest("GET", target, skip_host=True, skip_accept_encoding=True)
+                connection.putrequest(method, target, skip_host=True, skip_accept_encoding=True)
                 for name, value in headers.items():
                     connection.putheader(name, value)
-                connection.endheaders()
+                if body is not None:
+                    connection.putheader("Content-Length", str(len(body)))
+                connection.endheaders(body)
                 return connection.getresponse()
             except (ConnectionResetError, BrokenPipeError) as exc:  # RemoteDisconnected too
                 self.drop()
@@ -254,11 +264,21 @@ class Transport:
         A ``2xx`` is returned unread. A ``3xx`` is ``RedirectRefused``; any other status is
         ``HttpStatusError``; both are raised with the body unread and the connection dropped.
         """
+        return self._request("GET", path, query, headers)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        query: Sequence[tuple[str, str]] = (),
+        headers: Mapping[str, str] = {},
+        body: bytes | None = None,
+    ) -> Response:
         self._network.require_network(self._purpose)
         pairs = [(quote(k), quote(v)) for k, v in query]
         target = path + ("?" + "&".join(f"{k}={v}" if v else k for k, v in pairs) if pairs else "")
         sent = {"Host": self.endpoint.authority, "User-Agent": USER_AGENT, **headers}
-        raw = self._send(target, sent)
+        raw = self._send(target, sent, method, body)
         response = Response(
             raw.status, {k.lower(): v for k, v in raw.getheaders()}, raw, _transport=self
         )
