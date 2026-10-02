@@ -1,0 +1,9 @@
+{
+  "_recorded": "A declared REST CMMS (profile cmms_profile.json): GET /api/v1/work-orders with cursor paging; values synthetic.",
+  "work_orders": [
+    {"id": 501, "number": "WO-501", "type": "PM", "asset": {"id": "ARM-02"}, "site": "Plant 2", "completed": "2026-06-20 14:00", "problem": "Scheduled joint 3 grease", "work": "Greased joint 3; torque check", "updatedAt": "2026-06-20T14:05:00Z", "attachments": [{"id": 71, "fileName": "joint3-torque.csv", "size": 22, "updatedAt": "2026-06-20T14:03:00Z"}]},
+    {"id": 502, "number": "WO-502", "type": "CM", "asset": {"id": "AMR-14"}, "site": "Warehouse B", "completed": "2026-06-21 09:30", "problem": "Left drive wheel noise", "work": "Replaced left drive wheel", "updatedAt": "2026-06-21T09:35:00Z", "attachments": []},
+    {"id": 503, "number": "WO-503", "type": "PM", "asset": {"id": "Q-3"}, "site": "Plant 2", "completed": "2026-06-22 10:00", "problem": "Foot sensor calibration", "work": "Recalibrated four foot sensors", "updatedAt": "2026-06-22T10:05:00Z", "attachments": []}
+  ],
+  "attachment_bytes": {"71": "joint,torque\n3,41.2\n"}
+}
