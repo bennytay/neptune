@@ -1,0 +1,117 @@
+{
+  "rec_arm_cell_0001": [
+    {
+      "topic": "/imu",
+      "encoding": "cdr",
+      "schemaName": "sensor_msgs/msg/Imu",
+      "schemaEncoding": "ros2msg",
+      "version": "1"
+    },
+    {
+      "topic": "/battery",
+      "encoding": "json",
+      "schemaName": "battery_state",
+      "schemaEncoding": "jsonschema",
+      "version": "1"
+    },
+    {
+      "topic": "/diagnostics",
+      "encoding": "json",
+      "schemaName": "",
+      "schemaEncoding": "",
+      "version": "1"
+    }
+  ],
+  "rec_amr_fleet_0002": [
+    {
+      "topic": "/imu",
+      "encoding": "cdr",
+      "schemaName": "sensor_msgs/msg/Imu",
+      "schemaEncoding": "ros2msg",
+      "version": "1"
+    },
+    {
+      "topic": "/battery",
+      "encoding": "json",
+      "schemaName": "battery_state",
+      "schemaEncoding": "jsonschema",
+      "version": "1"
+    },
+    {
+      "topic": "/diagnostics",
+      "encoding": "json",
+      "schemaName": "",
+      "schemaEncoding": "",
+      "version": "1"
+    }
+  ],
+  "rec_legged_0003": [
+    {
+      "topic": "/imu",
+      "encoding": "cdr",
+      "schemaName": "sensor_msgs/msg/Imu",
+      "schemaEncoding": "ros2msg",
+      "version": "1"
+    },
+    {
+      "topic": "/battery",
+      "encoding": "json",
+      "schemaName": "battery_state",
+      "schemaEncoding": "jsonschema",
+      "version": "1"
+    },
+    {
+      "topic": "/diagnostics",
+      "encoding": "json",
+      "schemaName": "",
+      "schemaEncoding": "",
+      "version": "1"
+    }
+  ],
+  "rec_marine_0004": [
+    {
+      "topic": "/imu",
+      "encoding": "cdr",
+      "schemaName": "sensor_msgs/msg/Imu",
+      "schemaEncoding": "ros2msg",
+      "version": "1"
+    },
+    {
+      "topic": "/battery",
+      "encoding": "json",
+      "schemaName": "battery_state",
+      "schemaEncoding": "jsonschema",
+      "version": "1"
+    },
+    {
+      "topic": "/diagnostics",
+      "encoding": "json",
+      "schemaName": "",
+      "schemaEncoding": "",
+      "version": "1"
+    }
+  ],
+  "rec_unassigned_0006": [
+    {
+      "topic": "/imu",
+      "encoding": "cdr",
+      "schemaName": "sensor_msgs/msg/Imu",
+      "schemaEncoding": "ros2msg",
+      "version": "1"
+    },
+    {
+      "topic": "/battery",
+      "encoding": "json",
+      "schemaName": "battery_state",
+      "schemaEncoding": "jsonschema",
+      "version": "1"
+    },
+    {
+      "topic": "/diagnostics",
+      "encoding": "json",
+      "schemaName": "",
+      "schemaEncoding": "",
+      "version": "1"
+    }
+  ]
+}

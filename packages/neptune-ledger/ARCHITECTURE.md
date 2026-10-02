@@ -33,7 +33,7 @@ flowchart LR
   QRY --> ACC
   ACC -->|catalog API, threads, lake, lineage view| MEM & CTX & DEP & LRN
   CLI --> ACC
-  CLI -.->|register, verify until access/ lands| CAT
+  CLI -.->|register, verify, rebuild, dump until access/ lands| CAT
 
   subgraph KEY[" "]
     K1["built"]

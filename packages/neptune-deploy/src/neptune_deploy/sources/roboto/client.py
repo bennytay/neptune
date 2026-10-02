@@ -22,7 +22,6 @@ bounded, strict JSON; each request has a deadline; errors name no URL, token or 
 """
 
 import hashlib
-import http.client
 import re
 import urllib.parse
 from collections.abc import Mapping, Sequence
@@ -50,7 +49,6 @@ from neptune_deploy.sources.object_store.transport import (
     ResponseTooLarge,
     Transport,
     TransportError,
-    _Deadline,
 )
 from neptune_deploy.sources.roboto.config import ID, RobotoLocation, RobotoOptions
 from neptune_deploy.sources.stated_records import DocumentInvalid, dumps, parse_json
@@ -71,8 +69,6 @@ class RobotoTransport(Transport):
         self, endpoint: Endpoint, network: NetworkGate, purpose: str, *, timeout: float
     ) -> None:
         super().__init__(endpoint, network, purpose, timeout=timeout)
-        self._method = "GET"
-        self._body: bytes | None = None
 
     def post_query(
         self,
@@ -85,41 +81,9 @@ class RobotoTransport(Transport):
         route = path.removeprefix(self.endpoint.base_path)
         if not _QUERY_ROUTE.fullmatch(route):
             raise ValueError("POST is sent to the dataset files query only")
-        self._method, self._body = "POST", body
-        try:
-            return self.get(
-                path,
-                query,
-                {**headers, "Content-Type": "application/json", "Content-Length": str(len(body))},
-            )
-        finally:
-            self._method, self._body = "GET", None
-
-    def _send(
-        self, target: str, headers: Mapping[str, str], deadline: _Deadline
-    ) -> http.client.HTTPResponse:
-        # Transport._send with a method and a body. A kept-alive connection the server closed while
-        # idle is reopened once: a query is idempotent, and nothing was received.
-        for attempt in (0, 1):
-            reused = self._connection is not None
-            connection = self._connect()
-            self.requests += 1
-            try:
-                connection.putrequest(
-                    self._method, target, skip_host=True, skip_accept_encoding=True
-                )
-                for name, value in headers.items():
-                    connection.putheader(name, value)
-                connection.endheaders(self._body)
-                return connection.getresponse()
-            except (ConnectionResetError, BrokenPipeError) as exc:
-                self.drop()
-                if not (reused and attempt == 0) or deadline.expired:
-                    raise deadline.error(exc, TransportError(type(exc).__name__)) from exc
-            except (OSError, http.client.HTTPException) as exc:
-                self.drop()
-                raise deadline.error(exc, TransportError(type(exc).__name__)) from exc
-        raise AssertionError("unreachable")
+        return self._request(
+            "POST", path, query, {**headers, "Content-Type": "application/json"}, body
+        )
 
 
 Entry = Listed | Unlisted
