@@ -11,7 +11,7 @@ import tracemalloc
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import pytest
 
@@ -62,6 +62,7 @@ from neptune.validate import (
     validate_package,
 )
 
+T = TypeVar("T")
 ROBOTS = ("arm", "mobile_base", "legged", "aerial")
 MACHINES = {
     "arm": LogicalId("serial", "ur5e-0042"),
@@ -104,7 +105,7 @@ class Kit:
     def id_of(self, kind: str, provenance: Provenance) -> RecordId:
         return evidence_record_id(kind, provenance.evidence, self.transform)
 
-    def add(self, record: Any) -> Any:
+    def add(self, record: T) -> T:
         self.records.append(record)
         return record
 
@@ -723,7 +724,7 @@ def test_findings_are_ranked_by_a_fixed_severity_order(tmp_path: Path) -> None:
     receipt = read_package(amend(staged, package, report.records()).path).receipt
     ranks = [SEVERITY_ORDER.index(f.severity) for f in receipt.findings]
     assert ranks == sorted(ranks) and Severity.ERROR in {f.severity for f in receipt.findings}
-    assert all(f.details["rule"].endswith("/1") for f in report.findings)
+    assert all(str(f.details["rule"]).endswith("/1") for f in report.findings)
 
 
 def test_every_finding_cites_evidence_in_the_package(tmp_path: Path) -> None:
