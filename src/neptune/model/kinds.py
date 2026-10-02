@@ -24,6 +24,7 @@ from neptune.model.alignment import (
     run_assembly_from_json,
     snapshot_binding_from_json,
 )
+from neptune.model.assertion import Assertion, assertion_from_json
 from neptune.model.configuration import (
     ConfigurationSnapshot,
     ConfigurationValue,
@@ -124,6 +125,7 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (FrameBinding, frame_binding_from_json),
         (RunAssembly, run_assembly_from_json),
         (SnapshotBinding, snapshot_binding_from_json),
+        (Assertion, assertion_from_json),
     )
 }
 
