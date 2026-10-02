@@ -1,0 +1,195 @@
+{
+  "api_version": "1.3.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 1,
+      "tx_time": "2026-10-02T00:00:01.000000Z"
+    }
+  },
+  "findings": [],
+  "key": {
+    "key": {
+      "namespace": "px4.sys_uuid",
+      "value": "000200000000343233345117003a0027"
+    },
+    "kind": "machine"
+  },
+  "lineage_sets": [
+    {
+      "kind": "calibration",
+      "resolution": {
+        "knowledge": "not_applicable"
+      },
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+      "transforms": [
+        "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+      ]
+    },
+    {
+      "kind": "hardware_configuration",
+      "resolution": {
+        "knowledge": "not_applicable"
+      },
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+      "transforms": [
+        "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+      ]
+    },
+    {
+      "kind": "machine",
+      "resolution": {
+        "knowledge": "not_applicable"
+      },
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+      "transforms": [
+        "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+      ]
+    },
+    {
+      "kind": "run",
+      "resolution": {
+        "knowledge": "not_applicable"
+      },
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+      "transforms": [
+        "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+      ]
+    },
+    {
+      "kind": "software_configuration",
+      "resolution": {
+        "knowledge": "not_applicable"
+      },
+      "source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+      "transforms": [
+        "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a"
+      ]
+    }
+  ],
+  "links": [],
+  "order": "world",
+  "partitions": [
+    {
+      "clock_key": "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31",
+      "entries": [
+        {
+          "kind": "run",
+          "lineage_source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+          "packages": [
+            "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25"
+          ],
+          "record_id": "rec:sha256:bbe0a997b0284bd7a1f3982de3dbddf3abcd70485034c4d1af9fe1709da3401b",
+          "registration_key": {
+            "tx_seq": 1,
+            "tx_time": "2026-10-02T00:00:01.000000Z"
+          },
+          "roles": [
+            "cites"
+          ],
+          "transform_id": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a",
+          "world": {
+            "knowledge": "known",
+            "value": {
+              "end": {
+                "knowledge": "not_covered"
+              },
+              "start": {
+                "domain_id": "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31",
+                "ticks": 12000000
+              }
+            }
+          }
+        }
+      ],
+      "kind": "clock"
+    },
+    {
+      "entries": [
+        {
+          "kind": "machine",
+          "lineage_source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+          "packages": [
+            "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25"
+          ],
+          "record_id": "rec:sha256:534181a799ceed2d15c376e7865ed0a504e5f1dee8873c7e28d0862f9c6d128d",
+          "registration_key": {
+            "tx_seq": 1,
+            "tx_time": "2026-10-02T00:00:01.000000Z"
+          },
+          "roles": [
+            "subject"
+          ],
+          "transform_id": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a",
+          "world": {
+            "knowledge": "not_applicable"
+          }
+        },
+        {
+          "kind": "hardware_configuration",
+          "lineage_source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+          "packages": [
+            "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25"
+          ],
+          "record_id": "rec:sha256:69495ee3bb39fc2ba4d9d1eace573c8bda557b6615027eef080e73cf603064e2",
+          "registration_key": {
+            "tx_seq": 1,
+            "tx_time": "2026-10-02T00:00:01.000000Z"
+          },
+          "roles": [
+            "cites"
+          ],
+          "transform_id": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a",
+          "world": {
+            "knowledge": "not_applicable"
+          }
+        },
+        {
+          "kind": "calibration",
+          "lineage_source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+          "packages": [
+            "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25"
+          ],
+          "record_id": "rec:sha256:cb6e8583121408782d115b87542894f9fbc326484373ddb29cd9232c14fb102c",
+          "registration_key": {
+            "tx_seq": 1,
+            "tx_time": "2026-10-02T00:00:01.000000Z"
+          },
+          "roles": [
+            "cites"
+          ],
+          "transform_id": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a",
+          "world": {
+            "knowledge": "unknown"
+          }
+        },
+        {
+          "kind": "software_configuration",
+          "lineage_source": "sha256:dfa933a5f86a5002a8288b44faed8cb2d7fdcc70042c5f0010f86f9f54c45a9b",
+          "packages": [
+            "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25"
+          ],
+          "record_id": "rec:sha256:d58311a8b201fe4ec72d731ae135c51e962ae3e77ab7796541476727a24a5539",
+          "registration_key": {
+            "tx_seq": 1,
+            "tx_time": "2026-10-02T00:00:01.000000Z"
+          },
+          "roles": [
+            "cites"
+          ],
+          "transform_id": "rec:sha256:e9fbe1a6c74e6a906f2f784c1511a4d66c913a515e23a584d0565d36059aa66a",
+          "world": {
+            "knowledge": "not_applicable"
+          }
+        }
+      ],
+      "kind": "untimed"
+    }
+  ],
+  "preference": {
+    "preference": "history"
+  },
+  "revisions": [],
+  "thread_id": "sha256:119c901a9dc2fff937cc869ae9c6161ef8f3fbcf23e22528b0f09cd110a86a6b",
+  "unresolved": []
+}

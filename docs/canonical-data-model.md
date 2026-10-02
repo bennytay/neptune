@@ -8,7 +8,7 @@ MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66 (ADR 0017), runs, 
 (`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). Any change here needs
 an ADR and a schema-version bump, and must be an addition (ADR 0023 §1).
 
-## Record kinds (schema version 2)
+## Record kinds (schema version 3)
 
 Every record kind belongs to one family (ADR 0017 §4). The last four families are the design contract's source
 domains.
@@ -23,6 +23,7 @@ domains.
 | `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration`; since version 2 `ConfigurationSnapshot`, `ConfigurationValue` | `model/machine.py` (ADR 0019), `model/configuration.py` (ADR 0037) |
 | `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord` | `model/world.py` (ADR 0020) |
 | `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
+| `alignment` | `IdentityLink`, `ClockMapping`, `FrameBinding`, `RunAssembly`, `SnapshotBinding` (since 3) | `model/alignment.py` (ADR 0050) |
 
 `IngestReceipt` is the package-level account of an ingest run, not a record table: one document per package,
 beside `PackageManifest` and the volatile `ReceiptEnvelope` (`model/package.py`, ADR 0022).
@@ -46,8 +47,8 @@ boundary to the memory learner.
 - A value defined by a format specification (MCAP `log_time` is ns) cites the bytes that establish the format
   plus the transform that applies the spec. When the source carries the definition itself (a ROS message
   definition in an MCAP schema record), it cites that instead.
-- `SCHEMA_VERSION` is 2. It became 1 at the M1 gate (ADR 0023), and a record kind's fields never change from
-  then on. The model grows only by addition (new record kinds, including companion kinds naming the record they
+- `SCHEMA_VERSION` is 3 (2: configuration, ADR 0037; 3: alignment, ADR 0050). It became 1 at the M1
+  gate (ADR 0023), and a record kind's fields never change from then on. The model grows only by addition (new record kinds, including companion kinds naming the record they
   extend, new enum members, new locator steps), each through an ADR and a version bump. So every record from
   version 1 on stays valid, readers read versions 1 to their own unchanged, and ids never move. Version 0
   drafts are refused. Stored packages are never rewritten. Anything that is not an addition is a new kind and
@@ -108,8 +109,8 @@ a bug, not a value.
   `scope` (where the ticks are read, verbatim) and `Knowledge`-wrapped `role` (receive / publish / sample /
   document), `resolution` (exact `Fraction` seconds per tick), `epoch`, `timescale` and `declared_monotonic`.
 - MCAP `log_time` and `publish_time`, ROS `header.stamp` and receive time, PX4 boot-time and GPS time are
-  separate domains. Mappings between domains are `ClockAlignment` records produced in MVL-36 with method,
-  evidence and error bounds.
+  separate domains. Mappings between domains are `ClockMapping` records (ADR 0050, below): stated ones are
+  canonical, estimated ones (MVL-36) derived.
 - Civil date-times (ADR 0023 §2): with a stated offset, ticks are POSIX seconds of the exact instant (epoch
   `unix`, timescale `posix`); with no zone, POSIX-style seconds on the source's own civil clock (epoch `unix`,
   timescale `Unknown`); a date alone counts days.
@@ -226,6 +227,26 @@ a bug, not a value.
 - Nothing is inferred: a key named `wheel_radius` is a declared number, with no unit unless the document
   states one in a value of its own.
 
+## Alignment (ADR 0050; `model/alignment.py`)
+
+- Relations between records other families declare, only as far as cited evidence states them. An
+  exact join of declared values (two declarations giving one id) is evidence; anything estimated is
+  `inferred` and lives in `derived/<kind>.jsonl` with the same fields. Nothing merges or re-times.
+- `validity`: `Knowledge[ValidityWindow]`, `{clock, start, end}` on one `TimestampDomain`, start
+  inclusive and end exclusive; `KnownAbsent` bound = stated open, `Unknown` = not stated.
+- `IdentityLink {left, right, basis, identifier, evidence}`: `right` `Known` or `Ambiguous`, never `left`;
+  `co_declared` (one declaration, two ids) or `shared_identifier` (two declarations, one `identifier`).
+  Never a merge: both ids stay keys.
+- `ClockMapping {source, target, method, anchor, rate, residual_bound}`:
+  `target(t) = anchor.target + rate * (t - anchor.source)` in ticks, `rate` an exact positive fraction,
+  `residual_bound` a `Duration` on the target clock, `validity` on the source clock.
+- `FrameBinding {parent, child, transform, basis, calibration}`: the `FrameTransform` that gives one graph
+  edge its value (`robot_description`, `calibration`, `transform_message`).
+- `RunAssembly {run, rule, members}`: each member a `SourceRevision` id, a role (`recording`,
+  `description`, `context`) and the `EvidenceRef` that places it in the run.
+- `SnapshotBinding {run, snapshot, snapshot_kind}`: the hardware, software, calibration or configuration
+  snapshot a run ran with, over a window on one of its clocks (MVL-38).
+
 ## World and record context (ADR 0020; `model/world.py`)
 
 - `Site` / `Asset`: a place or thing one declaration names (a register row, a manifest entry, a GeoJSON
@@ -296,10 +317,10 @@ a bug, not a value.
 
 | Example | Sources | Records |
 |---|---|---|
-| drone | PX4 ULog | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings |
-| quadruped | ROS 2 bag, URDF, STL mesh | run from bag metadata, joint and trajectory streams with three clocks each, URDF frames, transforms and components, the mesh as geometry |
-| manipulator | MCAP, hand-eye YAML | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit |
-| mobile robot | ROS 1 bag, site register CSV, PNG photo | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture |
+| drone | PX4 ULog | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings; the log as its run's member and three snapshot bindings |
+| quadruped | ROS 2 bag, URDF, STL mesh | run from bag metadata, joint and trajectory streams with three clocks each, URDF frames, transforms and components, the mesh as geometry; the bag's file list, its stated `starting_time` → `log_time` clock mapping, URDF edge bindings |
+| manipulator | MCAP, hand-eye YAML | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit; the calibration's edge binding |
+| mobile robot | ROS 1 bag, site register CSV, PNG photo | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture; the bag as its run's one member |
 
 Every source is a real file, and every record resolves back to it: citations land on real records, pointers,
 rows and cells resolve, and every id a record names is in the example.

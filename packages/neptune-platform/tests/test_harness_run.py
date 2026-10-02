@@ -31,7 +31,7 @@ def test_today_the_compiler_is_real_and_the_rest_are_stubs(tmp_path: Path) -> No
     ]
     ledger = report["stages"][1]
     assert ledger["output"]["contract"] == "catalog-api"
-    assert ledger["output"]["contract_version"] == "1.2.0"
+    assert ledger["output"]["contract_version"] == "1.3.0"
     served = contracts.registry().latest("catalog-api")
     assert served is not None
     assert ledger["output"]["served"] == "goldens"
@@ -92,7 +92,8 @@ def test_a_corrupt_source_is_a_finding_not_a_failed_run(tmp_path: Path) -> None:
     report, code = run(tmp_path / "run", owner_tests=False, corpus_root=tmp_path / "corpus")
     row = report["stages"][0]["output"]["cases"][0]
     assert code == 0 and row["state"] == "committed"
-    assert row["findings"] == {"mcap.truncated": 1}
+    # The adapter's finding, and validation's roll-up of the source it cut short (ADR 0054).
+    assert row["findings"] == {"mcap.truncated": 1, "neptune.validate.source_incomplete": 1}
     assert report["corpus"]["name"] == "custom"
 
 

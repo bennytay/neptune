@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<opencv_storage>
+<image_width>1600</image_width>
+<image_height>1200</image_height>
+<camera_name>"rov_down_cam"</camera_name>
+<camera_matrix type_id="opencv-matrix">
+  <rows>3</rows>
+  <cols>3</cols>
+  <dt>d</dt>
+  <data>
+    7.6811e+02 0. 8.0147e+02 0. 7.6894e+02 5.9602e+02 0. 0. 1.</data></camera_matrix>
+<distortion_coefficients type_id="opencv-matrix">
+  <rows>4</rows>
+  <cols>1</cols>
+  <dt>d</dt>
+  <data>
+    1.0316e-01 -3.4871e-02 1.1957e-02 -3.1e-03</data></distortion_coefficients>
+<fisheye_model>1</fisheye_model>
+<avg_reprojection_error>.Nan</avg_reprojection_error>
+</opencv_storage>

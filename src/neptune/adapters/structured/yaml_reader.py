@@ -29,8 +29,8 @@ from yaml.events import (
 )
 from yaml.tokens import DirectiveToken, ScalarToken, Token
 
-from neptune.adapters.config._scalars import YamlVersion, combine, implicit, tagged
-from neptune.adapters.config._tree import (
+from neptune.adapters.structured.scalars import YamlVersion, combine, implicit, tagged
+from neptune.adapters.structured.tree import (
     Alias,
     Collection,
     Document,

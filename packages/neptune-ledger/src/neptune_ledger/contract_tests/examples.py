@@ -89,6 +89,13 @@ class WorkedPackage:
         assert isinstance(value, Mapping)
         return value
 
+    @property
+    def schema_version(self) -> int:
+        """The schema version the package is written at: its manifest's (root ADR 0037 §1)."""
+        version = self.manifest["schema_version"]
+        assert isinstance(version, int)
+        return version
+
     def records(self, kind: str) -> list[Record]:
         data = self.files.get(f"records/{kind}.jsonl", b"")
         out = [canonical_json.loads(line) for line in data.splitlines()]
