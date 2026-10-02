@@ -17,22 +17,25 @@ import zlib
 from array import array
 from bisect import bisect_left
 from collections import Counter
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
 from neptune.adapters.contract import AdapterConfig, Chunk, ChunkOutput, SourceReader, read_pieces
 from neptune.adapters.mcap.ingest import (
+    HEADER_CLOCK,
     KNOWN,
     LOG_TIME,
     PUBLISH_TIME,
     SEQUENCE,
     UNKNOWN,
     Cite,
+    Records,
     as_int,
     as_list,
     as_place,
     columns,
+    decoding_of,
     ticks,
 )
 from neptune.adapters.mcap.ranges import CHANNEL_ID, index_counts, skipped
@@ -62,12 +65,26 @@ from neptune.adapters.mcap.scan import (
     read_exact,
     scan,
 )
+from neptune.adapters.rosmsg.streams import (
+    Decoding,
+    Undecoded,
+    add_cells,
+    decode_row,
+    undecoded_report,
+)
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.knowledge import Knowledge, Known, NotApplicable, Unknown
 from neptune.model.provenance import Row
-from neptune.model.series import SEQ, SeriesBatch, SeriesColumn, locator_column, state_column
+from neptune.model.series import (
+    SEQ,
+    ColumnType,
+    SeriesBatch,
+    SeriesColumn,
+    locator_column,
+    state_column,
+)
 from neptune.model.time import INT64_MAX
 from neptune.model.world import CellValue, StructuredRecord, StructuredTable
 
@@ -85,11 +102,15 @@ _CHUNK_PROBLEMS: Final = {
 
 @dataclass
 class Slot:
-    """A selected channel's rows here, and the ``seq`` the next chunk's messages start from."""
+    """A selected channel's rows here, and the ``seq`` the next chunk's messages start from;
+    how its payloads decode, its columns, and the payloads this chunk could not decode."""
 
     stream: RecordId
     seq: int
     rows: dict[str, list[object]] = field(default_factory=dict)
+    decoding: Decoding | None = None
+    columns: tuple[tuple[str, ColumnType, bool], ...] = ()
+    undecoded: Undecoded = field(default_factory=Undecoded)
 
 
 # A channel's messages in one chunk, in record order: their offsets and log times, 16 bytes each.
@@ -143,14 +164,26 @@ class Data:
         self.first = as_int(context["first"]) if "first" in context else 0
         self.last = as_int(context["last"]) if "last" in context else None
         self.lead = self.first == 0  # of the planned chunks reading one chunk, the one reporting
-        self.columns = columns(self.chunked)
         self.slots: dict[int, Slot] = {}
-        for item in as_list(context["channels"]):
-            channel, where, seq = as_list(item)
+        entries = [as_list(item) for item in as_list(context["channels"])]
+        declared = Records(source, self.limit)
+        declared.load(
+            (as_place(entry[1]) for entry in entries),
+            (as_place(entry[3]) for entry in entries if len(entry) > 3),
+        )
+        for entry in entries:
+            channel, where, seq = entry[:3]
+            place = as_place(where)
+            schema = as_place(entry[3]) if len(entry) > 3 else None
+            decoding = decoding_of(declared, declared.channel(place), schema, config)
+            usable = decoding if isinstance(decoding, Decoding) else None
+            kinds = columns(self.chunked, decoding)
             self.slots[as_int(channel)] = Slot(
-                self.cite.channel(as_place(where)).stream,
+                self.cite.channel(place).stream,
                 as_int(seq),
-                {name: [] for name, _ in self.columns},
+                {name: [] for name, _, _ in kinds},
+                usable,
+                kinds,
             )
         self.indexes: list[tuple[Place, ChunkIndex]] | None = None
         if "index" in context:
@@ -210,6 +243,7 @@ class Data:
                 "the file ends after a whole record, without a Data End record, summary or footer",
                 {"size": self.source.size},
             )
+        self._payload_findings()
         return ChunkOutput(
             records=tuple(self.records),
             series=tuple(self._batches()),
@@ -331,6 +365,8 @@ class Data:
         seq: int,
         head: tuple[int, int, int, int],
         steps: tuple[tuple[int, int], ...],
+        payload: "Callable[[], bytes | memoryview] | None" = None,
+        size: int | None = None,
     ) -> None:
         _, sequence, log_time, publish_time = head
         if not self.selection.admits(log_time):
@@ -345,6 +381,11 @@ class Data:
         for step, (offset, size) in enumerate(steps):
             rows[locator_column(step, "length")].append(size)
             rows[locator_column(step, "offset")].append(offset)
+        if slot.decoding is not None and payload is not None:
+            decoded = decode_row(slot.decoding, payload, size)
+            add_cells(rows, slot.decoding, decoded, HEADER_CLOCK)
+            if decoded.problem is not None:
+                slot.undecoded.add(decoded.problem.reason, Place(steps))
 
     def _top_message(self, head: bytes, record: TopRecord) -> None:
         """A message outside chunks, in a file whose messages are not chunked.
@@ -358,7 +399,14 @@ class Data:
             return
         seq, slot.seq = slot.seq, slot.seq + 1
         if record.length >= MESSAGE_FIELDS:
-            self._row(slot, seq, _MESSAGE_HEAD.unpack_from(head), record.place.steps)
+
+            def payload() -> bytes:
+                return content_of(self.source, record, MESSAGE_FIELDS)
+
+            # The payload is read from the source only when its size is within the limit.
+            size = record.length - MESSAGE_FIELDS
+            fields = _MESSAGE_HEAD.unpack_from(head)
+            self._row(slot, seq, fields, record.place.steps, payload, size)
 
     def _advance(self, counts: Counter[int]) -> None:
         for channel, slot in self.slots.items():
@@ -400,6 +448,7 @@ class Data:
         messages only counts its way to its first message and stops after its last.
         """
         data, outer, lead = chunk.data, chunk.place.steps[0], self.lead
+        view = memoryview(data)
         first, last, slots = self.first, self.last, self.slots
         read_head, read_channel = _MESSAGE_HEAD.unpack_from, CHANNEL_ID.unpack_from
         held = _Held()
@@ -443,7 +492,14 @@ class Data:
                 continue
             if ordinal < first or (last is not None and ordinal >= last):
                 continue
-            self._row(slot, base[channel] + j, head, (outer, (offset, RECORD_HEADER + length)))
+            start, stop = content + MESSAGE_FIELDS, content + length
+
+            def payload(start: int = start, stop: int = stop) -> memoryview:
+                return view[start:stop]
+
+            self._row(
+                slot, base[channel] + j, head, (outer, (offset, RECORD_HEADER + length)), payload
+            )
         if greatest >= 0:
             held.times = (least, greatest)
         return held
@@ -792,7 +848,26 @@ class Data:
                 yield SeriesBatch(
                     slot.stream,
                     tuple(
-                        SeriesColumn(name, kind, tuple(slot.rows[name]))  # type: ignore[arg-type]
-                        for name, kind in self.columns
+                        SeriesColumn(name, kind, tuple(slot.rows[name]), repeated)  # type: ignore[arg-type]
+                        for name, kind, repeated in slot.columns
                     ),
                 )
+
+    def _payload_findings(self) -> None:
+        """One finding per stream whose payloads this chunk could not all decode."""
+        for channel, slot in sorted(self.slots.items()):
+            first = slot.undecoded.first
+            report = undecoded_report(slot.undecoded, f"channel {channel}", {"id": channel})
+            if report is None or not isinstance(first, Place):
+                continue
+            self.findings.append(
+                self.reporter.finding(
+                    report.code,
+                    report.category,
+                    report.severity,
+                    first,
+                    report.message,
+                    report.details,
+                    records=(slot.stream,),
+                )
+            )

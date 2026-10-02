@@ -4,8 +4,8 @@ Chunk 0 is the declarations; its context names the Header, the Statistics, and t
 referenced schema and each channel is read from. Every other chunk is a data range: its bytes,
 the file's layout, the chunk index records of its chunks (indexed layout), the stretch of a large
 chunk's messages it emits (``first``, ``last``), and per channel with messages in it the ``seq``
-its rows start from (``channels``), or that the config does not select it (``ignore``), or that
-nothing declares it (``undeclared``).
+its rows start from and the record its schema is read from (``channels``), or that the config
+does not select it (``ignore``), or that nothing declares it (``undeclared``).
 """
 
 from neptune.adapters.contract import AdapterConfig, Plan, SourceReader, make_chunk
@@ -66,7 +66,10 @@ def _data(layout: Layout, directory: Directory, chosen: Selection) -> list[tuple
                 continue
             declared, parsed = directory.channels[channel]
             if chosen.selects(parsed.topic):
-                channels.append([channel, declared.place.to_json(), start[channel]])
+                entry: list[JsonValue] = [channel, declared.place.to_json(), start[channel]]
+                if parsed.schema_id and parsed.schema_id in directory.schemas:
+                    entry.append(directory.schemas[parsed.schema_id].place.to_json())
+                channels.append(entry)
             else:
                 ignore.append(channel)
         context: dict[str, JsonValue] = {

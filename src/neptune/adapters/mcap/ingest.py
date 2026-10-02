@@ -38,6 +38,15 @@ from neptune.adapters.mcap.scan import (
     place_from_json,
     read_exact,
 )
+from neptune.adapters.rosmsg.streams import (
+    HEADER_STAMP,
+    Decoding,
+    NotDecoded,
+    decoded_columns,
+    decoding_report,
+    header_domain,
+    plan_stream,
+)
 from neptune.identity.provenance import EvidenceRecord, evidence_record_id
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
@@ -74,27 +83,53 @@ from neptune.model.time import INT64_MAX, NANOSECOND, ClockRole, Timestamp
 TIME_FIELD: Final = "mcap:time_field"
 MAGIC_PLACE: Final = Place(((0, len(MAGIC)),))
 LOG_TIME, PUBLISH_TIME = time_column(0), time_column(1)
+HEADER_CLOCK: Final = 2  # a leading header's stamp, where the payload decodes
+RESERVED: Final = frozenset({"sequence"})  # value/sequence is the Message record's own field
 SEQUENCE: Final = value_column("sequence")
 KNOWN, UNKNOWN = "known", "unknown"
 
 
-def columns(chunked: bool) -> tuple[tuple[str, ColumnType], ...]:
-    """Every column of an MCAP stream's series, in name order, with its type."""
+def columns(
+    chunked: bool, decoding: "Decoding | NotDecoded | None" = None
+) -> tuple[tuple[str, ColumnType, bool], ...]:
+    """Every column of an MCAP stream's series, in name order, with its type and whether it is
+    repeated: the message's own, then what its payload decodes to (ADR 0068 §1)."""
     steps = (0, 1) if chunked else (0,)
     found = [
-        (SEQ, ColumnType.INT64),
-        (LOG_TIME, ColumnType.INT64),
-        (PUBLISH_TIME, ColumnType.INT64),
-        (state_column(LOG_TIME), ColumnType.STRING),
-        (state_column(PUBLISH_TIME), ColumnType.STRING),
-        (SEQUENCE, ColumnType.UINT32),
+        (SEQ, ColumnType.INT64, False),
+        (LOG_TIME, ColumnType.INT64, False),
+        (PUBLISH_TIME, ColumnType.INT64, False),
+        (state_column(LOG_TIME), ColumnType.STRING, False),
+        (state_column(PUBLISH_TIME), ColumnType.STRING, False),
+        (SEQUENCE, ColumnType.UINT32, False),
     ]
     for step in steps:
         found += [
-            (locator_column(step, "length"), ColumnType.INT64),
-            (locator_column(step, "offset"), ColumnType.INT64),
+            (locator_column(step, "length"), ColumnType.INT64, False),
+            (locator_column(step, "offset"), ColumnType.INT64, False),
         ]
+    found += decoded_columns(decoding, HEADER_CLOCK)
     return tuple(sorted(found))
+
+
+def decoding_of(
+    read: "Records", channel: Channel, schema: Place | None, config: AdapterConfig
+) -> Decoding | NotDecoded:
+    """How a channel's payloads decode, from what the channel and its schema declare."""
+    name = encoding = definition = None
+    if schema is not None:
+        parsed = read.schema(schema)
+        name, encoding = parsed.name.value, parsed.encoding.value
+        start, length = parsed.data
+        definition = read.content(schema)[start : start + length] if length else None
+    return plan_stream(
+        config=config,
+        message_encoding=channel.message_encoding.value,
+        schema_encoding=encoding,
+        schema_name=name,
+        definition=definition,
+        reserved=RESERVED,
+    )
 
 
 def series_template(source: SourceReader, chunked: bool) -> SeriesProvenance:
@@ -382,6 +417,15 @@ class Declarations:
             declared_monotonic=Unknown(),
         )
         name, encoding, definition = self._schema(channel, place, ids.stream)
+        schema_place = self.schemas.get(channel.schema_id) if channel.schema_id else None
+        decoding = decoding_of(self.read, channel, schema_place, cite.config)
+        clocks = [cite.log_time, ids.publish]
+        records: list[EvidenceRecord] = [publish]
+        if isinstance(decoding, Decoding) and decoding.has_header:
+            assert schema_place is not None and isinstance(definition, Known)
+            header = self._header_clock(place, scope, definition.value)
+            clocks.append(header.id)
+            records.append(header)
         count: Knowledge[int] = Unknown()
         if channel_id in counts:
             value, entry = counts[channel_id]
@@ -396,30 +440,23 @@ class Declarations:
             schema_definition=definition,
             message_encoding=text_knowledge(channel.message_encoding),
             metadata=metadata,
-            clocks=(cite.log_time, ids.publish),
+            clocks=tuple(clocks),
             message_count=count,
             first=Unknown(),
             last=Unknown(),
             series=series_template(cite.source, self.chunked),
         )
-        self.records += [publish, stream]
+        self.records += [*records, stream]
         self.series.append(
             SeriesBatch(
                 stream.id,
-                tuple(SeriesColumn(column, kind, ()) for column, kind in columns(self.chunked)),
+                tuple(
+                    SeriesColumn(column, kind, (), repeated)
+                    for column, kind, repeated in columns(self.chunked, decoding)
+                ),
             )
         )
-        shown = channel.message_encoding.shown
-        self.finding(
-            "payload_not_decoded",
-            FindingCategory.UNSUPPORTED,
-            Severity.INFO,
-            place,
-            f"channel {channel_id}'s message payloads are not decoded; each row cites its"
-            " message's bytes",
-            {"id": channel_id, "message_encoding": shown},
-            records=(stream.id,),
-        )
+        self._decoding_findings(channel, place, stream.id, decoding)
         encoding_text = channel.message_encoding.value
         if encoding_text and encoding_text not in MESSAGE_ENCODINGS:
             self.finding(
@@ -449,6 +486,37 @@ class Declarations:
                     "topic_selected": selected,
                 },
                 records=(stream.id,),
+            )
+
+    def _header_clock(
+        self, place: Place, scope: tuple[str, ...], definition: EvidenceRef
+    ) -> TimestampDomain:
+        """The clock a leading ``std_msgs/Header``'s stamp reads (ADR 0068 §2)."""
+        cite, where = self.cite, (time_field(HEADER_STAMP),)
+        return header_domain(
+            record_id=cite.record_id(TimestampDomain.kind, place, *where),
+            provenance=cite.provenance(place, *where),
+            scope=scope,
+            definition=Provenance(definition, cite.transform.id, AssertionKind.STATED),
+        )
+
+    def _decoding_findings(
+        self, channel: Channel, place: Place, stream: RecordId, decoding: Decoding | NotDecoded
+    ) -> None:
+        details: dict[str, JsonValue] = {
+            "id": channel.id,
+            "message_encoding": channel.message_encoding.shown,
+        }
+        report = decoding_report(decoding, f"channel {channel.id}", details)
+        if report is not None:
+            self.finding(
+                report.code,
+                report.category,
+                report.severity,
+                place,
+                report.message,
+                report.details,
+                records=(stream,),
             )
 
     def _metadata(

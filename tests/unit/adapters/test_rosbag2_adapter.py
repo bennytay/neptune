@@ -162,10 +162,10 @@ def test_inspect_reads_the_schema_only() -> None:
 # --- sqlite3 storage -----------------------------------------------------------------------------
 
 
-def test_a_clean_database_reads_with_no_findings_but_the_undecoded_payloads(
+def test_a_clean_database_reads_with_no_findings_its_payloads_decoded(
     sqlite_run: SourceOutput,
 ) -> None:
-    assert codes(sqlite_run) == ["payload_not_decoded"] * 3
+    assert codes(sqlite_run) == []  # every type is in message_definitions, every payload CDR
     assert len(records(sqlite_run, Run)) == 1
     assert len(records(sqlite_run, TimestampDomain)) == 1
     assert len(records(sqlite_run, Stream)) == 3
@@ -246,7 +246,7 @@ def test_a_database_with_no_messages_has_streams_and_an_unknown_extent(tmp_path:
     (run_record,) = records(out, Run)
     assert (run_record.first, run_record.last) == (Unknown(), Unknown())
     assert len(records(out, Stream)) == 3
-    assert codes(out) == ["payload_not_decoded"] * 3
+    assert codes(out) == []
 
 
 def test_output_is_independent_of_how_planning_cuts_the_database() -> None:

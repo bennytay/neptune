@@ -20,12 +20,15 @@ from dataclasses import dataclass, field
 
 from neptune.adapters.contract import AdapterConfig, Chunk, ChunkOutput, SourceReader
 from neptune.adapters.rosbag1.ingest import (
+    HEADER_CLOCK,
     TIME,
     Cite,
+    ConnectionReader,
     as_int,
     as_list,
     as_place,
     columns,
+    decoding_of,
 )
 from neptune.adapters.rosbag1.records import (
     FieldError,
@@ -49,10 +52,23 @@ from neptune.adapters.rosbag1.scan import (
     scan,
     whole,
 )
+from neptune.adapters.rosmsg.streams import (
+    Decoding,
+    Undecoded,
+    add_cells,
+    decode_row,
+    undecoded_report,
+)
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import RecordId
 from neptune.model.jsonvalue import JsonValue
-from neptune.model.series import SEQ, SeriesBatch, SeriesColumn, locator_column
+from neptune.model.series import (
+    SEQ,
+    ColumnType,
+    SeriesBatch,
+    SeriesColumn,
+    locator_column,
+)
 
 _CHUNK_PROBLEMS = {
     "too_large": ("record_too_large", FindingCategory.LIMIT),
@@ -66,11 +82,15 @@ _LISTED = 20  # entries a finding's details list before they are counted
 
 @dataclass
 class Slot:
-    """A declared connection's rows here, and the ``seq`` the next chunk's messages start from."""
+    """A declared connection's rows here, and the ``seq`` the next chunk's messages start from;
+    how its payloads decode, its columns, and the payloads this chunk could not decode."""
 
     stream: RecordId
     seq: int
-    rows: dict[str, list[int]] = field(default_factory=dict)
+    rows: dict[str, list[object]] = field(default_factory=dict)
+    decoding: Decoding | None = None
+    columns: tuple[tuple[str, ColumnType, bool], ...] = ()
+    undecoded: Undecoded = field(default_factory=Undecoded)
 
 
 @dataclass(frozen=True)
@@ -131,14 +151,21 @@ class Data:
         self.first = as_int(context["first"]) if "first" in context else 0
         self.last = as_int(context["last"]) if "last" in context else None
         self.lead = self.first == 0  # of the planned chunks reading one chunk, the one reporting
-        self.columns = columns()
         self.slots: dict[int, Slot] = {}
         self.declared: dict[int, tuple[Place, bytes]] = {}
-        for item in as_list(context["channels"]):
-            conn, where, seq = as_list(item)
+        entries = [as_list(item) for item in as_list(context["channels"])]
+        reader = ConnectionReader(source, self.limits)
+        # In file order, so each chunk that holds declarations is decompressed once.
+        for conn, where, seq in sorted(entries, key=lambda item: as_place(item[1]).steps):
             place = as_place(where)
+            decoding = decoding_of(parse_connection(reader.record(place)), config)
+            kinds = columns(decoding)
             self.slots[as_int(conn)] = Slot(
-                self.cite.stream(place), as_int(seq), {name: [] for name, _ in self.columns}
+                self.cite.stream(place),
+                as_int(seq),
+                {name: [] for name, _, _ in kinds},
+                decoding if isinstance(decoding, Decoding) else None,
+                kinds,
             )
             if self.indexed and self.lead:
                 self._declare(as_int(conn), place)
@@ -196,6 +223,7 @@ class Data:
             for k, unit in enumerate(self.units):
                 end = positions[k + 1] if k + 1 < len(positions) else self.end
                 self._walk(unit[0], end, unit)
+        self._payload_findings()
         return ChunkOutput(series=tuple(self._batches()), findings=tuple(self.findings))
 
     def _planned(self, info: Place | None) -> Planned | None:
@@ -467,9 +495,12 @@ class Data:
             rows = slot.rows
             rows[SEQ].append(base[conn] + j)
             rows[TIME].append(tick)
-            for step, (offset, size) in enumerate((outer, (inner.offset, inner.length))):
+            steps = (outer, (inner.offset, inner.length))
+            for step, (offset, size) in enumerate(steps):
                 rows[locator_column(step, "length")].append(size)
                 rows[locator_column(step, "offset")].append(offset)
+            if slot.decoding is not None:
+                self._decode(slot, chunk.data, inner.offset, inner.length, Place(steps))
         held.walk = records
         if greatest >= 0:
             held.times = (least, greatest)
@@ -665,7 +696,37 @@ class Data:
             [index.conn, index.count, found] if index is not None else [-1, -1, -1]
         )
 
+    def _decode(self, slot: Slot, data: bytes, offset: int, length: int, place: Place) -> None:
+        """A message's payload into its row's value cells and header clock (ADR 0068 §1): the
+        data after the record's header and the data's own length."""
+        assert slot.decoding is not None
+        header_length = int.from_bytes(data[offset : offset + 4], "little")
+        start = offset + 8 + header_length
+        decoded = decode_row(slot.decoding, memoryview(data)[start : offset + length])
+        add_cells(slot.rows, slot.decoding, decoded, HEADER_CLOCK)
+        if decoded.problem is not None:
+            slot.undecoded.add(decoded.problem.reason, place)
+
     # -- output --
+
+    def _payload_findings(self) -> None:
+        """One finding per stream whose payloads this chunk could not all decode."""
+        for conn, slot in sorted(self.slots.items()):
+            first = slot.undecoded.first
+            report = undecoded_report(slot.undecoded, f"connection {conn}", {"id": conn})
+            if report is None or not isinstance(first, Place):
+                continue
+            self.findings.append(
+                self.reporter.finding(
+                    report.code,
+                    report.category,
+                    report.severity,
+                    first,
+                    report.message,
+                    report.details,
+                    records=(slot.stream,),
+                )
+            )
 
     def _batches(self) -> Iterator[SeriesBatch]:
         for slot in self.slots.values():
@@ -673,8 +734,8 @@ class Data:
                 yield SeriesBatch(
                     slot.stream,
                     tuple(
-                        SeriesColumn(name, kind, tuple(slot.rows[name]))
-                        for name, kind in self.columns
+                        SeriesColumn(name, kind, tuple(slot.rows[name]), repeated)  # type: ignore[arg-type]
+                        for name, kind, repeated in slot.columns
                     ),
                 )
 
