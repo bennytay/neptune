@@ -74,7 +74,7 @@ from neptune.adapters.contract import (
     chunk_from_json,
     configure,
 )
-from neptune.adapters.registry import AdapterRegistry, SelectionStatus
+from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatus
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.layout import Layout, layout_from_scan
@@ -95,6 +95,7 @@ from neptune.discovery.source import (
 from neptune.discovery.verify import short_read_finding, verify_artifact
 from neptune.identity import canonical_json
 from neptune.identity.revisions import Observation, SourceLedger
+from neptune.manifest import LoadedManifest, ManifestError
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
@@ -122,6 +123,7 @@ from neptune.runtime.cache import (
     chunk_laws_key,
     explain_plan,
 )
+from neptune.runtime.declared import Declarations
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
 from neptune.runtime.lineage import Failure, Law, Step, failure_from_json, type_name
 from neptune.runtime.sandbox import (
@@ -153,6 +155,7 @@ from neptune.store.workspace import (
 
 DEFAULT_ATTEMPTS: Final = 2
 ADAPTER_FAILED: Final = f"{PROBE_ID}.adapter_failed"
+PROBE_AMBIGUOUS: Final = f"{PROBE_ID}.ambiguous"
 # What the runtime's own reads of a source raise: opening it, its size, its head. An adapter's
 # reads are the adapter's: anything but ``SourceChangedError`` from ``plan`` or ``ingest`` is its
 # failure (``plan_failed``, ``chunk_failed``).
@@ -199,6 +202,9 @@ class JobOptions:
     against the rules' readings; it is the grouping transform's config. ``ignore`` says which
     ignore rules the walk applies (ADR 0043): by default version-control internals, OS metadata
     and the root's ``.neptune-ignore``; whatever they leave unread is a finding naming the rule.
+    ``manifest`` is the root's manifest, read (ADR 0047): its runs are the declared sessions (so
+    ``grouping`` stays default), its adapter options join ``config`` (never the same key twice),
+    and its source rules choose adapters, each set against the probe engine's observations.
     """
 
     attempts: int = DEFAULT_ATTEMPTS
@@ -209,8 +215,11 @@ class JobOptions:
     allow_degraded_sandbox: bool = False
     grouping: GroupingConfig = field(default_factory=GroupingConfig)
     ignore: IgnorePolicy = field(default_factory=IgnorePolicy)
+    manifest: LoadedManifest | None = None
 
     def __post_init__(self) -> None:
+        if self.manifest is not None and not isinstance(self.manifest, LoadedManifest):
+            raise JobError(f"manifest must be a LoadedManifest, got {self.manifest!r}")
         if not isinstance(self.ignore, IgnorePolicy):
             raise JobError(f"ignore must be an IgnorePolicy, got {self.ignore!r}")
         if isinstance(self.attempts, bool) or not isinstance(self.attempts, int):
@@ -273,6 +282,7 @@ class _Source:
     locations: list[LocalPath | RawLocalPath] = field(default_factory=list)  # every one, walk order
     probe: SourceProbe | None = None  # what the probe engine found, once probed
     inspection: explain.Inspection | None = None  # the adapter's ``inspect``, in a dry run
+    pin: explain.Pin | None = None  # the manifest rule that chose its adapter (ADR 0047)
 
     @property
     def content_id(self) -> ContentId:
@@ -499,7 +509,9 @@ class IngestJob:
         self.workspace = workspace
         self.registry = registry
         self.options = options if options is not None else JobOptions()
-        self._configs = self._configure(registry, self.options.config)
+        self._declared = self._declarations(registry, self.options)
+        config = self._declared.config if self._declared is not None else self.options.config
+        self._configs = self._configure(registry, config)
         self._on_event: EventSink = on_event if on_event is not None else (lambda event: None)
         self._cancel = cancel
         self.job = self.options.job if self.options.job is not None else uuid.uuid4().hex
@@ -539,7 +551,14 @@ class IngestJob:
         self._engine = ProbeEngine(registry)
         self._derivatives: dict[str, DerivativeCache] = {}
         self._receipt: RecordId | None = None
-        self._grouper = LayoutGrouper(self.options.grouping)
+        self._grouper = (
+            self._declared.grouper()
+            if self._declared is not None
+            else LayoutGrouper(self.options.grouping)
+        )
+        if self._declared is not None:  # the manifest's own findings name it
+            manifest = self._declared.loaded.transform
+            self._producers[manifest.id] = manifest
         self._layout = Layout(())
         self._grouping: Grouping | None = None
         self._dry = False  # a dry run: stops after plan and explains (ADR 0035, 0044)
@@ -547,6 +566,16 @@ class IngestJob:
         self._inspected = 0  # adapter ``inspect`` calls, in a dry run
         self._explanation: explain.Explanation | None = None
         self._published: ContentId | None = None  # the package, once renamed into place
+
+    @staticmethod
+    def _declarations(registry: AdapterRegistry, options: JobOptions) -> Declarations | None:
+        """The manifest made ready for this job, checked before any work (ADR 0047 §5)."""
+        if options.manifest is None:
+            return None
+        try:
+            return Declarations.build(options.manifest, registry, options.config, options.grouping)
+        except (ManifestError, ConfigError) as exc:
+            raise JobError(f"the manifest cannot be used: {exc}") from exc
 
     @staticmethod
     def _configure(
@@ -750,8 +779,11 @@ class IngestJob:
                     probe=item.probe,
                     adapter=adapter,
                     verdicts=(
-                        explain.adapter_verdicts(item.probe, descriptors) if item.probe else ()
+                        explain.adapter_verdicts(item.probe, descriptors, item.pin)
+                        if item.probe
+                        else ()
                     ),
+                    pin=item.pin,
                     inspection=item.inspection,
                     plan=plan,
                     heavy=heavy,
@@ -1081,6 +1113,7 @@ class IngestJob:
             for absence in result.absences:
                 self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
             self._sources = list(by_content.values())
+            self._check_manifest(result.observations)
             # Grouping reads the revisions the package lists, so it recomputes from the package.
             self._layout = layout_from_scan(listed, result.symlinks)
             skipped = {
@@ -1106,6 +1139,18 @@ class IngestJob:
                 },
             )
         return scanned
+
+    def _check_manifest(self, observations: Iterable[Observation]) -> None:
+        """The manifest the job was given is the one this scan hashed: same place, same bytes."""
+        if self._declared is None:
+            return
+        loaded = self._declared.loaded
+        seen = {o.revision.location: o.revision.content_id for o in observations}
+        if loaded.location not in seen:
+            problem = f"the manifest {loaded.location.path} was not read by the walk (ignored?)"
+            raise JobError(problem) from ManifestError(problem)
+        if seen[loaded.location] != loaded.content_id:
+            raise JobError(f"the manifest {loaded.location.path} changed while the job read it")
 
     # --- inspect -------------------------------------------------------------------------------
 
@@ -1175,6 +1220,10 @@ class IngestJob:
                             self._inspect_source(item, reader)
                 if probed is None:
                     counts["unreadable"] += 1
+            if self._declared is not None:
+                every = (location for item in self._sources for location in item.locations)
+                for finding in self._declared.unmatched(every):
+                    self._record(finding, self._declared.loaded.transform)
             self._group()
             self._finish(Phase.INSPECT, dict(counts))
 
@@ -1186,7 +1235,16 @@ class IngestJob:
             "location": item.location.to_json(),
             "source": item.content_id,
         }
-        if selection.status is SelectionStatus.SELECTED:
+        if (pinned := self._choose(item, probed)) is not None:  # the manifest's (ADR 0047)
+            counts["selected"] += 1
+            details |= {
+                "adapter": pinned.adapter,
+                "confidence": pinned.confidence,
+                "manifest": True,
+                "version": pinned.version,
+            }
+            self._emit(events.SOURCE_SELECTED, details)
+        elif selection.status is SelectionStatus.SELECTED:
             best = selection.candidates[0]
             item.adapter = self.registry.get(best.adapter)
             item.config = self._configs[best.adapter]
@@ -1232,6 +1290,34 @@ class IngestJob:
             item.inspection = explain.Inspection(None, (), failure)
         else:
             item.inspection = explain.Inspection(None, (), outcome.cause())
+
+    def _choose(self, item: _Source, probed: SourceProbe) -> Candidate | None:
+        """Apply the manifest's source rules to ``item``; the adapter they selected, if any."""
+        if self._declared is None:
+            return None
+        choice = self._declared.choose(
+            item.content_id, item.artifact.size, item.locations, probed.selection
+        )
+        for finding in choice.findings:
+            self._record(finding, self._declared.loaded.transform)
+        if choice.candidate is None or choice.config is None:
+            return None
+        if choice.answers_tie:  # the tie is answered: the manifest's finding says how
+            whole = EvidenceRef(item.content_id, (ByteRange(0, item.artifact.size),))
+            for finding in probed.findings:
+                if finding.code == PROBE_AMBIGUOUS and finding.subject == whole:
+                    self._findings.pop(finding.id, None)
+        item.adapter = self.registry.get(choice.candidate.adapter)
+        item.config = choice.config
+        if choice.rule is not None:
+            loaded = self._declared.loaded
+            item.pin = explain.Pin(
+                choice.candidate.adapter,
+                choice.rule.pointer,
+                loaded.location.path,
+                loaded.content_id,
+            )
+        return choice.candidate
 
     def _group(self) -> None:
         """Stage 5, at the end of inspect so a dry run sees it too: propose sessions from this
@@ -1876,6 +1962,8 @@ class IngestJob:
             # always names the guarantees it could not give; a sound run adds a transform only to
             # carry a finding, keeping its lineage unchanged (ADR 0030).
             cited = {finding.transform for finding in self._findings.values()}
+            if self._declared is not None:  # a package made under a manifest names it
+                cited.add(self._declared.loaded.transform.id)
             if self._lost_guarantees:
                 cited.add(self.transform.id)
             derived = None
@@ -1976,8 +2064,13 @@ def collect(
     Removes the rest. Refused (``JobError``) while a job holds the workspace, or when the
     workspace cannot be read well enough to tell what is reachable.
     """
-    configs = IngestJob._configure(registry, (options or JobOptions()).config)
+    options = options or JobOptions()
+    declared = IngestJob._declarations(registry, options)
+    config = declared.config if declared is not None else options.config
+    live = {c.transform.id for c in IngestJob._configure(registry, config).values()}
+    if declared is not None:
+        live |= {c.transform.id for c in declared.configs()}
     try:
-        return workspace.collect({config.transform.id for config in configs.values()})
+        return workspace.collect(live)
     except (WorkspaceError, ValueError, TypeError, OSError) as exc:
         raise JobError(f"the workspace cannot be collected: {exc}") from exc
