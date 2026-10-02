@@ -543,6 +543,29 @@ def test_depth_element_and_size_limits_are_exact() -> None:
     assert codes(run(data, max_bytes=len(data) - 1)) == ["urdf.too_large"]
 
 
+def test_an_expansion_is_bounded_against_its_source_exactly() -> None:
+    calls = b"".join(b'<xacro:wheel n="%d"/>' % i for i in range(8))
+    data = (
+        b'<robot name="r" xmlns:xacro="http://www.ros.org/wiki/xacro">'
+        b'<xacro:macro name="wheel" params="n"><link name="wheel_${n}" note="'
+        + b"w" * 400
+        + b'"/></xacro:macro>'
+        + calls
+        + b"</robot>"
+    )
+    (expansion,) = records(run(data, max_expansion_ratio=1000), DescriptionExpansion)
+    assert expansion.size > 2 * len(data)  # a real amplification
+    fits = -(-expansion.size // len(data))  # the smallest ratio that holds it
+    assert not run(data, max_expansion_ratio=fits).findings()
+    (finding,) = run(data, max_expansion_ratio=fits - 1).findings()
+    assert finding.code == "urdf.limit_exceeded"
+    assert finding.details["limit"] == (fits - 1) * len(data)
+    assert "max_expansion_ratio" in finding.message
+    # max_bytes still bounds it when it is the smaller.
+    (finding,) = run(data, max_bytes=len(data), max_expansion_ratio=1000).findings()
+    assert finding.code == "urdf.limit_exceeded" and "max_bytes" in finding.message
+
+
 def test_an_attribute_at_the_limit_is_read_and_one_past_it_is_not() -> None:
     from neptune.adapters.urdf.xmltree import MAX_VALUE_CHARS
 

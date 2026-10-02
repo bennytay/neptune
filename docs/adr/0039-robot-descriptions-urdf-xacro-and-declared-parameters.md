@@ -52,7 +52,7 @@ The forces:
      `sensor` components. Sensors get no frames of their own: inventing a frame name is a guess,
      so a placement is the link's frame plus the declared pose parameters.
 3. **`hardware_specification`: what a declaration states about one component or configuration**
-   (the extension rule's companion kind; this and §4's and §5's kinds are `since` 3). `subject` names the `HardwareComponent` or
+   (the extension rule's companion kind; this and §4's and §5's kinds are `since` 5). `subject` names the `HardwareComponent` or
    `HardwareConfiguration` it adds to; `parameters` are `DeclaredParameter`s, sorted, unique, at
    least one. `CalibrationParameter` is generalised as `DeclaredParameter` (same JSON; the old
    name stays an alias).
@@ -103,7 +103,8 @@ The forces:
      chunk id covers (cache and resume would serve stale output), and its records would cite
      another source. The included file in the same ingest root is ingested as its own source.
    - Bounds: macro nesting 64, 500,000 expansion steps, the configured `max_elements`,
-     `max_depth` and `max_bytes` for the expansion, and a nesting budget: each nested element,
+     `max_depth` and `max_bytes` for the expansion, `max_expansion_ratio` (64) times the source's
+     size, so a few hundred bytes of macros never become megabytes of records, and a nesting budget: each nested element,
      call or conditional and each property evaluated inside another is counted at the Python
      frames it may take, against 640. So the expander never reaches Python's recursion limit,
      and where a bound is met depends on the document alone, never on the stack it runs on.
@@ -133,7 +134,11 @@ The forces:
 8. **A description names a model, never a machine** (ADR 0003, ADR 0019 §1). No `Machine` is
    emitted. Identical files are one artifact read once (ADR 0009); two robots that ship it stay
    two robots, because nothing in the configuration names a machine.
-9. **Findings** are `urdf.<name>`, documented in the descriptor, each once per source; past 1,000
+9. **Stated, except what the adapter measures** (ADR 0052 §3). Everything a description gives
+   (components, frames, transforms, parameters, extensions, a Xacro argument's text) is what the
+   file declares about a robot, so `stated`. Only a `description_expansion`'s own provenance (its
+   `digest` and `size`, which the adapter computes) is `observed`.
+10. **Findings** are `urdf.<name>`, documented in the descriptor, each once per source; past 1,000
    the first 1,000 are kept and `urdf.findings_capped` counts the rest.
 
 ## Alternatives considered

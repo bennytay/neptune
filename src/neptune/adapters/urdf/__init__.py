@@ -132,6 +132,11 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ConfigOption(
             "max_elements", 50_000, "a document or expansion with more elements is not read"
         ),
+        ConfigOption(
+            "max_expansion_ratio",
+            64,
+            "a Xacro expansion more than this many times the source's size is reported, not read",
+        ),
     ),
     libraries=(),
     finding_codes=(
@@ -155,7 +160,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         _code(
             "limit_exceeded",
-            "max_depth, max_elements, max_bytes or a fixed bound stopped the read (limit, error)",
+            "max_depth, max_elements, max_bytes, max_expansion_ratio or a fixed bound stopped the"
+            " read (limit, error)",
         ),
         _code(
             "link_undeclared",
@@ -417,15 +423,20 @@ class UrdfAdapter:
         whole: EvidenceRef,
         limits: dict[str, int],
     ) -> ChunkOutput:
-        max_bytes = config.integer("max_bytes")
+        # The expansion is bounded absolutely and against the source, so a few hundred bytes of
+        # macros cannot become max_bytes of records (amplification).
+        ratio = config.integer("max_expansion_ratio")
+        bound, most = "max_bytes", config.integer("max_bytes")
+        if ratio * source.size < most:
+            bound, most = "max_expansion_ratio times the source's size", ratio * source.size
         try:
             try:
-                expansion = xacro.expand(root, max_chars=max_bytes, **limits)
+                expansion = xacro.expand(root, max_chars=most, chars_bound=bound, **limits)
                 expanded = serialize(expansion.root)
             except RecursionError:  # a safety net: the bounds keep well inside the limit
                 raise xacro.ExpansionLimit("nests deeper than Python can follow", 0, root) from None
-            if len(expanded) > max_bytes:
-                raise xacro.ExpansionLimit("is larger than max_bytes", max_bytes, root)
+            if len(expanded) > most:
+                raise xacro.ExpansionLimit(f"is larger than {bound}", most, root)
         except xacro.ExpansionLimit as limit:
             finding = _finding(
                 config,

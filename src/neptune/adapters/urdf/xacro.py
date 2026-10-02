@@ -245,10 +245,11 @@ def _parse_param(token: str) -> tuple[str, tuple[bool, str | None] | None]:
 
 
 class _Expander:
-    def __init__(self, max_elements: int, max_depth: int, max_chars: int) -> None:
+    def __init__(self, max_elements: int, max_depth: int, max_chars: int, chars_bound: str) -> None:
         self.max_elements = max_elements
         self.max_depth = max_depth
         self.max_chars = max_chars
+        self.chars_bound = chars_bound
         self.problems: list[Problem] = []
         self.arguments: dict[str, Argument] = {}
         self.elements = 0
@@ -281,7 +282,7 @@ class _Expander:
     def produced(self, text: str, element: Element) -> None:
         self.chars += len(text)
         if self.chars > self.max_chars:
-            raise ExpansionLimit("is larger than max_bytes", self.max_chars, element)
+            raise ExpansionLimit(f"is larger than {self.chars_bound}", self.max_chars, element)
 
     # Values
 
@@ -787,9 +788,19 @@ class _Expander:
         return _Entry(literal(result), element)
 
 
-def expand(root: Element, *, max_elements: int, max_depth: int, max_chars: int) -> Expansion:
-    """Expand a Xacro document's root; ``ExpansionLimit`` past a bound."""
-    expander = _Expander(max_elements, max_depth, max_chars)
+def expand(
+    root: Element,
+    *,
+    max_elements: int,
+    max_depth: int,
+    max_chars: int,
+    chars_bound: str = "max_bytes",
+) -> Expansion:
+    """Expand a Xacro document's root; ``ExpansionLimit`` past a bound.
+
+    ``chars_bound`` names the setting ``max_chars`` comes from, for the limit's message.
+    """
+    expander = _Expander(max_elements, max_depth, max_chars, chars_bound)
     out = expander.expand(root)
     arguments = sorted(expander.arguments.values(), key=lambda argument: argument.name)
     return Expansion(out, arguments, expander.problems)
