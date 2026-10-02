@@ -4,6 +4,7 @@ length. Object-store reads and Foxglove reads go through the same code, so both 
 
 import socket
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -23,13 +24,17 @@ from neptune_deploy.sources.object_store import (
 )
 from neptune_deploy.sources.object_store.transport import (
     MAX_TIMEOUT,
+    DeadlineExceeded,
     Endpoint,
     ShortRead,
     Transport,
     TransportError,
 )
+from neptune_deploy.sources.records import RecordConfigError, jira_source
+from neptune_deploy.sources.records.http import RecordTransport
 from neptune_deploy.sources.rerun import rerun_source
 from neptune_deploy.sources.roboto import roboto_source
+from neptune_deploy.sources.roboto.client import RobotoTransport
 
 BODY = b"x" * 100
 
@@ -160,6 +165,12 @@ def _refusals(tmp_path: Path, timeout: float) -> dict[str, Callable[[], object]]
             options={"storage": {"s3": {"timeout": timeout}}},
             credentials=s3_keys,
         ),
+        "jira": lambda: jira_source(
+            "jira://a.atlassian.net/OPS",
+            network=network,
+            options={"timeout": timeout},
+            environ={"NEPTUNE_JIRA_EMAIL": "ops@example.com", "NEPTUNE_JIRA_API_TOKEN": "t"},
+        ),
         "foxglove": lambda: foxglove_source(
             "foxglove://prj_a",
             network=network,
@@ -170,15 +181,15 @@ def _refusals(tmp_path: Path, timeout: float) -> dict[str, Callable[[], object]]
 
 
 @pytest.mark.parametrize("timeout", [1e10, MAX_TIMEOUT + 1, 10**30, float("inf"), float("nan")])
-@pytest.mark.parametrize("connector", ["s3", "gcs", "azure", "roboto", "rerun", "foxglove"])
+@pytest.mark.parametrize("connector", ["s3", "gcs", "azure", "roboto", "rerun", "jira", "foxglove"])
 def test_an_absurd_timeout_is_a_configuration_error_for_every_connector(
     tmp_path: Path, connector: str, timeout: float
 ) -> None:
-    with pytest.raises((ObjectStoreConfigError, FoxgloveConfigError)):
+    with pytest.raises((ObjectStoreConfigError, FoxgloveConfigError, RecordConfigError)):
         _refusals(tmp_path, timeout)[connector]()
 
 
-@pytest.mark.parametrize("connector", ["s3", "gcs", "azure", "roboto", "rerun", "foxglove"])
+@pytest.mark.parametrize("connector", ["s3", "gcs", "azure", "roboto", "rerun", "jira", "foxglove"])
 def test_the_refusal_is_the_timeout_and_nothing_else_in_the_fixture(
     tmp_path: Path, connector: str
 ) -> None:
@@ -239,3 +250,69 @@ def test_a_complete_body_is_returned_whole(tmp_path: Path) -> None:
     with serve_raw(_short(len(BODY), BODY)) as endpoint:
         transport = Transport(endpoint, _online(tmp_path), "test")
         assert transport.get("/x").body(1000) == BODY
+
+
+# --- The deadline reaches a body that trickles in after ``Connection: close`` --------------------
+
+
+@contextmanager
+def serve_trickle(head: bytes) -> Iterator[Endpoint]:
+    """A server that sends ``head`` and then one byte every 0.2 s, far longer than any deadline."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+
+    def run() -> None:
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                return
+            threading.Thread(target=drip, args=(conn,), daemon=True).start()
+
+    def drip(conn: socket.socket) -> None:
+        with conn:
+            conn.settimeout(2)
+            try:
+                _drain(conn)
+                conn.sendall(head)
+                for _ in range(200):
+                    time.sleep(0.2)
+                    conn.sendall(b"x")
+            except OSError:
+                return
+
+    threading.Thread(target=run, daemon=True).start()
+    try:
+        yield Endpoint.parse(f"http://127.0.0.1:{listener.getsockname()[1]}")
+    finally:
+        listener.close()
+
+
+CLOSE = b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n"
+HTTP10 = b"HTTP/1.0 200 OK\r\n\r\n"
+
+
+def _transports(endpoint: Endpoint, network: Workspace) -> dict[str, Transport]:
+    return {
+        "object_store": Transport(endpoint, network, "test", timeout=1.0),
+        "foxglove": FoxgloveTransport(endpoint, network, "test", timeout=1.0),
+        "roboto": RobotoTransport(endpoint, network, "test", timeout=1.0),
+        "records": RecordTransport(endpoint, network, "test", timeout=1.0),
+    }
+
+
+@pytest.mark.parametrize("head", [CLOSE, HTTP10], ids=["connection-close", "http-1.0"])
+@pytest.mark.parametrize("name", ["object_store", "foxglove", "roboto", "records"])
+def test_a_body_trickling_after_connection_close_is_cut_off_at_the_deadline(
+    tmp_path: Path, name: str, head: bytes
+) -> None:
+    """http.client forgets ``connection.sock`` after such a response; the deadline must still be
+    able to shut the socket down, whatever connector's transport is reading."""
+    with serve_trickle(head) as endpoint:
+        transport = _transports(endpoint, _online(tmp_path))[name]
+        started = time.monotonic()
+        with pytest.raises(DeadlineExceeded):
+            transport.get("/x").body(1_000_000)
+        assert time.monotonic() - started < 5
+        transport.drop()

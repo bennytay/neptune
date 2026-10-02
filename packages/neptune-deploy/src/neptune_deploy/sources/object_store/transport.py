@@ -274,6 +274,10 @@ class Transport:
         self._tls = tls
         self._user_agent = user_agent
         self._connection: http.client.HTTPConnection | None = None
+        # Our own reference to the connected socket: http.client sets ``connection.sock`` to None
+        # after a ``Connection: close`` or HTTP/1.0 response while the response still reads from
+        # the socket, so ``abort`` could not reach a body that trickles in.
+        self._socket: socket.socket | None = None
         self.requests = 0
 
     def _connect(self) -> http.client.HTTPConnection:
@@ -292,17 +296,19 @@ class Transport:
 
     def abort(self) -> None:
         """Shut the connection's socket down from another thread (a deadline passed)."""
-        connection = self._connection
-        sock = connection.sock if connection is not None else None
-        if isinstance(sock, socket.socket):
+        sock = self._socket
+        if sock is not None:
             with contextlib.suppress(OSError):  # already closed
                 sock.shutdown(socket.SHUT_RDWR)
+            with contextlib.suppress(OSError):
+                sock.close()
 
     def drop(self) -> None:
         """Close the connection; the next request opens a new one."""
         if self._connection is not None:
             self._connection.close()
             self._connection = None
+        self._socket = None
 
     def _send(
         self,
@@ -319,13 +325,16 @@ class Transport:
             connection = self._connect()
             self.requests += 1
             try:
+                if connection.sock is None:
+                    connection.connect()
+                    self._socket = connection.sock  # kept for ``abort`` (see ``__init__``)
                 connection.putrequest(method, target, skip_host=True, skip_accept_encoding=True)
                 for name, value in headers.items():
                     connection.putheader(name, value)
                 if body is not None:
                     connection.putheader("Content-Length", str(len(body)))
-                connection.endheaders(body)  # connects, if the connection is new
-                if deadline.expired:  # it passed while connecting, before a socket to shut down
+                connection.endheaders(body)
+                if deadline.expired:  # it passed while connecting or sending
                     self.drop()
                     raise DeadlineExceeded("the request outlived its deadline")
                 return connection.getresponse()
