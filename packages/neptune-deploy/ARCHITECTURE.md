@@ -6,7 +6,7 @@ flowchart LR
   subgraph P["neptune-deploy"]
     SRC["sources/ read-only connectors"]
     LIF["adapters/lifecycle"]
-    MAP["lifecycle/ mapper · mapping files · vendor presets"]
+    MAP["lifecycle/ mapper · mapping files · document templates · vendor presets"]
     PACKS["packs/ evidence-pack compiler"]
     CONSOLE["console/"]
   end
@@ -23,7 +23,7 @@ flowchart LR
   LIF --> EP
   CONF -.->|CI gate| LIF
   MODEL -->|record kinds| LIF
-  STORE -->|tables of a package| MAP
+  STORE -->|tables and documents of a package| MAP
   MAP -->|new package of lifecycle records| STORE
   MODEL -->|record kinds| MAP
   CON -->|package-schema 4.0.0| PACKS

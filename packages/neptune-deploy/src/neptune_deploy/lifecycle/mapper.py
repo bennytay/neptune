@@ -252,13 +252,21 @@ class _Group:
 class _Findings:
     """Findings grouped by code, table and detail: one finding names its first rows and records."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        catalog: dict[str, tuple[Severity, FindingCategory, str]] | None = None,
+        producer: str = MAPPER_ID,
+        scope: str = "table",
+        field_key: str = "column",
+    ) -> None:
+        self.catalog = FINDINGS if catalog is None else catalog
+        self.producer, self.scope, self.field_key = producer, scope, field_key
         self.groups: dict[tuple[str, str, str], _Group] = {}
 
     def add(
         self,
         name: str,
-        table: _Table,
+        table: Any,
         subject: EvidenceRef,
         *,
         key: str = "",
@@ -269,33 +277,33 @@ class _Findings:
     ) -> None:
         group = self.groups.setdefault(
             (name, table.record.id, key),
-            _Group(subject, {"table": table.record.id, **(details or {})}),
+            _Group(subject, {self.scope: table.record.id, **(details or {})}),
         )
         group.count += 1
         if row is not None and len(group.rows) < NAMED:
             group.rows.append(row)
-            if record is not None:
-                group.records.append(record)
+        if record is not None and len(group.records) < NAMED:
+            group.records.append(record)
         for ref in related:
             if len(group.related) < NAMED and ref not in group.related and ref != group.subject:
                 group.related.append(ref)
 
-    def once(self, name: str, table: _Table, subject: EvidenceRef, column: str) -> None:
+    def once(self, name: str, table: Any, subject: EvidenceRef, column: str) -> None:
         """A finding about a table's column, made once however many rows read it."""
         if (name, table.record.id, column) not in self.groups:
-            self.add(name, table, subject, key=column, details={"column": column})
+            self.add(name, table, subject, key=column, details={self.field_key: column})
 
     def build(self, transform: TransformRecord) -> list[IngestFinding]:
         out = []
         for (name, _, _), group in sorted(self.groups.items()):
-            severity, category, message = FINDINGS[name]
+            severity, category, message = self.catalog[name]
             details = dict(group.details)
             details["count"] = group.count
             if group.rows:
                 details["rows"] = list(group.rows)
             out.append(
                 ingest_finding(
-                    code=code(name),
+                    code=f"{self.producer}.{name}",
                     category=category,
                     severity=severity,
                     subject=group.subject,
@@ -321,52 +329,31 @@ class _Cell:
     absent_from_table: bool = False
 
 
-class _Row:
-    """One row being mapped by one rule under one transform."""
+class _Values:
+    """Values read into fields, one record at a time, under one transform: the shapes of ADR 0002 §3
+    and §4 over ``cell``, which a subclass says how to find. A table row (``_Row``) and a document
+    (``documents._DocRow``) differ only in what a reference names."""
 
-    def __init__(self, mapper: "_Mapper", table: _Table, index: int, kind: str) -> None:
-        self.mapper, self.table = mapper, table
-        self.record = table.rows[index]
-        self.pointers = table.pointers[index] if table.header is None else None
-        self.evidence = self.record.provenance.evidence
-        # The id the lifecycle record will have: findings about its cells name it.
-        self.record_id = evidence_record_id(kind, self.evidence, mapper.transform)
+    mapper: Any  # has ``transform``, ``findings`` and ``domain``
+    table: Any  # has ``record`` (its ``id`` scopes findings and clocks) and ``evidence``
+    evidence: EvidenceRef  # the record's own evidence
+    record_id: RecordId  # the id the lifecycle record will have: findings about its values name it
+    pointers: dict[str, int] | None = None
+
+    def cell(self, column: str, via: str = "column") -> _Cell:
+        raise NotImplementedError
+
+    def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
+        raise NotImplementedError
+
+    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
+        raise NotImplementedError
+
+    def blank(self, spec: Part) -> bool:
+        raise NotImplementedError
 
     def provenance(self, evidence: EvidenceRef) -> Provenance:
         return Provenance(evidence, self.mapper.transform.id, STATED)
-
-    def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
-        self.mapper.findings.add(
-            name, self.table, subject, key=column, details={"column": column}, row=self.record.row
-        )
-
-    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
-        """One finding per cell, naming the record and field: never capped, never grouped."""
-        self.mapper.findings.add(
-            name,
-            self.table,
-            subject,
-            key=f"{self.record.row}|{path}|{column}|{subject.locator_json()}",
-            details={"column": column, "field": path},
-            row=self.record.row,
-            record=self.record_id,
-        )
-
-    def cell(self, column: str) -> _Cell:
-        table, record = self.table, self.record
-        if not table.has(column):
-            self.mapper.findings.once("column_absent", table, table.evidence, column)
-            return _Cell(None, self.evidence, absent_from_table=True)
-        if self.pointers is not None:
-            index: int | None = self.pointers.get(column)
-        else:
-            index = table.columns[column]
-            if index is None:
-                self.mapper.findings.once("column_repeated", table, table.evidence, column)
-                return _Cell(Unknown(self.provenance(self.evidence)), self.evidence)
-        if index is None or index >= len(record.cells):
-            return _Cell(None, self.evidence)  # a missing key, or a short row
-        return _Cell(record.cells[index], record.cell_evidence(table.record, index))
 
     def label(self, column: str) -> str:
         return column
@@ -374,7 +361,7 @@ class _Row:
     # One cell into one field ---------------------------------------------------------------
 
     def scalar(self, shape: Shape, spec: Scalar, path: str) -> Knowledge[Any]:
-        cell = self.cell(spec.column)
+        cell = self.cell(spec.column, spec.via)
         if cell.absent_from_table:
             return NotCovered()
         state, place = cell.state, cell.place
@@ -437,7 +424,12 @@ class _Row:
             return None
         assert spec.zone is not None
         domain = self.mapper.domain(
-            self.table, spec.column, reading.instant, reading.resolution, spec.zone, place
+            self.table.record.id,
+            spec.column,
+            reading.instant,
+            reading.resolution,
+            spec.zone,
+            place,
         )
         return Known(Timestamp(reading.ticks, domain), provenance)
 
@@ -445,7 +437,7 @@ class _Row:
 
     def pieces(self, spec: ListCell, path: str) -> list[tuple[str, EvidenceRef]]:
         """The texts a list cell states, each with its citation (a span inside a split cell)."""
-        cell = self.cell(spec.column)
+        cell = self.cell(spec.column, spec.via)
         if cell.absent_from_table or isinstance(cell.state, KnownAbsent):
             return []
         if cell.state is None or isinstance(cell.state, Unknown | NotCovered):
@@ -503,17 +495,17 @@ class _Row:
             )
         return spec.cls(**self.values(spec.cls, spec.fields, path))
 
-    def blank(self, spec: Part) -> bool:
-        """Every cell the part reads is blank or absent in this row."""
-        for column in sorted(spec_columns(spec)):
-            if not self.table.has(column):
+    def items(self, specs: Any, path: str) -> tuple[Any, ...]:
+        """Parts spelled out field by field; one whose every cell is blank is not listed."""
+        items: list[Any] = []
+        for item in specs:
+            assert isinstance(item, Part)
+            if self.blank(item):
+                column = ", ".join(sorted(spec_columns(item)))
+                self.finding("item_blank", column, self.evidence)
                 continue
-            if self.pointers is None and self.table.columns[column] is None:
-                return False  # a repeated header: its field is unknown, not blank
-            cell = self.cell(column)
-            if cell.state is not None and not isinstance(cell.state, Unknown):
-                return False
-        return True
+            items.append(self.part(item, f"{path}/{len(items)}"))
+        return tuple(items)
 
     def values(self, cls: type[Any], specs: Any, path: str = "") -> dict[str, Any]:
         """Every field of ``cls``; ``path`` is where ``cls`` sits in the record (JSON pointer)."""
@@ -527,15 +519,7 @@ class _Row:
                 case Shape.STATEMENTS:
                     out[shape.name] = self.statements(spec, at) if spec else ()
                 case Shape.ITEMS:
-                    items: list[Any] = []
-                    for item in spec or ():
-                        assert isinstance(item, Part)
-                        if self.blank(item):
-                            column = ", ".join(sorted(spec_columns(item)))
-                            self.finding("item_blank", column, self.evidence)
-                            continue
-                        items.append(self.part(item, f"{at}/{len(items)}"))
-                    out[shape.name] = tuple(items)
+                    out[shape.name] = self.items(spec or (), at)
                 case Shape.PART:
                     assert shape.part is not None
                     out[shape.name] = self.part(
@@ -548,6 +532,70 @@ class _Row:
                         else NotCovered()
                     )
         return out
+
+
+class _Row(_Values):
+    """One row being mapped by one rule under one transform."""
+
+    def __init__(
+        self,
+        mapper: Any,
+        table: _Table,
+        index: int,
+        kind: str,
+        record_id: RecordId | None = None,
+    ) -> None:
+        self.mapper, self.table = mapper, table
+        self.record = table.rows[index]
+        self.pointers = table.pointers[index] if table.header is None else None
+        self.evidence = self.record.provenance.evidence
+        # The id the lifecycle record will have: findings about its cells name it.
+        self.record_id = record_id or evidence_record_id(kind, self.evidence, mapper.transform)
+
+    def finding(self, name: str, column: str, subject: EvidenceRef) -> None:
+        self.mapper.findings.add(
+            name, self.table, subject, key=column, details={"column": column}, row=self.record.row
+        )
+
+    def cell_finding(self, name: str, column: str, path: str, subject: EvidenceRef) -> None:
+        """One finding per cell, naming the record and field: never capped, never grouped."""
+        self.mapper.findings.add(
+            name,
+            self.table,
+            subject,
+            key=f"{self.record.row}|{path}|{column}|{subject.locator_json()}",
+            details={"column": column, "field": path},
+            row=self.record.row,
+            record=self.record_id,
+        )
+
+    def cell(self, column: str, via: str = "column") -> _Cell:
+        table, record = self.table, self.record
+        if not table.has(column):
+            self.mapper.findings.once("column_absent", table, table.evidence, column)
+            return _Cell(None, self.evidence, absent_from_table=True)
+        if self.pointers is not None:
+            index: int | None = self.pointers.get(column)
+        else:
+            index = table.columns[column]
+            if index is None:
+                self.mapper.findings.once("column_repeated", table, table.evidence, column)
+                return _Cell(Unknown(self.provenance(self.evidence)), self.evidence)
+        if index is None or index >= len(record.cells):
+            return _Cell(None, self.evidence)  # a missing key, or a short row
+        return _Cell(record.cells[index], record.cell_evidence(table.record, index))
+
+    def blank(self, spec: Part) -> bool:
+        """Every cell the part reads is blank or absent in this row."""
+        for column in sorted(spec_columns(spec)):
+            if not self.table.has(column):
+                continue
+            if self.pointers is None and self.table.columns[column] is None:
+                return False  # a repeated header: its field is unknown, not blank
+            cell = self.cell(column)
+            if cell.state is not None and not isinstance(cell.state, Unknown):
+                return False
+        return True
 
 
 def _number(value: Any) -> float | NonFinite | None:
@@ -588,7 +636,39 @@ def _text(value: Any) -> str | None:
 # --- The mapper ---------------------------------------------------------------------------------
 
 
-class _Mapper:
+class _Clocks:
+    """The ``TimestampDomain`` of each time field read, one per scope and field (ADR 0002 §5)."""
+
+    transform: TransformRecord
+    domains: dict[tuple[Any, ...], TimestampDomain]
+
+    def domain(
+        self,
+        scope: RecordId,
+        column: str,
+        instant: bool,
+        resolution: Any,
+        zone: str,
+        place: EvidenceRef,
+    ) -> RecordId:
+        key = (scope, column, instant, resolution, "" if instant else zone)
+        if key not in self.domains:
+            provenance = Provenance(place, self.transform.id, STATED)
+            self.domains[key] = TimestampDomain(
+                id=evidence_record_id(TimestampDomain.kind, place, self.transform),
+                provenance=provenance,
+                field=column,
+                scope=(),  # the declared zone is the mapping's, in the transform config
+                role=Known(ClockRole.DOCUMENT),
+                resolution=Known(resolution),
+                epoch=Known(Epoch.UNIX),
+                timescale=Known(Timescale.POSIX) if instant else Unknown(),
+                declared_monotonic=NotCovered(),
+            )
+        return self.domains[key].id
+
+
+class _Mapper(_Clocks):
     """One mapping applied to one package's tables."""
 
     def __init__(self, mapping: LifecycleMapping, base: ContentId, tables: list[_Table]) -> None:
@@ -607,31 +687,6 @@ class _Mapper:
         )
         self.findings = _Findings()
         self.domains: dict[tuple[Any, ...], TimestampDomain] = {}
-
-    def domain(
-        self,
-        table: _Table,
-        column: str,
-        instant: bool,
-        resolution: Any,
-        zone: str,
-        place: EvidenceRef,
-    ) -> RecordId:
-        key = (table.record.id, column, instant, resolution, "" if instant else zone)
-        if key not in self.domains:
-            provenance = Provenance(place, self.transform.id, STATED)
-            self.domains[key] = TimestampDomain(
-                id=evidence_record_id(TimestampDomain.kind, place, self.transform),
-                provenance=provenance,
-                field=column,
-                scope=(),  # the declared zone is the mapping's, in the transform config
-                role=Known(ClockRole.DOCUMENT),
-                resolution=Known(resolution),
-                epoch=Known(Epoch.UNIX),
-                timescale=Known(Timescale.POSIX) if instant else Unknown(),
-                declared_monotonic=NotCovered(),
-            )
-        return self.domains[key].id
 
     def run(self) -> list[Any]:
         records: list[Any] = []
@@ -764,26 +819,37 @@ def tables_of(records: Iterable[Any]) -> tuple[list[_Table], list[StructuredTabl
     return usable, unnamed
 
 
-def map_records(base: IngestPackage, mappings: Sequence[LifecycleMapping]) -> list[Any]:
-    """Every record of the mapped package: the base's source ledger and the transforms its
-    records name, then each mapping's transform, lifecycle records, clocks and findings."""
+def map_tables(
+    base: IngestPackage, mappings: Sequence[LifecycleMapping], claimed: Iterable[RecordId] = ()
+) -> list[Any]:
+    """Each mapping's transform, lifecycle records, clocks and findings, then findings about the
+    tables no mapping applies to. ``claimed`` are tables something else (a document template)
+    already accounts for."""
     hashes = [mapping.sha256 for mapping in mappings]
     if len(set(hashes)) != len(hashes):
         raise MappingError("the same mapping file is given twice")
     ids = [mapping.id for mapping in mappings]
     if len(set(ids)) != len(ids):
         raise MappingError(f"two mapping files share an id: {ids}")
-    usable, unnamed = tables_of(base.records)
+    taken = set(claimed)
+    # A table of a document a template matched is that template's: no mapping reads it again.
+    named, nameless = tables_of(base.records)
+    usable = [t for t in named if t.record.id not in taken]
+    unnamed = [t for t in nameless if t.id not in taken]
     out: list[Any] = []
-    claimed: set[RecordId] = set()
     for mapping in sorted(mappings, key=lambda m: m.sha256):
         mapper = _Mapper(mapping, base.id, usable)
-        claimed.update(table.record.id for table in mapper.tables)
+        taken.update(table.record.id for table in mapper.tables)
         out.extend(mapper.run())
     out.extend(
-        _run_findings(base.id, hashes, [t for t in usable if t.record.id not in claimed], unnamed)
+        _run_findings(
+            base.id,
+            hashes,
+            [t for t in usable if t.record.id not in taken],
+            [t for t in unnamed if t.id not in taken],
+        )
     )
-    return [*_carried(base, out), *out]
+    return out
 
 
 def _run_findings(
@@ -816,17 +882,17 @@ def _run_findings(
     return [transform, *findings.build(transform)]
 
 
-def _carried(base: IngestPackage, records: list[Any]) -> list[Any]:
+def carried(base: IngestPackage, records: list[Any]) -> list[Any]:
     """The base package's source ledger, and every base transform the new records' transforms
     name upstream, with theirs in turn: the new package's lineage is whole."""
     transforms = {r.id: r for r in base.records if r.kind == "transform_record"}
     wanted = [u for r in records if r.kind == "transform_record" for u in r.upstream]
-    carried: dict[RecordId, Any] = {}
+    kept: dict[RecordId, Any] = {}
     while wanted:
         current = wanted.pop()
-        if current in carried or current not in transforms:
+        if current in kept or current not in transforms:
             continue
-        carried[current] = transforms[current]
+        kept[current] = transforms[current]
         wanted.extend(transforms[current].upstream)
     ledger = [r for r in base.records if r.kind in LEDGER_KINDS]
-    return [*ledger, *carried.values()]
+    return [*ledger, *kept.values()]
