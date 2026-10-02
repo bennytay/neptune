@@ -5,6 +5,7 @@ absent (the API's ``null`` is dropped, never read as a value), and anything off-
 with the finding code that says why, so one bad entry costs that entry and nothing else.
 """
 
+import hashlib
 from typing import Final
 
 from neptune.identity.canonical_json import CanonicalJsonError
@@ -63,3 +64,13 @@ def stable_name(value: object) -> bytes:
     except (CanonicalJsonError, TypeError):
         encoded = repr(type(value).__name__).encode()
     return encoded[:256]
+
+
+def item_digest(value: object) -> str:
+    """A digest of the whole of ``value`` (canonical JSON where it has one), for noticing a page
+    that is served again."""
+    try:
+        encoded = canonical_dumps(value)  # type: ignore[arg-type]
+    except (CanonicalJsonError, TypeError):
+        encoded = repr(value).encode("utf-8", "backslashreplace")
+    return hashlib.sha256(encoded).hexdigest()

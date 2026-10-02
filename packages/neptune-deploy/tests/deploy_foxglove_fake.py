@@ -13,6 +13,7 @@ reached the API and nothing else.
 
 import json
 import threading
+import time
 import urllib.parse
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -69,6 +70,9 @@ class FakeFoxglove:
     rate_limit_streams: bool = False  # POST /data/stream answers 429
     forbid: bool = False  # every API call answers 403
     drop_idle: bool = False  # close every connection after its response
+    headers: dict[str, str] = field(default_factory=dict)  # the link's headers, overriding
+    ignore_offset: bool = False  # every page starts at the first recording
+    drip: float | None = None  # the link's body arrives one byte per this many seconds
     on_request: Callable[[Request], None] | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _port: int = 0
@@ -103,6 +107,11 @@ class FakeFoxglove:
         finally:
             server.shutdown()
             server.server_close()
+
+
+def _get(item: Any, name: str) -> Any:
+    """``item[name]`` for a dict, else nothing: the index may hold entries that are not objects."""
+    return item.get(name) if isinstance(item, dict) else None
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -182,18 +191,18 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.owner.page_cap is not None:
             limit = min(limit, self.owner.page_cap)
-        offset = int(params.get("offset", "0"))
+        offset = 0 if self.owner.ignore_offset else int(params.get("offset", "0"))
         self._json(items[offset : offset + limit])
 
     def _recordings(self, params: dict[str, str]) -> None:
         items = list(self.owner.recordings)
         if "projectId" in params:
-            items = [r for r in items if r.get("projectId") == params["projectId"]]
+            items = [r for r in items if _get(r, "projectId") == params["projectId"]]
         if "deviceId" in params:
-            items = [r for r in items if r.get("device", {}).get("id") == params["deviceId"]]
+            items = [r for r in items if _get(_get(r, "device"), "id") == params["deviceId"]]
         if "deviceName" in params:
-            items = [r for r in items if r.get("device", {}).get("name") == params["deviceName"]]
-        items.sort(key=lambda r: r["createdAt"])
+            items = [r for r in items if _get(_get(r, "device"), "name") == params["deviceName"]]
+        items.sort(key=lambda r: r.get("createdAt", "") if isinstance(r, dict) else "")
         if self.owner.skip_one and params.get("offset", "0") != "0":
             items = items[1:]  # the first recording was deleted between pages
         self._page(items, params)
@@ -205,6 +214,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if path != "/v1/data/stream":
             self._send(404, b'{"error":"no such route"}')
+            return
+        if path in fake.raw:
+            self._send(200, fake.raw[path], {"Content-Type": "application/json"})
             return
         if fake.rate_limit_streams:
             self._send(429, b'{"error":"slow down"}', {"Retry-After": "3"})
@@ -228,6 +240,21 @@ class _Handler(BaseHTTPRequestHandler):
                 f"http://{host}:{fake._port}/blob/{urllib.parse.quote(recording_id)}?sig={quoted}"
             )
         self._json({"link": link})
+
+    def _drip(self, status: int, body: bytes, headers: dict[str, str]) -> None:
+        """A server that trickles: one byte at a time, each well inside the socket timeout."""
+        self.send_response(status)
+        for name, value in {"Content-Length": str(len(body)), **headers}.items():
+            self.send_header(name, value)
+        self.end_headers()
+        try:
+            for index in range(len(body)):
+                self.wfile.write(body[index : index + 1])
+                self.wfile.flush()
+                time.sleep(self.owner.drip or 0)
+        except OSError:
+            pass  # the client gave up
+        self.close_connection = True
 
     def _blob(self, path: str, params: dict[str, str]) -> None:
         fake = self.owner
@@ -256,12 +283,15 @@ class _Handler(BaseHTTPRequestHandler):
             if fake.wrong_range:
                 start, end = max(0, start - 1), max(0, end - 1)
             body = data[start : end + 1]
-            span = f"{int(first)}-{int(last)}" if fake.wrong_range else f"{start}-{end}"
-            headers["Content-Range"] = f"bytes {span}/{'*' if fake.no_total else total}"
+            headers["Content-Range"] = f"bytes {start}-{end}/{'*' if fake.no_total else total}"
             if fake.truncate_after is not None:
                 headers["Content-Length"] = str(len(body))
                 body = body[: fake.truncate_after]
                 self.close_connection = True
+            headers.update(fake.headers)
+            if fake.drip is not None:
+                self._drip(206, body, headers)
+                return
             self._send(206, body, headers)
             return
         if fake.no_length:
@@ -277,4 +307,5 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, data[: fake.truncate_after], headers)
             self.close_connection = True
             return
+        headers.update(fake.headers)
         self._send(200, data, headers)

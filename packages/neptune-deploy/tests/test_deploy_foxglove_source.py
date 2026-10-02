@@ -11,12 +11,10 @@ from typing import Any
 import pytest
 
 from deploy_foxglove_fake import API_KEY, STREAM, FakeFoxglove, load
-from neptune.adapters.harness import ingest_source
-from neptune.adapters.mcap import McapAdapter
 from neptune.identity import canonical_json
 from neptune.identity.hashing import content_id, digest_stream
 from neptune.identity.revisions import SourceLedger
-from neptune.model.ids import ContentId, ExternalObjectRef, LogicalId
+from neptune.model.ids import ExternalObjectRef, LogicalId
 from neptune.model.knowledge import (
     Ambiguous,
     AssertionKind,
@@ -33,7 +31,7 @@ from neptune_deploy.sources.foxglove import (
     StreamEntry,
     foxglove_source,
 )
-from neptune_deploy.sources.object_store import ObjectReadError
+from neptune_deploy.sources.object_store import ObjectReadError, SkippedObject
 
 SITE = "fixture"
 ARM, AMR, LEGGED, MARINE, PENDING, UNASSIGNED = (
@@ -75,6 +73,10 @@ def connect(
             source.close()
 
 
+def object_key(recording_id: str) -> tuple[str, ...]:
+    return ("external", "deploy_foxglove", f"{SITE}:recording/{recording_id}")
+
+
 def location(recording_id: str, token: str) -> ExternalObjectRef:
     return ExternalObjectRef("deploy_foxglove", f"{SITE}:recording/{recording_id}", token)
 
@@ -111,7 +113,9 @@ def test_the_index_is_every_complete_recording_by_id_with_external_identity(tmp_
     with connect(fake, tmp_path) as source:
         index = source.index()
     assert index.complete
-    assert [r.recording_id for r in index.recordings] == sorted([ARM, AMR, LEGGED, MARINE, UNASSIGNED])
+    assert [r.recording_id for r in index.recordings] == sorted(
+        [ARM, AMR, LEGGED, MARINE, UNASSIGNED]
+    )
     arm = next(r for r in index.recordings if r.recording_id == ARM)
     assert arm.location == location(
         ARM, "import:2026-09-30T06:15:02.123456789Z;created:2026-09-30T06:10:00Z;size:5042"
@@ -146,8 +150,10 @@ def test_walk_measures_each_stream_and_hints_mcap(tmp_path: Path) -> None:
     assert [e.key for e in entries] == sorted([ARM, AMR, LEGGED, MARINE, UNASSIGNED])
     # The stream's size is measured; it is not the recording's stored ``size`` (that is a fact).
     assert {e.size for e in entries} == {len(STREAM)}
-    assert {e.name for e in entries} == {f"{key}.mcap" for key in (ARM, AMR, LEGGED, MARINE, UNASSIGNED)}
-    assert [(w.raw_key, w.reason) for w in walked[len(entries) :]] == [
+    assert {e.name for e in entries} == {
+        f"{key}.mcap" for key in (ARM, AMR, LEGGED, MARINE, UNASSIGNED)
+    }
+    assert [(w.raw_key, w.reason) for w in walked if isinstance(w, SkippedObject)] == [
         (PENDING.encode(), "import_incomplete")
     ]
 
@@ -168,14 +174,13 @@ def test_a_declared_store_scopes_ids_and_the_public_endpoint_does_not(tmp_path: 
     fake = FakeFoxglove()
     with connect(fake, tmp_path) as source:
         assert source.index().recordings[0].location.object_id.startswith(f"{SITE}:recording/")
-    with fake.serve() as endpoint:
-        with pytest.raises(Exception, match="store"):
-            foxglove_source(
-                "foxglove://-",
-                network=online(tmp_path),
-                options={"endpoint": endpoint},
-                credentials={"foxglove_api_key": API_KEY},
-            )
+    with fake.serve() as endpoint, pytest.raises(Exception, match="store"):
+        foxglove_source(
+            "foxglove://-",
+            network=online(tmp_path),
+            options={"endpoint": endpoint},
+            credentials={"foxglove_api_key": API_KEY},
+        )
 
 
 # --- Revisions and discovery ---------------------------------------------------------------------
@@ -215,14 +220,16 @@ def test_a_recording_uploaded_again_under_the_same_key_is_a_new_recording_never_
     ledger = SourceLedger()
     with connect(fake, tmp_path) as source:
         fingerprint(source, ledger, source.walk())
-        old = source.declared(next(r.location for r in source.index().recordings if r.recording_id == AMR))
+        old = source.declared(
+            next(r.location for r in source.index().recordings if r.recording_id == AMR)
+        )
     fake.recordings = load("recordings_after_reupload.json")  # deleted, uploaded again: a new id
     with connect(fake, tmp_path, ledger=ledger) as source:
         discovery = source.discover(ledger)
         (new,) = discovery.new
         assert new.recording_id == "rec_amr_fleet_0102"
         # The old id is gone, but only because the API says so (404), not because a page lacks it.
-        assert [r.location.object_id for r in discovery.gone] == [f"{SITE}:recording/{AMR}"]
+        assert [r.location.key for r in discovery.gone] == [object_key(AMR)]
         again = source.declared(new.location)
     assert any(r.method == "GET" and r.path == f"/v1/recordings/{AMR}" for r in fake.requests)
     # Both declare the same key; neither is the other. Consolidation is Memory's decision.
@@ -233,9 +240,6 @@ def test_a_recording_uploaded_again_under_the_same_key_is_a_new_recording_never_
     assert identifiers(old).keys() & identifiers(again).keys() >= {
         ("foxglove.recording_key", "amr07-2026-09-30-b"),
         ("foxglove.device_id", "dev_amr_07"),
-    }
-    recording_ids = lambda d: {  # noqa: E731
-        v for (ns, v) in identifiers(d) if ns == "foxglove.recording_id"
     }
     assert recording_ids(old) == {AMR} and recording_ids(again) == {"rec_amr_fleet_0102"}
 
@@ -277,7 +281,7 @@ def test_gone_is_asserted_when_the_api_says_not_found(tmp_path: Path) -> None:
     fake.recordings = [r for r in fake.recordings if r["id"] != LEGGED]
     with connect(fake, tmp_path, ledger=ledger) as source:
         gone = source.discover(ledger).gone
-    assert [r.location.object_id for r in gone] == [f"{SITE}:recording/{LEGGED}"]
+    assert [r.location.key for r in gone] == [object_key(LEGGED)]
 
 
 def test_walk_with_a_ledger_yields_only_what_changed_and_costs_no_other_stream(
@@ -303,10 +307,18 @@ def declared_of(source: FoxgloveSource, recording_id: str) -> DeclaredRecording:
     return source.declared(recording.location)
 
 
+def recording_ids(declared: DeclaredRecording) -> set[str]:
+    return {v for (ns, v) in identifiers(declared) if ns == "foxglove.recording_id"}
+
+
 def identifiers(declared: DeclaredRecording) -> dict[tuple[str, str], Any]:
     found = {}
     for knowledge in declared.identifiers:
-        value = knowledge.value if isinstance(knowledge, Known) else knowledge.candidates[0].value
+        if isinstance(knowledge, Known):
+            value = knowledge.value
+        else:
+            assert isinstance(knowledge, Ambiguous)
+            value = knowledge.candidates[0].value
         found[(value.namespace, value.value)] = knowledge
     return found
 
@@ -404,7 +416,10 @@ def test_a_device_rename_is_ambiguous_until_the_index_agrees_and_never_a_new_rev
         # The bytes did not change, so nothing is re-read: the ledger sees no new revision.
         assert (discovery.new, discovery.changed, discovery.gone) == ((), (), ())
         assert after.location == before.location
-        assert codes(source) == ["deploy_foxglove.device_name_differs", "deploy_foxglove.import_incomplete"]
+        assert codes(source) == [
+            "deploy_foxglove.device_name_differs",
+            "deploy_foxglove.import_incomplete",
+        ]
     names = [k for k in after.identifiers if not isinstance(k, Known) and isinstance(k, Ambiguous)]
     (ambiguous,) = names
     assert [c.value.value for c in ambiguous.candidates] == ["ur5e-cell-1", "ur5e-cell-1-retrofit"]
@@ -413,9 +428,10 @@ def test_a_device_rename_is_ambiguous_until_the_index_agrees_and_never_a_new_rev
         "GET /devices",
     ]
     # The id is the stable thing, and it is unchanged: declared, not merged.
-    assert identifiers(after)[("foxglove.device_id", "dev_ur5e_cell1")] == identifiers(before)[
-        ("foxglove.device_id", "dev_ur5e_cell1")
-    ]
+    assert (
+        identifiers(after)[("foxglove.device_id", "dev_ur5e_cell1")]
+        == identifiers(before)[("foxglove.device_id", "dev_ur5e_cell1")]
+    )
     # Once the index states the new name too, it is one name again.
     fake.recordings = copy.deepcopy(fake.recordings)
     for recording in fake.recordings:
@@ -439,7 +455,9 @@ def test_declared_topics_are_stated_with_their_count_and_unread_topics_say_why(
     assert isinstance(schemaless, Known) and schemaless.value.schema_name == ""
     assert isinstance(declared.topics_coverage, Known) and declared.topics_coverage.value == 3
     topic_calls = [r for r in fake.api_requests() if r.path == "/v1/data/topics"]
-    assert topic_calls and all(set(r.query) <= {"recordingId", "limit", "offset"} for r in topic_calls)
+    assert topic_calls and all(
+        set(r.query) <= {"recordingId", "limit", "offset"} for r in topic_calls
+    )
     with connect(fake, tmp_path, topics=False) as source:
         off = declared_of(source, LEGGED)
     assert off.topics == () and isinstance(off.topics_coverage, NotCovered)
@@ -472,7 +490,9 @@ def test_everything_is_independent_of_page_size_and_how_the_server_pages(tmp_pat
                 (type(w).__name__, getattr(w, "location", None), getattr(w, "size", None))
                 for w in source.walk()
             ]
-            results.append((walked, declared_bytes(source), source.findings(), source.index().complete))
+            results.append(
+                (walked, declared_bytes(source), source.findings(), source.index().complete)
+            )
     assert all(result == results[0] for result in results)
     assert results[0][3]
 
@@ -483,7 +503,9 @@ def test_the_same_run_twice_is_byte_identical(tmp_path: Path) -> None:
         fake = FakeFoxglove()
         with connect(fake, tmp_path) as source:
             list(source.walk())
-            runs.append((declared_bytes(source), [f.id for f in source.findings()], source.transform.id))
+            runs.append(
+                (declared_bytes(source), [f.id for f in source.findings()], source.transform.id)
+            )
     assert runs[0] == runs[1]
 
 
@@ -580,28 +602,24 @@ def test_the_reader_checks_every_chunk_against_the_fingerprint(tmp_path: Path) -
     assert "deploy_foxglove.object_changed" in codes(source)
 
 
-def test_the_compilers_mcap_adapter_reads_a_recording_through_ranged_reads(
+def test_an_adapter_reading_in_small_steps_gets_the_whole_mcap_from_ranged_reads(
     tmp_path: Path,
 ) -> None:
+    """What an adapter does through ``reader()``: many small ranged reads, each chunk checked.
+    (Members may not import a format adapter, so the MCAP adapter itself is not run here.)"""
     fake = FakeFoxglove()
     ledger = SourceLedger()
     with connect(fake, tmp_path) as source:
         artifacts = fingerprint(source, ledger, source.walk())
         entry = next(e for e in source.walk() if isinstance(e, StreamEntry) and e.key == ARM)
-        remote = ingest_source(McapAdapter(), source.reader(entry.location, artifacts[ARM]))
-        requests = len(fake.link_requests())
-
-    class Local:
-        content_id = ContentId(content_id(STREAM))
-        size = len(STREAM)
-
-        def read(self, offset: int, length: int) -> bytes:
-            return STREAM[offset : offset + length]
-
-    local = ingest_source(McapAdapter(), Local())
-    assert remote.records() == local.records() and remote.records()
-    assert [f.id for f in remote.findings()] == [f.id for f in local.findings()]
-    assert requests > 0  # every byte the adapter read came through a ranged GET of a fresh link
+        reader = source.reader(entry.location, artifacts[ARM])
+        fake.requests.clear()
+        pieces = [reader.read(offset, 777) for offset in range(0, reader.size, 777)]
+    data = b"".join(pieces)
+    assert data == STREAM and data[:8] == data[-8:] == b"\x89MCAP0\r\n"
+    chunks = -(-len(STREAM) // 1024)  # the artifact was hashed in 1 KiB chunks
+    assert len([r for r in fake.requests if r.method == "POST"]) == chunks
+    assert len(fake.link_requests()) == chunks  # one ranged GET per chunk, each from a fresh link
 
 
 def test_a_stream_that_changed_size_is_object_changed_never_a_mix(tmp_path: Path) -> None:

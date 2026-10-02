@@ -47,6 +47,7 @@ from neptune_deploy.sources.foxglove.config import Options, valid_id
 from neptune_deploy.sources.foxglove.validation import (
     MAX_DOCUMENT_BYTES,
     Invalid,
+    item_digest,
     json_pointer,
     strip_nulls,
     text,
@@ -223,6 +224,7 @@ class Declarer:
         host = self._host
         found: dict[str, JsonObject] = {}
         offset = pages = invalid = held = 0
+        seen: set[str] = set()  # ids of every device entry seen, to notice a page served again
         while pages < MAX_PAGES:
             try:
                 page = host.client.devices(host.project, offset, host.options.page_size)
@@ -234,8 +236,10 @@ class Declarer:
             if not page:
                 break
             offset += len(page)
+            before = len(seen)
             for item in page:
                 doc = strip_nulls(item)
+                seen.add(item_digest(item))
                 try:
                     if not isinstance(doc, dict) or not valid_id(doc.get("id")):
                         raise Invalid("record_invalid")
@@ -254,6 +258,9 @@ class Declarer:
                 if str(doc["id"]) not in found:
                     found[str(doc["id"])] = doc
                     held += weight
+            if len(seen) == before:
+                host.report("pagination_loop", host.listing_ref, {"call": "devices"})
+                break
         if invalid:
             host.report("record_invalid", host.listing_ref, {"call": "devices", "count": invalid})
         return found

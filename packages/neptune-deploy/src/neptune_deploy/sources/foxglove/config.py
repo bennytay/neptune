@@ -130,8 +130,13 @@ class Options:
                 "a declared endpoint needs a declared store name, and only it: ids are unique per"
                 " deployment, so the store is part of every recording's identity"
             )
-        if endpoint is not None and not isinstance(endpoint, str):
-            raise FoxgloveConfigError("endpoint is a URL")
+        if endpoint is not None:
+            if not isinstance(endpoint, str):
+                raise FoxgloveConfigError("endpoint is a URL")
+            try:
+                Endpoint.parse(endpoint)  # https, or http to loopback; no user information
+            except ValueError as exc:
+                raise FoxgloveConfigError(str(exc)) from None
         if store is not None and (not isinstance(store, str) or not _STORE.fullmatch(store)):
             raise FoxgloveConfigError("not a store name")
         ids: dict[str, str | None] = {}
