@@ -133,6 +133,14 @@ client = Neptune(
 )
 ```
 
+With no `adapters`, a client uses the built-ins plus every plugin adapter installed distributions
+register (`neptune.adapters` entry points, ADR 0058). `plugins=False` reads none,
+`plugins=PluginPolicy(allow=("neptune-deploy",))` only those distributions; `client.plugins` holds
+what was admitted and the findings about what was refused (a broken or duplicate plugin) or what a
+plugin printed, which every job of the client records; the package names the admitted plugins (the
+`neptune.plugins` transform's libraries). An allowlist name that registers no installed plugin is a
+`ConfigurationError`. Given `adapters`, the registry is exactly those.
+
 `options` is the runtime's `JobOptions` (attempts, isolation, limits, per-adapter config, job name):
 there is no SDK copy of it. Selection is still the probe engine's rule; pinning an adapter to a file
 is the manifest's. A config change is a new lineage: new record ids, a new package.
