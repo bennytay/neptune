@@ -67,3 +67,4 @@ header).
 | [0058](0058-plugin-adapters-and-sources-from-entry-points.md) | Plugin adapters and Sources from entry points, in a fixed order, refused as findings | Accepted |
 | [0059](0059-xlsx-workbooks-in-the-tabular-adapter-sheets-as-cited-tables.md) | XLSX workbooks in the tabular adapter: sheets as tables of cited cells | Accepted |
 | [0060](0060-clock-alignment-fitted-mappings-found-clocks-and-bounded-instants.md) | Clock alignment: fitted mappings, found clocks and bounded instants | Accepted |
+| [0068](0068-payload-decoding-and-frame-alignment-run-trees-links-and-comparable-references.md) | Payload decoding and frame alignment: declared definitions into columns, run trees, links and comparable references | Accepted |

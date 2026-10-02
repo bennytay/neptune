@@ -140,7 +140,15 @@ a bug, not a value.
   quaternion algebra and units are separate `Knowledge` fields, so "undeclared" keeps the numbers.
 - `FrameTransform(id, provenance, parent, child, direction, value, validity)`: one graph, `direction` `Knowledge`-wrapped
   (`Ambiguous` when a calibration file does not say), validity `STATIC` or a `Timestamp`. Not to be confused
-  with `TransformRecord`, the provenance record. Composition and graph alignment are MVL-37.
+  with `TransformRecord`, the provenance record. Nothing composes transforms.
+- Across graphs (ADR 0068, derived): a run's tf and header frame ids form one `frame_tree`, each tf pair a
+  `frame_edge` (static or dynamic, its samples' first and last instants, direction `child_to_parent`, unit and
+  quaternion algebra `Unknown`); names a declared graph and a run share, or that differ by a leading `/`, are
+  `frame_link` proposals; `frame_group`s are frames transforms, edges and stated bindings join (never links),
+  each with its `origin` and an `Unknown` `earth`; `spatial_reference` says which frames, CRS or geodetic type a
+  stream's or record's values are in. `neptune.derived.frames.FrameIndex.compare` says whether two references
+  are comparable (a path, whether inferred, its caveats, coverage at an instant) or why not (`disconnected`,
+  `crs_differs`, `no_georeference`, …). Nothing is composed or reprojected.
 - `GeodeticPosition`: latitude/longitude as declared, `Knowledge`-wrapped height, `CrsCode`, units and
   `HeightReference` (`ellipsoid`, `mean_sea_level`, `home`, `ground`).
 
@@ -164,7 +172,8 @@ a bug, not a value.
   `schema_definition`, `message_encoding`, `metadata`, `clocks`, and the source's declared `message_count` /
   `first` / `last`, plus `series`. A topic split across files is several streams of one run.
 - Every clock a sample carries is its own domain and its own `time/<i>` column. Clock 0, the one the source
-  orders or indexes by, only orders the stored rows; it is not the stream's time.
+  orders or indexes by, only orders the stored rows; it is not the stream's time. A decoded ROS payload whose
+  type leads with a `std_msgs/Header` adds its stamp as one more clock, `header.stamp` (ADR 0068).
 - Series: one Parquet file per stream, one row per sample.
 
   | Column | Type | Holds |
@@ -172,7 +181,7 @@ a bug, not a value.
   | `seq` | int64 | the sample's position in source order |
   | `time/<i>` | int64 | ticks on `clocks[i]`; never Parquet's TIMESTAMP type |
   | `locator/<i>/<field>` | int64, UTF-8 or double | the fields of locator step `i` that vary per row |
-  | `value/<name>` | as decoded | decoded fields, named by the adapter (MVL-21 standardises the mapping) |
+  | `value/<name>` | as decoded | decoded fields, named by the adapter; a ROS payload's by field path (`header.frame_id`, `transforms[].child_frame_id`, a list column under one array level), each with its state column (ADR 0068) |
   | `state/<column>` | dictionary UTF-8 | `known` / `unknown` / `not_covered` / `not_applicable`; the column is null exactly where not `known` |
 
 - Row provenance: the `Stream` hoists the source, the assertion kind and a locator template, and the
@@ -315,8 +324,9 @@ a bug, not a value.
   carrying images, video or point clouds: its media kind, frame count, hydrator and derivative states; its
   frames are its series rows, queried and hydrated lazily by `neptune.sdk.media`; ADR 0056), and
   `timestamp_domain` and `clock_mapping` (a clock found in a stream's values, and a mapping fitted from sync
-  anchors; ADR 0060). Present and empty means the producer ran and inferred nothing, absent means it did not
-  run.
+  anchors; ADR 0060), and `frame_tree`, `frame_edge`, `frame_link`, `frame_group` and `spatial_reference`
+  (frames across run trees and declared graphs, and what each subject's values are in; ADR 0068). Present and
+  empty means the producer ran and inferred nothing, absent means it did not run.
 
 ## Serialization (ADR 0002)
 
