@@ -1,0 +1,60 @@
+{
+  "api_version": "1.5.0",
+  "as_of": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 4,
+      "tx_time": "2026-10-02T00:00:04.000000Z"
+    }
+  },
+  "cited_by": [
+    {
+      "kind": "clock_mapping",
+      "line": 1,
+      "package_id": "sha256:4ef25575cf89858d879dedec24ea4ef2dced9235de0450966c2cf890b1fd7b51",
+      "record_id": "rec:sha256:63aa1aa4ccdc1469a5dcbd8761cec32cb1f890ace83b17cabb17d7151d84bd1b"
+    }
+  ],
+  "evidence_ref": {
+    "locator": [
+      {
+        "kind": "byte_range",
+        "length": 1818,
+        "offset": 0
+      },
+      {
+        "kind": "json_pointer",
+        "pointer": "/rosbag2_bagfile_information/files/0"
+      }
+    ],
+    "source": "sha256:4b9a6b056ea0d9b9af3f3960afa75caca42063479c9b6d0768b7a175ef9e6da9"
+  },
+  "fetch": [
+    {
+      "blob_path": {
+        "knowledge": "not_applicable"
+      },
+      "locations": [
+        {
+          "kind": "local",
+          "path": "bag/metadata.yaml"
+        }
+      ],
+      "package_id": "sha256:4ef25575cf89858d879dedec24ea4ef2dced9235de0450966c2cf890b1fd7b51",
+      "storage": "referenced"
+    }
+  ],
+  "findings": [],
+  "region": {
+    "addressing": "json_pointer",
+    "step": {
+      "kind": "json_pointer",
+      "pointer": "/rosbag2_bagfile_information/files/0"
+    }
+  },
+  "size": {
+    "knowledge": "known",
+    "value": 1818
+  },
+  "status": "resolved"
+}
