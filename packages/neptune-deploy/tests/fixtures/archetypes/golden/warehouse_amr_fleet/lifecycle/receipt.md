@@ -1,12 +1,12 @@
 # Ingest receipt
 
-Receipt `rec:sha256:c0d7efa5f6b675b4bb0ce7401f32803061b4b376c40b7cab950930323857a0bc`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:c207f83fc2737658bbada2b643b4531b9ec6e3d0c709660a8019b3e3a3858ee3`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 25 seen, 10 read, 15 not read, 0 gone
 - Runs: 0; streams: 0; entities: 0
-- Findings: 0 errors, 13 warnings, 11 info; ambiguous fields: 0
+- Findings: 0 errors, 13 warnings, 13 info; ambiguous fields: 0
 
 ## Sources
 
@@ -23,8 +23,8 @@ Receipt `rec:sha256:c0d7efa5f6b675b4bb0ce7401f32803061b4b376c40b7cab950930323857
 | `config/AMR-10/nav2_params.yaml` | 405 | `sha256:0ea560b788ce` | not read |
 | `incidents/INC-0007.pdf` | 6897 | `sha256:b793183fb43a` | deploy_document_map 0.1.0 |
 | `incidents/INC-0013.pdf` | 6416 | `sha256:c33a7d5acbe3` | deploy_document_map 0.1.0 |
-| `maps/S-007_zones.geojson` | 1393 | `sha256:83d1dc3347fe` | deploy_document_map 0.1.0 |
-| `maps/S-012_zones.geojson` | 1394 | `sha256:22a6767e99ac` | deploy_document_map 0.1.0 |
+| `maps/S-007_zones.geojson` | 1393 | `sha256:83d1dc3347fe` | deploy_lifecycle_map 0.1.0 |
+| `maps/S-012_zones.geojson` | 1394 | `sha256:22a6767e99ac` | deploy_lifecycle_map 0.1.0 |
 | `neptune.yaml` | 149 | `sha256:2c6ff33f9633` | not read |
 | `requalification/requalification_tests.csv` | 785 | `sha256:82e663e574ca` | deploy_lifecycle_map 0.1.0 |
 | `runs/S-007/amr-05_2026-03-03.mcap` | 17400 | `sha256:08528ca2ef6f` | not read |
@@ -42,14 +42,16 @@ Receipt `rec:sha256:c0d7efa5f6b675b4bb0ce7401f32803061b4b376c40b7cab950930323857
 
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
-| `deploy_document_map` | `0.1.0` | `sha256:1844c57cf199` | none | `rec:65a32bf9b29d` |
-| `deploy_document_map` | `0.1.0` | `sha256:a8b359372816` | none | `rec:a442dcb589a9` |
-| `deploy_lifecycle_map` | `0.1.0` | `sha256:22fd5b3c0f8b` | none | `rec:1725dd9fd9d3` |
-| `deploy_lifecycle_map` | `0.1.0` | `sha256:01f101f527e7` | none | `rec:23dc3adc91e0` |
-| `deploy_lifecycle_map` | `0.1.0` | `sha256:bcba1781f592` | none | `rec:2b672723e64e` |
-| `deploy_lifecycle_map` | `0.1.0` | `sha256:fd3b955cad3c` | none | `rec:c155dd82fcef` |
+| `deploy_document_map` | `0.1.0` | `sha256:1184093d6739` | none | `rec:0388c73dc4c2` |
+| `deploy_document_map` | `0.1.0` | `sha256:d0ee217a23e0` | none | `rec:3c101aa53aa1` |
+| `deploy_lifecycle_map` | `0.1.0` | `sha256:e10288f5faf0` | none | `rec:0c7d6c5ac0bc` |
+| `deploy_lifecycle_map` | `0.1.0` | `sha256:d000867bc8e0` | none | `rec:3c16eb1ecf80` |
+| `deploy_lifecycle_map` | `0.1.0` | `sha256:d4d7261b57bb` | none | `rec:46e2b0981156` |
+| `deploy_lifecycle_map` | `0.1.0` | `sha256:b869c7b2b5e9` | none | `rec:6a67e7d97496` |
+| `deploy_lifecycle_map` | `0.1.0` | `sha256:e4db44c96fda` | none | `rec:6ac5601f79c5` |
+| `geojson` | `0.1.0` | `sha256:542c42fe020a` | none | `rec:2c0e605ea2be` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
-| `tabular` | `0.1.0` | `sha256:15487b4cb47e` | pyarrow 25.0.1 | `rec:b4754c46f7fb` |
+| `tabular` | `0.2.0` | `sha256:f3ca9581546a` | pyarrow 25.0.1 | `rec:a849dd895889` |
 | `text` | `0.1.0` | `sha256:12b7c5463bbb` | none | `rec:3b8cd771874a` |
 
 ## Records
@@ -59,13 +61,13 @@ Receipt `rec:sha256:c0d7efa5f6b675b4bb0ce7401f32803061b4b376c40b7cab950930323857
 | `authorisation_envelope` | 4 |
 | `change_record` | 6 |
 | `incident_record` | 2 |
-| `ingest_finding` | 24 |
+| `ingest_finding` | 26 |
 | `maintenance_event` | 12 |
 | `requalification_record` | 2 |
 | `source_artifact` | 25 |
 | `source_revision` | 25 |
 | `timestamp_domain` | 12 |
-| `transform_record` | 9 |
+| `transform_record` | 11 |
 
 ## Runs
 
@@ -84,30 +86,32 @@ Receipt `rec:sha256:c0d7efa5f6b675b4bb0ce7401f32803061b4b376c40b7cab950930323857
 
 ## Findings
 
-- **warning** `deploy_lifecycle_map.column_unmapped` (unsupported): columns the mapping neither maps nor ignores; they stay in the base package's rows only · `rec:5d69a9018228`
-- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:0e3b217ec318`
-- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:3e68528695f8`
-- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:7127f70bc350`
-- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:834cd37205a9`
-- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:b6c0fd33aaa8`
-- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:d8f71d5e9aca`
-- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:ea27f6d1298f`
-- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:eff6c300a43c`
-- **warning** `deploy_lifecycle_map.row_unmatched` (unsupported): rows of a mapped table that no rule of the mapping applies to; they have no lifecycle record · `rec:f62ec183b8f2`
-- **warning** `deploy_lifecycle_map.value_blank` (missing): blank cells in columns the mapping declares required; the fields are unknown · `rec:66565ff32dcc`
-- **warning** `deploy_lifecycle_map.value_blank` (missing): blank cells in columns the mapping declares required; the fields are unknown · `rec:d21be8f6898f`
-- **warning** `deploy_lifecycle_map.value_unreadable` (inconsistent): cells that do not read as their field's declared shape or format; the fields are unknown · `rec:10ed23f39873`
-- **info** `deploy_document_map.document_unmatched` (unsupported): a document no template matches; it has no lifecycle record · `rec:345320a756d2`
-- **info** `deploy_document_map.document_unmatched` (unsupported): a document no template matches; it has no lifecycle record · `rec:7b65517a6486`
-- **info** `deploy_document_map.document_unmatched` (unsupported): a document no template matches; it has no lifecycle record · `rec:8937bd74deea`
-- **info** `deploy_document_map.document_unmatched` (unsupported): a document no template matches; it has no lifecycle record · `rec:eb874865d6d0`
-- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:25033f6db4a2`
-- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:e890597554d9`
-- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:81964dbfde83`
-- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:8b4bf22560b9`
-- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:e1570e958d10`
-- **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:9154f12997a6`
-- **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:9ad74a27081b`
+- **warning** `deploy_lifecycle_map.column_unmapped` (unsupported): columns the mapping neither maps nor ignores; they stay in the base package's rows only · `rec:70eda5d39afd`
+- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:23a4c70ea2d0`
+- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:300715cb3f3e`
+- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:467348ad1274`
+- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:75d70adf4e1d`
+- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:804121aa771a`
+- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:da5445d06ddf`
+- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:dbfd4265bd85`
+- **warning** `deploy_lifecycle_map.list_cell_blank` (missing): a blank cell read into a list field: a list holds no unknown, so this record's list lacks what the cell would have stated; the list is not a statement of none · `rec:f6a0e6da7149`
+- **warning** `deploy_lifecycle_map.row_unmatched` (unsupported): rows of a mapped table that no rule of the mapping applies to; they have no lifecycle record · `rec:d8aeb4225838`
+- **warning** `deploy_lifecycle_map.value_blank` (missing): blank cells in columns the mapping declares required; the fields are unknown · `rec:3e59cfc87916`
+- **warning** `deploy_lifecycle_map.value_blank` (missing): blank cells in columns the mapping declares required; the fields are unknown · `rec:cb293643c87d`
+- **warning** `deploy_lifecycle_map.value_unreadable` (inconsistent): cells that do not read as their field's declared shape or format; the fields are unknown · `rec:e41701f1078d`
+- **info** `deploy_document_map.document_unmatched` (unsupported): a document no template matches; it has no lifecycle record · `rec:20d79d083ce6`
+- **info** `deploy_document_map.document_unmatched` (unsupported): a document no template matches; it has no lifecycle record · `rec:838db4234bd0`
+- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:4b07f62a8f01`
+- **info** `deploy_document_map.template_matched` (missing): a document matched a template: the structure it showed is cited, and the fields of the kind the template does not cover are listed as not covered · `rec:b3dfbb74e2dd`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:071341aefb52`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:0edd904d9817`
+- **info** `deploy_lifecycle_map.fields_not_covered` (missing): fields of a rule's lifecycle kind that the rule does not read, in every record it made: an unread value is not covered, and an unread list is empty without stating none · `rec:443a2c201feb`
+- **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:6b6f5b34d1d6`
+- **info** `deploy_lifecycle_map.item_blank` (missing): parts whose every cell is blank in the row (no part swapped, no test); none is listed · `rec:7a4950be2e65`
+- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:519623a08487`
+- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:bf096894fb25`
+- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:c3fb71c2dedb`
+- **info** `deploy_lifecycle_map.table_unmapped` (unsupported): tables no mapping applies to; they have no lifecycle records · `rec:c65ae2bd1bdd`
 
 ## Ambiguous fields
 

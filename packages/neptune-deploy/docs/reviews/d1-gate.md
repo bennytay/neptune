@@ -15,10 +15,12 @@
   the eight defects below were fixed ([ADR 0005](../adr/0005-d1-gate-bounds-container-index-tables-and-explicit-coverage.md)).
   **Verdict: pass.** D2 may start once this is merged and `main` is tagged `d1-gate`. No D2 issue
   starts before this gate is Done.
-- Harness: green at `7727dc1` (and at `f8f1608`): `contracts ok | compiler: real ok | ledger: stub
+- Harness: green at `7727dc1` (and at `f8f1608`), and again after the refresh onto `main` with GeoJSON,
+  XLSX and package schema 4: `contracts ok | compiler: real ok | ledger: stub
   ok | memory: stub ok | context: stub ok`, for both corpora. Over the archetype corpus the compiler stage reproduced both
-  committed base packages byte for byte (manifest `sha256:e828a9b2…` for the fleet,
-  `sha256:3ec26b9a…` for the cell), so the mapper's input has not drifted from the compiler's output.
+  committed base packages byte for byte (manifest `sha256:32dac47f…` for the fleet,
+  `sha256:083c97e7…` for the cell; they were `e828a9b2…` and `3ec26b9a…` before the refresh), so the
+  mapper's input has not drifted from the compiler's output.
 
 ## The safety lead's questions
 
@@ -132,7 +134,7 @@ was a tautology.
 
 | Gap | Effect here | Issue |
 |---|---|---|
-| No GeoJSON adapter | The fleet's zone maps are read as plain text: `document_unmatched` (info) on each | MVL-31 |
+| (closed) GeoJSON adapter | Merged as PR #82 (ADR 0057). The fleet's zone maps are now a `SpatialArtifact` and `geojson:properties` tables, reported `table_unmapped` (info) because no mapping reads them; they were `document_unmatched` text | MVL-31 |
 | No URDF adapter on `main` | The URDFs are read as plain text: `document_unmatched` on each | MVL-24, PR #38 |
 | An MCAP-storage rosbag2 bag becomes two runs (its metadata and its storage file) | The cell's base package has two runs for one bag | none yet (coordinator to file) |
 | MCAP and bag payloads are not decoded | `mcap.payload_not_decoded` (21 info findings in the fleet) | none yet (coordinator to file) |

@@ -635,7 +635,15 @@ def test_container_index_tables_are_neither_mapped_nor_reported() -> None:
     usable, unnamed = tables_of(base.records)
     every = {t.id for t in _of(base, "structured_table")}
     assert len(every) - len(usable) - len(unnamed) == 4
-    assert not [f for f in _findings(MAPPED[FLEET], "table_unmapped")]
+    # What is reported unmapped is the site maps' GeoJSON tables (the geojson adapter, root ADR
+    # 0057), each cited to a ``SpatialArtifact``'s source; none is an index.
+    maps = {a.provenance.evidence.source for a in _of(base, "spatial_artifact")}
+    map_tables = {
+        t.id for t in _of(base, "structured_table") if t.provenance.evidence.source in maps
+    }
+    reported = {f.details["table"] for f in _findings(MAPPED[FLEET], "table_unmapped")}
+    assert map_tables
+    assert reported == map_tables
     # A workbook's sheet index, as the XLSX reader writes it (root ADR 0059 §4), named by the
     # citation's last step: never a candidate. The same table without that step stays one, and
     # is reported unmapped when no mapping reads it.
