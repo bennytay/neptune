@@ -48,9 +48,9 @@ from neptune_ledger.catalog.projection import (
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.contract_tests.examples import (
     WorkedPackage,
+    at_schema_1,
     at_schema_2,
     evidence_anchor,
-    materialise,
     reparse,
     write,
 )
@@ -78,7 +78,7 @@ def catalog(pg_uri: str) -> Iterator[PostgresCatalog]:
 @pytest.fixture
 def older(tmp_path: Path) -> WorkedPackage:
     """The drone as a schema-1 compiler wrote it."""
-    return materialise("drone", tmp_path / "drone-v1")
+    return write("drone-v1", tmp_path / "drone-v1", at_schema_1("drone"))
 
 
 @pytest.fixture
@@ -188,6 +188,9 @@ def test_adding_a_version_appends_it_and_never_remaps_an_indexed_one() -> None:
     assert repointed.numbers == (1, 2)
     assert repointed.latest.contract_version == "2.1.0"
     assert repointed.latest.mapping_digest == registry.latest.mapping_digest
+    assert add_version(registry, registry.latest) == registry  # the same version again
+    with pytest.raises(ProjectionError, match=r"only to a later registry version, not 2\.0\.0"):
+        add_version(repointed, SchemaVersion("2.0.0", DIGEST, latest))
 
 
 def test_the_mapping_is_canonical_json_and_its_digest_pins_it() -> None:
@@ -391,10 +394,37 @@ def test_packages_of_schema_1_and_2_are_indexed_side_by_side(
     )
 
 
+def test_the_sql_coverage_agrees_with_the_registry_everywhere(
+    catalog: PostgresCatalog, pg: Conn, newer: WorkedPackage
+) -> None:
+    """``projection_covered`` and ``Registry.covered`` answer alike for every kind, version and
+    column, so the Python and SQL readings of NotCovered cannot drift."""
+    assert catalog.register(newer.root).outcome == "registered"
+    registry = shipped_registry()
+    cases = [
+        (kind, version, column)
+        for version in (*registry.numbers, registry.latest.version + 1)
+        for kind in registry.latest.spec.kinds
+        for column in projection_columns(registry)
+    ]
+    answers = rows(
+        pg,
+        "SELECT tenant_acme.projection_covered(c.kind, c.version, c.column_name)"
+        " FROM unnest(%s::text[], %s::int[], %s::text[]) WITH ORDINALITY"
+        "  AS c(kind, version, column_name, n) ORDER BY n",
+        [k for k, _, _ in cases],
+        [v for _, v, _ in cases],
+        [c for _, _, c in cases],
+    )
+    assert [a for (a,) in answers] == [registry.covered(*case) for case in cases]
+    assert any(a for (a,) in answers) and not all(a for (a,) in answers)
+
+
 def test_a_version_is_recorded_once_by_the_registration_that_first_brings_it(
     catalog: PostgresCatalog, pg: Conn, older: WorkedPackage, tmp_path: Path
 ) -> None:
-    sibling = write("drone-b", tmp_path / "drone-b", reparse("drone", "1.0.0", {"profile": "b"}))
+    files = reparse("drone", "1.0.0", {"profile": "b"}, up_to=1)
+    sibling = write("drone-b", tmp_path / "drone-b", files)
     assert catalog.register(older.root).outcome == "registered"
     assert catalog.register(sibling.root).outcome == "registered"
     assert rows(
@@ -532,9 +562,10 @@ def test_registry_rows_are_a_function_of_the_registration_order(
     assert without[0] == without[2]
 
 
-def test_migration_0007_refuses_a_catalog_that_already_holds_packages(pg: Conn) -> None:
+def test_the_registry_migration_refuses_a_catalog_that_already_holds_packages(pg: Conn) -> None:
     """Their versions would have no registry rows, so their NULLs could not be told apart."""
-    before = tuple(m for m in migrations() if m.version < 7)
+    (number,) = [m.version for m in migrations() if m.name == "schema_version_registry"]
+    before = tuple(m for m in migrations() if m.version < number)
     apply_migrations(pg, "acme", shipped=before)
     add_package(pg, "tenant_acme", DIGEST, 1)
     with pytest.raises(psycopg.errors.RaiseException, match="rebuild this catalog"):

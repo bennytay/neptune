@@ -269,6 +269,7 @@ def test_a_projection_added_to_an_existing_kind_guards_its_filed_rows() -> None:
     text = render_migration(projection_spec(schema_v1()), projection_spec(schema), 6)
     assert "IF EXISTS (SELECT 1 FROM record WHERE (schema_version >= 2 AND kind IN (" in text
     assert "      'image'))) THEN" in text
+    assert "-- the field: their NULL is NotCovered by their version" in text
 
 
 def published(directory: Path, schema: dict[str, Any], version: str) -> Path:

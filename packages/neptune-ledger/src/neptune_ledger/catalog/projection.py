@@ -384,6 +384,15 @@ def render_migration(old: Spec, new: Spec, version: int) -> str:
     if grown:
         listed = ",\n".join(f"      '{kind}'" for kind in grown)
         tests.append(f"(schema_version >= {new.major} AND kind IN (\n{listed}))")
+    if grown and new.major > 1:
+        # Rows of these kinds from older versions keep NULL there: NotCovered by their version,
+        # which projection_covered reports (ADR 0011 §6). Never a statement about the record.
+        out += [
+            "--",
+            f"-- Rows of {', '.join(grown)} from schema versions before {new.major} do not state",
+            "-- the field: their NULL is NotCovered by their version (projection_covered,",
+            "-- ADR 0011).",
+        ]
     if tests:
         out += [
             "",
@@ -473,6 +482,10 @@ def schema_version_from(schema_path: Path) -> SchemaVersion:
     return SchemaVersion(version, digest, projection_spec(json.loads(data)))
 
 
+def _semver(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.split("."))
+
+
 def add_version(registry: Registry, entry: SchemaVersion) -> Registry:
     """``registry`` with ``entry``: the next version, or an indexed one whose mapping is unchanged.
 
@@ -481,11 +494,19 @@ def add_version(registry: Registry, entry: SchemaVersion) -> Registry:
     the entry's provenance when its mapping is identical.
     """
     known = registry.entry(entry.version)
+    if known == entry:
+        return registry  # the same published version again: nothing changes
     if known is not None:
         if known.spec != entry.spec:
             raise ProjectionError(
                 f"package-schema {entry.version} is already indexed with another mapping; a"
                 " change to an indexed version needs an ADR and a rebuild"
+            )
+        if _semver(entry.contract_version) <= _semver(known.contract_version):
+            raise ProjectionError(
+                f"package-schema {entry.version} is indexed from {known.contract_version}; an"
+                f" entry is re-pointed only to a later registry version, not"
+                f" {entry.contract_version}"
             )
         versions = list(registry.versions)
         versions[entry.version - 1] = entry

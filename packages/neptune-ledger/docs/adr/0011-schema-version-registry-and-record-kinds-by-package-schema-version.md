@@ -65,10 +65,14 @@ registered side by side forever. Three gaps followed from ADRs 0008 and 0009:
    registration (§2, ADR 0008 §2) and `query`, where a kind no version the Ledger reads declares
    is `invalid_request` (MVL-98 implements it; contract test
    `test_query_rejects_a_kind_no_schema_version_declares`). `KindCount` gains a docstring, so its
-   description no longer prints the kind tuple. The change only widens one definition, so every
-   1.2.0 golden validates against 1.3.0 (a minor version, ADR 0004 §5). From 1.3.0 on, a
-   package-schema version that adds kinds changes no catalog-api file; a test proves that a
-   compiler with one more kind exports byte-identical catalog-api schema.
+   description no longer prints the kind tuple. From 1.3.0 on, a package-schema version that
+   adds kinds changes no catalog-api file; a test proves that a compiler with one more kind
+   exports byte-identical catalog-api schema.
+   - **A minor version, not a major.** The change only widens one definition, so every earlier
+     1.x golden validates against 1.3.0, which is what platform ADR 0002 §3 calls
+     reader-compatible. A 1.x reader that decodes kinds strictly already rejected each kind that
+     1.2.0 added as a minor version; ADR 0004 counts an added enum member as minor, and the open
+     pattern is the limit of that rule. Readers accept a kind they do not know (catalog-api.md).
 5. **Migration 0007: `schema_version` and `schema_version_projection`.** Registration writes a
    `schema_version` row for each version a package states (its manifest's and its records') the
    first time the tenant sees it: the version, schema id, `contract_version`, `schema_sha256`,

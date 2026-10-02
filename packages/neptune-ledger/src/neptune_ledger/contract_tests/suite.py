@@ -45,6 +45,7 @@ from neptune_ledger.api.types import (
 from neptune_ledger.contract_tests.examples import (
     EXAMPLES,
     WorkedPackage,
+    at_schema_1,
     at_schema_2,
     evidence_anchor,
     machine_threads,
@@ -186,11 +187,11 @@ class CatalogContract:
         assert after.registration_key.value.tx_seq == first.registration_key.value.tx_seq + 1
 
     def test_packages_of_two_schema_versions_register_side_by_side(
-        self, catalog: CatalogApi, packages: dict[str, WorkedPackage], tmp_path: Path
+        self, catalog: CatalogApi, tmp_path: Path
     ) -> None:
         """The same source ingested by a schema-1 and a schema-2 compiler (Ledger ADR 0011):
         both register, each at the version its manifest declares, whichever comes first."""
-        older = packages["drone"]
+        older = write("drone-v1", tmp_path / "drone-v1", at_schema_1("drone"))
         newer = write("drone-v2", tmp_path / "drone-v2", at_schema_2("drone", "2.0.0", {}))
         assert (older.manifest["schema_version"], newer.manifest["schema_version"]) == (1, 2)
         for package, version in ((newer, 2), (older, 1)):
