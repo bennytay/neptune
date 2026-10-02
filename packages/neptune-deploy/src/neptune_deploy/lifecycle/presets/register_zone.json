@@ -1,0 +1,35 @@
+{
+  "schema": "neptune-deploy.lifecycle-mapping/1",
+  "id": "register.zone",
+  "version": "1",
+  "description": "A zone authorisation register, one row per envelope and zone: the robots, the zone's speed limit, the payload, missions, supervision, dependencies and validity.",
+  "zone": "unstated",
+  "rules": [
+    {
+      "id": "envelope",
+      "kind": "authorisation_envelope",
+      "requires": ["Envelope ID", "Zone"],
+      "fields": {
+        "identifiers": [{"column": "Envelope ID", "namespace": "register.envelope"}],
+        "site": {"column": "Site", "namespace": "register.site"},
+        "machines": [{"column": "Robots", "namespace": "register.robot", "split": ";"}],
+        "zones": [
+          {
+            "zone": {"column": "Zone", "namespace": "register.zone"},
+            "speed_limit": {"value": {"column": "Speed Limit"}, "unit": {"column": "Speed Unit"}}
+          }
+        ],
+        "payload_max": {"value": {"column": "Payload Max"}, "unit": {"column": "Payload Unit"}},
+        "missions": [{"column": "Missions", "split": ";"}],
+        "supervision": {"column": "Supervision"},
+        "dependencies": [{"column": "Depends On", "split": ";"}],
+        "valid_from": {"column": "Valid From", "format": "%Y-%m-%d", "required": true},
+        "valid_until": {"column": "Valid Until", "format": "%Y-%m-%d"},
+        "approval": {
+          "authority": {"column": "Approved By"},
+          "time": {"column": "Approved On", "format": "%Y-%m-%d"}
+        }
+      }
+    }
+  ]
+}
