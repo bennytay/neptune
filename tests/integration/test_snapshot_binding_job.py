@@ -11,7 +11,8 @@ A real job, with the real sandbox and grouping, reads four sites across embodime
 - an arm whose session holds two different ``params.yaml``, equally near its recording.
 
 Stated bindings are canonical records; inferred ones are a derived table; every gap, conflict and
-shared file is a finding naming the run. Nothing is mocked, and a second job writes the same package.
+shared file is a finding naming the run. Nothing is mocked, and a second job writes the same
+package.
 """
 
 import hashlib
