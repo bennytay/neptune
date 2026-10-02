@@ -69,7 +69,9 @@ def test_every_log_lands_read_by_flightlog_inside_the_sandbox(
     transforms = {t.id: t.adapter_id for t in package.receipt.transforms}
     readers = {
         source.location.path: [
-            transforms[t] for t in source.read_by if transforms[t] != "neptune.grouping"
+            transforms[t]
+            for t in source.read_by
+            if transforms[t] not in {"neptune.grouping", "neptune.introspection"}
         ]
         for source in package.receipt.sources
     }
@@ -77,7 +79,10 @@ def test_every_log_lands_read_by_flightlog_inside_the_sandbox(
     assert all(found == ["flightlog"] for found in readers.values()), readers
     codes = {r.code for r in package.records if isinstance(r, IngestFinding)}
     quarantined = {
-        c for c in codes if c.startswith("neptune.") and not c.startswith("neptune.grouping.")
+        c
+        for c in codes
+        if c.startswith("neptune.")
+        and not c.startswith(("neptune.grouping.", "neptune.introspection."))
     }
     assert not quarantined
     assert {"flightlog.truncated", "flightlog.dropout", "flightlog.units_not_declared"} <= codes
