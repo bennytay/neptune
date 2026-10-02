@@ -283,7 +283,7 @@ a bug, not a value.
 
 | Example | Sources | Records |
 |---|---|---|
-| drone | PX4 ULog, fleet register JSON | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings; a co-declared identity link and three snapshot bindings |
+| drone | PX4 ULog | run, streams with boot and GPS clocks, machine by `sys_uuid`, hardware, firmware, calibration, findings; the log as its run's member and three snapshot bindings |
 | quadruped | ROS 2 bag, URDF, STL mesh | run from bag metadata, joint and trajectory streams with three clocks each, URDF frames, transforms and components, the mesh as geometry; the bag's file list, its stated `starting_time` → `log_time` clock mapping, URDF edge bindings |
 | manipulator | MCAP, hand-eye YAML | run, joint and camera streams, hand-eye calibration with an `Ambiguous` direction and a finding for its missing unit; the calibration's edge binding |
 | mobile robot | ROS 1 bag, site register CSV, PNG photo | run and streams, register table and rows, sites citing their cells, the photo's pixels and EXIF capture; the bag as its run's one member |

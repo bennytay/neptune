@@ -304,7 +304,6 @@ REPRESENTED_AS: Final = {
         "stream",
         "timestamp_domain",
     },
-    ("drone", "fleet.json"): {"identity_link", "machine"},
     ("quadruped", "bag/metadata.yaml"): {
         "clock_mapping",
         "run",

@@ -91,13 +91,16 @@ Forces:
    so a new kind cannot be a minor version even though every earlier golden still validates. A
    package that holds no alignment record is written at its old version, byte for byte (ADR 0037
    §1). `alignment-records` becomes active and rides on package-schema's version.
-10. **Worked examples.** Each of the four examples holds the alignment its sources state: the drone
-    (a fleet register's co-declared identity link, its log as its own run, three snapshot bindings
-    from the log's start), the quadruped (rosbag2's file list, its `starting_time` → MCAP
-    `log_time` identity map with bound 0, URDF edge bindings, the ROS distribution's binding), the
-    manipulator (the hand-eye calibration's edge binding, its log as its own run) and the mobile
-    robot (its bag as its own run). The drone gains one source, `fleet.json`; no other source
-    changes.
+10. **Worked examples.** Each of the four examples holds the alignment its sources state, and no
+    source changes: the drone (its log as its own run, three snapshot bindings from the log's
+    start), the quadruped (rosbag2's file list, its `starting_time` → MCAP `log_time` identity map
+    with bound 0, URDF edge bindings, the ROS distribution's binding), the manipulator (the hand-eye
+    calibration's edge binding, its log as its own run) and the mobile robot (its bag as its own
+    run). No example's sources state an identity link, and Memory's G1 golden graph consolidates
+    every worked-example record, so a link there changes Memory's contract: the first worked-example
+    `identity_link` (a fleet register naming the drone by asset tag and `sys_uuid`) lands with
+    MVL-126, which adopts this shape. Until then `IdentityLink` is pinned by its JSON Schema
+    definition and `tests/unit/model/test_alignment.py`.
 
 ## Alternatives considered
 

@@ -45,8 +45,6 @@ from neptune.model.alignment import (
     ClockMapping,
     FrameBinding,
     FrameBindingBasis,
-    IdentityLink,
-    LinkBasis,
     MappingMethod,
     MemberRole,
     RunAssembly,
@@ -478,35 +476,6 @@ def drone() -> Example:
                 validity=from_start,
             )
         )
-    # The fleet register names the drone by its asset tag and by the sys_uuid the log declares:
-    # one declaration, two ids, so a co-declared identity link. Never a merge.
-    fleet = "fleet.json"
-
-    def row(pointer: str = "") -> Provenance:
-        return ex.pointer("fleet", fleet, "/assets/0" + pointer, kind=STATED)
-
-    tag = LogicalId("fleet.asset_tag", "D-07")
-    ex.add(
-        Machine(
-            id=ex.id_of("machine", row()),
-            provenance=row(),
-            identifiers=(Known(tag, row("/asset_tag")), Known(uuid, row("/sys_uuid"))),
-            manufacturer=Unknown(),  # the register could say and does not
-            model=Unknown(),
-        )
-    )
-    ex.add(
-        IdentityLink(
-            id=ex.id_of("identity_link", row()),
-            provenance=row(),
-            left=tag,
-            right=Known(uuid, row("/sys_uuid")),
-            basis=LinkBasis.CO_DECLARED,
-            identifier=NotApplicable(),
-            evidence=(),
-            validity=Unknown(),  # the register could state when the tag was assigned; it does not
-        )
-    )
     return ex
 
 

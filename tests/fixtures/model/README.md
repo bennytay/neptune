@@ -6,7 +6,7 @@ sources declare (MVL-70). `make examples` rebuilds everything here from `make_ex
 
 | Example | Sources | What it shows |
 |---|---|---|
-| `drone` | `flight.ulg` (PX4 ULog), `fleet.json` | boot time and GPS time as separate clocks; the vehicle by its `sys_uuid`; board, sensor ids, firmware commit and accelerometer calibration; a dropout and an unstated release as findings; a fleet register naming the drone by an asset tag and its `sys_uuid` (an identity link, never a merge); the log's snapshots bound to its run from its start |
+| `drone` | `flight.ulg` (PX4 ULog) | boot time and GPS time as separate clocks; the vehicle by its `sys_uuid`; board, sensor ids, firmware commit and accelerometer calibration; a dropout and an unstated release as findings |
 | `quadruped` | `bag/metadata.yaml` + `bag/walk_0.mcap` (ROS 2 bag), `robot.urdf`, `meshes/body.stl` | a run declared by the bag's metadata; joint states and a body-pose trajectory, each with three clocks; the URDF as frames, transforms and components, naming no machine; the mesh as geometry |
 | `manipulator` | `session.mcap`, `handeye.yaml` | camera frames inside a log as a stream; a hand-eye calibration whose transform direction is `Ambiguous` and whose unit is missing |
 | `mobile_robot` | `drive.bag` (ROS 1), `sites.csv`, `photos/dock.png` | a register with blank cells, its rows and the sites they name, each id and name citing its cell; a photo's pixels and its EXIF capture time, position and camera serial |
