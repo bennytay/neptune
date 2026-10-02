@@ -72,6 +72,10 @@ id changes.
   cells): at 100,000 rows the previous writer took 31 s and peaked at 771 MiB; the streaming writer
   takes 25 s and peaks at 127 MiB, with the same package id. At 1,000,000 rows it stays under the
   same cap, in linear time. `tests/integration/test_package_write_scale.py` holds both (`@slow`).
+- Deploy's D1 case (100,000 work orders, 470 MiB of tables, 69,000 findings): the write took
+  96.7 s and peaked at 2.9 GB. `package_files` now takes 62 s and peaks at 2.0 GB, because it still
+  holds the whole package. `write_package_stream` takes 68 s and its process peaks at 746 MiB, most
+  of which is the mapper's input and output, held as lists.
 - Byte identity is proved against the worked examples' golden documents, Deploy's committed
   archetype packages (series and derived tables included) and the in-memory writer, with a budget
   small enough to force multi-level merges (`tests/unit/store/test_streaming_writer.py`).
