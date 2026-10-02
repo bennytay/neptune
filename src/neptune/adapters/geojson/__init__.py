@@ -80,9 +80,12 @@ from neptune.adapters.geojson._scan import (
 from neptune.model.finding import IngestFinding
 from neptune.model.jsonvalue import JsonObject
 
-# Blocks are cut between features by constants of the adapter's version, never by a setting.
-BLOCK_FEATURES: Final = 2048
-BLOCK_BYTES: Final = 1024 * 1024
+# Blocks are cut between features by constants of the adapter's version, never by a setting. A
+# block's output (about 2 KiB held per record, a record per value) must stay far under the 512 MiB
+# declared: 128 KiB of JSON holds at most ~26,000 values at five bytes each, so ~55 MiB of records;
+# a single feature is the one thing a cut cannot split, and ``max_properties`` bounds it.
+BLOCK_FEATURES: Final = 256
+BLOCK_BYTES: Final = 128 * 1024
 
 DESCRIPTOR: Final = AdapterDescriptor(
     id=ADAPTER_ID,
@@ -159,7 +162,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "chunks",
             "chunk 0 holds the artifact and the two tables; every other chunk holds whole"
-            " features (at most 2,048 or 1 MiB of them) and its context gives the byte range, the"
+            " features (at most 256 or 128 KiB of them) and its context gives the byte range, the"
             " first feature's index, the features array and the file's CRS decision",
         ),
         Documented(

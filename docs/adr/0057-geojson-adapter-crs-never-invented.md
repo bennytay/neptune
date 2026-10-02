@@ -94,8 +94,9 @@ One adapter, `geojson`, emitting existing kinds only (no schema change).
    (1 GiB), `max_features` (10 M), `max_positions` (500,000 per geometry; over it the geometry is
    not walked and its bounds are `Unknown`: `position_budget`), `max_properties` (4,096 per
    feature), `max_depth` (32, for GeometryCollections and properties). Blocks of features are cut by
-   constants of this version (2,048 features or 1 MiB), so chunk ids and the per-chunk, one per
-   code findings are deterministic. A feature that is not UTF-8 has no record (`invalid_utf8`), a
+   constants of this version (256 features or 128 KiB, so a chunk holds under ~26,000 values: ~55
+   MiB against the 512 MiB declared), so chunk ids and the per-chunk, one per code findings are
+   deterministic. A feature that is not UTF-8 has no record (`invalid_utf8`), a
    repeated member name is `Unknown` (`duplicate_member`), truncated or malformed JSON keeps every
    whole feature before it (`json_truncated`, `json_syntax`).
 

@@ -849,13 +849,25 @@ def test_blocks_cut_a_big_collection_without_changing_a_record(
     ]
     data = collection(*features)
     wide = run(data)
-    assert len(wide.plan.chunks) == 1 + 3  # 2,048 features a block
+    assert len(wide.plan.chunks) > 1 + 4200 // geojson.BLOCK_FEATURES  # cut by features or bytes
     assert sorted(feature_rows(wide)) == list(range(4200))
     assert [r.cells[0].value for r in rows(wide, "features")] == list(range(4200))
     monkeypatch.setattr(geojson, "BLOCK_FEATURES", 7)
     narrow = run(data)
     assert len(narrow.plan.chunks) > len(wide.plan.chunks)
     assert [r.to_json() for r in narrow.records()] == [r.to_json() for r in wide.records()]
+
+
+def test_a_chunk_never_holds_more_records_than_its_budget_allows() -> None:
+    """Many small values per feature: the bytes cut, not the feature count, bound the records."""
+    props = ",".join(f'"a{i}":1' for i in range(100))
+    feature = f'{{"type":"Feature","geometry":null,"properties":{{{props}}}}}'.encode()
+    output = run(collection(*[feature] * 1200))
+    assert len(output.plan.chunks) > 1 + 1200 // geojson.BLOCK_FEATURES
+    most = max(len(chunk.records) for chunk in output.outputs)
+    assert most <= geojson.BLOCK_BYTES // 5 + geojson.BLOCK_FEATURES  # five bytes a value
+    assert most < 30_000  # the budget in records: ~55 MiB held against 512 MiB declared
+    assert len(rows(output, "properties")) == 1200 * 100
 
 
 def test_a_setting_or_version_change_is_new_lineage() -> None:
