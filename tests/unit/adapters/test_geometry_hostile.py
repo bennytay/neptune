@@ -690,7 +690,7 @@ def test_a_glTF_finding_cites_the_json_it_is_about_not_byte_zero() -> None:
     document["meshes"][0]["primitives"][0]["attributes"]["POSITION"] = 7
     text = json.dumps(document).encode()
     (found,) = by_code(run(text), "geometry.malformed")
-    assert found.subject.locator[0].pointer == "/accessors"  # type: ignore[union-attr]
+    assert found.subject.locator[0].pointer == "/accessors"
 
 
 def test_obj_statements_may_start_with_whitespace() -> None:
