@@ -117,7 +117,10 @@ earlier statement. Nothing in the model can hold one. Forces:
 6. **Version.** The kind is `since` 5, so `SCHEMA_VERSION` is 5 and the package-schema contract
    publishes **5.0.0** (an integer owner constant is the registry major, platform ADR 0002 §3);
    every earlier golden still validates, and a package without assertions keeps its bytes (ADR
-   0037 §1). The Ledger's catalog API, which embeds the compiler's kinds, takes **1.5.0**. A new
+   0037 §1). Compiler kind additions no longer touch catalog-api: since Ledger ADR 0011 (#79) it
+   references package-schema by version and stays **1.6.0**. Package-schema 5 gets its entry in
+   the Ledger's schema-version registry (`catalog/projections.json`) from the generator,
+   `python -m neptune_ledger.catalog.projection contracts/package-schema/v5.0.0/schema.json`. A new
    planned contract, `assertion-records`, is part of package-schema and rides on its version.
    Number 5 is provisional: kind-adding PRs are numbered in merge order, and a renumber touches
    only the version constants, `since`, contract directories and regenerated outputs.
