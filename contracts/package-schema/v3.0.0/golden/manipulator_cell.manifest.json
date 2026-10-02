@@ -2,12 +2,12 @@
   "files": [
     {
       "path": "receipt.json",
-      "sha256": "sha256:aaacabf49696b1dab906cbfd6a87aab6c073eed1eabbfdf428ffb2918e17ad99",
+      "sha256": "sha256:e458509edf9252333ffa35bb782201b5c0fd469181a5718c39f2b7a2f5f33f84",
       "size": 1532
     },
     {
       "path": "receipt.md",
-      "sha256": "sha256:3b5191bfa15ce89e2000064abb3945faf6e10fa285e9343adbfc0356b70eec1d",
+      "sha256": "sha256:a0d05e4def097dda5337148407be44f92395a6afd9be8cd7a81dad8c30c39d21",
       "size": 1209
     },
     {
@@ -32,8 +32,8 @@
     },
     {
       "path": "records/commissioning_baseline.jsonl",
-      "sha256": "sha256:2318893ebcade61b4ea8bed9e723e4c843501608b7f071c74a077b4c56127b69",
-      "size": 13679
+      "sha256": "sha256:d7798940b759c7228efa5c56e3578f66593d819fe7f2028ee64929370089b024",
+      "size": 13673
     },
     {
       "path": "records/configuration_snapshot.jsonl",
@@ -107,18 +107,18 @@
     },
     {
       "path": "records/maintenance_event.jsonl",
-      "sha256": "sha256:c0cd330ecc29e42bf5fbd73d64bf8fa8d0076121b051a1f6cf62e7b3c49e60ef",
-      "size": 5278
+      "sha256": "sha256:1cf1dcf5d7e804d4547a105f8a2f1a3b9bbd7f96548e64b97976a5b49e7102ca",
+      "size": 5272
     },
     {
       "path": "records/requalification_record.jsonl",
-      "sha256": "sha256:ed96f30bda3cb0e3a4322335242484e9be01ef5ad0f665fca09fbacaa5e07634",
-      "size": 8843
+      "sha256": "sha256:a379b2c6d9e65a8bcbbe31c2e20d235eac8cb4f0e3f1bea36b22364bc645ad63",
+      "size": 8837
     },
     {
       "path": "records/risk_assessment.jsonl",
-      "sha256": "sha256:740682cddc8dc5df2f2760894076e8a38663540ef02f0391bea1ebb65024a597",
-      "size": 9999
+      "sha256": "sha256:e51798249c82a6b06065da9b4df6cc7972eb0b6324ae0e47aa6032ee57f7d27e",
+      "size": 9993
     },
     {
       "path": "records/run.jsonl",
@@ -142,12 +142,12 @@
     },
     {
       "path": "records/source_artifact.jsonl",
-      "sha256": "sha256:81de6d189eea507664c752d4488e894b78efde2a846714ebd484a3ddcf5d1348",
+      "sha256": "sha256:877913738079c4c3120c46f6b1960e228caac9a99c3765042b302bd5dbe816bf",
       "size": 251
     },
     {
       "path": "records/source_revision.jsonl",
-      "sha256": "sha256:7c65379cc804cf1f23cce649ba3123437dc6f8f1bb768f91374f37217122c212",
+      "sha256": "sha256:03ffbc1f03c3c3f37cc14e4028f21e366f7e175d1dcbdf9939e27eba56f96117",
       "size": 282
     },
     {
@@ -172,7 +172,7 @@
     },
     {
       "path": "records/timestamp_domain.jsonl",
-      "sha256": "sha256:074e358375333cde8d009f9ea9bf032bc87cf9f0feaadead7c7edb92bae76176",
+      "sha256": "sha256:b22bea5325f5289585d9d2b6001aea39fc5f2c55f4e94e84c1b712d70369e519",
       "size": 747
     },
     {
@@ -187,12 +187,12 @@
     }
   ],
   "kind": "package_manifest",
-  "receipt": "rec:sha256:e28839808f1d54280a50a2afd14a5c1aff4d9063c01daf7fbdfcd89eb5731ec9",
+  "receipt": "rec:sha256:8159d51e13dfab9dc0ca9f2083d5e52c4aabb21a68e6c4282f4da2ed08ac6a6f",
   "schema_version": 3,
   "sources": [
     {
-      "content_id": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9",
-      "size": 3374,
+      "content_id": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024",
+      "size": 3350,
       "storage": "referenced"
     }
   ],

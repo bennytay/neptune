@@ -934,7 +934,8 @@ def warehouse_amr() -> Example:
     """The warehouse deployment of AMR-07 at site S-007, from its records export."""
     ex = Example("warehouse_amr", {source.path: source for source in EXAMPLES["warehouse_amr"]()})
     r = Records(ex, "records.json")
-    site = r.ref("register", "/site")  # the site register's id (sites.csv)
+    # The export's own site id; linking it to a site register's S-007 is MVL-35's, not a join here.
+    site = r.ref("siteops.site", "/site")
     c = "/commissioning/0"
     r.add(
         CommissioningBaseline,

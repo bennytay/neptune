@@ -280,7 +280,7 @@
       "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
     },
     "value": {
-      "namespace": "register",
+      "namespace": "siteops.site",
       "value": "S-007"
     }
   },

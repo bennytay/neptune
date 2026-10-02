@@ -8,7 +8,7 @@
           "locator": [
             {
               "kind": "byte_range",
-              "length": 3374,
+              "length": 3350,
               "offset": 0
             },
             {
@@ -16,7 +16,7 @@
               "pointer": "/commissioning/calibrations/0"
             }
           ],
-          "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+          "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
         },
         "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
       },
@@ -34,7 +34,7 @@
         "locator": [
           {
             "kind": "byte_range",
-            "length": 3374,
+            "length": 3350,
             "offset": 0
           },
           {
@@ -42,12 +42,12 @@
             "pointer": "/commissioning/date"
           }
         ],
-        "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+        "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
       },
       "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
     },
     "value": {
-      "domain_id": "rec:sha256:5e7ad9e089b0f9a3d015d631b3863ba21da6a66144f21ac0a43ed91f72c54a0d",
+      "domain_id": "rec:sha256:762a5cc2b559dbfc788292a49fa5c2a8cd3a364ad73c67d0eea77fdfe4f2289e",
       "ticks": 1789338600
     }
   },
@@ -59,7 +59,7 @@
         "locator": [
           {
             "kind": "byte_range",
-            "length": 3374,
+            "length": 3350,
             "offset": 0
           },
           {
@@ -67,7 +67,7 @@
             "pointer": "/commissioning/configuration"
           }
         ],
-        "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+        "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
       },
       "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
     },
@@ -85,7 +85,7 @@
           "locator": [
             {
               "kind": "byte_range",
-              "length": 3374,
+              "length": 3350,
               "offset": 0
             },
             {
@@ -93,7 +93,7 @@
               "pointer": "/commissioning/constraints/0"
             }
           ],
-          "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+          "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
         },
         "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
       },
@@ -107,7 +107,7 @@
           "locator": [
             {
               "kind": "byte_range",
-              "length": 3374,
+              "length": 3350,
               "offset": 0
             },
             {
@@ -115,7 +115,7 @@
               "pointer": "/commissioning/constraints/1"
             }
           ],
-          "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+          "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
         },
         "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
       },
@@ -133,7 +133,7 @@
               "locator": [
                 {
                   "kind": "byte_range",
-                  "length": 3374,
+                  "length": 3350,
                   "offset": 0
                 },
                 {
@@ -141,7 +141,7 @@
                   "pointer": "/commissioning/hardware/0/serial"
                 }
               ],
-              "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+              "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
             },
             "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
           },
@@ -159,7 +159,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -167,7 +167,7 @@
                 "pointer": "/commissioning/hardware/0/model"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -181,7 +181,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -189,7 +189,7 @@
                 "pointer": "/commissioning/hardware/0/item"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -209,7 +209,7 @@
               "locator": [
                 {
                   "kind": "byte_range",
-                  "length": 3374,
+                  "length": 3350,
                   "offset": 0
                 },
                 {
@@ -217,7 +217,7 @@
                   "pointer": "/commissioning/hardware/1/serial"
                 }
               ],
-              "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+              "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
             },
             "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
           },
@@ -235,7 +235,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -243,7 +243,7 @@
                 "pointer": "/commissioning/hardware/1/model"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -257,7 +257,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -265,7 +265,7 @@
                 "pointer": "/commissioning/hardware/1/item"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -285,7 +285,7 @@
               "locator": [
                 {
                   "kind": "byte_range",
-                  "length": 3374,
+                  "length": 3350,
                   "offset": 0
                 },
                 {
@@ -293,7 +293,7 @@
                   "pointer": "/commissioning/hardware/2/serial"
                 }
               ],
-              "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+              "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
             },
             "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
           },
@@ -311,7 +311,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -319,7 +319,7 @@
                 "pointer": "/commissioning/hardware/2/model"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -333,7 +333,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -341,7 +341,7 @@
                 "pointer": "/commissioning/hardware/2/item"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -352,7 +352,7 @@
       }
     }
   ],
-  "id": "rec:sha256:bd7ae9a41053e0dbb126221bb55156ad8a4dea0b485e31c7dff40185c0a0e5b7",
+  "id": "rec:sha256:132ce879350a2e57513bab8242bc86a257b5c6ee683d569b930e97746c1bc7d1",
   "identifiers": [
     {
       "knowledge": "known",
@@ -362,7 +362,7 @@
           "locator": [
             {
               "kind": "byte_range",
-              "length": 3374,
+              "length": 3350,
               "offset": 0
             },
             {
@@ -370,7 +370,7 @@
               "pointer": "/commissioning/record"
             }
           ],
-          "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+          "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
         },
         "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
       },
@@ -390,7 +390,7 @@
           "locator": [
             {
               "kind": "byte_range",
-              "length": 3374,
+              "length": 3350,
               "offset": 0
             },
             {
@@ -398,13 +398,13 @@
               "pointer": "/commissioning/robot"
             }
           ],
-          "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+          "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
         },
         "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
       },
       "value": {
         "namespace": "robot.serial",
-        "value": "UR10e-20415"
+        "value": "20415"
       }
     }
   ],
@@ -414,7 +414,7 @@
       "locator": [
         {
           "kind": "byte_range",
-          "length": 3374,
+          "length": 3350,
           "offset": 0
         },
         {
@@ -422,7 +422,7 @@
           "pointer": "/commissioning"
         }
       ],
-      "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+      "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
     },
     "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
   },
@@ -437,7 +437,7 @@
           "locator": [
             {
               "kind": "byte_range",
-              "length": 3374,
+              "length": 3350,
               "offset": 0
             },
             {
@@ -445,7 +445,7 @@
               "pointer": "/commissioning/signed_off_by"
             }
           ],
-          "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+          "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
         },
         "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
       },
@@ -459,7 +459,7 @@
           "locator": [
             {
               "kind": "byte_range",
-              "length": 3374,
+              "length": 3350,
               "offset": 0
             },
             {
@@ -467,7 +467,7 @@
               "pointer": "/commissioning/acceptance"
             }
           ],
-          "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+          "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
         },
         "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
       },
@@ -481,7 +481,7 @@
           "locator": [
             {
               "kind": "byte_range",
-              "length": 3374,
+              "length": 3350,
               "offset": 0
             },
             {
@@ -489,12 +489,12 @@
               "pointer": "/commissioning/signed_off"
             }
           ],
-          "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+          "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
         },
         "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
       },
       "value": {
-        "domain_id": "rec:sha256:5e7ad9e089b0f9a3d015d631b3863ba21da6a66144f21ac0a43ed91f72c54a0d",
+        "domain_id": "rec:sha256:762a5cc2b559dbfc788292a49fa5c2a8cd3a364ad73c67d0eea77fdfe4f2289e",
         "ticks": 1789362000
       }
     }
@@ -507,7 +507,7 @@
         "locator": [
           {
             "kind": "byte_range",
-            "length": 3374,
+            "length": 3350,
             "offset": 0
           },
           {
@@ -515,7 +515,7 @@
             "pointer": "/cell"
           }
         ],
-        "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+        "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
       },
       "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
     },
@@ -538,7 +538,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -546,7 +546,7 @@
                 "pointer": "/commissioning/software/0/item"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -560,7 +560,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -568,7 +568,7 @@
                 "pointer": "/commissioning/software/0/version"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -591,7 +591,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -599,7 +599,7 @@
                 "pointer": "/commissioning/software/1/item"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -613,7 +613,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -621,7 +621,7 @@
                 "pointer": "/commissioning/software/1/version"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -642,7 +642,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -650,7 +650,7 @@
                 "pointer": "/commissioning/tests/0/test"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -664,7 +664,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -672,12 +672,12 @@
                 "pointer": "/commissioning/tests/0/date"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
         "value": {
-          "domain_id": "rec:sha256:5e7ad9e089b0f9a3d015d631b3863ba21da6a66144f21ac0a43ed91f72c54a0d",
+          "domain_id": "rec:sha256:762a5cc2b559dbfc788292a49fa5c2a8cd3a364ad73c67d0eea77fdfe4f2289e",
           "ticks": 1789344300
         }
       },
@@ -689,7 +689,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -697,7 +697,7 @@
                 "pointer": "/commissioning/tests/0/result"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -713,7 +713,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -721,7 +721,7 @@
                 "pointer": "/commissioning/tests/1/test"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
@@ -735,7 +735,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -743,12 +743,12 @@
                 "pointer": "/commissioning/tests/1/date"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },
         "value": {
-          "domain_id": "rec:sha256:5e7ad9e089b0f9a3d015d631b3863ba21da6a66144f21ac0a43ed91f72c54a0d",
+          "domain_id": "rec:sha256:762a5cc2b559dbfc788292a49fa5c2a8cd3a364ad73c67d0eea77fdfe4f2289e",
           "ticks": 1789346400
         }
       },
@@ -760,7 +760,7 @@
             "locator": [
               {
                 "kind": "byte_range",
-                "length": 3374,
+                "length": 3350,
                 "offset": 0
               },
               {
@@ -768,7 +768,7 @@
                 "pointer": "/commissioning/tests/1/result"
               }
             ],
-            "source": "sha256:c5ebbba39b83c75586f33ec874a0b145f4fcb8b3928f645cca36001a0d696cd9"
+            "source": "sha256:dc7c0cefc5571782679481931276618a97a3b45b76661e3443bb97d47f570024"
           },
           "transform": "rec:sha256:538dcf5923612a1510b339695305313296bbbbd3212b49a943afa4b687df7d55"
         },

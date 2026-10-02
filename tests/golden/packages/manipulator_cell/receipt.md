@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:e28839808f1d54280a50a2afd14a5c1aff4d9063c01daf7fbdfcd89eb5731ec9`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:8159d51e13dfab9dc0ca9f2083d5e52c4aabb21a68e6c4282f4da2ed08ac6a6f`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -12,7 +12,7 @@ Receipt `rec:sha256:e28839808f1d54280a50a2afd14a5c1aff4d9063c01daf7fbdfcd89eb573
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `records.json` | 3374 | `sha256:c5ebbba39b83` | deployment_json 1.0.0 |
+| `records.json` | 3350 | `sha256:dc7c0cefc557` | deployment_json 1.0.0 |
 
 ## Adapters
 

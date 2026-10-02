@@ -44,6 +44,7 @@ from neptune.model.ids import LogicalId, RecordId, check_text, logical_id_from_j
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import (
     Ambiguous,
+    AssertionKind,
     Knowledge,
     Known,
     KnownAbsent,
@@ -396,6 +397,11 @@ class _Lifecycle(_Declared):
 
     def __post_init__(self) -> None:
         check_evidence_record(self.id, self.provenance)
+        # A lifecycle record is what a form, ticket or work order states; never an observation.
+        if self.provenance.assertion_kind is not AssertionKind.STATED:
+            raise ValueError(
+                f"a {self.kind} is stated by its declaration, not {self.provenance.assertion_kind}"
+            )
         self._check_fields()
 
     def to_json(self) -> JsonObject:
