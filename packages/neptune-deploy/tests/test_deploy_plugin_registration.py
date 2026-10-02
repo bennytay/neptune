@@ -34,7 +34,13 @@ def test_deploy_registers_its_adapters_and_nothing_else() -> None:
     assert _entry_points(ADAPTERS_GROUP) == {
         "deploy_lifecycle": "neptune_deploy.adapters.lifecycle:LifecycleAdapter"
     }
-    assert _entry_points(SOURCES_GROUP) == {}  # reserved: no connector has landed yet
+    assert _entry_points(SOURCES_GROUP) == {  # read-only connectors (ADR 0006, 0009)
+        "deploy_azure_blob": "neptune_deploy.sources.object_store:azure_source",
+        "deploy_gcs": "neptune_deploy.sources.object_store:gcs_source",
+        "deploy_rerun": "neptune_deploy.sources.rerun:rerun_source",
+        "deploy_roboto": "neptune_deploy.sources.roboto:roboto_source",
+        "deploy_s3": "neptune_deploy.sources.object_store:s3_source",
+    }
 
 
 def test_each_entry_point_is_named_by_its_adapter_id_and_registers() -> None:
