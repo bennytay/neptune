@@ -29,17 +29,15 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from types import TracebackType
-from typing import Any, BinaryIO, Final, Self
+from typing import TYPE_CHECKING, Any, BinaryIO, Final, Self
 
 from neptune.identity import canonical_json
-from neptune.identity.findings import check_ingest_finding
 from neptune.identity.ids import RECORD_ID_SCHEME
-from neptune.identity.provenance import check_evidence_record_id, check_transform_record
+from neptune.identity.provenance import check_transform_record
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.kinds import RECORD_KINDS, kinds_at, package_version, record_key
 from neptune.model.package import (
-    AmbiguousField,
     IngestReceipt,
     PackageFile,
     PackageManifest,
@@ -47,7 +45,6 @@ from neptune.model.package import (
     ReceiptEntity,
     ReceiptFinding,
     ReceiptRun,
-    ReceiptSource,
     ReceiptStream,
     ReceiptTransform,
     SourceHandle,
@@ -59,7 +56,6 @@ from neptune.model.package import (
     receipt_run_from_json,
     receipt_stream_from_json,
 )
-from neptune.model.provenance import Provenance, TransformRecord
 from neptune.model.record import envelope
 from neptune.store.package import (
     _DERIVED,
@@ -73,6 +69,7 @@ from neptune.store.package import (
     _document,
     _series_settings,
     blob_path,
+    check_record_lineage,
     copy_file,
     derived_path,
     package_id,
@@ -83,13 +80,16 @@ from neptune.store.receipt import (
     _LEDGER,
     NON_READERS,
     RECEIPT_KIND,
-    _read_by,
     _stated_ids,
-    _walk,
+    cite,
+    ledger_sections,
     render_lines,
 )
 from neptune.store.series import SeriesError, check_series
 from neptune.store.spill import SPILL_BUDGET, Key, Sorter, SpillBudget
+
+if TYPE_CHECKING:
+    from neptune.model.provenance import TransformRecord
 
 # Tables read back before the rest: what later records are checked or counted against.
 _FIRST: Final = (
@@ -250,13 +250,8 @@ class _Receipt:
             self.absences.append(record)
         if kind in _LEDGER:
             return
-        for source, transform in _read_by(record, data):
-            if transform not in self.judges:
-                self.read_by[source].add(transform)
-        for pointer, value in _walk(data):
-            if isinstance(value, dict) and value.get("knowledge") == "ambiguous":
-                field = AmbiguousField(record.id, pointer)
-                self.ambiguous.add((record.id, pointer), canonical_json.dumps(field.to_json()))
+        for field in cite(record, data, self.judges, self.read_by):
+            self.ambiguous.add((field.record, field.pointer), canonical_json.dumps(field.to_json()))
         if kind == "timestamp_domain":
             self.clocks.append(ReceiptClock(record.id, record.field, record.scope))
         elif kind == "stream":
@@ -294,28 +289,8 @@ class _Receipt:
         self, artifacts: Mapping[ContentId, int], counts: Mapping[str, int], version: int
     ) -> dict[str, Any]:
         """Every section of the core, checked as ``IngestReceipt`` checks its own."""
-        superseded = {
-            previous for entry in (*self.revisions, *self.absences) for previous in entry.supersedes
-        }
-        heads = sorted(
-            (r for r in self.revisions if r.id not in superseded), key=lambda r: r.location.key
-        )
-        sources = tuple(
-            ReceiptSource(
-                location=revision.location,
-                content_id=revision.content_id,
-                size=artifacts[revision.content_id],
-                read_by=tuple(sorted(RecordId(t) for t in self.read_by[revision.content_id])),
-            )
-            for revision in heads
-        )
-        absent = tuple(
-            sorted(
-                (a.location for a in self.absences if a.id not in superseded),
-                key=lambda location: location.key,
-            )
-        )
-        small = {
+        sources, absent = ledger_sections(self.revisions, self.absences, artifacts, self.read_by)
+        small: dict[str, Any] = {
             "sources": sources,
             "absent": absent,
             "transforms": tuple(self.transforms),
@@ -469,7 +444,7 @@ class PackageWriter:
                     if kind == "transform_record":
                         transforms[record.id] = _lineage(check_transform_record, record)
                     else:
-                        _check_lineage(record, transforms)
+                        check_record_lineage(record, transforms)
                     if kind == "source_artifact":
                         artifacts[record.content_id] = record.size
                     elif kind == "stream":
@@ -484,9 +459,11 @@ class PackageWriter:
                 raise
             files[path], digests[path] = table.close()
             counts[kind] = count
+            if kind in self._tables:  # read once: its runs are not needed again
+                self._tables[kind].close()
             if kind == "transform_record":
                 for transform in transforms.values():
-                    _check_lineage(transform, transforms)
+                    check_record_lineage(transform, transforms)
 
         for stream, file in sorted(series.items()):
             if stream not in streams:
@@ -503,6 +480,8 @@ class PackageWriter:
             digests[blob_path(artifact)] = digest
         for name, lines in sorted((derived or {}).items()):
             path = derived_path(name)
+            if not _DERIVED.fullmatch(path):
+                raise PackageError(f"not a derived table kind: {name!r}")
             files[path], digests[path] = self._derived(name, lines, set(transforms), sink(path))
 
         sections = receipt.sections(artifacts, counts, version)
@@ -574,14 +553,12 @@ class PackageWriter:
     ) -> tuple[Content, tuple[int, ContentId]]:
         """A derived table, sorted by id, each line checked as the reader checks it."""
         path = derived_path(kind)
-        if not _DERIVED.fullmatch(path):
-            raise PackageError(f"not a derived table kind: {kind!r}")
         sorter = self._sorter(f"derived-{kind}")
-        for line in lines:
-            ident = _derived_line(kind, line, transforms)
-            sorter.add((ident,), canonical_json.dumps(line) + b"\n")
         previous: Key | None = None
         try:
+            for line in lines:
+                ident = _derived_line(kind, line, transforms)
+                sorter.add((ident,), canonical_json.dumps(line) + b"\n")
             for key, encoded in sorter:
                 if previous is not None and key <= previous:
                     raise PackageError(f"{path} must name each id once")
@@ -605,24 +582,6 @@ def _read_back(read: Callable[[JsonValue], Any], line: bytes, path: str) -> tupl
 def _lineage(check: Callable[[Any], Any], record: Any) -> Any:
     try:
         return check(record)
-    except ValueError as exc:
-        raise PackageError(str(exc)) from exc
-
-
-def _check_lineage(record: Any, transforms: Mapping[str, TransformRecord]) -> None:
-    """``_check_lineage`` of the package reader, for one record (ADRs 0016, 0017)."""
-    try:
-        if record.kind == "ingest_finding":
-            check_ingest_finding(record)
-            if record.transform not in transforms:
-                raise PackageError(f"finding {record.id} names a transform not in the package")
-        provenance = getattr(record, "provenance", None)
-        if isinstance(provenance, Provenance):
-            if provenance.transform not in transforms:
-                raise PackageError(f"{record.kind} {record.id}: its transform is missing")
-            check_evidence_record_id(record, transforms[provenance.transform])
-    except PackageError:
-        raise
     except ValueError as exc:
         raise PackageError(str(exc)) from exc
 
@@ -656,15 +615,20 @@ def write_package_stream(
     if root.exists() and (not root.is_dir() or any(root.iterdir())):
         raise PackageError(f"{root} is not an empty directory")
     root.mkdir(parents=True, exist_ok=True)
-    with PackageWriter(scratch, budget=budget) as writer:
-        writer.extend(records)
-        contents = writer.finish(root, series=series, blobs=blobs, store=store, derived=derived)
-    for relative, data in sorted(contents.items()):
-        target = root / relative
-        if isinstance(data, bytes):
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-        elif data != target:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            copy_file(data, target)
+    try:
+        with PackageWriter(scratch, budget=budget) as writer:
+            writer.extend(records)
+            contents = writer.finish(root, series=series, blobs=blobs, store=store, derived=derived)
+        for relative, data in sorted(contents.items()):
+            target = root / relative
+            if isinstance(data, bytes):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+            elif data != target:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                copy_file(data, target)
+    except BaseException:
+        for entry in list(root.iterdir()):  # it was empty: leave it so, not half a package
+            shutil.rmtree(entry) if entry.is_dir() and not entry.is_symlink() else entry.unlink()
+        raise
     return package_id(contents)

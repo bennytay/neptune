@@ -49,8 +49,10 @@ id changes.
 6. **The bound.** Peak memory of a write is the interpreter and modules (about 70 MiB) + the spill
    budget with Python's per-entry overhead (about 2 × 32 MiB) + one 64 KiB read buffer per merged
    run (at most 64) + a 1 MiB write buffer per open file + one record + the manifest + the
-   receipt's per-source sections: sources, absences, transforms, clocks, and a stream count per
-   run. None of these grows with the number of records. The tests cap peak RSS at **256 MiB** at
+   receipt's per-source sections: sources, absences, transforms, clocks, the id of each stream and
+   a stream count per run (`stage` also holds each stream's record and its runs' paths). None of
+   these grows with the number of evidence records or findings; they grow with sources, streams
+   and runs, which are few next to them. The tests cap peak RSS at **256 MiB** at
    20,000, 100,000 and 1,000,000 rows. `stage` adds one committed chunk's records at a time.
 
 ## Alternatives considered
@@ -73,7 +75,8 @@ id changes.
 - Byte identity is proved against the worked examples' golden documents, Deploy's committed
   archetype packages (series and derived tables included) and the in-memory writer, with a budget
   small enough to force multi-level merges (`tests/unit/store/test_streaming_writer.py`).
-- A write needs scratch disk about the size of its record tables.
+- A write needs scratch disk about the size of its record tables; each table's runs are removed
+  once it is written.
 - Not in this part of MVL-48: `read_package` and validation still hold the whole package, so a job
   (stage, then validate) is bounded only up to its validate phase; `amend` and `export` still use
   the in-memory path. Queues, backpressure, storage tiers and object-store execution are the rest

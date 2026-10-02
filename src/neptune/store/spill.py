@@ -97,6 +97,8 @@ class Sorter:
             self._sorted = False
         self._buffer.append((key, payload))
         self._count += 1
+        if self._directory is None:
+            return  # nothing can spill: the budget does not apply
         cost = _charge(key, payload)
         self.held += cost
         self._budget._spend(cost)

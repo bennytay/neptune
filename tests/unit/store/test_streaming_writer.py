@@ -137,10 +137,22 @@ def test_spill_is_removed_when_the_write_fails(tmp_path: Path) -> None:
     assert list(scratch.iterdir()) == []
 
 
-def test_a_finding_whose_transform_is_absent_is_refused(tmp_path: Path) -> None:
+def test_a_refused_write_leaves_no_half_package(tmp_path: Path) -> None:
     records = [r for r in SCALE.scale_records(10) if r.kind != "transform_record"]
+    root = tmp_path / "p"
     with pytest.raises(PackageError, match="transform"):
-        write_package_stream(tmp_path / "p", records, scratch=spill_dir(tmp_path), budget=TINY)
+        write_package_stream(root, records, scratch=spill_dir(tmp_path), budget=TINY)
+    assert list(root.iterdir()) == []
+
+
+def test_a_derived_kind_that_is_not_a_name_writes_nothing_outside_the_package(
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "deep" / "er" / "out"
+    with PackageWriter() as writer, pytest.raises(PackageError, match="not a derived table"):
+        writer.finish(out, derived={"../../../escaped": []})
+    written = [p for p in tmp_path.rglob("*") if p.is_file()]
+    assert written and all(p.is_relative_to(out / "records") for p in written)  # tables only
 
 
 def test_the_package_root_must_be_empty(tmp_path: Path) -> None:

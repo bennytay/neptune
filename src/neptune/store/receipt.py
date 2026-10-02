@@ -9,7 +9,7 @@ so a time reads as ticks on a named clock.
 
 import itertools
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from dataclasses import replace
 from typing import Any, Final
 
@@ -104,6 +104,49 @@ def _stated_ids(identifiers: Iterable[Knowledge[LogicalId]]) -> tuple[LogicalId,
     return tuple(sorted(values, key=lambda value: (value.namespace, value.value)))
 
 
+def cite(
+    record: Any, data: JsonValue, judges: Collection[str], read_by: dict[str, set[str]]
+) -> list[AmbiguousField]:
+    """What one evidence record (not the ledger, not a transform) gives the receipt: each source
+    it cites is added to ``read_by`` under the transform citing it (unless that transform only
+    judges, ``NON_READERS``), and its ambiguous fields are returned. ``data`` is its JSON. The
+    streaming writer (ADR 0065) calls this per record, as ``build_receipt`` does."""
+    for source, transform in _read_by(record, data):
+        if transform not in judges:
+            read_by[source].add(transform)
+    return [
+        AmbiguousField(record.id, pointer)
+        for pointer, value in _walk(data)
+        if isinstance(value, dict) and value.get("knowledge") == "ambiguous"
+    ]
+
+
+def ledger_sections(
+    revisions: Iterable[Any],
+    absences: Iterable[Any],
+    sizes: Mapping[ContentId, int],
+    read_by: Mapping[str, set[str]],
+) -> tuple[tuple[ReceiptSource, ...], tuple[SourceLocation, ...]]:
+    """The receipt's ``sources`` and ``absent``: the head of each location's chain, sorted by
+    location, each source with its size and the transforms that read it."""
+    revisions, absences = list(revisions), list(absences)
+    superseded = {previous for entry in (*revisions, *absences) for previous in entry.supersedes}
+    heads = sorted((r for r in revisions if r.id not in superseded), key=lambda r: r.location.key)
+    sources = tuple(
+        ReceiptSource(
+            location=revision.location,
+            content_id=revision.content_id,
+            size=sizes[revision.content_id],
+            read_by=tuple(sorted(RecordId(t) for t in read_by.get(revision.content_id, ()))),
+        )
+        for revision in heads
+    )
+    absent = tuple(
+        sorted((a.location for a in absences if a.id not in superseded), key=lambda loc: loc.key)
+    )
+    return sources, absent
+
+
 def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestReceipt:
     """The receipt core of a package holding ``records`` (ledger, transforms, records, findings).
 
@@ -124,7 +167,6 @@ def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestR
         raise ValueError(f"a schema version {version} package cannot hold {newer}")
     artifacts = {artifact.content_id: artifact for artifact in by_kind["source_artifact"]}
     revisions, absences = by_kind["source_revision"], by_kind["source_absence"]
-    superseded = {previous for entry in (*revisions, *absences) for previous in entry.supersedes}
 
     judges = {t.id for t in by_kind["transform_record"] if t.adapter_id in NON_READERS}
     read_by: dict[str, set[str]] = defaultdict(set)
@@ -133,27 +175,10 @@ def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestR
         if kind in _LEDGER or kind == "transform_record":
             continue
         for record in members:
-            data = record.to_json()
-            for source, transform in _read_by(record, data):
-                if transform not in judges:
-                    read_by[source].add(transform)
-            for pointer, value in _walk(data):
-                if isinstance(value, dict) and value.get("knowledge") == "ambiguous":
-                    ambiguous.append(AmbiguousField(record.id, pointer))
+            ambiguous += cite(record, record.to_json(), judges, read_by)
 
-    heads = sorted((r for r in revisions if r.id not in superseded), key=lambda r: r.location.key)
-    sources = tuple(
-        ReceiptSource(
-            location=revision.location,
-            content_id=revision.content_id,
-            size=artifacts[revision.content_id].size,
-            read_by=tuple(sorted(RecordId(t) for t in read_by[revision.content_id])),
-        )
-        for revision in heads
-    )
-    absent = tuple(
-        sorted((a.location for a in absences if a.id not in superseded), key=lambda loc: loc.key)
-    )
+    sizes = {content: artifact.size for content, artifact in artifacts.items()}
+    sources, absent = ledger_sections(revisions, absences, sizes, read_by)
     transforms = sorted(by_kind["transform_record"], key=lambda t: t.id)
     runs = sorted(by_kind["run"], key=lambda r: r.id)
     streams = sorted(by_kind["stream"], key=lambda s: s.id)

@@ -136,6 +136,14 @@ def _series_file(
     return Held.REBUILT
 
 
+def _remove_empty(directory: Path) -> None:
+    """Remove ``directory`` and the directories under it, which must hold no file: anything left
+    is a file that should have moved into the package, and fails the stage."""
+    for path in sorted(directory.rglob("*"), reverse=True):
+        path.rmdir()
+    directory.rmdir()
+
+
 class SourceOpener(Protocol):
     """What materialising needs of a ``Source`` (``neptune.discovery.source``): to open a location.
 
@@ -370,7 +378,7 @@ def stage(
                 derived=derived,
             )
         copied = _lay_out(staging, contents, movable=scratch)
-        shutil.rmtree(scratch)  # every file was moved into place; empty directories and spill
+        _remove_empty(scratch)  # every merged series, landed source and written file was moved
         _check_copies(staging, contents, copied)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -383,9 +391,10 @@ def amend(staged: StagedPackage, package: IngestPackage, extra: Iterable[Any]) -
 
     ``package`` is ``staged`` as ``read_package`` read it. The new package is built in a fresh
     sibling: its tables, receipt and manifest are rewritten, and its series and blobs are moved
-    (never copied) out of ``staged``, which is then removed. ``package_contents`` verifies the
-    whole (``read_files``) before anything moves, so the result needs no second read. On failure
-    the new sibling is removed and ``staged`` may have lost files; the caller discards it.
+    (never copied) out of ``staged``, which is then removed. ``package_contents`` checks the
+    whole as the reader does (ADR 0065 §4) before anything moves, so the result needs no second
+    read. On failure the new sibling is removed and ``staged`` may have lost files; the caller
+    discards it.
     """
     contents = package_contents(
         [*package.records, *extra],

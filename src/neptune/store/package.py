@@ -486,16 +486,34 @@ def _check_lineage(records: list[Any]) -> None:
     try:
         for transform in by_kind["transform_record"]:
             transforms[transform.id] = check_transform_record(transform)
-        for finding in by_kind["ingest_finding"]:
-            check_ingest_finding(finding)
-            if finding.transform not in transforms:
-                raise PackageError(f"finding {finding.id} names a transform not in the package")
-        for record in records:
-            provenance = getattr(record, "provenance", None)
-            if isinstance(provenance, Provenance):
-                if provenance.transform not in transforms:
-                    raise PackageError(f"{record.kind} {record.id}: its transform is missing")
-                check_evidence_record_id(record, transforms[provenance.transform])
+    except ValueError as exc:
+        raise PackageError(str(exc)) from exc
+    for finding in by_kind["ingest_finding"]:
+        check_record_lineage(finding, transforms, provenance=False)
+    for record in records:
+        check_record_lineage(record, transforms, finding=False)
+
+
+def check_record_lineage(
+    record: Any,
+    transforms: Mapping[str, TransformRecord],
+    *,
+    finding: bool = True,
+    provenance: bool = True,
+) -> None:
+    """One record's lineage, against the package's ``transforms``: a finding's id recomputes and
+    names a transform of the package, and an evidence record's transform is there and its id
+    recomputes under it (ADRs 0016, 0017). The streaming writer checks each record with it."""
+    try:
+        if finding and record.kind == "ingest_finding":
+            check_ingest_finding(record)
+            if record.transform not in transforms:
+                raise PackageError(f"finding {record.id} names a transform not in the package")
+        cited = getattr(record, "provenance", None)
+        if provenance and isinstance(cited, Provenance):
+            if cited.transform not in transforms:
+                raise PackageError(f"{record.kind} {record.id}: its transform is missing")
+            check_evidence_record_id(record, transforms[cited.transform])
     except PackageError:
         raise
     except ValueError as exc:
