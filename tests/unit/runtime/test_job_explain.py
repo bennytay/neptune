@@ -191,6 +191,7 @@ def test_an_explanation_covers_inventory_formats_adapters_grouping_work_and_left
         "Inventory: 9 files",
         "telemetry_amr.csv",
         "Sessions (inferred",
+        "a dry run writes nothing to the package and only warms the workspace cache",
         "Work:",
         "Left out:",
     ):
