@@ -6,6 +6,7 @@ registry and the contract. A job may also build its own ``AdapterRegistry`` from
 
 from neptune.adapters.config import ConfigAdapter
 from neptune.adapters.contract import Adapter
+from neptune.adapters.flightlog import FlightLogAdapter
 from neptune.adapters.geometry import GeometryAdapter
 from neptune.adapters.image import ImageAdapter
 from neptune.adapters.markdown import MarkdownAdapter
@@ -23,6 +24,7 @@ def builtin_adapters() -> tuple[Adapter, ...]:
     """A fresh instance of every shipped adapter, in id order."""
     return (
         ConfigAdapter(),
+        FlightLogAdapter(),
         GeometryAdapter(),
         ImageAdapter(),
         MarkdownAdapter(),
