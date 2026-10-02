@@ -83,6 +83,16 @@ from neptune.model.source import (
     source_artifact_from_json,
     source_revision_from_json,
 )
+from neptune.model.task import (
+    Requirement,
+    SOPSection,
+    TaskBrief,
+    WorkOrder,
+    requirement_from_json,
+    sop_section_from_json,
+    task_brief_from_json,
+    work_order_from_json,
+)
 from neptune.model.world import (
     Asset,
     DocumentBlock,
@@ -137,6 +147,10 @@ RECORD_KINDS: Final[Mapping[str, tuple[type, Reader]]] = {
         (DocumentBlock, document_block_from_json),
         (StructuredTable, structured_table_from_json),
         (StructuredRecord, structured_record_from_json),
+        (TaskBrief, task_brief_from_json),
+        (Requirement, requirement_from_json),
+        (SOPSection, sop_section_from_json),
+        (WorkOrder, work_order_from_json),
         (IdentityLink, identity_link_from_json),
         (ClockMapping, clock_mapping_from_json),
         (FrameBinding, frame_binding_from_json),

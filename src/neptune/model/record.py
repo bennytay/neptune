@@ -27,12 +27,13 @@ from neptune.model.jsonvalue import JsonObject, JsonValue
 
 # The newest version of the canonical model: what this code reads and can write. It became 1 at
 # the M1 gate (ADR 0023), 2 with the configuration kinds (ADR 0037), 3 with the alignment kinds
-# (ADR 0050) and 4 with the deployment lifecycle kinds (ADR 0051). The model only grows: a newer
-# version adds record kinds, enum members or locator steps, through an ADR, and never changes an
-# existing field. A record of any version from OLDEST_READABLE_VERSION on is therefore valid as
-# it is: its migration is the identity. A record is written at the version that added its kind,
-# so an addition never changes the bytes of records that do not use it (ADR 0037 §1).
-SCHEMA_VERSION: Final = 4
+# (ADR 0050), 4 with the deployment lifecycle kinds (ADR 0051) and 5 with the task kinds (ADR 0063).
+# The model only grows: a newer version adds record kinds, enum members or locator steps, through an
+# ADR, and never changes an existing field. A record of any version from OLDEST_READABLE_VERSION on
+# is therefore valid as it is: its migration is the identity. A record is written at the version
+# that added its kind, so an addition never changes the bytes of records that do not use it
+# (ADR 0037 §1).
+SCHEMA_VERSION: Final = 5
 OLDEST_READABLE_VERSION: Final = 1
 ENVELOPE_KEYS: Final = frozenset({"kind", "schema_version"})
 
@@ -50,7 +51,7 @@ class Family(StrEnum):
     REFERENCE = "reference"  # the clocks and frames that times and poses are expressed in
     MACHINE = "machine"  # machine context: embodiment, sensors, calibration, software
     WORLD = "world"  # world / record context: sites, assets, maps, photos, documents, registers
-    TASK = "task"  # task context: briefs, SOPs, requirements, work orders (MVL-33)
+    TASK = "task"  # task context: briefs, requirements, procedure steps, work orders
     RUN = "run"  # run / experience evidence: sessions and their timestamped streams
     ALIGNMENT = "alignment"  # what evidence says relates other records: ids, clocks, frames, runs
 

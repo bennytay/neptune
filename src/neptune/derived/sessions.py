@@ -38,6 +38,7 @@ from neptune.derived.clocks import (
     inferred_clock_mapping_from_json,
     inferred_timestamp_domain_from_json,
 )
+from neptune.derived.declared import CANDIDATE_KIND, declared_candidate_from_json
 from neptune.derived.media import MEDIA_KIND, media_stream_from_json
 from neptune.derived.provenance import DERIVED_SCHEMA_VERSION as DERIVED_SCHEMA_VERSION
 from neptune.derived.provenance import INFERRED
@@ -589,6 +590,7 @@ DERIVED_KINDS: Final[Mapping[str, Callable[[JsonValue], Any]]] = {
     DEFINITION_KIND: definition_layout_from_json,  # ADR 0049
     LAYOUT_KIND: stream_layout_from_json,
     SEMANTIC_KIND: stream_semantic_from_json,
+    CANDIDATE_KIND: declared_candidate_from_json,  # ADR 0063
     MEDIA_KIND: media_stream_from_json,  # ADR 0056
     DOMAIN_KIND: inferred_timestamp_domain_from_json,  # ADR 0060
     MAPPING_KIND: inferred_clock_mapping_from_json,

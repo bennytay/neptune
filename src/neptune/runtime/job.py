@@ -55,7 +55,7 @@ from datetime import UTC, datetime
 from functools import partial
 from itertools import pairwise
 from pathlib import Path
-from typing import Final, TypeVar
+from typing import Any, Final, TypeVar
 
 from neptune.adapters.check import check_chunk_output, check_plan
 from neptune.adapters.contract import (
@@ -75,6 +75,13 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatus
+from neptune.declared import (
+    DECLARED_INPUTS,
+    DeclaredExtraction,
+    extract_declared,
+    row_wanted,
+    table_wanted,
+)
 from neptune.derived.assembly import EvidenceBuilder, RunAssembler
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
@@ -113,6 +120,7 @@ from neptune.model.source import (
     SourceArtifact,
     local_location,
 )
+from neptune.model.world import StructuredRecord, StructuredTable
 from neptune.runtime import events, explain, lineage, sandbox, wire
 from neptune.runtime.cache import (
     VERDICT_FILE,
@@ -2012,9 +2020,14 @@ class IngestJob:
             if (clocks := self._align_clocks()) is not None:
                 cited.add(clocks.transform.id)
                 derived = {**(derived or {}), **clocks.tables()}
+            declared_found = self._extract_declared(self._declared_records())
+            if declared_found is not None:
+                cited.update(transform.id for transform in declared_found.transforms)
+                derived = {**(derived or {}), **declared_found.tables()}
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
+                *(declared_found.records if declared_found is not None else ()),
                 *assembled,
             ]
             assert self.destination is not None  # ``run`` refuses to start without one
@@ -2038,6 +2051,70 @@ class IngestJob:
             self._finish(
                 Phase.ASSEMBLE, {"quarantined": quarantined, "sources": len(self._ingested)}
             )
+
+    def _chunk_records(
+        self, kinds: frozenset[str], only: set[tuple[ContentId, RecordId]] | None = None
+    ) -> Iterator[tuple[tuple[ContentId, RecordId], list[Any]]]:
+        """Each committed chunk's records with its source's key, one chunk at a time, for every
+        admitted source (of ``only``, when given) whose adapter declares it emits one of
+        ``kinds``: a source that cannot hold them is never loaded."""
+        adapters = {item.key: item.adapter for item in self._sources if item.config is not None}
+        try:
+            for key in sorted(set(self._ingested)):
+                if only is not None and key not in only:
+                    continue
+                adapter = adapters.get(key)
+                if adapter is not None and not kinds & set(adapter.descriptor.record_kinds):
+                    continue
+                self._check_cancel()  # each source's records are read whole: a checkpoint between
+                plan = self.workspace.load_plan(*key)
+                if plan is None:
+                    continue  # staging refuses the package and says why
+                for chunk in plan.chunks:
+                    yield key, list(self.workspace.load(str(chunk["id"])).records)
+        except (WorkspaceError, ValueError, OSError) as exc:
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+
+    def _declared_records(self) -> list[Any]:
+        """The admitted records the declared-records pass reads: documents, tables and
+        configurations. Rows are loaded in a second pass, and only from sources holding a table
+        whose rows the pass can read (a register, an undeclared or JSON table): a log's
+        telemetry tables are never loaded for it, nor held."""
+        kept: list[Any] = []
+        tables: dict[RecordId, StructuredTable] = {}
+        holders: set[tuple[ContentId, RecordId]] = set()
+        kinds = frozenset(kind.kind for kind in DECLARED_INPUTS)
+        for key, records in self._chunk_records(kinds):
+            for record in records:
+                if isinstance(record, StructuredTable) and table_wanted(record):
+                    tables[record.id] = record
+                    holders.add(key)
+                if isinstance(record, DECLARED_INPUTS) and not isinstance(record, StructuredRecord):
+                    kept.append(record)
+        if holders:  # rows may sit in other chunks than their table: a second pass
+            rows = frozenset({StructuredRecord.kind})
+            for _, records in self._chunk_records(rows, holders):
+                for record in records:
+                    if isinstance(record, StructuredRecord):
+                        table = tables.get(record.table)
+                        if table is not None and row_wanted(table, record):
+                            kept.append(record)
+        return kept
+
+    def _extract_declared(self, admitted: list[Any]) -> DeclaredExtraction | None:
+        """Stage 9c, before the package is staged: the sites, assets, briefs, requirements,
+        procedure steps and work orders the admitted documents, tables and configurations
+        explicitly declare, and the candidates that only look like one (ADR 0063). Reads records
+        only; no source byte is read and no adapter called."""
+        found = extract_declared(admitted)
+        if found is None:
+            return None
+        for transform in found.transforms:
+            self._producers[transform.id] = transform
+        for finding in found.findings:
+            self._record(finding, self._producers[finding.transform])
+        self._emit(events.DECLARED_EXTRACTED, found.summary())
+        return found
 
     def _assemble_runs(self) -> tuple[object, ...]:
         """Stage 9, over the admitted sources' committed records: assemble runs and sessions
