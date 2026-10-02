@@ -16,7 +16,7 @@ from neptune.adapters.geometry._emit import (
     known,
     missing,
 )
-from neptune.adapters.geometry._scan import LimitHit, Scanner
+from neptune.adapters.geometry._scan import LimitHit, Scanner, parse_number
 from neptune.model.jsonvalue import JsonValue
 from neptune.model.knowledge import AssertionKind
 from neptune.model.provenance import ByteRange, Locator
@@ -195,7 +195,6 @@ def operand(data: bytes, keyword_length: int) -> tuple[bytes, int]:
 
 
 def floats(tokens: Iterable[bytes]) -> list[float] | None:
-    try:
-        return [float(token) for token in tokens]
-    except ValueError:
-        return None
+    """Every token as a number the formats write (``parse_number``), or ``None`` if any is not."""
+    found = [parse_number(token) for token in tokens]
+    return None if None in found else [value for value in found if value is not None]

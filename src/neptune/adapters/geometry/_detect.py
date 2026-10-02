@@ -10,12 +10,14 @@ is never left to a JSON reader). The name is only a last resort: ``NAME_ONLY`` f
 file of a geometry extension no signature or grammar explains (a truncated binary STL).
 """
 
+import json
 import re
 import struct
 from dataclasses import dataclass
 from typing import Final
 
 from neptune.adapters.contract import NAME_ONLY, SIGNATURE, STRUCTURE, VERIFIED
+from neptune.adapters.geometry._scan import parse_number
 
 OBJ: Final = "obj"
 STL_ASCII: Final = "stl_ascii"
@@ -32,7 +34,10 @@ EXTENSIONS: Final = {
 _PLY_FORMAT: Final = re.compile(
     rb"\nformat (?:ascii|binary_little_endian|binary_big_endian) 1\.0\r?\n"
 )
-_GLTF_ASSET: Final = re.compile(rb'"asset"\s*:\s*\{[^{}]*"version"\s*:\s*"(2\.[0-9]+)"')
+_SPECIAL: Final = re.compile(rb'[\\"\[\]{}]')
+_COLON: Final = re.compile(rb"\s*:\s*")
+_VERSION: Final = re.compile(r"2\.[0-9]+")
+_SOLID: Final = re.compile(rb"solid(?![^\s])[^\r\n]*\r?\n\s*(?:facet|endsolid)\b", re.IGNORECASE)
 _USDA: Final = re.compile(rb"#usda ([0-9]+\.[0-9]+)")
 OBJ_KEYWORDS: Final = frozenset(
     {b"v", b"vt", b"vn", b"vp", b"f", b"l", b"p", b"o", b"g", b"s", b"usemtl", b"mtllib"}
@@ -72,15 +77,13 @@ def detect(head: bytes, size: int) -> Detected | None:
     if _binary_stl(head, size):
         return Detected(STL_BINARY, SIGNATURE, "an 84-byte header whose facet count fits the size")
     if head.lstrip().startswith(b"{"):  # JSON has no byte order mark (RFC 8259, glTF 2.0)
-        asset = _GLTF_ASSET.search(head)
-        if asset is not None:
-            return Detected(GLTF, SIGNATURE, "a glTF asset object", asset.group(1).decode())
+        version = _asset_version(head)
+        if version is not None:
+            return Detected(GLTF, SIGNATURE, "a top-level glTF asset object", version)
         return None
     text = head[len(_BOM) :] if head.startswith(_BOM) else head
     stripped = text.lstrip()
-    if stripped[:5].lower() == b"solid" and re.search(
-        rb"\b(?:facet|endsolid)\b", stripped[:4096], re.I
-    ):
+    if _SOLID.match(stripped[:4096]):
         return Detected(STL_ASCII, STRUCTURE, "a solid followed by facets")
     if _obj(text, size - (len(head) - len(text))):
         return Detected(OBJ, STRUCTURE, "OBJ statements with a vertex of three numbers")
@@ -94,6 +97,45 @@ def detect_by_name(name: str, size: int) -> Detected | None:
     if kind is None or size == 0:
         return None
     return Detected(kind, NAME_ONLY, f"only the extension {name[dot:].lower()!r} suggests it")
+
+
+def _asset_version(head: bytes) -> str | None:
+    """The ``version`` of the ``asset`` object that is a member of the head's top-level JSON
+    object, if it is ``2.x``. The head is scanned, never parsed whole (it may end mid-document):
+    strings are skipped, a key counts only at depth 1, and only the asset's own span is parsed."""
+    first = len(head) - len(head.lstrip())
+    depth = 0
+    inside = False
+    escaped = key = -1
+    asset = -1  # where the asset object's value starts, once its key is found
+    for found in _SPECIAL.finditer(head, first):
+        at, char = found.start(), found.group()
+        if at == escaped:
+            continue
+        if inside:
+            if char == b"\\":
+                escaped = at + 1
+            elif char == b'"':
+                inside = False
+                if depth == 1 and asset < 0 and head[key + 1 : at] == b"asset":
+                    colon = _COLON.match(head, at + 1)
+                    if colon is not None and head[colon.end() : colon.end() + 1] == b"{":
+                        asset = colon.end()
+        elif char == b'"':
+            inside, key = True, at
+        elif char in (b"[", b"{"):
+            depth += 1
+        elif char in (b"]", b"}"):
+            depth -= 1
+            if asset >= 0 and depth == 1:
+                try:
+                    value = json.loads(head[asset : at + 1]).get("version")
+                except (ValueError, RecursionError, AttributeError):
+                    return None
+                return value if isinstance(value, str) and _VERSION.fullmatch(value) else None
+            if depth <= 0:
+                return None
+    return None
 
 
 def _binary_stl(head: bytes, size: int) -> bool:
@@ -121,9 +163,7 @@ def _obj(head: bytes, size: int) -> bool:
         if words[0].encode() not in OBJ_KEYWORDS:
             return False
         if words[0] == "v" and len(words) >= 4:
-            try:
-                [float(word) for word in words[1:4]]
-            except ValueError:
+            if None in [parse_number(word.encode()) for word in words[1:4]]:
                 return False
             vertex = True
     return vertex
@@ -157,9 +197,7 @@ def _obj_like(head: bytes, size: int) -> bool:
     for line in lines[:400]:
         words = line.split("#", 1)[0].split()
         if len(words) >= 4 and words[0] == "v":
-            try:
-                [float(word) for word in words[1:4]]
-            except ValueError:
+            if None in [parse_number(word.encode()) for word in words[1:4]]:
                 continue
             return True
     return False
@@ -175,7 +213,7 @@ def lenient(head: bytes, size: int) -> Detected | None:
         return found
     if _plausible_facet(head, size):
         return Detected(STL_BINARY, NAME_ONLY, "a damaged binary STL")
-    if head.lstrip()[:5].lower() == b"solid" and b"\x00" not in head:
+    if re.match(rb"solid(?![^\s])", head.lstrip(), re.IGNORECASE) and b"\x00" not in head:
         return Detected(STL_ASCII, NAME_ONLY, "an ASCII STL with no facets")
     if _obj_like(head[len(_BOM) :] if head.startswith(_BOM) else head, size):
         return Detected(OBJ, NAME_ONLY, "an OBJ with statements that are not OBJ's")

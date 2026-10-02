@@ -30,7 +30,7 @@ from neptune.adapters.geometry._emit import (
     Geometry,
     missing,
 )
-from neptune.adapters.geometry._scan import LimitHit
+from neptune.adapters.geometry._scan import LimitHit, parse_index
 from neptune.model.knowledge import Known, Unknown
 from neptune.model.world import SpatialCategory
 
@@ -69,15 +69,16 @@ def read(ctx: Context) -> Geometry:
                     raise LimitHit("max_vertices", ctx.max_vertices)
                 numbers = floats(tokens[1:4]) if len(tokens) >= 4 else None
                 if numbers is None:
-                    problems.add("vertices without three numbers were skipped", line.offset)
+                    problems.add(
+                        "vertices whose x, y and z are not three numbers were skipped", line.offset
+                    )
                 else:
                     bounds.add(numbers[0], numbers[1], numbers[2], line.offset)
             elif keyword == b"f":
                 faces += 1
                 for corner in tokens[1:]:
-                    try:
-                        index = int(corner.split(b"/", 1)[0])
-                    except ValueError:
+                    index = parse_index(corner.split(b"/", 1)[0])
+                    if index is None:
                         problems.add("face corners that are not an index", line.offset)
                         break
                     if index == 0 or abs(index) > vertices:

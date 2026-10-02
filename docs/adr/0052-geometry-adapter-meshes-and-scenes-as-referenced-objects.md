@@ -71,10 +71,14 @@ counts, truncated binaries, nesting bombs, and references to `/etc/passwd`.
    and everything inside it is `NotCovered`. Bounds are in the file's own units, unconverted;
    a file with no finite vertex has `NotApplicable` bounds, a scan stopped by a limit
    `NotCovered`, never zero.
-6. **Hostile input is bounded and reported.** `max_scan_bytes` (256 MiB), `max_vertices`
+6. **Hostile input is bounded and reported.** `max_scan_bytes` (128 MiB), `max_vertices`
    (2,000,000), `max_header_bytes` (1 MiB), `max_json_bytes` (16 MiB), `max_json_depth` (64),
-   `max_entries` and `max_value_bytes`, all config and so part of the transform. A line over 64 KiB
-   is skipped, never buffered. Binary STL and PLY compare their declared counts with the file's size
+   `max_entries` (10,000) and `max_value_bytes`, all config and so part of the transform. A line
+   over 64 KiB is skipped, never buffered; runs of line ends are skipped without a pass per line,
+   and every line is charged at least 32 bytes of `max_scan_bytes`, so a scan stops after at most
+   4M lines and a hostile file costs about 7 s of CPU at the defaults (measured), well inside the
+   sandbox's 60 s. Memory is declared as 1 GiB: a 16 MiB glTF of tiny objects peaks near 450 MB.
+   Binary STL and PLY compare their declared counts with the file's size
    before reading a row, read only the rows that fit, and report `geometry.truncated` and
    `geometry.count_mismatch` with both numbers; a count of 10^18 costs nothing. A scan cut short by a
    limit makes counts and bounds `NotCovered` and is one `geometry.limit_exceeded`. glTF nesting is
@@ -82,14 +86,20 @@ counts, truncated binaries, nesting bombs, and references to `/etc/passwd`.
    are left out of the bounds and counted once. Unknown OBJ statements and bad face indices are
    one `geometry.malformed` per reason. One damaged structure is a finding and the rest is read
    (non-negotiable 7); a file that is no readable geometry is `geometry.unreadable` and has no record.
+   A number in OBJ, STL, PLY or USD is decimal text (`1`, `-.5`, `1e-3`); `1_0`, `nan`,
+   `infinity` and padded forms are not numbers and are counted as malformed, never read as values.
    Names (an OBJ object, an STL solid, a glTF scene, a USD default prim) are copied only as text a
    record can hold: a control character, a lone surrogate, bytes that are not UTF-8 or more than
    `max_value_bytes` make the name `Unknown` with a finding. A byte order mark is skipped in OBJ and
    ASCII STL and refused in glTF JSON (RFC 8259). Numbers past int64 or float range are
    unreadable (a PLY count) or `Unknown` (a glTF accessor), never an exception.
 7. **Probing is by bytes.** Signatures (GLB, PLY, USD) are `SIGNATURE` or `VERIFIED`; binary STL by
-   its exact size; ASCII STL, OBJ and glTF JSON by grammar (glTF is `SIGNATURE`, so JSON readers
-   never take it). A file that starts `solid` and whose size fits a binary STL is binary. The name
+   its exact size; ASCII STL, OBJ and glTF JSON by grammar. glTF JSON is `SIGNATURE` only if the
+   head's top-level object has an `asset` member (found by a string-aware scan, never a regex over
+   the head) whose `version` is `2.x`: JSON that merely holds such an object deeper is config's.
+   ASCII STL is `solid` then whitespace or a line end, then a line starting `facet` or
+   `endsolid`; prose is not. A `.gltf` whose `asset` lies past the first 64 KiB (keys sorted by an
+   exporter) is not claimed by its bytes and probes `NAME_ONLY`: accepted. A file that starts `solid` and whose size fits a binary STL is binary. The name
    is the last resort (`NAME_ONLY`, non-empty files only); `ingest` then reads a damaged binary
    STL, ASCII STL or OBJ if its first bytes are shaped like one.
 8. **Out of scope, filed separately.** Decoding vertices or faces, triangulation, unit conversion,

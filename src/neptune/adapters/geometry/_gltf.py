@@ -83,7 +83,7 @@ def _parse(ctx: Context, offset: int, length: int) -> Any:
     raw = ctx.scan.read(offset, length)
     _check_depth(raw, ctx.max_json_depth)
     try:
-        return json.loads(raw.decode("utf-8"), parse_constant=_reject)
+        return json.loads(raw.decode("utf-8"), parse_constant=_reject, parse_int=_integer)
     except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise Unreadable(f"the JSON does not parse ({type(exc).__name__})", offset, length) from exc
 
@@ -111,6 +111,12 @@ def _check_depth(raw: bytes, limit: int) -> None:
                 raise LimitHit("max_json_depth", limit)
         elif char in (b"]", b"}"):
             depth -= 1
+
+
+def _integer(token: str) -> int | float:
+    """A JSON integer; one of more than 19 digits is infinity, which no count or bound accepts,
+    so it spoils the one value and not the whole file (``int`` refuses 4301 digits)."""
+    return int(token) if len(token) <= 19 else math.inf
 
 
 def _reject(constant: str) -> Any:

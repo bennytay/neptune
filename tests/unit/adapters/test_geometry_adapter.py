@@ -254,7 +254,7 @@ def test_no_vertices_have_no_bounds_which_is_not_applicable_not_zero() -> None:
     p = props(output)
     assert values(p["vertex_count"]) == (2,)
     assert values(p["bounds_min"]) == (1.0, 2.0, 3.0)
-    empty = run(b"o thing\nf 1 2 3\n" + b"v nan nan nan\n")
+    empty = run(b"o thing\nf 1 2 3\n" + b"v 1e999 1e999 1e999\n")
     q = props(empty)
     assert isinstance(q["bounds_min"].cells[1], NotApplicable)
     assert "geometry.non_finite" in codes(empty)

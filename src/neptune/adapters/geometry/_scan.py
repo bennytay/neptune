@@ -5,6 +5,7 @@ budget (``max_scan_bytes``), so a hostile file costs at most the limit however i
 longer than ``MAX_LINE`` is reported once and skipped, never buffered.
 """
 
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Final
@@ -14,6 +15,23 @@ from neptune.adapters.contract import SourceReader, read_pieces
 MAX_LINE: Final = 64 * 1024
 BLOCK: Final = 1024 * 1024
 BOM: Final = b"\xef\xbb\xbf"
+LINE_COST: Final = 32  # the least a line is charged against the scan budget, however short
+_LINE: Final = re.compile(rb"[^\r\n]+")
+_BREAK: Final = re.compile(rb"[\r\n]")
+_NUMBER: Final = re.compile(rb"[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?")
+_INDEX: Final = re.compile(rb"-?[0-9]+")
+
+
+def parse_number(token: bytes) -> float | None:
+    """``token`` as the decimal number text formats write (``1``, ``-0.5``, ``.5``, ``1e-3``), or
+    ``None``. Python's own ``float`` also reads ``1_0``, ``nan``, ``infinity`` and padded forms,
+    which none of these formats write: they are not numbers here."""
+    return float(token) if _NUMBER.fullmatch(token) else None
+
+
+def parse_index(token: bytes) -> int | None:
+    """``token`` as a signed decimal integer of at most 18 digits, or ``None`` (no ``1_0``)."""
+    return int(token) if _INDEX.fullmatch(token) and len(token) <= 18 else None
 
 
 class LimitHit(Exception):
@@ -71,33 +89,47 @@ class Scanner:
             yield piece
 
     def lines(self, start: int, end: int) -> Iterator[Line]:
-        """Every line of ``[start, end)``, ``\\n`` or ``\\r\\n`` ended; the last may be unended."""
-        buffer = b""
-        at = start  # offset of buffer[0]
-        skipping = False
+        """Every non-empty line of ``[start, end)``; ``\\n``, ``\\r\\n`` and ``\\r`` end one.
+
+        Runs of line ends are skipped at C speed, and each line is charged at least
+        ``LINE_COST`` bytes, so a file of short lines costs about what its size says.
+        """
+        carry = b""  # a line that may continue in the next block
+        carry_at = start
+        skipping = False  # inside an over-long line: nothing is kept until it ends
+        first = True
         for piece in self.blocks(start, end):
-            if start == 0 and at == 0 and not buffer and piece.startswith(BOM):
-                piece, at = piece[len(BOM) :], len(BOM)  # a byte order mark is not text
-            buffer += piece
+            base = carry_at
+            if first and start == 0 and piece.startswith(BOM):
+                piece, base = piece[len(BOM) :], len(BOM)  # a byte order mark is not text
+            first = False
+            data = carry + piece
+            carry = b""
             position = 0
-            while True:
-                newline = buffer.find(b"\n", position)
-                if newline < 0:
+            if skipping:
+                found = _BREAK.search(data)
+                if found is None:
+                    carry_at = base + len(data)
+                    continue
+                skipping, position = False, found.start()
+            carry_at = base + len(data)
+            for line in _LINE.finditer(data, position):
+                length = line.end() - line.start()
+                if line.end() == len(data):  # it may go on in the next block
+                    carry, carry_at = line.group(), base + line.start()
                     break
-                if skipping:
-                    skipping = False
-                elif newline - position > MAX_LINE:
-                    yield Line(at + position, b"", overlong=True)
+                self._charge(length)
+                if length > MAX_LINE:
+                    yield Line(base + line.start(), b"", overlong=True)
                 else:
-                    yield Line(at + position, buffer[position:newline].rstrip(b"\r"))
-                position = newline + 1
-            buffer = buffer[position:]
-            at += position
-            if len(buffer) > MAX_LINE:
-                if not skipping:
-                    yield Line(at, b"", overlong=True)
-                skipping = True
-                at += len(buffer)
-                buffer = b""
-        if buffer and not skipping:
-            yield Line(at, buffer.rstrip(b"\r"))
+                    yield Line(base + line.start(), line.group())
+            if len(carry) > MAX_LINE:
+                yield Line(carry_at, b"", overlong=True)
+                skipping, carry, carry_at = True, b"", carry_at + len(carry)
+        if carry and not skipping:
+            self._charge(len(carry))
+            yield Line(carry_at, carry)
+
+    def _charge(self, length: int) -> None:
+        if length < LINE_COST:
+            self._spend(LINE_COST - length)

@@ -63,7 +63,7 @@ from neptune.model.world import SpatialArtifact
 if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonValue
 
-DEFAULT_MAX_SCAN_BYTES: Final = 256 * 1024 * 1024
+DEFAULT_MAX_SCAN_BYTES: Final = 128 * 1024 * 1024
 DEFAULT_MAX_VERTICES: Final = 2_000_000
 DEFAULT_MAX_HEADER_BYTES: Final = 1024 * 1024
 DEFAULT_MAX_JSON_BYTES: Final = 16 * 1024 * 1024
@@ -211,7 +211,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
             " Unknown. OBJ, STL, PLY: Unknown. A binary USD crate: NotCovered",
         ),
     ),
-    resources=Resources(max_memory=512 * 1024 * 1024, streaming=True),
+    resources=Resources(max_memory=1024 * 1024 * 1024, streaming=True),
     security=(
         "Decodes no geometry into records: vertices are scanned once for bounds, never kept.",
         "Bounds every scan: max_scan_bytes, max_vertices, a 64 KiB line cap, max_header_bytes.",

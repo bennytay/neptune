@@ -22,6 +22,7 @@ from neptune.adapters.geometry._context import Context, Problems, bytes_text
 from neptune.adapters.geometry._emit import (
     NOT_COVERED,
     OBSERVED,
+    REFERENCE_UNSAFE,
     STATED,
     UNIT_UNMAPPED,
     Dep,
@@ -30,7 +31,7 @@ from neptune.adapters.geometry._emit import (
     known,
     missing,
 )
-from neptune.adapters.geometry._scan import LimitHit, Unreadable
+from neptune.adapters.geometry._scan import LimitHit, Unreadable, parse_number
 from neptune.model.knowledge import Knowledge, Known, NotCovered, Unknown
 from neptune.model.provenance import Locator
 from neptune.model.units import Unit, unit_from_text
@@ -46,7 +47,7 @@ _TOKEN: Final = re.compile(
   | (?P<comment>\#[^\n]*)
   | (?P<text>\"\"\"(?:[^"\\]|\\.|"(?!""))*\"\"\"|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')
   | (?P<asset>@@@.*?@@@|@[^@\n]*@)
-  | (?P<number>[-+]?(?:[0-9]+\.?[0-9]*(?:[eE][-+]?[0-9]+)?|\.[0-9]+(?:[eE][-+]?[0-9]+)?))
+  | (?P<number>[-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][-+]?[0-9]+)?(?![A-Za-z0-9_]))
   | (?P<name>[A-Za-z_][A-Za-z0-9_:.]*)
   | (?P<punct>[()\[\]{},=;])
     """,
@@ -126,10 +127,17 @@ def read_layer(ctx: Context) -> Geometry:
         else:
             name = Known(prim, out.provenance(ctx.span(at, len(text)), STATED))
     problems.report(ctx)
-    deps = tuple(
-        Dep("sublayer", text.decode("utf-8", "replace"), ctx.span(at, len(text)))
-        for text, at in layer.sublayers
-    )
+    deps: list[Dep] = []
+    for text, at in layer.sublayers:
+        try:
+            deps.append(Dep("sublayer", text.decode("utf-8"), ctx.span(at, len(text))))
+        except UnicodeDecodeError:  # never rewritten: a reference is the bytes it is written as
+            out.finding(
+                REFERENCE_UNSAFE,
+                ctx.span(at, len(text)),
+                "a sublayer reference is not text",
+                {"kind": "sublayer"},
+            )
     out.finding(
         NOT_COVERED,
         ctx.span(min(end, ctx.size - 1), 1),
@@ -140,17 +148,14 @@ def read_layer(ctx: Context) -> Geometry:
         missing(n, "not_covered", whole, OBSERVED)
         for n in ("vertex_count", "bounds_min", "bounds_max")
     )
-    return Geometry("usda", SpatialCategory.SCENE, name, unit, tuple(props), deps)
+    return Geometry("usda", SpatialCategory.SCENE, name, unit, tuple(props), tuple(deps))
 
 
 def _number(found: Found | None) -> float | None:
     if found is None:
         return None
-    try:
-        number = float(found[0])
-    except ValueError:
-        return None
-    return number if math.isfinite(number) else None
+    number = parse_number(found[0])
+    return number if number is not None and math.isfinite(number) else None
 
 
 def _declared(ctx: Context, name: str, found: Found | None, block: Where) -> Prop:

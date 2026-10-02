@@ -310,7 +310,6 @@ BAD_JSON: Final = [
     b'\xef\xbb\xbf{"asset":{"version":"2.0"}}',
     b'{"asset":{"version":"2.0"}} trailing',
     b'[{"asset":{"version":"2.0"}}]',
-    b'{"asset":{"version":"2.0"},"x":1' + b"0" * 5000 + b"}",
 ]
 
 
@@ -477,7 +476,7 @@ def test_obj_faces_naming_no_vertex_and_unknown_statements_are_counted_once_per_
         "face corners naming no vertex read so far": 2,
         "face corners that are not an index": 1,
         "statements that are not OBJ keywords": 2,
-        "vertices without three numbers were skipped": 1,
+        "vertices whose x, y and z are not three numbers were skipped": 1,
     }
     assert cells(output, "vertex_count") == (
         3,
@@ -518,7 +517,7 @@ def test_an_obj_over_max_vertices_stops_and_its_counts_and_bounds_are_not_covere
 
 
 def test_an_obj_with_every_vertex_non_finite_has_no_bounds() -> None:
-    output = run(b"v nan 0 0\nv inf 1 1\nv -inf 0 0\n")
+    output = run(b"v 1e999 0 0\nv +1e999 1 1\nv -1e999 0 0\n")
     assert isinstance(props(output)["bounds_min"].cells[1], NotApplicable)
     (finding,) = by_code(output, "geometry.non_finite")
     assert finding.details["count"] == 3
