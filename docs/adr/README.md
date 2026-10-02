@@ -14,7 +14,7 @@ header).
 | [0003](0003-identity-tiers.md) | Identity tiers and parser-upgrade survival | Accepted; amended by 0017 |
 | [0004](0004-epistemic-states.md) | Epistemic states (`Knowledge[T]`) and the field-scope rule | Accepted |
 | [0005](0005-timestamp-domains.md) | Timestamp domains | Accepted |
-| [0006](0006-provenance-and-locators.md) | Provenance and locator model | Accepted |
+| [0006](0006-provenance-and-locators.md) | Provenance and locator model | Accepted; amended by 0037 |
 | [0007](0007-coordinate-frames.md) | Coordinate-frame semantics | Accepted |
 | [0008](0008-adapter-abi.md) | Adapter ABI surface and runtime/adapter responsibility split | Accepted |
 | [0009](0009-source-revisions-and-id-rendering.md) | Source revisions, dedup policy and id rendering | Accepted; §3–§5 amended by [0010](0010-lossless-local-locations.md) |
@@ -25,13 +25,13 @@ header).
 | [0014](0014-version-primitives.md) | Version primitives: one type per kind, stored verbatim | Accepted |
 | [0015](0015-frame-rotation-and-transform-types.md) | Frames, rotations and frame transforms: types and named conventions | Accepted |
 | [0016](0016-evidence-refs-locator-paths-and-transform-lineage.md) | Evidence refs, locator paths and transform lineage | Accepted; amended by 0023 |
-| [0017](0017-canonical-records-envelope-and-schema-version.md) | Canonical records: envelope, families, schema version and findings | Accepted; amended by 0023 |
+| [0017](0017-canonical-records-envelope-and-schema-version.md) | Canonical records: envelope, families, schema version and findings | Accepted; amended by 0023, 0037 |
 | [0018](0018-runs-streams-and-series-layout.md) | Runs, streams and the series layout | Accepted |
 | [0019](0019-machine-context-records.md) | Machine context: machines, hardware, software and calibration | Accepted |
 | [0020](0020-world-and-record-context-records.md) | World and record context: sites, assets, geometry, media, documents and tables | Accepted |
 | [0021](0021-schema-export-and-worked-examples.md) | The canonical JSON Schema and the worked examples | Accepted |
-| [0022](0022-ingest-package-and-receipt.md) | The ingest package and its receipt | Accepted; amended by 0023, 0031 |
-| [0023](0023-m1-gate-freeze-and-growth.md) | The M1 gate: the model freezes, grows only by addition, and fixes four gaps | Accepted; amended by 0036 |
+| [0022](0022-ingest-package-and-receipt.md) | The ingest package and its receipt | Accepted; amended by 0023, 0031, 0037 |
+| [0023](0023-m1-gate-freeze-and-growth.md) | The M1 gate: the model freezes, grows only by addition, and fixes four gaps | Accepted; amended by 0036, 0037 |
 | [0024](0024-adapter-abi-types-selection-and-reference-adapter.md) | The adapter ABI's exact types, adapter selection, and the reference adapter | Accepted |
 | [0025](0025-series-files-sorted-merged-and-pinned.md) | Series files: one sorted Parquet file per stream, merged from runs, written with pinned settings | Accepted |
 | [0026](0026-local-workspace-in-place-reads-and-assembly.md) | The local workspace, reading sources in place, and assembling packages | Accepted; amended by 0031 |
