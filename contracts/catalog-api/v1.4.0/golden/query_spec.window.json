@@ -1,0 +1,12 @@
+{
+  "as_of": 4,
+  "kinds": [
+    "run",
+    "stream"
+  ],
+  "window": {
+    "clock": "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31",
+    "first": 0,
+    "last": 1099511627776
+  }
+}
