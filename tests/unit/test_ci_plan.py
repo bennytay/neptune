@@ -225,3 +225,19 @@ def test_committed_package_indexes_are_current() -> None:
     dirs = sorted(str(p) for p in (root / "packages").glob("*/docs/adr"))
     assert dirs
     assert adr_index.main(["--check", *dirs]) == 0
+
+
+def test_adapter_only_change_runs_the_compiler_and_the_harness_not_every_dependent() -> None:
+    members = {**MEMBERS, "neptune-platform": frozenset()}
+    result = ci_plan.plan(["src/neptune/adapters/mcap/adapter.py"], members)
+    assert (result.compiler, result.packages) == (True, ("neptune-platform",))
+
+
+def test_adapter_contract_change_is_core() -> None:
+    result = ci_plan.plan(["src/neptune/adapters/contract.py"], MEMBERS)
+    assert result.packages == ("neptune-ledger", "neptune-recall")
+
+
+def test_contracts_tool_is_plumbing() -> None:
+    result = ci_plan.plan(["scripts/contracts.py"], MEMBERS)
+    assert result.packages == tuple(sorted(MEMBERS))

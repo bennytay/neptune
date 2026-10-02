@@ -224,6 +224,29 @@ class Verdict(StrEnum):
     OUTRANKED = "outranked"  # claims the source, less confidently than the top
     DECLINED = "declined"  # confidence 0: not its format
     FAILED = "failed"  # its probe raised, crashed or hit a limit: out of the running
+    PINNED = "pinned"  # the manifest names it and its probe accepts the source (ADR 0047 §6)
+
+
+@dataclass(frozen=True)
+class Pin:
+    """A manifest rule that chose a source's adapter: the adapter, and where the rule is.
+
+    ``manifest`` is the manifest's location and ``source`` its content id; ``pointer`` is the
+    rule's JSON pointer in it. The probe's verdicts are still listed beside it.
+    """
+
+    adapter: str
+    pointer: str
+    manifest: str
+    source: ContentId
+
+    def to_json(self) -> JsonObject:
+        return {
+            "adapter": self.adapter,
+            "manifest": self.manifest,
+            "pointer": self.pointer,
+            "source": self.source,
+        }
 
 
 @dataclass(frozen=True)
@@ -259,9 +282,10 @@ class AdapterVerdict:
 
 
 def adapter_verdicts(
-    probe: SourceProbe, descriptors: Mapping[str, AdapterDescriptor]
+    probe: SourceProbe, descriptors: Mapping[str, AdapterDescriptor], pin: Pin | None = None
 ) -> tuple[AdapterVerdict, ...]:
-    """Every registered adapter's verdict on ``probe``'s source, in adapter id order."""
+    """Every registered adapter's verdict on ``probe``'s source, in adapter id order. With a
+    ``pin``, its adapter is ``pinned`` and every other verdict says the manifest chose."""
     selection = probe.selection
     top = selection.candidates[0] if selection.candidates else None
     tied = (
@@ -296,14 +320,25 @@ def adapter_verdicts(
             )
             continue
         confidence = candidate.confidence
-        if confidence == 0.0:
+        chose = f"the manifest names {pin.adapter} ({pin.pointer} in {pin.manifest})" if pin else ""
+        if pin is not None and pin.adapter == adapter_id and confidence > 0.0:
+            verdict = Verdict.PINNED
+            ranked = f"the probe's top claim was {top.adapter} ({top.confidence})" if top else ""
+            why = f"{chose}; it claims the source at {confidence}" + (
+                f"; {ranked}" if top is not None and top.adapter != adapter_id else ""
+            )
+        elif confidence == 0.0:
             codes = ", ".join(reason.code for reason in candidate.result.reasons)
             verdict = Verdict.DECLINED
             why = "confidence 0: not its format" + (f" ({codes})" if codes else "")
         elif adapter_id in tied:
             others = ", ".join(sorted(tied - {adapter_id}))
             verdict = Verdict.TIED
-            why = f"ties at {confidence} with {others}; none is chosen until a manifest names one"
+            settled = chose if pin is not None else "none is chosen until a manifest names one"
+            why = f"ties at {confidence} with {others}; {settled}"
+        elif pin is not None:
+            verdict = Verdict.OUTRANKED
+            why = f"claims it at {confidence}; {chose}"
         elif top is not None and top.adapter == adapter_id:
             verdict = Verdict.SELECTED
             runner = next((c for c in selection.candidates[1:]), None)
@@ -465,6 +500,7 @@ class SourceExplanation:
     quarantined: tuple[str, ...]  # the codes of the findings that took it out, in order
     locations_omitted: int = 0
     members_omitted: int = 0  # container members a bound left out of ``format.container``
+    pin: Pin | None = None  # the manifest rule that chose ``adapter``, if one did (ADR 0047)
 
     @property
     def whole(self) -> EvidenceRef:
@@ -492,6 +528,8 @@ class SourceExplanation:
         }
         if self.adapter is not None:
             out["adapter"] = self.adapter
+        if self.pin is not None:
+            out["pin"] = self.pin.to_json()
         if self.probe is not None:
             detected: dict[str, JsonValue] = {
                 "description": self.format_line(),

@@ -49,3 +49,4 @@ that links back; they are never edited in place. Status values: Proposed, Accept
 | [0044](0044-explain-dry-runs-inspect-and-return-a-bounded-typed-explanation.md) | Explain: the dry run inspects and returns a bounded, typed explanation | Accepted |
 | [0045](0045-rosbag2-adapter-metadata-sqlite3-reader-and-mcap-delegation.md) | rosbag2: one adapter for `metadata.yaml` and sqlite3 storage, MCAP left to the MCAP adapter, a SQLite reader over bytes | Accepted |
 | [0046](0046-ros1-bag-adapter-connections-as-streams-planning-from-the-index.md) | The ROS 1 bag adapter: connections as streams, planning from the index, the same Run and Stream as MCAP | Accepted |
+| [0047](0047-optional-manifest-stated-declarations-set-against-evidence.md) | The optional manifest: a source in the folder, stated declarations set against the evidence, generated as commented choices | Accepted |

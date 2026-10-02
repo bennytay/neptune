@@ -143,8 +143,8 @@ sandboxed; a failed `inspect` is shown and never quarantines (a short read or a 
 source's, as for `plan`). The outcome carries an `Explanation` (`neptune.runtime.explain`):
 
 - inventory (files, links, skipped entries), and per distinct source its status, detected format,
-  every adapter's verdict (`selected`/`tied`/`outranked`/`declined`/`failed`, confidence, reasons,
-  why), `inspect` summary, and plan (rule, chunks, committed, bytes left to read);
+  every adapter's verdict (`selected`/`tied`/`outranked`/`declined`/`failed`, or `pinned` with
+  the manifest rule as `pin`, ADR 0047; confidence, reasons, why), `inspect` summary, and plan (rule, chunks, committed, bytes left to read);
 - the session grouping (proposals with reasons, contested readings, unassigned files);
 - work left (chunks, bytes, `ingest` calls) and heavy sources (≥ 256 MiB or ≥ 1024 chunks left,
   non-streaming memory growth, declared memory above the sandbox limit);

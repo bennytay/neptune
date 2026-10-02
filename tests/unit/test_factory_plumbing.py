@@ -74,7 +74,12 @@ case $path in
   */issues/7/comments) file=comments ;;
   */pulls/7/reviews) file=reviews ;;
   */pulls/7/files) file=files ;;
+  */commits\?sha=main*) file=main-commits ;;
+  */commits/aaaaaaa*/check-runs*) file=main-pending ;;
+  */commits/mmmmmmm*/check-runs*) file=main-check-runs ;;
   */check-runs*) file=check-runs ;;
+  */compare/main...*) file=compare-pr ;;
+  */compare/*...main) file=compare-main ;;
   *) echo "fake gh: unexpected path $path" >&2; exit 9 ;;
 esac
 jq -rc "$filter" "$GH_FIXTURES/$file.json"
@@ -91,6 +96,10 @@ def _factory_merge(
     comments: list[dict[str, Any]],
     body: str = "Closes MVL-1",
     files: tuple[str, ...] = ("src/x.py",),
+    behind: int = 0,
+    main_files: tuple[str, ...] = (),
+    main_check: str = "success",
+    labels: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -103,21 +112,31 @@ def _factory_merge(
         "mergeable_state": "clean",
         "title": "Do a thing",
         "body": body,
+        "labels": [{"name": n} for n in labels],
     }
+
+    def runs(conclusion: str) -> dict[str, Any]:
+        return {
+            "check_runs": [
+                {
+                    "status": "completed",
+                    "completed_at": "2026-10-01T09:00:00Z",
+                    "conclusion": conclusion,
+                }
+            ]
+        }
+
     served = {
         "pull": pull,
         "comments": comments,
         "reviews": [],
         "files": [{"filename": f} for f in files],
-        "check-runs": {
-            "check_runs": [
-                {
-                    "status": "completed",
-                    "completed_at": "2026-10-01T09:00:00Z",
-                    "conclusion": "success",
-                }
-            ]
-        },
+        "check-runs": runs("success"),
+        "main-commits": [{"sha": "a" * 40}, {"sha": "m" * 40}],
+        "main-pending": {"check_runs": [{"status": "in_progress", "conclusion": None}]},
+        "main-check-runs": runs(main_check),
+        "compare-pr": {"behind_by": behind, "merge_base_commit": {"sha": "b" * 40}},
+        "compare-main": {"files": [{"filename": f} for f in main_files]},
     }
     for name, value in served.items():
         (tmp_path / f"{name}.json").write_text(json.dumps(value))
@@ -127,6 +146,8 @@ def _factory_merge(
         "GH_REPO": "owner/repo",
         "GH_FIXTURES": str(tmp_path),
         "DRY_RUN": "1",
+        "FACTORY_MERGE_LOCK": str(tmp_path / "merge.lock"),
+        "FRESHNESS_REF": "HEAD",
     }
     return subprocess.run(
         ["bash", str(SCRIPTS / "factory-merge.sh"), "7", HEAD[:7]],
@@ -173,6 +194,53 @@ def test_factory_merge_requires_a_filled_architecture_change(
     )
     assert result.returncode == (0 if accepted else 1), result.stderr
     assert ("no filled **Architecture change** section" in result.stderr) is not accepted
+
+
+def test_factory_merge_merges_a_behind_pr_when_main_changed_elsewhere(tmp_path: Path) -> None:
+    result = _factory_merge(
+        tmp_path,
+        [_comment("OWNER", "MERGE")],
+        files=("src/neptune/adapters/mcap/adapter.py",),
+        behind=3,
+        main_files=("packages/neptune-ledger/src/x.py", "packages/neptune-memory/src/y.py"),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "3 commit(s) behind main" in result.stderr
+    assert "would squash-merge #7" in result.stderr
+
+
+def test_factory_merge_asks_for_a_refresh_when_main_changed_what_the_pr_reaches(
+    tmp_path: Path,
+) -> None:
+    result = _factory_merge(
+        tmp_path,
+        [_comment("OWNER", "MERGE")],
+        files=("src/neptune/adapters/mcap/adapter.py",),
+        behind=1,
+        main_files=("src/neptune/model/time.py",),
+    )
+    assert result.returncode == 1
+    assert "needs a refresh (main changed inputs to neptune)" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("main_check", "labels", "accepted"),
+    [
+        ("failure", (), False),
+        ("cancelled", (), False),
+        ("failure", ("fix-main",), True),
+        ("success", (), True),
+    ],
+)
+def test_factory_merge_stops_the_line_on_a_red_main(
+    tmp_path: Path, main_check: str, labels: tuple[str, ...], accepted: bool
+) -> None:
+    """main's head is still running, so its parent's completed check decides."""
+    result = _factory_merge(
+        tmp_path, [_comment("OWNER", "MERGE")], main_check=main_check, labels=labels
+    )
+    assert result.returncode == (0 if accepted else 1), result.stderr
+    assert ("the latest check on main failed" in result.stderr) is not accepted
 
 
 # --- Makefile: a failing `ruff format --check` stops the all-packages lint loop ------------------

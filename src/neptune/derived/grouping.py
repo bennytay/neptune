@@ -389,10 +389,17 @@ def _include_order(proposals: Mapping[RecordId, SessionProposal]) -> list[Record
 class LayoutGrouper:
     """v0: filesystem-level signals only (module docstring; ADR 0036 §3)."""
 
-    def __init__(self, config: GroupingConfig | None = None) -> None:
+    def __init__(
+        self, config: GroupingConfig | None = None, *, upstream: Sequence[RecordId] = ()
+    ) -> None:
+        """``upstream`` names what the config came from: a manifest's transform (ADR 0047), so a
+        declared session's proposal leads back to the manifest that declared it."""
         self.config = config if config is not None else GroupingConfig()
         self.transform = transform_record(
-            adapter_id=GROUPING_ID, adapter_version=GROUPING_VERSION, config=self.config.to_json()
+            adapter_id=GROUPING_ID,
+            adapter_version=GROUPING_VERSION,
+            config=self.config.to_json(),
+            upstream=upstream,
         )
 
     def propose(self, layout: Layout) -> Grouping:
