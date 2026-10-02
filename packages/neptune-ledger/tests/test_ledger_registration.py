@@ -18,6 +18,7 @@ import pytest
 from conftest import new_database
 from neptune.identity import canonical_json
 from neptune.model.knowledge import Known, NotApplicable, NotCovered, Unknown
+from neptune.model.record import OLDEST_READABLE_VERSION, SCHEMA_VERSION
 from neptune_ledger.api import CatalogUnavailable, codec
 from neptune_ledger.catalog.migrate import apply_migrations
 from neptune_ledger.catalog.registry import PostgresCatalog
@@ -245,13 +246,72 @@ def test_a_manifest_that_is_not_one_is_invalid(
     assert result.package_id == Known("sha256:" + __import__("hashlib").sha256(data).hexdigest())
 
 
-def test_another_schema_version_is_unsupported(
+@pytest.mark.parametrize("version", [OLDEST_READABLE_VERSION - 1, SCHEMA_VERSION + 1])
+def test_a_schema_version_this_ledger_does_not_read_is_unsupported(
+    catalog: PostgresCatalog, drone: WorkedPackage, version: int
+) -> None:
+    """A future version is refused before anything is written, whatever partitions exist."""
+    _rewrite_manifest(drone, lambda m: m.update(schema_version=version))
+    result = catalog.register(drone.root)
+    assert result.outcome == "refused"
+    assert [f.code for f in result.findings] == ["unsupported_schema_version"]
+    assert result.schema_version == Known(version)
+
+
+def test_a_table_its_schema_version_does_not_declare_is_invalid(
     catalog: PostgresCatalog, drone: WorkedPackage
 ) -> None:
-    _rewrite_manifest(drone, lambda m: m.update(schema_version=2))
+    """The default partition is no back door: a package holds exactly its version's kinds."""
+    (drone.root / "records" / "telepathy.jsonl").write_bytes(b"")
+    _rewrite_manifest(drone, lambda m: m["tables"].update(telepathy=0))
     result = catalog.register(drone.root)
-    assert [f.code for f in result.findings] == ["unsupported_schema_version"]
+    assert result.outcome == "refused"
+    assert [f.code for f in result.findings] == ["manifest_invalid"]
+
+
+def test_a_declared_kind_without_its_own_partition_is_stored_not_refused(
+    pg_uri: str, pg: Conn, drone: WorkedPackage
+) -> None:
+    """Acceptance (MVL-91): a kind of a version this Ledger reads needs no partition of its own.
+
+    Taking the calibration partition away stands in for a kind a newer schema version adds
+    (ADR 0008 §1): the real registration path files its rows in ``record_default``.
+    """
+    with fresh(pg_uri) as catalog:
+        pg.execute("ALTER TABLE tenant_acme.record DETACH PARTITION tenant_acme.record_calibration")
+        pg.execute("DROP TABLE tenant_acme.record_calibration")
+        result = catalog.register(drone.root)
+    assert result.outcome == "registered"
+    placed = pg.execute(
+        "SELECT tableoid::regclass::text, count(*) FROM tenant_acme.record"
+        " WHERE kind = 'calibration' GROUP BY 1"
+    ).fetchall()
+    assert placed == [("tenant_acme.record_default", len(drone.records("calibration")))]
+    assert len(drone.records("calibration")) > 0
+
+
+CONFIG_GOLDEN = Path(__file__).resolve().parents[3] / "tests" / "golden" / "config" / "nav2_params"
+
+
+@pytest.mark.skipif(
+    not (CONFIG_GOLDEN / "manifest.json").is_file(),
+    reason="the compiler ships no package schema 2 golden yet (MVL-23)",
+)
+def test_a_package_schema_2_package_registers(pg_uri: str, pg: Conn, tmp_path: Path) -> None:
+    """The compiler's own version 2 package, with configuration kinds that have no partition."""
+    root = tmp_path / "nav2_params"
+    shutil.copytree(CONFIG_GOLDEN, root)
+    manifest = canonical_json.loads((root / "manifest.json").read_bytes())
+    assert isinstance(manifest, dict)
+    for entry in manifest["files"]:  # the golden leaves its empty tables out of the repository
+        if entry["size"] == 0 and not (root / entry["path"]).exists():
+            (root / entry["path"]).write_bytes(b"")
+    with fresh(pg_uri) as catalog:
+        result = catalog.register(root)
+    assert result.outcome == "registered", result.findings
     assert result.schema_version == Known(2)
+    kinds = pg.execute("SELECT DISTINCT kind FROM tenant_acme.record_default ORDER BY 1").fetchall()
+    assert kinds == [("configuration_snapshot",), ("configuration_value",)]
 
 
 def test_an_unlisted_file_is_unexpected(catalog: PostgresCatalog, drone: WorkedPackage) -> None:
