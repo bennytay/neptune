@@ -21,6 +21,8 @@ called.
 
 import os
 from collections.abc import Mapping
+from dataclasses import replace
+from typing import Protocol
 
 from neptune.identity.revisions import SourceLedger
 from neptune.model.jsonvalue import JsonValue
@@ -62,6 +64,7 @@ __all__ = [
     "ObjectStoreSource",
     "Provider",
     "SkippedObject",
+    "SourceFactory",
     "azure_source",
     "gcs_source",
     "object_store_source",
@@ -82,8 +85,8 @@ def object_store_source(
     """The source ``url`` names on ``provider``'s store; a local-only workspace refuses it."""
     connector = CONNECTOR_IDS[provider]
     network.require_network(f"reading {connector} sources")
-    location = parse_url(url, provider)
     parsed = Options.parse(options, provider)
+    location = replace(parse_url(url, provider), store=parsed.store)
     found = credentials_for(
         provider,
         credentials,
@@ -109,64 +112,54 @@ def object_store_source(
     return ObjectStoreSource(location, client, network, parsed, ledger=ledger)
 
 
-def s3_source(
-    url: str,
-    *,
-    network: NetworkGate,
-    ledger: SourceLedger | None = None,
-    options: Mapping[str, JsonValue] | None = None,
-    credentials: Mapping[str, str] | None = None,
-    environ: Mapping[str, str] | None = None,
-) -> ObjectStoreSource:
-    """``deploy_s3``: an S3 or S3-compatible bucket prefix (``s3://<bucket>/<prefix>``)."""
-    return object_store_source(
-        Provider.S3,
-        url,
-        network=network,
-        ledger=ledger,
-        options=options,
-        credentials=credentials,
-        environ=environ,
-    )
+class SourceFactory(Protocol):
+    """The signature every ``neptune.sources`` entry point of this package has (ADR 0006 §1)."""
+
+    def __call__(
+        self,
+        url: str,
+        *,
+        network: NetworkGate,
+        ledger: SourceLedger | None = None,
+        options: Mapping[str, JsonValue] | None = None,
+        credentials: Mapping[str, str] | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> ObjectStoreSource: ...
 
 
-def gcs_source(
-    url: str,
-    *,
-    network: NetworkGate,
-    ledger: SourceLedger | None = None,
-    options: Mapping[str, JsonValue] | None = None,
-    credentials: Mapping[str, str] | None = None,
-    environ: Mapping[str, str] | None = None,
-) -> ObjectStoreSource:
-    """``deploy_gcs``: a Google Cloud Storage bucket prefix (``gs://<bucket>/<prefix>``)."""
-    return object_store_source(
-        Provider.GCS,
-        url,
-        network=network,
-        ledger=ledger,
-        options=options,
-        credentials=credentials,
-        environ=environ,
-    )
+def _factory(provider: Provider, doc: str) -> SourceFactory:
+    def factory(
+        url: str,
+        *,
+        network: NetworkGate,
+        ledger: SourceLedger | None = None,
+        options: Mapping[str, JsonValue] | None = None,
+        credentials: Mapping[str, str] | None = None,
+        environ: Mapping[str, str] | None = None,
+    ) -> ObjectStoreSource:
+        return object_store_source(
+            provider,
+            url,
+            network=network,
+            ledger=ledger,
+            options=options,
+            credentials=credentials,
+            environ=environ,
+        )
+
+    factory.__name__ = factory.__qualname__ = f"{provider.value}_source"
+    factory.__doc__ = doc
+    return factory
 
 
-def azure_source(
-    url: str,
-    *,
-    network: NetworkGate,
-    ledger: SourceLedger | None = None,
-    options: Mapping[str, JsonValue] | None = None,
-    credentials: Mapping[str, str] | None = None,
-    environ: Mapping[str, str] | None = None,
-) -> ObjectStoreSource:
-    """``deploy_azure_blob``: an Azure Blob container prefix (``az://<account>/<container>/<p>``)."""
-    return object_store_source(
-        Provider.AZURE,
-        url,
-        network=network,
-        ledger=ledger,
-        options=options,
-        credentials=credentials,
-        environ=environ,
-    )
+s3_source = _factory(
+    Provider.S3, "``deploy_s3``: an S3 or S3-compatible bucket prefix (``s3://<bucket>/<prefix>``)."
+)
+gcs_source = _factory(
+    Provider.GCS,
+    "``deploy_gcs``: a Google Cloud Storage bucket prefix (``gs://<bucket>/<prefix>``).",
+)
+azure_source = _factory(
+    Provider.AZURE,
+    "``deploy_azure_blob``: an Azure Blob container prefix (``az://<account>/<container>/<p>``).",
+)

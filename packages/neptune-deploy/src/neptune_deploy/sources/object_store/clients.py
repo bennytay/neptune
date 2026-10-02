@@ -18,6 +18,7 @@ ever expanded.
 """
 
 import json
+import re
 import urllib.parse
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterator, Sequence
@@ -32,6 +33,7 @@ from neptune_deploy.sources.object_store.transport import Response, Transport, T
 MAX_PAGE_BYTES: Final = 32 * 1024 * 1024
 MAX_TOKEN: Final = 1024  # characters in a version id, etag or generation
 AZURE_VERSION: Final = "2021-08-06"  # the x-ms-version every Azure request names
+_DECLARATION: Final = re.compile(r"<!\s*(?:DOCTYPE|ENTITY)", re.IGNORECASE)
 
 Cursor = tuple[str, ...]
 
@@ -105,11 +107,20 @@ class StoreClient(Protocol):
 
 
 def _xml(body: bytes) -> ET.Element:
-    head = body[:4096].lower()
-    if b"<!doctype" in head or b"<!entity" in body.lower():
-        raise PageInvalid("a listing declares a document type")
+    """A listing page, decoded as UTF-8 here and refused if it declares a type or an entity.
+
+    Decoding first means the search sees exactly the text the parser parses: a page in another
+    encoding (UTF-16 would hide ``<!ENTITY`` from a byte search) is refused, and expat, given
+    text, ignores whatever encoding the document declares.
+    """
     try:
-        return ET.fromstring(body)
+        text = body.decode("utf-8").removeprefix("\ufeff")
+    except UnicodeDecodeError as exc:
+        raise PageInvalid("a listing is not UTF-8") from exc
+    if _DECLARATION.search(text):
+        raise PageInvalid("a listing declares a document type or an entity")
+    try:
+        return ET.fromstring(text)
     except ET.ParseError as exc:
         raise PageInvalid("a listing is not XML") from exc
 
@@ -185,7 +196,9 @@ def read_range(response: Response, start: int, length: int) -> Range:
     """The bytes a ranged GET answered: a ``206`` for exactly the range, or a ``200`` from 0.
 
     A ``200`` means the store ignored the range and sent the object from its first byte: only the
-    ``length`` asked for are read, and the connection is dropped before the rest arrives.
+    ``length`` asked for are read, and the connection is dropped before the rest arrives. It must
+    state its length, which the source checks against the listed size: a body the store
+    transformed on the way (GCS's decompressive transcoding sends no length) is refused.
     """
     if response.status == 206:
         try:
@@ -194,10 +207,9 @@ def read_range(response: Response, start: int, length: int) -> Range:
             response.discard()  # its body is unread: the connection cannot be reused
             raise
         return Range(response.exact(length), total)
-    if response.status == 200 and start == 0:
-        declared = response.headers.get("content-length", "")
-        total = int(declared) if declared.isdigit() else None
-        return Range(response.exact(length), total)
+    declared = response.headers.get("content-length", "")
+    if response.status == 200 and start == 0 and declared.isdigit():
+        return Range(response.exact(length), int(declared))
     response.discard()
     raise RangeInvalid(f"status {response.status} to a ranged read", response.status)
 
@@ -369,7 +381,13 @@ class GcsClient:
         base = self.transport.endpoint.base_path
         path = f"{base}/storage/v1/b/{quote(self.bucket)}/o/{quote(key)}"
         query = [("alt", "media"), ("generation", token.partition(":")[2])]
-        headers = {**self._headers, "Range": _range_header(start, length)}
+        # Asking for gzip makes GCS serve a gzip-encoded object as stored, ranges honoured, rather
+        # than decompressed (its "decompressive transcoding"): the bytes read are the bytes held.
+        headers = {
+            **self._headers,
+            "Accept-Encoding": "gzip",
+            "Range": _range_header(start, length),
+        }
         return read_range(self.transport.get(path, query, headers), start, length)
 
 

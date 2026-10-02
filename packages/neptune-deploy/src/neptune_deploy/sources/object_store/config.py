@@ -47,6 +47,7 @@ _GCS_BUCKET: Final = re.compile(r"[a-z0-9][a-z0-9._\-]{1,220}[a-z0-9]")
 _AZURE_ACCOUNT: Final = re.compile(r"[a-z0-9]{3,24}")
 _AZURE_CONTAINER: Final = re.compile(r"[a-z0-9][a-z0-9\-]{1,61}[a-z0-9]")
 _REGION: Final = re.compile(r"[a-z0-9][a-z0-9\-]{0,31}")
+_STORE: Final = re.compile(r"[a-z0-9][a-z0-9\-]{0,62}")
 # What a SAS token may grant: read and list. Anything else (write, delete, add, create, tag, ...)
 # makes the credential writable, and the source refuses it.
 _SAS_READ_ONLY: Final = frozenset("rl")
@@ -66,11 +67,18 @@ class StoreLocation:
     bucket: str  # the S3 or GCS bucket, or the Azure container
     prefix: str
     account: str | None = None  # the Azure storage account
+    store: str | None = None  # the declared name of a store at a declared endpoint
 
     @property
     def scope(self) -> str:
-        """What every object id here starts with: ``<bucket>/`` or ``<account>/<container>/``."""
-        return f"{self.account}/{self.bucket}/" if self.account else f"{self.bucket}/"
+        """What every object id here starts with: ``<bucket>/`` or ``<account>/<container>/``,
+        after ``<store>:`` for a declared endpoint, whose bucket names are its own (ADR 0006 §3).
+
+        No bucket, account or container name holds ``/`` or ``:``, so the parts never run together.
+        """
+        store = f"{self.store}:" if self.store else ""
+        names = f"{self.account}/{self.bucket}" if self.account else self.bucket
+        return f"{store}{names}/"
 
     def object_id(self, key: str) -> str:
         """The ``ExternalObjectRef.object_id`` of ``key``: the scope, then the key verbatim."""
@@ -109,7 +117,9 @@ def parse_url(url: str, provider: Provider) -> StoreLocation:
 
 @dataclass(frozen=True)
 class Options:
-    """Declared options. ``endpoint`` replaces the provider's public endpoint (MinIO, an emulator).
+    """Declared options. ``endpoint`` replaces the provider's public endpoint (MinIO, an emulator),
+    and ``store`` then names that store: its bucket names are its own, so the name is part of each
+    object's identity.
 
     ``addressing`` (S3 only) defaults to virtual-hosted for the public endpoint and path-style for
     a declared one. ``versions`` (S3 only) lists with ``ListObjectVersions`` so a versioned bucket's
@@ -117,6 +127,7 @@ class Options:
     """
 
     endpoint: str | None = None
+    store: str | None = None  # required with ``endpoint``: whose bucket namespace it is
     region: str = "us-east-1"
     addressing: Addressing | None = None
     versions: bool = True
@@ -129,7 +140,7 @@ class Options:
     def parse(cls, options: Mapping[str, JsonValue] | None, provider: Provider) -> "Options":
         given = dict(options or {})
         s3_only = {"region", "addressing", "versions"}
-        known = {"endpoint", "anonymous", "max_objects", "page_size", "timeout"}
+        known = {"endpoint", "store", "anonymous", "max_objects", "page_size", "timeout"}
         allowed = known | s3_only if provider is Provider.S3 else known
         unknown = sorted(set(given) - allowed)
         if unknown:
@@ -138,6 +149,14 @@ class Options:
         endpoint = given.get("endpoint")
         if endpoint is not None and not isinstance(endpoint, str):
             raise ObjectStoreConfigError("endpoint is a URL")
+        store = given.get("store")
+        if (endpoint is None) != (store is None):
+            raise ObjectStoreConfigError(
+                "a declared endpoint needs a declared store name, and only it: bucket names are"
+                " unique per store, so the store is part of every object's identity"
+            )
+        if store is not None and (not isinstance(store, str) or not _STORE.fullmatch(store)):
+            raise ObjectStoreConfigError(f"not a store name: {store!r}")
         region = given.get("region", parsed.region)
         if not isinstance(region, str) or not _REGION.fullmatch(region):
             raise ObjectStoreConfigError(f"not a region: {region!r}")
@@ -161,6 +180,7 @@ class Options:
             raise ObjectStoreConfigError("timeout is a positive number of seconds")
         return cls(
             endpoint=endpoint,
+            store=store,
             region=region,
             addressing=Addressing(addressing) if addressing is not None else None,
             versions=flags["versions"],
@@ -220,12 +240,14 @@ def _declared_text(declared: Mapping[str, str], name: str) -> str | None:
 
 def azure_sas(token: str) -> tuple[tuple[str, str], ...]:
     """A SAS token's parameters, refused unless it grants read and list only."""
-    try:
-        params = urllib.parse.parse_qsl(
-            token.removeprefix("?"), keep_blank_values=True, strict_parsing=True
-        )
-    except ValueError as exc:
-        raise ObjectStoreConfigError("the SAS token is not a query string") from exc
+    # Split by hand: ``parse_qsl`` reads ``+`` as a space, which corrupts a base64 signature
+    # written unescaped. Percent-escapes are decoded; ``+`` stays ``+``.
+    params: list[tuple[str, str]] = []
+    for part in token.removeprefix("?").split("&"):
+        name, sep, value = part.partition("=")
+        if not sep or not name:
+            raise ObjectStoreConfigError("the SAS token is not a query string")
+        params.append((urllib.parse.unquote(name), urllib.parse.unquote(value)))
     names = [name for name, _ in params]
     if len(set(names)) != len(names):
         raise ObjectStoreConfigError("the SAS token repeats a parameter")

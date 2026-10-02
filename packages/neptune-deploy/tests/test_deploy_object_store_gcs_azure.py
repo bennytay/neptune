@@ -49,7 +49,7 @@ def connect(
                 f"gs://{fake.bucket}/{prefix}",
                 network=workspace,
                 ledger=ledger,
-                options={"endpoint": endpoint, **options},
+                options={"endpoint": endpoint, "store": "site-a", **options},
                 credentials={"gcs_access_token": "ya29.token-never-printed"},
             )
         else:
@@ -57,7 +57,7 @@ def connect(
                 f"az://{fake.account}/{fake.bucket}/{prefix}",
                 network=workspace,
                 ledger=ledger,
-                options={"endpoint": endpoint, **options},
+                options={"endpoint": endpoint, "store": "site-a", **options},
                 credentials={"azure_sas_token": SAS},
             )
 
@@ -67,7 +67,7 @@ def _connector(fake: FakeStore) -> str:
 
 
 def _scope(fake: FakeStore) -> str:
-    return "fleet-logs/" if fake.provider == "gcs" else f"{fake.account}/fleet-logs/"
+    return "site-a:fleet-logs/" if fake.provider == "gcs" else f"site-a:{fake.account}/fleet-logs/"
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
@@ -149,6 +149,7 @@ def test_reads_are_ranged_and_pinned(tmp_path: Path, provider: str) -> None:
     assert request.headers["range"] == "bytes=150000-199999"
     if provider == "gcs":
         assert request.query["generation"] == str(version.generation)
+        assert request.headers["accept-encoding"] == "gzip"  # stored bytes, never transcoded
     else:
         assert request.query["versionid"] == version.version_id
         assert request.query["sp"] == "rl" and "sig" in request.query
@@ -229,7 +230,7 @@ def test_a_writable_sas_token_is_refused_before_any_request(tmp_path: Path) -> N
                 azure_source(
                     f"az://{fake.account}/{fake.bucket}/",
                     network=workspace,
-                    options={"endpoint": endpoint},
+                    options={"endpoint": endpoint, "store": "site-a"},
                     credentials={"azure_sas_token": SAS.replace("sp=rl", f"sp={permissions}")},
                 )
     assert fake.requests == []

@@ -101,7 +101,12 @@ def _source(tmp_path: Path, admin: Admin, ledger: SourceLedger | None = None) ->
         f"s3://{admin.bucket}/",
         network=workspace,
         ledger=ledger,
-        options={"endpoint": ENDPOINT, "region": REGION, "page_size": 100},
+        options={
+            "endpoint": ENDPOINT,
+            "store": "live",
+            "region": REGION,
+            "page_size": 100,
+        },
         credentials={"s3_access_key_id": KEY_ID, "s3_secret_access_key": SECRET},
     )
 

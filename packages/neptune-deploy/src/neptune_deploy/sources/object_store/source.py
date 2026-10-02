@@ -1,7 +1,9 @@
 """``ObjectStoreSource``: one bucket prefix as a read-only compiler ``Source`` (ADR 0006).
 
-It implements the compiler's ``Source`` protocol (``walk``, ``open``) structurally, and adds what an
-external source needs that a folder does not:
+It has the shape of the compiler's ``Source`` protocol (``walk``, ``open``). Its entries mirror
+the compiler's ``SourceEntry`` and ``SkippedEntry`` but are its own types, because members may not
+import the compiler's discovery package; the compiler's scan accepts them once it ingests plugin
+Sources (ADR 0006, compiler gaps). It adds what an external source needs that a folder does not:
 
 - ``listing()``: every object under the prefix, from every page, sorted by key. Its identity is
   ``ExternalObjectRef(connector id, <bucket>/<key>, <version id, generation or etag>)``. Nothing in
@@ -245,6 +247,8 @@ class ObjectStoreSource:
         }
         if self.location.account is not None:
             config["account"] = self.location.account
+        if self.location.store is not None:
+            config["store"] = self.location.store
         if self.location.provider.value == "s3":
             config["versions"] = self.options.versions
         return transform_record(
@@ -285,12 +289,14 @@ class ObjectStoreSource:
     @cached_property
     def _listing(self) -> Listing:
         prefix = self.location.prefix
+        limit = self.options.max_objects
         kept: dict[str, Listed] = {}
         duplicated: set[str] = set()
-        skipped: list[SkippedObject] = []
+        skipped: set[SkippedObject] = set()
+        skipped_keys: set[bytes] = set()
         cursors: set[Cursor] = set()
         cursor: Cursor | None = None
-        complete = False
+        complete = limited = False
         pages = 0
         while True:
             if pages >= MAX_PAGES:
@@ -309,21 +315,23 @@ class ObjectStoreSource:
                     self.report("listing_failed", self.listing_ref, {**details, "cause": exc.code})
                 break
             pages += 1
-            skipped.extend(SkippedObject(item.raw, item.reason) for item in page.unlisted)
+            found = [SkippedObject(item.raw, item.reason) for item in page.unlisted]
             for item in page.objects:
                 raw = item.key.encode("utf-8")
                 if not item.key.startswith(prefix):
-                    skipped.append(SkippedObject(raw, "key_outside_prefix"))
+                    found.append(SkippedObject(raw, "key_outside_prefix"))
                 elif len(raw) > MAX_KEY_BYTES:
-                    skipped.append(SkippedObject(raw, "key_too_long"))
+                    found.append(SkippedObject(raw[: MAX_KEY_BYTES + 1], "key_too_long"))
                 elif item.key in kept and kept[item.key] != item:
                     duplicated.add(item.key)
                 else:
                     kept[item.key] = item
-            if len(kept) > self.options.max_objects:
-                self.report(
-                    "listing_limit", self.listing_ref, {"max_objects": self.options.max_objects}
-                )
+            skipped.update(found)
+            skipped_keys.update(item.raw_key for item in found)
+            # Every distinct key counts, used or not, so no listing grows without bound.
+            if len(kept) + len(skipped_keys) > limit:
+                self.report("listing_limit", self.listing_ref, {"max_objects": limit})
+                limited = True
                 break
             if page.cursor is None:
                 complete = True
@@ -333,16 +341,24 @@ class ObjectStoreSource:
                 break
             cursors.add(page.cursor)
             cursor = page.cursor
+        if limited:
+            # Keep what any page size keeps. Stores list in key order, so every key below the
+            # greatest one seen has been seen whole, duplicates included; keep the first ``limit``
+            # of those, and nothing after them.
+            seen = {key.encode("utf-8") for key in kept} | skipped_keys
+            greatest = max(seen)
+            cutoff = sorted(key for key in seen if key < greatest)[:limit][-1]
+            kept = {k: v for k, v in kept.items() if k.encode("utf-8") <= cutoff}
+            duplicated = {key for key in duplicated if key.encode("utf-8") <= cutoff}
+            skipped = {item for item in skipped if item.raw_key <= cutoff}
         for key in duplicated:
             del kept[key]
-            skipped.append(SkippedObject(key.encode("utf-8"), "key_duplicated"))
+            skipped.add(SkippedObject(key.encode("utf-8"), "key_duplicated"))
         entries = tuple(
             ObjectEntry(self.ref(key, item.token), item.size, key)
             for key, item in sorted(kept.items())
         )
-        if len(entries) > self.options.max_objects:
-            entries = entries[: self.options.max_objects]
-        unique = tuple(sorted(set(skipped), key=lambda s: (s.reason, s.raw_key)))
+        unique = tuple(sorted(skipped, key=lambda s: (s.reason, s.raw_key)))
         self._report_skipped(unique)
         return Listing(entries, unique, complete)
 
@@ -364,6 +380,17 @@ class ObjectStoreSource:
     def discover(self, ledger: SourceLedger) -> Discovery:
         """The listing against ``ledger`` (a ledger of this ingest root, ADR 0009)."""
         listing = self.listing()
+        new, changed, unchanged = self._classify(listing, ledger)
+        return Discovery(new, changed, unchanged, self._gone(listing, ledger), listing.complete)
+
+    def _classify(
+        self, listing: Listing, ledger: SourceLedger
+    ) -> tuple[
+        tuple[ObjectEntry, ...],
+        tuple[ObjectEntry, ...],
+        tuple[tuple[ObjectEntry, SourceRevision], ...],
+    ]:
+        """New, changed and unchanged objects, each in key order."""
         new: list[ObjectEntry] = []
         changed: list[ObjectEntry] = []
         unchanged: list[tuple[ObjectEntry, SourceRevision]] = []
@@ -378,6 +405,10 @@ class ObjectStoreSource:
                 unchanged.append((entry, head))
             else:
                 changed.append(entry)
+        return tuple(new), tuple(changed), tuple(unchanged)
+
+    def _gone(self, listing: Listing, ledger: SourceLedger) -> tuple[SourceRevision, ...]:
+        """Ledger revisions under this scope and prefix that a complete listing no longer holds."""
         gone: list[SourceRevision] = []
         if listing.complete:
             seen = {entry.location.object_id for entry in listing.entries}
@@ -397,13 +428,7 @@ class ObjectStoreSource:
                     and where.object_id not in seen
                 ):
                     gone.append(head)
-        return Discovery(
-            tuple(new),
-            tuple(changed),
-            tuple(unchanged),
-            tuple(sorted(gone, key=lambda revision: revision.location.key)),
-            listing.complete,
-        )
+        return tuple(sorted(gone, key=lambda revision: revision.location.key))
 
     # --- The Source protocol ---------------------------------------------------------------------
 
@@ -417,7 +442,8 @@ class ObjectStoreSource:
         if self._ledger is None:
             yield from listing.entries
         else:
-            yield from self.discover(self._ledger).to_probe
+            new, changed, _ = self._classify(listing, self._ledger)
+            yield from sorted((*new, *changed), key=lambda entry: entry.key)
         yield from listing.skipped
 
     def entry(self, location: SourceLocation) -> ObjectEntry:

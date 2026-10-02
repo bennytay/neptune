@@ -41,12 +41,15 @@ rule is harder: the store is remote, mutable, paginated and hostile.
    `url` is `s3://<bucket>/<prefix>`, `gs://<bucket>/<prefix>` or `az://<account>/<container>/<prefix>`.
    `network` is the compiler's `Workspace` (anything with `require_network(purpose)`). `ledger` is the
    ingest root's `SourceLedger`. `options` are declared (§7), `credentials` declared (§6). The returned
-   source implements the compiler's `Source` protocol structurally: `walk()` yields `ObjectEntry`
-   (`location`, `size`, as `SourceEntry` has) and then `SkippedObject`; `open(location)` returns a
-   seekable binary stream. It adds `listing()`, `discover(ledger)`, `reader(location, artifact)` (an
-   adapter's `SourceReader`) and `findings()`. Importing the package touches nothing. Because the
-   protocol is met structurally, the members' import rule (no `neptune.discovery`) stays as it is; this
-   settles the question ADR 0001's consequences left to the first connector.
+   source has the shape of the compiler's `Source` protocol: `walk()` yields `ObjectEntry` (with
+   `location` and `size`, as `SourceEntry` has) and then `SkippedObject` (raw key and finding code,
+   where `SkippedEntry` has a raw path and a `SkipReason`), and `open(location)` returns a seekable,
+   buffered binary stream. Failed reads raise `ObjectReadError`, an `OSError`, where `LocalSource`
+   raises `SourceAccessError`. These are its own types, so the members' import rule (no
+   `neptune.discovery`) stays as it is; this settles the question ADR 0001's consequences left to the
+   first connector. The compiler's scan must accept them when it ingests plugin Sources (compiler
+   gap 2). The source adds `listing()`, `discover(ledger)`, `reader(location, artifact)` (an adapter's
+   `SourceReader`) and `findings()`. Importing the package touches nothing.
 2. **One interface, three clients.** `StoreClient` has two calls: `list_page(prefix, cursor, size)` and
    `get_range(key, token, start, length)`. Everything else (which keys are kept, order, coverage,
    findings, ledger discovery, reads) is the source's, so the providers cannot differ in policy.
@@ -60,28 +63,39 @@ rule is harder: the store is remote, mutable, paginated and hostile.
    their documented wire formats and tested against in-process fakes of them. They count as verified when
    a live test runs each against its emulator (fake-gcs-server, Azurite), which the D2 gate review does.
    If either fails there, its entry point is withdrawn until it passes.
-3. **Identity.** An object is `ExternalObjectRef(<connector id>, <scope><key>, <token>)`. The scope is
-   `<bucket>/`, or `<account>/<container>/` for Azure. Bucket, account and container names cannot hold
-   `/`, so the split is unambiguous. The key is verbatim. The token is `version:<id>` (an S3 version id
+3. **Identity.** An object is `ExternalObjectRef(<connector id>, <scope><key>, <token>)`. On a
+   provider's public endpoint the scope is `<bucket>/`, or `<account>/<container>/` for Azure: those
+   names are global there. A declared endpoint (MinIO, Ceph, an emulator) has its own bucket
+   namespace, so it requires a declared `store` name, and its scope is `<store>:<bucket>/` (or
+   `<store>:<account>/<container>/`). Two sites that each have a bucket `logs` therefore never share an
+   identity, whatever ledger they reach. No bucket, account, container or store name holds `/` or `:`,
+   so the parts never run together. The key is verbatim. The token is `version:<id>` (an S3 version id
    other than `null`, an Azure version id), `generation:<n>` (GCS), else `etag:<etag>` (quotes
    stripped). A changed object under one key is therefore a new token at the same location. The ledger
    chains it as a new `SourceRevision` superseding the old one, and identical bytes under a new token
    are no new revision (root ADR 0009). The endpoint is not part of identity: like a local root path, it
-   says where bytes were read from, not what they are. A ledger belongs to one ingest root, so two
-   endpoints never share one.
+   says where bytes were read from, not what they are. The declared store name says whose bytes they
+   are, so moving one store to a new host keeps its identity.
 4. **Listing and determinism.** The source reads every page and sorts the objects by key (code-point
    order, which is UTF-8 byte order). The listing, its findings, their ids and the transform do not
    depend on page size, page order, entry order or the wall clock. A test lists one bucket with page
    sizes from 1 to 1,000, pages shuffled, and gets identical results for each provider.
    - A key listed twice is one object if both entries agree, and is dropped with `key_duplicated` if
      they do not: no arrival order decides.
-   - A cursor seen before stops the listing (`pagination_loop`). Pages are limited to 100,000 and
-     objects to `max_objects` (default 1,000,000), each limit a `listing_limit` finding.
+   - A cursor seen before stops the listing (`pagination_loop`). Pages are limited to 100,000, and
+     distinct keys, used or not, to `max_objects` (default 1,000,000): each limit is a
+     `listing_limit` finding, and keys a store lists but the source cannot use cannot grow a listing
+     without bound.
+   - A listing stopped by `max_objects` keeps the first `max_objects` keys below the greatest key it
+     saw, and drops every finding about later keys. Stores list in key order, so every key below the
+     greatest has been seen whole, duplicates included, and a limited listing is the same for every
+     page size. A listing stopped by a failure or a loop depends on where it stopped, and its finding
+     says where.
    - A listing that stopped early is `complete: false`, and nothing is asserted gone from it.
    - The only wall-clock reading is the SigV4 signing time. It reaches the request, never an output.
    - Findings carry codes, counts, statuses, offsets and keys (as hex), never error text, received
      byte counts, URLs or credentials.
-   - The transform record (`deploy_<provider>` 0.1.0) holds provider, bucket, account, prefix,
+   - The transform record (`deploy_<provider>` 0.1.0) holds provider, store, bucket, account, prefix,
      `versions` and `max_objects`: what decided which objects were seen. It holds no endpoint or
      credentials.
 5. **Incremental discovery against the compiler's ledger.** `discover(ledger)` sorts each listed
@@ -114,8 +128,8 @@ rule is harder: the store is remote, mutable, paginated and hostile.
    - Credentials never appear in a repr, a finding or the transform.
    - When Platform X2 secrets land, a superseding ADR moves the credential source there. The factory
      signature does not change.
-7. **Declared, closed options.** `endpoint`, `anonymous`, `max_objects`, `page_size` (1 to 1,000),
-   `timeout`; S3 adds `region`, `addressing` (`virtual` by default on AWS, `path` for a declared
+7. **Declared, closed options.** `endpoint` with `store` (both or neither), `anonymous`, `max_objects`,
+   `page_size` (1 to 1,000), `timeout`; S3 adds `region`, `addressing` (`virtual` by default on AWS, `path` for a declared
    endpoint) and `versions`. An unknown option is refused. A dotted bucket over https must be
    path-style, because the wildcard certificate does not cover a dotted host.
 8. **Hostile input.**
@@ -130,12 +144,21 @@ rule is harder: the store is remote, mutable, paginated and hostile.
      (`key_too_long`), one outside the requested prefix (`key_outside_prefix`), or one with no usable
      token or size (`revision_invalid`, `size_invalid`). Each reason is one finding citing at most ten
      keys as hex and counting all of them.
-   - Listing XML that declares a document type or entity is refused before it is parsed
-     (`response_invalid`), so no entity is ever expanded. A page body is limited to 32 MiB.
-   - A store that ignores `Range` is accepted only from offset 0. Only the bytes asked for are read, and
-     the connection is dropped.
+   - A listing page is decoded as UTF-8 first (another encoding is `response_invalid`; UTF-16 would
+     hide `<!ENTITY` from a byte search). A page that declares a document type or entity is refused
+     before it is parsed, and the parser is given the decoded text, so it ignores any encoding the page
+     declares. No entity is ever expanded. A page body is limited to 32 MiB.
+   - A store that ignores `Range` is accepted only from offset 0 and only with a stated length, which
+     must equal the listed size. Only the bytes asked for are read, and the connection is dropped. GCS
+     reads send `Accept-Encoding: gzip`, so a gzip-encoded object is served as stored, with ranges,
+     not decompressed by GCS's transcoding. A transformed body without a length is `read_failed`.
+   - An Azure SAS token is split by hand: `parse_qsl` would turn a `+` in an unescaped base64
+     signature into a space.
 9. **Lazy range reads.** `open()` fetches a 64 KiB window on the first read and doubles the window up to
-   8 MiB while reads are sequential. A seek resets it. A probe's head therefore costs one small request.
+   8 MiB while reads are sequential. A seek resets it, and no request asks for more than 8 MiB. A
+   probe's head therefore costs one small request. The stream is buffered, so `read(n)` returns `n`
+   bytes unless the object ends first. A kept-alive connection that the server closed while idle is
+   reopened once (`GET` is idempotent); a response whose body is not read drops its connection.
    `reader(location, artifact)` gives an adapter a `SourceReader` that fetches whole artifact chunks with
    one ranged GET each, checks each against `artifact.chunks` before serving a byte, and keeps the last
    four. Adapters never download whole objects. The compiler hashes a new or changed object once, by
@@ -175,6 +198,9 @@ rule is harder: the store is remote, mutable, paginated and hostile.
 - **The version id in `object_id`.** Every version would then be its own location, so the ledger would
   never chain one object's revisions, and a changed object would look like a new object plus one that
   never goes away. Lost.
+- **The endpoint URL in identity.** It would separate two sites' `logs` buckets, but moving a store to
+  a new host name, or reaching it through another address, would make every object new. A declared
+  store name separates them and survives a move. Lost.
 - **Following same-host redirects.** S3's `301 PermanentRedirect` points at another regional endpoint,
   not a safe target, and "same host" cannot be checked once DNS is involved. The finding tells the operator to declare the region.
   Lost.
@@ -189,9 +215,10 @@ rule is harder: the store is remote, mutable, paginated and hostile.
   the compiler does yet. These compiler gaps are listed, not worked around:
   1. `neptune ingest` and the SDK refuse every non-`file` scheme (`UnsupportedError`). They do not route
      `s3://`, `gs://` or `az://` to a plugin Source.
-  2. The scan and runtime accept only `LocalSource`. Nothing fingerprints an `ObjectEntry`, carries
-     `discover().unchanged` revisions forward, records `gone` as `SourceAbsence`, or gives adapters
-     `reader()`.
+  2. The scan and runtime accept only `LocalSource` and its entry types. Nothing fingerprints an
+     `ObjectEntry`, treats `SkippedObject` as a skipped entry, quarantines one object on
+     `ObjectReadError` (the scan catches only `SourceAccessError`), carries `discover().unchanged`
+     revisions forward, records `gone` as `SourceAbsence`, or gives adapters `reader()`.
   3. The ledger keeps the first token it saw for identical bytes, so an object re-tokened over the same
      bytes (a re-upload, a copy) counts as changed, and is fetched and hashed again, on every run until
      its bytes change.

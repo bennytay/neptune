@@ -109,8 +109,9 @@ class Endpoint:
             host, port_text = authority[1:close], authority[close + 1 :].removeprefix(":")
         elif ":" in authority:
             host, _, port_text = authority.rpartition(":")
-        if not host:
-            raise ValueError(f"an endpoint names a host: {url!r}")
+        if not host or (":" in host and not authority.startswith("[")):
+            raise ValueError(f"an endpoint names one host (IPv6 in brackets): {url!r}")
+        host = host.lower()
         port = 443 if scheme == "https" else 80
         if port_text:
             if not port_text.isdigit() or not 0 < int(port_text) < 65536:
@@ -119,7 +120,7 @@ class Endpoint:
         if scheme == "http" and not _is_loopback(host):
             raise ValueError(f"plain http is allowed to a loopback host only: {url!r}")
         base = "/" + path.strip("/") if path.strip("/") else ""
-        return cls(scheme, host.lower(), port, base)
+        return cls(scheme, host, port, base)
 
     @property
     def authority(self) -> str:

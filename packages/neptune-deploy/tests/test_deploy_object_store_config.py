@@ -16,7 +16,7 @@ from neptune_deploy.sources.object_store import (
     gcs_source,
     s3_source,
 )
-from neptune_deploy.sources.object_store.clients import Addressing
+from neptune_deploy.sources.object_store.clients import Addressing, PageInvalid, _xml
 from neptune_deploy.sources.object_store.config import (
     Options,
     credentials_for,
@@ -92,7 +92,11 @@ def test_a_url_that_names_no_valid_bucket_is_refused(url: str, provider: Provide
         ({"max_objects": True}, Provider.S3),
         ({"page_size": 1001}, Provider.S3),
         ({"timeout": 0}, Provider.S3),
-        ({"endpoint": 5}, Provider.S3),
+        ({"endpoint": 5, "store": "site-a"}, Provider.S3),
+        ({"endpoint": "http://127.0.0.1:9000"}, Provider.S3),  # whose bucket namespace?
+        ({"store": "site-a"}, Provider.GCS),  # a public endpoint's namespace is global
+        ({"endpoint": "http://127.0.0.1:9000", "store": "Site A"}, Provider.AZURE),
+        ({"endpoint": "http://127.0.0.1:9000", "store": "a:b"}, Provider.S3),
     ],
 )
 def test_options_are_closed_and_checked(options: dict[str, Any], provider: Provider) -> None:
@@ -109,6 +113,8 @@ def test_options_are_closed_and_checked(options: dict[str, Any], provider: Provi
         "https://minio:99999",
         "ftp://minio",
         "https://",
+        "http://::1:9000",  # IPv6 unbracketed
+        "http://minio:9000:80",
     ],
 )
 def test_endpoints_are_https_or_loopback_http(url: str) -> None:
@@ -141,6 +147,7 @@ def test_endpoints_and_addressing() -> None:
     assert endpoint_for(azure, Options())[0].host == "acct01.blob.core.windows.net"
     gcs = parse_url("gs://fleet-logs/", Provider.GCS)
     assert endpoint_for(gcs, Options())[0] == Endpoint("https", "storage.googleapis.com", 443)
+    assert Endpoint.parse("http://LocalHost:9000").host == "localhost"
     assert Endpoint("https", "h", 8443).authority == "h:8443"
     assert Endpoint("http", "::1", 80).authority == "[::1]"
 
@@ -178,6 +185,8 @@ def test_credentials_come_from_the_declaration_or_neptune_variables_only() -> No
         (Provider.AZURE, {"azure_sas_token": "sig=x&sp=rl&comp=list"}, False),  # sets a request
         (Provider.AZURE, {"azure_sas_token": "sig=x&sp=rld"}, False),  # can delete
         (Provider.AZURE, {"azure_sas_token": "sig=x"}, False),  # permissions unstated
+        (Provider.AZURE, {"azure_sas_token": "sig=x&sp=rl&&"}, False),  # not a query string
+        (Provider.AZURE, {"azure_sas_token": "sig=x&sp=rl&flag"}, False),
     ],
 )
 def test_credentials_that_are_missing_or_writable_are_refused(
@@ -185,6 +194,12 @@ def test_credentials_that_are_missing_or_writable_are_refused(
 ) -> None:
     with pytest.raises(ObjectStoreConfigError):
         credentials_for(provider, declared, {}, anonymous=anonymous)
+
+
+def test_a_sas_signature_keeps_its_plus_signs() -> None:
+    token = "sv=2021-08-06&sp=rl&sig=ab+c/d%2Be%3D"
+    found = credentials_for(Provider.AZURE, {"azure_sas_token": token}, {}, anonymous=False)
+    assert found.azure_sas is not None and dict(found.azure_sas)["sig"] == "ab+c/d+e="
 
 
 def test_anonymous_access_needs_no_credentials() -> None:
@@ -232,7 +247,7 @@ def test_building_a_source_sends_nothing(tmp_path: Path) -> None:
     source = s3_source(
         "s3://fleet-logs/amr/",
         network=workspace,
-        options={"endpoint": "http://127.0.0.1:9"},
+        options={"endpoint": "http://127.0.0.1:9", "store": "site-a"},
         credentials=S3_KEYS,
     )
     assert source.client.transport.requests == 0
@@ -242,5 +257,37 @@ def test_building_a_source_sends_nothing(tmp_path: Path) -> None:
         "max_objects": 1_000_000,
         "prefix": "amr/",
         "provider": "s3",
+        "store": "site-a",
         "versions": True,
     }
+    assert source.ref("k", "etag:x").object_id == "site-a:fleet-logs/k"
+
+
+# --- Listing XML ---------------------------------------------------------------------------------
+
+ENTITY_PAGE = (
+    '<?xml version="1.0" encoding="{encoding}"?>'
+    '<!DOCTYPE r [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;">]>'
+    "<ListBucketResult><Contents><Key>&b;</Key></Contents></ListBucketResult>"
+)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        ENTITY_PAGE.format(encoding="UTF-8").encode("utf-8"),
+        ENTITY_PAGE.format(encoding="UTF-16").encode("utf-16"),  # hides from a byte search
+        ENTITY_PAGE.format(encoding="UTF-32").encode("utf-32"),
+        b'<?xml version="1.0"?><! DOCTYPE r><r/>',
+        b"<r>\xff</r>",
+        b"<r>",
+    ],
+)
+def test_a_listing_page_that_declares_entities_or_is_not_utf8_is_refused(body: bytes) -> None:
+    with pytest.raises(PageInvalid):
+        _xml(body)
+
+
+def test_a_listing_page_is_parsed_as_utf8_whatever_it_declares() -> None:
+    page = '﻿<?xml version="1.0" encoding="UTF-16"?><r><k>café</k></r>'
+    assert _xml(page.encode("utf-8")).findtext("k") == "café"

@@ -19,6 +19,7 @@ from neptune.model.ids import ExternalObjectRef
 from neptune.model.source import SourceArtifact
 from neptune.store.workspace import LocalOnlyError, Workspace
 from neptune_deploy.sources.object_store import (
+    Listing,
     ObjectEntry,
     ObjectReadError,
     ObjectStoreSource,
@@ -49,7 +50,7 @@ def connect(
             f"s3://{fake.bucket}/{prefix}",
             network=online(tmp_path),
             ledger=ledger,
-            options={"endpoint": endpoint, **options},
+            options={"endpoint": endpoint, "store": "site-a", **options},
             credentials=CREDENTIALS,
         )
 
@@ -90,7 +91,7 @@ def test_a_versioned_bucket_lists_latest_versions_keyed_by_version_id(tmp_path: 
         "arm-cell/joint_states.mcap",
     ]
     assert listing.entries[1].location == ExternalObjectRef(
-        "deploy_s3", "fleet-logs/arm-cell/joint_states.mcap", f"version:{second.version_id}"
+        "deploy_s3", "site-a:fleet-logs/arm-cell/joint_states.mcap", f"version:{second.version_id}"
     )
     assert listing.entries[1].size == len(b"second take")
     assert listing.entries[0].location.revision_token == f"version:{calib.version_id}"
@@ -169,7 +170,7 @@ def test_gone_objects_are_asserted_only_from_a_complete_listing(tmp_path: Path) 
     with connect(fake, tmp_path, "cell/", page_size=1) as source:
         gone = source.discover(ledger).gone
     assert [revision.location.key for revision in gone] == [
-        ("external", "deploy_s3", "fleet-logs/cell/b.csv")
+        ("external", "deploy_s3", "site-a:fleet-logs/cell/b.csv")
     ]
     fake.put("cell/c.csv", b"c")
     fake.loop = True  # the listing cannot finish: nothing may be called gone
@@ -329,12 +330,14 @@ def test_opening_what_was_not_listed_is_refused(tmp_path: Path) -> None:
     fake = FakeStore()
     version = fake.put("amr/a.bag", b"a")
     with connect(fake, tmp_path) as source:
-        stale = ExternalObjectRef("deploy_s3", "fleet-logs/amr/a.bag", "version:older")
+        stale = ExternalObjectRef("deploy_s3", "site-a:fleet-logs/amr/a.bag", "version:older")
         with pytest.raises(ObjectReadError) as raised:
             source.open(stale)
         assert raised.value.code == "not_listed"
         with pytest.raises(TypeError):
-            source.open(ExternalObjectRef("deploy_gcs", "fleet-logs/amr/a.bag", version.version_id))
+            source.open(
+                ExternalObjectRef("deploy_gcs", "site-a:fleet-logs/amr/a.bag", version.version_id)
+            )
     assert source.findings() == ()
 
 
@@ -349,14 +352,14 @@ def test_a_local_only_workspace_refuses_the_source_before_any_request(tmp_path: 
             s3_source(
                 f"s3://{fake.bucket}/",
                 network=Workspace(tmp_path / "home"),  # local-only by default
-                options={"endpoint": endpoint},
+                options={"endpoint": endpoint, "store": "site-a"},
                 credentials=CREDENTIALS,
             )
         workspace = online(tmp_path)
         source = s3_source(
             f"s3://{fake.bucket}/",
             network=workspace,
-            options={"endpoint": endpoint},
+            options={"endpoint": endpoint, "store": "site-a"},
             credentials=CREDENTIALS,
         )
         workspace.allow_network(False)  # every request asks again
@@ -395,7 +398,7 @@ def test_anonymous_access_sends_no_credentials(tmp_path: Path) -> None:
         source = s3_source(
             f"s3://{fake.bucket}/public/",
             network=online(tmp_path),
-            options={"endpoint": endpoint, "anonymous": True},
+            options={"endpoint": endpoint, "store": "site-a", "anonymous": True},
             environ={},
         )
         assert [entry.key for entry in source.listing().entries] == ["public/map.pgm"]
@@ -505,6 +508,36 @@ def test_a_listing_declaring_a_document_type_is_refused_unparsed(tmp_path: Path)
     assert codes(source) == ["deploy_s3.response_invalid"]
 
 
+def test_a_body_without_a_length_is_never_read_as_the_object(tmp_path: Path) -> None:
+    fake = FakeStore()
+    fake.put("arm/notes.txt", b"stored bytes")
+    with connect(fake, tmp_path) as source:
+        (entry,) = source.listing().entries
+        fake.no_length = True
+        with pytest.raises(ObjectReadError) as raised, source.open(entry.location) as stream:
+            stream.read()
+    assert raised.value.code == "read_failed"
+    assert source.findings()[0].details["cause"] == "range_invalid"
+
+
+def test_entries_that_are_not_used_count_toward_the_limit(tmp_path: Path) -> None:
+    fake = FakeStore()
+    for index in range(5):
+        fake.put(f"cell/{index}.csv", b"x")
+    junk = fake.put("elsewhere/x", b"y")
+
+    def flood(number: int, entries: list[Entry]) -> list[Entry]:
+        keys = [f"zz/{number:05d}-{i:03d}".encode() for i in range(100)]
+        return entries + [Entry(key, junk, True) for key in keys]
+
+    fake.rewrite = flood
+    with connect(fake, tmp_path, "cell/", max_objects=150, page_size=1) as source:
+        listing = source.listing()
+    assert not listing.complete and len(fake.requests) == 2
+    assert len(listing.entries) + len(listing.skipped) <= 150
+    assert codes(source) == ["deploy_s3.key_outside_prefix", "deploy_s3.listing_limit"]
+
+
 def test_the_object_limit_stops_the_listing_and_says_so(tmp_path: Path) -> None:
     fake = FakeStore()
     for index in range(10):
@@ -514,6 +547,35 @@ def test_the_object_limit_stops_the_listing_and_says_so(tmp_path: Path) -> None:
     assert [entry.key for entry in listing.entries] == [f"fleet/{i:02d}.bag" for i in range(4)]
     assert not listing.complete
     assert codes(source) == ["deploy_s3.listing_limit"]
+
+
+def test_a_limited_listing_does_not_depend_on_page_size(tmp_path: Path) -> None:
+    def run(page_size: int) -> tuple[object, ...]:
+        fake = FakeStore()
+        for index in range(20):
+            fake.put(f"fleet/{index:02d}.bag", bytes([index]))
+        fake.put(b"fleet/05\xff", b"not utf-8")
+        other = fake.put("elsewhere", b"z")
+
+        def twin(number: int, entries: list[Entry]) -> list[Entry]:
+            out = []
+            for entry in entries:  # a conflicting twin of key 03, next to it, as a store lists
+                out.append(entry)
+                if entry.key == b"fleet/03.bag":
+                    out.append(Entry(entry.key, other, True))
+            return out
+
+        fake.rewrite = twin
+        with connect(fake, tmp_path, "fleet/", max_objects=10, page_size=page_size) as source:
+            listing = source.listing()
+        return listing, tuple(f.id for f in source.findings())
+
+    reference = run(1000)
+    listing = reference[0]
+    assert isinstance(listing, Listing) and not listing.complete
+    assert "fleet/03.bag" not in {entry.key for entry in listing.entries}
+    for page_size in (1, 2, 3, 7):
+        assert run(page_size) == reference
 
 
 # --- Determinism ---------------------------------------------------------------------------------

@@ -75,6 +75,7 @@ class FakeStore:
     sas_required: bool = False  # Azure: refuse a request without a SAS signature
     drop_idle: bool = False  # close every connection after its response, without saying so
     wrong_range: bool = False  # a 206 whose Content-Range starts one byte later than asked
+    no_length: bool = False  # answer reads with 200, other bytes and no length (transcoding)
     _counter: int = 0
     _pages_served: int = 0
     _cache: tuple[object, list[Entry]] = (None, [])
@@ -240,6 +241,13 @@ class _Handler(BaseHTTPRequestHandler):
             return
         data = version.data
         status, headers = 200, {"ETag": f'"{version.etag}"'}
+        if self.fake.no_length:  # a body the store transformed: no length, ended by closing
+            self.send_response(200)
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(data.upper() + b"!")
+            self.close_connection = True
+            return
         requested = self.headers.get("Range")
         if requested and not self.fake.ignore_range:
             first, _, last = requested.removeprefix("bytes=").partition("-")

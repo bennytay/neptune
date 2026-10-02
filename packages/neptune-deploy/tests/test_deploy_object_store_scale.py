@@ -28,7 +28,7 @@ def test_a_hundred_thousand_key_listing_is_within_budget(tmp_path: Path) -> None
         source = s3_source(
             f"s3://{fake.bucket}/fleet/",
             network=workspace,
-            options={"endpoint": endpoint},
+            options={"endpoint": endpoint, "store": "site-a"},
             credentials={"s3_access_key_id": "AKID", "s3_secret_access_key": "secret"},
         )
         tracemalloc.start()
