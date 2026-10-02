@@ -3,12 +3,15 @@
 ```mermaid
 flowchart LR
   LED[("Ledger catalog API")]
+  PG[("PostgreSQL 16 + pgvector")]
   subgraph M["neptune-memory"]
     SEAM["ledger.py: LedgerReader + StubLedger"]
     CON["consolidate/"]
     DER["derived/"]
     SCH["schema/"]
-    STO["store/"]
+    RD["schema/reader: MemoryReader + reference"]
+    CT["contract/: golden graph + suite"]
+    STO["store/: MemoryStore"]
     SPA["spatial/"]
     EPI["episodes/"]
     CLI["cli/"]
@@ -17,8 +20,12 @@ flowchart LR
   LED --> SEAM --> CON --> SCH --> STO
   DER --> SCH
   SCH --> SPA & EPI
+  SCH --> RD --> OUT
+  CON --> CT --> RD
+  CT --> REG[("contracts/graph-schema v1.0.0")]
   STO --> OUT
   CLI --> STO
+  STO --> PG
 
   subgraph KEY[" "]
     K1["built"]
@@ -33,10 +40,10 @@ flowchart LR
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1 built
   class K2 partial
-  class CON,DER,STO,SPA,EPI,CLI,K3 todo
-  class SCH partial
-  class SEAM built
-  class LED,OUT ext
+  class DER,SPA,EPI,CLI,K3 todo
+  class CON,SCH,STO partial
+  class SEAM,RD,CT built
+  class LED,OUT,PG,REG ext
   style M fill:#8b949e0f,stroke:#8b949e
   style KEY fill:none,stroke:none
   linkStyle default stroke:#8b949e

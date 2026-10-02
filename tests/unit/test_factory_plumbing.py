@@ -74,7 +74,12 @@ case $path in
   */issues/7/comments) file=comments ;;
   */pulls/7/reviews) file=reviews ;;
   */pulls/7/files) file=files ;;
+  */commits\?sha=main*) file=main-commits ;;
+  */commits/aaaaaaa*/check-runs*) file=main-pending ;;
+  */commits/mmmmmmm*/check-runs*) file=main-check-runs ;;
   */check-runs*) file=check-runs ;;
+  */compare/main...*) file=compare-pr ;;
+  */compare/*...main) file=compare-main ;;
   *) echo "fake gh: unexpected path $path" >&2; exit 9 ;;
 esac
 jq -rc "$filter" "$GH_FIXTURES/$file.json"
@@ -91,6 +96,10 @@ def _factory_merge(
     comments: list[dict[str, Any]],
     body: str = "Closes MVL-1",
     files: tuple[str, ...] = ("src/x.py",),
+    behind: int = 0,
+    main_files: tuple[str, ...] = (),
+    main_check: str = "success",
+    labels: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -103,21 +112,31 @@ def _factory_merge(
         "mergeable_state": "clean",
         "title": "Do a thing",
         "body": body,
+        "labels": [{"name": n} for n in labels],
     }
+
+    def runs(conclusion: str) -> dict[str, Any]:
+        return {
+            "check_runs": [
+                {
+                    "status": "completed",
+                    "completed_at": "2026-10-01T09:00:00Z",
+                    "conclusion": conclusion,
+                }
+            ]
+        }
+
     served = {
         "pull": pull,
         "comments": comments,
         "reviews": [],
         "files": [{"filename": f} for f in files],
-        "check-runs": {
-            "check_runs": [
-                {
-                    "status": "completed",
-                    "completed_at": "2026-10-01T09:00:00Z",
-                    "conclusion": "success",
-                }
-            ]
-        },
+        "check-runs": runs("success"),
+        "main-commits": [{"sha": "a" * 40}, {"sha": "m" * 40}],
+        "main-pending": {"check_runs": [{"status": "in_progress", "conclusion": None}]},
+        "main-check-runs": runs(main_check),
+        "compare-pr": {"behind_by": behind, "merge_base_commit": {"sha": "b" * 40}},
+        "compare-main": {"files": [{"filename": f} for f in main_files]},
     }
     for name, value in served.items():
         (tmp_path / f"{name}.json").write_text(json.dumps(value))
@@ -127,6 +146,8 @@ def _factory_merge(
         "GH_REPO": "owner/repo",
         "GH_FIXTURES": str(tmp_path),
         "DRY_RUN": "1",
+        "FACTORY_MERGE_LOCK": str(tmp_path / "merge.lock"),
+        "FRESHNESS_REF": "HEAD",
     }
     return subprocess.run(
         ["bash", str(SCRIPTS / "factory-merge.sh"), "7", HEAD[:7]],
@@ -175,6 +196,53 @@ def test_factory_merge_requires_a_filled_architecture_change(
     assert ("no filled **Architecture change** section" in result.stderr) is not accepted
 
 
+def test_factory_merge_merges_a_behind_pr_when_main_changed_elsewhere(tmp_path: Path) -> None:
+    result = _factory_merge(
+        tmp_path,
+        [_comment("OWNER", "MERGE")],
+        files=("src/neptune/adapters/mcap/adapter.py",),
+        behind=3,
+        main_files=("packages/neptune-ledger/src/x.py", "packages/neptune-memory/src/y.py"),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "3 commit(s) behind main" in result.stderr
+    assert "would squash-merge #7" in result.stderr
+
+
+def test_factory_merge_asks_for_a_refresh_when_main_changed_what_the_pr_reaches(
+    tmp_path: Path,
+) -> None:
+    result = _factory_merge(
+        tmp_path,
+        [_comment("OWNER", "MERGE")],
+        files=("src/neptune/adapters/mcap/adapter.py",),
+        behind=1,
+        main_files=("src/neptune/model/time.py",),
+    )
+    assert result.returncode == 1
+    assert "needs a refresh (main changed inputs to neptune)" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("main_check", "labels", "accepted"),
+    [
+        ("failure", (), False),
+        ("cancelled", (), False),
+        ("failure", ("fix-main",), True),
+        ("success", (), True),
+    ],
+)
+def test_factory_merge_stops_the_line_on_a_red_main(
+    tmp_path: Path, main_check: str, labels: tuple[str, ...], accepted: bool
+) -> None:
+    """main's head is still running, so its parent's completed check decides."""
+    result = _factory_merge(
+        tmp_path, [_comment("OWNER", "MERGE")], main_check=main_check, labels=labels
+    )
+    assert result.returncode == (0 if accepted else 1), result.stderr
+    assert ("the latest check on main failed" in result.stderr) is not accepted
+
+
 # --- Makefile: a failing `ruff format --check` stops the all-packages lint loop ------------------
 
 FAKE_UV = r"""#!/usr/bin/env bash
@@ -186,8 +254,14 @@ exit 0
 
 
 def _make_lint(tmp_path: Path, fail_format_in: str) -> tuple[int, list[str]]:
+    return _make(tmp_path, "lint", fail_format_in=fail_format_in)
+
+
+def _make(
+    tmp_path: Path, target: str, pkg: str = "", fail_format_in: str = ""
+) -> tuple[int, list[str]]:
     workspace = tmp_path / "ws"
-    for member in ("_template", "alpha"):
+    for member in ("_template", "alpha", "neptune-platform"):
         (workspace / "packages" / member).mkdir(parents=True)
         (workspace / "packages" / member / "pyproject.toml").write_text("")
     shutil.copy(ROOT / "Makefile", workspace / "Makefile")
@@ -198,7 +272,7 @@ def _make_lint(tmp_path: Path, fail_format_in: str) -> tuple[int, list[str]]:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("MAKE", "MFLAGS", "PKG"))}
     env |= {"UV_LOG": str(log), "FAIL_FORMAT_IN": fail_format_in}
     result = subprocess.run(
-        ["make", "-C", str(workspace), "lint", f"UV={tmp_path / 'uv'}", "ADR_DIRS=", "PKG="],
+        ["make", "-C", str(workspace), target, f"UV={tmp_path / 'uv'}", "ADR_DIRS=", f"PKG={pkg}"],
         env=env,
         capture_output=True,
         text=True,
@@ -217,8 +291,51 @@ def test_make_lint_stops_when_an_earlier_package_fails_format(tmp_path: Path) ->
 def test_make_lint_runs_every_package_when_all_pass(tmp_path: Path) -> None:
     status, calls = _make_lint(tmp_path, fail_format_in="")
     assert status == 0
-    assert len(calls) == 4  # format + check for the compiler and for alpha
+    assert len(calls) == 6  # format + check for the compiler, alpha and neptune-platform
     assert sum(c.split(" ", 1)[0].endswith("/packages/alpha") for c in calls) == 2
+
+
+def test_make_lint_gives_harness_to_the_platform_not_the_compiler(tmp_path: Path) -> None:
+    status, calls = _make(tmp_path, "lint")
+    assert status == 0
+    harness = str((tmp_path / "ws").resolve() / "harness")
+    by_dir = {c.split(" ", 1)[0].rsplit("/", 1)[-1]: c for c in calls if " format " in c}
+    assert by_dir["neptune-platform"].endswith(f"ruff format --check . {harness}")
+    assert "--extend-exclude harness" in by_dir["ws"] and harness not in by_dir["ws"]
+    assert not by_dir["alpha"].endswith("harness")
+
+
+def _contracts_calls(calls: list[str]) -> list[str]:
+    return [c.split("scripts/contracts.py ", 1)[1] for c in calls if "scripts/contracts.py" in c]
+
+
+def test_make_contracts_check_runs_one_consumer_check_and_the_matrix(tmp_path: Path) -> None:
+    """Without PKG: the owner rule per package, then one `check` (so each owner's contract tests
+    run once) and the matrix freshness check."""
+    status, calls = _make(tmp_path, "contracts-check")
+    assert status == 0
+    assert _contracts_calls(calls) == [
+        "check-owner --package neptune",
+        "check-owner --package alpha",
+        "check-owner --package neptune-platform",
+        "check --all --package alpha --package neptune-platform",
+        "matrix --check",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("pkg", "expected"),
+    [
+        ("neptune", ["check-owner --package neptune", "matrix --check"]),
+        ("alpha", ["check-owner --package alpha", "check --package alpha", "matrix --check"]),
+    ],
+)
+def test_make_contracts_check_for_one_package(
+    tmp_path: Path, pkg: str, expected: list[str]
+) -> None:
+    status, calls = _make(tmp_path, "contracts-check", pkg=pkg)
+    assert status == 0
+    assert [" ".join(c.split()) for c in _contracts_calls(calls)] == expected
 
 
 # --- new-package.sh: reserved names ------------------------------------------------------------

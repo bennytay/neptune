@@ -66,6 +66,64 @@ def test_contracts_run_every_member_but_not_the_compiler() -> None:
     assert _plan("contracts/ledger.schema.json") == (False, tuple(sorted(MEMBERS)), False)
 
 
+def test_harness_runs_the_platform_job_which_lints_it() -> None:
+    """harness/ is the platform's: its tests live in packages/neptune-platform/tests, and the
+    platform job's `make lint` formats and lints harness/ (the Makefile's MEMBER_DIRS)."""
+    assert _plan("harness/runner.py") == (False, ("neptune-platform",), False)
+    assert _plan("harness/x.py", "docs/y.md")[:2] == (
+        True,
+        ("neptune-ledger", "neptune-platform", "neptune-recall"),
+    )
+    assert _plan("harnessy/x.py")[0] is True  # only the harness/ directory itself
+
+
+def test_member_dirs_agree_with_the_makefile() -> None:
+    makefile = (Path(__file__).parents[2] / "Makefile").read_text()
+    (line,) = [x for x in makefile.splitlines() if x.startswith("MEMBER_DIRS :=")]
+    pairs = [pair.split(":") for pair in line.split(":=", 1)[1].split()]
+    assert {f"{d}/": member for member, d in pairs} == ci_plan.MEMBER_DIRS
+
+
+OWNERS = {"package-schema": "neptune", "catalog-api": "neptune-ledger"}
+
+
+@pytest.mark.parametrize(
+    ("path", "compiler"),
+    [
+        ("contracts/package-schema/v1.0.0/schema.json", True),
+        ("contracts/package-schema/contract.toml", True),
+        ("contracts/catalog-api/v0.0.0/golden/x.json", False),
+        ("contracts/lock.toml", False),
+        ("contracts/unknown/contract.toml", False),
+    ],
+)
+def test_a_compiler_owned_contract_runs_the_compiler(path: str, compiler: bool) -> None:
+    """The compiler job runs the owner check for the contracts it owns."""
+    result = ci_plan.plan([path], MEMBERS, OWNERS)
+    assert (result.compiler, result.packages) == (
+        compiler,
+        tuple(sorted(MEMBERS)),
+    )
+
+
+def test_contract_owners_reads_each_contract_toml(tmp_path: Path) -> None:
+    for name, text in [
+        ("a", '[owner]\npackage = "neptune"\n'),
+        ("b", '[owner]\npackage = "neptune-ledger"\n'),
+        ("broken", "owner = [\n"),
+        ("no-owner", 'title = "x"\n'),
+    ]:
+        (tmp_path / "contracts" / name).mkdir(parents=True)
+        (tmp_path / "contracts" / name / "contract.toml").write_text(text)
+    assert ci_plan.contract_owners(tmp_path) == {"a": "neptune", "b": "neptune-ledger"}
+    assert ci_plan.contract_owners(tmp_path / "nowhere") == {}
+
+
+def test_the_committed_package_schema_is_owned_by_the_compiler() -> None:
+    owners = ci_plan.contract_owners(Path(__file__).parents[2])
+    assert owners["package-schema"] == ci_plan.COMPILER
+
+
 @pytest.mark.parametrize(
     "path", ["pyproject.toml", "uv.lock", "Makefile", ".python-version", ".github/workflows/ci.yml"]
 )
@@ -167,3 +225,19 @@ def test_committed_package_indexes_are_current() -> None:
     dirs = sorted(str(p) for p in (root / "packages").glob("*/docs/adr"))
     assert dirs
     assert adr_index.main(["--check", *dirs]) == 0
+
+
+def test_adapter_only_change_runs_the_compiler_and_the_harness_not_every_dependent() -> None:
+    members = {**MEMBERS, "neptune-platform": frozenset()}
+    result = ci_plan.plan(["src/neptune/adapters/mcap/adapter.py"], members)
+    assert (result.compiler, result.packages) == (True, ("neptune-platform",))
+
+
+def test_adapter_contract_change_is_core() -> None:
+    result = ci_plan.plan(["src/neptune/adapters/contract.py"], MEMBERS)
+    assert result.packages == ("neptune-ledger", "neptune-recall")
+
+
+def test_contracts_tool_is_plumbing() -> None:
+    result = ci_plan.plan(["scripts/contracts.py"], MEMBERS)
+    assert result.packages == tuple(sorted(MEMBERS))

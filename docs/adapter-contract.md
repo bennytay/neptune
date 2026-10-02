@@ -117,6 +117,7 @@ or it ties with or loses to them.
 | Source shows | Emit | Never |
 |---|---|---|
 | missing key, empty or whitespace-only cell | `Unknown` | a default, `""`, `0`, "none" |
+| a typed source's (JSON, Parquet) empty string | `Unknown` (the model holds no empty text); other strings, whitespace-only included, are `Known` | `Known("")` |
 | a token the source or its format spec defines as "none" | `KnownAbsent(provenance=<that definition>)` | `KnownAbsent` without a citation |
 | a spec-defined sentinel (e.g. ROS covariance `[0] == -1`) | the state the spec gives it, e.g. `NotCovered` | the sentinel as a `Known` number |
 | any other value, however implausible | `Known(value)` | "fixing" it; plausibility is `validate/` |
@@ -171,6 +172,21 @@ For formats with timestamped samples (logs, bags, flight logs, telemetry tables,
   a `uint8` stays `uint8`); arrays are `repeated` columns. `seq` and `time/<i>` are `int64`.
 - Tests check every row with `Stream.check_row` and resolve `Stream.row_provenance` back to the bytes.
 
+## Several files, one recording (ADR 0045)
+
+A bag, a split recording or a folder of sidecars is several sources, and an adapter sees one:
+
+- Each file is read by the adapter that claims it, by its bytes. A bag's `.mcap` files are the MCAP
+  adapter's, its `metadata.yaml` and `.db3` files the `rosbag2` adapter's. Never claim another
+  adapter's format to "handle the bag", and never copy its parser.
+- A manifest-like file (`metadata.yaml`) reports what it says of itself: stated rows with cited cells,
+  and findings about its own lists (a part named twice, numbering with a gap, counts that do not
+  add up, a path that leaves the directory). It never opens the files it lists.
+- Which listed parts are present is a check across sources, so it is `validate/`'s, not an adapter's.
+  Grouping the files into one recording is `derived/`'s (ADR 0036).
+- A database you cannot hand to an engine (no path in a `SourceReader`) is read from its bytes
+  by a bounded reader inside the adapter, never copied to scratch per call (`rosbag2/_sqlite.py`).
+
 ## Machine context (ADR 0019)
 
 For sources that describe machines (manifests, robot descriptions, flight logs, calibration files):
@@ -213,6 +229,8 @@ For registers, geometry, photos, video files and documents:
 - Tables: one `StructuredTable` and one `StructuredRecord` per row, citing the row as `Row(r)` so each
   cell's place is its `RowCell`. Keep cells as the source types them; never infer a CSV cell's type.
   Blank is `Unknown`; only a token the source or its spec defines as none is `KnownAbsent`.
+  A row not cited as `Row(r)` (a JSON element, a table on a page) gives each cell its own
+  provenance. The `tabular` adapter (ADR 0042) is the worked example for CSV, JSON and Parquet.
 - A `Site` or `Asset` per row or feature that names one, with its ids and names each citing its cell or
   span. Don't copy the rest of the row into it.
 - Geometry: a `SpatialArtifact` per file, unit / CRS / frame as declared (`NotCovered` where the format

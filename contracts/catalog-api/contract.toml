@@ -1,12 +1,16 @@
-title = "Catalog API over ingest packages: packages, entity threads, lineage, current view"
+title = "Catalog API over ingest packages: register, verify, resolve, threads, lineage, query"
 status = "active"
 consumers = ["neptune-context", "neptune-deploy", "neptune-learn", "neptune-memory"]
 
-# v0.0.0 is a Platform-authored draft; the Ledger's first real export supersedes it.
+# v0.0.0 is the Platform-authored draft (MVL-121). v1.0.0 is the Ledger's first export (MVL-88),
+# a new major because it rejects v0.0.0's goldens (platform ADR 0002 §3; Ledger ADR 0004 §5).
 [owner]
 package = "neptune-ledger"
 module = "neptune_ledger.api"
 schema_export = "neptune_ledger.api:catalog_schema"
 version_constant = "neptune_ledger.api:CATALOG_API_VERSION"
-golden_generator = "packages/neptune-ledger/contracts/catalog_goldens.py"
-contract_tests = ["packages/neptune-ledger/tests/contract"]
+golden_generator = "packages/neptune-ledger/src/neptune_ledger/contract_tests/goldens.py"
+contract_tests = [
+  "packages/neptune-ledger/tests/contract",
+  "packages/neptune-ledger/tests/test_ledger_api_contract.py",
+]

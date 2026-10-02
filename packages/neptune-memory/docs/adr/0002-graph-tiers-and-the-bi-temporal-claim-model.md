@@ -1,6 +1,6 @@
 # 0002 — Graph tiers, node and edge schema, and the bi-temporal claim model
 
-- Status: Accepted
+- Status: Accepted; §4 and the worked examples superseded by 0005
 - Date: 2026-10-02
 - Issue: MVL-102
 

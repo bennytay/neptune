@@ -6,6 +6,7 @@
 - ``confine``: the Linux controls a sandboxed call runs under (limits, Landlock, seccomp).
 - ``wire``: how a sandboxed call's value comes back: JSON, decoded strictly.
 - ``cache``: what a job reuses and why it recomputes: invalidation rules and the cache report.
+- ``explain``: the ``Explanation`` a dry run returns: what a run would do, and why (ADR 0044).
 - ``job``: ``IngestJob``, the state machine over discovery, adapters, the workspace and the store;
   ``collect``, which removes from a workspace what no job with these adapters can reuse.
 
@@ -15,6 +16,7 @@ nothing imports the runtime but the SDK (``neptune.sdk``, ADR 0035), and the CLI
 
 from neptune.runtime.cache import RULES, CacheReport, Rule, cache_report_from_json
 from neptune.runtime.events import PHASES, EventSink, JobEvent, JobState, Phase
+from neptune.runtime.explain import Explanation
 from neptune.runtime.job import IngestJob, JobError, JobOptions, JobOutcome, collect
 from neptune.runtime.lineage import FINDING_CODES, RUNTIME_ID, RUNTIME_VERSION, runtime_transform
 from neptune.runtime.sandbox import (
@@ -34,6 +36,7 @@ __all__ = [
     "RUNTIME_VERSION",
     "CacheReport",
     "EventSink",
+    "Explanation",
     "IngestJob",
     "Isolation",
     "JobError",

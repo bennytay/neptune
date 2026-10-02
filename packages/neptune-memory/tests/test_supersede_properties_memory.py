@@ -1,4 +1,4 @@
-"""The superseding determinism specification (ADR 0002 §4), as properties.
+"""The superseding determinism specification (ADR 0002 §4 as superseded by ADR 0005), as properties.
 
 P1 order-free: the history depends on the set of claims, not their order (byte-identical JSON).
 P2 idempotent: resolving a resolved history returns it unchanged.
@@ -8,6 +8,12 @@ P4 as_of is history: the versions current at tx are exactly what resolving only 
 P5 consistent: no two current claims on one ``one`` predicate, subject and clock overlap with
    different objects.
 P6 total order: arrival is (recorded_at, priority, id); a full tie is impossible.
+P7 uncontested parts survive (split closures): without a lineage upgrade, every instant of every
+   ``one`` assertion stays held by a current version on its fact and clock.
+P8 retirement: no current version, split pieces included, belongs to a replaced lineage.
+
+Claim sets come in two kinds: stable lineages, and ones where ``memory.a`` is upgraded as
+transactions advance, so retirement interleaves with splitting.
 """
 
 from dataclasses import replace
@@ -21,16 +27,19 @@ from memory_schema_builders import BOOT_CLOCK, INFERRED, OBSERVED, SECONDS, STAT
 from neptune.identity.canonical_json import dumps
 from neptune.model.ids import RecordId
 from neptune.model.knowledge import Knowledge, Known, Unknown
-from neptune_memory.schema.claim import Claim
-from neptune_memory.schema.interval import OPEN, CivilClock, ledger_tx
+from neptune_memory.schema.claim import Claim, ClaimId
+from neptune_memory.schema.interval import OPEN, CivilClock, Open, ledger_tx
 from neptune_memory.schema.nodes import NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES, Cardinality
 from neptune_memory.schema.supersede import (
+    Lineage,
     Resolution,
+    ResolutionFinding,
     arrival_key,
     as_of,
     assertions,
     is_closure,
+    lineage_of,
     resolve,
 )
 
@@ -64,7 +73,19 @@ def claims(draw: st.DrawFn) -> Claim:
     )
 
 
-CLAIM_SETS = st.lists(claims(), max_size=8)
+@st.composite
+def upgrading_claims(draw: st.DrawFn) -> Claim:
+    """A claim whose ``memory.a`` lineage moves to a new version every two transactions."""
+    item = draw(claims())
+    if item.provenance.consolidator_id != "memory.a":
+        return item
+    version = str(1 + item.recorded_at // 2)
+    return replace(item, provenance=replace(item.provenance, consolidator_version=version))
+
+
+STABLE_SETS = st.lists(claims(), max_size=8)
+CLAIM_SETS = st.one_of(STABLE_SETS, st.lists(upgrading_claims(), max_size=8))
+HORIZON = 12  # past every bounded valid_to the strategy draws
 
 
 def run(items: list[Claim] | tuple[Claim, ...]) -> Resolution:
@@ -75,13 +96,18 @@ def as_bytes(result: Resolution) -> bytes:
     return dumps(
         {
             "claims": [c.to_json() for c in result.claims],
-            "findings": [[str(f.code), f.claim, list(f.others)] for f in result.findings],
+            "findings": [f.to_json() for f in result.findings],
         }
     )
 
 
 def clear(claims: tuple[Claim, ...]) -> list[Claim]:
     return sorted((replace(c, superseded_at=OPEN) for c in claims), key=lambda c: c.id)
+
+
+def clear_findings(findings: tuple[ResolutionFinding, ...]) -> list[ResolutionFinding]:
+    cleared = (replace(f, superseded_at=OPEN) for f in findings)
+    return sorted(cleared, key=lambda f: (f.claim, f.code, f.others))
 
 
 @settings(derandomize=True, max_examples=300)
@@ -128,16 +154,38 @@ def test_p3_nothing_deleted(items: list[Claim]) -> None:
         if is_closure(version):
             (narrowed,) = version.supersedes
             assert history[narrowed].superseded_at == version.recorded_at
+            root = root_of(version, history)
+            assert root.id in {i.id for i in items}
+            assert version.provenance.evidence[: len(root.provenance.evidence)] == (
+                root.provenance.evidence
+            )
+            assert version.object == root.object and version.assertion_kind == root.assertion_kind
+            assert root.valid.minus([version.valid]) != (root.valid,)  # a piece of the root
+            assert not version.valid.minus([root.valid])
+
+
+def root_of(version: Claim, history: dict[ClaimId, Claim]) -> Claim:
+    """The assertion a closure version is a piece of: follow ``supersedes`` past closures."""
+    while is_closure(version):
+        (narrowed,) = version.supersedes
+        version = history[narrowed]
+    return version
 
 
 @settings(derandomize=True, max_examples=300)
 @given(CLAIM_SETS)
 def test_p4_as_of_sees_history(items: list[Claim]) -> None:
-    history = run(items).claims
+    resolution = run(items)
     for tx in range(MAX_TX + 1):
-        seen = as_of(history, ledger_tx(tx))
-        prefix = run([c for c in items if c.recorded_at <= tx]).claims
-        assert clear(seen) == clear(tuple(c for c in prefix if c.is_current))
+        seen = as_of(resolution, ledger_tx(tx))
+        prefix = run([c for c in items if c.recorded_at <= tx])
+        assert clear(seen.claims) == clear(tuple(c for c in prefix.claims if c.is_current))
+        # Findings replay too: as_of shows exactly the findings a replay to tx leaves active.
+        live = [f for f in prefix.findings if isinstance(f.superseded_at, Open)]
+        assert clear_findings(seen.findings) == clear_findings(tuple(live))
+        # ADR 0006 §6: exactly, bookkeeping included: no later supersession leaks into tx.
+        assert seen.claims == tuple(c for c in prefix.claims if c.is_current)
+        assert seen.findings == tuple(live)
 
 
 @settings(derandomize=True, max_examples=300)
@@ -160,3 +208,37 @@ def test_p6_arrival_order_is_total(items: list[Claim]) -> None:
     distinct = {c.id: c for c in items}.values()
     keys = [arrival_key(c, PRIORITIES) for c in distinct]
     assert len(set(keys)) == len(keys)
+
+
+def ticks_held(claims: list[Claim], fact: tuple[object, str, str]) -> set[int]:
+    held: set[int] = set()
+    for c in claims:
+        if (c.subject, c.predicate, c.valid_from.domain_id) == fact:
+            end = HORIZON if isinstance(c.valid_to, Open) else c.valid_to.ticks
+            held.update(range(c.valid_from.ticks, end))
+    return held
+
+
+@settings(derandomize=True, max_examples=300)
+@given(STABLE_SETS)
+def test_p7_uncontested_parts_survive(items: list[Claim]) -> None:
+    live = [c for c in run(items).claims if c.is_current]
+    for item in items:
+        if CORE_PREDICATES.spec(item.predicate).cardinality is Cardinality.MANY:
+            continue
+        fact = (item.subject, item.predicate, item.valid_from.domain_id)
+        end = HORIZON if isinstance(item.valid_to, Open) else item.valid_to.ticks
+        assert set(range(item.valid_from.ticks, end)) <= ticks_held(live, fact)
+
+
+@settings(derandomize=True, max_examples=300)
+@given(st.lists(upgrading_claims(), max_size=8))
+def test_p8_replaced_lineages_keep_nothing_current(items: list[Claim]) -> None:
+    history = {c.id: c for c in run(items).claims}
+    latest: dict[str, Lineage] = {}
+    for item in sorted(items, key=lambda c: c.recorded_at):
+        latest[item.provenance.consolidator_id] = lineage_of(item)
+    for version in history.values():
+        if version.is_current:
+            root = root_of(version, history)
+            assert lineage_of(root) == latest[root.provenance.consolidator_id]

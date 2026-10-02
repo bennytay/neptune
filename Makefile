@@ -19,14 +19,20 @@ SELECTED := $(if $(PKG),$(PKG),$(COMPILER) $(MEMBERS))
 SELECTED_MEMBERS := $(filter $(MEMBERS),$(SELECTED))
 # Every tool runs against the whole workspace environment, from the package's own directory so its
 # own ruff / mypy / pytest configuration applies. Members are linted only by their own job.
+# MEMBER_DIRS (<member>:<root dir>) are root directories whose tests live in a member: that member
+# lints them (`$$d`) and the compiler does not; .github/scripts/ci_plan.py routes them the same way.
 RUN := $(UV) run --all-packages --all-groups
-EACH = set -ef; for p in $(SELECTED); do \
-  if [ "$$p" = $(COMPILER) ]; then cd "$(CURDIR)"; x="--extend-exclude packages/*"; \
-  else cd "$(CURDIR)/packages/$$p"; x=""; fi; echo "--- $$p" >&2;
+MEMBER_DIRS := neptune-platform:harness
+EACH = set -ef; for p in $(SELECTED); do d=""; \
+  if [ "$$p" = $(COMPILER) ]; then cd "$(CURDIR)"; \
+    x="--extend-exclude packages/*$(foreach m,$(MEMBER_DIRS), --extend-exclude $(word 2,$(subst :, ,$(m))))"; \
+  else cd "$(CURDIR)/packages/$$p"; x=""; \
+    for m in $(MEMBER_DIRS); do if [ "$${m%%:*}" = "$$p" ]; then d="$$d $(CURDIR)/$${m\#*:}"; fi; done; \
+  fi; echo "--- $$p" >&2;
 ADR_DIRS = $(SELECTED_MEMBERS:%=packages/%/docs/adr)
 
 .PHONY: help setup fmt lint type test test-fast check schema examples adr-index adr-index-check \
-  contracts-check
+  contracts-check harness
 
 help: ## Show available targets
 > @grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -40,7 +46,7 @@ fmt: ## Format code and auto-fix lint findings
 
 lint: adr-index-check ## Formatting, lint and ADR-index check without modifying files
 # `set -e` ignores a failure on the left of `&&`, so each step exits explicitly.
-> @$(EACH) $(RUN) ruff format --check $$x . || exit 1; $(RUN) ruff check $$x . || exit 1; done
+> @$(EACH) $(RUN) ruff format --check $$x . $$d || exit 1; $(RUN) ruff check $$x . $$d || exit 1; done
 
 type: ## Static type check (mypy --strict)
 > @$(EACH) $(RUN) mypy; done
@@ -68,9 +74,15 @@ examples: ## Regenerate the worked examples and their golden package documents
 > $(UV) run python tests/golden/mcap/make_mcap_golden.py
 > $(UV) run python tests/golden/config/make_config_golden.py
 
-contracts-check: ## Owner rule, then lock + upstream contract tests per package (PKG=<name> for one)
+# One `check` call covers every selected member (and, without PKG, every package in lock.toml), so
+# each upstream owner's contract tests run once; the matrix must match the registry.
+CONTRACT_CONSUMERS = $(if $(PKG),,--all) $(SELECTED_MEMBERS:%=--package %)
+contracts-check: ## Owner rule, lock + upstream contract tests, matrix freshness (PKG=<name> for one)
 > @set -e; for p in $(SELECTED); do echo "--- contracts $$p" >&2; \
-  $(RUN) python scripts/contracts.py check-owner --package "$$p"; \
-  if [ "$$p" != $(COMPILER) ]; then $(RUN) python scripts/contracts.py check --package "$$p"; fi; \
-  done
-> $(if $(PKG),@true,$(RUN) python scripts/contracts.py check --all)
+  $(RUN) python scripts/contracts.py check-owner --package "$$p"; done
+> $(if $(strip $(CONTRACT_CONSUMERS)),$(RUN) python scripts/contracts.py check $(CONTRACT_CONSUMERS),@true)
+> $(RUN) python scripts/contracts.py matrix --check
+
+HARNESS_RUN_DIR ?= harness/.run
+harness: ## Integration harness: contracts check, corpus through the stages, smoke query, report
+> $(RUN) python -m harness --run-dir "$(HARNESS_RUN_DIR)" $(HARNESS_ARGS)

@@ -1,4 +1,4 @@
-"""ADR 0002's worked examples, executed: each one is a test of the resolver on real types."""
+"""ADR 0005's worked examples (ADR 0002's, on declared clocks), executed on real types."""
 
 from dataclasses import replace
 
@@ -6,13 +6,14 @@ import pytest
 
 from memory_schema_builders import (
     BOOT_CLOCK,
-    DAYS,
     INFERRED,
     OBSERVED,
+    SECONDS,
     STATED,
     claim,
     node,
 )
+from neptune.identity.ids import record_id
 from neptune.model.knowledge import Known
 from neptune_memory.schema.claim import Claim, ClaimId, TypedLiteral, ValueType
 from neptune_memory.schema.interval import OPEN, ledger_tx
@@ -21,6 +22,7 @@ from neptune_memory.schema.predicates import CORE_PREDICATES, ClaimSchemaError
 from neptune_memory.schema.supersede import (
     RESOLVER_ID,
     FindingCode,
+    Resolution,
     as_of,
     is_closure,
     resolve,
@@ -28,9 +30,13 @@ from neptune_memory.schema.supersede import (
 
 PRIORITIES = {"memory.calibration": 1, "memory.manifest": 1, "memory.test": 1}
 
-# Day numbers since 1970-01-01 on the civil DAYS clock.
-MAR_02, MAY_01, JUN_10, JUL_14 = 20514, 20574, 20614, 20648
-APR_01 = 20544
+# Each record declares a POSIX instant (Unix seconds: timescale, epoch and resolution Known), so
+# it lands on the shared civil SECONDS clock. The names are UTC labels for the reader only:
+# MAR_02 is 2026-03-02T00:00:00Z. A date with no zone never lands here (ADR 0005 §4).
+MAR_02, APR_01, MAY_01 = 1_772_409_600, 1_775_001_600, 1_777_593_600
+JUN_10, JUL_14 = 1_781_049_600, 1_783_987_200
+# The ROV logbook writes bare dates with no zone: a named day clock of its own, never civil time.
+LOGBOOK_DAYS = record_id("timestamp_domain", {"test": "rov-2 logbook dates, zone not stated"})
 
 
 def by_id(claims: tuple[Claim, ...]) -> dict[ClaimId, Claim]:
@@ -39,6 +45,10 @@ def by_id(claims: tuple[Claim, ...]) -> dict[ClaimId, Claim]:
 
 def current(claims: tuple[Claim, ...]) -> list[Claim]:
     return [c for c in claims if c.is_current]
+
+
+def claims_as_of(resolution: Resolution, tx: int) -> tuple[Claim, ...]:
+    return as_of(resolution, ledger_tx(tx)).claims
 
 
 def test_example_1_an_arm_camera_calibration_is_replaced() -> None:
@@ -50,7 +60,7 @@ def test_example_1_an_arm_camera_calibration_is_replaced() -> None:
         MAR_02,
         tx=1,
         kind=OBSERVED,
-        clock=DAYS,
+        clock=SECONDS,
         consolidator="memory.calibration",
     )
     july = claim(
@@ -60,11 +70,12 @@ def test_example_1_an_arm_camera_calibration_is_replaced() -> None:
         JUL_14,
         tx=2,
         kind=OBSERVED,
-        clock=DAYS,
+        clock=SECONDS,
         consolidator="memory.calibration",
         ev=1,
     )
-    history = resolve([july, march], CORE_PREDICATES, PRIORITIES).claims
+    resolution = resolve([july, march], CORE_PREDICATES, PRIORITIES)
+    history = resolution.claims
     ids = by_id(history)
 
     assert ids[march.id].superseded_at == 2  # the open-ended version stopped being current at tx 2
@@ -76,15 +87,21 @@ def test_example_1_an_arm_camera_calibration_is_replaced() -> None:
     assert closure.provenance.consolidator_id == RESOLVER_ID
     assert closure.provenance.evidence == (*march.provenance.evidence, *july.provenance.evidence)
     # As of tx 1, March's calibration is current and open-ended; as of tx 2, it ended on 14 July.
-    assert as_of(history, ledger_tx(1)) == (ids[march.id],)
-    assert set(as_of(history, ledger_tx(2))) == {closure, ids[july.id]}
+    # The snapshot shows tx 1 as it was known then: the tx 2 supersession is masked (ADR 0006 §6).
+    assert claims_as_of(resolution, 1) == (replace(ids[march.id], superseded_at=OPEN),)
+    assert claims_as_of(resolution, 1) == (march,)
+    assert set(claims_as_of(resolution, 2)) == {closure, ids[july.id]}
 
 
 def test_example_2_an_amr_moves_between_warehouses() -> None:
     amr = node(NodeType.MACHINE, "amr-12")
     wh_a, wh_b = node(NodeType.SITE, "warehouse-a"), node(NodeType.SITE, "warehouse-b")
-    at_a = claim(amr, "located_at", wh_a, MAR_02, tx=5, clock=DAYS, consolidator="memory.manifest")
-    at_b = claim(amr, "located_at", wh_b, JUN_10, tx=9, clock=DAYS, consolidator="memory.manifest")
+    at_a = claim(
+        amr, "located_at", wh_a, MAR_02, tx=5, clock=SECONDS, consolidator="memory.manifest"
+    )
+    at_b = claim(
+        amr, "located_at", wh_b, JUN_10, tx=9, clock=SECONDS, consolidator="memory.manifest"
+    )
     result = resolve([at_a, at_b], CORE_PREDICATES, PRIORITIES)
     live = current(result.claims)
     assert {(c.object, c.valid_to) for c in live} == {(wh_a, at_b.valid_from), (wh_b, OPEN)}
@@ -97,7 +114,11 @@ def test_example_2_an_amr_moves_between_warehouses() -> None:
     assert finding.code is FindingCode.CLOCK_MISMATCH
     (at_a_closed,) = [c for c in current(result.claims) if c.object == wh_a]
     assert (finding.claim, finding.others) == (on_boot.id, (at_a_closed.id,))
+    assert (finding.recorded_at, finding.superseded_at) == (10, OPEN)
     assert by_id(result.claims)[on_boot.id].is_current
+    # as_of carries the conflict marker with the pair, and not before the pair existed.
+    assert as_of(result, ledger_tx(10)).findings == (finding,)
+    assert as_of(result, ledger_tx(9)).findings == ()
 
 
 @pytest.mark.parametrize("operator_first", [False, True])
@@ -134,42 +155,64 @@ def test_example_3_an_operator_overrides_an_inferred_quadruped_identity(
         assert (finding.claim, finding.others) == (guess.id, (operator.id,))
     else:
         assert ids[operator.id].supersedes == (guess.id,)
-        assert as_of(result.claims, ledger_tx(3)) == (ids[guess.id],)
+        assert claims_as_of(result, 3) == (replace(ids[guess.id], superseded_at=OPEN),)
 
 
 def test_example_4_a_marine_inspection_fact_is_superseded_by_maintenance() -> None:
     rov = node(NodeType.MACHINE, "work-class-rov-2")
 
-    def state(text: str, day: int, tx: int, ev: int) -> Claim:
+    def state(text: str, since: int, tx: int, ev: int) -> Claim:
         return claim(
             rov,
             "maintenance_state",
             TypedLiteral(ValueType.TEXT, text),
-            day,
+            since,
             tx=tx,
-            clock=DAYS,
+            clock=SECONDS,
             ev=ev,
         )
 
     fault = state("thruster 3 fault", MAY_01, tx=2, ev=0)
     repaired = state("operational", JUN_10, tx=7, ev=1)
     late = state("operational", APR_01, tx=9, ev=2)  # an older record, filed late
-    history = resolve([fault, repaired, late], CORE_PREDICATES, PRIORITIES).claims
-    live = sorted(current(history), key=lambda c: c.valid_from.ticks)
-    assert [(c.valid_from.ticks, c.object) for c in live] == [
-        (APR_01, late.object),
-        (MAY_01, fault.object),
-        (JUN_10, repaired.object),
+    resolution = resolve([fault, repaired, late], CORE_PREDICATES, PRIORITIES)
+    history = resolution.claims
+    live = sorted(current(history), key=lambda c: (c.valid_from.ticks, c.recorded_at))
+    assert [(c.valid_from.ticks, c.valid_to, c.object) for c in live] == [
+        (APR_01, fault.valid_from, late.object),
+        (MAY_01, repaired.valid_from, fault.object),
+        (JUN_10, OPEN, repaired.object),
+        (JUN_10, OPEN, late.object),  # the late record's uncontested tail corroborates the repair
     ]
-    assert [c.valid_to for c in live] == [fault.valid_from, repaired.valid_from, OPEN]
-    # The late record was narrowed on arrival: its full version was never current.
+    # The late record was split on arrival: its full version was never current, and both pieces
+    # are resolver closures citing its evidence.
     assert by_id(history)[late.id].superseded_at == late.recorded_at
+    pieces = [c for c in live if is_closure(c) and c.supersedes == (late.id,)]
+    assert [p.valid_from.ticks for p in pieces] == [APR_01, JUN_10]
+    assert all(p.provenance.evidence[0] == late.provenance.evidence[0] for p in pieces)
     # As of tx 8 the late record had not arrived: the fault held from 1 May until 10 June.
-    before_late = sorted(as_of(history, ledger_tx(8)), key=lambda c: c.valid_from.ticks)
+    before_late = sorted(claims_as_of(resolution, 8), key=lambda c: c.valid_from.ticks)
     assert [(c.valid_from.ticks, c.valid_to) for c in before_late] == [
         (MAY_01, repaired.valid_from),
         (JUN_10, OPEN),
     ]
+
+    # The logbook's bare date ("2026-05-20", no zone) stays on the logbook's own day clock: it is
+    # never ordered against the civil records, only marked while both are current.
+    bare = claim(
+        rov,
+        "maintenance_state",
+        TypedLiteral(ValueType.TEXT, "thruster 3 fault"),
+        20593,
+        tx=10,
+        clock=LOGBOOK_DAYS,
+        ev=3,
+    )
+    with_bare = resolve([fault, repaired, late, bare], CORE_PREDICATES, PRIORITIES)
+    assert set(current(with_bare.claims)) == {*current(history), bare}
+    mismatched = {(f.code, f.claim, f.others) for f in with_bare.findings}
+    operational = [c.id for c in current(history) if c.object == repaired.object]
+    assert mismatched == {(FindingCode.CLOCK_MISMATCH, bare.id, (o,)) for o in operational}
 
 
 def test_simultaneous_arrival_is_decided_by_priority_then_id() -> None:

@@ -8,4 +8,8 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-ledger-place-in-the-programme.md) | The Ledger is layer 1: it consumes compiler packages and serves the layers above | Accepted |
+| [0002](0002-catalog-data-model.md) | Catalog data model: package registry, record and source indexes, transform lineage, tenancy | Accepted |
 | [0003](0003-entity-threads-and-the-lineage-current-view.md) | Entity threads: one declared key, per-clock order, and a named lineage preference | Accepted |
+| [0004](0004-catalog-api-error-model-and-versioning.md) | Catalog API: call names, error model, absence, versioning and contract tests | Accepted |
+| [0005](0005-l1-gate-catalog-data-model-amendments.md) | L1 gate: catalog data model amendments for record bodies, constant-time clock checks, byte-order collation and the scale budget | Accepted |
+| [0006](0006-l1-gate-catalog-api-amendments.md) | L1 gate: catalog API amendments for hostile packages, moved evidence, tenant roots and paging; catalog-api 1.1.0 stable | Accepted |

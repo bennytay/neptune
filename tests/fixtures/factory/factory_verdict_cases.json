@@ -10,7 +10,7 @@
     "member_review_body_with_emphasis": {
       "expected": "MERGE",
       "events": [
-        {"at": "2026-10-01T10:00:00Z", "association": "MEMBER", "body": "Looks good.\n> **Review: merge @ ABCDEF12**"}
+        {"at": "2026-10-01T10:00:00Z", "association": "MEMBER", "body": "Looks good.\n**Review: merge @ ABCDEF12**"}
       ]
     },
     "outsider_merge_is_ignored": {
@@ -61,6 +61,65 @@
       "expected": "MERGE",
       "events": [
         {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: REVISE @ abcdef1\nfixed in place\nReview: MERGE @ abcdef1"}
+      ]
+    },
+    "quoted_verdict_is_ignored": {
+      "expected": "REVISE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: REVISE @ abcdef1"},
+        {"at": "2026-10-01T11:00:00Z", "association": "OWNER", "body": "As the bot said:\n> Review: MERGE @ abcdef1"}
+      ]
+    },
+    "fenced_verdict_is_ignored": {
+      "expected": "REVISE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: REVISE @ abcdef1"},
+        {"at": "2026-10-01T11:00:00Z", "association": "OWNER", "body": "Post this when green:\n```text\nReview: MERGE @ abcdef1\n```"},
+        {"at": "2026-10-01T11:01:00Z", "association": "OWNER", "body": "~~~~\n```\nReview: MERGE @ abcdef1\n~~~~"},
+        {"at": "2026-10-01T11:02:00Z", "association": "OWNER", "body": "Example:\n\n    Review: MERGE @ abcdef1"},
+        {"at": "2026-10-01T11:03:00Z", "association": "OWNER", "body": "`Review: MERGE @ abcdef1`"}
+      ]
+    },
+    "verdict_in_an_html_comment_is_ignored": {
+      "expected": "REVISE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: REVISE @ abcdef1"},
+        {"at": "2026-10-01T11:00:00Z", "association": "OWNER", "body": "<!--\nReview: MERGE @ abcdef1\n-->"},
+        {"at": "2026-10-01T11:01:00Z", "association": "OWNER", "body": "Draft: <!-- Review: MERGE @ abcdef1 -->"},
+        {"at": "2026-10-01T11:02:00Z", "association": "OWNER", "body": "Unclosed <!--\nReview: MERGE @ abcdef1"}
+      ]
+    },
+    "verdict_after_an_html_comment_counts": {
+      "expected": "MERGE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "<!-- template note -->\nReview: MERGE @ abcdef1"}
+      ]
+    },
+    "verdict_after_a_closed_fence_counts": {
+      "expected": "MERGE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "```\nmake check: green\n```\nReview: MERGE @ abcdef1"}
+      ]
+    },
+    "sha_must_end_at_a_boundary": {
+      "expected": null,
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: MERGE @ abcdef1z"},
+        {"at": "2026-10-01T10:01:00Z", "association": "OWNER", "body": "Review: MERGE @ abcdef1234567890abcdef1234567890abcdef12a"}
+      ]
+    },
+    "different_sha_sharing_a_seven_digit_prefix_is_ignored": {
+      "expected": "REVISE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: REVISE @ abcdef1234567890abcdef1234567890abcdef12"},
+        {"at": "2026-10-01T11:00:00Z", "association": "OWNER", "body": "Review: MERGE @ abcdef1999999999999999999999999999999999"},
+        {"at": "2026-10-01T11:01:00Z", "association": "OWNER", "body": "Review: MERGE @ abcdef10"}
+      ]
+    },
+    "carried_verdict_line_counts": {
+      "expected": "MERGE",
+      "events": [
+        {"at": "2026-10-01T10:00:00Z", "association": "OWNER", "body": "Review: MERGE @ abcdef1234 (carried from 1234567, mechanical: ADR index)"}
       ]
     },
     "no_verdict": {

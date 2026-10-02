@@ -203,7 +203,7 @@ def test_without_the_rival_the_renamed_tally_is_read_and_the_zip_members_are_rep
         b"recording.mcap": "mcap",  # claimed by its magic
     }
     # The tar's members, and the same tar's inside a gzip, are probed by their bytes alike.
-    in_tar = {b"drive.bag": None, b"logs/lift.tally": "tally", b"notes.txt": "text"}
+    in_tar = {b"drive.bag": "rosbag1", b"logs/lift.tally": "tally", b"notes.txt": "text"}
     archive, compressed = probes["archive"], probes["archive.tgz"]
     assert archive.container is not None and compressed.container is not None
     assert _probed_members(archive.container) == in_tar

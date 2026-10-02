@@ -1,11 +1,11 @@
 # Contract compatibility matrix
 
-Which contract versions exist and which version each consuming package is built against. Sources:
-`contracts/<id>/contract.toml`, `contracts/<id>/v*/version.json` and `contracts/lock.toml`
-(ADR 0002 in `packages/neptune-platform/docs/adr/`). Hand-maintained until `scripts/contracts.py matrix`
-generates it and `make check` verifies it (follow-up, ADR 0003 §10): any PR that edits `lock.toml` or
-publishes a contract version updates this file in the same PR. The file at a release tag is that release's
-compatibility statement.
+Which contract versions exist and which version each consuming package is built against. Generated
+by `scripts/contracts.py matrix` from `contracts/<id>/contract.toml`,
+`contracts/<id>/v*/version.json`, `contracts/lock.toml` and `contracts/packages.toml`; do not edit
+it by hand. `make contracts-check` fails while it is stale. The policy is ADR 0002 in
+`packages/neptune-platform/docs/adr/`. The file at a release tag is that release's compatibility
+statement.
 
 ## Contracts
 
@@ -14,21 +14,23 @@ compatibility statement.
 | `package-schema` | `neptune` | active | 3.0.0 | — | `neptune-deploy`, `neptune-learn`, `neptune-ledger` |
 | `alignment-records` | `neptune` (part of `package-schema`) | planned | — | — | `neptune-memory` |
 | `lifecycle-records` | `neptune` (part of `package-schema`; kinds ship in 3.0.0, ADR 0051) | planned | — | — | `neptune-deploy`, `neptune-memory` |
-| `catalog-api` | `neptune-ledger` | active | — | 0.0.0 | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
-| `graph-schema` | `neptune-memory` | planned | — | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
+| `catalog-api` | `neptune-ledger` | active | 1.2.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn`, `neptune-memory` |
+| `graph-schema` | `neptune-memory` | active | 1.0.0 | — | `neptune-context`, `neptune-deploy`, `neptune-learn` |
 | `query-packet` | `neptune-context` | planned | — | — | `neptune-deploy`, `neptune-learn` |
-| `dataset-manifest` | `neptune-learn` | planned | — | — | external training pipelines |
+| `dataset-manifest` | `neptune-learn` | planned | — | — | none in this repository |
 
 ## Consumer locks
 
-Cells: the version in `lock.toml` and whether it equals the latest stable (`current`) or not (`behind`);
-`no stable` when the contract has no stable version yet (nothing to declare); blank when the package does not
-consume the contract. Planned parts of `package-schema` ride on its version.
+Cells: the version `lock.toml` declares, then `current` (the latest stable), `behind` (an older
+stable) or `draft`; `no stable` when the contract has no stable version yet (nothing to declare);
+`not declared` when a stable version exists but the lock has no entry, `(no package yet)` when the
+package has no lock section; blank when the package does not consume the contract. A contract that
+is part of another rides on its version and has no column.
 
 | Consumer | `package-schema` | `catalog-api` | `graph-schema` | `query-packet` |
 |---|---|---|---|---|
-| `neptune-ledger` | 3.0.0 current | | | |
-| `neptune-memory` | | no stable | | |
-| `neptune-context` | | no stable | no stable | |
-| `neptune-deploy` | not declared (no package yet) | no stable | no stable | no stable |
-| `neptune-learn` | not declared (no package yet) | no stable | no stable | no stable |
+| `neptune-ledger` | 3.0.0 current |  |  |  |
+| `neptune-memory` |  | 1.1.0 behind |  |  |
+| `neptune-context` |  | not declared (no package yet) | not declared (no package yet) |  |
+| `neptune-deploy` | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) | no stable |
+| `neptune-learn` | not declared (no package yet) | not declared (no package yet) | not declared (no package yet) | no stable |

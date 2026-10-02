@@ -1,0 +1,4 @@
+[package]
+name = "motor-driver"
+version.workspace = true
+edition = "2021"
