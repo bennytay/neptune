@@ -200,6 +200,7 @@ class _Table:
     # Every column name in first-seen order, computed once: lookups never scan the rows.
     ordered: tuple[str, ...] = ()
     present: frozenset[str] = frozenset()
+    firsts: dict[str, EvidenceRef | None] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.header is not None:
@@ -214,6 +215,24 @@ class _Table:
     @property
     def evidence(self) -> EvidenceRef:
         return self.record.provenance.evidence
+
+    def first_cell(self, column: str) -> EvidenceRef | None:
+        """The column's cell in the first row that has one, whatever it holds: what a clock read
+        from the column cites, so damage to any value leaves every clock's id as it is (ADR 0005
+        §7). Found once per column."""
+        if column not in self.firsts:
+            found = None
+            for index, row in enumerate(self.rows):
+                at = (
+                    self.columns.get(column)
+                    if self.header is not None
+                    else self.pointers[index].get(column)
+                )
+                if at is not None and at < len(row.cells):
+                    found = row.cell_evidence(self.record, at)
+                    break
+            self.firsts[column] = found
+        return self.firsts[column]
 
     def has(self, column: str) -> bool:
         return column in self.present
@@ -453,9 +472,13 @@ class _Values:
             reading.instant,
             reading.resolution,
             spec.zone,
-            place,
+            self.clock_place(spec.column, place),
         )
         return Known(Timestamp(reading.ticks, domain), provenance)
+
+    def clock_place(self, column: str, place: EvidenceRef) -> EvidenceRef:
+        """What a clock read from ``column`` cites (and so its id): here, the cell read."""
+        return place
 
     # Cells into lists ----------------------------------------------------------------------
 
@@ -624,6 +647,10 @@ class _Row(_Values):
         if index is None or index >= len(record.cells):
             return _Cell(None, self.evidence)  # a missing key, or a short row
         return _Cell(record.cells[index], record.cell_evidence(table.record, index))
+
+    def clock_place(self, column: str, place: EvidenceRef) -> EvidenceRef:
+        """A table's clock cites its column's first cell, not the first one read (ADR 0005 §7)."""
+        return self.table.first_cell(column) or place
 
     def blank(self, spec: Part) -> bool:
         """Every cell the part reads is blank or absent in this row."""
