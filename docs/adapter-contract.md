@@ -224,24 +224,6 @@ For parameter files and other configuration documents (the `config` adapter read
   keyed by content or made only of tables is `config.shape_not_configuration`, left to the text adapter or a
   dialect adapter, which claims it above `STRUCTURE`.
 
-## Configuration (ADR 0037)
-
-For parameter files and other configuration documents (the `config` adapter reads JSON, YAML and TOML):
-
-- One `ConfigurationSnapshot` per document and one `ConfigurationValue` per node, in document order,
-  each citing a `JsonPointer` to it and its value citing its exact span. A repeated key keeps every
-  entry, addressed by position; a finding says it repeats.
-- A scalar keeps its declared `text` beside its typed `value`. Type only by what the format defines:
-  JSON's and TOML's grammars, YAML's tag or the YAML version the document declares. Where versions
-  disagree and none is declared, the value is `Ambiguous`. A null the format defines is `KnownAbsent`.
-- Never follow a reference out of the document or expand one inside it: a YAML alias is a value that
-  names its anchor's path, and an `!include` tag is the application's to read (`Unknown` plus a finding).
-- A value's meaning is not yours: a key named `wheel_radius` is a number, with a unit only where the
-  document states one.
-- Probe for settings, not for a grammar: JSON and YAML hold data too. A root sequence, GeoJSON, an object
-  keyed by content or made only of tables is `config.shape_not_configuration`, left to the text adapter or a
-  dialect adapter, which claims it above `STRUCTURE`.
-
 ## World and record context (ADR 0020)
 
 For registers, geometry, photos, video files and documents:
