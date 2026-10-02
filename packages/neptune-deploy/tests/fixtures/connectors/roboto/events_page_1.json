@@ -1,0 +1,71 @@
+{
+  "data": {
+    "items": [
+      {
+        "associations": [
+          {
+            "association_id": "fl_amr07_am",
+            "association_type": "file",
+            "association_version": null
+          },
+          {
+            "association_id": "ds_shift_0914",
+            "association_type": "dataset",
+            "association_version": null
+          }
+        ],
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_reviewer",
+        "custom_fields": {},
+        "description": "Lidar field breach, person in aisle 12",
+        "display_options": null,
+        "end_time": 1757836809500000000,
+        "event_id": "ev_amr07_stop",
+        "metadata": {
+          "rule": "ISO3691-4 5.2",
+          "zone": "aisle-12"
+        },
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_reviewer",
+        "name": "protective_stop",
+        "org_id": "og_acme_robotics",
+        "start_time": 1757836805000000000,
+        "tags": [
+          "safety",
+          "amr"
+        ]
+      },
+      {
+        "associations": [
+          {
+            "association_id": "fl_arm3_pick",
+            "association_type": "file",
+            "association_version": null
+          },
+          {
+            "association_id": "ds_shift_0914",
+            "association_type": "dataset",
+            "association_version": null
+          }
+        ],
+        "created": "2026-09-14T08:00:00.000000+00:00",
+        "created_by": "usr_reviewer",
+        "custom_fields": {},
+        "description": null,
+        "display_options": null,
+        "end_time": 1757836861000000000,
+        "event_id": "ev_arm3_grasp",
+        "metadata": {
+          "object": "tote-4411"
+        },
+        "modified": "2026-09-14T08:00:00.000000+00:00",
+        "modified_by": "usr_reviewer",
+        "name": "grasp_failure",
+        "org_id": "og_acme_robotics",
+        "start_time": 1757836861000000000,
+        "tags": []
+      }
+    ],
+    "next_token": "tok_events_2"
+  }
+}
