@@ -85,11 +85,15 @@ rule is harder: the store is remote, mutable, paginated and hostile.
    - A cursor seen before stops the listing (`pagination_loop`). Only a sha256 digest of each cursor
      is kept for this, never the cursor. A continuation token or marker longer than 4 KiB stops the
      listing (`response_invalid`).
-   - Pages are limited to 100,000. Used keys are limited to `max_objects` (default 1,000,000). The
-     bytes the listing holds are limited to `max_listing_bytes` (default 256 MiB). That budget counts
-     used keys and their tokens whole, and each unused key as at most its first 256 bytes, kept with
-     its length and sha256. A store that lists huge or unusable keys therefore cannot grow a listing
-     without bound: 20,000 keys of 30 KB outside the prefix hold about 5 MB, not 600 MB.
+   - Pages are limited to 100,000. Entries, used or not, are limited to `max_objects` together
+     (default 1,000,000). The bytes the listing holds are limited to `max_listing_bytes` (default
+     256 MiB). That budget charges every entry a fixed overhead (320 bytes: the entry object, its
+     slot, digest and headers, measured with tracemalloc at 176 to 226 bytes and rounded up), plus
+     each used key and its token whole, and each unused key as at most its first 256 bytes and its
+     reason. Unused keys keep only those bytes, with their length and sha256. A store that lists
+     huge, unusable or very many keys therefore cannot grow a listing past the budget: 20,000 keys
+     of 30 KB outside the prefix hold about 10 MB, not 600 MB, and a test checks that 40,000 short
+     ones hold at most twice a 1 MiB budget.
    - A limit is checked entry by entry, never per page. Within a page, entries are taken in byte
      order of their keys. Stores list in key order, so this is one sequence of entries whatever the
      page size. The listing stops at the first entry that would pass a limit, and that entry is not
@@ -97,7 +101,8 @@ rule is harder: the store is remote, mutable, paginated and hostile.
      page sizes 1 to 1,000.
    - The stop is a `listing_limit` finding, and its `covered_through_hex` is the last kept used key,
      whole, in byte order. Every key after it is not covered. Unused keys are reported as findings
-     (ordered by prefix, length, sha256) and play no part in that marker or in the object limit.
+     (ordered by prefix, length, sha256); they count against both limits but play no part in that
+     marker.
    - A listing stopped by the page limit, a failure or a loop depends on where it stopped, and its
      finding says where.
    - A listing that stopped early is `complete: false`, and nothing is asserted gone from it.

@@ -218,19 +218,74 @@ def test_the_object_limit_cuts_in_byte_order_past_a_shared_prefix(tmp_path: Path
         assert _limited(tmp_path, keys, page_size, max_objects=1)[:2] == reference[:2]
 
 
-def test_unused_keys_never_move_the_cut_and_are_always_reported(tmp_path: Path) -> None:
+def test_unused_keys_count_against_the_object_limit_in_byte_order(tmp_path: Path) -> None:
     shared = "fleet/" + "p" * 300
     used = [f"fleet/{index:02d}.bag" for index in range(6)]
     huge = [shared + "y" * 1000, shared + "z" * 1000]  # too long: unused, sharing 256 bytes
-    reference = _limited(tmp_path, [*used, *huge], 1000, max_objects=3)
+    early = ["fleet/00a" + "y" * 1100, "fleet/01a" + "y" * 1100]  # too long, among the used keys
+    keys = [*used, *huge, *early]
+    reference = _limited(tmp_path, keys, 1000, max_objects=5)
     listing, _, findings = reference
+    # Byte order: 00.bag, 00a…, 01.bag, 01a…, 02.bag; the fifth entry is the limit.
     assert [e.key for e in listing.entries] == used[:3]
-    assert [f.code for f in findings] == ["deploy_s3.listing_limit"]  # huge keys sort after
-    complete = _limited(tmp_path, [*used, *huge], 1000)
-    assert complete[0].complete and [s.reason for s in complete[0].skipped] == ["key_too_long"] * 2
-    assert {f.details.get("count") for f in complete[2]} == {2}
-    for page_size in (1, 2, 3):
-        assert _limited(tmp_path, [*used, *huge], page_size, max_objects=3)[:2] == reference[:2]
+    assert [s.length for s in listing.skipped] == [1109, 1109]
+    assert sorted(f.code for f in findings) == ["deploy_s3.key_too_long", "deploy_s3.listing_limit"]
+    limit = next(f for f in findings if f.code == "deploy_s3.listing_limit")
+    assert limit.details["max_objects"] == 5
+    assert limit.details["covered_through_hex"] == used[2].encode().hex()
+    complete = _limited(tmp_path, keys, 1000)
+    assert complete[0].complete and [s.reason for s in complete[0].skipped] == ["key_too_long"] * 4
+    assert {f.details.get("count") for f in complete[2]} == {4}
+    for page_size in (1, 2, 3, 4):
+        assert _limited(tmp_path, keys, page_size, max_objects=5)[:2] == reference[:2]
+
+
+def _outside(fake: FakeStore, count: int) -> None:
+    """``count`` objects under ``cell/`` that the store lists as short keys outside the prefix."""
+    fake.bulk({f"cell/{i:06d}".encode(): b"" for i in range(count)})
+
+    def moved(number: int, entries: list[Entry]) -> list[Entry]:
+        return [Entry(b"o/" + e.key[5:], e.version, e.latest) for e in entries]
+
+    fake.rewrite = moved
+
+
+def test_many_short_unused_keys_hold_no_more_than_the_byte_budget(tmp_path: Path) -> None:
+    budget = 2**20
+    fake = FakeStore()
+    _outside(fake, 40_000)  # charged by key bytes alone, these would hold about 10 MB
+    with connect(fake, tmp_path, "cell/", max_objects=1) as warm:
+        warm.listing()  # the fake builds and keeps its own entries, outside what is measured
+    results = []
+    for page_size in (1000, 97):
+        with connect(fake, tmp_path, "cell/", page_size=page_size, max_listing_bytes=budget) as src:
+            tracemalloc.start()
+            before = tracemalloc.get_traced_memory()[0]
+            listing = src.listing()
+            grown = tracemalloc.get_traced_memory()[0] - before
+            tracemalloc.stop()
+        assert grown <= 2 * budget, f"{grown / 2**20:.1f} MiB held for a 1 MiB budget"
+        assert not listing.complete and listing.entries == ()
+        assert 0 < len(listing.skipped) < 40_000
+        limit = next(f for f in src.findings() if f.code == "deploy_s3.listing_limit")
+        assert limit.details["max_listing_bytes"] == budget
+        results.append((listing, tuple(f.id for f in src.findings())))
+    assert results[0] == results[1]  # the same cut at every page size
+    skipped = results[0][0].skipped
+    assert [s.raw_key for s in skipped] == [b"o/%06d" % i for i in range(len(skipped))]
+
+
+def test_the_object_limit_counts_unused_keys_at_every_page_size(tmp_path: Path) -> None:
+    fake = FakeStore()
+    _outside(fake, 40)
+    reference = None
+    for page_size in (1000, 1, 3, 7):
+        with connect(fake, tmp_path, "cell/", page_size=page_size, max_objects=25) as source:
+            listing = source.listing()
+        result = (listing, tuple(f.id for f in source.findings()))
+        assert len(listing.skipped) == 25 and not listing.complete
+        reference = reference or result
+        assert result == reference
 
 
 def test_a_continuation_token_over_4_kib_stops_the_listing(tmp_path: Path) -> None:
