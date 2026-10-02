@@ -24,7 +24,7 @@ from psycopg import sql
 import neptune_ledger
 from neptune.identity import canonical_json
 from neptune.model.knowledge import Knowledge, Known, NotApplicable, NotCovered, Unknown
-from neptune.store.package import blob_path
+from neptune.store.package import MANIFEST, blob_path
 from neptune_ledger.api import codec
 from neptune_ledger.api.protocol import CatalogUnavailable
 from neptune_ledger.api.types import (
@@ -52,8 +52,15 @@ from neptune_ledger.api.types import (
     VerifyReport,
 )
 from neptune_ledger.catalog.check import Checked, check_package, open_root
-from neptune_ledger.catalog.index import PackageRows, RecordRow, package_rows, projection_columns
+from neptune_ledger.catalog.index import (
+    PackageRows,
+    RecordRow,
+    UnindexedVersion,
+    package_rows,
+    projection_columns,
+)
 from neptune_ledger.catalog.migrate import tenant_schema
+from neptune_ledger.catalog.projection import SchemaVersion, shipped_registry
 from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, check_sources
 from neptune_ledger.lineage.graph import read_lineage, unknown_record
 from neptune_ledger.threads.alignment import clock_mapping
@@ -200,6 +207,9 @@ class PostgresCatalog:
             return self._refusal(root, checked, list(checked.findings))
         try:
             rows = package_rows(str(checked.package_id), checked.manifest, checked.lines)
+        except UnindexedVersion as exc:
+            finding = CatalogFinding("record_invalid", str(checked.package_id), str(exc))
+            return self._refusal(root, checked, [finding])
         except (RecursionError, MemoryError) as exc:  # hostile depth or size the readers let by
             detail = f"the record index cannot be built: {type(exc).__name__}"
             finding = CatalogFinding("record_invalid", str(checked.package_id), detail)
@@ -273,8 +283,9 @@ class PostgresCatalog:
             seq, at, locator, version = stored
             return "already_registered", TransactionKey(int(seq), str(at)), locator, version
         conflicts, new_sources, new_transforms = self._compare(conn, rows)
-        if conflicts:
-            raise _Refused(conflicts)
+        unseen, remapped = self._schema_versions(conn, rows)
+        if conflicts or remapped:
+            raise _Refused([*remapped, *conflicts])
         tick = conn.execute("SELECT tx_seq, tx_time FROM next_tx()").fetchone()
         assert tick is not None
         seq, at = int(tick[0]), str(tick[1])
@@ -288,6 +299,7 @@ class PostgresCatalog:
             " VALUES (%s, %s, %s, %s)",
             (t, p, rows.schema_version, rows.receipt_id),
         )
+        self._write_schema_versions(conn, unseen, seq)
         with conn.cursor() as cur:
             cur.executemany(
                 "INSERT INTO source VALUES (%s, %s, %s)",
@@ -463,6 +475,69 @@ class PostgresCatalog:
             set(sizes) - set(stored_sizes),
             {x.transform_id for x in rows.transforms} - set(stored),
         )
+
+    def _schema_versions(
+        self, conn: Conn, rows: PackageRows
+    ) -> tuple[list[SchemaVersion], list[CatalogFinding]]:
+        """The package's schema versions this catalog has not seen, and any it indexed with
+        another projection mapping (ADR 0011 §2): a catalog built by a Ledger whose mapping of a
+        version differs is rebuilt, never extended with rows indexed two ways."""
+        registry = shipped_registry()
+        stored: dict[int, str] = {
+            int(version): str(digest)
+            for version, digest in conn.execute(
+                "SELECT schema_version, mapping_digest FROM schema_version"
+                " WHERE tenant_id = %s AND schema_version = ANY(%s)",
+                (self._tenant, list(rows.schema_versions)),
+            ).fetchall()
+        }
+        unseen: list[SchemaVersion] = []
+        remapped: list[CatalogFinding] = []
+        for version in rows.schema_versions:
+            entry = registry.entry(version)
+            assert entry is not None  # package_rows refused every version the registry lacks
+            digest = stored.get(version)
+            if digest is None:
+                unseen.append(entry)
+            elif digest != entry.mapping_digest:
+                detail = (
+                    f"this catalog indexed schema version {version} with projection mapping"
+                    f" {digest}, this Ledger with {entry.mapping_digest}; rebuild the catalog"
+                    " from its packages and registration log (ADR 0011)"
+                )
+                remapped.append(CatalogFinding("unsupported_schema_version", MANIFEST, detail))
+        return unseen, remapped
+
+    def _write_schema_versions(self, conn: Conn, unseen: list[SchemaVersion], seq: int) -> None:
+        """Record each version first seen in this registration, with its mapping (ADR 0011 §1)."""
+        t = self._tenant
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO schema_version VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    (
+                        t,
+                        e.version,
+                        e.spec.schema_id,
+                        e.contract_version,
+                        e.schema_sha256,
+                        list(e.spec.kinds),
+                        e.mapping,
+                        e.mapping_digest,
+                        seq,
+                    )
+                    for e in unseen
+                ],
+            )
+            cur.executemany(
+                "INSERT INTO schema_version_projection VALUES (%s, %s, %s, %s, %s)",
+                [
+                    (t, e.version, p.kind, p.field, column)
+                    for e in unseen
+                    for p in e.spec.projections
+                    for column in p.columns
+                ],
+            )
 
     def _stored_transforms(
         self, conn: Conn, ids: list[str]

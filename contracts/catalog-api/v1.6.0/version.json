@@ -44,7 +44,7 @@
     "thread_link.example.json": "#/$defs/ThreadLink"
   },
   "owner_version": "1.6.0",
-  "schema_sha256": "sha256:2832e7dadf863a0acd38249db770ae773d80889b251f3192836f7796fe932701",
+  "schema_sha256": "sha256:4a8b16495a3c3178b3bde433b530e9275a89d6a0032475cb4b228ff0028b1cdc",
   "status": "stable",
   "version": "1.6.0"
 }

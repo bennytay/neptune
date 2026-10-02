@@ -8,8 +8,9 @@ skipped:
 1. ``unsafe_entry``: an entry at any depth that is not a regular file or a directory.
 2. ``manifest.json``: absent or not a file (``package_unreadable`` on register, ``file_missing``
    on verify), not a manifest (``manifest_invalid``), a schema version this Ledger does not read
-   (``unsupported_schema_version``), or tables other than exactly the record kinds of its schema
-   version (``manifest_invalid``; Ledger ADR 0008 §2).
+   (``unsupported_schema_version``: one its schema-version registry does not hold, so a package
+   from a future version is refused; Ledger ADR 0011 §2), or tables other than exactly the record
+   kinds of its schema version (``manifest_invalid``; Ledger ADR 0008 §2).
 3. Files: ``file_missing``, ``unexpected_file``, ``file_digest_mismatch``. A listed path that is
    absolute or escapes the root can never equal a walked entry, so it is ``file_missing`` and
    nothing outside the root is opened. A file whose size differs is never read.
@@ -28,12 +29,12 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 from neptune.identity import canonical_json
-from neptune.model import kinds as model_kinds
-from neptune.model.kinds import RECORD_KINDS
+from neptune.model.kinds import kinds_at
 from neptune.model.package import package_manifest_from_json
 from neptune.model.record import OLDEST_READABLE_VERSION, SCHEMA_VERSION
 from neptune.store.package import MANIFEST, VOLATILE, IngestPackage, PackageError, read_files
 from neptune_ledger.api.types import CatalogFinding, FindingCode
+from neptune_ledger.catalog.projection import shipped_registry
 
 # Files the compiler streams instead of holding in memory (neptune.store.package): series and
 # blobs. They are hashed here as streams and handed to the compiler's checks by path.
@@ -46,21 +47,18 @@ Mode = Literal["register", "verify"]
 
 
 def kinds_of(version: int) -> frozenset[str]:
-    """The record kinds a package of schema ``version`` holds a table for (Ledger ADR 0008 §2).
-
-    The compiler's ``neptune.model.kinds.kinds_at``. A compiler with one schema version has no
-    ``kinds_at``, and every kind is then of that version. The fallback goes once package schema 2
-    (compiler PR #37, which adds ``kinds_at``) is on main.
-    """
-    kinds_at = getattr(model_kinds, "kinds_at", None)
-    if kinds_at is None:
-        return frozenset(RECORD_KINDS)
+    """The record kinds a package of schema ``version`` holds a table for (Ledger ADR 0008 §2):
+    the compiler's ``kinds_at``. A test holds the registry's kinds of each version to it."""
     return frozenset(kinds_at(version))
 
 
-def readable_versions() -> str:
-    """The package schema versions this Ledger reads, as text for a finding."""
-    return ", ".join(str(v) for v in range(OLDEST_READABLE_VERSION, SCHEMA_VERSION + 1))
+def readable_versions() -> tuple[int, ...]:
+    """The package-schema versions this Ledger reads (ADR 0011 §2): those its schema-version
+    registry holds a projection for, within the range the compiler's readers read. A newer
+    version is refused until a Ledger version adds its projection; it is never guessed at."""
+    return tuple(
+        v for v in shipped_registry().numbers if OLDEST_READABLE_VERSION <= v <= SCHEMA_VERSION
+    )
 
 
 @dataclass(frozen=True)
@@ -145,7 +143,8 @@ def check_package(root_fd: int, mode: Mode, expected_id: str | None = None) -> C
             "unsupported_schema_version" if problem == "version" else "manifest_invalid"
         )
         detail = (
-            f"schema version {version}; this Ledger reads {readable_versions()}"
+            f"schema version {version}; this Ledger reads"
+            f" {', '.join(str(v) for v in readable_versions())}"
             if problem == "version"
             else problem
         )
@@ -233,7 +232,7 @@ def _manifest(data: bytes) -> tuple[dict[str, Any], str | None]:
     version = value.get("schema_version")
     if not isinstance(version, int) or isinstance(version, bool):
         return value, "no integer schema_version"
-    if not OLDEST_READABLE_VERSION <= version <= SCHEMA_VERSION:
+    if version not in readable_versions():
         return value, "version"
     tables = value.get("tables")
     if not isinstance(tables, dict) or set(tables) != kinds_of(version):
