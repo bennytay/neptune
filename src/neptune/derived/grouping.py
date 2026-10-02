@@ -118,6 +118,8 @@ NO_SESSION: Final = "no_session"
 OUTSIDE_DECLARATION: Final = "outside_declaration"
 SEVERAL_SESSIONS: Final = "several_sessions"
 SEVERAL_STEMS: Final = "several_stems"
+# A configuration above several sessions, shared by them all and held by none (ADR 0066 §5).
+SHARED_REFERENCE: Final = "shared_reference"
 TOO_MANY_SESSIONS: Final = "too_many_sessions"
 
 # How many locations a reason or finding lists before it only counts; a duplicate's twins are
@@ -143,6 +145,11 @@ class Rule(StrEnum):
     SHARED_STEM = "shared_stem"
     SOLE_SESSION = "sole_session_in_directory"
     SAME_BYTES = "same_bytes"
+    # The evidence assembler's rules (``neptune.derived.assembly``, ADR 0066); v0 never forms them.
+    ROSBAG2_FILE_LIST = "rosbag2_file_list"
+    MACHINE_SPLIT = "machine_split"
+    MACHINE_TIME_MERGE = "machine_time_merge"
+    NAMED_IN_DOCUMENT = "named_in_document"
 
 
 # The confidence each rule lends what it forms or places, as named bands (ADR 0036 §3): a ranking,
@@ -159,6 +166,11 @@ CONFIDENCE: Final[Mapping[Rule, float]] = {
     Rule.NAME_TIME_CLUSTERS: 0.3,
     Rule.NAME_TIME_PROXIMITY: 0.3,
     Rule.NUMBERED_SEQUENCE: 0.3,
+    # ADR 0066: the bands the evidence assembler starts from before its edges (assembly.score).
+    Rule.ROSBAG2_FILE_LIST: 0.95,
+    Rule.MACHINE_SPLIT: 0.5,
+    Rule.MACHINE_TIME_MERGE: 0.5,
+    Rule.NAMED_IN_DOCUMENT: 0.5,
 }
 
 # A link aliases a session by naming its directory only when that directory is the session's own.
@@ -170,6 +182,7 @@ _PLACED: Final[Mapping[Rule, str]] = {
     Rule.SHARED_NAME_TIME: "context files whose names state one of the session's times",
     Rule.SHARED_STEM: "context files whose name stem is a member's",
     Rule.SOLE_SESSION: "context files beside the only session in their directory",
+    Rule.NAMED_IN_DOCUMENT: "documents whose text names a member's file or directory",
 }
 
 
@@ -446,6 +459,8 @@ class _Draft:
     times: dict[int, str] = field(default_factory=dict)
     stems: set[bytes] = field(default_factory=set)
     links: set[tuple[LayoutLink, LinkRelation]] = field(default_factory=set)
+    # The evidence assembler's score (ADR 0066 §4); ``None`` keeps the rule's band.
+    confidence: float | None = None
 
     def add(self, path: bytes, role: Role, rule: Rule) -> None:
         self.members.setdefault(path, (role, rule))
@@ -534,10 +549,17 @@ class _Proposer:
         loose = (path for node, held in under.items() if node not in leaves for path in held)
         self._loose(sorted(loose), bags)
         self._outers(singles, under, whole, bags)
+        self._evidence()
+        self._extents.clear()  # the evidence step may change members
         self._reconcile()
         self._links()
         self._same_bytes()
         return self._build()
+
+    def _evidence(self) -> None:
+        """A hook between reading the layout and settling it: v0 reads no evidence. The
+        evidence assembler (ADR 0066) changes drafts here, before declarations, links and
+        duplicates are set against them."""
 
     # --- signals -------------------------------------------------------------------------------
 
@@ -1257,7 +1279,9 @@ class _Proposer:
             proposals[ids[index]] = session_proposal(
                 transform=transform,
                 rule=draft.rule,
-                confidence=CONFIDENCE[draft.rule],
+                confidence=(
+                    CONFIDENCE[draft.rule] if draft.confidence is None else draft.confidence
+                ),
                 directory=directory_location(draft.directory),
                 members=[
                     SessionMember(
@@ -1305,7 +1329,7 @@ class _Proposer:
                     candidates=named if len(named) > 1 else (),
                 )
             )
-            if len(named) > 1:
+            if len(named) > 1 and reason != SHARED_REFERENCE:  # shared is not in doubt
                 ambiguous[parent(path)].append(path)
         for group in groups:
             self.findings.append(self._contested_finding(group))
