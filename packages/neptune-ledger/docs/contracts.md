@@ -16,6 +16,7 @@ Lakehouse table contracts are listed here when they land.
 | Contract | Owner | Version built against | Source of truth | Fixed by |
 |---|---|---|---|---|
 | Package schema (canonical records) | `neptune` (compiler) | **4** | `neptune.model.record.SCHEMA_VERSION`; schema id `urn:neptune:schema:canonical:4` (versions 2 to 4 only add kinds: root ADR 0037 §1, MVL-23 / PR #37; root ADR 0050, MVL-82; root ADR 0051, MVL-83); its JSON Schema exports generate the schema-version registry, one projection spec per version (`catalog/projections.json` from `contracts/package-schema/v1.0.0/` to `v4.0.0/`; migration 0005 from v1.0.0; v2.0.0 needed none; migration 0006 from v2.0.0 to v4.0.0, a guard only: v3's `run_assembly` and `snapshot_binding` fill the existing `run_ids`, v4's lifecycle kinds fill the existing `site_namespace`/`site_value`) | root ADR 0017; Ledger [ADR 0001](adr/0001-ledger-place-in-the-programme.md), [ADR 0009](adr/0009-record-index-bodies-pointers-and-generated-projections.md), [ADR 0011](adr/0011-schema-version-registry-and-record-kinds-by-package-schema-version.md) |
+| Package series files | `neptune` (compiler) | series contract of root ADRs 0018 and 0025; the manifest's `store.series` (root ADR 0022) | `neptune.store.series` (`check_settings`, `SERIES_SETTINGS`), `neptune.store.package.series_path` | Ledger [ADR 0013](adr/0013-lakehouse-layout-and-in-place-series-reads.md) |
 
 Rules:
 
