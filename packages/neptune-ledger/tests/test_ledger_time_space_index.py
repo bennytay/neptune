@@ -294,7 +294,7 @@ def test_too_many_intervals_are_refused_never_cut_short(
     assert refused.outcome == "refused" and refused.entries == ()
     assert codes(refused) == [("invalid_request", BOOT)]
     # The bound is on the whole request: three on BOOT and one on GPS are four.
-    named = {"clocks": [GPS], "mappings": [flight["mapping"]]}
+    named: dict[str, Any] = {"clocks": [GPS], "mappings": [flight["mapping"]]}
     assert len(index.window(window, max_entries=4, **named).entries) == 4
     assert codes(index.window(window, max_entries=3, **named)) == [("invalid_request", GPS)]
 
