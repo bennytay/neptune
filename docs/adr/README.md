@@ -25,7 +25,7 @@ header).
 | [0014](0014-version-primitives.md) | Version primitives: one type per kind, stored verbatim | Accepted |
 | [0015](0015-frame-rotation-and-transform-types.md) | Frames, rotations and frame transforms: types and named conventions | Accepted |
 | [0016](0016-evidence-refs-locator-paths-and-transform-lineage.md) | Evidence refs, locator paths and transform lineage | Accepted; amended by 0023 |
-| [0017](0017-canonical-records-envelope-and-schema-version.md) | Canonical records: envelope, families, schema version and findings | Accepted; amended by 0023, 0037, 0050 |
+| [0017](0017-canonical-records-envelope-and-schema-version.md) | Canonical records: envelope, families, schema version and findings | Accepted; amended by 0023, 0037, 0050, 0062 |
 | [0018](0018-runs-streams-and-series-layout.md) | Runs, streams and the series layout | Accepted |
 | [0019](0019-machine-context-records.md) | Machine context: machines, hardware, software and calibration | Accepted |
 | [0020](0020-world-and-record-context-records.md) | World and record context: sites, assets, geometry, media, documents and tables | Accepted; amended by 0051 |
@@ -67,6 +67,7 @@ header).
 | [0058](0058-plugin-adapters-and-sources-from-entry-points.md) | Plugin adapters and Sources from entry points, in a fixed order, refused as findings | Accepted; amended by 0067 |
 | [0059](0059-xlsx-workbooks-in-the-tabular-adapter-sheets-as-cited-tables.md) | XLSX workbooks in the tabular adapter: sheets as tables of cited cells | Accepted |
 | [0060](0060-clock-alignment-fitted-mappings-found-clocks-and-bounded-instants.md) | Clock alignment: fitted mappings, found clocks and bounded instants | Accepted |
+| [0062](0062-assertion-records-human-assertions-as-stated-evidence.md) | Assertion records: human assertions, acceptances and retractions as stated evidence | Accepted |
 | [0064](0064-snapshot-binding-stated-joins-nearest-session-candidates-and-explicit-gaps.md) | Snapshot binding: stated joins, nearest session candidates, explicit gaps | Accepted |
 | [0065](0065-streaming-package-write-bounded-spill-and-byte-identical-output.md) | Streaming package write: bounded spill, byte-identical output | Accepted |
 | [0066](0066-run-assembly-evidence-graph-over-the-layout-reading.md) | Run assembly: an evidence graph over the layout reading | Accepted |

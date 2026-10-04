@@ -1,0 +1,27 @@
+{
+  "format": "neptune.assertions",
+  "version": 1,
+  "assertions": [
+    {
+      "id": {"namespace": "dc-north.fleet-console", "value": "ASR-2026-0131"},
+      "assertion_type": "retract",
+      "author": {"namespace": "dc-north.staff", "value": "s.lindqvist"},
+      "authored_at": "2026-09-21T08:15:00",
+      "authored_zone": "Europe/Berlin",
+      "scope": [],
+      "retracts": {"namespace": "dc-north.fleet-console", "value": "ASR-2026-0107"},
+      "rationale": "The chassis plate was swapped during the 2026-09-10 repair; serial 22871 now sits on AMR-09. See FLEET-433.",
+      "ticket": {"namespace": "jira.dc-north", "value": "FLEET-433"}
+    },
+    {
+      "id": {"namespace": "dc-north.fleet-console", "value": "ASR-2026-0132"},
+      "assertion_type": "annotate",
+      "author": {"namespace": "dc-north.staff", "value": "s.lindqvist"},
+      "authored_at": "2026-09-21T08:17:30",
+      "authored_zone": "Europe/Berlin",
+      "scope": [{"namespace": "dc-north.asset_tag", "value": "AMR-09"}],
+      "payload": {"chassis_serial_now": "OTTO-1500-22871"},
+      "rationale": "AMR-09 carries the swapped chassis plate until the plate is reissued."
+    }
+  ]
+}

@@ -55,6 +55,7 @@ from neptune_ledger.contract_tests.examples import (
     at_schema_1,
     at_schema_2,
     evidence_anchor,
+    examples_dir,
     materialise,
     reparse,
     write,
@@ -523,13 +524,14 @@ def test_a_package_of_a_version_the_registry_lacks_is_refused_and_writes_nothing
 def test_the_newest_version_is_read_and_the_next_is_refused(
     catalog: PostgresCatalog, tmp_path: Path
 ) -> None:
-    """Boundary: the registry's newest version (the schema-4 manipulator cell) registers; the same
-    package one version past it is a future version."""
-    cell = materialise("manipulator_cell", tmp_path / "manipulator_cell")
+    """Boundary: the registry's newest version (the schema-5 assertion golden, root ADR 0062)
+    registers; the same package one version past it is a future version."""
+    goldens = examples_dir().parents[1] / "golden" / "assertion"
+    cell = materialise("cell_baseline", tmp_path / "cell_baseline", goldens)
     assert cell.schema_version == shipped_registry().latest.version
     manifest = dict(cell.manifest)
     manifest["schema_version"] = shipped_registry().latest.version + 1
-    future = tmp_path / "manipulator_cell-next"
+    future = tmp_path / "cell_baseline-next"
     future.mkdir()
     for path, data in cell.files.items():
         (future / path).parent.mkdir(parents=True, exist_ok=True)
