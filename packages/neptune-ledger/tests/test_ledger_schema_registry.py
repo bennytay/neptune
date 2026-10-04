@@ -62,6 +62,7 @@ from neptune_ledger.contract_tests.examples import (
     evidence_anchor,
     materialise,
     reparse,
+    with_changed_body,
     write,
 )
 
@@ -574,6 +575,22 @@ def test_the_newest_version_is_read_and_the_next_is_refused(
         )
     refused = catalog.register(future)
     assert [f.code for f in refused.findings] == ["unsupported_schema_version"]
+    assert catalog.register(cell.root).outcome == "registered"
+
+
+def test_a_version_6_package_with_a_blank_list_registers(
+    catalog: PostgresCatalog, tmp_path: Path
+) -> None:
+    """No worked example reaches schema 6 (root ADR 0061 §7): the manipulator cell with one
+    maintenance event's parts left blank, an ``Unknown`` list, writes that record, and so the
+    package, at version 6 (root ADR 0061 §6); the registry reads it."""
+    blank = with_changed_body(
+        "manipulator_cell",
+        "maintenance_event",
+        lambda record: {**record, "parts": {"knowledge": "unknown"}, "schema_version": 6},
+    )
+    cell = write("manipulator_cell", tmp_path / "manipulator_cell", blank)
+    assert cell.schema_version == 6
     assert catalog.register(cell.root).outcome == "registered"
 
 
