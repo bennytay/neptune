@@ -45,6 +45,7 @@ from neptune.adapters.contract import (
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
+    ChunkExtent,
     ChunkOutput,
     ConfigOption,
     Documented,
@@ -141,6 +142,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         "Decodes UTF-8 only and never guesses another encoding.",
         "Holds one chunk in memory: at most chunk_bytes or max_block_bytes of source.",
     ),
+    extent=ChunkExtent(),  # data chunks name their [start, end) bytes (ADR 0069)
 )
 
 

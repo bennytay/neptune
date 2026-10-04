@@ -17,7 +17,7 @@ from neptune.model.frames import FrameRef
 from neptune.model.ids import LogicalId, RecordId
 from neptune.model.knowledge import Ambiguous, Known, Unknown
 from neptune.model.provenance import EvidenceRef
-from neptune.model.time import Timestamp
+from neptune.model.references import named
 from neptune.model.versions import version_to_json
 from neptune.validate import pending
 from neptune.validate.engine import (
@@ -315,58 +315,64 @@ def id_conflict(context: Context) -> Iterator[Draft]:
             )
 
 
-def _timestamps(record: Any) -> Iterator[Timestamp]:
-    for name in ("first", "last", "performed", "valid_from", "valid_until", "validity"):
-        state = getattr(record, name, None)
-        if isinstance(state, Known) and isinstance(state.value, Timestamp):
-            yield state.value
-        elif isinstance(state, Timestamp):
-            yield state
-    capture = getattr(record, "capture", None)
-    if capture is not None and isinstance(capture.time, Known):
-        yield capture.time.value
+# The kind of record a reference must name, where the model states one. Only a target-kind check:
+# which fields are references is read from the model (``model.references``), never listed here.
+_TARGET_KINDS: Final = {
+    ("calibration", "extrinsics"): "frame_transform",
+    ("civil_time_zone", "domain"): "timestamp_domain",
+    ("configuration_value", "snapshot"): "configuration_snapshot",
+    ("document_block", "document"): "document_record",
+    ("frame_binding", "transform"): "frame_transform",
+    ("hardware_component", "configuration"): "hardware_configuration",
+    ("stream", "clocks"): "timestamp_domain",
+    ("stream", "run"): "run",
+    ("structured_record", "table"): "structured_table",
+    ("video", "clock"): "timestamp_domain",
+}
 
 
-# Fields holding the id of another record, and the kind that record must be.
-_REFERENCES: Final = (
-    ("calibration", "extrinsics", "frame_transform"),
-    ("civil_time_zone", "domain", "timestamp_domain"),
-    ("document_block", "document", "document_record"),
-    ("hardware_component", "configuration", "hardware_configuration"),
-    ("stream", "clocks", "timestamp_domain"),
-    ("stream", "run", "run"),
-    ("structured_record", "table", "structured_table"),
-    ("video", "clock", "timestamp_domain"),
-)
-# A stream's times lie on its clocks, which ``_REFERENCES`` already checks.
-_TIMED: Final = ("calibration", "frame_transform", "image", "run", "video")
+def references_checked(context: Context) -> Iterator[tuple[Any, str, str]]:
+    """``(record, field, target)`` for every reference ``dangling_reference`` checks: every
+    record's and every other producer's finding's, as ``model.references.named`` reads them (the
+    walker the runtime's salvage check uses, ADR 0069 §2)."""
+    for record in context.package.records:
+        if record.kind == "ingest_finding":
+            continue  # the other producers' findings follow; this rule's own are never read
+        for field, target in named(record):
+            yield record, field, target
+    for finding in context.findings:
+        for field, target in named(finding):
+            yield finding, field, target
 
 
 def dangling_reference(context: Context) -> Iterator[Draft]:
-    """A record names another record (a run, a clock, a table) the package does not hold."""
-    missing: dict[tuple[str, str, str, str], list[Any]] = defaultdict(list)
-
-    def check(record: Any, field: str, target: str, kind: str) -> None:
+    """A record names another record (a run, a clock, a table, a snapshot, a frame graph) the
+    package does not hold, or one of another kind than the model states; a finding's
+    ``records`` name one it does not hold. Version 3: every reference the model types, not a
+    hand list (ADR 0069); references marked external (another package's) are not checked."""
+    missing: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
+    for record, field, target in references_checked(context):
         held = context.by_id.get(target)
-        if held is None or held.kind != kind:
-            missing[record.kind, field, kind, target].append(record)
+        want = _TARGET_KINDS.get((record.kind, field))
+        if held is None or (want is not None and held.kind != want):
+            missing[record.kind, field, target].append(record)
 
-    for kind, field, target_kind in _REFERENCES:
-        for record in context.records(kind):
-            value = getattr(record, field)
-            for target in value if isinstance(value, tuple) else (value,):
-                check(record, field, target, target_kind)
-    for kind in _TIMED:
-        for record in context.records(kind):
-            for stamp in sorted({t.domain_id for t in _timestamps(record)}):
-                check(record, "timestamp", stamp, "timestamp_domain")
-    for (kind, field, target_kind, target), records in sorted(missing.items()):
+    def where(record: Any) -> Any:
+        subject = getattr(record, "subject", None)  # a finding has a subject, no provenance
+        return subject if subject is not None else evidence_of(record)
+
+    for (kind, field, target), records in sorted(missing.items()):
+        want = _TARGET_KINDS.get((kind, field))
+        details: dict[str, JsonValue] = {"field": field, "kind": kind, "target": target}
+        if want is not None:
+            details["target_kind"] = want
+        related = [where(r) for r in records[1:]]
         yield Draft(
-            subject=evidence_of(records[0]),
-            message=f"{plural(len(records), kind + ' record')} name {target_kind} {short(target)}"
-            f" in {field}, which this package does not hold",
-            details={"field": field, "kind": kind, "target": target, "target_kind": target_kind},
-            related=[evidence_of(r) for r in records[1:]],
+            subject=where(records[0]),
+            message=f"{plural(len(records), kind + ' record')} name {want or 'record'}"
+            f" {short(target)} in {field}, which this package does not hold",
+            details=details,
+            related=[r for r in related if isinstance(r, EvidenceRef)],
             records=[r.id for r in records],
         )
 
@@ -664,8 +670,9 @@ RULES_ON: Final = (
     Rule("count_mismatch", 1, _C.INCONSISTENT, _W,
          "a stream's declared message count differs from the rows its series holds",
          count_mismatch),
-    Rule("dangling_reference", 2, _C.MISSING, _W,
-         "a record names a run, clock, table or configuration the package does not hold",
+    Rule("dangling_reference", 3, _C.MISSING, _W,
+         "a record or finding names, in a field the model types as a record id, a record the"
+         " package does not hold",
          dangling_reference),
     Rule("duplicate_id", 1, _C.AMBIGUOUS, _W,
          "one source states one logical id for two records of a kind", duplicate_id),

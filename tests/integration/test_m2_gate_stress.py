@@ -280,7 +280,11 @@ def test_a_crash_inside_the_sandbox_costs_one_chunk_and_the_rerun_retries_only_i
     crashy = first.source("crashy.hostile")
     committed = [e for e in first.of("chunk_committed") if e.details["source"] == crashy]
     assert len(committed) == 4  # the document, a, b and d: one chunk lost, not the source's work
-    assert len(first.outcome.ingested) == 1  # the notes landed
+    assert len(first.outcome.ingested) == 2  # the notes, and crashy salvaged without it (ADR 0069)
+    (partial,) = first.findings("neptune.runtime.source_partial")
+    assert partial.details["lost"] == [
+        {"chunk": crash.details["chunk"], "code": crash.code, "extent": crash.details["extent"]}
+    ]
 
     again = Job(root, tmp_path / "home", tmp_path / "again", registry())
     assert again.outcome.cache.calls.ingest == 2  # the crashed chunk's two attempts, nothing else
