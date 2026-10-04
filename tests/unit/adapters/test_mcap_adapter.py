@@ -271,7 +271,8 @@ def test_each_clock_is_its_own_domain_as_the_specification_defines_it() -> None:
         assert (domain.epoch, domain.timescale) == (Unknown(), Unknown())  # never assumed
     assert battery.clocks[0] == imu.clocks[0]  # one recorder clock per file
     assert battery.clocks[1] != imu.clocks[1]  # each publisher's clock is its own
-    assert len(domains) == 1 + 4
+    # one recorder clock, a publisher clock per channel, and a header stamp per Imu channel
+    assert len(domains) == 1 + 4 + 2
 
 
 def test_a_stream_holds_its_channel_and_schema_as_declared() -> None:
@@ -318,10 +319,12 @@ def test_metadata_is_a_table_of_its_entries_and_attachments_are_cited() -> None:
     assert attachment.details["crc_checked"] is True
 
 
-def test_every_stream_has_a_payload_finding_and_nothing_else_is_reported() -> None:
+def test_every_undecoded_stream_has_a_payload_finding_and_nothing_else_is_reported() -> None:
     assert codes(ROBOT) == ["mcap.attachment_not_extracted"]
     payloads = [f for f in ROBOT.findings() if f.code == "mcap.payload_not_decoded"]
-    assert len(payloads) == 4 and all(len(f.records) == 1 for f in payloads)
+    # /battery and /diagnostics are JSON; both Imu channels decode by their ros2msg definition
+    assert len(payloads) == 2 and all(len(f.records) == 1 for f in payloads)
+    assert [f.details["reason"] for f in payloads] == ["message_encoding"] * 2
 
 
 # --- Every message a row, every row its bytes ----------------------------------------------------

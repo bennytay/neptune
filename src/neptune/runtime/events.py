@@ -82,6 +82,7 @@ RUNS_ASSEMBLED: Final = "runs_assembled"  # the assembler's counts, over records
 STREAMS_INTROSPECTED: Final = "streams_introspected"  # introspection's counts (ADR 0049)
 MEDIA_INDEXED: Final = "media_indexed"  # media streams indexed (ADR 0056)
 CLOCKS_ALIGNED: Final = "clocks_aligned"  # the clock-alignment pass's counts (ADR 0060)
+FRAMES_ALIGNED: Final = "frames_aligned"  # the frame-alignment pass's counts (ADR 0068)
 PACKAGE_STAGED: Final = "package_staged"
 PACKAGE_VERIFIED: Final = "package_verified"
 JOB_COMMITTED: Final = "job_committed"
