@@ -179,7 +179,9 @@ For formats with timestamped samples (logs, bags, flight logs, telemetry tables,
 - A column that can be blank or hold a sentinel your format's spec defines is wrapped: add
   `state/<column>` and leave the value null where the state is not `known`. `KnownAbsent` and `Ambiguous`
   do not fit one cell: write `unknown` plus a finding.
-- A payload you do not decode still gets its rows (times and locators) plus a finding.
+- A payload you do not decode still gets its rows (times and locators) plus a finding. ROS payloads
+  (ROS 1, CDR) are decoded by the stream's declared definition with the shared
+  `neptune.adapters.rosmsg` (ADR 0068): `value/<field path>` columns, each with its state column.
 - The chunk that emits a `Stream` emits a `SeriesBatch` for it, empty if that chunk holds none of
   its rows: the batch types the stream's columns, so a stream with no samples still has a series.
 - Give each `SeriesColumn` the `ColumnType` the source encodes (a ROS `float32` stays `float32`,

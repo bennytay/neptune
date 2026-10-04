@@ -5,16 +5,23 @@ connection's stated count and the record each connection is read from. Every oth
 range: the file's layout, its bytes, its units (a chunk's position and, in the indexed layout, the
 Chunk Info that lists it), the stretch of a large chunk's messages it emits (``first``, ``last``),
 and per connection with messages in it the ``seq`` its rows start from.
+
+The plan also decides which connections' definitions fall past the source's decoding budget
+(``over_budget``, ADR 0068 §1), reading every connection's header once in connection id order,
+so every chunk decides alike; a context names those of its connections (only when there are any).
 """
 
 from collections import Counter
 from dataclasses import dataclass
+from functools import partial
 
 from neptune.adapters.contract import AdapterConfig, Plan, SourceReader, make_chunk
+from neptune.adapters.rosbag1.ingest import ConnectionReader, declared_of
 from neptune.adapters.rosbag1.layout import Head, Layout, Unit, plan_layout, read_head
-from neptune.adapters.rosbag1.records import MAGIC
+from neptune.adapters.rosbag1.records import MAGIC, FieldError, parse_connection
 from neptune.adapters.rosbag1.report import Limits, Reporter, limits
 from neptune.adapters.rosbag1.scan import Place
+from neptune.adapters.rosmsg.streams import Declared, over_budget
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.jsonvalue import JsonObject, JsonValue
 
@@ -79,7 +86,30 @@ def plan_ranges(layout: Layout, chunk_bytes: int, max_rows: int) -> list[RangePl
     return ranges
 
 
-def _declarations(layout: Layout, head: Head) -> JsonObject:
+def _over_budget(
+    source: SourceReader, config: AdapterConfig, layout: Layout, bounds: Limits
+) -> list[int]:
+    """The connections whose definitions fall past the source's decoding budget (ADR 0068
+    §1): every connection's header read once, in connection id order, so every chunk decides
+    alike. A header that no longer reads costs nothing here; its chunk says why."""
+    if not config.flag("decode_payloads"):
+        return []
+    reader = ConnectionReader(source, bounds)
+    found: dict[int, Declared] = {}
+    # In file order, so each chunk holding declarations is decompressed once.
+    for conn, declared in sorted(layout.declared.items(), key=lambda item: item[1].place.steps):
+        try:
+            found[conn] = declared_of(parse_connection(reader.record(declared.place)))
+        except (FieldError, ValueError):
+            found[conn] = Declared(None, None, None, None)
+    return over_budget(((conn, partial(_given, found[conn])) for conn in found), config)
+
+
+def _given(declared: Declared) -> Declared:
+    return declared
+
+
+def _declarations(layout: Layout, head: Head, over: list[int]) -> JsonObject:
     context: dict[str, JsonValue] = {
         "channels": [
             [conn, declared.place.to_json()] for conn, declared in sorted(layout.declared.items())
@@ -87,6 +117,8 @@ def _declarations(layout: Layout, head: Head) -> JsonObject:
         "layout": "indexed" if layout.indexed else "scanned",
         "part": "declarations",
     }
+    if over:
+        context["over_budget"] = list(over)
     if head.header is not None:
         context["header"] = head.place.to_json()
     stated = layout.stated
@@ -103,7 +135,7 @@ def _declarations(layout: Layout, head: Head) -> JsonObject:
     return context
 
 
-def _data(layout: Layout, ranges: list[RangePlan]) -> list[tuple[JsonObject, int]]:
+def _data(layout: Layout, ranges: list[RangePlan], over: list[int]) -> list[tuple[JsonObject, int]]:
     contexts: list[tuple[JsonObject, int]] = []
     for current in ranges:
         counts: Counter[int] = Counter()
@@ -130,6 +162,8 @@ def _data(layout: Layout, ranges: list[RangePlan]) -> list[tuple[JsonObject, int
             context["first"] = current.first
             if current.last is not None:
                 context["last"] = current.last
+        if mine := [conn for conn in over if conn in counts and conn in layout.declared]:
+            context["over_budget"] = list(mine)
         contexts.append((context, current.end - current.start))
     return contexts
 
@@ -179,7 +213,8 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
     ranges = plan_ranges(layout, chunk_bytes, max_rows)
     # what reading the declarations costs: each record or chunk holding them, once
     cost = sum(length for _, length in {d.place.steps[0] for d in layout.declared.values()})
-    chunks = [make_chunk(source, config, _declarations(layout, head), cost)]
-    for context, size in _data(layout, ranges):
+    over = _over_budget(source, config, layout, bounds)
+    chunks = [make_chunk(source, config, _declarations(layout, head, over), cost)]
+    for context, size in _data(layout, ranges, over):
         chunks.append(make_chunk(source, config, context, size))
     return Plan(tuple(chunks), tuple(findings))

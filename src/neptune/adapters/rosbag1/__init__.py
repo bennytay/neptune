@@ -12,8 +12,10 @@ What it emits for a bag (ADR 0046), in the same shape the MCAP adapter gives a r
   connection header field (md5sum, callerid, latching) as metadata and its stated message count,
   all of it ``stated`` by the publisher;
 - one series row per message: ``seq``, the record time and a locator to its exact Message Data
-  record inside its Chunk's uncompressed data. Payloads are not decoded (MVL-21); a finding per
-  stream says so;
+  record inside its Chunk's uncompressed data. Payloads are decoded by the connection's
+  ``message_definition`` into ``value/<field path>`` columns (``neptune.adapters.rosmsg``, ADR
+  0068); a leading ``Header`` adds its stamp as a second clock. A payload that cannot be decoded
+  is not, and a finding per stream says why;
 - findings for every problem met.
 
 Planning reads the Bag Header and the index; when the index holds together, the data section
@@ -61,6 +63,7 @@ from neptune.adapters.rosbag1.records import (
     parse_record,
 )
 from neptune.adapters.rosbag1.summary import summarize
+from neptune.adapters.rosmsg.streams import with_decode_options
 
 DEFAULT_CHUNK_BYTES: Final = 64 * 1024 * 1024
 DEFAULT_MAX_ROWS: Final = 100_000
@@ -81,13 +84,13 @@ def _code(name: str, description: str) -> Documented:
 
 DESCRIPTOR: Final = AdapterDescriptor(
     id="rosbag1",
-    version="0.1.0",
+    version="0.2.0",
     abi=ABI_VERSION,
     summary="ROS 1 bags: a run, a stream per connection with every message's record time and"
     " exact bytes, the message definitions and md5sums as the publishers stated them.",
     formats=(FormatSpec("ROS 1 bag", extensions=(".bag",), magic=(Magic(0, MAGIC),)),),
     record_kinds=("run", "stream", "timestamp_domain"),
-    config=(
+    config=with_decode_options(
         ConfigOption(
             "max_chunk_bytes",
             DEFAULT_MAX_CHUNK_BYTES,
@@ -167,7 +170,19 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         _code(
             "payload_not_decoded",
-            "a stream's payloads are not decoded; each row cites its message (unsupported, info)",
+            "a stream's payloads are not decoded, with the reason: no definition, a definition"
+            " that does not parse, decoding turned off; each row cites its message"
+            " (unsupported, info)",
+        ),
+        _code(
+            "payload_partly_decoded",
+            "a stream's payloads are decoded, but byte arrays or arrays of arrays are walked"
+            " without a column, or only the leading header is decoded (unsupported, info)",
+        ),
+        _code(
+            "payload_undecodable",
+            "payloads that do not hold their definition's layout (corrupt), or pass a decoding"
+            " limit (limit); their values are unknown or not covered (warning)",
         ),
         _code(
             "record_too_large",
@@ -212,7 +227,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "rosbag1:time_field",
             "the time field `name` (time) that the specification defines on every Message Data"
-            " record, cited after what declares the clock: the magic",
+            " record, cited after the magic; or header.stamp, which a connection's definition"
+            " declares, cited after its Connection record",
         ),
     ),
     conventions=(
@@ -225,7 +241,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "clocks",
             "clock 0 is the record time (scope (), the recorder's): ticks are nanoseconds from"
-            " sec and nsec as stored, never converted or normalised",
+            " sec and nsec as stored, never converted or normalised; clock 1 a leading Header's"
+            " stamp where the payload decodes (scope (topic,)), secs * 10^9 + nsecs",
         ),
         Documented(
             "declarations",
@@ -251,8 +268,10 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         Documented(
             "series",
-            "seq, time/0 the record time, locator/0 and locator/1 length and offset; no value"
-            " columns, the payload is not decoded",
+            "seq, time/0 the record time, locator/0 and locator/1 length and offset; a decoded"
+            " payload's fields as value/<path> (segments joined by '.', '[]' after an array: a"
+            " list column), each with its state column; time and duration as <path>.secs and"
+            " <path>.nsecs",
         ),
     ),
     # A call holds one chunk's stored bytes and what they decode to, each at most
