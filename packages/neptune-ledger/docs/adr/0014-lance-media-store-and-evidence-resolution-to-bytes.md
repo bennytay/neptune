@@ -220,7 +220,8 @@ that no package records (root ADR 0010).
   artefact says what it came from and what made it.
 - The Ledger depends on `pylance` (with `numpy`, `pydantic` and others transitively), `mcap`,
   `mcap-ros2-support`, `lz4`, `zstandard`, `pillow` and `pypdfium2`, all pinned. A bump to any
-  decoder library is a new extraction lineage. mypy skips numpy's 3.12-syntax stubs.
+  decoder library is a new extraction lineage. numpy is pinned to 2.3.5: 2.4's stubs use 3.12 syntax that every
+  member's 3.11 mypy check would fail to parse.
 - Decoders run in the Ledger's process. `guarded` turns a Python exception into a finding, but
   a native crash in PDFium, Pillow or a decompressor on hostile bytes would end the process.
   The sources were already ingested by the compiler in its sandbox. Revisit with a decoding
