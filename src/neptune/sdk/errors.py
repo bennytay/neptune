@@ -52,7 +52,7 @@ from neptune.manifest import ManifestError
 from neptune.runtime import JobError
 from neptune.runtime.sandbox import SandboxError
 from neptune.store.assemble import NotDurableError
-from neptune.store.workspace import WorkspaceError
+from neptune.store.workspace import LocalOnlyError, WorkspaceError
 
 
 class NeptuneError(Exception):
@@ -197,6 +197,8 @@ def from_job_error(error: JobError, destination: Path | None = None) -> NeptuneE
         kind = ConfigurationError
     elif isinstance(cause, WorkspaceError | ScratchError):
         kind = WorkspaceUnusableError
+    elif isinstance(cause, LocalOnlyError):  # a connector asked again mid-job (ADR 0067)
+        kind = NetworkRefusedError
     elif isinstance(cause, NotDurableError):
         return PublishIncompleteError(str(error), destination)
     elif destination is not None and (destination.exists() or destination.is_symlink()):

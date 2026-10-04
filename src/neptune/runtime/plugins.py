@@ -6,8 +6,9 @@ groups (Deploy ADR 0001):
 - ``neptune.adapters``: the name is the adapter id; the value is a zero-argument callable that
   returns an object with the four-method ABI (ADR 0024).
 - ``neptune.sources``: the name is the connector id; the value is a callable returning a
-  ``Source``. It is imported and admitted here, never called: what a connector is given is the
-  connector issue's to decide (MVL-153).
+  ``Source``. It is imported and admitted here, never called. It may declare the URI schemes it
+  reads (``schemes``, ADR 0067); a client calls it when a source URI names one of them
+  (``neptune.discovery.external``).
 
 ``load_plugins`` reads both, the same way on every host:
 
@@ -108,7 +109,8 @@ FINDING_CODES: Final[tuple[Documented, ...]] = (
         REFUSED,
         "a plugin loaded but is not admissible: not callable, no descriptor, a missing method,"
         " another ABI, an id other than its entry point's name, a library pin that contradicts"
-        " its distribution, or a distribution with no usable name; the plugin is not used"
+        " its distribution, a distribution with no usable name, or a Source factory whose"
+        " schemes are not distinct lowercase URI schemes other than file; the plugin is not used"
         " (failed, warning)",
     ),
 )
@@ -122,6 +124,11 @@ NAME_MISMATCH: Final = "name_mismatch"
 LIBRARY_CONFLICT: Final = "library_conflict"
 INVALID_NAME: Final = "invalid_name"
 UNNAMED_DISTRIBUTION: Final = "unnamed_distribution"
+INVALID_SCHEMES: Final = "invalid_schemes"
+
+# A URI scheme a connector may claim (RFC 3986, lowercase). ``file`` is the local root's own.
+SCHEME: Final = re.compile(r"[a-z][a-z0-9+.\-]{0,31}")
+RESERVED_SCHEMES: Final = frozenset({"file"})
 
 _METHODS: Final = ("probe", "inspect", "plan", "ingest")
 _ID: Final = re.compile(r"[a-z][a-z0-9_.\-]*")
@@ -251,12 +258,15 @@ class PluginAdapter:
 
 @dataclass(frozen=True)
 class PluginSource:
-    """A connector a plugin registers: its id (the entry-point name), where it comes from, and
-    the callable that builds the ``Source``, not yet called."""
+    """A connector a plugin registers: its id (the entry-point name), where it comes from, the
+    callable that builds the ``Source`` (not yet called), and the URI schemes the callable
+    declares it reads (its ``schemes`` attribute; none if it declares none, when the connector is
+    used only when named, ADR 0067)."""
 
     id: str
     origin: Origin
     factory: Callable[..., object] = field(compare=False)
+    schemes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -287,6 +297,18 @@ class Plugins:
             if adapter.descriptor.id == adapter_id:
                 return f"{adapter.origin.distribution} {adapter.origin.version}"
         return None
+
+
+def _schemes(declared: object) -> tuple[str, ...] | None:
+    """The schemes a Source factory declares, sorted, or ``None`` if they are not usable."""
+    if not isinstance(declared, tuple | list | frozenset | set):
+        return None
+    schemes = list(declared)
+    if not all(isinstance(s, str) and SCHEME.fullmatch(s) for s in schemes):
+        return None
+    if len(set(schemes)) != len(schemes) or RESERVED_SCHEMES.intersection(schemes):
+        return None
+    return tuple(sorted(schemes))
 
 
 def _text(value: object) -> str | None:
@@ -545,7 +567,18 @@ class _Loader:
         if factory is None:
             return None
         assert callable(factory)
-        return PluginSource(origin.name, origin, factory)
+        ok, declared = self._call(origin, "imported", lambda: getattr(factory, "schemes", ()))
+        if not ok:
+            return None
+        schemes = _schemes(declared)
+        if schemes is None:
+            self.refused(
+                origin,
+                INVALID_SCHEMES,
+                "its schemes are not a list of distinct lowercase URI schemes other than file",
+            )
+            return None
+        return PluginSource(origin.name, origin, factory, schemes)
 
     def findings(self, transform: TransformRecord) -> tuple[IngestFinding, ...]:
         made = {

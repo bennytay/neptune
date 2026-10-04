@@ -265,8 +265,9 @@ def test_resume_with_no_earlier_work_is_nothing_to_resume(run_folder: Path, at: 
     failed(("ingest", "run", "--out", "pkg", "-w", "ws", "--resume"), "nothing_to_resume")
 
 
-def test_a_remote_source_is_refused_while_local_only(at: Path) -> None:
-    failed(("ingest", "s3://bucket/runs/7", "--out", "pkg", "-w", "ws"), "network_refused")
+def test_a_remote_source_no_connector_reads_is_a_configuration_error(at: Path) -> None:
+    argv = ("ingest", "s3://bucket/runs/7", "--out", "pkg", "-w", "ws", "--no-plugins")
+    failed(argv, "invalid_configuration")
 
 
 def test_an_unreadable_root_fails_the_job(run_folder: Path, at: Path) -> None:
