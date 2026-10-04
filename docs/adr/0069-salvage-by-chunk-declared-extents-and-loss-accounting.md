@@ -61,7 +61,8 @@ the receipt states exactly what was lost.
    neither. One problem per target. It applies to salvaged sources only: a whole source whose
    references dangle is an adapter bug that validation reports; validation's
    `dangling_reference` (rule version 3) checks every reference the same walker reads, keeping a
-   table only for the kind a reference must name where the model states one. A source that lost
+   table only for the kind a reference must name where the model states one. A missing frame graph is
+   reported by both `frame_unresolved` and `dangling_reference`, as intended. A source that lost
    nothing is judged as before (`output_invalid` if it breaks a law).
 
    **Refuse, never drop.** Such a source is refused, not admitted without the dangling records:

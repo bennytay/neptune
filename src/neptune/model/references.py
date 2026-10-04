@@ -22,7 +22,7 @@ from neptune.model.ids import is_external
 from neptune.model.provenance import EvidenceRef, Provenance, TransformRecord
 
 _PREFIX: Final = "rec:sha256:"
-_NOT_REFERENCES: Final = frozenset({"id", "provenance", "transform"})
+_NOT_REFERENCES: Final = frozenset({"id", "provenance"})
 _OPAQUE: Final = (Provenance, EvidenceRef, TransformRecord)
 
 
@@ -68,6 +68,8 @@ def named(record: object) -> Iterator[tuple[str, str]]:
     for field in dataclasses.fields(record):
         if field.name in _NOT_REFERENCES or is_external(field):
             continue
+        if field.name == "transform" and getattr(record, "kind", None) == "ingest_finding":
+            continue  # who made the finding, not what it is about
         value = getattr(record, field.name)
         targets = _ids(value) if _typed_as_id(field) else _nested(value)
         for target in targets:

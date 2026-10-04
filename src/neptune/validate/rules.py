@@ -322,6 +322,7 @@ _TARGET_KINDS: Final = {
     ("civil_time_zone", "domain"): "timestamp_domain",
     ("configuration_value", "snapshot"): "configuration_snapshot",
     ("document_block", "document"): "document_record",
+    ("frame_binding", "transform"): "frame_transform",
     ("hardware_component", "configuration"): "hardware_configuration",
     ("stream", "clocks"): "timestamp_domain",
     ("stream", "run"): "run",

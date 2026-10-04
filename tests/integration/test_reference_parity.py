@@ -57,6 +57,44 @@ def test_validation_checks_exactly_what_salvage_checks(example: str) -> None:
     assert checked and checked == salvage_view(records)
 
 
+def _strings(value: Any) -> Any:
+    """Every string in a JSON value, outside any ``provenance`` (evidence and its transform)."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if key != "provenance":
+                yield from _strings(item)
+
+
+def oracle(records: list[Any]) -> set[tuple[str, str, str]]:
+    """References derived without the walker or the model's types: every record id a record's
+    JSON holds that is a record of the package, by top-level key, except its own ``id``, its
+    provenance, a finding's ``transform`` and the fields marked external."""
+    held = {getattr(r, "id", None) for r in records}
+    found = set()
+    for record in records:
+        external = {f.name for f in dataclasses.fields(record) if is_external(f)}
+        for key, value in record.to_json().items():
+            if key in ("id", "provenance") or key in external:
+                continue
+            if record.kind == "ingest_finding" and key == "transform":
+                continue
+            found |= {(record.kind, key, text) for text in _strings(value) if text in held}
+    return found
+
+
+@pytest.mark.parametrize("example", EXAMPLES)
+def test_the_walker_finds_what_the_json_says(example: str) -> None:
+    """An independent oracle: the walker's references are exactly the package's record ids
+    each record's JSON holds (every example resolves whole, so none is left out)."""
+    records = records_of(example)
+    assert salvage_view(records) == oracle(records)
+
+
 def _holds_id(value: Any) -> bool:
     """Whether a field's value holds a record id: bare, in a tuple, or as a ``Known``'s value."""
     value = getattr(value, "value", value)
@@ -71,8 +109,10 @@ def test_every_kind_s_typed_references_are_read() -> None:
         for record in records_of(example):
             read = {field for field, _ in named(record)}
             for field in dataclasses.fields(record):
-                if "RecordId" not in str(field.type) or field.name in ("id", "transform"):
+                if "RecordId" not in str(field.type) or field.name == "id":
                     continue
+                if record.kind == "ingest_finding" and field.name == "transform":
+                    continue  # who made the finding, never a reference
                 held = _holds_id(getattr(record, field.name))
                 if is_external(field):
                     assert field.name not in read, (record.kind, field.name)
