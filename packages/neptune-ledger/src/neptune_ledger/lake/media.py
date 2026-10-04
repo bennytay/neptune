@@ -49,8 +49,9 @@ from neptune_ledger.lake.evidence import (
     EvidenceBytes,
     EvidenceResolver,
     MediaFinding,
-    SourceChanged,
+    ReadFailure,
     SourceReader,
+    catalog_findings,
     parse_locator,
 )
 
@@ -296,6 +297,9 @@ class Hydration:
         if problem is not None:
             return Hydrated(None, (problem,))
         if self.variant == "bytes":
+            if self.snapshot is not None:
+                detail = "bytes are served from the source itself, never from a media snapshot"
+                return Hydrated(None, (MediaFinding("invalid_request", subject, detail),))
             return self._slice()
         return self._artefact(subject)
 
@@ -310,6 +314,11 @@ class Hydration:
         transform = transform_for(variant)
         made_id = artefact_id(self.evidence_ref, variant, transform)
         store = self._media.store
+        # The catalog must hold the evidence at ``as_of`` even when the artefact is stored: a
+        # stored artefact is never served for evidence the catalog does not resolve.
+        cataloged = self._media.resolver.cataloged(self.evidence_ref, as_of=self.as_of)
+        if cataloged.status != "resolved":
+            return Hydrated(None, catalog_findings(cataloged))
         if self.snapshot is not None:
             latest = store.snapshot()
             if latest is None or not 1 <= self.snapshot <= latest:
@@ -328,7 +337,7 @@ class Hydration:
             return Hydrated(None, evidence.findings)
         try:
             made = decode(variant, evidence.inner, evidence.open(), subject, self._media.limits)
-        except (DecodeFailure, SourceChanged) as failed:
+        except (DecodeFailure, ReadFailure) as failed:
             return Hydrated(None, (*evidence.findings, failed.finding))
         row = {
             "artefact_id": made_id,

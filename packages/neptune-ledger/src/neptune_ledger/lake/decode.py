@@ -26,14 +26,14 @@ encoding this version cannot decode, ``invalid_request`` for a citation the byte
 ``unsafe_entry`` for a decompression or pixel bomb.
 """
 
-import csv
 import hashlib
 import io
 import json
 import math
+import re
 import threading
 import zlib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from importlib.metadata import version as library_version
 from typing import Any, Final, Literal, TypeAlias
@@ -52,7 +52,7 @@ from neptune.model.provenance import (
     RowCell,
     Span,
 )
-from neptune_ledger.lake.evidence import MediaFinding, MediaFindingCode, SourceReader
+from neptune_ledger.lake.evidence import MediaFinding, MediaFindingCode, ReadFailure, SourceReader
 
 Variant: TypeAlias = Literal["bytes", "frame", "image_region", "page", "row", "value"]
 VARIANTS: Final[tuple[Variant, ...]] = ("bytes", "frame", "image_region", "page", "row", "value")
@@ -69,8 +69,8 @@ _ENDS: Final[Mapping[str, tuple[type, ...]]] = {
 }
 _LIBRARIES: Final[Mapping[str, tuple[str, ...]]] = {
     "bytes": (),
-    "frame": ("mcap", "mcap-ros2-support", "pillow"),
-    "image_region": ("mcap", "mcap-ros2-support", "pillow"),
+    "frame": ("lz4", "mcap", "mcap-ros2-support", "pillow", "zstandard"),
+    "image_region": ("lz4", "mcap", "mcap-ros2-support", "pillow", "zstandard"),
     "page": ("pillow", "pypdfium2"),
     "row": ("pyarrow",),
     "value": ("pyyaml",),
@@ -178,7 +178,7 @@ class _Scope:
 
     def file(self) -> io.BufferedIOBase:
         if self._reader is not None:
-            return self._reader.file()
+            return self._reader.file(self._limits.max_decoded_bytes)
         return io.BytesIO(self._data or b"")
 
     def head(self, n: int) -> bytes:
@@ -230,9 +230,11 @@ class _Scope:
                 f" {self.size}-byte scope"
             )
             raise DecodeFailure("invalid_request", subject, detail)
-        with self.file() as f:
-            f.seek(step.offset)
-            data = f.read(step.length)
+        if (
+            self._reader is not None
+        ):  # still lazy: an MCAP inside an archive member is not read whole
+            return _Scope(self._reader.narrow(step.offset, step.length), None, self._limits)
+        data = (self._data or b"")[step.offset : step.offset + step.length]
         return _Scope(None, data, self._limits)
 
 
@@ -248,7 +250,7 @@ def decode(
 ) -> Decoded:
     """Extract ``variant`` from the span ``reader`` serves by ``steps`` (the inner steps).
 
-    Raises ``DecodeFailure`` with the finding, or the reader's ``SourceChanged``.
+    Raises ``DecodeFailure`` with the finding, or the reader's ``ReadFailure``.
     """
     scope = _Scope(reader, None, limits)
     image: tuple[Any, dict[str, Any]] | None = None
@@ -271,7 +273,7 @@ def decode(
     if isinstance(last, (Page, PageRegion)):
         return _page(scope.decoded(subject), last, subject, limits)
     if isinstance(last, (Row, RowCell)):
-        return _row(scope.decoded(subject), last, subject)
+        return _row(scope.decoded(subject), last, subject, limits)
     if isinstance(last, JsonPointer):
         return _pointer(scope.decoded(subject), last, subject)
     if isinstance(last, Span):
@@ -287,11 +289,9 @@ def guarded(subject: str, what: str, call: Callable[[], Any]) -> Any:
     0029), so every exception becomes a finding; a changed source chunk and our own failures
     pass through.
     """
-    from neptune_ledger.lake.evidence import SourceChanged
-
     try:
         return call()
-    except (DecodeFailure, SourceChanged):
+    except (DecodeFailure, ReadFailure):
         raise
     except Exception as exc:
         detail = (
@@ -374,23 +374,11 @@ def _frame(
         what = "a ROS 1 bag" if head.startswith(b"#ROSBAG") else "not an MCAP file"
         code: MediaFindingCode = "no_decoder" if head.startswith(b"#ROSBAG") else "undecodable"
         raise DecodeFailure(code, subject, f"a record_range frame needs MCAP; this is {what}")
-    from mcap.reader import make_reader
     from mcap_ros2.decoder import DecoderFactory
 
     def messages() -> list[Any]:
         with scope.file() as f:
-            reader = make_reader(f, decoder_factories=[DecoderFactory()])  # type: ignore[arg-type]
-            found = []
-            for item in reader.iter_messages(
-                topics=[step.channel],
-                start_time=step.start.ticks,
-                end_time=step.end.ticks,
-                log_time_order=True,
-            ):
-                found.append(item)
-                if len(found) > 1:
-                    break
-            return found
+            return _mcap_messages(f, step, subject, limits.max_decoded_bytes)
 
     found = guarded(subject, "not a readable MCAP file", messages)
     if len(found) != 1:
@@ -423,6 +411,99 @@ def _frame(
         return _raw_image(body, subject, limits), {**facts, "encoding": str(body.encoding)}
     detail = f"{step.channel} carries {schema.name}, not an image message"
     raise DecodeFailure("no_decoder", subject, detail)
+
+
+def _mcap_messages(f: Any, step: RecordRange, subject: str, limit: int) -> list[Any]:
+    """Up to two ``(schema, channel, message)`` of ``step.channel`` logged in ``[start, end)``.
+
+    With a summary, only the chunks its index says overlap the range and hold the channel are
+    read; without one (a truncated recording), the file is read through once. Every chunk is
+    decompressed here, bounded by ``limit`` and by its stated size, so a hostile chunk header
+    cannot make the library allocate without bound.
+    """
+    from mcap.data_stream import ReadDataStream
+    from mcap.reader import SeekingReader
+    from mcap.records import Channel, Chunk, Message, Schema
+    from mcap.stream_reader import StreamReader
+
+    first, end = step.start.ticks, step.end.ticks
+    found: list[Any] = []
+    reader = SeekingReader(f, record_size_limit=limit)
+    summary = reader.get_summary()
+    if summary is not None and summary.chunk_indexes:
+        wanted = {key for key, channel in summary.channels.items() if channel.topic == step.channel}
+        indexes = sorted(summary.chunk_indexes, key=lambda index: index.chunk_start_offset)
+        for index in indexes:
+            if index.message_end_time < first or index.message_start_time >= end:
+                continue
+            held = index.message_index_offsets.keys()  # empty when the writer kept no index
+            if not wanted or (held and not wanted & held):
+                continue
+            if index.chunk_length > limit:
+                detail = (
+                    f"an MCAP chunk of {index.chunk_length} bytes exceeds the {limit}-byte limit"
+                )
+                raise DecodeFailure("unsafe_entry", subject, detail)
+            f.seek(index.chunk_start_offset + 1 + 8)
+            for record in _chunk_records(Chunk.read(ReadDataStream(f)), subject, limit):
+                if not isinstance(record, Message) or record.channel_id not in wanted:
+                    continue
+                if first <= record.log_time < end:
+                    channel = summary.channels[record.channel_id]
+                    found.append((summary.schemas.get(channel.schema_id), channel, record))
+                    if len(found) > 1:
+                        return found
+        return found
+    f.seek(0)
+    schemas: dict[int, Any] = {}
+    channels: dict[int, Any] = {}
+    for item in StreamReader(f, emit_chunks=True, record_size_limit=limit).records:
+        records = _chunk_records(item, subject, limit) if isinstance(item, Chunk) else [item]
+        for record in records:
+            if isinstance(record, Schema):
+                schemas[record.id] = record
+            elif isinstance(record, Channel):
+                channels[record.id] = record
+            elif isinstance(record, Message) and first <= record.log_time < end:
+                known = channels.get(record.channel_id)
+                if known is not None and known.topic == step.channel:
+                    found.append((schemas.get(known.schema_id), known, record))
+                    if len(found) > 1:
+                        return found
+    return found
+
+
+def _chunk_records(chunk: Any, subject: str, limit: int) -> list[Any]:
+    """The records of one MCAP chunk, decompressed to exactly its stated size, at most ``limit``."""
+    import dataclasses
+
+    from mcap.stream_reader import breakup_chunk
+
+    size = chunk.uncompressed_size
+    if size > limit:
+        detail = f"an MCAP chunk inflating to {size} bytes exceeds the {limit}-byte limit"
+        raise DecodeFailure("unsafe_entry", subject, detail)
+    if chunk.compression == "":
+        data = bytes(chunk.data)
+    elif chunk.compression == "zstd":
+        import zstandard
+
+        out = bytearray()
+        with zstandard.ZstdDecompressor().stream_reader(bytes(chunk.data)) as stream:
+            while len(out) <= size and (block := stream.read(min(1 << 20, size + 1 - len(out)))):
+                out += block
+        data = bytes(out)
+    elif chunk.compression == "lz4":
+        import lz4.frame
+
+        data = lz4.frame.LZ4FrameDecompressor().decompress(bytes(chunk.data), max_length=size + 1)
+    else:
+        detail = f"an MCAP chunk compressed with {chunk.compression!r}; no decoder"
+        raise DecodeFailure("no_decoder", subject, detail)
+    if len(data) != size:
+        detail = f"an MCAP chunk inflates to {len(data)}+ bytes, not its stated {size}"
+        raise DecodeFailure("undecodable", subject, detail)
+    return list(breakup_chunk(dataclasses.replace(chunk, compression="", data=data)))
 
 
 def _raw_image(body: Any, subject: str, limits: Limits) -> Any:
@@ -517,21 +598,131 @@ def _render(
 
 # --- Rows from CSV and Parquet -----------------------------------------------------------------
 
+# The compiler's CSV grammar, mirrored because no member may import its adapters: records end at
+# an LF outside quotes (a CR before it belongs to the ending), a line holding nothing is not a
+# record, a field starting with '"' is quoted, a leading UTF-8 byte-order mark is skipped, and
+# the delimiter is sniffed from the first 64 KiB by the fixed rule below. A row index counts
+# records, the header included (``Row``).
+_CSV_SNIFFED: Final = (",", "\t", ";")
+_CSV_SNIFF_RECORDS: Final = 64
+_CSV_SNIFF_BYTES: Final = 64 * 1024
+_BOM: Final = b"\xef\xbb\xbf"
+_QUOTE, _LF, _CR = 0x22, 0x0A, 0x0D
+_START, _UNQUOTED, _QUOTED, _AFTER_QUOTE = range(4)
 
-def _row(scope: _Scope, step: Row | RowCell, subject: str) -> Decoded:
+
+@dataclass(frozen=True)
+class _CsvRecord:
+    content: bytes  # without its ending
+    fields: int
+    ended: bool  # by an LF, not by the end of the bytes
+    unterminated: bool  # the bytes end inside a quoted field
+
+
+def _csv_records(data: bytes, delimiter: str) -> Iterator[_CsvRecord]:
+    mark = ord(delimiter)
+    stop = re.compile(b"[" + re.escape(delimiter.encode()) + b"\n]")
+    start, fields, state, i, n = 0, 1, _START, 0, len(data)
+    while i < n:
+        if state == _QUOTED:
+            j = data.find(b'"', i)
+            if j < 0:
+                break
+            state, i = _AFTER_QUOTE, j + 1
+            continue
+        if state == _UNQUOTED:
+            found = stop.search(data, i)
+            if found is None:
+                break
+            i = found.start()
+        byte = data[i]
+        if byte == _LF:
+            end = i - 1 if i > start and data[i - 1] == _CR else i
+            if end > start:
+                yield _CsvRecord(data[start:end], fields, True, False)
+            start, fields, state = i + 1, 1, _START
+        elif byte == mark:
+            fields, state = fields + 1, _START
+        elif byte == _QUOTE:
+            state = _QUOTED
+        else:
+            state = _UNQUOTED
+        i += 1
+    if n > start:
+        yield _CsvRecord(data[start:], fields, False, state == _QUOTED)
+
+
+def _csv_split(content: bytes, delimiter: str) -> list[bytes]:
+    """A record's fields: quoted fields unquoted, text after a closing quote kept."""
+    mark = delimiter.encode()
+    if b'"' not in content:
+        return content.split(mark)
+    fields: list[bytes] = []
+    i, n = 0, len(content)
+    while True:
+        if i < n and content[i] == _QUOTE:
+            held = bytearray()
+            i += 1
+            while True:
+                j = content.find(b'"', i)
+                if j < 0:  # unterminated: the field runs to the end
+                    fields.append(bytes(held + content[i:]))
+                    return fields
+                held += content[i:j]
+                if j + 1 < n and content[j + 1] == _QUOTE:
+                    held += b'"'
+                    i = j + 2
+                    continue
+                i = j + 1
+                break
+            k = content.find(mark, i)
+            held += content[i : n if k < 0 else k]
+            fields.append(bytes(held))
+        else:
+            k = content.find(mark, i)
+            fields.append(content[i:] if k < 0 else content[i:k])
+        if k < 0:
+            return fields
+        i = k + 1
+
+
+def _csv_sniff(data: bytes) -> tuple[str, str]:
+    """The delimiter the head's records agree on, as the compiler sniffs it, and the rule used."""
+    head = data[:_CSV_SNIFF_BYTES]
+    complete = len(head) == len(data)
+    sample = head[len(_BOM) :] if head.startswith(_BOM) else head
+    best: tuple[str, int] | None = None
+    for delimiter in _CSV_SNIFFED:
+        counts: list[int] = []
+        for record in _csv_records(sample, delimiter):
+            if record.unterminated or (not record.ended and not complete):
+                break
+            counts.append(record.fields)
+            if len(counts) == _CSV_SNIFF_RECORDS:
+                break
+        agree = len(counts) >= 2 and counts[0] >= 2 and len(set(counts)) == 1
+        if agree and (best is None or counts[0] > best[1]):
+            best = (delimiter, counts[0])
+    return (best[0], "sniffed") if best else (",", "default")
+
+
+def _row(scope: _Scope, step: Row | RowCell, subject: str, limits: Limits) -> Decoded:
     if scope.size >= 12 and scope.head(4) == b"PAR1" and scope.tail(4) == b"PAR1":
         made = guarded(
-            subject, "not a readable Parquet file", lambda: _parquet_row(scope, step, subject)
+            subject,
+            "not a readable Parquet file",
+            lambda: _parquet_row(scope, step, subject, limits),
         )
     else:
         made = _csv_row(scope.whole(subject, "a table"), step, subject)
     if isinstance(made, MediaFinding):
         raise DecodeFailure(made.code, made.subject, made.detail)
-    return Decoded("application/json", canonical_json.dumps(made), {"format": made["format"]})
+    facts = {k: made[k] for k in ("delimiter", "delimiter_rule", "format") if k in made}
+    return Decoded("application/json", canonical_json.dumps(made), facts)
 
 
 def _cell_column(
-    step: Row | RowCell, cells: int, names: list[str], subject: str
+    step: Row | RowCell, cells: int, names: list[str | None], subject: str
 ) -> MediaFinding | None:
     """A row_cell's column must be in the row, and a stated name must be the column's name."""
     if not isinstance(step, RowCell):
@@ -549,32 +740,50 @@ def _cell_column(
     return None
 
 
+def _csv_text(field: bytes) -> str | None:
+    try:
+        return field.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def _csv_row(data: bytes, step: Row | RowCell, subject: str) -> dict[str, Any] | MediaFinding:
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        return MediaFinding("undecodable", subject, f"a CSV table must be UTF-8: {exc}")
-    header: list[str] = []
-    try:
-        for index, cells in enumerate(csv.reader(io.StringIO(text, newline=""), strict=True)):
-            if index == 0:
-                header = cells
-            if index == step.row:
-                problem = _cell_column(step, len(cells), header, subject)
-                if problem is not None:
-                    return problem
-                out: dict[str, Any] = {"format": "csv", "row": step.row}
-                if isinstance(step, RowCell):
-                    out |= {"cell": cells[step.column], "column": step.column}
-                else:
-                    out["cells"] = cells
-                return out
-    except csv.Error as exc:
-        return MediaFinding("undecodable", subject, f"not a readable CSV table: {exc}")
+    if b"\x00" in data:  # the compiler's tabular probe claims text only
+        return MediaFinding("undecodable", subject, "neither Parquet nor text: it holds NUL bytes")
+    delimiter, rule = _csv_sniff(data)
+    body = data[len(_BOM) :] if data.startswith(_BOM) else data
+    header: list[str | None] = []
+    for index, record in enumerate(_csv_records(body, delimiter)):
+        cells = _csv_split(record.content, delimiter)
+        if index == 0:
+            header = [_csv_text(cell) for cell in cells]
+        if index < step.row:
+            continue
+        problem = _cell_column(step, len(cells), header, subject)
+        if problem is not None:
+            return problem
+        out: dict[str, Any] = {
+            "delimiter": delimiter,
+            "delimiter_rule": rule,
+            "format": "csv",
+            "row": step.row,
+        }
+        texts = [_csv_text(cell) for cell in cells]
+        shown = [
+            {"hex": cell.hex()} if text is None else text
+            for cell, text in zip(cells, texts, strict=True)
+        ]
+        if isinstance(step, RowCell):
+            out |= {"cell": shown[step.column], "column": step.column}
+        else:
+            out["cells"] = shown
+        return out
     return MediaFinding("invalid_request", subject, f"the table has no row {step.row}")
 
 
-def _parquet_row(scope: _Scope, step: Row | RowCell, subject: str) -> dict[str, Any] | MediaFinding:
+def _parquet_row(
+    scope: _Scope, step: Row | RowCell, subject: str, limits: Limits
+) -> dict[str, Any] | MediaFinding:
     import pyarrow.parquet as pq
 
     with scope.file() as f:
@@ -582,7 +791,7 @@ def _parquet_row(scope: _Scope, step: Row | RowCell, subject: str) -> dict[str, 
         meta = parquet.metadata
         if step.row >= meta.num_rows:
             return MediaFinding("invalid_request", subject, f"the table has no row {step.row}")
-        names = list(parquet.schema_arrow.names)
+        names: list[str | None] = list(parquet.schema_arrow.names)
         problem = _cell_column(step, len(names), names, subject)
         if problem is not None:
             return problem
@@ -590,9 +799,19 @@ def _parquet_row(scope: _Scope, step: Row | RowCell, subject: str) -> dict[str, 
         for group in range(meta.num_row_groups):
             rows = meta.row_group(group).num_rows
             if step.row < first + rows:
-                table = parquet.read_row_group(group)
                 break
             first += rows
+        else:
+            detail = f"the footer states {meta.num_rows} rows; its row groups hold {first}"
+            return MediaFinding("undecodable", subject, detail)
+        size, limit = meta.row_group(group).total_byte_size, limits.max_decoded_bytes
+        if size > limit:
+            detail = f"row group {group} of {size} bytes exceeds the {limit}-byte limit"
+            return MediaFinding("unsafe_entry", subject, detail)
+        table = parquet.read_row_group(group)
+        if table.num_rows != rows:
+            detail = f"row group {group} holds {table.num_rows} rows, its footer states {rows}"
+            return MediaFinding("undecodable", subject, detail)
         record = table.slice(step.row - first, 1)
         columns = [step.column] if isinstance(step, RowCell) else range(len(names))
         cells = []
@@ -625,43 +844,101 @@ def _json_value(value: Any) -> Any:
 # --- Values from JSON or YAML, and text spans --------------------------------------------------
 
 
+class _Keys(dict[str, Any]):
+    """A JSON object; ``repeated`` names the keys it holds more than once."""
+
+    repeated: frozenset[str] = frozenset()
+
+
+def _pairs(pairs: list[tuple[str, Any]]) -> _Keys:
+    made = _Keys(pairs)
+    if len(made) != len(pairs):
+        names = [name for name, _ in pairs]
+        made.repeated = frozenset(name for name in made if names.count(name) > 1)
+    return made
+
+
+def _refuse_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not JSON")
+
+
 def _pointer(scope: _Scope, step: JsonPointer, subject: str) -> Decoded:
+    """A JSON value as canonical JSON, or a YAML node as the text it is written as.
+
+    JSON is typed by its grammar, so its value is re-encoded canonically. A YAML scalar's type
+    depends on the YAML version and schema a reader assumes, so a YAML node is returned verbatim:
+    the document's own text from the node's first character to its last. Keys are matched by
+    their text, as the compiler cites them. A key held twice on the path is ambiguous.
+    """
     data = scope.whole(subject, "a document")
+    tokens = [t.replace("~1", "/").replace("~0", "~") for t in step.pointer.split("/")[1:]]
     try:
-        document, kind = json.loads(data.decode("utf-8")), "json"
-    except (UnicodeDecodeError, ValueError):
-        document, kind = _yaml(data, subject), "yaml"
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise DecodeFailure("undecodable", subject, f"a document must be UTF-8: {exc}") from exc
+    try:
+        document = json.loads(text, object_pairs_hook=_pairs, parse_constant=_refuse_constant)
+    except ValueError:
+        return _yaml_pointer(text, tokens, step.pointer, subject)
+    except RecursionError as exc:
+        raise DecodeFailure("undecodable", subject, "a JSON document nested too deep") from exc
     value = document
-    for token in step.pointer.split("/")[1:]:
-        name = token.replace("~1", "/").replace("~0", "~")
+    for name in tokens:
+        if isinstance(value, _Keys) and name in value.repeated:
+            detail = f"{step.pointer} passes key {name!r}, which the object holds more than once"
+            raise DecodeFailure("invalid_request", subject, detail)
         if isinstance(value, dict) and name in value:
             value = value[name]
-        elif isinstance(value, list) and name.isdigit() and (name == "0" or name[0] != "0"):
-            if int(name) >= len(value):
-                raise DecodeFailure("invalid_request", subject, f"{step.pointer} is past the array")
+        elif isinstance(value, list) and _is_index(name) and int(name) < len(value):
             value = value[int(name)]
         else:
-            detail = f"{step.pointer} does not resolve in the {kind} document"
+            detail = f"{step.pointer} does not resolve in the json document"
             raise DecodeFailure("invalid_request", subject, detail)
     made = canonical_json.dumps(_json_value(value))
-    return Decoded("application/json", made, {"format": kind, "pointer": step.pointer})
+    return Decoded("application/json", made, {"format": "json", "pointer": step.pointer})
 
 
-def _yaml(data: bytes, subject: str) -> Any:
+def _is_index(token: str) -> bool:
+    return token.isascii() and token.isdigit() and (token == "0" or token[0] != "0")
+
+
+def _yaml_pointer(text: str, tokens: list[str], pointer: str, subject: str) -> Decoded:
     import yaml
 
     class _NoAliases(yaml.SafeLoader):
-        """A safe loader that refuses aliases, so a document cannot expand without bound."""
+        """Composes nodes only, never constructs a value, and refuses aliases."""
 
         def compose_node(self, parent: Any, index: Any) -> Any:
             if self.check_event(yaml.AliasEvent):
                 raise yaml.YAMLError("aliases are refused")
             return super().compose_node(parent, index)
 
-    def load() -> Any:
-        return yaml.load(data, Loader=_NoAliases)
+    def compose() -> Any:
+        return yaml.compose(text, Loader=_NoAliases)
 
-    return guarded(subject, "neither JSON nor single-document YAML", load)
+    node = guarded(subject, "neither JSON nor single-document YAML", compose)
+    for name in tokens:
+        if isinstance(node, yaml.MappingNode):
+            held = [v for k, v in node.value if isinstance(k, yaml.ScalarNode) and k.value == name]
+            if len(held) > 1:
+                detail = f"{pointer} passes key {name!r}, which the mapping holds more than once"
+                raise DecodeFailure("invalid_request", subject, detail)
+            node = held[0] if held else None
+        elif (
+            isinstance(node, yaml.SequenceNode) and _is_index(name) and int(name) < len(node.value)
+        ):
+            node = node.value[int(name)]
+        else:
+            node = None
+        if node is None:
+            break
+    if node is None:
+        raise DecodeFailure(
+            "invalid_request", subject, f"{pointer} does not resolve in the yaml document"
+        )
+    written = text[node.start_mark.index : node.end_mark.index]
+    metadata = {"format": "yaml", "pointer": pointer, "tag": str(node.tag)}
+    return Decoded("application/yaml", written.encode("utf-8"), metadata)
 
 
 def _span(scope: _Scope, step: Span, subject: str) -> Decoded:

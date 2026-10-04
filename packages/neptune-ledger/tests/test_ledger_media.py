@@ -185,6 +185,7 @@ def assert_frame(
 def test_every_worked_example_citation_resolves_to_its_bytes(lake: Lake, tmp_path: Path) -> None:
     kinds: set[str] = set()
     cited = 0
+    hydrated = {"json_pointer": 0, "row": 0}
     for name in EXAMPLES:
         package = materialise(name, tmp_path / "examples" / name)
         lake.register(package.root)
@@ -215,7 +216,14 @@ def test_every_worked_example_citation_resolves_to_its_bytes(lake: Lake, tmp_pat
             sliced = lake.read(ref, "bytes")
             assert isinstance(sliced.value, SourceSlice)
             assert sliced.value.read() == data
+            last = ref.locator[-1]["kind"]
+            if last in ("json_pointer", "row"):  # the compiler's own pointers and rows decode
+                made = lake.artefact(ref, "value" if last == "json_pointer" else "row")
+                hydrated[last] += 1
+                if record["kind"] == "structured_record":
+                    assert_row_states(made, record)
     assert cited > 60
+    assert hydrated["json_pointer"] > 10 and hydrated["row"] >= 3
     adapter_steps = {k for k in kinds if ":" in k}
     assert kinds - adapter_steps == {"byte_range", "json_pointer", "row"}
     assert adapter_steps == {
@@ -226,6 +234,19 @@ def test_every_worked_example_citation_resolves_to_its_bytes(lake: Lake, tmp_pat
         "rosbag1:time_field",
         "ulog:field",
     }
+
+
+def assert_row_states(made: Artefact, record: dict[str, Any]) -> None:
+    """Every cell the compiler states as known is the text the hydrated row holds there."""
+    row = canonical_json.loads(made.read())
+    assert isinstance(row, dict) and row["format"] == "csv" and row["delimiter"] == ","
+    cells = row["cells"]
+    assert isinstance(cells, list) and len(cells) == len(record["cells"])
+    for stated, cell in zip(record["cells"], cells, strict=True):
+        if stated["knowledge"] == "known":
+            assert cell == stated["value"]
+        else:
+            assert cell == ""  # a blank cell is Unknown in the record and "" in the source
 
 
 def test_worked_example_pointers_and_rows_hydrate_to_what_the_records_state(
@@ -253,13 +274,18 @@ def test_worked_example_pointers_and_rows_hydrate_to_what_the_records_state(
     row = lake.artefact(anchor(sites, {"kind": "row", "row": 2}), "row")
     assert canonical_json.loads(row.read()) == {
         "cells": ["S-008", "Berth 4", "", "-33.8612", "151.2111", ""],
+        "delimiter": ",",
+        "delimiter_rule": "sniffed",
         "format": "csv",
         "row": 2,
     }
+    assert row.metadata == {"delimiter": ",", "delimiter_rule": "sniffed", "format": "csv"}
     cell = {"column": 2, "column_name": "aka", "kind": "row_cell", "row": 1}
     assert canonical_json.loads(lake.artefact(anchor(sites, cell), "row").read()) == {
         "cell": "NP;Plant 3",
         "column": 2,
+        "delimiter": ",",
+        "delimiter_rule": "sniffed",
         "format": "csv",
         "row": 1,
     }
@@ -313,7 +339,7 @@ def test_a_frame_from_a_referenced_mcap_and_from_a_materialised_one(lake: Lake) 
     assert raw.evidence_ref == materialised
     assert raw.transform == transform_for("frame").to_json()
     assert raw.transform["decoder"] == "neptune_ledger.media.frame"
-    assert set(raw.transform["libraries"]) == {"mcap", "mcap-ros2-support", "pillow"}
+    assert set(raw.transform["libraries"]) == {"lz4", "mcap", "mcap-ros2-support", "pillow", "zstandard"}
     assert raw.transform_id == transform_for("frame").id
     assert raw.sha256 == "sha256:" + __import__("hashlib").sha256(raw.read()).hexdigest()
 

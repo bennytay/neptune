@@ -29,6 +29,7 @@ import psycopg
 from psycopg import sql
 
 from neptune.identity import canonical_json
+from neptune.model.knowledge import Known
 from neptune.model.provenance import ByteRange, Locator, locator_from_json
 from neptune.store.package import blob_path
 from neptune_ledger.api.types import CatalogFinding, EvidenceAnchor, Resolution, SourceLocation
@@ -174,8 +175,12 @@ class _Located(_Source):
         return data if len(data) == length else None
 
 
-class SourceChanged(Exception):
-    """A chunk read for a slice no longer hashes to the source's stated chunk (internal)."""
+class ReadFailure(Exception):
+    """A read of a span stopped: a chunk changed or went, or one read asked for too much.
+
+    Raised through file-like reads (``SourceReader.file``), where a return value cannot carry a
+    finding; decoders let it pass and hydration reports ``finding``.
+    """
 
     def __init__(self, finding: MediaFinding) -> None:
         super().__init__(finding.detail)
@@ -218,15 +223,30 @@ class SourceReader:
             return MediaFinding("invalid_request", self._content, detail)
         try:
             return self._read(self.span.offset + offset, length)
-        except SourceChanged as changed:
+        except ReadFailure as changed:
             return changed.finding
 
     def read_all(self) -> bytes | MediaFinding:
         return self.read_range(0, self.span.length)
 
-    def file(self) -> io.BufferedReader:
-        """The span as a seekable binary file; a changed chunk raises ``SourceChanged``."""
-        return io.BufferedReader(_SpanFile(self), buffer_size=min(self._chunk_size, 1 << 20))
+    def narrow(self, offset: int, length: int) -> "SourceReader":
+        """A reader of ``length`` bytes from ``offset`` of this span, still verified per chunk;
+        the caller has checked that they lie inside it."""
+        if not _is_count(offset) or not _is_count(length) or offset + length > self.span.length:
+            raise ValueError(f"[{offset}, +{length}) is outside a {self.span.length}-byte span")
+        span = ByteSpan(self.span.offset + offset, length)
+        return SourceReader(
+            self._source, self._content, span, self._chunk_size, self._chunks, self._size
+        )
+
+    def file(self, max_read: int) -> io.BufferedReader:
+        """The span as a seekable binary file, nothing read until asked.
+
+        A changed or missing chunk, or one read of more than ``max_read`` bytes (a hostile
+        length field asking a parser to load a huge record), raises ``ReadFailure``.
+        """
+        raw = _SpanFile(self, max_read)
+        return io.BufferedReader(raw, buffer_size=min(self._chunk_size, 1 << 20))
 
     def _read(self, at: int, length: int) -> bytes:
         out = bytearray()
@@ -248,20 +268,21 @@ class SourceReader:
         data = self._source.read(at, length)
         if data is None:
             detail = f"{self._source.describe()} can no longer be read at [{at}, +{length})"
-            raise SourceChanged(MediaFinding("file_missing", self._content, detail))
+            raise ReadFailure(MediaFinding("file_missing", self._content, detail))
         if (
             index >= len(self._chunks)
             or "sha256:" + hashlib.sha256(data).hexdigest() != (self._chunks[index])
         ):
             detail = f"chunk {index} of {self._source.describe()} is not the stated bytes"
-            raise SourceChanged(MediaFinding("file_digest_mismatch", self._content, detail))
+            raise ReadFailure(MediaFinding("file_digest_mismatch", self._content, detail))
         self._cached = (index, data)
         return data
 
 
 class _SpanFile(io.RawIOBase):
-    def __init__(self, reader: SourceReader) -> None:
+    def __init__(self, reader: SourceReader, max_read: int) -> None:
         self._reader = reader
+        self._max_read = max_read
         self._at = 0
 
     def readable(self) -> bool:
@@ -285,6 +306,10 @@ class _SpanFile(io.RawIOBase):
         length = max(0, min(len(view), self._reader.size - self._at))
         if not length:
             return 0
+        if length > self._max_read:
+            detail = f"a read of {length} bytes exceeds the {self._max_read}-byte limit"
+            finding = MediaFinding("unsafe_entry", self._reader._content, detail)
+            raise ReadFailure(finding)
         data = self._reader._read(self._reader.span.offset + self._at, length)
         view[:length] = data
         self._at += length
@@ -317,6 +342,17 @@ class EvidenceBytes:
         if self._reader is None:
             raise ValueError(f"evidence is {self.status}, not resolved: {self.findings}")
         return self._reader()
+
+
+def catalog_findings(resolution: Resolution) -> tuple[MediaFinding, ...]:
+    """Why the catalog did not resolve an anchor: its findings, never none."""
+    findings = tuple(MediaFinding.of(f) for f in resolution.findings)
+    if resolution.status == "resolved" or findings:
+        return findings
+    detail = "no registered package holds the source"
+    return (
+        MediaFinding("unresolvable_evidence", str(resolution.evidence_ref.source)[:200], detail),
+    )
 
 
 def parse_locator(anchor: EvidenceAnchor) -> tuple[Locator, ...] | MediaFinding:
@@ -386,11 +422,15 @@ class EvidenceResolver:
             self._conn = conn
         return self._conn
 
+    def cataloged(self, anchor: EvidenceAnchor, *, as_of: int | None = None) -> Resolution:
+        """The catalog's own answer for the anchor at ``as_of``; no byte is touched."""
+        return self._catalog.resolve(anchor, as_of=as_of)
+
     def resolve(self, anchor: EvidenceAnchor, *, as_of: int | None = None) -> EvidenceBytes:
         """Where the anchor's bytes are, at one catalog point; a finding when nowhere."""
         resolution = self._catalog.resolve(anchor, as_of=as_of)
         if resolution.status != "resolved":
-            findings = tuple(MediaFinding.of(f) for f in resolution.findings)
+            findings = catalog_findings(resolution)
             unresolvable = any(f.code == "unresolvable_evidence" for f in findings)
             status: Literal["invalid", "unresolvable"] = (
                 "unresolvable" if unresolvable else "invalid"
@@ -399,7 +439,11 @@ class EvidenceResolver:
         steps = parse_locator(anchor)
         if isinstance(steps, MediaFinding):
             return EvidenceBytes(anchor, "invalid", resolution, None, (), None, (steps,))
-        size = resolution.size.value  # type: ignore[union-attr]
+        if not isinstance(resolution.size, Known):
+            detail = "the catalog states no size for the source, so no object can be checked"
+            finding = MediaFinding("file_missing", anchor.source, detail)
+            return EvidenceBytes(anchor, "unavailable", resolution, None, (), None, (finding,))
+        size = resolution.size.value
         span, inner = split_span(steps, size)
         if span.offset + span.length > size:
             detail = (
@@ -425,6 +469,8 @@ class EvidenceResolver:
             root, body = packages.get(route.package_id, (None, None))
             chunks = _chunks(body, size)
             if root is None or chunks is None:
+                # The bytes could not be verified through this package, so it is not a route.
+                tried.append(f"package {route.package_id} (no chunk ids for {size} bytes)")
                 continue
             for source, made in self._candidates(anchor.source, root, route, findings):
                 tried.append(source.describe())
