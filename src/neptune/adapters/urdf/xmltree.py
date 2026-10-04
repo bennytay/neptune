@@ -9,7 +9,8 @@ elements and an attribute or text run longer than ``MAX_VALUE_CHARS``. Expat's o
 amplification protection never comes into play, because no entity is ever defined.
 
 ``serialize`` writes a tree back as canonical XML and fills in each element's range in the bytes
-it wrote: that is how an expansion's records cite the expansion (ADR 0039 §4).
+it wrote: that is how an expansion's records cite the expansion (ADR 0039 §4). Given a budget, it
+stops with ``TooLarge`` as soon as it has written more, so it never holds much more than that.
 """
 
 import xml.parsers.expat
@@ -191,15 +192,22 @@ def _escape(text: str, attribute: bool) -> str:
     return text
 
 
+class TooLarge(Exception):
+    """The serialisation passed its budget; what was written is dropped."""
+
+
 class _Writer:
-    def __init__(self) -> None:
+    def __init__(self, budget: int | None) -> None:
         self.parts: list[bytes] = []
         self.size = 0
+        self.budget = budget
 
     def write(self, text: str) -> None:
         data = text.encode("utf-8")
-        self.parts.append(data)
         self.size += len(data)
+        if self.budget is not None and self.size > self.budget:
+            raise TooLarge(self.budget)
+        self.parts.append(data)
 
     def element(self, element: Element, depth: int) -> None:
         indent = "  " * depth
@@ -229,14 +237,14 @@ class _Writer:
 XML_DECLARATION: Final = '<?xml version="1.0" encoding="UTF-8"?>\n'
 
 
-def serialize(root: Element) -> bytes:
+def serialize(root: Element, budget: int | None = None) -> bytes:
     """``root`` as canonical UTF-8 XML; sets every element's ``start`` and ``end`` in it.
 
     Attributes keep their order, whitespace-only text between elements is replaced by one newline
     and two spaces per level, any other text is written exactly, and nothing else is added. The
-    same tree always gives the same bytes.
+    same tree always gives the same bytes. ``TooLarge`` once more than ``budget`` bytes are written.
     """
-    writer = _Writer()
+    writer = _Writer(budget)
     writer.write(XML_DECLARATION)
     writer.element(root, 0)
     writer.write("\n")

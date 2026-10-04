@@ -51,7 +51,7 @@ from neptune.adapters.contract import (
 )
 from neptune.adapters.urdf import xacro
 from neptune.adapters.urdf.description import describe
-from neptune.adapters.urdf.xmltree import Element, XmlError, parse, serialize
+from neptune.adapters.urdf.xmltree import Element, TooLarge, XmlError, parse, serialize
 from neptune.identity.findings import ingest_finding
 from neptune.identity.hashing import content_id
 from neptune.identity.provenance import evidence_record_id
@@ -431,12 +431,13 @@ class UrdfAdapter:
             bound, most = "max_expansion_ratio times the source's size", ratio * source.size
         try:
             try:
+                # Both stop as soon as their output passes the bound, so memory stays near it.
                 expansion = xacro.expand(root, max_chars=most, chars_bound=bound, **limits)
-                expanded = serialize(expansion.root)
+                expanded = serialize(expansion.root, budget=most)
             except RecursionError:  # a safety net: the bounds keep well inside the limit
                 raise xacro.ExpansionLimit("nests deeper than Python can follow", 0, root) from None
-            if len(expanded) > most:
-                raise xacro.ExpansionLimit(f"is larger than {bound}", most, root)
+            except TooLarge:
+                raise xacro.ExpansionLimit(f"is larger than {bound}", most, root) from None
         except xacro.ExpansionLimit as limit:
             finding = _finding(
                 config,
@@ -495,6 +496,10 @@ def _argument(
         text: ParameterValue = argument.value
         value = Known(text, cited)
     else:
+        # A stated empty default (``default=""``, common for a name prefix) did expand as "", but
+        # canonical text is never blank (``check_text``; ``Knowledge`` maps a blank to Unknown), so
+        # Known("") cannot be recorded. Unknown here means "declared blank", cited to the
+        # declaration; the expansion's digest still covers the "" it used.
         value = Unknown(cited)
     return DeclaredParameter(argument.name, value, NotApplicable())
 

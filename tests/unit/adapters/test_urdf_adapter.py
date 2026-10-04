@@ -424,7 +424,8 @@ def test_what_needs_ros_or_another_file_is_not_covered_never_guessed() -> None:
     (expansion,) = records(output, DescriptionExpansion)
     arguments = {a.name: a.value for a in expansion.arguments}
     assert isinstance(arguments["serial_port"], NotCovered)
-    assert isinstance(arguments["prefix"], Unknown)  # declared empty
+    # Declared empty: canonical text is never blank, so the stated "" is Unknown, not Known("").
+    assert isinstance(arguments["prefix"], Unknown)
     assert arguments["use_sim"].known_or_raise() == "false"
     joints = components(output, ComponentCategory.JOINT)
     imu = spec(output, joints["imu_joint"])
@@ -573,6 +574,49 @@ def test_an_expansion_is_bounded_against_its_source_exactly() -> None:
     # max_bytes still bounds it when it is the smaller.
     (finding,) = run(data, max_bytes=len(data), max_expansion_ratio=1000).findings()
     assert finding.code == "urdf.limit_exceeded" and "max_bytes" in finding.message
+
+
+def name_bomb(body: bytes, levels: int) -> bytes:
+    """``body`` doubled through ``levels`` nested macros: 2**(levels-1) copies of it."""
+    macros = [b'<xacro:macro name="m0" params=""><link name="l"/>' + body + b"</xacro:macro>"]
+    macros += [
+        b'<xacro:macro name="m%d" params=""><xacro:m%d/><xacro:m%d/></xacro:macro>'
+        % (level, level - 1, level - 1)
+        for level in range(1, levels)
+    ]
+    return (
+        b'<robot name="r" xmlns:xacro="http://www.ros.org/wiki/xacro">'
+        + b"".join(macros)
+        + b"<xacro:m%d/></robot>" % (levels - 1)
+    )
+
+
+@pytest.mark.parametrize(
+    "body", [b"<t" + b"a" * 30_000 + b"/>", b"<x " + b"a" * 30_000 + b'="1"/>'], ids=["tag", "attr"]
+)
+def test_long_names_count_against_the_expansion_bound_and_memory_stays_near_it(body: bytes) -> None:
+    import tracemalloc
+
+    data = name_bomb(body, 12)  # 31 KB of source; unbounded, a 123 MB expansion
+    tracemalloc.start()
+    try:
+        output = run(data)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert codes(output) == ["urdf.limit_exceeded"] and not output.records()
+    bound = 64 * len(data)  # the default max_expansion_ratio's bound, about 2 MB
+    assert peak < 4 * bound
+
+
+def test_serialising_stops_as_soon_as_it_passes_its_budget() -> None:
+    from neptune.adapters.urdf.xmltree import TooLarge
+
+    root = parse(fixture("robots/arm6.urdf"), max_depth=64, max_elements=10_000)
+    size = len(serialize(root))
+    assert len(serialize(root, budget=size)) == size
+    with pytest.raises(TooLarge):
+        serialize(root, budget=size - 1)
 
 
 def test_an_attribute_at_the_limit_is_read_and_one_past_it_is_not() -> None:

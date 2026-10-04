@@ -243,6 +243,15 @@ def _parse_param(token: str) -> tuple[str, tuple[bool, str | None] | None]:
 
 # --- The expander ------------------------------------------------------------------------------
 
+# The least markup the writer adds around a name: ``<tag/>`` and `` name=""``. Counting it with the
+# names and values keeps the count at or under the serialised size, so a bound is never met early,
+# and makes long tag and attribute names count, so a macro repeating them is stopped too.
+_ATTRIBUTE_MARKUP: Final = 4
+
+
+def _markup(tag: str) -> int:
+    return len(tag) + 3
+
 
 class _Expander:
     def __init__(self, max_elements: int, max_depth: int, max_chars: int, chars_bound: str) -> None:
@@ -279,8 +288,9 @@ class _Expander:
         if self.steps > MAX_STEPS:
             raise ExpansionLimit("takes more steps than the limit", MAX_STEPS, element)
 
-    def produced(self, text: str, element: Element) -> None:
-        self.chars += len(text)
+    def produced(self, chars: int, element: Element) -> None:
+        """Count ``chars`` of output; past the bound the expansion stops before it grows more."""
+        self.chars += chars
         if self.chars > self.max_chars:
             raise ExpansionLimit(f"is larger than {self.chars_bound}", self.max_chars, element)
 
@@ -448,6 +458,7 @@ class _Expander:
 
     def expand(self, root: Element) -> Element:
         out = Element(root.tag, [])
+        self.produced(_markup(root.tag), root)
         symbols, macros = _Symbols(None), _Macros(None)
         self.attributes(root, out, symbols)
         self.children(out, root, macros, symbols, 1)
@@ -462,7 +473,7 @@ class _Expander:
             except Unresolved as unresolved:
                 result = value
                 out.unresolved[name] = unresolved.state
-            self.produced(result, source)
+            self.produced(len(name) + len(result) + _ATTRIBUTE_MARKUP, source)
             out.attributes.append((name, result))
 
     def children(
@@ -481,7 +492,7 @@ class _Expander:
                 except Unresolved as unresolved:
                     text = node
                     out.unresolved["#text"] = unresolved.state
-                self.produced(text, source)
+                self.produced(len(text), source)
                 out.children.append(text)
             else:
                 self.node(out, node, macros, symbols, depth)
@@ -509,6 +520,7 @@ class _Expander:
             self.elements += 1
             if self.elements > self.max_elements:
                 raise ExpansionLimit("has more elements than max_elements", self.max_elements, node)
+            self.produced(_markup(node.tag), node)
             element = Element(node.tag, [])
             self.attributes(node, element, symbols)
             self.children(element, node, macros, symbols, depth + 1)
@@ -693,7 +705,7 @@ class _Expander:
                 self.count(copied, node, depth)
             else:  # a block's own text is output too, once per insertion
                 self.step(node)
-                self.produced(copied, node)
+                self.produced(len(copied), node)
             out.children.append(copied)
 
     def count(self, element: Element, node: Element, depth: int) -> None:
@@ -707,8 +719,9 @@ class _Expander:
             self.elements += 1
             if self.elements > self.max_elements:
                 raise ExpansionLimit("has more elements than max_elements", self.max_elements, node)
-            for value in (*(v for _, v in current.attributes), current.text()):
-                self.produced(value, node)
+            self.produced(_markup(current.tag) + len(current.text()), node)
+            for name, value in current.attributes:
+                self.produced(len(name) + len(value) + _ATTRIBUTE_MARKUP, node)
             stack.extend((child, level + 1) for child in current.elements())
 
     def call(

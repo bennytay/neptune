@@ -253,10 +253,11 @@ def test_recursion_and_explosions_stop_at_the_bounds() -> None:
         run('<xacro:macro name="n"><a><xacro:n/></a></xacro:macro><xacro:n/>', max_depth=10)
     with pytest.raises(ExpansionLimit, match="larger than max_bytes"):
         run('<link name="l" a="' + "x" * 200 + '"/>', max_chars=100)
-    # A ** block's own text counts at every insertion, not only where the call gives it.
+    # A ** block's own text counts at every insertion, not only where the call gives it (and its
+    # tags count too: 11 <c>s of 80 characters, <g> and <robot> stay under 1000).
     inserts = '<xacro:insert_block name="b"/>' * 10
     body = f'<xacro:macro name="m" params="**b"><g>{inserts}</g></xacro:macro><xacro:m><c>'
-    assert run(body + "x" * 90 + "</c></xacro:m>", max_chars=1000)
+    assert run(body + "x" * 80 + "</c></xacro:m>", max_chars=1000)
     with pytest.raises(ExpansionLimit, match="larger than max_bytes"):
         run(body + "x" * 200 + "</c></xacro:m>", max_chars=1000)
 
