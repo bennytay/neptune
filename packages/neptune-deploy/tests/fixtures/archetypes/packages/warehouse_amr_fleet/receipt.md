@@ -1,12 +1,12 @@
 # Ingest receipt
 
-Receipt `rec:sha256:9789947d5096e9c020bd9e0eeaf61a18380beae68b2eaaf457c16c4ea2908481`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:5f304db8596f01a068d2f3b50ad6c291af514a7a4c8f3bd747389381c6de383f`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 25 seen, 25 read, 0 not read, 0 gone
 - Runs: 8; streams: 21; entities: 0
-- Findings: 1 errors, 6 warnings, 32 info; ambiguous fields: 0
+- Findings: 1 errors, 22 warnings, 48 info; ambiguous fields: 0
 
 ## Sources
 
@@ -45,6 +45,7 @@ Receipt `rec:sha256:9789947d5096e9c020bd9e0eeaf61a18380beae68b2eaaf457c16c4ea290
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
 | `geojson` | `0.1.0` | `sha256:542c42fe020a` | none | `rec:2c0e605ea2be` |
 | `mcap` | `0.2.0` | `sha256:2a8c92ad6f72` | lz4 4.4.5, zstandard 0.25.0 | `rec:020b1b8799e7` |
+| `neptune.bindings` | `0.1.0` | `sha256:dbfdd73f0250` | none | `rec:eeeae4b50647` |
 | `neptune.clocks` | `0.1.0` | `sha256:8abe788c243b` | none | `rec:813f84ae2b74` |
 | `neptune.frames` | `0.1.0` | `sha256:44136fa355b3` | none | `rec:eea7c92058c7` |
 | `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:5a4dc4d9d1f4` |
@@ -65,7 +66,7 @@ Receipt `rec:sha256:9789947d5096e9c020bd9e0eeaf61a18380beae68b2eaaf457c16c4ea290
 | `configuration_value` | 115 |
 | `document_block` | 34 |
 | `document_record` | 4 |
-| `ingest_finding` | 39 |
+| `ingest_finding` | 71 |
 | `run` | 8 |
 | `run_assembly` | 1 |
 | `source_artifact` | 25 |
@@ -75,7 +76,7 @@ Receipt `rec:sha256:9789947d5096e9c020bd9e0eeaf61a18380beae68b2eaaf457c16c4ea290
 | `structured_record` | 60 |
 | `structured_table` | 14 |
 | `timestamp_domain` | 36 |
-| `transform_record` | 14 |
+| `transform_record` | 15 |
 
 ## Runs
 
@@ -126,6 +127,22 @@ Receipt `rec:sha256:9789947d5096e9c020bd9e0eeaf61a18380beae68b2eaaf457c16c4ea290
 - **error** `mcap.truncated` (corrupt): the file ends inside a chunk: 1507 of its bytes are there, and 5 message(s) are read from them · `rec:ba090e403418`
 - **warning** `config.duplicate_key` (inconsistent): 2 entries repeat a key of their mapping; each is kept in source order (first: '/controller_server/ros__parameters/max_vel_x') · `rec:7ee22e82dd5d`
 - **warning** `mcap.chunk_truncated` (corrupt): the chunk is cut short: its stored bytes decode to 1458 of its 2965 bytes, whose whole records end at 1151; only those records are read, unchecked by its CRC · `rec:f70315288875`
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:0aca39ee0f1c`
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:58f6723b5cc3`
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:8f0273a5ffd3`
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:be30338974b5`
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:bf00dd5a25ce`
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:cc2c54c80abb`
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:dd827bdc5098`
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:e810f203e7bb`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:1a510085125e`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:1c3c458df1d3`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:2896ba2ed677`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:3bf780cd7da5`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:41e5c0620adc`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:48750a7ed2e9`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:876966c8efdd`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:d229443f1fb9`
 - **warning** `neptune.introspection.definition_unreadable` (unsupported): the stream's definition cannot be used: the definition is not one byte range · `rec:1c4eb3c5948e`
 - **warning** `neptune.introspection.definition_unreadable` (unsupported): the stream's definition cannot be used: the definition is not one byte range · `rec:331368f51f35`
 - **warning** `neptune.introspection.definition_unreadable` (unsupported): the stream's definition cannot be used: the definition is not one byte range · `rec:ba0b6d23c6ac`
@@ -144,6 +161,22 @@ Receipt `rec:sha256:9789947d5096e9c020bd9e0eeaf61a18380beae68b2eaaf457c16c4ea290
 - **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded (message encoding 'json' is not ROS 1 or CDR); each row cites its message · `rec:dc70fadd71a1`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded (message encoding 'json' is not ROS 1 or CDR); each row cites its message · `rec:f528702a7e89`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded (message encoding 'json' is not ROS 1 or CDR); each row cites its message · `rec:fd74eb5e0284`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:139ce8f8e388`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:2010b40e3622`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:29dba1a56714`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:3560f65b3adc`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:4a953aab06f5`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:4fc27ff7ed50`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:533832eaf556`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:63917ada8001`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:7ef76ec8d547`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:8ccd5458d1f8`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:8ce2d5b6fdce`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:c5d9793314a1`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:d22b13da61f6`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:d5d502ac0b4b`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:ef08f87ac83a`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:fb10d3d12c2f`
 - **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:0e8caa694531`
 - **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:88acc34e270a`
 - **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:a75cac171fc0`

@@ -1,12 +1,12 @@
 # Ingest receipt
 
-Receipt `rec:sha256:9124d754d67450945904b5c16eb22616f794fccfcb6615ceaff19a9cbe6b206f`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:e28fdb597cb271a290292dc3668bdbd991d1bd14ce7d5691ed381b93c0578c2e`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
 - Sources: 15 seen, 15 read, 0 not read, 0 gone
 - Runs: 2; streams: 2; entities: 0
-- Findings: 0 errors, 0 warnings, 5 info; ambiguous fields: 4
+- Findings: 0 errors, 4 warnings, 9 info; ambiguous fields: 4
 
 ## Sources
 
@@ -34,6 +34,7 @@ Receipt `rec:sha256:9124d754d67450945904b5c16eb22616f794fccfcb6615ceaff19a9cbe6b
 |---|---|---|---|---|
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
 | `mcap` | `0.2.0` | `sha256:2a8c92ad6f72` | lz4 4.4.5, zstandard 0.25.0 | `rec:020b1b8799e7` |
+| `neptune.bindings` | `0.1.0` | `sha256:dbfdd73f0250` | none | `rec:eeeae4b50647` |
 | `neptune.clocks` | `0.1.0` | `sha256:8abe788c243b` | none | `rec:813f84ae2b74` |
 | `neptune.frames` | `0.1.0` | `sha256:44136fa355b3` | none | `rec:ebb96c0ca1d5` |
 | `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:5a4dc4d9d1f4` |
@@ -53,7 +54,7 @@ Receipt `rec:sha256:9124d754d67450945904b5c16eb22616f794fccfcb6615ceaff19a9cbe6b
 | `configuration_value` | 66 |
 | `document_block` | 43 |
 | `document_record` | 4 |
-| `ingest_finding` | 5 |
+| `ingest_finding` | 13 |
 | `run` | 2 |
 | `run_assembly` | 1 |
 | `source_artifact` | 15 |
@@ -62,7 +63,7 @@ Receipt `rec:sha256:9124d754d67450945904b5c16eb22616f794fccfcb6615ceaff19a9cbe6b
 | `structured_record` | 46 |
 | `structured_table` | 15 |
 | `timestamp_domain` | 5 |
-| `transform_record` | 12 |
+| `transform_record` | 13 |
 
 ## Runs
 
@@ -85,6 +86,14 @@ Receipt `rec:sha256:9124d754d67450945904b5c16eb22616f794fccfcb6615ceaff19a9cbe6b
 
 ## Findings
 
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:9673a984e5d7`
+- **warning** `neptune.bindings.no_software_identity` (missing): the run has no software identity: no software, build, firmware or checkpoint record is bound to it · `rec:ba2ff09bf5f6`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:3f6c23ebe497`
+- **warning** `neptune.bindings.snapshot_unresolved` (missing): no configuration_snapshot record is bound to the run: the binding is unresolved · `rec:664008adf4d6`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:53d68d01e0c9`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:cab2549c8d46`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no calibration record is bound to the run: the binding is unresolved · `rec:dc4552190c10`
+- **info** `neptune.bindings.snapshot_unresolved` (missing): no hardware_configuration record is bound to the run: the binding is unresolved · `rec:ef9a66ddeec5`
 - **info** `neptune.clocks.latency_unbounded` (missing): 3 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:f78839ae7718`
 - **info** `neptune.clocks.unsynchronised` (missing): the package's clocks form 2 groups that no clock mapping joins; times in different groups cannot be compared · `rec:c3402a3f8f6d`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:182da7bcdc08`

@@ -1,0 +1,28 @@
+{
+  "format": "neptune.assertions",
+  "version": 1,
+  "assertions": [
+    {
+      "id": {"namespace": "cell-4.commissioning", "value": "BL-ACCEPT-0003"},
+      "assertion_type": "accept_baseline",
+      "author": {"namespace": "acme.integrator", "value": "r.tanaka"},
+      "authored_at": "2026-08-27T16:05:00.500Z",
+      "scope": [
+        "rec:sha256:db51ab20577a4798da4bc4014bb82c195f9ca6e5d3cd7fe9f455c4dbeeb1ec94",
+        {"namespace": "cell-4.commissioning", "value": "CB-2026-014"}
+      ],
+      "payload": {"baseline": "hand-eye calibration and TCP", "tolerances": {"tcp_position_mm": 0.5, "tcp_rotation_deg": 0.2}},
+      "rationale": "Hand-eye residuals and the TCP check are inside the commissioning tolerances; accepted as cell 4's baseline.",
+      "signature": "sha256-rsa:5f1c0e2a9b",
+      "ticket": {"namespace": "servicenow.acme", "value": "CHG0031187"}
+    },
+    {
+      "id": {"namespace": "cell-4.commissioning", "value": "BL-REJECT-0002"},
+      "assertion_type": "reject_baseline",
+      "author": {"namespace": "acme.integrator", "value": "r.tanaka"},
+      "authored_at": "2026-08-26",
+      "scope": [{"namespace": "cell-4.commissioning", "value": "CB-2026-013"}],
+      "rationale": "Gripper changed after this baseline was recorded."
+    }
+  ]
+}
