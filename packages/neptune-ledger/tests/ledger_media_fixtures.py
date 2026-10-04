@@ -29,7 +29,7 @@ import sys
 import tarfile
 import zlib
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 FIXTURES: Final = Path(__file__).parent / "fixtures" / "media"
 START: Final = 1_790_762_401_000_000_000  # ns on each recording's log clock
@@ -238,6 +238,33 @@ def build() -> dict[str, bytes]:
         "sites.parquet": sites_parquet(),
         "leg_calibration.tar": leg_calibration(),
     }
+
+
+def rewrite_mcap(data: bytes, **options: Any) -> bytes:
+    """The recording's messages written again with other writer options (same bytes per message)."""
+    from mcap.reader import make_reader
+    from mcap.writer import Writer
+
+    out = io.BytesIO()
+    writer = Writer(out, **options)
+    writer.start(profile="ros2", library="neptune-ledger tests")
+    schemas: dict[int, int] = {}
+    channels: dict[int, int] = {}
+    for schema, channel, message in make_reader(io.BytesIO(data)).iter_messages(
+        log_time_order=False
+    ):
+        assert schema is not None
+        if schema.id not in schemas:
+            schemas[schema.id] = writer.register_schema(schema.name, schema.encoding, schema.data)
+        if channel.id not in channels:
+            channels[channel.id] = writer.register_channel(
+                channel.topic, channel.message_encoding, schemas[schema.id], channel.metadata
+            )
+        writer.add_message(
+            channels[channel.id], message.log_time, message.data, message.publish_time
+        )
+    writer.finish()  # type: ignore[no-untyped-call]
+    return out.getvalue()
 
 
 def fixture(name: str) -> bytes:

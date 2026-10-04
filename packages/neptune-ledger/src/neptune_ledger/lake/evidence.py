@@ -241,6 +241,13 @@ class SourceReader:
             self._sources, self._content, span, self._chunk_size, self._chunks, self._size
         )
 
+    def whole(self) -> "SourceReader":
+        """A reader of the whole source this span lies in, verified the same way."""
+        span = ByteSpan(0, self._size)
+        return SourceReader(
+            self._sources, self._content, span, self._chunk_size, self._chunks, self._size
+        )
+
     def file(self, max_read: int) -> io.BufferedReader:
         """The span as a seekable binary file, nothing read until asked.
 

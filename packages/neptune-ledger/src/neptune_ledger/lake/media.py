@@ -31,7 +31,6 @@ from typing import Any, BinaryIO, Final, Literal
 import pyarrow as pa
 
 from neptune.identity import canonical_json
-from neptune.model.provenance import ByteRange
 from neptune_ledger.api.types import EvidenceAnchor
 from neptune_ledger.catalog.migrate import tenant_schema
 from neptune_ledger.lake.decode import (
@@ -42,6 +41,7 @@ from neptune_ledger.lake.decode import (
     Limits,
     Variant,
     check_variant,
+    cited_bytes,
     decode,
     transform_for,
 )
@@ -130,20 +130,33 @@ class Artefact:
 
 @dataclass(frozen=True)
 class SourceSlice:
-    """The ``bytes`` variant: the cited span of the source itself, read lazily and verified."""
+    """The ``bytes`` variant: the bytes every byte_range step of the locator addresses.
+
+    When no step needed decompression they are read lazily from the source, verified per
+    chunk (``reader``). When one did (a record inside a compressed MCAP chunk, a member of a
+    compressed archive) they are the decoded bytes (``data``), and ``inflated`` names each
+    decompression applied, so they are never mistaken for stored bytes.
+    """
 
     evidence: EvidenceBytes
-    reader: SourceReader
+    reader: SourceReader | None
+    data: bytes | None = None
+    inflated: tuple[str, ...] = ()
 
     @property
     def size(self) -> int:
-        return self.reader.size
+        return self.reader.size if self.reader is not None else len(self.data or b"")
 
     def read_range(self, offset: int, length: int) -> bytes | MediaFinding:
-        return self.reader.read_range(offset, length)
+        if self.reader is not None:
+            return self.reader.read_range(offset, length)
+        if offset < 0 or length < 0 or offset + length > self.size:
+            detail = f"[{offset!r}, +{length!r}) is outside the {self.size} cited bytes"
+            return MediaFinding("invalid_request", self.evidence.evidence_ref.source, detail)
+        return (self.data or b"")[offset : offset + length]
 
     def read(self) -> bytes | MediaFinding:
-        return self.reader.read_all()
+        return self.read_range(0, self.size)
 
 
 @dataclass(frozen=True)
@@ -290,10 +303,8 @@ class Hydration:
         steps = parse_locator(self.evidence_ref)
         if isinstance(steps, MediaFinding):
             return Hydrated(None, (steps,))
-        # The innermost inner step decides the variant: a lone byte_range leaves none, so only
-        # ``bytes`` can be read from it.
-        inner = steps[1:] if isinstance(steps[0], ByteRange) else steps
-        problem = check_variant(self.variant, inner, subject)
+        # The innermost step decides the variant.
+        problem = check_variant(self.variant, steps, subject)
         if problem is not None:
             return Hydrated(None, (problem,))
         if self.variant == "bytes":
@@ -307,7 +318,13 @@ class Hydration:
         evidence = self.resolve()
         if evidence.status != "resolved":
             return Hydrated(None, evidence.findings)
-        return Hydrated(SourceSlice(evidence, evidence.open()), evidence.findings)
+        subject = str(self.evidence_ref.source)[:200]
+        try:
+            cited = cited_bytes(evidence.inner, evidence.open(), subject, self._media.limits)
+        except (DecodeFailure, ReadFailure) as failed:
+            return Hydrated(None, (*evidence.findings, failed.finding))
+        made = SourceSlice(evidence, cited.reader, cited.data, cited.inflated)
+        return Hydrated(made, evidence.findings)
 
     def _artefact(self, subject: str) -> Hydrated:
         variant: Variant = self.variant  # type: ignore[assignment]

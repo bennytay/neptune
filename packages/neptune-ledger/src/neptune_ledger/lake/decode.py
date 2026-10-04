@@ -26,11 +26,14 @@ encoding this version cannot decode, ``invalid_request`` for a citation the byte
 ``unsafe_entry`` for a decompression or pixel bomb.
 """
 
+import bz2
 import codecs
+import decimal
 import functools
 import hashlib
 import io
 import json
+import lzma
 import math
 import re
 import threading
@@ -63,7 +66,9 @@ DECODER_VERSION: Final = "1.0.0"
 PAGE_SCALE: Final = 2.0
 
 _ENDS: Final[Mapping[str, tuple[type, ...]]] = {
-    "frame": (RecordRange,),
+    # A frame is cited by its time (record_range) or, as the compiler cites a message, by the
+    # byte_range of its Message record (inside a Chunk's records when chunked).
+    "frame": (RecordRange, ByteRange),
     "image_region": (ImageRegion,),
     "page": (Page, PageRegion),
     "row": (Row, RowCell),
@@ -101,6 +106,9 @@ class Limits:
 
     max_decoded_bytes: int = 256 * 1024 * 1024
     max_pixels: int = 64 * 1024 * 1024
+    # A JSON or YAML document a pointer is resolved in: the compiler's own limit for parsed
+    # documents (its config and calibration adapters' ``max_bytes``).
+    max_document_bytes: int = 8 * 1024 * 1024
 
 
 DEFAULT_LIMITS: Final = Limits()
@@ -151,12 +159,19 @@ class DecodeFailure(Exception):
 
 
 def check_variant(variant: str, steps: tuple[Locator, ...], subject: str) -> MediaFinding | None:
-    """Why ``variant`` cannot be extracted from these inner steps, or None."""
+    """Why ``variant`` cannot be extracted by a locator of these steps (all of them), or None."""
     if variant not in VARIANTS:
         return MediaFinding(
             "invalid_request", subject, f"no variant {variant!r}; one of {VARIANTS}"
         )
     if variant == "bytes":
+        beyond = [step.kind for step in steps if not isinstance(step, ByteRange)]
+        if beyond:
+            detail = (
+                f"bytes serves what byte_range steps address; this locator also has {beyond[0]},"
+                " which a decoding variant reads"
+            )
+            return MediaFinding("invalid_request", subject, detail)
         return None
     ends = _ENDS[variant]
     if not steps or not isinstance(steps[-1], ends):
@@ -170,10 +185,30 @@ def check_variant(variant: str, steps: tuple[Locator, ...], subject: str) -> Med
 
 
 class _Scope:
-    """Bytes a step addresses: the verified source span, lazily, or bytes decoded from it."""
+    """Bytes a step addresses: the verified source span, lazily, or bytes decoded from it.
 
-    def __init__(self, reader: SourceReader | None, data: bytes | None, limits: Limits) -> None:
+    ``origin`` is the whole source: when it is an MCAP file, a scope that is exactly one Chunk
+    record is that chunk's records once decoded (root ADR 0034: the compiler cites a record
+    inside a chunk as a byte_range of the Chunk record, then one in its uncompressed records).
+    ``inflated`` names each decompression applied on the way here.
+    """
+
+    def __init__(
+        self,
+        reader: SourceReader | None,
+        data: bytes | None,
+        limits: Limits,
+        *,
+        origin: "_Origin | None" = None,
+        inflated: tuple[str, ...] = (),
+    ) -> None:
         self._reader, self._data, self._limits = reader, data, limits
+        self.origin, self.inflated = origin, inflated
+
+    @property
+    def reader(self) -> SourceReader | None:
+        """The verified reader when no decompression has happened, else None."""
+        return self._reader
 
     @property
     def size(self) -> int:
@@ -193,38 +228,89 @@ class _Scope:
             f.seek(max(0, self.size - n))
             return f.read(n)
 
-    def whole(self, subject: str, what: str) -> bytes:
-        if self._data is not None:
-            return self._data
-        if self.size > self._limits.max_decoded_bytes:
-            limit = self._limits.max_decoded_bytes
+    def whole(self, subject: str, what: str, limit: int | None = None) -> bytes:
+        limit = self._limits.max_decoded_bytes if limit is None else limit
+        if self.size > limit:
             detail = f"{what} of {self.size} bytes exceeds the {limit}-byte limit"
             raise DecodeFailure("unsafe_entry", subject, detail)
+        if self._data is not None:
+            return self._data
         with self.file() as f:
             return f.read()
 
+    def _made(self, data: bytes, how: str) -> "_Scope":
+        return _Scope(None, data, self._limits, origin=self.origin, inflated=(*self.inflated, how))
+
     def decoded(self, subject: str) -> "_Scope":
-        """The scope with a gzip stream decompressed; any other bytes as they are."""
-        if self.head(2) != b"\x1f\x8b":
-            return self
+        """The scope a further step addresses inside: an MCAP chunk's records, or a gzip, bzip2,
+        xz or zstd stream decompressed (bounded by ``max_decoded_bytes``); else as it is."""
+        head = self.head(min(self.size, 4096))
+        if head[:1] == b"\x06" and self.origin is not None and self.origin.is_mcap:
+            chunk = _chunk_head(head, self.size)
+            if chunk is not None:
+                return self._chunk(chunk, subject)
+        for magic, how in _STREAMS:
+            if head.startswith(magic):
+                return self._made(self._inflate_stream(how, subject), how)
+        return self
+
+    def _chunk(self, chunk: "_ChunkHead", subject: str) -> "_Scope":
         limit = self._limits.max_decoded_bytes
-        inflate = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        if chunk.uncompressed_size > limit:
+            detail = (
+                f"an MCAP chunk inflating to {chunk.uncompressed_size} bytes exceeds the"
+                f" {limit}-byte limit"
+            )
+            raise DecodeFailure("unsafe_entry", subject, detail)
+        if chunk.compression == "":
+            if chunk.records_length != chunk.uncompressed_size:
+                detail = "an uncompressed MCAP chunk whose records are not its stated size"
+                raise DecodeFailure("undecodable", subject, detail)
+            # Still lazy and verified per source chunk: the records are a range of the scope.
+            return self.slice(ByteRange(chunk.records_offset, chunk.records_length), subject)
+        stored = self.slice(ByteRange(chunk.records_offset, chunk.records_length), subject)
+        data = stored.whole(subject, "an MCAP chunk's stored records")
+        records = _inflate(chunk.compression, data, chunk.uncompressed_size, subject)
+        if chunk.uncompressed_crc and zlib.crc32(records) != chunk.uncompressed_crc:
+            detail = "an MCAP chunk's records do not match its stated CRC"
+            raise DecodeFailure("undecodable", subject, detail)
+        return self._made(records, f"mcap-chunk:{chunk.compression}")
+
+    def _inflate_stream(self, how: str, subject: str) -> bytes:
+        limit = self._limits.max_decoded_bytes
+        if how == "gzip":
+            inflate: Any = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        elif how == "bzip2":
+            inflate = bz2.BZ2Decompressor()
+        elif how == "xz":
+            inflate = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
+        else:
+            inflate = None
+        if inflate is None:  # zstd: one frame, bounded
+            data = self.whole(subject, "a zstd stream")
+            return _inflate_zstd(data, limit, subject, exact=None)
         out = bytearray()
         try:
             with self.file() as f:
                 while block := f.read(min(1 << 20, max(1, limit))):
-                    out += inflate.decompress(block, limit + 1 - len(out))
-                    if len(out) > limit or inflate.unconsumed_tail:
-                        detail = f"the gzip stream inflates past the {limit}-byte limit"
+                    if how == "gzip":
+                        out += inflate.decompress(block, limit + 1 - len(out))
+                        pending = bool(inflate.unconsumed_tail)
+                    else:
+                        out += inflate.decompress(block, max_length=limit + 1 - len(out))
+                        pending = not inflate.needs_input and not inflate.eof
+                    if len(out) > limit or pending:
+                        detail = f"the {how} stream inflates past the {limit}-byte limit"
                         raise DecodeFailure("unsafe_entry", subject, detail)
                     if inflate.eof:
                         break
-                out += inflate.flush()
-        except zlib.error as exc:
-            raise DecodeFailure("undecodable", subject, f"not a gzip stream: {exc}") from exc
+                if how == "gzip":
+                    out += inflate.flush()
+        except (zlib.error, OSError, lzma.LZMAError, EOFError) as exc:
+            raise DecodeFailure("undecodable", subject, f"not a {how} stream: {exc}") from exc
         if not inflate.eof:
-            raise DecodeFailure("undecodable", subject, "the gzip stream is truncated")
-        return _Scope(None, bytes(out), self._limits)
+            raise DecodeFailure("undecodable", subject, f"the {how} stream is truncated")
+        return bytes(out)
 
     def slice(self, step: ByteRange, subject: str) -> "_Scope":
         if step.offset + step.length > self.size:
@@ -233,12 +319,111 @@ class _Scope:
                 f" {self.size}-byte scope"
             )
             raise DecodeFailure("invalid_request", subject, detail)
-        if (
-            self._reader is not None
-        ):  # still lazy: an MCAP inside an archive member is not read whole
-            return _Scope(self._reader.narrow(step.offset, step.length), None, self._limits)
+        if self._reader is not None:  # still lazy: an MCAP inside an archive member is not read
+            narrowed = self._reader.narrow(step.offset, step.length)
+            return _Scope(narrowed, None, self._limits, origin=self.origin, inflated=self.inflated)
         data = (self._data or b"")[step.offset : step.offset + step.length]
-        return _Scope(None, data, self._limits)
+        return _Scope(None, data, self._limits, origin=self.origin, inflated=self.inflated)
+
+
+class _Origin:
+    """The whole source a span lies in, read only when a decoder needs more than the span."""
+
+    def __init__(self, reader: SourceReader, limits: Limits) -> None:
+        self.scope = _Scope(reader, None, limits)
+
+    @functools.cached_property
+    def is_mcap(self) -> bool:
+        return self.scope.head(len(_MCAP_MAGIC)) == _MCAP_MAGIC
+
+
+# Streams decompressed before a further step, by their magic.
+_STREAMS: Final = (
+    (b"\x1f\x8b", "gzip"),
+    (b"BZh", "bzip2"),
+    (b"\xfd7zXZ\x00", "xz"),
+    (b"\x28\xb5\x2f\xfd", "zstd"),
+)
+
+
+@dataclass(frozen=True)
+class _ChunkHead:
+    """An MCAP Chunk record's fields before its records (MCAP spec, opcode 0x06)."""
+
+    uncompressed_size: int
+    uncompressed_crc: int
+    compression: str
+    records_offset: int
+    records_length: int
+
+
+def _chunk_head(head: bytes, size: int) -> _ChunkHead | None:
+    """The Chunk record a scope of ``size`` bytes is exactly, from its first bytes, or None."""
+    if len(head) < 9 + 8 * 3 + 4 + 4 or head[0] != 0x06:
+        return None
+    if int.from_bytes(head[1:9], "little") != size - 9:
+        return None
+    at = 9 + 16
+    uncompressed = int.from_bytes(head[at : at + 8], "little")
+    crc = int.from_bytes(head[at + 8 : at + 12], "little")
+    name_length = int.from_bytes(head[at + 12 : at + 16], "little")
+    at += 16
+    if at + name_length + 8 > len(head):
+        return None
+    try:
+        compression = head[at : at + name_length].decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    at += name_length
+    records_length = int.from_bytes(head[at : at + 8], "little")
+    if at + 8 + records_length != size:
+        return None
+    return _ChunkHead(uncompressed, crc, compression, at + 8, records_length)
+
+
+def _inflate(compression: str, data: bytes, size: int, subject: str) -> bytes:
+    """An MCAP chunk's records: exactly ``size`` bytes, never more than ``size + 1`` produced."""
+    if compression == "zstd":
+        return _inflate_zstd(data, size, subject, exact=size)
+    if compression == "lz4":
+        import lz4.frame
+
+        def run() -> bytes:
+            made: bytes = lz4.frame.LZ4FrameDecompressor().decompress(data, max_length=size + 1)
+            return made
+
+        out = guarded(subject, "not an lz4 frame", run)
+    elif compression == "":
+        out = data
+    else:
+        detail = f"an MCAP chunk compressed with {compression!r}; no decoder"
+        raise DecodeFailure("no_decoder", subject, detail)
+    if len(out) != size:
+        more = "+" if len(out) > size else ""
+        detail = f"an MCAP chunk inflates to {len(out)}{more} bytes, not its stated {size}"
+        raise DecodeFailure("undecodable", subject, detail)
+    return bytes(out)
+
+
+def _inflate_zstd(data: bytes, limit: int, subject: str, *, exact: int | None) -> bytes:
+    import zstandard
+
+    def run() -> bytes:
+        out = bytearray()
+        with zstandard.ZstdDecompressor().stream_reader(data) as stream:
+            while len(out) <= limit and (block := stream.read(min(1 << 20, limit + 1 - len(out)))):
+                out += block
+        return bytes(out)
+
+    out = guarded(subject, "not a zstd stream", run)
+    if exact is None and len(out) > limit:
+        detail = f"the zstd stream inflates past the {limit}-byte limit"
+        raise DecodeFailure("unsafe_entry", subject, detail)
+    if exact is not None and len(out) != exact:
+        more = "+" if len(out) > exact else ""
+        detail = f"an MCAP chunk inflates to {len(out)}{more} bytes, not its stated {exact}"
+        raise DecodeFailure("undecodable", subject, detail)
+    return out  # type: ignore[no-any-return]
 
 
 # --- Entry point -------------------------------------------------------------------------------
@@ -255,7 +440,11 @@ def decode(
 
     Raises ``DecodeFailure`` with the finding, or the reader's ``ReadFailure``.
     """
-    scope = _Scope(reader, None, limits)
+    origin = _Origin(reader.whole(), limits)
+    scope = _Scope(reader, None, limits, origin=origin)
+    if variant == "frame" and (not steps or isinstance(steps[-1], ByteRange)):
+        picture, facts = _message_frame(_walk(scope, steps, subject), origin, subject, limits)
+        return _png(picture, facts)
     image: tuple[Any, dict[str, Any]] | None = None
     for at, step in enumerate(steps[:-1]):
         if isinstance(step, ByteRange):
@@ -274,7 +463,9 @@ def decode(
         picture, facts = _frame(scope.decoded(subject), last, subject, limits)
         return _png(picture, facts)
     if isinstance(last, ImageRegion):
-        if image is None:
+        if image is None and _message_head(scope) is not None and origin.is_mcap:
+            image = _message_frame(scope, origin, subject, limits)
+        elif image is None:
             image = _still(scope.decoded(subject), subject, limits)
         return _png(*_crop(*image, last, subject))
     if isinstance(last, (Page, PageRegion)):
@@ -282,11 +473,46 @@ def decode(
     if isinstance(last, (Row, RowCell)):
         return _row(scope.decoded(subject), last, subject, limits)
     if isinstance(last, JsonPointer):
-        return _pointer(scope.decoded(subject), last, subject)
+        return _pointer(scope.decoded(subject), last, subject, limits)
     if isinstance(last, Span):
         return _span(scope.decoded(subject), last, subject)
     detail = f"this Ledger decodes no {last.kind} step"
     raise DecodeFailure("no_decoder", subject, detail)
+
+
+def _walk(scope: _Scope, steps: tuple[Locator, ...], subject: str) -> _Scope:
+    """The scope a chain of byte_range steps addresses, each inside what the last decodes to."""
+    for step in steps:
+        if not isinstance(step, ByteRange):
+            detail = f"only byte_range steps are followed here, not {step.kind}"
+            raise DecodeFailure("no_decoder", subject, detail)
+        scope = scope.decoded(subject).slice(step, subject)
+    return scope
+
+
+@dataclass(frozen=True)
+class CitedBytes:
+    """The bytes every byte_range step of a locator addresses (the ``bytes`` variant).
+
+    ``reader`` serves them lazily from the source when no step needed decompression; ``data``
+    holds them when one did, and ``inflated`` names each decompression (``mcap-chunk:zstd``,
+    ``gzip``), so a reader knows they are decoded from the stored bytes, not stored as such.
+    """
+
+    reader: SourceReader | None
+    data: bytes | None
+    inflated: tuple[str, ...]
+
+
+def cited_bytes(
+    steps: tuple[Locator, ...], reader: SourceReader, subject: str, limits: Limits = DEFAULT_LIMITS
+) -> CitedBytes:
+    """Follow every inner byte_range step; raises ``DecodeFailure`` or ``ReadFailure``."""
+    origin = _Origin(reader.whole(), limits)
+    scope = _walk(_Scope(reader, None, limits, origin=origin), steps, subject)
+    if scope.reader is not None:
+        return CitedBytes(scope.reader, None, scope.inflated)
+    return CitedBytes(None, scope.whole(subject, "the cited bytes"), scope.inflated)
 
 
 def guarded(subject: str, what: str, call: Callable[[], Any]) -> Any:
@@ -381,7 +607,6 @@ def _frame(
         what = "a ROS 1 bag" if head.startswith(b"#ROSBAG") else "not an MCAP file"
         code: MediaFindingCode = "no_decoder" if head.startswith(b"#ROSBAG") else "undecodable"
         raise DecodeFailure(code, subject, f"a record_range frame needs MCAP; this is {what}")
-    from mcap_ros2.decoder import DecoderFactory
 
     def messages() -> list[Any]:
         with scope.file() as f:
@@ -396,28 +621,94 @@ def _frame(
         )
         raise DecodeFailure("invalid_request", subject, detail)
     schema, channel, message = found[0]
+    return _image_message(schema, channel, bytes(message.data), message.log_time, subject, limits)
+
+
+def _image_message(
+    schema: Any, channel: Any, payload: bytes, log_time: int, subject: str, limits: Limits
+) -> tuple[Any, dict[str, Any]]:
+    """A ROS 2 CDR ``sensor_msgs`` image message's raster, and facts about it."""
+    from mcap_ros2.decoder import DecoderFactory
+
     if schema is None or channel.message_encoding != "cdr" or schema.encoding != "ros2msg":
         encoding = channel.message_encoding
-        detail = f"{step.channel} is {encoding!r}; this Ledger decodes ROS 2 CDR image messages"
+        detail = f"{channel.topic} is {encoding!r}; this Ledger decodes ROS 2 CDR image messages"
         raise DecodeFailure("no_decoder", subject, detail)
 
     def decoded() -> Any:
-        return DecoderFactory().decoder_for(channel.message_encoding, schema)(message.data)  # type: ignore[misc]
+        return DecoderFactory().decoder_for(channel.message_encoding, schema)(payload)  # type: ignore[misc]
 
     body = guarded(subject, "not a decodable ROS 2 message", decoded)
-    facts: dict[str, Any] = {
-        "channel": step.channel,
-        "log_time": message.log_time,
-        "schema": schema.name,
-    }
+    facts: dict[str, Any] = {"channel": channel.topic, "log_time": log_time, "schema": schema.name}
     name = schema.name.replace("/msg/", "/")
     if name == "sensor_msgs/CompressedImage":
         image = _open_image(bytes(body.data), subject, limits)
         return _normalised(image), {**facts, "encoding": str(body.format)}
     if name == "sensor_msgs/Image":
         return _raw_image(body, subject, limits), {**facts, "encoding": str(body.encoding)}
-    detail = f"{step.channel} carries {schema.name}, not an image message"
+    detail = f"{channel.topic} carries {schema.name}, not an image message"
     raise DecodeFailure("no_decoder", subject, detail)
+
+
+@dataclass(frozen=True)
+class _MessageHead:
+    channel_id: int
+    log_time: int
+
+
+def _message_head(scope: _Scope) -> _MessageHead | None:
+    """The Message record (MCAP opcode 0x05) a scope is exactly, or None."""
+    head = scope.head(31)
+    if len(head) < 31 or head[0] != 0x05 or int.from_bytes(head[1:9], "little") != scope.size - 9:
+        return None
+    return _MessageHead(int.from_bytes(head[9:11], "little"), int.from_bytes(head[15:23], "little"))
+
+
+def _message_frame(
+    scope: _Scope, origin: "_Origin", subject: str, limits: Limits
+) -> tuple[Any, dict[str, Any]]:
+    """The image in the Message record a scope is, decoded with its channel's schema, which is
+    looked up in the whole recording: its summary, else one bounded pass over its records."""
+    message = _message_head(scope)
+    if message is None or not origin.is_mcap:
+        detail = "a frame cited by byte ranges must address one MCAP Message record"
+        raise DecodeFailure("invalid_request", subject, detail)
+    payload = scope.whole(subject, "an MCAP message")[31:]
+
+    def declared() -> tuple[Any, Any]:
+        with origin.scope.file() as f:
+            return _declarations(f, message.channel_id, subject, limits.max_decoded_bytes)
+
+    schema, channel = guarded(subject, "not a readable MCAP file", declared)
+    if channel is None:
+        detail = f"the recording declares no channel {message.channel_id}"
+        raise DecodeFailure("undecodable", subject, detail)
+    return _image_message(schema, channel, payload, message.log_time, subject, limits)
+
+
+def _declarations(f: Any, channel_id: int, subject: str, limit: int) -> tuple[Any, Any]:
+    """``(schema, channel)`` of one channel id: from the summary, else the first declarations."""
+    from mcap.reader import SeekingReader
+    from mcap.records import Channel, Chunk, Schema
+    from mcap.stream_reader import StreamReader
+
+    summary = SeekingReader(f, record_size_limit=limit).get_summary()
+    if summary is not None and channel_id in summary.channels:
+        channel = summary.channels[channel_id]
+        return summary.schemas.get(channel.schema_id), channel
+    f.seek(0)
+    schemas: dict[int, Any] = {}
+    found: Any = None
+    for item in StreamReader(f, emit_chunks=True, record_size_limit=limit).records:
+        records = _chunk_records(item, subject, limit) if isinstance(item, Chunk) else [item]
+        for record in records:
+            if isinstance(record, Schema):
+                schemas.setdefault(record.id, record)
+            elif isinstance(record, Channel) and record.id == channel_id and found is None:
+                found = record
+            if found is not None and (found.schema_id == 0 or found.schema_id in schemas):
+                return schemas.get(found.schema_id), found
+    return (schemas.get(found.schema_id) if found is not None else None), found
 
 
 def _mcap_messages(f: Any, step: RecordRange, subject: str, limit: int) -> list[Any]:
@@ -490,26 +781,7 @@ def _chunk_records(chunk: Any, subject: str, limit: int) -> list[Any]:
     if size > limit:
         detail = f"an MCAP chunk inflating to {size} bytes exceeds the {limit}-byte limit"
         raise DecodeFailure("unsafe_entry", subject, detail)
-    if chunk.compression == "":
-        data = bytes(chunk.data)
-    elif chunk.compression == "zstd":
-        import zstandard
-
-        out = bytearray()
-        with zstandard.ZstdDecompressor().stream_reader(bytes(chunk.data)) as stream:
-            while len(out) <= size and (block := stream.read(min(1 << 20, size + 1 - len(out)))):
-                out += block
-        data = bytes(out)
-    elif chunk.compression == "lz4":
-        import lz4.frame
-
-        data = lz4.frame.LZ4FrameDecompressor().decompress(bytes(chunk.data), max_length=size + 1)
-    else:
-        detail = f"an MCAP chunk compressed with {chunk.compression!r}; no decoder"
-        raise DecodeFailure("no_decoder", subject, detail)
-    if len(data) != size:
-        detail = f"an MCAP chunk inflates to {len(data)}+ bytes, not its stated {size}"
-        raise DecodeFailure("undecodable", subject, detail)
+    data = _inflate(chunk.compression, bytes(chunk.data), size, subject)
     return list(breakup_chunk(dataclasses.replace(chunk, compression="", data=data)))
 
 
@@ -788,47 +1060,158 @@ def _csv_row(data: bytes, step: Row | RowCell, subject: str) -> dict[str, Any] |
     return MediaFinding("invalid_request", subject, f"the table has no row {step.row}")
 
 
+# The compiler's Parquet guards (root ADR 0042), mirrored: a footer is bounded and every column
+# chunk read must lie before it and decode to at most ``max_decoded_bytes`` as the footer states.
+_PARQUET_MAGIC: Final = b"PAR1"
+_PARQUET_ENCRYPTED: Final = b"PARE"
+_MAX_FOOTER_BYTES: Final = 16 * 1024 * 1024
+_MAX_LEAF_COLUMNS: Final = 16384
+# Rows are decoded in batches of this many, only the cited row group's cited columns, so a row
+# costs at most one batch of those columns, never the whole group.
+_PARQUET_BATCH_ROWS: Final = 1024
+
+
 def _parquet_row(
     scope: _Scope, step: Row | RowCell, subject: str, limits: Limits
 ) -> dict[str, Any] | MediaFinding:
+    """A row (one cell per leaf column, as the compiler's header lists them) or one cell."""
     import pyarrow.parquet as pq
 
+    size = scope.size
+    tail = scope.tail(8)
+    declared = int.from_bytes(tail[:4], "little")
+    if tail[4:] == _PARQUET_ENCRYPTED:
+        return MediaFinding("no_decoder", subject, "an encrypted Parquet footer is not read")
+    if declared > size - 12:
+        detail = f"the footer declares {declared} bytes, more than the file holds before it"
+        return MediaFinding("undecodable", subject, detail)
+    if declared > _MAX_FOOTER_BYTES:
+        detail = f"the footer declares {declared} bytes, over {_MAX_FOOTER_BYTES}"
+        return MediaFinding("unsafe_entry", subject, detail)
+    footer_start = size - 8 - declared
     with scope.file() as f:
-        parquet = pq.ParquetFile(f)
+        parquet = pq.ParquetFile(
+            f,
+            pre_buffer=False,
+            buffer_size=1 << 20,
+            thrift_string_size_limit=_MAX_FOOTER_BYTES,
+            arrow_extensions_enabled=False,
+        )
         meta = parquet.metadata
+        leaves: list[str | None] = [meta.schema.column(i).path for i in range(meta.num_columns)]
+        if len(leaves) > _MAX_LEAF_COLUMNS:
+            detail = f"the schema declares {len(leaves)} leaf columns, over {_MAX_LEAF_COLUMNS}"
+            return MediaFinding("unsafe_entry", subject, detail)
         if step.row >= meta.num_rows:
             return MediaFinding("invalid_request", subject, f"the table has no row {step.row}")
-        names: list[str | None] = list(parquet.schema_arrow.names)
-        problem = _cell_column(step, len(names), names, subject)
+        problem = _cell_column(step, len(leaves), leaves, subject)
         if problem is not None:
             return problem
         first = 0
         for group in range(meta.num_row_groups):
             rows = meta.row_group(group).num_rows
+            if rows < 0:
+                return MediaFinding(
+                    "undecodable", subject, f"row group {group} declares {rows} rows"
+                )
             if step.row < first + rows:
                 break
             first += rows
         else:
             detail = f"the footer states {meta.num_rows} rows; its row groups hold {first}"
             return MediaFinding("undecodable", subject, detail)
-        size, limit = meta.row_group(group).total_byte_size, limits.max_decoded_bytes
-        if size > limit:
-            detail = f"row group {group} of {size} bytes exceeds the {limit}-byte limit"
-            return MediaFinding("unsafe_entry", subject, detail)
-        table = parquet.read_row_group(group)
-        if table.num_rows != rows:
-            detail = f"row group {group} holds {table.num_rows} rows, its footer states {rows}"
+        columns = [step.column] if isinstance(step, RowCell) else list(range(len(leaves)))
+        tops = {str(leaves[c]).split(".")[0] for c in columns}
+        read = [i for i, leaf in enumerate(leaves) if str(leaf).split(".")[0] in tops]
+        problem = _check_group(meta.row_group(group), group, read, footer_start, subject, limits)
+        if problem is not None:
+            return problem
+        record = _parquet_record(parquet, group, rows, step.row - first, columns, leaves, subject)
+        if isinstance(record, MediaFinding):
+            return record
+    return {"cells": record, "format": "parquet", "row": step.row}
+
+
+def _check_group(
+    meta: Any, group: int, columns: list[int], footer_start: int, subject: str, limits: Limits
+) -> MediaFinding | None:
+    if meta.num_columns <= max(columns, default=-1):
+        detail = f"row group {group} declares {meta.num_columns} column chunks"
+        return MediaFinding("undecodable", subject, detail)
+    total = 0
+    for column in columns:
+        chunk = meta.column(column)
+        dictionary = chunk.dictionary_page_offset if chunk.has_dictionary_page else None
+        start = (
+            dictionary if isinstance(dictionary, int) and dictionary > 0 else chunk.data_page_offset
+        )
+        end = start + chunk.total_compressed_size
+        if start < len(_PARQUET_MAGIC) or chunk.total_compressed_size < 0 or end > footer_start:
+            detail = (
+                f"row group {group}'s column {column} declares bytes [{start}, {end}), outside"
+                f" the data before the footer at {footer_start}"
+            )
             return MediaFinding("undecodable", subject, detail)
-        record = table.slice(step.row - first, 1)
-        columns = [step.column] if isinstance(step, RowCell) else range(len(names))
-        cells = []
-        for column in columns:
-            field = table.schema.field(column)
-            value = record.column(column).to_pylist()[0]
-            cell: dict[str, Any] = {"column": column, "name": field.name, "type": str(field.type)}
-            cell |= {"null": True} if value is None else {"value": _json_value(value)}
-            cells.append(cell)
-    return {"cells": cells, "format": "parquet", "row": step.row}
+        total += max(0, chunk.total_uncompressed_size)
+    if total > limits.max_decoded_bytes:
+        detail = (
+            f"row group {group}'s cited columns decode to {total} bytes as the footer states,"
+            f" over the {limits.max_decoded_bytes}-byte limit"
+        )
+        return MediaFinding("unsafe_entry", subject, detail)
+    return None
+
+
+def _parquet_record(
+    parquet: Any,
+    group: int,
+    rows: int,
+    index: int,
+    columns: list[int],
+    leaves: list[str | None],
+    subject: str,
+) -> list[dict[str, Any]] | MediaFinding:
+    """The cited cells of row ``index`` of a row group, decoded a batch at a time (each cited
+    leaf's top-level column, whose every leaf ``_check_group`` has bounded)."""
+    tops = sorted({str(leaves[c]).split(".")[0] for c in columns})
+    seen = 0
+    for batch in parquet.iter_batches(
+        batch_size=_PARQUET_BATCH_ROWS, row_groups=[group], columns=tops, use_threads=False
+    ):
+        if seen + batch.num_rows > index:
+            row = batch.slice(index - seen, 1)
+            return [_parquet_cell(row, c, str(leaves[c])) for c in columns]
+        seen += batch.num_rows
+        if seen > rows:
+            break
+    detail = f"row group {group} does not hold the {rows} rows its footer states"
+    return MediaFinding("undecodable", subject, detail)
+
+
+def _parquet_cell(row: Any, column: int, path: str) -> dict[str, Any]:
+    """One leaf's value in a one-row batch: a struct path is followed to the leaf; the stored
+    integer of a date, time, timestamp or duration (its unit and zone are in ``type``); a
+    decimal's exact text. A leaf inside a list or map is not decoded, as in the compiler."""
+    import pyarrow as pa
+    import pyarrow.types as pt
+
+    parts = path.split(".")
+    array = row.column(row.schema.get_field_index(parts[0]))
+    for part in parts[1:]:
+        if not pt.is_struct(array.type) or array.type.get_field_index(part) < 0:
+            return {"column": column, "decoded": False, "name": path, "type": str(array.type)}
+        array = array.field(part)
+    kind = array.type
+    if pt.is_dictionary(kind):
+        array = array.dictionary_decode()
+        kind = array.type
+    if pt.is_timestamp(kind) or pt.is_date(kind) or pt.is_time(kind) or pt.is_duration(kind):
+        array = array.view(pa.int64() if kind.bit_width == 64 else pa.int32())
+    if pt.is_list(kind) or pt.is_large_list(kind) or pt.is_map(kind):
+        return {"column": column, "decoded": False, "name": path, "type": str(kind)}
+    value = array.to_pylist()[0]
+    cell: dict[str, Any] = {"column": column, "name": path, "type": str(kind)}
+    return cell | ({"null": True} if value is None else {"value": _json_value(value)})
 
 
 def _json_value(value: Any) -> Any:
@@ -845,6 +1228,8 @@ def _json_value(value: Any) -> Any:
         return [_json_value(v) for v in value]
     if isinstance(value, dict):
         return {str(k): _json_value(v) for k, v in value.items()}
+    if isinstance(value, decimal.Decimal):
+        return {"decimal": format(value, "f")}
     return {"text": str(value)}
 
 
@@ -875,97 +1260,241 @@ def _text(data: bytes, subject: str) -> str:
         raise DecodeFailure("undecodable", subject, f"not {encoding} text: {exc}") from exc
 
 
-class _Keys(dict[str, Any]):
-    """A JSON object; ``repeated`` names the keys it holds more than once."""
+def _pointer(scope: _Scope, step: JsonPointer, subject: str, limits: Limits) -> Decoded:
+    """The JSON or YAML node a pointer names, as the text it is written as.
 
-    repeated: frozenset[str] = frozenset()
-
-
-def _pairs(pairs: list[tuple[str, Any]]) -> _Keys:
-    made = _Keys(pairs)
-    if len(made) != len(pairs):
-        names = [name for name, _ in pairs]
-        made.repeated = frozenset(name for name in made if names.count(name) > 1)
-    return made
-
-
-def _refuse_constant(name: str) -> Any:
-    raise ValueError(f"{name} is not JSON")
-
-
-def _pointer(scope: _Scope, step: JsonPointer, subject: str) -> Decoded:
-    """A JSON value as canonical JSON, or a YAML node as the text it is written as.
-
-    JSON is typed by its grammar, so its value is re-encoded canonically. A YAML scalar's type
-    depends on the YAML version and schema a reader assumes, so a YAML node is returned verbatim:
-    the document's own text from the node's first character to its last. Keys are matched by
-    their text, as the compiler cites them. A key held twice on the path is ambiguous.
+    The document is at most ``max_document_bytes`` (the compiler's own limit), and it is
+    walked as a stream of tokens or events: nothing is built from it, so memory is the
+    document's text plus its nesting, whatever its shape. The node is returned verbatim, so no
+    reader's typing of a scalar (YAML 1.1 or 1.2, a float's precision) is assumed. Keys are
+    matched by their text, as the compiler cites them; a key held twice on the path is
+    ambiguous.
     """
-    text = _text(scope.whole(subject, "a document"), subject)
-    tokens = [t.replace("~1", "/").replace("~0", "~") for t in step.pointer.split("/")[1:]]
+    data = scope.whole(subject, "a JSON or YAML document", limits.max_document_bytes)
+    text = _text(data, subject)
+    del data
+    tokens = tuple(t.replace("~1", "/").replace("~0", "~") for t in step.pointer.split("/")[1:])
     try:
-        document = json.loads(text, object_pairs_hook=_pairs, parse_constant=_refuse_constant)
-    except ValueError:
-        return _yaml_pointer(text, tokens, step.pointer, subject)
-    except RecursionError as exc:
-        raise DecodeFailure("undecodable", subject, "a JSON document nested too deep") from exc
-    value = document
-    for name in tokens:
-        if isinstance(value, _Keys) and name in value.repeated:
-            detail = f"{step.pointer} passes key {name!r}, which the object holds more than once"
-            raise DecodeFailure("invalid_request", subject, detail)
-        if isinstance(value, dict) and name in value:
-            value = value[name]
-        elif isinstance(value, list) and _is_index(name) and int(name) < len(value):
-            value = value[int(name)]
-        else:
-            detail = f"{step.pointer} does not resolve in the json document"
-            raise DecodeFailure("invalid_request", subject, detail)
-    made = canonical_json.dumps(_json_value(value))
-    return Decoded("application/json", made, {"format": "json", "pointer": step.pointer})
+        found, kind = _json_node(text, tokens, step.pointer, subject), "json"
+    except _NotJson:
+        found, kind = _yaml_node(text, tokens, step.pointer, subject), "yaml"
+    if found is None:
+        detail = f"{step.pointer} does not resolve in the {kind} document"
+        raise DecodeFailure("invalid_request", subject, detail)
+    start, end = found
+    media = "application/json" if kind == "json" else "application/yaml"
+    metadata = {"format": kind, "pointer": step.pointer}
+    return Decoded(media, text[start:end].encode("utf-8"), metadata)
 
 
 def _is_index(token: str) -> bool:
     return token.isascii() and token.isdigit() and (token == "0" or token[0] != "0")
 
 
-def _yaml_pointer(text: str, tokens: list[str], pointer: str, subject: str) -> Decoded:
+class _NotJson(Exception):
+    """The text is not one JSON value (internal: it is then read as YAML)."""
+
+
+@dataclass(eq=False)
+class _Open:
+    """One open container of a streamed walk."""
+
+    mapping: bool
+    start: int
+    matched: bool  # its own path is the pointer's prefix, so a child may lead to the target
+    target: bool  # it is the target
+    as_key: bool = False  # a YAML collection used as a key: skipped whole
+    index: int = 0  # a sequence's next item
+    leads: bool = False  # its current child is on the pointer's path
+    expect_key: bool = True  # a mapping's next node is a key
+    hits: int = 0  # how often its keys matched the next token
+
+
+class _Tracker:
+    """Follows a pointer through a document fed as structural events, building nothing.
+
+    It records the span of the value the pointer names; a container on the path holding the
+    next token twice makes the pointer ambiguous (``invalid_request``).
+    """
+
+    def __init__(self, tokens: tuple[str, ...], pointer: str, subject: str) -> None:
+        self.tokens, self.pointer, self.subject = tokens, pointer, subject
+        self.stack: list[_Open] = []
+        self.found: tuple[int, int] | None = None
+
+    def _place(self) -> tuple[bool, bool]:
+        """Is the value starting now on the pointer's path, and is it the target?"""
+        on = not self.stack or (self.stack[-1].matched and self.stack[-1].leads)
+        return on, on and len(self.stack) == len(self.tokens) and self.found is None
+
+    def _child(self, frame: _Open, token: str) -> bool:
+        """Does ``frame`` (the innermost container) lead on to the target through ``token``?"""
+        depth = len(self.stack) - 1
+        return frame.matched and depth < len(self.tokens) and self.tokens[depth] == token
+
+    def scalar(self, start: int, end: int) -> None:
+        _, target = self._place()
+        if target:
+            self.found = (start, end)
+        self._done()
+
+    def open(self, mapping: bool, start: int) -> None:
+        on, target = self._place()
+        matched = on and len(self.stack) < len(self.tokens)
+        frame = _Open(mapping, start, matched, target)
+        self.stack.append(frame)
+        if not mapping:
+            frame.leads = self._child(frame, "0")
+
+    def open_key(self, mapping: bool, start: int) -> None:
+        self.stack.append(_Open(mapping, start, False, False, as_key=True))
+
+    def key(self, name: str) -> None:
+        frame = self.stack[-1]
+        frame.leads = self._child(frame, name)
+        frame.expect_key = False
+        if frame.leads:
+            frame.hits += 1
+            if frame.hits > 1:
+                detail = f"{self.pointer} passes key {name!r}, which its mapping holds twice"
+                raise DecodeFailure("invalid_request", self.subject, detail)
+
+    def close(self, end: int) -> None:
+        frame = self.stack.pop()
+        if frame.as_key:
+            parent = self.stack[-1]
+            parent.expect_key, parent.leads = False, False
+            return
+        if frame.target and self.found is None:
+            self.found = (frame.start, end)
+        self._done()
+
+    def _done(self) -> None:
+        if not self.stack:
+            return
+        frame = self.stack[-1]
+        if frame.mapping:
+            frame.expect_key, frame.leads = True, False
+        else:
+            frame.index += 1
+            frame.leads = self._child(frame, str(frame.index))
+
+
+_WS: Final = re.compile(r"[ \t\n\r]*")
+_STRING: Final = re.compile(r'"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"')
+_SCALAR: Final = re.compile(
+    r'"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"'
+    r"|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?(?![0-9.eE+-])"
+    r"|(?:true|false|null)(?![A-Za-z0-9_])"
+)
+
+
+def _json_node(
+    text: str, tokens: tuple[str, ...], pointer: str, subject: str
+) -> tuple[int, int] | None:
+    """The span of the value ``tokens`` names (RFC 8259), walked without building any value;
+    ``_NotJson`` when the text is not exactly one JSON value."""
+    track = _Tracker(tokens, pointer, subject)
+
+    def ws(at: int) -> int:
+        return _WS.match(text, at).end()  # type: ignore[union-attr]
+
+    at, state = ws(0), "value"
+    while True:
+        char = text[at : at + 1]
+        if state == "value":
+            if char in ("{", "["):
+                track.open(char == "{", at)
+                at = ws(at + 1)
+                if text[at : at + 1] == ("}" if char == "{" else "]"):
+                    at += 1
+                    track.close(at)
+                    state = "after"
+                else:
+                    state = "key" if char == "{" else "value"
+                continue
+            match = _SCALAR.match(text, at)
+            if match is None:
+                raise _NotJson
+            track.scalar(at, match.end())
+            at, state = match.end(), "after"
+        elif state == "key":
+            match = _STRING.match(text, at)
+            if match is None:
+                raise _NotJson
+            track.key(json.loads(match.group()))
+            at = ws(match.end())
+            if text[at : at + 1] != ":":
+                raise _NotJson
+            at, state = ws(at + 1), "value"
+        else:
+            at = ws(at)
+            if not track.stack:
+                if at != len(text):
+                    raise _NotJson
+                return track.found
+            mapping = track.stack[-1].mapping
+            char = text[at : at + 1]
+            if char == ",":
+                at, state = ws(at + 1), "key" if mapping else "value"
+            elif char == ("}" if mapping else "]"):
+                at += 1
+                track.close(at)
+            else:
+                raise _NotJson
+
+
+def _yaml_node(
+    text: str, tokens: tuple[str, ...], pointer: str, subject: str
+) -> tuple[int, int] | None:
+    """The span of the node ``tokens`` names in a single YAML document, walked as parser events
+    (PyYAML's pure-Python parser, as the compiler reads YAML): nothing is composed or
+    constructed, and an alias is refused."""
     import yaml
 
-    class _NoAliases(yaml.SafeLoader):
-        """Composes nodes only, never constructs a value, and refuses aliases."""
+    track = _Tracker(tokens, pointer, subject)
 
-        def compose_node(self, parent: Any, index: Any) -> Any:
-            if self.check_event(yaml.AliasEvent):
+    def walk() -> tuple[int, int] | None:
+        documents = 0
+        for event in yaml.parse(text, Loader=yaml.SafeLoader):
+            if isinstance(event, yaml.DocumentStartEvent):
+                documents += 1
+                if documents > 1:
+                    raise yaml.YAMLError("more than one document")
+                continue
+            if isinstance(event, yaml.AliasEvent):
                 raise yaml.YAMLError("aliases are refused")
-            return super().compose_node(parent, index)
+            start = event.start_mark.index if event.start_mark is not None else 0
+            end = event.end_mark.index if event.end_mark is not None else 0
+            if isinstance(event, (yaml.MappingEndEvent, yaml.SequenceEndEvent)):
+                # A block collection ends where the next token starts: its text ends before
+                # the whitespace between them.
+                if track.stack and track.stack[-1].target:
+                    first = track.stack[-1].start
+                    while end > first and text[end - 1] in " \t\r\n":
+                        end -= 1
+                track.close(end)
+                continue
+            if not isinstance(event, (yaml.ScalarEvent, yaml.CollectionStartEvent)):
+                continue
+            parent = track.stack[-1] if track.stack else None
+            mapping = isinstance(event, yaml.MappingStartEvent)
+            if parent is not None and parent.mapping and parent.expect_key:
+                if isinstance(event, yaml.ScalarEvent):
+                    if parent.as_key or any(frame.as_key for frame in track.stack):
+                        parent.expect_key = False
+                    else:
+                        track.key(event.value)
+                else:
+                    track.open_key(mapping, start)
+                continue
+            if isinstance(event, yaml.ScalarEvent):
+                track.scalar(start, end)
+            else:
+                track.open(mapping, start)
+        return track.found
 
-    def compose() -> Any:
-        return yaml.compose(text, Loader=_NoAliases)
-
-    node = guarded(subject, "neither JSON nor single-document YAML", compose)
-    for name in tokens:
-        if isinstance(node, yaml.MappingNode):
-            held = [v for k, v in node.value if isinstance(k, yaml.ScalarNode) and k.value == name]
-            if len(held) > 1:
-                detail = f"{pointer} passes key {name!r}, which the mapping holds more than once"
-                raise DecodeFailure("invalid_request", subject, detail)
-            node = held[0] if held else None
-        elif (
-            isinstance(node, yaml.SequenceNode) and _is_index(name) and int(name) < len(node.value)
-        ):
-            node = node.value[int(name)]
-        else:
-            node = None
-        if node is None:
-            break
-    if node is None:
-        raise DecodeFailure(
-            "invalid_request", subject, f"{pointer} does not resolve in the yaml document"
-        )
-    written = text[node.start_mark.index : node.end_mark.index]
-    metadata = {"format": "yaml", "pointer": pointer, "tag": str(node.tag)}
-    return Decoded("application/yaml", written.encode("utf-8"), metadata)
+    return guarded(subject, "neither JSON nor single-document YAML", walk)  # type: ignore[no-any-return]
 
 
 def _span(scope: _Scope, step: Span, subject: str) -> Decoded:

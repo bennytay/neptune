@@ -10,6 +10,7 @@ source is a finding, never an exception.
 
 import gzip
 import io
+import json
 import tarfile
 import threading
 from collections.abc import Iterator, Mapping
@@ -31,6 +32,7 @@ from ledger_media_fixtures import (
     WRIST_TOPIC,
     fixture,
     pixel,
+    rewrite_mcap,
 )
 from ledger_media_packages import content_id, ingest_root, source_package
 from neptune.identity import canonical_json
@@ -214,8 +216,12 @@ def test_every_worked_example_citation_resolves_to_its_bytes(lake: Lake, tmp_pat
                 s["kind"] for s in ref.locator[1 if first == "byte_range" else 0 :]
             ]
             sliced = lake.read(ref, "bytes")
-            assert isinstance(sliced.value, SourceSlice)
-            assert sliced.value.read() == data
+            if all(step["kind"] == "byte_range" for step in ref.locator):
+                assert isinstance(sliced.value, SourceSlice), sliced.findings
+                assert sliced.value.read() == data or len(ref.locator) > 1
+            else:  # bytes never drops a step it cannot follow
+                assert sliced.value is None
+                assert [f.code for f in sliced.findings] == ["invalid_request"]
             last = ref.locator[-1]["kind"]
             if last in ("json_pointer", "row"):  # the compiler's own pointers and rows decode
                 made = lake.artefact(ref, "value" if last == "json_pointer" else "row")
@@ -260,14 +266,12 @@ def test_worked_example_pointers_and_rows_hydrate_to_what_the_records_state(
     ref = anchor(handeye, byte_range(0, len(handeye)), {"kind": "json_pointer", "pointer": ""})
     value = lake.artefact(ref, "value")
     assert value.media_type == "application/json"
-    whole = canonical_json.loads(value.read())
-    assert isinstance(whole, dict) and whole["robot_base_frame"] == "base_link"
+    assert value.read() == handeye.strip()  # the document's own text, verbatim
+    assert json.loads(value.read())["robot_base_frame"] == "base_link"
     tool = {"kind": "json_pointer", "pointer": "/transformation/qw"}
     assert (
-        canonical_json.loads(
-            lake.artefact(anchor(handeye, byte_range(0, 348), tool), "value").read()
-        )
-        == 0.7071067811865476
+        lake.artefact(anchor(handeye, byte_range(0, 348), tool), "value").read()
+        == b"0.7071067811865476"
     )
 
     sites = fixture_path("mobile_robot", "sites.csv")
@@ -446,7 +450,7 @@ def test_hydration_is_lazy_and_video_bytes_slice_by_range(lake: Lake) -> None:
     store = Counting(ingest_root(lake.tmp / "ingest", {"gimbal.mp4": clip}))
     lake.stores = [store]
     frame = {"domain_id": DOMAIN, "index": 3, "kind": "video_frame", "pts": 3, "track": 0}
-    ref = anchor(clip, frame)
+    ref = anchor(clip, byte_range(0, len(clip)))
 
     handle = lake.media.hydrate(ref, "bytes")
     assert store.opens == 0  # nothing resolved or read yet
@@ -459,8 +463,9 @@ def test_hydration_is_lazy_and_video_bytes_slice_by_range(lake: Lake) -> None:
     assert store.opens == opened + 1
     assert made.value.read_range(4130, 10) == clip[4130:4140]
     assert made.value.read_range(4130, 11).code == "invalid_request"  # type: ignore[union-attr]
-    # A video frame is never decoded by this version: only its bytes are served.
-    assert lake.codes(ref, "frame") == ["invalid_request"]
+    # A video frame is never decoded by this version, and bytes do not drop its step.
+    assert lake.codes(anchor(clip, frame), "frame") == ["invalid_request"]
+    assert lake.codes(anchor(clip, frame), "bytes") == ["invalid_request"]
 
 
 # --- Pages, regions, rows, spans and archive members across embodiments ------------------------
@@ -593,7 +598,7 @@ def test_a_moved_source_resolves_to_a_finding_not_a_crash(lake: Lake) -> None:
     assert [f.code for f in evidence.findings] == ["file_missing"]
     assert str(ingest) in evidence.findings[0].detail
     assert lake.codes(ref, "frame") == ["file_missing"]
-    assert lake.codes(ref, "bytes") == ["file_missing"]
+    assert lake.codes(anchor(wrist, byte_range(0, len(wrist))), "bytes") == ["file_missing"]
     with pytest.raises(ValueError, match="unavailable"):
         evidence.open()
 
@@ -722,33 +727,6 @@ def test_the_media_table_lives_under_the_tenants_prefix(lake: Lake) -> None:
 # --- MCAP variants: compressed, unindexed, nested, and a chunk bomb ----------------------------
 
 
-def rewrite_mcap(data: bytes, **options: Any) -> bytes:
-    """The recording's messages written again with other writer options (same bytes per message)."""
-    from mcap.reader import make_reader
-    from mcap.writer import Writer
-
-    out = io.BytesIO()
-    writer = Writer(out, **options)
-    writer.start(profile="ros2", library="neptune-ledger tests")
-    schemas: dict[int, int] = {}
-    channels: dict[int, int] = {}
-    for schema, channel, message in make_reader(io.BytesIO(data)).iter_messages(
-        log_time_order=False
-    ):
-        assert schema is not None
-        if schema.id not in schemas:
-            schemas[schema.id] = writer.register_schema(schema.name, schema.encoding, schema.data)
-        if channel.id not in channels:
-            channels[channel.id] = writer.register_channel(
-                channel.topic, channel.message_encoding, schemas[schema.id], channel.metadata
-            )
-        writer.add_message(
-            channels[channel.id], message.log_time, message.data, message.publish_time
-        )
-    writer.finish()  # type: ignore[no-untyped-call]
-    return out.getvalue()
-
-
 def test_compressed_unindexed_and_nested_recordings_give_the_same_frame(lake: Lake) -> None:
     from mcap.writer import CompressionType
 
@@ -866,21 +844,19 @@ def test_pointers_into_json_and_yaml(lake: Lake) -> None:
 
     on = value(config, "/controller/on")
     assert on.read() == b"yes" and on.media_type == "application/yaml"
-    assert on.metadata == {
-        "format": "yaml",
-        "pointer": "/controller/on",
-        "tag": "tag:yaml.org,2002:bool",
-    }
+    assert on.metadata == {"format": "yaml", "pointer": "/controller/on"}
     assert value(config, "/controller/gains/1").read() == b"0x10"
     assert value(config, "/controller/a~1b").read() == b"3"
-    assert value(config, "/controller").read().startswith(b"gait: trot\n  on: yes")
+    assert value(config, "/controller").read() == (
+        b"gait: trot\n  on: yes\n  gains: [1.5, 0x10]\n  'a/b': 3"
+    )
     for missing in ("/twice", "/controller/gains/2", "/controller/gains/01", "/nowhere"):
         ref = anchor(config, {"kind": "json_pointer", "pointer": missing})
         assert lake.codes(ref, "value") == ["invalid_request"], missing
 
     radius = value(document, "/wheel/radius")
     assert radius.read() == b"0.0825" and radius.media_type == "application/json"
-    assert value(document, "/ok/0").read() == b'{"null":true}'
+    assert value(document, "/ok/0").read() == b"null"  # the text written, never a fact
     assert lake.codes(anchor(document, {"kind": "json_pointer", "pointer": "/dup"}), "value") == [
         "invalid_request"
     ]
