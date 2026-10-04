@@ -30,8 +30,8 @@ import queue
 import re
 import threading
 import urllib.parse
-from collections.abc import AsyncIterator, Callable, Iterable, Iterator
-from dataclasses import replace
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator, Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import TracebackType
 from typing import Final, Literal, TypeAlias
@@ -39,8 +39,11 @@ from typing import Final, Literal, TypeAlias
 from neptune.adapters.builtin import builtin_adapters
 from neptune.adapters.contract import Adapter, ConfigError, ContractError, configure
 from neptune.adapters.registry import AdapterRegistry
+from neptune.discovery.external import ExternalRoot, ExternalSourceError
 from neptune.discovery.source import LocalSource
+from neptune.identity import canonical_json
 from neptune.manifest import LoadedManifest, ManifestError, discover, locate, read
+from neptune.model.jsonvalue import JsonValue
 from neptune.runtime import EventSink, IngestJob, JobError, JobEvent, JobOptions
 from neptune.runtime.plugins import (
     ADAPTERS_GROUP,
@@ -49,6 +52,7 @@ from neptune.runtime.plugins import (
     SOURCES_GROUP,
     PluginPolicy,
     Plugins,
+    PluginSource,
     load_plugins,
 )
 from neptune.sdk.errors import (
@@ -79,6 +83,22 @@ _LOCAL_HOSTS: Final = ("", "localhost")
 _REMOTE_SCHEMES: Final = ("http", "https")
 
 
+@dataclass(frozen=True)
+class RemoteSource:
+    """A source a connector reads (ADR 0067): its URI, the connector, and the connector's options.
+
+    ``connector`` names a ``neptune.sources`` plugin (its id, ``deploy_s3``); ``None`` uses the
+    one installed connector that declares the URI's scheme. ``options`` are the connector's own,
+    passed as given (an endpoint, a region); credentials are never options: the connector reads
+    them where its own documentation says. A plain URI string is a ``RemoteSource`` without
+    either.
+    """
+
+    uri: str
+    connector: str | None = None
+    options: Mapping[str, JsonValue] | None = field(default=None, compare=False)
+
+
 # --- Resolving what a call names -----------------------------------------------------------------
 
 
@@ -89,18 +109,103 @@ def _require_network(workspace: Workspace, purpose: str) -> None:
         raise NetworkRefusedError(str(exc)) from exc
 
 
-def _local_root(source: StrPath, workspace: Workspace) -> Path:
-    """The local directory or file ``source`` names: a path, or a ``file:`` URI on this host.
+def _root(
+    source: StrPath | RemoteSource, workspace: Workspace, plugins: Plugins
+) -> Path | ExternalRoot:
+    """What ``source`` names: a local folder or file, or a connector's source (ADR 0067)."""
+    if isinstance(source, RemoteSource):
+        return _remote_root(source, workspace, plugins)
+    remote = isinstance(source, str) and _URI.match(source)
+    if remote and urllib.parse.urlsplit(str(source)).scheme.lower() != "file":
+        return _remote_root(RemoteSource(str(source)), workspace, plugins)
+    return _local_root(source)
 
-    Any other scheme names something only a connector can read over the network: refused while
-    the workspace is local-only, and unsupported until a connector lands (MVL-45, MVL-46).
+
+def _remote_root(remote: RemoteSource, workspace: Workspace, plugins: Plugins) -> ExternalRoot:
+    """The connector's source ``remote`` names, built by its ``neptune.sources`` factory.
+
+    The URI must be one: a scheme, no credentials, no query or fragment (a secret there would be
+    kept in the ledger and the envelope). The connector is the one named, else the one installed
+    connector declaring the scheme; none, or two, is a ``ConfigurationError``. The network must be
+    allowed before the factory is called, which asks again itself.
     """
+    uri = remote.uri
+    if not isinstance(uri, str) or not _URI.match(uri):
+        raise InvalidSourceError(f"a remote source is a URI with a scheme, got {uri!r}")
+    try:
+        parts = urllib.parse.urlsplit(uri)
+    except ValueError as exc:
+        raise InvalidSourceError(f"{uri!r} is not a URI: {exc}") from exc
+    scheme = parts.scheme.lower()
+    if "@" in parts.netloc:
+        raise InvalidSourceError("a source URI carries no credentials; give them to the connector")
+    if parts.query or parts.fragment or "?" in uri or "#" in uri:
+        raise InvalidSourceError(
+            "a source URI has no query or fragment; options go to the connector"
+        )
+    plugin = _connector(scheme, remote.connector, plugins)
+    options = _source_options(remote.options)
+    _require_network(workspace, f"reading {scheme}:// sources")
+    try:
+        built = plugin.factory(uri, network=workspace, options=options)
+    except LocalOnlyError as exc:
+        raise NetworkRefusedError(str(exc)) from exc
+    except KeyboardInterrupt:
+        raise
+    except BaseException as exc:  # a plugin never ends the client (ADR 0058 §3)
+        raise ConfigurationError(
+            f"connector {plugin.id} cannot read {uri}: {type(exc).__name__}: {exc}"
+        ) from exc
+    try:
+        return ExternalRoot(uri, plugin.id, built)  # type: ignore[arg-type]
+    except ExternalSourceError as exc:
+        raise ConfigurationError(str(exc)) from exc
+
+
+def _connector(scheme: str, named: str | None, plugins: Plugins) -> PluginSource:
+    """The connector that reads ``scheme``: the one ``named``, else the one declaring it."""
+    installed = sorted(source.id for source in plugins.sources)
+    if named is not None:
+        found = [source for source in plugins.sources if source.id == named]
+        if not found:
+            raise ConfigurationError(f"no connector {named!r} is installed; installed: {installed}")
+        (plugin,) = found
+        if plugin.schemes and scheme not in plugin.schemes:
+            raise ConfigurationError(
+                f"connector {named} reads {', '.join(s + '://' for s in plugin.schemes)},"
+                f" not {scheme}://"
+            )
+        return plugin
+    claim = [source for source in plugins.sources if scheme in source.schemes]
+    if not claim:
+        raise ConfigurationError(
+            f"no installed connector reads {scheme}:// sources (installed: {installed}); install"
+            " one, or name one that reads it with connector="
+        )
+    if len(claim) > 1:
+        names = ", ".join(source.id for source in claim)
+        raise ConfigurationError(f"{scheme}:// is read by {names}; name one with connector=")
+    return claim[0]
+
+
+def _source_options(options: Mapping[str, JsonValue] | None) -> dict[str, JsonValue] | None:
+    """A connector's options as given: a JSON object, or none."""
+    if options is None:
+        return None
+    if not isinstance(options, Mapping) or not all(isinstance(k, str) for k in options):
+        raise ConfigurationError("a connector's options are a JSON object")
+    copied = dict(options)
+    try:
+        canonical_json.dumps(copied)
+    except (ValueError, TypeError) as exc:
+        raise ConfigurationError(f"a connector's options are not JSON: {exc}") from exc
+    return copied
+
+
+def _local_root(source: StrPath) -> Path:
+    """The local directory or file ``source`` names: a path, or a ``file:`` URI on this host."""
     if isinstance(source, str) and _URI.match(source):
         parts = urllib.parse.urlsplit(source)
-        scheme = parts.scheme.lower()
-        if scheme != "file":
-            _require_network(workspace, f"reading {scheme}:// sources")
-            raise UnsupportedError(f"no connector reads {scheme}:// sources in this version")
         if parts.netloc.lower() not in _LOCAL_HOSTS:
             raise UnsupportedError(f"{source} names another host; a file URI names this one")
         if parts.query or parts.fragment or not parts.path:
@@ -115,11 +220,14 @@ def _local_root(source: StrPath, workspace: Workspace) -> Path:
     return root
 
 
-def _destination(destination: StrPath, root: Path) -> Path:
-    """``destination``, if a package can be written there: nothing there yet, not in ``root``."""
+def _destination(destination: StrPath, root: Path | None) -> Path:
+    """``destination``, if a package can be written there: nothing there yet, not in ``root``
+    (``None`` for a connector's source, which is no local tree)."""
     path = Path(destination)
     if path.exists() or path.is_symlink():
         raise DestinationExistsError(f"{path} exists; a package is written once")
+    if root is None:
+        return path
     try:
         inside = path.resolve().is_relative_to(root.resolve())
     except (OSError, RuntimeError) as exc:  # a symlink loop on the way
@@ -450,22 +558,35 @@ class Neptune:
 
     def _builder(
         self,
-        source: StrPath,
+        source: StrPath | RemoteSource,
         destination: StrPath | None,
         resume: bool = False,
         manifest: ManifestChoice = None,
     ) -> Build:
         """Resolve and check the call now; return what builds its job around a sink and event."""
-        root = _local_root(source, self._workspace)
+        root = _root(source, self._workspace, self._plugins)
         options = self._options
-        if manifest is False:  # none, even one the client's options carry
-            options = replace(options, manifest=None)
-        elif manifest is not None or options.manifest is None:
-            options = replace(options, manifest=_manifest(root, manifest))
-        target = _destination(destination, root) if destination is not None else None
-        if resume and not self._workspace.has_ledger(root):
+        if isinstance(root, ExternalRoot):  # a manifest is a file in a local root (ADR 0067)
+            if manifest not in (None, False) or options.manifest is not None:
+                raise ConfigurationError(
+                    "a manifest is read from a local root; a connector's has none"
+                )
+            if options.ignore.patterns:
+                raise ConfigurationError(
+                    "ignore patterns name local paths; a connector lists what its URI names"
+                )
+            local: Path | None = None
+            ledger_root: Path | str = root.uri
+        else:
+            if manifest is False:  # none, even one the client's options carry
+                options = replace(options, manifest=None)
+            elif manifest is not None or options.manifest is None:
+                options = replace(options, manifest=_manifest(root, manifest))
+            local = ledger_root = root
+        target = _destination(destination, local) if destination is not None else None
+        if resume and not self._workspace.has_ledger(ledger_root):
             raise NothingToResumeError(
-                f"the workspace {self._workspace.home} holds no earlier work on {root}; "
+                f"the workspace {self._workspace.home} holds no earlier work on {ledger_root}; "
                 "a resume continues a job that scanned it here"
             )
 
@@ -488,7 +609,7 @@ class Neptune:
 
     def ingest(
         self,
-        source: StrPath,
+        source: StrPath | RemoteSource,
         destination: StrPath,
         *,
         on_event: EventSink | None = None,
@@ -496,7 +617,8 @@ class Neptune:
         resume: bool = False,
         manifest: ManifestChoice = None,
     ) -> IngestResult:
-        """Ingest the folder or file ``source`` (a path or a ``file:`` URI) into a package at
+        """Ingest the folder or file ``source`` (a path or a ``file:`` URI), or a connector's
+        source (a URI of another scheme, or a ``RemoteSource``: ADR 0067), into a package at
         ``destination``, on this thread. ``on_event`` gets every ``JobEvent`` as it happens; an
         exception it raises stops the job and propagates. Setting ``cancel`` stops the job at its
         next checkpoint: the result is ``cancelled`` and the workspace keeps the work. Run it
@@ -510,7 +632,7 @@ class Neptune:
 
     def dry_run(
         self,
-        source: StrPath,
+        source: StrPath | RemoteSource,
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
@@ -526,7 +648,7 @@ class Neptune:
 
     def start(
         self,
-        source: StrPath,
+        source: StrPath | RemoteSource,
         destination: StrPath,
         *,
         cancel: threading.Event | None = None,
@@ -539,7 +661,7 @@ class Neptune:
 
     def start_dry_run(
         self,
-        source: StrPath,
+        source: StrPath | RemoteSource,
         *,
         cancel: threading.Event | None = None,
         resume: bool = False,
@@ -590,7 +712,7 @@ class AsyncNeptune:
 
     async def ingest(
         self,
-        source: StrPath,
+        source: StrPath | RemoteSource,
         destination: StrPath,
         *,
         on_event: EventSink | None = None,
@@ -604,7 +726,7 @@ class AsyncNeptune:
 
     async def dry_run(
         self,
-        source: StrPath,
+        source: StrPath | RemoteSource,
         *,
         on_event: EventSink | None = None,
         cancel: threading.Event | None = None,
@@ -617,7 +739,7 @@ class AsyncNeptune:
 
     def start(
         self,
-        source: StrPath,
+        source: StrPath | RemoteSource,
         destination: StrPath,
         *,
         cancel: threading.Event | None = None,
@@ -630,7 +752,7 @@ class AsyncNeptune:
 
     def start_dry_run(
         self,
-        source: StrPath,
+        source: StrPath | RemoteSource,
         *,
         cancel: threading.Event | None = None,
         resume: bool = False,

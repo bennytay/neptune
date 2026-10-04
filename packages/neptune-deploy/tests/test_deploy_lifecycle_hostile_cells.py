@@ -96,12 +96,14 @@ def test_a_lossy_number_is_unknown_with_a_finding_citing_its_cell() -> None:
     base = _with_cells(_base("warehouse_amr"), "Speed Limit", {1: "9007199254740993", 2: "0.8"})
     base = _with_cells(base, "Payload Max", {1: "1e-400"})
     package = _mapped(base, "register_zone")
-    envelopes = {e.zones[0].zone.value.value: e for e in _of(package, "authorisation_envelope")}
+    envelopes = {
+        e.zones.value[0].zone.value.value: e for e in _of(package, "authorisation_envelope")
+    }
     lossy = envelopes["DOCK-1"]
-    assert isinstance(lossy.zones[0].speed_limit.value, Unknown)
+    assert isinstance(lossy.zones.value[0].speed_limit.value, Unknown)
     assert isinstance(lossy.payload_max.value, Unknown)
-    assert envelopes["AISLE-14"].zones[0].speed_limit.value == Known(
-        0.8, envelopes["AISLE-14"].zones[0].speed_limit.value.provenance
+    assert envelopes["AISLE-14"].zones.value[0].speed_limit.value == Known(
+        0.8, envelopes["AISLE-14"].zones.value[0].speed_limit.value.provenance
     )
     unreadable = _codes(package, "value_unreadable")
     fields = sorted(f.details["field"] for f in unreadable)
@@ -199,10 +201,10 @@ def test_empty_split_parts_and_repeated_ids_are_findings() -> None:
     events = [
         e
         for e in _of(package, "maintenance_event")
-        if any(i.value.value == "WO-26-0312" for i in e.identifiers)
+        if any(i.value.value == "WO-26-0312" for i in e.identifiers.value)
     ]
     (event,) = events
-    assert [r.value.value for r in event.related] == ["CHG-1", "INC-0007"]
+    assert [r.value.value for r in event.related.value] == ["CHG-1", "INC-0007"]
     empty = _codes(package, "list_part_empty")
     repeated = _codes(package, "list_id_repeated")
     assert len(empty) == 1 and len(repeated) == 1  # one finding per cell

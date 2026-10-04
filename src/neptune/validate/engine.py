@@ -41,7 +41,7 @@ from neptune.store.package import IngestPackage
 
 VALIDATOR_ID: Final = "neptune.validate"
 # Changes whenever a rule is added or removed; each rule's own version changes with its logic.
-VALIDATOR_VERSION: Final = "0.1.0"
+VALIDATOR_VERSION: Final = "0.2.0"
 CODE_PREFIX: Final = f"{VALIDATOR_ID}."
 FINDINGS_CAPPED: Final = f"{VALIDATOR_ID}.findings_capped"
 RULE_FAILED: Final = f"{VALIDATOR_ID}.rule_failed"

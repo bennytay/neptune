@@ -49,20 +49,18 @@ from neptune.identity.hashing import content_id
 from neptune.identity.provenance import check_evidence_record_id, check_transform_record
 from neptune.model.ids import ContentId, RecordId, parse_content_id, parse_record_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.kinds import RECORD_KINDS, kinds_at, package_version, record_key
+from neptune.model.kinds import RECORD_KINDS, kinds_at, record_key, records_version
 from neptune.model.package import (
     IngestReceipt,
-    PackageFile,
     PackageManifest,
     ReceiptEnvelope,
-    SourceHandle,
     Storage,
     ingest_receipt_from_json,
     package_manifest_from_json,
     receipt_envelope_from_json,
 )
 from neptune.model.provenance import Provenance, TransformRecord
-from neptune.store.receipt import build_receipt, check_receipt, render_receipt
+from neptune.store.receipt import check_receipt, render_receipt
 from neptune.store.series import SeriesError, check_series, check_settings
 
 MANIFEST: Final = "manifest.json"
@@ -173,87 +171,17 @@ def package_contents(
     by content id; every other source stays referenced (ADR 0022 §5). ``store`` holds the settings
     the store wrote them with. Series and blobs may be paths, which are never loaded.
     ``derived`` are derived tables by kind, each its lines as JSON objects, in any order.
+
+    It is ``PackageWriter`` (``neptune.store.writer``) with nothing spilled: every table is held
+    and given as bytes. ``write_package_stream`` writes the same bytes in bounded memory. Every
+    check the package reader makes is made as the files are computed, so the reader never refuses
+    what this gives.
     """
-    series, blobs, store = dict(series or {}), dict(blobs or {}), dict(store or {})
-    held: dict[str, list[Any]] = defaultdict(list)
-    for record in records:
-        kind = getattr(record, "kind", None)
-        if not isinstance(kind, str) or kind not in RECORD_KINDS:
-            raise PackageError(f"not a record of a known kind: {record!r}")
-        held[kind].append(record)
-    # The lowest schema version that holds these records: a package that uses no later kind is
-    # what a version 1 writer wrote, byte for byte (ADR 0037 §1).
-    version = package_version(held)
-    tables: dict[str, list[Any]] = {kind: held.get(kind, []) for kind in kinds_at(version)}
-    files: dict[str, Content] = {}
-    for kind, members in tables.items():
-        members.sort(key=record_key)
-        keys = [record_key(record) for record in members]
-        if len(set(keys)) != len(keys):
-            raise PackageError(f"two {kind} records share an id")
-        files[table_path(kind)] = b"".join(_document(record) + b"\n" for record in members)
-    streams = {stream.id for stream in tables["stream"]}
-    if series:
-        _series_settings(store)
-    for stream, data in series.items():
-        if stream not in streams:
-            raise PackageError(f"series for {stream}, which is not a stream of this package")
-        files[series_path(stream)] = data
-    artifacts = {artifact.content_id: artifact for artifact in tables["source_artifact"]}
-    for content, data in blobs.items():
-        if content not in artifacts:
-            raise PackageError(f"blob {content} is not a source artifact of this package")
-        if _digest(data) != (artifacts[content].size, content):
-            raise PackageError(f"blob bytes do not hash to {content}")
-        files[blob_path(content)] = data
-    transforms = {transform.id for transform in tables["transform_record"]}
-    for kind, lines in sorted((derived or {}).items()):
-        files[derived_path(kind)] = _derived_table(kind, lines, transforms)
-    receipt = build_receipt((r for members in tables.values() for r in members), version)
-    files[RECEIPT] = _document(receipt)
-    files[RECEIPT_TEXT] = render_receipt(receipt).encode("utf-8")
-    manifest = PackageManifest(
-        receipt=receipt.id,
-        tables=tuple((kind, len(tables[kind])) for kind in sorted(tables)),
-        sources=tuple(
-            SourceHandle(
-                content,
-                artifacts[content].size,
-                Storage.MATERIALISED if content in blobs else Storage.REFERENCED,
-            )
-            for content in sorted(artifacts)
-        ),
-        files=tuple(PackageFile(path, *_digest(data)) for path, data in sorted(files.items())),
-        store=store,
-        version=version,
-    )
-    files[MANIFEST] = _document(manifest)
-    read_files(files)  # never hand out a package the reader would refuse
-    return files
+    from neptune.store.writer import PackageWriter  # the writer builds on this module
 
-
-def _derived_table(kind: str, lines: Iterable[JsonObject], transforms: set[str]) -> bytes:
-    """A derived table's bytes, sorted by id, each line checked as the reader checks it.
-
-    ``lines`` may be lazy: each is encoded and checked as it arrives, so only the table's bytes
-    are held, never its JSON objects. Lines given in id order (as a grouping gives them) are
-    joined as they come; any other order is sorted once, by id.
-    """
-    path = derived_path(kind)
-    if not _DERIVED.fullmatch(path):
-        raise PackageError(f"not a derived table kind: {kind!r}")
-    encoded: list[tuple[str, bytes]] = []
-    ordered = True
-    for line in lines:
-        key = _derived_line(kind, line, transforms)
-        ordered = ordered and (not encoded or encoded[-1][0] < key)
-        encoded.append((key, canonical_json.dumps(line) + b"\n"))
-    if not ordered:
-        encoded.sort(key=lambda entry: entry[0])
-        keys = [key for key, _ in encoded]
-        if len(set(keys)) != len(keys):
-            raise PackageError(f"{path} must name each id once")
-    return b"".join(line for _, line in encoded)
+    with PackageWriter() as writer:
+        writer.extend(records)
+        return writer.finish(series=series, blobs=blobs, store=store, derived=derived)
 
 
 def _derived_key(kind: str, line: JsonValue) -> str:
@@ -464,14 +392,6 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
             f"the manifest must count a table for every record kind of schema version"
             f" {manifest.version}, and no other"
         )
-    # A package is written at the lowest version that holds its records (ADR 0037 §1), so the same
-    # records have one package: a higher version would be a second package of them.
-    held = package_version(kind for kind, count in manifest.tables if count)
-    if manifest.version != held:
-        raise PackageError(
-            f"the manifest says schema version {manifest.version}, but its records are of version"
-            f" {held}: a package is written at the lowest version that holds its records"
-        )
 
     records: list[Any] = []
     for kind in kinds:
@@ -488,6 +408,14 @@ def read_files(files: Mapping[str, Content]) -> IngestPackage:
         if len(members) != dict(manifest.tables)[kind]:
             raise PackageError(f"{path} holds {len(members)} records, the manifest says otherwise")
         records.extend(members)
+    # A package is written at the lowest version that holds its records (ADR 0037 §1, ADR 0061
+    # §6), so the same records have one package: a higher version would be a second package.
+    held = records_version(records)
+    if manifest.version != held:
+        raise PackageError(
+            f"the manifest says schema version {manifest.version}, but its records are of version"
+            f" {held}: a package is written at the lowest version that holds its records"
+        )
     _check_lineage(records)
 
     series: dict[RecordId, Content] = {}
@@ -558,16 +486,34 @@ def _check_lineage(records: list[Any]) -> None:
     try:
         for transform in by_kind["transform_record"]:
             transforms[transform.id] = check_transform_record(transform)
-        for finding in by_kind["ingest_finding"]:
-            check_ingest_finding(finding)
-            if finding.transform not in transforms:
-                raise PackageError(f"finding {finding.id} names a transform not in the package")
-        for record in records:
-            provenance = getattr(record, "provenance", None)
-            if isinstance(provenance, Provenance):
-                if provenance.transform not in transforms:
-                    raise PackageError(f"{record.kind} {record.id}: its transform is missing")
-                check_evidence_record_id(record, transforms[provenance.transform])
+    except ValueError as exc:
+        raise PackageError(str(exc)) from exc
+    for finding in by_kind["ingest_finding"]:
+        check_record_lineage(finding, transforms, provenance=False)
+    for record in records:
+        check_record_lineage(record, transforms, finding=False)
+
+
+def check_record_lineage(
+    record: Any,
+    transforms: Mapping[str, TransformRecord],
+    *,
+    finding: bool = True,
+    provenance: bool = True,
+) -> None:
+    """One record's lineage, against the package's ``transforms``: a finding's id recomputes and
+    names a transform of the package, and an evidence record's transform is there and its id
+    recomputes under it (ADRs 0016, 0017). The streaming writer checks each record with it."""
+    try:
+        if finding and record.kind == "ingest_finding":
+            check_ingest_finding(record)
+            if record.transform not in transforms:
+                raise PackageError(f"finding {record.id} names a transform not in the package")
+        cited = getattr(record, "provenance", None)
+        if provenance and isinstance(cited, Provenance):
+            if cited.transform not in transforms:
+                raise PackageError(f"{record.kind} {record.id}: its transform is missing")
+            check_evidence_record_id(record, transforms[cited.transform])
     except PackageError:
         raise
     except ValueError as exc:

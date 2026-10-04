@@ -270,6 +270,7 @@ def test_kinds_are_unique_tokens_and_each_has_one_family() -> None:
         "transform_record": "lineage",
         "ingest_finding": "finding",
         "timestamp_domain": "reference",
+        "civil_time_zone": "reference",
         "frame_graph": "reference",
         "frame": "reference",
         "frame_transform": "reference",
@@ -308,6 +309,7 @@ def test_kinds_are_unique_tokens_and_each_has_one_family() -> None:
         "incident_record": "world",
         "change_record": "world",
         "risk_assessment": "world",
+        "assertion": "assertion",
     }
 
 

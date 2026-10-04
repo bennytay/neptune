@@ -59,6 +59,11 @@ def codes(src: FormantSource) -> dict[str, list[Any]]:
     return out
 
 
+def _ir(record: Any) -> str:
+    """An intervention's Formant id: its first identifier's value."""
+    return str(record.identifiers.value[0].value.value)
+
+
 def test_the_five_parts_are_documents_with_stated_tables() -> None:
     store = FakeFormant.standard()
     with serve(store) as endpoint:
@@ -122,7 +127,7 @@ def test_interventions_become_intervention_records_exactly_as_stated() -> None:
     with serve(FakeFormant.standard()) as endpoint:
         src = source(endpoint)
         catalog = src.catalog()
-    records: dict[str, Any] = {r.identifiers[0].value.value: r for r in catalog.of("intervention")}
+    records: dict[str, Any] = {_ir(r): r for r in catalog.of("intervention")}
     assert set(records) == {"ir-0001", "ir-0002", "ir-0003"}  # the request with no id builds none
     first = records["ir-0001"]
     assert first.kind == Intervention.kind
@@ -130,12 +135,12 @@ def test_interventions_become_intervention_records_exactly_as_stated() -> None:
     assert first.mode.value == "teleop"
     assert first.authority.value == "remote operator"
     assert first.reason.value == "AMR-07 stuck at dock door"
-    assert [c.value for c in first.commands] == ["clear_obstacle", "resume"]
+    assert [c.value for c in first.commands.value] == ["clear_obstacle", "resume"]
     assert first.outcome.value == "resolved"
-    assert [m.value.value for m in first.machines] == ["dev-amr-07"]
+    assert [m.value.value for m in first.machines.value] == ["dev-amr-07"]
     # Not in the API's answer: not covered, never a guess. Nothing is linked to anything else.
     assert isinstance(first.site, NotCovered) and isinstance(first.configuration, NotCovered)
-    assert first.related == ()
+    assert first.related == Known(())
     # Times are on a clock the text names: an offset says an instant, nothing else is added.
     assert isinstance(first.start, Known) and isinstance(first.end, Known)
     assert first.end.value.ticks - first.start.value.ticks == (8 * 60 + 30) * 1000
@@ -155,14 +160,14 @@ def test_interventions_become_intervention_records_exactly_as_stated() -> None:
     assert second.start.value.domain_id != first.start.value.domain_id
     assert clocks[second.start.value.domain_id].resolution.value == Fraction(1)
     assert clocks[first.start.value.domain_id].resolution.value == Fraction(1, 1000)
-    assert second.commands == ()  # an empty list: the request states none
+    assert second.commands == Known(())  # an empty list: the request states none
 
 
 def test_a_time_no_declared_format_reads_is_unknown_with_a_finding() -> None:
     with serve(FakeFormant.standard()) as endpoint:
         src = source(endpoint)
         catalog = src.catalog()
-    third = next(r for r in catalog.of("intervention") if r.identifiers[0].value.value == "ir-0003")
+    third = next(r for r in catalog.of("intervention") if _ir(r) == "ir-0003")
     assert isinstance(third.start, Unknown)
     assert isinstance(third.end, NotCovered | Unknown)
     found = codes(src)
@@ -435,7 +440,7 @@ def test_a_page_that_breaks_keeps_what_was_read_before_it() -> None:
     with serve(store) as endpoint:
         src = source(endpoint)
         catalog = src.catalog()
-    assert {r.identifiers[0].value.value for r in catalog.of("intervention")} == {
+    assert {_ir(r) for r in catalog.of("intervention")} == {
         "ir-0001",
         "ir-0002",
     }
@@ -451,7 +456,7 @@ def test_a_command_that_is_not_text_is_cited_where_it_is() -> None:
         src = source(endpoint)
         catalog = src.catalog()
     (record,) = catalog.of("intervention")
-    assert [c.value for c in record.commands] == ["stop", "go"]
+    assert [c.value for c in record.commands.value] == ["stop", "go"]
     (finding,) = codes(src)["value_unreadable"]
     assert finding.subject.locator[-1] == JsonPointer("/items/0/commands/1")
     assert finding.details["field"] == "commands/1"

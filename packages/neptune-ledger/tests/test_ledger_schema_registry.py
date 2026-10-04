@@ -62,6 +62,7 @@ from neptune_ledger.contract_tests.examples import (
     evidence_anchor,
     materialise,
     reparse,
+    with_changed_body,
     write,
 )
 
@@ -526,9 +527,9 @@ def test_a_package_of_a_version_the_registry_lacks_is_refused_and_writes_nothing
 
 
 def newest_package(tmp_path: Path) -> WorkedPackage:
-    """A package of package-schema 5: the schema-4 manipulator cell plus one work order (root
+    """A package of package-schema 7: the schema-4 manipulator cell plus one work order (root
     ADR 0063), stated by a declared-records transform over the cell's risk-assessment transform.
-    No worked example holds a version-5 kind, and a package is written at the lowest version that
+    No worked example holds a version-7 kind, and a package is written at the lowest version that
     holds its records, so the newest version needs a record of its own."""
     cell = materialise("manipulator_cell", tmp_path / "manipulator_cell-4")
     records = list(read_package(cell.root).records)
@@ -560,7 +561,7 @@ def test_the_newest_version_is_read_and_the_next_is_refused(
     catalog: PostgresCatalog, tmp_path: Path
 ) -> None:
     """Boundary: the registry's newest version (the manipulator cell with a work order, version
-    5) registers; the same package one version past it is a future version."""
+    7) registers; the same package one version past it is a future version."""
     cell = newest_package(tmp_path)
     assert cell.schema_version == shipped_registry().latest.version == SCHEMA_VERSION
     manifest = dict(cell.manifest)

@@ -84,7 +84,7 @@ def _by_id(package: IngestPackage, kind: str, namespace: str, value: str) -> lis
         for r in _of(package, kind)
         if any(
             isinstance(i, Known) and (i.value.namespace, i.value.value) == (namespace, value)
-            for i in r.identifiers
+            for i in r.identifiers.value
         )
     ]
 
@@ -117,8 +117,10 @@ def _resolve(raw: bytes, locator: tuple[Any, ...]) -> Any:
 
 
 def _states(value: Any) -> Iterator[Any]:
-    """Every Knowledge state inside a record's fields."""
-    if isinstance(value, Known | Unknown | KnownAbsent):
+    """Every Knowledge state inside a record's fields; a Known list is structure, not a value."""
+    if isinstance(value, Known) and isinstance(value.value, tuple):
+        yield from _states(value.value)
+    elif isinstance(value, Known | Unknown | KnownAbsent):
         yield value
     elif isinstance(value, tuple):
         for item in value:
@@ -168,21 +170,21 @@ def test_every_known_value_is_the_text_of_the_cell_it_cites(name: str) -> None:
 def test_amr_work_orders_keep_parts_serials_and_firmware_as_declared() -> None:
     package = _mapped("warehouse_amr")
     (event,) = _by_id(package, "maintenance_event", "cmms.work_order", "WO-26-0311")
-    (part,) = event.parts
+    (part,) = event.parts.value
     assert part.part.value == "Drive wheel assembly"
-    assert [i.value.value for i in part.removed] == ["DW-11873"]
-    assert [i.value.value for i in part.installed] == ["DW-12990"]
+    assert [i.value.value for i in part.removed.value] == ["DW-11873"]
+    assert [i.value.value for i in part.installed.value] == ["DW-12990"]
     assert event.configuration.value.namespace == "firmware"
     assert event.configuration.value.value == "4.2.0"
-    assert [a.value for a in event.actions] == ["Replace drive wheel", "Clean lidar window"]
-    assert event.actions[1].provenance.evidence.locator[-1] == Span(21, 39)
-    assert [m.value.value for m in event.machines] == ["AMR-07"]
+    assert [a.value for a in event.actions.value] == ["Replace drive wheel", "Clean lidar window"]
+    assert event.actions.value[1].provenance.evidence.locator[-1] == Span(21, 39)
+    assert [m.value.value for m in event.machines.value] == ["AMR-07"]
     # A work order with no part swapped lists none, and says so.
     twins = _by_id(package, "maintenance_event", "cmms.work_order", "WO-26-0313")
-    (flash,) = [t for t in twins if t.machines[0].value.value == "AMR-07"]
-    assert flash.parts == ()
+    (flash,) = [t for t in twins if t.machines.value[0].value.value == "AMR-07"]
+    assert flash.parts.value == ()
     assert "item_blank" in _codes(package)
-    assert [r.value.value for r in flash.related] == ["CHG-0042", "INC-0007"]
+    assert [r.value.value for r in flash.related.value] == ["CHG-0042", "INC-0007"]
 
 
 def test_civil_times_keep_their_own_clock_and_record_the_declared_zone() -> None:
@@ -215,14 +217,14 @@ def test_stated_offsets_are_instants_on_a_posix_clock() -> None:
 def test_zone_register_splits_declared_lists_and_keeps_units() -> None:
     package = _mapped("warehouse_amr")
     (envelope,) = _by_id(package, "authorisation_envelope", "register.envelope", "ENV-S007-03")
-    assert [m.value.value for m in envelope.machines] == ["AMR-07", "AMR-09", "AMR-12"]
-    assert all(isinstance(m.provenance.evidence.locator[-1], Span) for m in envelope.machines)
-    (zone,) = envelope.zones
+    assert [m.value.value for m in envelope.machines.value] == ["AMR-07", "AMR-09", "AMR-12"]
+    assert all(isinstance(m.provenance.evidence.locator[-1], Span) for m in envelope.machines.value)
+    (zone,) = envelope.zones.value
     assert zone.zone.value.value == "DOCK-1"
     assert zone.speed_limit.value.value == 0.8
     assert zone.speed_limit.unit.value.factors == (("m", 1), ("s", -1))
     assert envelope.supervision.value == "remote, 1 operator : 5 robots"
-    assert [m.value for m in envelope.missions] == ["Pallet transfer", "Charging"]
+    assert [m.value for m in envelope.missions.value] == ["Pallet transfer", "Charging"]
 
 
 def test_malformed_rows_are_findings_never_dropped_or_merged() -> None:
@@ -234,7 +236,7 @@ def test_malformed_rows_are_findings_never_dropped_or_merged() -> None:
     (repeated,) = codes["identifier_repeated"]
     assert repeated.records[0] in {t.id for t in twins}
     # A missing completion date is Unknown citing its cell, and the column is required.
-    missing = next(t for t in twins if t.machines[0].value.value == "AMR-09")
+    missing = next(t for t in twins if t.machines.value[0].value.value == "AMR-09")
     assert isinstance(missing.performed, Unknown)
     assert _place(missing.performed) == (RowCell(4, 4, "Completed"),)
     assert codes["value_blank"][0].details["rows"] == [4]
@@ -255,7 +257,7 @@ def test_malformed_rows_are_findings_never_dropped_or_merged() -> None:
 def test_cell_change_log_and_requalification_tests() -> None:
     package = _mapped("manipulator_cell")
     (change,) = _by_id(package, "change_record", "servicenow.change", "CHG0030012")
-    (item,) = change.changes
+    (item,) = change.changes.value
     assert (item.category.value, item.before.value, item.after.value) == (
         "Software",
         "5.4.2",
@@ -263,7 +265,7 @@ def test_cell_change_log_and_requalification_tests() -> None:
     )
     assert change.approval.decision.value == "approved"
     (requal,) = _by_id(package, "requalification_record", "plant2.requalification", "RQ-2026-004")
-    assert [(t.name.value, t.result.value) for t in requal.tests] == [
+    assert [(t.name.value, t.result.value) for t in requal.tests.value] == [
         ("Joint brake test", "PASS"),
         ("Safety-rated speed monitoring 250 mm/s", "PASS"),
         ("Light curtain stop distance", "212 mm"),
@@ -288,15 +290,15 @@ def test_mixed_encoding_cell_stays_unknown_and_a_missing_date_is_a_finding() -> 
     assert isinstance(authority, Unknown)
     assert _place(authority) == (RowCell(2, 14, "Decided By"),)
     assert isinstance(requal.return_to_service.time, Unknown)
-    assert len(requal.tests) == 2  # the third test's cells are blank
+    assert len(requal.tests.value) == 2  # the third test's cells are blank
     assert _codes(package)["value_blank"][0].details["column"] == "Decided On"
 
 
 def test_risk_register_scores_are_named_by_their_columns() -> None:
     package = _mapped("manipulator_cell")
     (risk,) = _by_id(package, "risk_assessment", "register.risk_assessment", "RA-CELL3-01")
-    (hazard,) = risk.hazards
-    assert [(s.name, s.value.value) for s in hazard.scores] == [
+    (hazard,) = risk.hazards.value
+    assert [(s.name, s.value.value) for s in hazard.scores.value] == [
         ("Severity", "S2"),
         ("Exposure", "F1"),
         ("Avoidance", "P2"),
@@ -304,12 +306,12 @@ def test_risk_register_scores_are_named_by_their_columns() -> None:
     ]
     assert risk.method.value == "ISO 12100"
     (baseline,) = _of(package, "commissioning_baseline")
-    assert [h.name.value for h in baseline.hardware] == [
+    assert [h.name.value for h in baseline.hardware.value] == [
         "Arm controller CR-7",
         "Parallel gripper PG-80",
     ]
-    assert baseline.software[0].version.value.value == "5.4.2"
-    assert [c.value for c in baseline.constraints] == [
+    assert baseline.software.value[0].version.value.value == "5.4.2"
+    assert [c.value for c in baseline.constraints.value] == [
         "No operation above 35 °C",
         "Manual loading only with light curtain active",
     ]
@@ -328,10 +330,10 @@ def test_every_archetype_maps_and_all_eight_kinds_appear() -> None:
 def test_legged_robot_maximo_export_maps_with_the_vendor_preset() -> None:
     package = _mapped("inspection_quadruped")
     (event,) = _by_id(package, "maintenance_event", "maximo.wonum", "WO1043")
-    assert [i.value.value for i in event.parts[0].installed] == ["KA3-00577"]
+    assert [i.value.value for i in event.parts.value[0].installed.value] == ["KA3-00577"]
     (calibration,) = _by_id(package, "maintenance_event", "maximo.wonum", "WO1044")
-    assert calibration.parts == ()
-    assert calibration.related == ()
+    assert calibration.parts.value == ()
+    assert calibration.related.value == ()
 
 
 # --- Lineage and determinism ---------------------------------------------------------------------
@@ -389,7 +391,7 @@ def test_map_package_writes_a_readable_package_and_leaves_the_base_untouched(
     assert _tree(root) == before
     written = read_package(tmp_path / "out")
     assert written.id == package_id
-    # Written at the version that added the lifecycle kinds it holds (root ADR 0037 §1).
+    # Known lists keep the lifecycle kinds' version 4 bytes (root ADR 0061 §5).
     assert written.manifest.version == LIFECYCLE_SINCE <= PACKAGE_SCHEMA_VERSION
 
 

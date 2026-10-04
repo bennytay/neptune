@@ -1,6 +1,27 @@
 {
   "contract": "package-schema",
   "goldens": {
+    "assertion_cell_baseline.manifest.json": "#/$defs/PackageManifest",
+    "assertion_cell_baseline.receipt.json": "#/$defs/IngestReceipt",
+    "assertion_cell_baseline.record.assertion.json": "#",
+    "assertion_cell_baseline.record.source_artifact.json": "#",
+    "assertion_cell_baseline.record.source_revision.json": "#",
+    "assertion_cell_baseline.record.timestamp_domain.json": "#",
+    "assertion_cell_baseline.record.transform_record.json": "#",
+    "assertion_fleet_identity.manifest.json": "#/$defs/PackageManifest",
+    "assertion_fleet_identity.receipt.json": "#/$defs/IngestReceipt",
+    "assertion_fleet_identity.record.assertion.json": "#",
+    "assertion_fleet_identity.record.source_artifact.json": "#",
+    "assertion_fleet_identity.record.source_revision.json": "#",
+    "assertion_fleet_identity.record.timestamp_domain.json": "#",
+    "assertion_fleet_identity.record.transform_record.json": "#",
+    "assertion_retraction.manifest.json": "#/$defs/PackageManifest",
+    "assertion_retraction.receipt.json": "#/$defs/IngestReceipt",
+    "assertion_retraction.record.assertion.json": "#",
+    "assertion_retraction.record.source_artifact.json": "#",
+    "assertion_retraction.record.source_revision.json": "#",
+    "assertion_retraction.record.timestamp_domain.json": "#",
+    "assertion_retraction.record.transform_record.json": "#",
     "drone.manifest.json": "#/$defs/PackageManifest",
     "drone.receipt.json": "#/$defs/IngestReceipt",
     "drone.record.calibration.json": "#",
@@ -88,7 +109,7 @@
     "warehouse_amr.record.transform_record.json": "#"
   },
   "owner_version": 5,
-  "schema_sha256": "sha256:8b44b0092ba29460fd762e23167ea11358c9c782503f9c921285daaad67ee3bd",
+  "schema_sha256": "sha256:df7a115b230eefbf4ccac6963663570b0dac9be422f427f6c64f8724e656c2ce",
   "status": "stable",
   "version": "5.0.0"
 }

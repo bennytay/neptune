@@ -1,0 +1,11 @@
+{
+  "adapter_id": "urdf",
+  "adapter_version": "1.0.0",
+  "config": {},
+  "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "id": "rec:sha256:163827bfaac771e9ba9f51d5b630984a2aa8eb3d64ff852bfe24bf0303285e07",
+  "kind": "transform_record",
+  "libraries": {},
+  "schema_version": 1,
+  "upstream": []
+}

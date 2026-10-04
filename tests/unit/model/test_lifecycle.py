@@ -35,6 +35,7 @@ from neptune.model.lifecycle import (
     IncidentRecord,
     Quantity,
     Score,
+    TimelineEntry,
     ZoneLimit,
 )
 from neptune.model.provenance import ByteRange, EvidenceRef, JsonPointer, Provenance
@@ -81,6 +82,10 @@ CLOCK: Final = TimestampDomain(
 def sample(tp: Any, name: str, *, sparse: bool = False) -> Any:
     """A value of type ``tp``: every state stated (``sparse``: every state Unknown, lists empty)."""
     origin, args = typing.get_origin(tp), typing.get_args(tp)
+    if args and typing.get_origin(args[0]) is Known:
+        (value_type,) = typing.get_args(args[0])
+        if typing.get_origin(value_type) is tuple:  # a Listed field: the list, Known
+            return Known(sample(value_type, name, sparse=sparse))
     if origin is tuple:
         if sparse:
             return ()
@@ -228,12 +233,12 @@ def test_severity_and_scores_are_declared_text_never_ranked() -> None:
     assert IncidentRecord.from_json(data) == incident
     hazard = Hazard(
         hazard=Known("crush between arm and fixture"),
-        scores=(Score("PLr", Known("d")), Score("severity", Known("S2"))),
-        mitigations=(Known("light curtain"),),
+        scores=Known((Score("PLr", Known("d")), Score("severity", Known("S2")))),
+        mitigations=Known((Known("light curtain"),)),
     )
     assert Hazard.from_json(hazard.to_json()) == hazard
     with pytest.raises(ValueError, match="unique"):
-        replace(hazard, scores=(Score("PLr", Known("d")), Score("PLr", Known("e"))))
+        replace(hazard, scores=Known((Score("PLr", Known("d")), Score("PLr", Known("e")))))
 
 
 def test_quantities_keep_their_declared_number_and_unit() -> None:
@@ -257,14 +262,30 @@ BAD: Final = [
     ("an id that is not a LogicalId", "zone", Known("PICK-A")),
     ("a bare text, not a state", "severity", "S2"),
     ("a bare id, not a state", "zone", LogicalId("site.zone", "DOCK-1")),
-    ("a list, not a tuple", "assets", []),
-    ("an unstated id", "assets", (Unknown(),)),
+    ("a list, not a tuple", "assets", Known([])),
+    ("a bare tuple, not a state", "assets", ()),
+    ("a declared-empty list as KnownAbsent", "assets", KnownAbsent(at("/assets"))),
+    ("an unstated id", "assets", Known((Unknown(),))),
     (
         "unsorted ids",
         "machines",
-        (Known(LogicalId("m", "b")), Known(LogicalId("m", "a"))),
+        Known((Known(LogicalId("m", "b")), Known(LogicalId("m", "a")))),
     ),
-    ("a repeated id", "machines", (Known(LogicalId("m", "a")), Known(LogicalId("m", "a")))),
+    (
+        "a repeated id",
+        "machines",
+        Known((Known(LogicalId("m", "a")), Known(LogicalId("m", "a")))),
+    ),
+    (
+        "an ambiguous whole list",
+        "machines",
+        Ambiguous[tuple[Any, ...]](
+            (
+                Candidate((Known(LogicalId("m", "a")), Known(LogicalId("m", "a")))),
+                Candidate(()),
+            )
+        ),
+    ),
 ]
 
 
@@ -284,11 +305,11 @@ def test_malformed_parts_are_refused() -> None:
     with pytest.raises(ValueError, match="non-empty"):
         Score("", Known("d"))
     with pytest.raises(ValueError, match="states"):
-        Hazard(Known("pinch"), (), (Unknown(),))
+        Hazard(Known("pinch"), Known(()), Known((Unknown(),)))
     with pytest.raises(ValueError):
         ZoneLimit.from_json({"zone": {"knowledge": "unknown"}})
     with pytest.raises(TypeError):
-        record(IncidentRecord, timeline=(Score("t", Known("x")),))
+        record(IncidentRecord, timeline=Known((Score("t", Known("x")),)))
 
 
 def test_a_lifecycle_record_is_stated_never_observed_or_inferred() -> None:
@@ -303,6 +324,61 @@ def test_a_lifecycle_record_is_stated_never_observed_or_inferred() -> None:
     data["provenance"] = {**data["provenance"], "assertion_kind": "observed"}
     with pytest.raises(ValueError, match="stated"):
         IncidentRecord.from_json(data)
+
+
+def observed(pointer: str) -> Provenance:
+    return Provenance(at(pointer).evidence, ADAPTER.id, AssertionKind.OBSERVED)
+
+
+OBSERVED_FIELDS: Final = [
+    ("a field", {"severity": Known("S2", observed("/severity"))}),
+    ("an unknown field", {"location": Unknown(observed("/location"))}),
+    ("a list", {"assets": Known((), observed("/assets"))}),
+    ("a list item", {"assets": Known((Known(LogicalId("a", "x"), observed("/assets/0")),))}),
+    (
+        "a candidate",
+        {"severity": Ambiguous((Candidate("S2", observed("/a")), Candidate("2", at("/b"))))},
+    ),
+    (
+        "a nested part",
+        {
+            "timeline": Known(
+                (
+                    TimelineEntry(
+                        Known(Timestamp(1_790_762_400, CLOCK.id)), Known("x", observed("/t"))
+                    ),
+                )
+            )
+        },
+    ),
+]
+
+
+@pytest.mark.parametrize(("what", "change"), OBSERVED_FIELDS, ids=[o[0] for o in OBSERVED_FIELDS])
+def test_every_value_is_stated_however_deeply_nested(what: str, change: dict[str, Any]) -> None:
+    with pytest.raises(ValueError, match="stated by its declaration"):
+        record(IncidentRecord, **change)
+    # The same line is refused when read, so it can never round-trip: the field written stated,
+    # then only that field's citations turned to observed.
+    name, value = next(iter(change.items()))
+    data = record(IncidentRecord, **{name: _restate(value)}).to_json()
+    field = canonical_json.dumps(data[name]).replace(b'"stated"', b'"observed"')
+    data[name] = canonical_json.loads(field)
+    with pytest.raises(ValueError, match="stated by its declaration"):
+        IncidentRecord.from_json(data)
+
+
+def _restate(value: Any) -> Any:
+    """``value`` with every observed provenance made stated: the record a reader would accept."""
+    if isinstance(value, Provenance):
+        return Provenance(value.evidence, value.transform, STATED)
+    if isinstance(value, tuple):
+        return tuple(_restate(item) for item in value)
+    if isinstance(value, Known | Unknown | Candidate | TimelineEntry):
+        return replace(value, **{f.name: _restate(getattr(value, f.name)) for f in fields(value)})
+    if isinstance(value, Ambiguous):
+        return Ambiguous(tuple(_restate(c) for c in value.candidates))
+    return value
 
 
 # --- In a package ------------------------------------------------------------------------------

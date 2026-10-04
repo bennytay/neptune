@@ -4,15 +4,17 @@
   artifact its content id names. Tests, the sandbox and small sources use it.
 - ``LocalReader`` reads a local source in place, checking each piece against the artifact's chunk
   hashes before serving it. Large sources use it: nothing is copied.
+- ``VerifiedReader`` is what both checked readers share; a connector's source has its own
+  (``neptune.discovery.external.ExternalReader``, ADR 0067).
 """
 
 import os
 from collections import OrderedDict
+from typing import BinaryIO, Protocol
 
-from neptune.discovery.source import LocalSource
 from neptune.identity.hashing import content_id
 from neptune.model.ids import ContentId
-from neptune.model.source import LocalPath, RawLocalPath, SourceArtifact
+from neptune.model.source import SourceArtifact, SourceLocation
 
 
 class BytesReader:
@@ -47,45 +49,22 @@ class SourceChangedError(Exception):
     """A source's bytes no longer match the artifact they were hashed as: never read silently."""
 
 
-class LocalReader:
-    """A local source read where it lies, every piece checked against its artifact (ADR 0026).
+class VerifiedReader:
+    """A source's bytes served only from chunks hashed against its artifact (ADR 0026 §3).
 
-    Nothing is copied to disk. Reads go through the artifact's chunks (8 MiB by default): each is
-    read whole, hashed and compared with ``artifact.chunks`` before any byte of it is served, and
-    the last ``cache`` checked chunks are kept. A file that changed since it was hashed raises
+    Reads go through the artifact's chunks (8 MiB by default): each is fetched whole
+    (``_fetch``), hashed and compared with ``artifact.chunks`` before any byte of it is served,
+    and the last ``cache`` checked chunks are kept. Bytes that no longer match raise
     ``SourceChangedError``, so an adapter can never decode bytes its citations do not name.
+    Subclasses say where a chunk's bytes come from.
     """
 
-    def __init__(
-        self,
-        source: LocalSource,
-        location: LocalPath | RawLocalPath,
-        artifact: SourceArtifact,
-        cache: int = 4,
-    ) -> None:
+    def __init__(self, artifact: SourceArtifact, cache: int = 4) -> None:
         if cache < 1:
             raise ValueError(f"cache must hold at least one chunk: {cache}")
         self._artifact = artifact
-        self._file = source.open(location)
-        size = os.fstat(self._file.fileno()).st_size
-        if size != artifact.size:
-            self._file.close()
-            raise SourceChangedError(f"{location} holds {size} bytes, not {artifact.size}")
         self._cache: OrderedDict[int, bytes] = OrderedDict()
         self._capacity = cache
-
-    def __enter__(self) -> "LocalReader":
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
-
-    def close(self) -> None:
-        self._file.close()
-
-    def fileno(self) -> int:
-        """The read-only descriptor the reader reads through: the one a sandboxed call keeps."""
-        return self._file.fileno()
 
     @property
     def content_id(self) -> ContentId:
@@ -95,19 +74,17 @@ class LocalReader:
     def size(self) -> int:
         return self._artifact.size
 
+    def _fetch(self, start: int, length: int) -> bytes:
+        """Up to ``length`` bytes from ``start``: fewer only if the source ends first."""
+        raise NotImplementedError
+
     def _chunk(self, index: int) -> bytes:
         if index in self._cache:
             self._cache.move_to_end(index)
             return self._cache[index]
         width = self._artifact.chunk_size
         start = index * width
-        expected = min(width, self._artifact.size - start)
-        data = b""
-        while len(data) < expected:
-            piece = os.pread(self._file.fileno(), expected - len(data), start + len(data))
-            if not piece:
-                break
-            data += piece
+        data = self._fetch(start, min(width, self._artifact.size - start))
         if content_id(data) != self._artifact.chunks[index]:
             raise SourceChangedError(
                 f"{self._artifact.content_id}: chunk {index} changed since it was hashed"
@@ -133,3 +110,59 @@ class LocalReader:
             pieces.append(piece)
             offset += len(piece)
         return b"".join(pieces)
+
+
+def pread_exactly(fd: int, start: int, length: int) -> bytes:
+    """``length`` bytes of ``fd`` from ``start``, fewer only at its end."""
+    data = b""
+    while len(data) < length:
+        piece = os.pread(fd, length - len(data), start + len(data))
+        if not piece:
+            break
+        data += piece
+    return data
+
+
+class Opens(Protocol):
+    """Anything that opens a location as a real file: a ``LocalSource``, or a spool."""
+
+    def open(self, location: SourceLocation) -> BinaryIO: ...
+
+
+class LocalReader(VerifiedReader):
+    """A local source read where it lies, every piece checked against its artifact (ADR 0026).
+
+    Nothing is copied to disk. A file that changed since it was hashed raises
+    ``SourceChangedError``. ``source`` is a ``LocalSource``, or anything else that opens the
+    location as a real file (the job's spool of a connector's bytes, ADR 0067).
+    """
+
+    def __init__(
+        self,
+        source: Opens,
+        location: SourceLocation,
+        artifact: SourceArtifact,
+        cache: int = 4,
+    ) -> None:
+        super().__init__(artifact, cache)
+        self._file = source.open(location)
+        size = os.fstat(self._file.fileno()).st_size
+        if size != artifact.size:
+            self._file.close()
+            raise SourceChangedError(f"{location} holds {size} bytes, not {artifact.size}")
+
+    def __enter__(self) -> "LocalReader":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self._file.close()
+
+    def fileno(self) -> int:
+        """The read-only descriptor the reader reads through: the one a sandboxed call keeps."""
+        return self._file.fileno()
+
+    def _fetch(self, start: int, length: int) -> bytes:
+        return pread_exactly(self._file.fileno(), start, length)
