@@ -244,9 +244,15 @@ def _index(edges: Mapping[str, Sequence[Hop]]) -> dict[str, _Outgoing]:
 
 
 def _search(
-    clock: str, reference: str, s: int, index: Mapping[str, _Outgoing], budget: _Budget
+    clock: str,
+    reference: str,
+    s: int,
+    index: Mapping[str, _Outgoing],
+    budget: _Budget,
+    end: int | None = None,
 ) -> _Search:
-    """The highest-ranked usable path for an entry starting at ``s`` (ADR 0003 §3.3-3.4).
+    """The highest-ranked usable path for an entry starting at ``s`` (ADR 0003 §3.3-3.4), or
+    for the interval ``[s, end]`` when ``end`` is given (the time index, ADR 0015 §3).
 
     A depth-first walk that follows a hop only when its validity window holds the interval as it
     stands, which is exactly what makes a path usable, so every complete walk is a usable path
@@ -254,14 +260,14 @@ def _search(
     windows are indexed (``_Outgoing``), so a step finds the windows that hold the interval
     without checking the others. The step budget is a backstop for windows that overlap a lot.
     """
+    stop = s if end is None else end
     if clock == reference:
-        return _Search((Path(()), (s, s)), (), False)
+        return _Search((Path(()), (s, stop)), (), False)
     best: tuple[Path, tuple[int, int]] | None = None
     tried: set[tuple[str, ...]] = set()
     steps = 0
-    start = Fraction(s)
     stack: list[tuple[str, frozenset[str], tuple[Hop, ...], Fraction, Fraction]] = [
-        (clock, frozenset({clock}), (), start, start)
+        (clock, frozenset({clock}), (), Fraction(s), Fraction(stop))
     ]
     while stack:
         at, seen, used, lo, hi = stack.pop()
@@ -385,3 +391,108 @@ def _out_of_range(entry: ThreadEntry, search: _Search) -> CatalogFinding:
         f"{detail} (package {entry.packages[0]})",
         paths_tried=tuple(MappingPath(ids) for ids in named[:MAX_PATHS_NAMED]) or None,
     )
+
+
+# How many simple paths ``IntervalMapper.candidates`` enumerates per clock before it gives up
+# pruning and asks for every interval on the clock (each is still mapped exactly).
+MAX_CANDIDATE_PATHS: Final = 256
+
+
+@dataclass(frozen=True)
+class Mapped:
+    """An interval carried onto the reference clock: ``[lo, hi]`` and the path's mapping ids."""
+
+    lo: int
+    hi: int
+    path: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Unmapped:
+    """No usable path holds the interval: the path prefixes whose window did not hold it, and
+    whether the step budget ran out first."""
+
+    tried: tuple[tuple[str, ...], ...]
+    exhausted: bool
+
+
+class IntervalMapper:
+    """ADR 0003 §3's merge applied to intervals, for the time index (ADR 0015 §3).
+
+    ``map`` carries ``[first, end]`` through the best-ranked usable path whose every hop's
+    validity window holds the interval as it stands, widening by each hop's bound, exactly as
+    ``merge`` carries ``[s, s]``. ``candidates`` gives, per clock, a range of native ticks that
+    holds every interval some path could carry into a reference window: the index lookup's key.
+    Stored ticks are never rewritten.
+    """
+
+    def __init__(self, reference: str, mappings: Sequence[ClockMapping]) -> None:
+        self.reference = reference
+        self.unusable = tuple(
+            sorted(
+                (m for m in mappings if not m.usable), key=lambda m: m.mapping_id.encode("utf-8")
+            )
+        )
+        self._edges = _edges(mappings)
+        self._index = _index(self._edges)
+        self._budget = _Budget(MAX_MERGE_STEPS)
+
+    def reaches(self, clock: str) -> bool:
+        """Whether a path of usable mappings joins ``clock`` to the reference, windows aside."""
+        return clock == self.reference or _reaches(clock, self.reference, self._edges)
+
+    def map(self, clock: str, first: int, end: int) -> Mapped | Unmapped:
+        found = _search(clock, self.reference, first, self._index, self._budget, end)
+        if found.best is None:
+            return Unmapped(found.tried, found.exhausted)
+        path, (lo, hi) = found.best
+        return Mapped(lo, hi, path.ids)
+
+    def candidates(self, clock: str, first: int, last: int) -> tuple[int, int] | None:
+        """Native ticks on ``clock`` that hold every interval whose mapped interval can meet the
+        reference window ``[first, last]``, or None when there are too many paths to bound it.
+
+        Through a path with ``F(t) = A·t + B`` and total bound ``TB``, a mapped interval is
+        ``[floor(F(s) - TB), ceil(F(e) + TB)]``; it meets the window only if
+        ``s <= (last + 1 + TB - B) / A`` and ``e >= (first - 1 - TB - B) / A``. The union over
+        every simple path, windows aside, is a superset of what ``map`` can place in the window.
+        """
+        if clock == self.reference:
+            return first, last
+        lows: list[int] = []
+        highs: list[int] = []
+        paths = self._simple_paths(clock)
+        if paths is None:
+            return None
+        for hops in paths:
+            slope, offset = Fraction(1), Fraction(0)
+            for hop in hops:
+                slope, offset = hop.slope * slope, hop.slope * offset + hop.offset
+            bound = Path(hops).total_bound
+            lows.append(math.floor((first - 1 - bound - offset) / slope))
+            highs.append(math.ceil((last + 1 + bound - offset) / slope))
+        if not lows:
+            return None
+        return min(lows), max(highs)
+
+    def _simple_paths(self, clock: str) -> list[tuple[Hop, ...]] | None:
+        """Every simple path of usable mappings to the reference, windows aside; None past
+        ``MAX_CANDIDATE_PATHS`` paths or ``MAX_ENTRY_STEPS`` steps."""
+        found: list[tuple[Hop, ...]] = []
+        steps = 0
+        stack: list[tuple[str, frozenset[str], tuple[Hop, ...]]] = [(clock, frozenset({clock}), ())]
+        while stack:
+            at, seen, used = stack.pop()
+            for hop in self._edges.get(at, ()):
+                steps += 1
+                if steps > MAX_ENTRY_STEPS:
+                    return None
+                if hop.target in seen:
+                    continue
+                if hop.target == self.reference:
+                    found.append((*used, hop))
+                    if len(found) > MAX_CANDIDATE_PATHS:
+                        return None
+                else:
+                    stack.append((hop.target, seen | {hop.target}, (*used, hop)))
+        return found

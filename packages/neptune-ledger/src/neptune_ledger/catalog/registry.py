@@ -16,10 +16,12 @@ import os
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Literal, TypeVar
 
 import psycopg
+import pyarrow as pa
 from psycopg import sql
 
 import neptune_ledger
@@ -64,6 +66,8 @@ from neptune_ledger.catalog.manifest import ManifestNotWritten, write_manifest
 from neptune_ledger.catalog.migrate import tenant_schema
 from neptune_ledger.catalog.projection import SchemaVersion, shipped_registry
 from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, check_sources
+from neptune_ledger.lake.space_index import ExtentRow, extent_rows
+from neptune_ledger.lake.time_index import IntervalRow, record_intervals, series_intervals
 from neptune_ledger.lineage.graph import read_lineage, unknown_record
 from neptune_ledger.threads.alignment import clock_mapping
 from neptune_ledger.threads.membership import MembershipError, ThreadRows, thread_rows
@@ -243,12 +247,22 @@ class PostgresCatalog:
         root_fd = open_root(root)  # no component followed: a link swapped in since is refused
         if root_fd is None:
             return self._unreadable(given)
+        series: tuple[IntervalRow, ...] = ()
+        unread: CatalogFinding | None = None
         try:
             checked = check_package(root_fd, "register")
+            if not checked.findings and checked.package is not None:
+                try:  # while the root is open: the series files just verified (ADR 0015 §1)
+                    series = series_intervals(root_fd, checked.package)
+                except (OSError, ValueError, pa.ArrowException) as exc:
+                    detail = f"a series file's clock columns cannot be read: {exc}"[:500]
+                    unread = CatalogFinding("record_invalid", str(checked.package_id), detail)
         finally:
             os.close(root_fd)
         if checked.findings:
             return self._refusal(root, checked, list(checked.findings))
+        if unread is not None:
+            return self._refusal(root, checked, [unread])
         if expected is not None and checked.package_id != expected:
             detail = f"it hashes to {checked.package_id}, not the logged package {expected}"
             finding = CatalogFinding("manifest_digest_mismatch", MANIFEST, detail)
@@ -268,8 +282,15 @@ class PostgresCatalog:
             finding = CatalogFinding("record_invalid", exc.record_id, exc.detail)
             return self._refusal(root, checked, [finding])
         try:
+            extents = extent_rows(checked.lines)
+        except (TypeError, ValueError, KeyError) as exc:  # the compiler's readers accepted it
+            finding = CatalogFinding("record_invalid", str(checked.package_id), str(exc)[:500])
+            return self._refusal(root, checked, [finding])
+        indexes = Indexes((*record_intervals(rows.records), *series), extents)
+        try:
             outcome, key, locator, version = self._run(
-                lambda conn: self._write(conn, rows, threads, root, tick), refuse_as=rows.package_id
+                lambda conn: self._write(conn, rows, threads, indexes, root, tick),
+                refuse_as=rows.package_id,
             )
         except _Refused as refused:
             return self._refusal(root, checked, refused.findings)
@@ -322,6 +343,7 @@ class PostgresCatalog:
         conn: Conn,
         rows: PackageRows,
         threads: ThreadRows,
+        indexes: "Indexes",
         root: str,
         replayed: TransactionKey | None,
     ) -> tuple[Literal["already_registered", "registered"], TransactionKey, str, str]:
@@ -406,7 +428,62 @@ class PostgresCatalog:
                     ],
                 )
             self._write_threads(conn, cur, threads, p, seq)
+            self._write_indexes(cur, indexes, p, seq)
         return "registered", TransactionKey(seq, at), root, self._ledger_version
+
+    def _write_indexes(
+        self, cur: psycopg.Cursor[Any], indexes: "Indexes", package: str, seq: int
+    ) -> None:
+        """The package's rows of the derived time and spatial indexes (ADR 0015), after its
+        records: every row is a function of the verified package, so a replay rewrites it."""
+        t = self._tenant
+        for intervals in _batches(indexes.intervals):
+            cur.executemany(
+                "INSERT INTO time_interval (tenant_id, subject, kind, record_id, package_id,"
+                " clock, first_tick, last_tick, rows_known, rows_unknown, registration_key)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    (
+                        t,
+                        x.subject,
+                        x.kind,
+                        x.record_id,
+                        package,
+                        x.clock,
+                        x.first,
+                        x.last,
+                        x.rows_known,
+                        x.rows_unknown,
+                        seq,
+                    )
+                    for x in intervals
+                ],
+            )
+        for extents in _batches(indexes.extents):
+            cur.executemany(
+                "INSERT INTO spatial_extent (tenant_id, kind, record_id, package_id, pointer,"
+                " registration_key, reference_kind, reference, extent_pointer, dims, unit,"
+                " min_x, min_y, min_z, max_x, max_y, max_z)"
+                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                [
+                    (
+                        t,
+                        x.kind,
+                        x.record_id,
+                        package,
+                        x.pointer,
+                        seq,
+                        x.reference_kind,
+                        x.reference,
+                        x.extent_pointer,
+                        None if x.low is None else len(x.low),
+                        x.unit,
+                        *_axes(x.low),
+                        *_axes(x.high),
+                    )
+                    for x in extents
+                ],
+            )
 
     def _write_threads(
         self, conn: Conn, cur: psycopg.Cursor[Any], threads: ThreadRows, package: str, seq: int
@@ -1159,3 +1236,17 @@ def _record_values(tenant: str, package_id: str, seq: int, r: RecordRow) -> tupl
 def _counts(checked: Checked) -> tuple[KindCount, ...]:
     tables = checked.manifest["tables"]
     return tuple(KindCount(kind, tables[kind]) for kind in sorted(tables) if tables[kind])
+
+
+@dataclass(frozen=True)
+class Indexes:
+    """A package's rows of the derived time and spatial indexes (ADR 0015)."""
+
+    intervals: tuple[IntervalRow, ...]
+    extents: tuple[ExtentRow, ...]
+
+
+def _axes(values: tuple[float, ...] | None) -> tuple[float | None, float | None, float | None]:
+    """x, y and z of an extent corner; None for an axis it does not have."""
+    padded = (*(values or ()), None, None, None)
+    return padded[0], padded[1], padded[2]
