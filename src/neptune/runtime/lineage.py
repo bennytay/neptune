@@ -27,10 +27,10 @@ from neptune.discovery.source import SkipReason
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import transform_record
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
-from neptune.model.ids import ContentId
+from neptune.model.ids import ContentId, ExternalObjectRef
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
-from neptune.model.source import LocalPath, RawLocalPath
+from neptune.model.source import SourceLocation
 from neptune.runtime.sandbox import DEFAULT_LIMITS, Isolation, Limits
 
 RUNTIME_ID: Final = "neptune.runtime"
@@ -378,24 +378,31 @@ def output_invalid(
 
 
 def source_changed(
-    transform: TransformRecord, location: LocalPath | RawLocalPath, source: ContentId
+    transform: TransformRecord, location: SourceLocation, source: ContentId
 ) -> IngestFinding:
-    """The file at ``location`` no longer holds the bytes it was fingerprinted as."""
+    """The file (or a connector's object) at ``location`` no longer holds the bytes it was
+    fingerprinted as."""
+    message = (
+        "the object's store served other bytes than it was fingerprinted as; it was not read,"
+        " and the next job fetches it again"
+        if isinstance(location, ExternalObjectRef)
+        else "the file changed after it was fingerprinted; it was not read, and the next job"
+        " fingerprints it again"
+    )
     return ingest_finding(
         code=SOURCE_CHANGED,
         category=FindingCategory.INCONSISTENT,
         severity=Severity.ERROR,
         subject=location,
         transform=transform,
-        message="the file changed after it was fingerprinted; it was not read, and the next job"
-        " fingerprints it again",
+        message=message,
         details={"source": source},
     )
 
 
 def source_unreadable(
     transform: TransformRecord,
-    location: LocalPath | RawLocalPath,
+    location: SourceLocation,
     reason: SkipReason,
     errno: str | None = None,
 ) -> IngestFinding:
@@ -407,12 +414,13 @@ def source_unreadable(
     if errno is not None:
         details["errno"] = errno
     said = f"{reason}, {errno}" if errno is not None else str(reason)
+    noun = "object" if isinstance(location, ExternalObjectRef) else "file"
     return ingest_finding(
         code=SOURCE_UNREADABLE,
         category=FindingCategory.SKIPPED,
         severity=Severity.ERROR,
         subject=location,
         transform=transform,
-        message=f"the file could not be opened or read ({said})",
+        message=f"the {noun} could not be opened or read ({said})",
         details=details,
     )

@@ -344,7 +344,7 @@ class ProbeEngine:
         return finding
 
     def source_probe_from_json(
-        self, data: JsonValue, *, source: ContentId, size: int, name: str, head: bytes
+        self, data: JsonValue, *, source: ContentId, size: int, name: str, head: bytes | None
     ) -> SourceProbe:
         """Read back the ``SourceProbe`` a sandboxed ``probe`` of this source returned.
 
@@ -354,6 +354,10 @@ class ProbeEngine:
         failed), the selection and the concluding findings are derived again, the container
         report and the other findings are parsed strictly and must cite this source, and the
         whole must be exactly what this engine writes. Anything else is a ``ValueError``.
+
+        ``head`` is ``None`` only for a probe this engine already checked and the workspace kept
+        (a connector's unchanged object, ADR 0067): its recorded sniff is read back instead of
+        taken again, and everything else is checked as for a fresh reply.
         """
         keys = {"findings", "name", "probes", "selection", "size", "sniff", "source"}
         if not isinstance(data, dict) or not keys <= data.keys() <= keys | {"container"}:
@@ -363,7 +367,11 @@ class ProbeEngine:
         if not isinstance(data["probes"], list) or not isinstance(data["findings"], list):
             raise ValueError("a source's probes and findings are lists")
         whole = EvidenceRef(source, (ByteRange(0, size),))
-        sniffed = sniff(head, size, self._signatures)
+        sniffed = (
+            sniff(head, size, self._signatures)
+            if head is not None
+            else sniff_from_json(data["sniff"], self._signatures)
+        )
         probes = tuple(self._candidate(item) for item in data["probes"])
         container = (
             None

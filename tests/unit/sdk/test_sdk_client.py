@@ -357,13 +357,14 @@ def test_a_file_uri_that_names_no_local_folder_is_refused(
 
 
 @pytest.mark.parametrize("uri", ["s3://fleet/run-7", "https://data.example/run-7", "gs://b/r"])
-def test_a_remote_source_needs_the_network_then_a_connector(home: Path, uri: str) -> None:
+def test_a_remote_source_no_installed_connector_reads_is_a_configuration_error(
+    home: Path, uri: str
+) -> None:
     workspace = Workspace(home)
-    with pytest.raises(NetworkRefusedError, match="needs the network"):
-        Neptune(workspace).dry_run(uri)
-    workspace.allow_network(True)
-    with pytest.raises(UnsupportedError, match="no connector"):
-        Neptune(workspace).dry_run(uri)
+    for allowed in (False, True):  # a configuration error, whatever the network setting
+        workspace.allow_network(allowed)
+        with pytest.raises(ConfigurationError, match="no installed connector reads"):
+            Neptune(workspace, plugins=False).dry_run(uri)
 
 
 def test_a_destination_that_exists_is_refused_before_anything_runs(

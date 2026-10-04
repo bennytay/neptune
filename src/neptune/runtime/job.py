@@ -31,6 +31,12 @@ in CPU time, wall time and memory, with no network and nowhere to write, whose c
 exhaustion becomes a finding as a raise does. Only this process writes the workspace, after
 checking what the child returned, so a killed child leaves nothing behind.
 
+A connector's source (ADR 0067) runs the same phases. ``discover`` is the connector's listing
+against the ledger of its URI; ``fingerprint`` carries every object whose revision token the ledger
+recognises forward without fetching it, fetches and hashes the rest into the job's spool, and
+records what the listing no longer holds as absent; the probe of an unchanged object is the one
+the workspace kept. Adapters read the spooled bytes in the sandbox, verified as a local file is.
+
 Cancellation is checked between units of work (sources and chunks) and between phases from
 inspect on; the walk and its saved ledger always finish. A chunk in progress finishes and commits;
 nothing in the workspace is left half-written.
@@ -41,6 +47,7 @@ keeps them under the key the job needs, so an unchanged source costs a hash and 
 Each miss names the rule that caused it, and the job leaves a ``CacheReport`` beside the envelope.
 """
 
+import contextlib
 import errno
 import os
 import platform
@@ -55,7 +62,7 @@ from datetime import UTC, datetime
 from functools import partial
 from itertools import pairwise
 from pathlib import Path
-from typing import Final, TypeVar
+from typing import BinaryIO, Final, Protocol, TypeAlias, TypeVar
 
 from neptune.adapters.check import check_chunk_output, check_plan
 from neptune.adapters.contract import (
@@ -81,6 +88,15 @@ from neptune.derived.introspection import Introspection, introspect
 from neptune.derived.media import MediaIndex, index_media
 from neptune.derived.spatial import FrameAlignment, align_frames, frame_records
 from neptune.derived.temporal import ClockAlignment, RowReader, align_clocks, clock_records
+from neptune.discovery.external import (
+    ExternalReader,
+    ExternalRoot,
+    ExternalSource,
+    ExternalSourceError,
+    Spool,
+    SpoolError,
+    fingerprint_external,
+)
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.layout import Layout, layout_from_scan
 from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
@@ -102,7 +118,7 @@ from neptune.identity import canonical_json
 from neptune.identity.revisions import Observation, SourceLedger
 from neptune.manifest import LoadedManifest, ManifestError
 from neptune.model.finding import IngestFinding
-from neptune.model.ids import ContentId, RecordId
+from neptune.model.ids import ContentId, ExternalObjectRef, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.package import ReceiptEnvelope, package_manifest_from_json
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
@@ -112,6 +128,7 @@ from neptune.model.source import (
     LocalPath,
     RawLocalPath,
     SourceArtifact,
+    SourceLocation,
     local_location,
 )
 from neptune.runtime import events, explain, lineage, sandbox, wire
@@ -164,6 +181,7 @@ from neptune.store.workspace import (
     Derivative,
     DerivativeKey,
     Held,
+    LocalOnlyError,
     Workspace,
     WorkspaceError,
 )
@@ -176,6 +194,8 @@ PROBE_AMBIGUOUS: Final = f"{PROBE_ID}.ambiguous"
 # reads are the adapter's: anything but ``SourceChangedError`` from ``plan`` or ``ingest`` is its
 # failure (``plan_failed``, ``chunk_failed``).
 _UNREADABLE: Final = (SourceChangedError, SourceAccessError, OSError)
+PROBE_RECIPE: Final = "neptune.runtime.probe/1"  # a connector's object's kept probe (ADR 0067)
+PROBE_FILE: Final = "probe.json"
 _T = TypeVar("_T")
 
 T = TypeVar("T")
@@ -285,7 +305,7 @@ class _Source:
     """One distinct artifact seen by this job, and what became of it."""
 
     artifact: SourceArtifact
-    location: LocalPath | RawLocalPath  # the first location holding it, in walk order
+    location: SourceLocation  # the first location holding it, in walk (or listing) order
     adapter: Adapter | None = None
     config: AdapterConfig | None = None
     chunks: tuple[Chunk, ...] = ()
@@ -295,7 +315,7 @@ class _Source:
     plan_cache: PlanCache | None = None  # set once the job decides to plan or reuse
     hits: set[str] = field(default_factory=set)  # chunks the workspace had committed
     intact: tuple[int, ...] | None = None  # the file's state when last verified intact
-    locations: list[LocalPath | RawLocalPath] = field(default_factory=list)  # every one, walk order
+    locations: list[SourceLocation] = field(default_factory=list)  # every one, walk order
     probe: SourceProbe | None = None  # what the probe engine found, once probed
     inspection: explain.Inspection | None = None  # the adapter's ``inspect``, in a dry run
     pin: explain.Pin | None = None  # the manifest rule that chose its adapter (ADR 0047)
@@ -318,17 +338,59 @@ class _AlignmentInputs:
     rows: RowReader
 
 
+Reader: TypeAlias = LocalReader | ExternalReader
+
+
+class _Origin(Protocol):
+    """Where the job reads its sources' bytes: a local root, or a connector and the job's spool."""
+
+    def reader(self, item: "_Source") -> Reader:
+        """A verified reader over ``item``'s bytes; raises what opening it raises."""
+        ...
+
+    def open(self, item: "_Source") -> BinaryIO:
+        """A stream over ``item``'s bytes as they are now, to see how they differ."""
+        ...
+
+
+class _LocalOrigin:
+    def __init__(self, source: LocalSource) -> None:
+        self.source = source
+
+    def reader(self, item: "_Source") -> Reader:
+        return LocalReader(self.source, item.location, item.artifact)
+
+    def open(self, item: "_Source") -> BinaryIO:
+        return self.source.open(item.location)
+
+
+class _ExternalOrigin:
+    def __init__(self, source: ExternalSource, spool: Spool) -> None:
+        self.source, self.spool = source, spool
+
+    def reader(self, item: "_Source") -> Reader:
+        return ExternalReader(self.source, item.location, item.artifact, self.spool)
+
+    def open(self, item: "_Source") -> BinaryIO:
+        """The spooled copy, exact by construction; an object never spooled is not fetched whole
+        again only to describe how it differs (``FileNotFoundError``: nothing is said)."""
+        spooled = self.spool.open(item.content_id)
+        if spooled is None:
+            raise FileNotFoundError(f"{item.content_id} is not spooled")
+        return spooled
+
+
 class _Opener:
     """One source's reader, opened the first time a chunk needs the source; then ``close``."""
 
-    def __init__(self, source: LocalSource, item: _Source) -> None:
-        self._source, self._item = source, item
-        self._reader: LocalReader | None = None
+    def __init__(self, origin: _Origin, item: _Source) -> None:
+        self._origin, self._item = origin, item
+        self._reader: Reader | None = None
 
-    def open(self) -> LocalReader:
+    def open(self) -> Reader:
         """The reader. The first call opens it and raises whatever opening raises."""
         if self._reader is None:
-            self._reader = LocalReader(self._source, self._item.location, self._item.artifact)
+            self._reader = self._origin.reader(self._item)
         return self._reader
 
     def close(self) -> None:
@@ -356,7 +418,9 @@ def _failure(raised: Raised, call: Step, result: Step, check: Step) -> Failure:
     return Failure(call, raised.error)
 
 
-def _hint_name(location: LocalPath | RawLocalPath) -> str:
+def _hint_name(location: SourceLocation) -> str:
+    if isinstance(location, ExternalObjectRef):  # advisory, as every name is: the key's last part
+        return location.object_id.rpartition("/")[2]
     if isinstance(location, LocalPath):
         return location.parts[-1]
     return location.raw.rsplit(b"/", 1)[-1].decode("utf-8", "replace")
@@ -512,11 +576,15 @@ class IngestJob:
     happens; ``cancel`` is checked at every checkpoint. Problems with one source become findings
     in the package; problems with the job raise ``JobError``. ``plugins`` are the plugins the
     registry was built from (ADR 0058): the findings about those refused join the job's.
+
+    ``root`` is a local folder or file, or an ``ExternalRoot``: a source a connector built from a
+    URI (ADR 0067), whose ledger is the URI's, and which takes no manifest and no ignore rules
+    (those name local paths).
     """
 
     def __init__(
         self,
-        root: Path,
+        root: Path | ExternalRoot,
         destination: Path | None,
         workspace: Workspace,
         registry: AdapterRegistry,
@@ -526,15 +594,28 @@ class IngestJob:
         cancel: threading.Event | None = None,
         plugins: Plugins | None = None,
     ) -> None:
-        self.root = Path(root)
+        self.options = options if options is not None else JobOptions()
+        self.root: Path | ExternalRoot
+        self._local_root: Path | None  # the root on this host; None for a connector's source
+        self._ledger_root: Path | str  # what the workspace keys the root's ledger by
+        if isinstance(root, ExternalRoot):
+            self.root, self._local_root, self._ledger_root = root, None, root.uri
+            if self.options.manifest is not None:
+                raise JobError("a manifest is read from a local root; a connector's has none")
+            if self.options.ignore.patterns:
+                raise JobError(
+                    "ignore rules name local paths; a connector lists what its URI names"
+                )
+        else:
+            path = Path(root)
+            if not path.is_dir() and not path.is_file():  # one file is a root too (ADR 0043)
+                raise JobError(f"{path} is neither a directory nor a regular file")
+            self.root, self._local_root, self._ledger_root = path, path, path
         self.destination = Path(destination) if destination is not None else None
-        if not self.root.is_dir() and not self.root.is_file():  # one file is a root too (ADR 0043)
-            raise JobError(f"{self.root} is neither a directory nor a regular file")
         if self.destination is not None and self.destination.exists():
             raise JobError(f"{self.destination} exists; a package is written once")
         self.workspace = workspace
         self.registry = registry
-        self.options = options if options is not None else JobOptions()
         self._declared = self._declarations(registry, self.options)
         config = self._declared.config if self._declared is not None else self.options.config
         self._configs = self._configure(registry, config)
@@ -569,7 +650,8 @@ class IngestJob:
         # Every producer whose findings the job records, by transform id: the runtime, and the
         # discovery and probe transforms whose findings it records for them (ADR 0033 §1, §3).
         self._producers: dict[RecordId, TransformRecord] = {self.transform.id: self.transform}
-        self._local: LocalSource | None = None
+        self._origin: _Origin | None = None  # set by discover
+        self._probe_inputs: JsonObject | None = None  # a kept probe's key, but the source's
         self._sources: list[_Source] = []
         self._ingested: list[tuple[ContentId, RecordId]] = []
         self._staged: StagedPackage | None = None
@@ -708,7 +790,7 @@ class IngestJob:
         the ingest root, or the job would read its own scratch space as evidence: ``JobError``.
         """
         try:
-            scratch = clear_scratch(self.workspace.scratch, ingest_root=self.root)
+            scratch = clear_scratch(self.workspace.scratch, ingest_root=self._local_root)
             staging = self.workspace.clear_staging()
         except ScratchError as exc:
             raise JobError(f"the workspace cannot hold scratch space: {exc}") from exc
@@ -717,18 +799,24 @@ class IngestJob:
         self._emit(events.WORKSPACE_SWEPT, {"scratch": scratch, "staging": staging})
 
     def _phases(self, started: str, *, dry: bool) -> ContentId | None:
-        source = self._local = self._source()
-        entries = self._discover(source)
-        scanned = self._fingerprint(source, entries)
-        self._inspect(source)
-        self._plan(source)
-        if dry:
-            self._explanation = self._explain_job()
-            return None
-        self._ingest(source)
-        self._assemble(scanned)
-        receipt = self._validate()
-        return self._commit(receipt, started)
+        with ExitStack() as stack:  # a connector's spool lives as long as the job
+            if isinstance(self.root, ExternalRoot):
+                scanned = self._scan_external(self.root, stack)
+            else:
+                source = self._source()
+                self._origin = _LocalOrigin(source)
+                entries = self._discover(source)
+                scanned = self._fingerprint(source, entries)
+            self._inspect()
+            self._plan()
+            if dry:
+                self._connector_findings()
+                self._explanation = self._explain_job()
+                return None
+            self._ingest()
+            self._assemble(scanned)
+            receipt = self._validate()
+            return self._commit(receipt, started)
 
     def _outcome(self, package: ContentId | None) -> JobOutcome:
         return JobOutcome(
@@ -812,7 +900,7 @@ class IngestJob:
                 explain.SourceExplanation(
                     source=item.content_id,
                     size=item.artifact.size,
-                    locations=tuple(sorted(item.locations, key=lambda loc: loc.raw)),
+                    locations=tuple(sorted(item.locations, key=explain.order)),
                     status=status,
                     probe=item.probe,
                     adapter=adapter,
@@ -828,7 +916,7 @@ class IngestJob:
                     quarantined=tuple(item.quarantined),
                 )
             )
-        sources.sort(key=lambda s: (s.locations[0].raw, s.source))
+        sources.sort(key=lambda s: (explain.order(s.locations[0]), s.source))
         calls: JsonObject = {
             "inspect": self._inspected,
             "plan": self._calls["plan"],
@@ -890,7 +978,7 @@ class IngestJob:
             self._staged = None
 
     def _call(
-        self, work: Callable[[], object], codec: sandbox.Codec[T], reader: LocalReader | None = None
+        self, work: Callable[[], object], codec: sandbox.Codec[T], reader: Reader | None = None
     ) -> Returned[T] | Raised | Crashed | Exceeded:
         """One adapter call through the runner; a sandbox that stops working fails the job.
 
@@ -902,7 +990,7 @@ class IngestJob:
             return self._run(work, codec, (), None)
         with ExitStack() as stack:
             try:
-                space = scratch_space(self.workspace.scratch, ingest_root=self.root)
+                space = scratch_space(self.workspace.scratch, ingest_root=self._local_root)
                 # The call writes beneath a directory of its own inside the locked one, so it
                 # cannot remove the lock that tells a sweep the directory is in use.
                 directory = stack.enter_context(space) / "call"
@@ -983,12 +1071,20 @@ class IngestJob:
         while its device, inode, size and change times stay the same: an adapter whose own
         window reads short fails every chunk, and every attempt, the same way.
         """
-        assert self._local is not None
+        assert self._origin is not None
+        state: tuple[int, ...] | None = None
         try:
-            with self._local.open(item.location) as stream:
-                info = os.fstat(stream.fileno())
-                state = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
-                if state == item.intact:
+            with self._origin.open(item) as stream:
+                with contextlib.suppress(OSError, ValueError):  # a connector's stream has no fd
+                    info = os.fstat(stream.fileno())
+                    state = (
+                        info.st_dev,
+                        info.st_ino,
+                        info.st_size,
+                        info.st_mtime_ns,
+                        info.st_ctime_ns,
+                    )
+                if state is not None and state == item.intact:
                     return ()
                 found = verify_artifact(stream, item.artifact)
         except _UNREADABLE:
@@ -1004,6 +1100,20 @@ class IngestJob:
         """
         for finding in self._differences(item) or ():
             self._record(finding, DISCOVERY_TRANSFORM)
+
+    def _spooled(self, item: _Source, reader: Reader) -> bool:
+        """Whether ``reader`` has the descriptor a sandboxed call keeps. A connector's object the
+        job holds no copy of is fetched now (ADR 0067): one that cannot be, or whose store serves
+        other bytes, is unreadable (quarantined), and ``False``. A spool that cannot be written
+        fails the job, as the workspace's failure."""
+        try:
+            reader.fileno()
+        except SpoolError as exc:
+            raise JobError(f"the workspace cannot hold the job's spool: {exc}") from _unusable(exc)
+        except _UNREADABLE as exc:
+            self._unreadable(item, exc)
+            return False
+        return True
 
     def _read_short(self, item: _Source, raised: Raised, step: str, chunk: Chunk | None) -> bool:
         """Whether a call that raised is the source's short read; if so, it is recorded.
@@ -1053,14 +1163,16 @@ class IngestJob:
         The rules are the policy's and the root's ``.neptune-ignore``; one that cannot be used
         fails the job as a configuration error, before anything is walked.
         """
+        root = self._local_root
+        assert root is not None  # a connector's source is scanned by ``_scan_external``
         with self._enter(Phase.DISCOVER):
             try:
-                rules = self.options.ignore.rules(LocalSource(self.root))
+                rules = self.options.ignore.rules(LocalSource(root))
             except IgnoreError as exc:
                 raise JobError(f"the ignore rules cannot be used: {exc}") from exc
             except OSError as exc:
-                raise JobError(f"{self.root} cannot be read: {exc}") from exc
-            return LocalSource(self.root, ignore=rules)
+                raise JobError(f"{root} cannot be read: {exc}") from exc
+            return LocalSource(root, ignore=rules)
 
     def _discover(self, source: LocalSource) -> tuple[WalkEntry, ...]:
         with self._enter(Phase.DISCOVER):
@@ -1095,17 +1207,9 @@ class IngestJob:
         earlier jobs, dry runs or cancelled ingests saw never reaches a package or its receipt.
         """
         with self._enter(Phase.FINGERPRINT):
-            try:
-                ledger = self.workspace.load_ledger(self.root)
-            except (WorkspaceError, ValueError, OSError) as exc:
-                message = f"the ledger of {self.root} cannot be loaded: {exc}"
-                raise JobError(message) from _unusable(exc)
+            ledger = self._load_ledger()
             result = fingerprint(source, ledger, entries)
-            try:
-                self.workspace.save_ledger(self.root, ledger)
-            except OSError as exc:
-                message = f"the ledger of {self.root} cannot be saved: {exc}"
-                raise JobError(message) from _unusable(exc)
+            self._save_ledger(ledger)
             producers = result.producers  # discovery's, and the ignore rules' (ADR 0043)
             for finding in result.findings:  # what the walk saw and did not read (ADR 0029 §1)
                 self._record(finding, producers[finding.transform])
@@ -1115,42 +1219,15 @@ class IngestJob:
             for entry in result.skipped:  # skipped at open, after the walk listed them
                 if (entry.raw_path, entry.reason, entry.detail) not in walked:
                     self._skip(entry)
-            by_content: dict[ContentId, _Source] = {}
-            scanned = SourceLedger()
-            listed: list[Observation] = []
-            files: list[explain.InventoryFile] = []
-            new_artifacts = new_revisions = 0
-            replaced = _replaced(ledger, result.observations)
             for observation in result.observations:
-                revision = observation.revision
-                location = revision.location
-                if not isinstance(location, LocalPath | RawLocalPath):
+                if not isinstance(observation.revision.location, LocalPath | RawLocalPath):
+                    location = observation.revision.location
                     raise JobError(f"a local scan yielded a non-local location: {location!r}")
-                new_artifacts += observation.new_artifact
-                new_revisions += observation.new_revision
-                artifact = ledger.artifact(revision.content_id)
-                if artifact is None:
-                    raise JobError(f"the ledger lost artifact {revision.content_id}")
-                listed.append(scanned.observe(location, artifact))
-                files.append(explain.InventoryFile(location, revision.content_id, artifact.size))
-                self._emit(
-                    events.SOURCE_HASHED,
-                    {
-                        "location": location.to_json(),
-                        "new_artifact": observation.new_artifact,
-                        "new_revision": observation.new_revision,
-                        "size": artifact.size,
-                        "source": revision.content_id,
-                    },
-                )
-                if revision.content_id not in by_content:
-                    by_content[revision.content_id] = _Source(
-                        artifact, location, replaced=replaced.get(revision.content_id)
-                    )
-                by_content[revision.content_id].locations.append(location)
+            scanned, listed, files, summary = self._take(
+                ledger, [(o.revision.location, o, True) for o in result.observations]
+            )
             for absence in result.absences:
                 self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
-            self._sources = list(by_content.values())
             self._check_manifest(result.observations)
             # Grouping reads the revisions the package lists, so it recomputes from the package.
             self._layout = layout_from_scan(listed, result.symlinks)
@@ -1171,12 +1248,174 @@ class IngestJob:
                 {
                     "absences": len(result.absences),
                     "locations": len(result.observations),
-                    "new_artifacts": new_artifacts,
-                    "new_revisions": new_revisions,
-                    "sources": len(self._sources),
+                    **summary,
                 },
             )
         return scanned
+
+    def _load_ledger(self) -> SourceLedger:
+        try:
+            return self.workspace.load_ledger(self._ledger_root)
+        except (WorkspaceError, ValueError, OSError) as exc:
+            message = f"the ledger of {self._ledger_root} cannot be loaded: {exc}"
+            raise JobError(message) from _unusable(exc)
+
+    def _save_ledger(self, ledger: SourceLedger) -> None:
+        try:
+            self.workspace.save_ledger(self._ledger_root, ledger)
+        except OSError as exc:
+            message = f"the ledger of {self._ledger_root} cannot be saved: {exc}"
+            raise JobError(message) from _unusable(exc)
+
+    def _take(
+        self,
+        ledger: SourceLedger,
+        observed: Sequence[tuple[SourceLocation, Observation, bool]],
+    ) -> tuple[SourceLedger, list[Observation], list[explain.InventoryFile], dict[str, JsonValue]]:
+        """This scan's sources, from its observations in ``ledger``: each with the location as
+        seen now (a connector's object with the token it is read under, which its ledger revision
+        may not name, ADR 0067) and whether it was hashed now (``False``: recognised by its
+        token).
+
+        Returns the ledger the package lists (ADR 0035 §9), its observations, the inventory's
+        files, and the counts the phase reports.
+        """
+        by_content: dict[ContentId, _Source] = {}
+        scanned = SourceLedger()
+        listed: list[Observation] = []
+        files: list[explain.InventoryFile] = []
+        new_artifacts = new_revisions = 0
+        replaced = _replaced(ledger, (observation for _, observation, _ in observed))
+        for location, observation, hashed in observed:
+            revision = observation.revision
+            new_artifacts += observation.new_artifact
+            new_revisions += observation.new_revision
+            artifact = ledger.artifact(revision.content_id)
+            if artifact is None:
+                raise JobError(f"the ledger lost artifact {revision.content_id}")
+            listed.append(scanned.observe(location, artifact))
+            files.append(explain.InventoryFile(location, revision.content_id, artifact.size))
+            if hashed:
+                self._emit(
+                    events.SOURCE_HASHED,
+                    {
+                        "location": location.to_json(),
+                        "new_artifact": observation.new_artifact,
+                        "new_revision": observation.new_revision,
+                        "size": artifact.size,
+                        "source": revision.content_id,
+                    },
+                )
+            else:
+                self._emit(
+                    events.SOURCE_RECOGNISED,
+                    {
+                        "location": location.to_json(),
+                        "size": artifact.size,
+                        "source": revision.content_id,
+                    },
+                )
+            if revision.content_id not in by_content:
+                by_content[revision.content_id] = _Source(
+                    artifact, location, replaced=replaced.get(revision.content_id)
+                )
+            by_content[revision.content_id].locations.append(location)
+        self._sources = list(by_content.values())
+        summary: dict[str, JsonValue] = {
+            "new_artifacts": new_artifacts,
+            "new_revisions": new_revisions,
+            "sources": len(self._sources),
+        }
+        return scanned, listed, files, summary
+
+    # --- a connector's source (ADR 0067) -------------------------------------------------------
+
+    def _scan_external(self, root: ExternalRoot, stack: ExitStack) -> SourceLedger:
+        """``discover`` and ``fingerprint`` for a connector's source; what this scan observed.
+
+        The listing is the connector's, against the ledger of the URI; every listed object is
+        then classified here (``fingerprint_external``): carried forward by a token the ledger
+        knows for its bytes, or fetched once into the spool and hashed. What a complete listing
+        no longer holds is absent. A connector that breaks the protocol fails the job: what it
+        listed cannot be trusted.
+        """
+        with self._enter(Phase.DISCOVER):
+            try:
+                space = stack.enter_context(scratch_space(self.workspace.scratch, ingest_root=None))
+            except (ScratchError, OSError) as exc:
+                message = f"the workspace cannot hold the job's spool: {exc}"
+                raise JobError(message) from _unusable(exc)
+            spool = Spool(space)
+            self._origin = _ExternalOrigin(root.source, spool)
+            ledger = self._load_ledger()
+            discovery = self._connector(root, "list", lambda: root.source.discover(ledger))
+            listed = self._connector(
+                root,
+                "list",
+                lambda: len(discovery.new) + len(discovery.changed) + len(discovery.unchanged),
+            )
+            self._finish(Phase.DISCOVER, {"files": listed, "skipped": 0, "symlinks": 0})
+        with self._enter(Phase.FINGERPRINT):
+            result = self._connector(
+                root, "fetch", lambda: fingerprint_external(root.source, ledger, discovery, spool)
+            )
+            self._save_ledger(ledger)
+            for finding in result.findings:  # what could not be fetched, or changed size
+                self._record(finding, DISCOVERY_TRANSFORM)
+            for location in result.unread:
+                details: JsonObject = {"location": location.to_json(), "reason": "unreadable"}
+                self._emit(events.ENTRY_SKIPPED, details)
+            self._connector_findings()
+            scanned, _, files, summary = self._take(
+                ledger, [(item.location, item.observation, item.fetched) for item in result.listed]
+            )
+            for absence in result.absences:
+                self._emit(events.SOURCE_ABSENT, {"location": absence.location.to_json()})
+            self._inventory = explain.Inventory.of(files, (), ())
+            recognised = sum(not item.fetched for item in result.listed)
+            self._finish(
+                Phase.FINGERPRINT,
+                {
+                    "absences": len(result.absences),
+                    "complete": discovery.complete,
+                    "locations": len(result.listed),
+                    "recognised": recognised,
+                    **summary,
+                },
+            )
+        return scanned
+
+    def _connector(self, root: ExternalRoot, step: str, call: Callable[[], _T]) -> _T:
+        """``call``, which runs the connector's code: a local-only refusal, a broken protocol or
+        anything else it raises fails the job, naming the connector and the exception's class."""
+        try:
+            return call()
+        except LocalOnlyError as exc:
+            raise JobError(f"connector {root.connector} needs the network: {exc}") from exc
+        except ExternalSourceError as exc:
+            raise JobError(f"connector {root.connector} broke the Source protocol: {exc}") from exc
+        except (ScratchError, WorkspaceError, SpoolError) as exc:
+            raise JobError(f"the workspace cannot hold the job's spool: {exc}") from _unusable(exc)
+        except Exception as exc:
+            message = (
+                f"connector {root.connector} failed to {step} {root.uri}: {type(exc).__name__}"
+            )
+            raise JobError(message) from exc
+
+    def _connector_findings(self) -> None:
+        """Record every finding the connector has made so far, under its transform."""
+        if not isinstance(self.root, ExternalRoot):
+            return
+        root = self.root
+        transform, found = self._connector(
+            root, "report on", lambda: (root.source.transform, root.source.findings())
+        )
+        if not isinstance(transform, TransformRecord):
+            raise JobError(f"connector {root.connector}'s transform is no TransformRecord")
+        for finding in found:
+            if not isinstance(finding, IngestFinding) or finding.transform != transform.id:
+                raise JobError(f"connector {root.connector} reported a finding not its own")
+            self._record(finding, transform)
 
     def _check_manifest(self, observations: Iterable[Observation]) -> None:
         """The manifest the job was given is the one this scan hashed: same place, same bytes."""
@@ -1192,7 +1431,7 @@ class IngestJob:
 
     # --- inspect -------------------------------------------------------------------------------
 
-    def _probe(self, item: _Source, reader: LocalReader, head: bytes) -> SourceProbe | None:
+    def _probe(self, item: _Source, reader: Reader, head: bytes) -> tuple[SourceProbe, bool] | None:
         """The probe engine over one source, in one sandboxed call (ADR 0027, ADR 0033 §1).
 
         Every adapter's probe and the container inspection run in the child; its reply is read
@@ -1200,7 +1439,8 @@ class IngestJob:
         raises or replies with anything but what the engine writes, each adapter is asked again
         in a call of its own, so the one that fails is named, and a container is left unopened
         (``inspection_failed``). ``None`` once the source is quarantined: it changed under the
-        probe. The engine's findings are recorded under its transform.
+        probe. The engine's findings are recorded under its transform. The bool says whether the
+        one call returned: only such a probe is kept for a connector's object (ADR 0067).
         """
         name = _hint_name(item.location)
         size = item.artifact.size
@@ -1224,22 +1464,101 @@ class IngestJob:
                 return asked.value if isinstance(asked, Returned) else asked.cause()
 
             probed = self._engine.probe_head(item.content_id, size, name, head, ask, failed)
-        whole = EvidenceRef(item.content_id, (ByteRange(0, size),))
+        self._probed(item, probed)
+        return probed, isinstance(outcome, Returned)
+
+    def _probed(self, item: _Source, probed: SourceProbe) -> None:
+        """Record the probe engine's findings about ``item``, and each adapter that failed."""
+        whole = EvidenceRef(item.content_id, (ByteRange(0, item.artifact.size),))
         for finding in probed.findings:
             self._record(finding, self._engine.transform)
             if finding.code == ADAPTER_FAILED and finding.subject == whole:
                 cause = {k: v for k, v in finding.details.items() if k != "version"}
                 self._emit(events.PROBE_FAILED, {"source": item.content_id, **cause})
+
+    def _probe_key(self, item: _Source) -> DerivativeKey:
+        """What a connector's object's probe is a function of: its bytes (content id and size),
+        its name, the probe engine's policy, and every registered adapter as described, plugin
+        distributions included (ADR 0067)."""
+        if self._probe_inputs is None:  # the same for every source of the job
+            adapters: list[JsonValue] = [
+                {
+                    "descriptor": canonical_json.dumps(descriptor.to_json()).decode("utf-8"),
+                    "id": adapter_id,
+                }
+                for adapter_id, descriptor in sorted(self.registry.descriptors().items())
+            ]
+            distributions: JsonObject = dict(sorted(self._engine.distributions.items()))
+            self._probe_inputs = {
+                "adapters": adapters,
+                "distributions": distributions,
+                "engine": self._engine.transform.id,
+            }
+        inputs: JsonObject = {
+            **self._probe_inputs,
+            "name": _hint_name(item.location),
+            "size": item.artifact.size,
+        }
+        return DerivativeKey(PROBE_RECIPE, inputs, ((item.content_id, self._engine.transform.id),))
+
+    def _kept_probe(self, item: _Source) -> SourceProbe | None:
+        """The probe the workspace kept for a connector's object, if one reads back whole."""
+        key = self._probe_key(item)
+        try:
+            kept = self.workspace.derivative(key)
+            if kept is None:
+                return None
+            data = canonical_json.loads(kept.read(PROBE_FILE))
+            probed = self._engine.source_probe_from_json(
+                data,
+                source=item.content_id,
+                size=item.artifact.size,
+                name=_hint_name(item.location),
+                head=None,
+            )
+        except (ValueError, OSError):  # damaged: probe again, and keep the new one
+            with contextlib.suppress(ValueError, OSError):
+                self.workspace.discard(key)
+            return None
+        self._derived(key, Held.HELD)
         return probed
 
-    def _inspect(self, source: LocalSource) -> None:
+    def _keep_probe(self, item: _Source, probed: SourceProbe) -> None:
+        """Keep a connector's object's probe, so an unchanged object is never fetched again only
+        to be probed (ADR 0067)."""
+        key = self._probe_key(item)
+
+        def build(directory: Path) -> None:
+            (directory / PROBE_FILE).write_bytes(canonical_json.dumps(probed.to_json()))
+
+        try:
+            _, held = self.workspace.materialise(key, build)
+        except (ValueError, OSError) as exc:
+            raise JobError(f"the probe of {item.content_id} cannot be kept: {exc}") from _unusable(
+                exc
+            )
+        self._derived(key, held)
+
+    def _inspect(self) -> None:
+        assert self._origin is not None
+        external = isinstance(self.root, ExternalRoot)
         with self._enter(Phase.INSPECT):
             self._emit(events.SANDBOX_READY, self._runner.describe())
             counts = dict.fromkeys(("ambiguous", "selected", "unreadable", "unsupported"), 0)
             for item in self._sources:
                 self._check_cancel()
+                if external and (kept := self._kept_probe(item)) is not None:
+                    self._probed(item, kept)
+                    self._select(item, kept, counts)
+                    if self._dry and item.adapter is not None:
+                        try:
+                            with self._origin.reader(item) as reader:
+                                self._inspect_source(item, reader)
+                        except _UNREADABLE as exc:
+                            self._unreadable(item, exc)
+                    continue
                 try:
-                    reader = LocalReader(source, item.location, item.artifact)
+                    reader = self._origin.reader(item)
                 except _UNREADABLE as exc:
                     self._unreadable(item, exc)
                     counts["unreadable"] += 1
@@ -1251,15 +1570,26 @@ class IngestJob:
                         self._unreadable(item, exc)
                         counts["unreadable"] += 1
                         continue
-                    probed = self._probe(item, reader, head)
-                    if probed is not None:
+                    if not self._spooled(item, reader):
+                        counts["unreadable"] += 1
+                        continue
+                    probing = self._probe(item, reader, head)
+                    if probing is not None:
+                        probed, clean = probing
+                        if external and clean:
+                            self._keep_probe(item, probed)
                         self._select(item, probed, counts)
                         if self._dry and item.adapter is not None:
                             self._inspect_source(item, reader)
-                if probed is None:
+                if probing is None:
                     counts["unreadable"] += 1
             if self._declared is not None:
-                every = (location for item in self._sources for location in item.locations)
+                every = (
+                    location
+                    for item in self._sources
+                    for location in item.locations
+                    if isinstance(location, LocalPath | RawLocalPath)
+                )
                 for finding in self._declared.unmatched(every):
                     self._record(finding, self._declared.loaded.transform)
             self._group()
@@ -1301,7 +1631,7 @@ class IngestJob:
             counts["unsupported"] += 1
             self._emit(events.SOURCE_UNSUPPORTED, details)
 
-    def _inspect_source(self, item: _Source, reader: LocalReader) -> None:
+    def _inspect_source(self, item: _Source, reader: Reader) -> None:
         """A dry run's ``inspect`` of a selected source, through the runner (ADR 0044 §3).
 
         What it says is the explanation's alone: a summary, or why there is none. Its findings
@@ -1310,6 +1640,8 @@ class IngestJob:
         any call.
         """
         assert item.adapter is not None and item.config is not None
+        if not self._spooled(item, reader):
+            return
         adapter, config = item.adapter, item.config
         self._inspected += 1
         outcome = self._call(partial(adapter.inspect, reader, config), wire.INSPECT, reader)
@@ -1333,9 +1665,8 @@ class IngestJob:
         """Apply the manifest's source rules to ``item``; the adapter they selected, if any."""
         if self._declared is None:
             return None
-        choice = self._declared.choose(
-            item.content_id, item.artifact.size, item.locations, probed.selection
-        )
+        local = [loc for loc in item.locations if isinstance(loc, LocalPath | RawLocalPath)]
+        choice = self._declared.choose(item.content_id, item.artifact.size, local, probed.selection)
         for finding in choice.findings:
             self._record(finding, self._declared.loaded.transform)
         if choice.candidate is None or choice.config is None:
@@ -1384,7 +1715,8 @@ class IngestJob:
             kept = ()
         return explain_plan(item.config.transform, kept, item.replaced)
 
-    def _plan(self, source: LocalSource) -> None:
+    def _plan(self) -> None:
+        assert self._origin is not None
         with self._enter(Phase.PLAN):
             planned = chunks_total = committed_total = failed = 0
             for item in self._sources:
@@ -1403,13 +1735,15 @@ class IngestJob:
                 item.plan_cache = PlanCache(Rule.PLANNED) if reused else self._explain(item)
                 if stored is None:
                     try:
-                        reader = LocalReader(source, item.location, item.artifact)
+                        reader = self._origin.reader(item)
                     except _UNREADABLE as exc:
                         self._unreadable(item, exc)
                         failed += 1
                         continue
                     with reader:
-                        plan = self._make_plan(item, reader)
+                        plan = (
+                            self._make_plan(item, reader) if self._spooled(item, reader) else None
+                        )
                     if plan is None:
                         failed += 1
                         continue
@@ -1451,7 +1785,7 @@ class IngestJob:
                 },
             )
 
-    def _make_plan(self, item: _Source, reader: LocalReader) -> Plan | None:
+    def _make_plan(self, item: _Source, reader: Reader) -> Plan | None:
         """Call the adapter's ``plan`` through the runner and check it; ``None`` once the source
         is quarantined.
 
@@ -1546,7 +1880,8 @@ class IngestJob:
 
     # --- parse and normalize, per chunk --------------------------------------------------------
 
-    def _ingest(self, source: LocalSource) -> None:
+    def _ingest(self) -> None:
+        assert self._origin is not None
         if Phase.PARSE not in self._started:
             self._started.add(Phase.PARSE)
             self._emit(events.PHASE_STARTED, {}, Phase.PARSE)
@@ -1554,7 +1889,7 @@ class IngestJob:
         for item in self._sources:
             if not item.planned or item.quarantined:
                 continue
-            opener = _Opener(source, item)
+            opener = _Opener(self._origin, item)
             try:
                 for chunk in item.chunks:
                     self._phase = Phase.PARSE  # between chunks, the job is about to parse
@@ -1575,12 +1910,14 @@ class IngestJob:
                             Phase.PARSE,
                         )
                         continue
-                    reader: LocalReader | None = None
+                    reader: Reader | None = None
                     with self._enter(Phase.PARSE):
                         try:
                             reader = opener.open()
                         except _UNREADABLE as exc:
                             self._unreadable(item, exc)
+                        if reader is not None and not self._spooled(item, reader):
+                            reader = None
                     if reader is None:
                         failed += 1
                         break
@@ -1606,9 +1943,7 @@ class IngestJob:
         )
         self._finish(Phase.NORMALIZE, {"committed": committed})
 
-    def _parse(
-        self, item: _Source, reader: LocalReader, chunk: Chunk
-    ) -> tuple[ChunkOutput, int] | None:
+    def _parse(self, item: _Source, reader: Reader, chunk: Chunk) -> tuple[ChunkOutput, int] | None:
         """``ingest`` one chunk through the runner, up to ``attempts`` times; ``None`` once it has
         failed for good.
 
@@ -1693,7 +2028,7 @@ class IngestJob:
         )
 
     def _check_output(
-        self, item: _Source, reader: LocalReader, chunk: Chunk, output: ChunkOutput
+        self, item: _Source, reader: Reader, chunk: Chunk, output: ChunkOutput
     ) -> Failure | None:
         """Whatever breaks while checking one chunk's output is that chunk's failure.
 
@@ -1715,7 +2050,7 @@ class IngestJob:
             return Failure.raised(Step.CHUNK_SERIES, exc)
 
     def _normalize(
-        self, item: _Source, reader: LocalReader, chunk: Chunk, output: ChunkOutput, attempt: int
+        self, item: _Source, reader: Reader, chunk: Chunk, output: ChunkOutput, attempt: int
     ) -> bool:
         """Check one chunk's output against the contract and commit it, whole or not at all.
 
@@ -1969,6 +2304,7 @@ class IngestJob:
         listing ``scanned``: this job's scan, never the workspace's history (ADR 0035 §9)."""
         with self._enter(Phase.ASSEMBLE):
             self._check_cancel()
+            self._connector_findings()  # what its reads since the scan found (ADR 0067)
             quarantined = 0
             for item in self._sources:
                 if item.adapter is None or item.config is None:
@@ -2007,6 +2343,10 @@ class IngestJob:
                 cited.add(self.transform.id)
             if self._plugins.loaded:  # which plugins could change this package (ADR 0058 §5)
                 cited.add(self._plugins.transform.id)
+            if isinstance(self.root, ExternalRoot):  # the connector that listed the sources
+                connector = self.root.source.transform
+                self._producers[connector.id] = connector
+                cited.add(connector.id)
             derived: dict[str, Iterable[JsonObject]] | None = None
             if self._grouping is not None:  # its derived tables name its transform
                 cited.add(self._grouping.transform.id)
@@ -2025,6 +2365,7 @@ class IngestJob:
             if (frames_found := self._align_frames(inputs)) is not None:
                 cited.add(frames_found.transform.id)
                 derived = {**(derived or {}), **frames_found.tables()}
+            self._connector_findings()  # and what introspection's reads found
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
@@ -2032,7 +2373,7 @@ class IngestJob:
             ]
             assert self.destination is not None  # ``run`` refuses to start without one
             try:  # tables too large to sort in memory spill to the workspace's scratch space
-                with scratch_space(self.workspace.scratch, ingest_root=self.root) as spill:
+                with scratch_space(self.workspace.scratch, ingest_root=self._local_root) as spill:
                     self._staged = stage(
                         self.destination,
                         self.workspace,
@@ -2123,18 +2464,16 @@ class IngestJob:
         if not streams:
             return None
         items = {item.content_id: item for item in self._sources}
-        readers: dict[ContentId, LocalReader] = {}
+        readers: dict[ContentId, Reader] = {}
 
         def read(ref: EvidenceRef) -> bytes | None:
             item = items.get(ref.source) if isinstance(ref.source, str) else None
             step = ref.locator[0]
-            if item is None or self._local is None or not isinstance(step, ByteRange):
+            if item is None or self._origin is None or not isinstance(step, ByteRange):
                 return None
             try:
                 if item.content_id not in readers:
-                    readers[item.content_id] = LocalReader(
-                        self._local, item.location, item.artifact
-                    )
+                    readers[item.content_id] = self._origin.reader(item)
                 return readers[item.content_id].read(step.offset, step.length)
             except (SourceChangedError, SourceAccessError, OSError, ValueError):
                 return None
@@ -2276,7 +2615,9 @@ class IngestJob:
                 started=started,
                 finished=_now(),
                 host=platform.node() or "unknown",
-                root=str(self.root.absolute()),
+                root=self.root.uri
+                if isinstance(self.root, ExternalRoot)
+                else str(self.root.absolute()),
                 durations=self._durations_pairs(),
             )
             try:
