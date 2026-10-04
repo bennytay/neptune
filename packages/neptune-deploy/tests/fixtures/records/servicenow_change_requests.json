@@ -1,0 +1,66 @@
+{
+  "_recorded": "Shape of GET /api/now/table/change_request?sysparm_display_value=false&sysparm_exclude_reference_link=true (ServiceNow Table API); values synthetic.",
+  "rows": [
+    {
+      "sys_id": "1c741bd70b2322007518478d83673af3",
+      "sys_updated_on": "2026-07-01 08:00:00",
+      "sys_mod_count": "2",
+      "number": "CHG0030001",
+      "cmdb_ci": "ARM-CELL-2",
+      "u_site": "Plant 2",
+      "category": "Software",
+      "u_before": "ctrl 4.1.2",
+      "u_after": "ctrl 4.2.0",
+      "approval": "approved",
+      "approval_set": "2026-06-30 16:00:00",
+      "start_date": "2026-07-01 06:00:00",
+      "end_date": "2026-07-01 07:00:00",
+      "short_description": "Upgrade arm controller firmware",
+      "description": "Planned upgrade; rollback to 4.1.2 if the payload test fails.",
+      "type": "normal",
+      "assignment_group": "robotics-maintenance"
+    },
+    {
+      "sys_id": "2d852ce80c3433118629589e94784bf4",
+      "sys_updated_on": "2026-07-02 09:30:00",
+      "sys_mod_count": "1",
+      "number": "CHG0030002",
+      "cmdb_ci": "AMR-FLEET-A",
+      "u_site": "Warehouse B",
+      "category": "Configuration",
+      "u_before": "max_speed 1.2",
+      "u_after": "max_speed 1.0",
+      "approval": "approved",
+      "approval_set": "2026-07-01 17:00:00",
+      "start_date": "2026-07-02 05:00:00",
+      "end_date": "2026-07-02 05:30:00",
+      "short_description": "Lower AMR speed limit in aisle 4",
+      "description": "After near miss CHG-INC-77.",
+      "type": "standard",
+      "assignment_group": "fleet-ops"
+    },
+    {
+      "sys_id": "3e963df90d4544229730690fa5895cd5",
+      "sys_updated_on": "2026-07-03 10:00:00",
+      "sys_mod_count": "0",
+      "number": "CHG0030003",
+      "cmdb_ci": "USV-HERON-1",
+      "u_site": "Harbour north",
+      "category": "Hardware",
+      "u_before": "prop A",
+      "u_after": "prop B",
+      "approval": "not requested",
+      "approval_set": "",
+      "start_date": "2026-07-03 09:00:00",
+      "end_date": "",
+      "short_description": "Swap port propeller",
+      "description": "",
+      "type": "emergency",
+      "assignment_group": "marine-ops"
+    }
+  ],
+  "attachments": [
+    {"sys_id": "aa1111111111111111111111111111aa", "table_sys_id": "1c741bd70b2322007518478d83673af3", "file_name": "rollback-plan.pdf", "size_bytes": "26", "sys_mod_count": "0", "sys_updated_on": "2026-06-30 15:00:00"}
+  ],
+  "attachment_bytes": {"aa1111111111111111111111111111aa": "%PDF-1.4 rollback plan 4.1.2"}
+}

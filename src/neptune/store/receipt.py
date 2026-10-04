@@ -7,8 +7,9 @@ writes the same content for people as Markdown: no wall clock, no host, and no t
 so a time reads as ticks on a named clock.
 """
 
+import itertools
 from collections import defaultdict
-from collections.abc import Iterable, Iterator
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from dataclasses import replace
 from typing import Any, Final
 
@@ -104,6 +105,49 @@ def _stated_ids(identifiers: Iterable[Knowledge[LogicalId]]) -> tuple[LogicalId,
     return tuple(sorted(values, key=lambda value: (value.namespace, value.value)))
 
 
+def cite(
+    record: Any, data: JsonValue, judges: Collection[str], read_by: dict[str, set[str]]
+) -> list[AmbiguousField]:
+    """What one evidence record (not the ledger, not a transform) gives the receipt: each source
+    it cites is added to ``read_by`` under the transform citing it (unless that transform only
+    judges, ``NON_READERS``), and its ambiguous fields are returned. ``data`` is its JSON. The
+    streaming writer (ADR 0065) calls this per record, as ``build_receipt`` does."""
+    for source, transform in _read_by(record, data):
+        if transform not in judges:
+            read_by[source].add(transform)
+    return [
+        AmbiguousField(record.id, pointer)
+        for pointer, value in _walk(data)
+        if isinstance(value, dict) and value.get("knowledge") == "ambiguous"
+    ]
+
+
+def ledger_sections(
+    revisions: Iterable[Any],
+    absences: Iterable[Any],
+    sizes: Mapping[ContentId, int],
+    read_by: Mapping[str, set[str]],
+) -> tuple[tuple[ReceiptSource, ...], tuple[SourceLocation, ...]]:
+    """The receipt's ``sources`` and ``absent``: the head of each location's chain, sorted by
+    location, each source with its size and the transforms that read it."""
+    revisions, absences = list(revisions), list(absences)
+    superseded = {previous for entry in (*revisions, *absences) for previous in entry.supersedes}
+    heads = sorted((r for r in revisions if r.id not in superseded), key=lambda r: r.location.key)
+    sources = tuple(
+        ReceiptSource(
+            location=revision.location,
+            content_id=revision.content_id,
+            size=sizes[revision.content_id],
+            read_by=tuple(sorted(RecordId(t) for t in read_by.get(revision.content_id, ()))),
+        )
+        for revision in heads
+    )
+    absent = tuple(
+        sorted((a.location for a in absences if a.id not in superseded), key=lambda loc: loc.key)
+    )
+    return sources, absent
+
+
 def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestReceipt:
     """The receipt core of a package holding ``records`` (ledger, transforms, records, findings).
 
@@ -124,7 +168,6 @@ def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestR
         raise ValueError(f"a schema version {version} package cannot hold {newer}")
     artifacts = {artifact.content_id: artifact for artifact in by_kind["source_artifact"]}
     revisions, absences = by_kind["source_revision"], by_kind["source_absence"]
-    superseded = {previous for entry in (*revisions, *absences) for previous in entry.supersedes}
 
     judges = {t.id for t in by_kind["transform_record"] if t.adapter_id in NON_READERS}
     read_by: dict[str, set[str]] = defaultdict(set)
@@ -133,27 +176,10 @@ def build_receipt(records: Iterable[Any], version: int | None = None) -> IngestR
         if kind in _LEDGER or kind == "transform_record":
             continue
         for record in members:
-            data = record.to_json()
-            for source, transform in _read_by(record, data):
-                if transform not in judges:
-                    read_by[source].add(transform)
-            for pointer, value in _walk(data):
-                if isinstance(value, dict) and value.get("knowledge") == "ambiguous":
-                    ambiguous.append(AmbiguousField(record.id, pointer))
+            ambiguous += cite(record, record.to_json(), judges, read_by)
 
-    heads = sorted((r for r in revisions if r.id not in superseded), key=lambda r: r.location.key)
-    sources = tuple(
-        ReceiptSource(
-            location=revision.location,
-            content_id=revision.content_id,
-            size=artifacts[revision.content_id].size,
-            read_by=tuple(sorted(RecordId(t) for t in read_by[revision.content_id])),
-        )
-        for revision in heads
-    )
-    absent = tuple(
-        sorted((a.location for a in absences if a.id not in superseded), key=lambda loc: loc.key)
-    )
+    sizes = {content: artifact.size for content, artifact in artifacts.items()}
+    sources, absent = ledger_sections(revisions, absences, sizes, read_by)
     transforms = sorted(by_kind["transform_record"], key=lambda t: t.id)
     runs = sorted(by_kind["run"], key=lambda r: r.id)
     streams = sorted(by_kind["stream"], key=lambda s: s.id)
@@ -287,37 +313,53 @@ def _state(knowledge: Knowledge[Any], clocks: dict[str, str]) -> str:
             return str(knowledge.state).replace("_", " ")
 
 
-def _table(header: tuple[str, ...], rows: Iterable[tuple[str, ...]]) -> list[str]:
-    lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
-    lines += ["| " + " | ".join(row) + " |" for row in rows]
-    return lines
+def _table(header: tuple[str, ...], rows: Iterable[tuple[str, ...]]) -> Iterator[str]:
+    yield "| " + " | ".join(header) + " |"
+    yield "|" + "---|" * len(header)
+    for row in rows:
+        yield "| " + " | ".join(row) + " |"
 
 
 def render_receipt(receipt: IngestReceipt) -> str:
     """The receipt core as Markdown. Deterministic: the same core renders to the same text."""
+    return "".join(render_lines(receipt))
+
+
+def render_lines(receipt: Any) -> Iterator[str]:
+    """``render_receipt`` one line at a time, each ending in a newline.
+
+    ``receipt`` is an ``IngestReceipt``, or anything with its fields whose sections can be read
+    more than once and counted (``len``): a streaming writer passes its large sections that way,
+    read back from disk, so the text is never held whole (ADR 0065).
+    """
     adapters = {t.id: f"{t.adapter_id} {t.adapter_version}" for t in receipt.transforms}
     clocks = _clock_names(receipt)
     counts = dict(receipt.records)
     read = [source for source in receipt.sources if source.read_by]
-    severities = {s: sum(1 for f in receipt.findings if f.severity is s) for s in SEVERITY_ORDER}
-    lines = [
-        "# Ingest receipt",
-        "",
-        f"Receipt {_code(receipt.id)}. Every id below is shortened; `receipt.json` has them whole.",
-        "",
-        "## Summary",
-        "",
-        f"- Sources: {len(receipt.sources)} seen, {len(read)} read, "
-        f"{len(receipt.sources) - len(read)} not read, {len(receipt.absent)} gone",
-        f"- Runs: {len(receipt.runs)}; streams: {len(receipt.streams)}; "
-        f"entities: {len(receipt.entities)}",
-        f"- Findings: {severities[Severity.ERROR]} errors, "
-        f"{severities[Severity.WARNING]} warnings, {severities[Severity.INFO]} info; "
-        f"ambiguous fields: {len(receipt.ambiguous)}",
-        "",
-        "## Sources",
-        "",
-        *_table(
+    severities = dict.fromkeys(SEVERITY_ORDER, 0)
+    for finding in receipt.findings:
+        severities[finding.severity] += 1
+    lines: Iterable[str] = itertools.chain(
+        [
+            "# Ingest receipt",
+            "",
+            f"Receipt {_code(receipt.id)}. Every id below is shortened; `receipt.json` has them"
+            " whole.",
+            "",
+            "## Summary",
+            "",
+            f"- Sources: {len(receipt.sources)} seen, {len(read)} read, "
+            f"{len(receipt.sources) - len(read)} not read, {len(receipt.absent)} gone",
+            f"- Runs: {len(receipt.runs)}; streams: {len(receipt.streams)}; "
+            f"entities: {len(receipt.entities)}",
+            f"- Findings: {severities[Severity.ERROR]} errors, "
+            f"{severities[Severity.WARNING]} warnings, {severities[Severity.INFO]} info; "
+            f"ambiguous fields: {len(receipt.ambiguous)}",
+            "",
+            "## Sources",
+            "",
+        ],
+        _table(
             ("Location", "Bytes", "Content", "Read by"),
             (
                 (
@@ -329,15 +371,10 @@ def render_receipt(receipt: IngestReceipt) -> str:
                 for source in receipt.sources
             ),
         ),
-    ]
-    if receipt.absent:
-        lines += ["", "Gone since an earlier scan: "]
-        lines += [f"- {_code(_location(location))}" for location in receipt.absent]
-    lines += [
-        "",
-        "## Adapters",
-        "",
-        *_table(
+        ["", "Gone since an earlier scan: "] if receipt.absent else [],
+        (f"- {_code(_location(location))}" for location in receipt.absent),
+        ["", "## Adapters", ""],
+        _table(
             ("Adapter", "Version", "Config", "Libraries", "Transform"),
             (
                 (
@@ -350,17 +387,13 @@ def render_receipt(receipt: IngestReceipt) -> str:
                 for t in sorted(receipt.transforms, key=lambda t: (t.adapter_id, t.id))
             ),
         ),
-        "",
-        "## Records",
-        "",
-        *_table(
+        ["", "## Records", ""],
+        _table(
             ("Kind", "Records"),
             ((_code(kind), str(count)) for kind, count in sorted(counts.items()) if count),
         ),
-        "",
-        "## Runs",
-        "",
-        *_table(
+        ["", "## Runs", ""],
+        _table(
             ("Run", "Session", "Machine", "First", "Last", "Streams"),
             (
                 (
@@ -374,10 +407,8 @@ def render_receipt(receipt: IngestReceipt) -> str:
                 for run in receipt.runs
             ),
         ),
-        "",
-        "## Streams",
-        "",
-        *_table(
+        ["", "## Streams", ""],
+        _table(
             ("Stream", "Run", "Topic", "Clocks", "Messages", "First", "Last"),
             (
                 (
@@ -392,10 +423,8 @@ def render_receipt(receipt: IngestReceipt) -> str:
                 for stream in receipt.streams
             ),
         ),
-        "",
-        "## Entities",
-        "",
-        *_table(
+        ["", "## Entities", ""],
+        _table(
             ("Kind", "Record", "Stated ids"),
             (
                 (
@@ -406,21 +435,16 @@ def render_receipt(receipt: IngestReceipt) -> str:
                 for entity in receipt.entities
             ),
         ),
-        "",
-        "## Findings",
-        "",
-    ]
-    if not receipt.findings:
-        lines.append("None.")
-    for finding in receipt.findings:
-        lines.append(
+        ["", "## Findings", ""],
+        [] if len(receipt.findings) else ["None."],
+        (
             f"- **{finding.severity}** {_code(finding.code)} ({finding.category}): "
             f"{_cell(finding.message)} · {_code(_short(finding.id))}"
-        )
-    lines += ["", "## Ambiguous fields", ""]
-    if not receipt.ambiguous:
-        lines.append("None.")
-    lines += [
-        f"- {_code(_short(field.record))} {_code(field.pointer)}" for field in receipt.ambiguous
-    ]
-    return "\n".join(lines) + "\n"
+            for finding in receipt.findings
+        ),
+        ["", "## Ambiguous fields", ""],
+        [] if len(receipt.ambiguous) else ["None."],
+        (f"- {_code(_short(field.record))} {_code(field.pointer)}" for field in receipt.ambiguous),
+    )
+    for line in lines:
+        yield line + "\n"

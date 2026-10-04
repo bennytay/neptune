@@ -75,6 +75,7 @@ from neptune.adapters.contract import (
     configure,
 )
 from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatus
+from neptune.derived.assembly import EvidenceBuilder, RunAssembler
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
 from neptune.derived.media import MediaIndex, index_media
@@ -1995,6 +1996,7 @@ class IngestJob:
                 else:
                     self._ingested.append(item.key)
                     self._emit(events.SOURCE_ADMITTED, details)
+            assembled = self._assemble_runs()
             # A degraded run records its runtime transform even with no findings, so the receipt
             # always names the guarantees it could not give; a sound run adds a transform only to
             # carry a finding, keeping its lineage unchanged (ADR 0030).
@@ -2026,18 +2028,28 @@ class IngestJob:
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
+                *assembled,
             ]
             assert self.destination is not None  # ``run`` refuses to start without one
-            try:
-                self._staged = stage(
-                    self.destination,
-                    self.workspace,
-                    scanned,
-                    self._ingested,
-                    extra=extra,
-                    derived=derived,
-                )
-            except (PackageError, WorkspaceError, SeriesError, ValueError, OSError) as exc:
+            try:  # tables too large to sort in memory spill to the workspace's scratch space
+                with scratch_space(self.workspace.scratch, ingest_root=self.root) as spill:
+                    self._staged = stage(
+                        self.destination,
+                        self.workspace,
+                        scanned,
+                        self._ingested,
+                        extra=extra,
+                        derived=derived,
+                        spill=spill,
+                    )
+            except (
+                PackageError,
+                WorkspaceError,
+                SeriesError,
+                ScratchError,
+                ValueError,
+                OSError,
+            ) as exc:
                 raise JobError(f"the package cannot be assembled: {exc}") from exc
             for use in self._staged.derivatives:
                 self._derived(use.key, use.held)
@@ -2048,6 +2060,41 @@ class IngestJob:
             self._finish(
                 Phase.ASSEMBLE, {"quarantined": quarantined, "sources": len(self._ingested)}
             )
+
+    def _assemble_runs(self) -> tuple[object, ...]:
+        """Stage 9, over the admitted sources' committed records: assemble runs and sessions
+        from the evidence as well as the layout (ADR 0066). The assembly replaces inspect's
+        layout-only grouping in the package (the dry run's explanation keeps that one), so the
+        layout grouping's findings leave with it. Returns the canonical run assemblies the
+        evidence states, for the package's records."""
+        self._check_cancel()
+        evidence = EvidenceBuilder()
+        try:
+            for content, transform in sorted(set(self._ingested)):
+                self._check_cancel()  # each source's records are read whole: a checkpoint between
+                plan = self.workspace.load_plan(content, transform)
+                if plan is None:
+                    continue  # staging refuses the package and says why
+                for chunk in plan.chunks:
+                    evidence.add(self.workspace.load(str(chunk["id"])).records)
+        except (WorkspaceError, ValueError, OSError) as exc:
+            raise JobError(f"the package cannot be assembled: {exc}") from exc
+        upstream = (self._declared.loaded.transform.id,) if self._declared is not None else ()
+        assembler = RunAssembler(self._grouper.config, evidence.build(), upstream=upstream)
+        assembly = assembler.assemble(self._layout)
+        if self._grouping is not None:
+            layout = self._grouping.transform.id
+            for finding in [f for f in self._findings.values() if f.transform == layout]:
+                del self._findings[finding.id]
+        grouping = assembly.grouping
+        self._producers[grouping.transform.id] = grouping.transform
+        for finding in grouping.findings:
+            self._record(finding, grouping.transform)
+        self._grouping = grouping
+        self._emit(
+            events.RUNS_ASSEMBLED, {**grouping.summary(), "run_assemblies": len(assembly.records)}
+        )
+        return assembly.records
 
     def _streams(self) -> tuple[list[Stream], dict[RecordId, int]]:
         """The admitted sources' streams, and each stream's series rows, counted from its runs'

@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:cafa5a56149f034ad8b983a94f4a8a0cdbe26101dd3d14936cc0548c88e552d7`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:9124d754d67450945904b5c16eb22616f794fccfcb6615ceaff19a9cbe6b206f`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -12,8 +12,8 @@ Receipt `rec:sha256:cafa5a56149f034ad8b983a94f4a8a0cdbe26101dd3d14936cc0548c88e5
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `bags/pick_place_2026-08-20/metadata.yaml` | 1480 | `sha256:6af83e864da1` | rosbag2 0.1.0 |
-| `bags/pick_place_2026-08-20/pick_place_2026-08-20_0.mcap` | 22273 | `sha256:a6eff07ae440` | mcap 0.1.0 |
+| `bags/pick_place_2026-08-20/metadata.yaml` | 1480 | `sha256:6af83e864da1` | rosbag2 0.2.0, neptune.grouping 0.2.0 |
+| `bags/pick_place_2026-08-20/pick_place_2026-08-20_0.mcap` | 22273 | `sha256:a6eff07ae440` | mcap 0.2.0 |
 | `calibration/CAL-ARM3A-0226.yaml` | 313 | `sha256:fecc413f15fd` | config 0.1.0 |
 | `calibration/CAL-ARM3A-0415.yaml` | 326 | `sha256:7734a681a3f1` | config 0.1.0 |
 | `calibration/CAL-ARM3A-0623.yaml` | 334 | `sha256:530ef05aaa16` | config 0.1.0 |
@@ -33,12 +33,15 @@ Receipt `rec:sha256:cafa5a56149f034ad8b983a94f4a8a0cdbe26101dd3d14936cc0548c88e5
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
-| `mcap` | `0.1.0` | `sha256:f42c37ac73d6` | lz4 4.4.5, zstandard 0.25.0 | `rec:89b0c5c3630b` |
-| `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:d268e329090f` |
-| `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:e29bd75e0779` |
+| `mcap` | `0.2.0` | `sha256:2a8c92ad6f72` | lz4 4.4.5, zstandard 0.25.0 | `rec:020b1b8799e7` |
+| `neptune.clocks` | `0.1.0` | `sha256:8abe788c243b` | none | `rec:813f84ae2b74` |
+| `neptune.frames` | `0.1.0` | `sha256:44136fa355b3` | none | `rec:ebb96c0ca1d5` |
+| `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:5a4dc4d9d1f4` |
+| `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:a4c22d1acf45` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
+| `neptune.plugins` | `0.1.0` | `sha256:44136fa355b3` | neptune-deploy 0.0.1 | `rec:c97e34263879` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
-| `rosbag2` | `0.1.0` | `sha256:44136fa355b3` | none | `rec:bf370f1dddcb` |
+| `rosbag2` | `0.2.0` | `sha256:6407455961dc` | none | `rec:4df8cd116009` |
 | `tabular` | `0.2.0` | `sha256:f3ca9581546a` | pyarrow 25.0.1 | `rec:a849dd895889` |
 | `text` | `0.1.0` | `sha256:12b7c5463bbb` | none | `rec:3b8cd771874a` |
 
@@ -52,27 +55,28 @@ Receipt `rec:sha256:cafa5a56149f034ad8b983a94f4a8a0cdbe26101dd3d14936cc0548c88e5
 | `document_record` | 4 |
 | `ingest_finding` | 5 |
 | `run` | 2 |
+| `run_assembly` | 1 |
 | `source_artifact` | 15 |
 | `source_revision` | 15 |
 | `stream` | 2 |
 | `structured_record` | 46 |
 | `structured_table` | 15 |
-| `timestamp_domain` | 4 |
-| `transform_record` | 9 |
+| `timestamp_domain` | 5 |
+| `transform_record` | 12 |
 
 ## Runs
 
 | Run | Session | Machine | First | Last | Streams |
 |---|---|---|---|---|---|
-| `rec:7e8a582df9fd` | unknown | unknown | 1787205600000000000 on `log_time` | 1787205605900000000 on `log_time` | 2 |
-| `rec:d343ad3ffdb1` | unknown | unknown | 1787205600000000000 on `starting_time.nanoseconds_since_epoch` | 1787205605900000000 on `starting_time.nanoseconds_since_epoch` | 0 |
+| `rec:8a9d3280dbcc` | unknown | unknown | 1787205600000000000 on `starting_time.nanoseconds_since_epoch` | 1787205605900000000 on `starting_time.nanoseconds_since_epoch` | 0 |
+| `rec:a8f8b9365722` | unknown | unknown | 1787205600000000000 on `log_time` | 1787205605900000000 on `log_time` | 2 |
 
 ## Streams
 
 | Stream | Run | Topic | Clocks | Messages | First | Last |
 |---|---|---|---|---|---|---|
-| `rec:cdfaa801adc6` | `rec:7e8a582df9fd` | `/status` | `log_time`, `publish_time (/status)` | `3` | unknown | unknown |
-| `rec:d5df76b7237d` | `rec:7e8a582df9fd` | `/joint_states` | `log_time`, `publish_time (/joint_states)` | `60` | unknown | unknown |
+| `rec:2eff2d727014` | `rec:a8f8b9365722` | `/status` | `log_time`, `publish_time (/status)` | `3` | unknown | unknown |
+| `rec:fb4c2e164774` | `rec:a8f8b9365722` | `/joint_states` | `log_time`, `publish_time (/joint_states)`, `header.stamp (/joint_states)` | `60` | unknown | unknown |
 
 ## Entities
 
@@ -81,8 +85,8 @@ Receipt `rec:sha256:cafa5a56149f034ad8b983a94f4a8a0cdbe26101dd3d14936cc0548c88e5
 
 ## Findings
 
-- **info** `mcap.payload_not_decoded` (unsupported): channel 2's message payloads are not decoded; each row cites its message's bytes · `rec:09e5a12ecc04`
-- **info** `mcap.payload_not_decoded` (unsupported): channel 1's message payloads are not decoded; each row cites its message's bytes · `rec:9d5585a08e16`
+- **info** `neptune.clocks.latency_unbounded` (missing): 3 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:f78839ae7718`
+- **info** `neptune.clocks.unsynchronised` (missing): the package's clocks form 2 groups that no clock mapping joins; times in different groups cannot be compared · `rec:c3402a3f8f6d`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:182da7bcdc08`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:250acb73c5ee`
 - **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:ba08f3bb74a9`

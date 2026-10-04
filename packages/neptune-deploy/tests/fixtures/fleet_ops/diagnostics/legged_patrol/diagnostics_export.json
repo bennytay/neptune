@@ -1,0 +1,14 @@
+[
+  {"header": {"stamp": {"sec": 1772468400, "nanosec": 125000000}, "frame_id": ""}, "status": [
+    {"level": 0, "name": "/legged/foot_pad_fl", "message": "contact ok", "hardware_id": "quad-02-fl", "values": [{"key": "pressure_kpa", "value": "212.5"}, {"key": "temp_c", "value": "31.0"}]},
+    {"level": 1, "name": "/legged/battery", "message": "below 30 percent", "hardware_id": "quad-02-batt", "values": [{"key": "charge_pct", "value": "27"}]}
+  ]},
+  {"header": {"stamp": {"sec": 1772468401, "nanosec": 125000000}, "frame_id": ""}, "status": [
+    {"level": 2, "name": "/legged/foot_pad_fl", "message": "pressure sensor stuck", "hardware_id": "quad-02-fl", "values": []},
+    {"level": 4, "name": "/legged/vendor_gait", "message": "gait controller vendor state", "hardware_id": "quad-02-gait", "values": [{"key": "state_code", "value": "4"}]},
+    {"level": 3, "name": "/legged/lidar", "message": "no data for 5 s", "hardware_id": "quad-02-lidar", "values": []}
+  ]},
+  {"header": {"stamp": {"sec": 1772468402, "nanosec": 0}, "frame_id": ""}, "status": [
+    {"name": "/legged/imu", "message": "a status that states no level", "hardware_id": "quad-02-imu", "values": []}
+  ]}
+]

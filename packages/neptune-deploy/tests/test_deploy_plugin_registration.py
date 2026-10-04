@@ -34,12 +34,24 @@ def test_deploy_registers_its_adapters_and_nothing_else() -> None:
     assert _entry_points(ADAPTERS_GROUP) == {
         "deploy_lifecycle": "neptune_deploy.adapters.lifecycle:LifecycleAdapter"
     }
-    assert _entry_points(SOURCES_GROUP) == {  # read-only connectors (ADR 0006, 0009)
+    assert _entry_points(
+        SOURCES_GROUP
+    ) == {  # read-only connectors (ADR 0006, 0007, 0008, 0009, 0010)
         "deploy_azure_blob": "neptune_deploy.sources.object_store:azure_source",
+        "deploy_confluence": "neptune_deploy.sources.records:confluence_source",
+        "deploy_formant": "neptune_deploy.sources.fleet_ops:formant_source",  # ADR 0010
+        "deploy_foxglove": "neptune_deploy.sources.foxglove:foxglove_source",  # ADR 0007
         "deploy_gcs": "neptune_deploy.sources.object_store:gcs_source",
+        "deploy_gdrive": "neptune_deploy.sources.records:gdrive_source",
+        "deploy_jira": "neptune_deploy.sources.records:jira_source",
+        "deploy_linear": "neptune_deploy.sources.records:linear_source",
+        "deploy_onedrive": "neptune_deploy.sources.records:onedrive_source",
+        "deploy_open_rmf": "neptune_deploy.sources.fleet_ops:open_rmf_source",  # ADR 0010
         "deploy_rerun": "neptune_deploy.sources.rerun:rerun_source",
+        "deploy_rest": "neptune_deploy.sources.records:rest_source",
         "deploy_roboto": "neptune_deploy.sources.roboto:roboto_source",
         "deploy_s3": "neptune_deploy.sources.object_store:s3_source",
+        "deploy_servicenow": "neptune_deploy.sources.records:servicenow_source",
     }
 
 

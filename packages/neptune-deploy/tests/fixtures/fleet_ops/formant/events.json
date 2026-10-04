@@ -1,0 +1,5 @@
+{"items": [
+  {"id": "ev-0001", "deviceId": "dev-amr-07", "type": "triggered-event", "message": "Emergency stop", "severity": "critical", "time": "2026-03-01T13:42:10.000Z", "tags": {"zone": "aisle-14"}},
+  {"id": "ev-0002", "deviceId": "dev-arm-cell3", "type": "threshold-event", "message": "Joint 4 torque above threshold", "severity": null, "time": "2026-03-01T09:05:41.250Z", "tags": {}},
+  {"id": "ev-0003", "deviceId": "dev-quad-02", "type": "comment", "message": "Foot pad inspected after patrol", "severity": "info", "time": "2026-03-02T16:20:00.000Z", "startTime": 1772468400000, "tags": {"site": "plant-2"}}
+]}

@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:67dae8c0d908bf8a34b83ee0f39864921ebd921beec40192f82de08402bec62c`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:e2ba2ab1a0f0d4a68539bb9034a27209593d2ee2574209e7f2af241041d4c06e`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -12,7 +12,7 @@ Receipt `rec:sha256:67dae8c0d908bf8a34b83ee0f39864921ebd921beec40192f82de08402be
 
 | Location | Bytes | Content | Read by |
 |---|---|---|---|
-| `maximo_workorders.csv` | 423 | `sha256:8e01bbee4e11` | tabular 0.1.0 |
+| `maximo_workorders.csv` | 423 | `sha256:8e01bbee4e11` | tabular 0.2.0 |
 | `neptune.yaml` | 149 | `sha256:2c6ff33f9633` | config 0.1.0 |
 
 ## Adapters
@@ -20,9 +20,9 @@ Receipt `rec:sha256:67dae8c0d908bf8a34b83ee0f39864921ebd921beec40192f82de08402be
 | Adapter | Version | Config | Libraries | Transform |
 |---|---|---|---|---|
 | `config` | `0.1.0` | `sha256:cfb937994850` | python 3.12, pyyaml 6.0.3 | `rec:746e5f2c7c59` |
-| `neptune.grouping` | `0.1.0` | `sha256:aeddaa6f335f` | none | `rec:d268e329090f` |
+| `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:c91fc242cc67` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
-| `tabular` | `0.1.0` | `sha256:15487b4cb47e` | pyarrow 25.0.1 | `rec:b4754c46f7fb` |
+| `tabular` | `0.2.0` | `sha256:f3ca9581546a` | pyarrow 25.0.1 | `rec:a849dd895889` |
 
 ## Records
 
@@ -54,7 +54,7 @@ Receipt `rec:sha256:67dae8c0d908bf8a34b83ee0f39864921ebd921beec40192f82de08402be
 
 ## Findings
 
-- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:81103b605fe9`
+- **info** `tabular.csv_dialect` (missing): a CSV declares no dialect: read as UTF-8, delimited by comma (sniffed), quoted with '"', header first_row · `rec:11afd046bf0d`
 
 ## Ambiguous fields
 

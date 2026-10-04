@@ -72,6 +72,27 @@ FIXED_KINDS: Final = (
     ("frame", 15),
     ("frame_transform", 3),
 )
+# A record body's size, in bytes of its canonical line: the worked examples' mean for the kind
+# (tests/fixtures/model, rounded). The stored ``record.body`` (Ledger ADR 0009 §1) is that size in
+# hex digests, so it compresses about as little as real bodies, whose ids are hex too.
+BODY_BYTES: Final = {
+    "source_artifact": 250,
+    "source_revision": 280,
+    "transform_record": 310,
+    "timestamp_domain": 750,
+    "ingest_finding": 710,
+    "run": 1340,
+    "machine": 610,
+    "hardware_configuration": 720,
+    "hardware_component": 750,
+    "software_configuration": 1420,
+    "calibration": 2140,
+    "frame": 630,
+    "frame_transform": 1820,
+    "stream": 2260,
+}
+# Bytes of a synthetic body besides its digests: the kind, the record id and the keys.
+_BODY_OVERHEAD: Final = 160
 MACHINE_THREAD_KINDS: Final = (
     "calibration",
     "hardware_configuration",
@@ -91,6 +112,7 @@ class Scale:
     long_offset: int = 501  # ... at these sequence numbers (never a sibling's)
     long_streams: int = 5000
     samples: int = 200
+    bodies: bool = True  # write record.body as registration does (ADR 0009 §1)
 
     @property
     def machines(self) -> int:
@@ -190,7 +212,7 @@ LOAD_RECORDS: Final = """
 INSERT INTO record (tenant_id, kind, record_id, package_id, registration_key, line,
                     schema_version, source_content_id, source_locator, transform_id,
                     assertion_kind, world_clock, world_first, world_last, ambiguous_pointers,
-                    body_digest)
+                    body_digest, body)
 SELECT %(tenant)s, k.kind, ids.record_id, p.package_id, p.seq, j, 1,
        CASE WHEN ledger THEN NULL ELSE p.content_id END,
        CASE WHEN ledger THEN NULL
@@ -210,11 +232,16 @@ SELECT %(tenant)s, k.kind, ids.record_id, p.package_id, p.seq, j, 1,
             WHEN k.kind = 'stream' THEN p.base + 600000000000 - j::bigint * 1000
             WHEN k.kind = 'calibration' THEN 1700000000 + p.src END,
        '{}',
-       'sha256:' || encode(sha256(convert_to('body:' || ids.record_id, 'UTF8')), 'hex')
+       'sha256:' || encode(sha256(convert_to('body:' || ids.record_id, 'UTF8')), 'hex'),
+       CASE WHEN %(bodies)s THEN jsonb_build_object(
+         'kind', k.kind, 'record_id', ids.record_id, 'schema_version', 1,
+         'fields', (SELECT coalesce(string_agg(encode(sha256(convert_to(
+                              ids.record_id || ':' || g, 'UTF8')), 'hex'), ''), '')
+                    FROM generate_series(1, k.digests) AS g)) END
 FROM gen_pkg p
 CROSS JOIN LATERAL (
-  SELECT kind, n FROM (VALUES %(fixed)s) AS f (kind, n)
-  UNION ALL SELECT 'stream', p.streams
+  SELECT kind, n, digests FROM (VALUES %(fixed)s) AS f (kind, n, digests)
+  UNION ALL SELECT 'stream', p.streams, %(stream_digests)s
 ) AS k
 CROSS JOIN LATERAL generate_series(1, k.n) AS j
 CROSS JOIN LATERAL (
@@ -363,6 +390,20 @@ def _hash(text: str) -> str:
     import hashlib
 
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _digests(kind: str) -> int:
+    """How many 64-character digests make a synthetic body of ``kind`` its documented size."""
+    return max(0, round((BODY_BYTES[kind] - _BODY_OVERHEAD) / 64))
+
+
+def _body(kind: str, record_id: str) -> str:
+    """A synthetic body as LOAD_RECORDS writes it, as JSON text."""
+    fields = "".join(_hash(f"{record_id}:{g}") for g in range(1, _digests(kind) + 1))
+    return json.dumps(
+        {"fields": fields, "kind": kind, "record_id": record_id, "schema_version": 1},
+        separators=(",", ":"),
+    )
 
 
 def machine_thread_id(namespace: str, value: str) -> str:
@@ -530,8 +571,9 @@ def build(conn: Conn, scale: Scale, report: dict[str, Any]) -> None:
             seq, tx_time = last.fetchone() or (0, None)
             conn.execute("SELECT replay_tx(%s, %s)", (seq, tx_time))
         with _phase(report, "records"):
-            fixed = ", ".join(f"('{kind}', {n})" for kind, n in FIXED_KINDS)
-            conn.execute(LOAD_RECORDS.replace("%(fixed)s", fixed), params)
+            fixed = ", ".join(f"('{kind}', {n}, {_digests(kind)})" for kind, n in FIXED_KINDS)
+            load = LOAD_RECORDS.replace("%(fixed)s", fixed)
+            conn.execute(load.replace("%(stream_digests)s", str(_digests("stream"))), params)
         with _phase(report, "logical_ids"):
             conn.execute(LOAD_LOGICAL_IDS, params)
         with _phase(report, "indexes"):
@@ -578,6 +620,10 @@ def _counts(conn: Conn) -> dict[str, Any]:
         "sources": one("SELECT count(*) FROM source"),
         "clocks": one("SELECT count(*) FROM clock"),
         "transforms": one("SELECT count(*) FROM transform"),
+        "bodies": one("SELECT count(body) FROM record"),
+        "body_text_bytes_mean": one(
+            "SELECT coalesce(avg(octet_length(body::text)), 0)::bigint FROM record"
+        ),
         "total_bytes": sum(by_table.values()),
         "bytes_by_table": dict(sorted(by_table.items())),
     }
@@ -758,6 +804,7 @@ def _registration_costs(conn: Conn, scale: Scale) -> dict[str, Any]:
                 tick[0],
                 j,
                 "sha256:" + _hash(f"new-body:{j}"),
+                _body("stream", "rec:sha256:" + _hash(f"new-stream:{j}")) if scale.bodies else None,
             )
             for j in range(1, 109)
         ]
@@ -765,7 +812,8 @@ def _registration_costs(conn: Conn, scale: Scale) -> dict[str, Any]:
         with conn.cursor() as cursor:
             cursor.executemany(
                 "INSERT INTO record (tenant_id, kind, record_id, package_id, registration_key,"
-                " line, schema_version, body_digest) VALUES (%s, %s, %s, %s, %s, %s, 1, %s)",
+                " line, schema_version, body_digest, body)"
+                " VALUES (%s, %s, %s, %s, %s, %s, 1, %s, %s::jsonb)",
                 rows,
             )
         out["record_rows_108_insert_ms"] = round((time.perf_counter() - start) * 1000, 3)
@@ -813,8 +861,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--data-dir", type=Path, help="pgserver data directory on disk (default: a temp dir)"
     )
     parser.add_argument("--out", type=Path, help="write the JSON report here too")
+    parser.add_argument(
+        "--no-bodies", action="store_true", help="leave record.body NULL, as the L1 gate did"
+    )
     args = parser.parse_args(argv)
-    scale = Scale(packages=args.packages, samples=args.samples)
+    scale = Scale(packages=args.packages, samples=args.samples, bodies=not args.no_bodies)
     if args.uri:
         report = run(args.uri, scale)
     else:
