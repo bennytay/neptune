@@ -341,24 +341,30 @@ _REFERENCES: Final = (
 _TIMED: Final = ("calibration", "frame_transform", "image", "run", "video")
 
 
+def references(record: Any) -> Iterator[tuple[str, str, str]]:
+    """Every ``(field, target id, target kind)`` by which ``record`` names another record: the
+    fields ``_REFERENCES`` lists for its kind, and the clocks its own times lie on (``_TIMED``).
+    The runtime asks the same of a salvaged source's kept records (ADR 0069)."""
+    for kind, field, target_kind in _REFERENCES:
+        if record.kind == kind:
+            value = getattr(record, field)
+            for target in value if isinstance(value, tuple) else (value,):
+                yield field, target, target_kind
+    if record.kind in _TIMED:
+        for stamp in sorted({t.domain_id for t in _timestamps(record)}):
+            yield "timestamp", stamp, "timestamp_domain"
+
+
 def dangling_reference(context: Context) -> Iterator[Draft]:
     """A record names another record (a run, a clock, a table) the package does not hold."""
     missing: dict[tuple[str, str, str, str], list[Any]] = defaultdict(list)
-
-    def check(record: Any, field: str, target: str, kind: str) -> None:
-        held = context.by_id.get(target)
-        if held is None or held.kind != kind:
-            missing[record.kind, field, kind, target].append(record)
-
-    for kind, field, target_kind in _REFERENCES:
+    kinds = {kind for kind, _, _ in _REFERENCES} | set(_TIMED)
+    for kind in sorted(kinds):
         for record in context.records(kind):
-            value = getattr(record, field)
-            for target in value if isinstance(value, tuple) else (value,):
-                check(record, field, target, target_kind)
-    for kind in _TIMED:
-        for record in context.records(kind):
-            for stamp in sorted({t.domain_id for t in _timestamps(record)}):
-                check(record, "timestamp", stamp, "timestamp_domain")
+            for field, target, target_kind in references(record):
+                held = context.by_id.get(target)
+                if held is None or held.kind != target_kind:
+                    missing[record.kind, field, target_kind, target].append(record)
     for (kind, field, target_kind, target), records in sorted(missing.items()):
         yield Draft(
             subject=evidence_of(records[0]),

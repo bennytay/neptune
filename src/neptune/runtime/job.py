@@ -170,6 +170,7 @@ from neptune.store.workspace import (
     WorkspaceError,
 )
 from neptune.validate import validate_package
+from neptune.validate.rules import references
 
 DEFAULT_ATTEMPTS: Final = 2
 ADAPTER_FAILED: Final = f"{PROBE_ID}.adapter_failed"
@@ -1888,8 +1889,11 @@ class IngestJob:
         are unique overall. Memory is one range per chunk, never one entry per row.
 
         Only the chunks ``item`` kept are judged: a salvaged source must stand without the ones
-        it lost (ADR 0069). Each problem is an object naming its ``Law`` and the ids it concerns,
-        never text.
+        it lost (ADR 0069), so for one that lost chunks a kept record must not name a record of
+        the source that no kept chunk holds (``reference_lost``: a block whose document, a stream
+        whose run or clock, was in a lost chunk). One problem per target, so memory is one entry
+        per distinct target. Each problem is an object naming its ``Law`` and the ids it
+        concerns, never text.
         """
         assert item.config is not None
         problems: list[JsonObject] = []
@@ -1897,6 +1901,7 @@ class IngestJob:
         finding_ids: set[RecordId] = set()
         streams: dict[RecordId, Stream] = {}
         runs: dict[RecordId, list[tuple[str, Path]]] = defaultdict(list)
+        named: dict[str, JsonObject] = {}  # salvage only: each target a kept record names, once
         try:
             stored = self.workspace.load_plan(item.content_id, item.config.transform.id)
         except (WorkspaceError, ValueError, OSError) as exc:
@@ -1928,6 +1933,20 @@ class IngestJob:
                 record_ids.add(record.id)
                 if isinstance(record, Stream):
                     streams[record.id] = record
+                if item.lost:
+                    for field_name, target, target_kind in references(record):
+                        named.setdefault(
+                            target,
+                            {
+                                "chunk": chunk.id,
+                                "field": field_name,
+                                "kind": record.kind,
+                                "law": str(Law.REFERENCE_LOST),
+                                "record": record.id,
+                                "target": target,
+                                "target_kind": target_kind,
+                            },
+                        )
             for finding in output.findings:
                 if finding.id in finding_ids:
                     problems.append(
@@ -1942,6 +1961,7 @@ class IngestJob:
                 runs[stream].append((chunk.id, run))
         if not said_something:
             problems.append({"law": str(Law.OUTPUT_SILENT)})
+        problems.extend(named[target] for target in sorted(set(named) - set(record_ids)))
         for stream in sorted(set(runs) - set(streams)):
             problems.append({"law": str(Law.STREAM_UNDECLARED), "stream": stream})
         for stream in sorted(set(streams) - set(runs)):
@@ -1955,9 +1975,9 @@ class IngestJob:
         """The cross-chunk laws' verdict on ``item``'s kept chunks: kept by the workspace, or
         computed now.
 
-        A function of those chunk ids (their outputs never change) and of the runtime's
-        version (which changes with the laws), so it is a derivative (ADR 0031 §4): an unchanged
-        source is not read again to be admitted.
+        A function of those chunk ids (their outputs never change, and whether the source lost
+        any follows from them) and of the runtime's version (which changes with the laws), so it
+        is a derivative (ADR 0031 §4): an unchanged source is not read again to be admitted.
         """
         assert item.config is not None
         key = admission_key(

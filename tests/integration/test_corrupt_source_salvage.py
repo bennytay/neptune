@@ -137,27 +137,29 @@ def corpus(tmp_path: Path, *recordings: tuple[str, str]) -> Path:
     return root
 
 
-# A data chunk in the middle of each recording: chunk_bytes small enough for several.
+# One data chunk of each recording (chunk_bytes small enough for several): the middle one, or for
+# DataFlash the last, since its middle chunk declares a parameter table the last one's records
+# name (losing it refuses the salvage: ``reference_lost``).
 RECORDINGS: Final = [
-    pytest.param(McapAdapter(chunk_bytes=512), "mcap/robot.mcap", "base.mcap", id="mcap"),
+    pytest.param(McapAdapter(chunk_bytes=512), "mcap/robot.mcap", "base.mcap", 2, id="mcap"),
     pytest.param(
-        Rosbag1Adapter(chunk_bytes=2048), "rosbag1/robot_none.bag", "arm.bag", id="rosbag1"
+        Rosbag1Adapter(chunk_bytes=2048), "rosbag1/robot_none.bag", "arm.bag", 1, id="rosbag1"
     ),
-    pytest.param(FlightLogAdapter(chunk_bytes=256), "ulog/copter.ulg", "copter.ulg", id="ulog"),
+    pytest.param(FlightLogAdapter(chunk_bytes=256), "ulog/copter.ulg", "copter.ulg", 3, id="ulog"),
     pytest.param(
-        FlightLogAdapter(chunk_bytes=1024), "ardupilot/copter.bin", "rover.bin", id="dataflash"
+        FlightLogAdapter(chunk_bytes=1024), "ardupilot/copter.bin", "rover.bin", 2, id="dataflash"
     ),
 ]
 
 
-@pytest.mark.parametrize(("adapter", "fixture", "name"), RECORDINGS)
+@pytest.mark.parametrize(("adapter", "fixture", "name", "which"), RECORDINGS)
 def test_a_decoder_bug_in_one_data_chunk_loses_exactly_its_bytes(
-    tmp_path: Path, adapter: Adapter, fixture: str, name: str
+    tmp_path: Path, adapter: Adapter, fixture: str, name: str, which: int
 ) -> None:
     data = (FIXTURES / fixture).read_bytes()
     windows = [c for c in chunks_of(adapter, data) if isinstance(c.context.get("start"), int)]
-    assert len(windows) >= 3, "the fixture needs a middle data chunk"
-    bad = windows[len(windows) // 2]
+    assert len(windows) >= 3, "the fixture needs several data chunks"
+    bad = windows[which]
     start, end = bad.context["start"], bad.context["end"]
     assert isinstance(start, int) and isinstance(end, int) and start < end
     root = corpus(tmp_path, (fixture, name))
@@ -215,6 +217,21 @@ def test_losing_the_declarations_refuses_the_salvage_and_the_rest_land(tmp_path:
     (quarantined,) = run.of("source_quarantined")
     assert quarantined.details["codes"] == [lineage.CHUNK_FAILED, REFUSED]
     assert len(run.ingested()) == 2 and not run.package.series  # the note and the PDF
+
+
+def test_a_lost_table_that_kept_records_name_refuses_the_salvage(tmp_path: Path) -> None:
+    """DataFlash's middle chunk declares a parameter table the last chunk's records name: kept,
+    they would dangle, so the salvage is refused (``reference_lost``)."""
+    adapter = FlightLogAdapter(chunk_bytes=1024)
+    data = (FIXTURES / "ardupilot" / "copter.bin").read_bytes()
+    middle = chunks_of(adapter, data)[1]
+    root = corpus(tmp_path, ("ardupilot/copter.bin", "rover.bin"))
+    run = Run(root, tmp_path, registry(FailOn(adapter, lambda c: c.id == middle.id)))
+    problems = run.only(REFUSED).details["problems"]
+    assert [(p["law"], p["target_kind"]) for p in problems] == [
+        ("reference_lost", "structured_table")
+    ]
+    assert len(run.ingested()) == 2
 
 
 def test_a_source_that_loses_every_chunk_is_quarantined(tmp_path: Path) -> None:

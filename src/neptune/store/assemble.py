@@ -459,6 +459,7 @@ def assemble(
         workspace,
         ledger,
         ingested,
+        omit=omit,
         materialise=materialise,
         source=source,
         extra=extra,

@@ -44,12 +44,15 @@ the receipt states exactly what was lost.
      series derivative key names exactly those chunks). The job emits `source_salvaged`, not
      `source_admitted`, and records one `neptune.runtime.source_partial` finding;
    - nothing committed, or what committed breaks a law without the rest (rows of a stream
-     declared in a lost chunk, an output that says nothing): the source is **quarantined** with
-     `neptune.runtime.salvage_refused`, naming the laws and the problems, or "every chunk was
-     lost". `source_quarantined` then lists the lost chunks' codes beside it.
-   A source that lost nothing is judged as before (`output_invalid` if it breaks a law). There
-   is no partial repair: the runtime never drops records from a committed chunk to make the rest
-   pass.
+     declared in a lost chunk, an output that says nothing, or `reference_lost`: a kept record
+     naming, in a field validation's `dangling_reference` rule checks, a record of the source no
+     kept chunk holds, such as a text block whose document was lost): the source is
+     **quarantined** with `neptune.runtime.salvage_refused`, naming the laws and the problems,
+     or "every chunk was lost". `source_quarantined` then lists the lost chunks' codes beside it.
+   `reference_lost` applies to salvaged sources only: a whole source whose references dangle is an
+   adapter bug that validation reports, as before. A source that lost nothing is judged as before
+   (`output_invalid` if it breaks a law). There is no partial repair: the runtime never drops
+   records from a committed chunk to make the rest pass.
 3. **Exact byte extents are declared, not guessed.** `AdapterDescriptor.extent` (optional,
    `ChunkExtent(start="start", end="end")`) names the chunk-context keys holding the `[start,
    end)` source bytes a chunk decodes. A chunk with neither key (a declarations chunk, a whole

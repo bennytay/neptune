@@ -811,3 +811,40 @@ def test_a_source_cut_after_hashing_is_verified_against_its_artifact(tmp_path: P
         "declared_size": len(data),
         "missing_bytes": len(data) - 20,
     }
+
+
+class HeadlessBrittle(BRITTLE.BrittleAdapter):  # type: ignore[misc, name-defined]
+    """Crashes on the document chunk, which every block names as its ``document``."""
+
+    def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput:
+        if chunk.context.get("part") == "document":
+            raise RuntimeError("the document chunk was asked to crash")
+        output: ChunkOutput = super().ingest(source, chunk, config)
+        return output
+
+
+def test_blocks_whose_document_was_lost_refuse_the_salvage(tmp_path: Path) -> None:
+    """Kept blocks naming a document only the lost chunk held would dangle in the package: the
+    salvage is refused (``reference_lost``), never admitted for validation to find (ADR 0069)."""
+    root = tmp_path / "root"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    (root / "headless.brittle").write_bytes(BRITTLE.brittle("first", "second"))
+    adapters = AdapterRegistry([*builtin_adapters(), HeadlessBrittle()])
+    outcome, package, seen = run(root, tmp_path, adapters)
+    assert codes(package) == ["neptune.runtime.chunk_failed", "neptune.runtime.salvage_refused"]
+    refused = only(outcome, "neptune.runtime.salvage_refused")
+    problems = refused.details["problems"]
+    assert isinstance(problems, list) and len(problems) == 1  # one per target, not per block
+    (problem,) = problems
+    assert isinstance(problem, dict)
+    assert (problem["law"], problem["field"], problem["kind"], problem["target_kind"]) == (
+        "reference_lost",
+        "document",
+        "document_block",
+        "document_record",
+    )
+    assert "(reference_lost)" in refused.message
+    assert len(outcome.ingested) == 1  # the notes
+    assert not [e for e in seen if e.kind == "source_salvaged"]
+    assert not [f for f in package.receipt.findings if f.code.endswith("dangling_reference")]

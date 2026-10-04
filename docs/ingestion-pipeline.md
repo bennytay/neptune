@@ -61,7 +61,8 @@ state machine over the stages above, in nine phases (ADR 0028):
   cross-chunk law without the lost ones (`source_salvaged` event; one `source_partial` finding:
   chunks planned and committed, each lost chunk with its code and extent, the merged byte ranges
   not covered, and how many lost chunks named no extent). If nothing committed, or the rest break a
-  law (rows of a stream declared in a lost chunk), it is quarantined with `salvage_refused`. Lost
+  law (rows of a stream declared in a lost chunk; `reference_lost`, a kept record naming one only a
+  lost chunk held), it is quarantined with `salvage_refused`. Lost
   chunks are never committed, so the next job retries exactly them.
 - **Partial success.** A plan that raises, a source that changes under the job or cannot be
   opened, a read that comes up short, a salvage refused, or a whole source's output breaking a

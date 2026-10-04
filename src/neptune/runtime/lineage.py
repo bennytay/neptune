@@ -92,7 +92,8 @@ FINDING_CODES: Final[tuple[Documented, ...]] = (
         SALVAGE_REFUSED,
         "chunks of a source were lost and the ones that committed cannot stand alone: none"
         " committed, or together they break a cross-chunk law (rows of a stream declared in a"
-        " lost chunk); the source is not in this package (failed, error)",
+        " lost chunk, a record naming one only a lost chunk held); the source is not in this"
+        " package (failed, error)",
     ),
     Documented(
         SOURCE_CHANGED,
@@ -142,6 +143,8 @@ class Law(StrEnum):
     RUN_BREAKS_STREAM = "run_breaks_stream"  # a chunk's run breaks its stream's row contract
     RUN_COLUMNS_DISAGREE = "run_columns_disagree"  # two chunks' runs of a stream differ in columns
     SEQ_RANGES_OVERLAP = "seq_ranges_overlap"  # two chunks' seq ranges of a stream overlap
+    # Salvage only (ADR 0069): a kept record names one of the source's that only a lost chunk held.
+    REFERENCE_LOST = "reference_lost"
 
 
 def type_name(value: object) -> str:
