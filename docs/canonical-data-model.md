@@ -3,13 +3,13 @@
 Status: **authoritative**; frozen at `SCHEMA_VERSION` 1 by the M1 gate (MVL-56, ADR 0023; review:
 `docs/reviews/m1-stress-test.md`) and grown only by addition since: version 2 adds configuration snapshots
 (MVL-23, ADR 0037), version 3 alignment records (MVL-82, ADR 0050), version 4 deployment lifecycle records
-(MVL-83, ADR 0051). Primitives are specified by
+(MVL-83, ADR 0051), version 5 human assertions (MVL-183, ADR 0062). Primitives are specified by
 MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66 (ADR 0017), runs, streams and series by MVL-67
 (ADR 0018), machine context by MVL-68 (ADR 0019) and world context by MVL-69 (ADR 0020). The JSON Schema
 (`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). Any change here needs
 an ADR and a schema-version bump, and must be an addition (ADR 0023 §1).
 
-## Record kinds (schema version 4)
+## Record kinds (schema version 5)
 
 Every record kind belongs to one family (ADR 0017 §4). The last four families are the design contract's source
 domains.
@@ -25,6 +25,7 @@ domains.
 | `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord`; since version 4 `CommissioningBaseline`, `AuthorisationEnvelope`, `Intervention`, `MaintenanceEvent`, `RequalificationRecord`, `IncidentRecord`, `ChangeRecord`, `RiskAssessment` | `model/world.py` (ADR 0020), `model/lifecycle.py` (ADR 0051) |
 | `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
 | `alignment` | `IdentityLink`, `ClockMapping`, `FrameBinding`, `RunAssembly`, `SnapshotBinding` (since 3) | `model/alignment.py` (ADR 0050) |
+| `assertion` | `Assertion` (since 5) | `model/assertion.py` (ADR 0062) |
 
 `IngestReceipt` is the package-level account of an ingest run, not a record table: one document per package,
 beside `PackageManifest` and the volatile `ReceiptEnvelope` (`model/package.py`, ADR 0022).
@@ -48,7 +49,8 @@ boundary to the memory learner.
 - A value defined by a format specification (MCAP `log_time` is ns) cites the bytes that establish the format
   plus the transform that applies the spec. When the source carries the definition itself (a ROS message
   definition in an MCAP schema record), it cites that instead.
-- `SCHEMA_VERSION` is 4 (2: configuration, ADR 0037; 3: alignment, ADR 0050; 4: deployment lifecycle, ADR 0051).
+- `SCHEMA_VERSION` is 5 (2: configuration, ADR 0037; 3: alignment, ADR 0050; 4: deployment lifecycle, ADR 0051;
+  5: assertion, ADR 0062).
   It became 1 at the M1 gate (ADR 0023), and a record kind's fields never change from then on. The model grows
   only by addition (new record kinds, including companion kinds naming the record they
   extend, new enum members, new locator steps), each through an ADR and a version bump. So every record from
@@ -259,6 +261,20 @@ a bug, not a value.
   assembly, recording stem or the one recording below; never another recording's sidecar). It adds a
   finding for every tie (`conflicting_snapshots`), every file as near to several runs (`shared_snapshot`)
   and every kind left unbound (`snapshot_unresolved`; `no_software_identity` for software).
+
+## Human assertions (ADR 0062; `model/assertion.py`)
+
+- `Assertion`: what a person declared about other records, `stated` and cited, applied by nobody here:
+  `identifier` (its declared id), `assertion_type` (`same_identity`, `distinct_identity`, `accept_baseline`,
+  `reject_baseline`, `annotate`, `retract`), `author` (a declared `LogicalId`, never resolved), `authored_at`
+  (civil time by ADR 0023 §2, one `TimestampDomain` per assertion, role `document`), `authored_zone` (an IANA
+  name as written, never looked up), `scope` (record ids and logical ids in declared order, one state for the
+  list), `retracts`, `payload` (the declared JSON text as written), `rationale` (text citing its span),
+  `signature`, `ticket`.
+- `retract` names the earlier assertion by its declared `identifier`; `retracts` is `NotApplicable` for every
+  other type. A retraction is a new record: nothing is deleted or changed.
+- The Ledger's transaction time is the Ledger's; no assertion holds one.
+- Read from `neptune.assertions` version 1 files by the `assertion` adapter (format in ADR 0062 §3).
 
 ## World and record context (ADR 0020; `model/world.py`)
 

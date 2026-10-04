@@ -44,6 +44,7 @@ def test_committed_registry_is_valid() -> None:
     assert report.problems == []
     assert set(tool.Registry(CONTRACTS).contract_ids()) == {
         "alignment-records",
+        "assertion-records",
         "catalog-api",
         "dataset-manifest",
         "graph-schema",
@@ -78,6 +79,9 @@ def test_package_schema_goldens_cover_four_robots_and_every_document() -> None:
         "quadruped",
         "warehouse_amr",  # deployment lifecycle records (ADR 0051)
         "manipulator_cell",
+        "assertion_cell_baseline",  # human assertions (ADR 0062)
+        "assertion_fleet_identity",
+        "assertion_retraction",
     }
     for robot in robots:
         assert latest.goldens[f"{robot}.manifest.json"] == "#/$defs/PackageManifest"
