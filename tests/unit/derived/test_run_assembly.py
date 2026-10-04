@@ -13,12 +13,15 @@ from fractions import Fraction
 import pytest
 
 from neptune.derived.assembly import (
+    BAG_COPIES_DIFFER,
     LISTED_PART_MISSING,
     MIXED_MACHINES_FINDING,
+    PART_CLAIMED_TWICE,
     SEVERAL_NAMED,
     UNLISTED_PART,
     Edge,
     Evidence,
+    EvidenceBuilder,
     FileList,
     Interval,
     RunAssembler,
@@ -39,9 +42,10 @@ from neptune.discovery.layout import Layout, LayoutFile, layout_of
 from neptune.identity.ids import record_id
 from neptune.model.alignment import MemberRole
 from neptune.model.ids import ContentId, LogicalId, RecordId
-from neptune.model.knowledge import AssertionKind, NotApplicable
-from neptune.model.provenance import ByteRange, EvidenceRef
+from neptune.model.knowledge import AssertionKind, Known, NotApplicable, NotCovered
+from neptune.model.provenance import ByteRange, EvidenceRef, Provenance
 from neptune.model.source import LocalPath
+from neptune.model.world import DocumentBlock
 
 UNIX = ("unix", "posix")
 
@@ -484,3 +488,97 @@ def test_prose_words_never_place_a_document() -> None:
     grouping = RunAssembler(evidence=found).propose(tree)
     [sop] = [u for u in grouping.unassigned if u.location == LocalPath("docs/sop.md")]
     assert sop.reason == NO_SESSION
+
+
+# --- edge cases after review (MVL-34 follow-up) -------------------------------------------------
+
+
+def layout_with(contents: dict[str, str]) -> Layout:
+    """A layout whose files' bytes are named: equal names are equal bytes."""
+    return layout_of(
+        LayoutFile(revision(p), LocalPath(p), content(c)) for p, c in sorted(contents.items())
+    )
+
+
+def test_copies_with_one_metadata_but_different_storage_bytes_are_a_finding() -> None:
+    tree = layout_with(
+        {
+            "a/metadata.yaml": "meta",
+            "a/bag_0.mcap": "good",
+            "b/metadata.yaml": "meta",
+            "b/bag_0.mcap": "damaged",
+        }
+    )
+    listed = file_list("a/metadata.yaml", "bag_0.mcap")
+    found = Evidence({content("meta"): listed}, ())
+    assembly = RunAssembler(evidence=found).assemble(tree)
+    [finding] = [f for f in assembly.grouping.findings if f.code == BAG_COPIES_DIFFER]
+    assert finding.details["count"] == 2 and finding.details["variants"] == 2
+    assert finding.details["copies"] == [
+        {"kind": "local", "path": "a/metadata.yaml"},
+        {"kind": "local", "path": "b/metadata.yaml"},
+    ]
+    assert finding.records == (listed.file_lists[0].run,)
+    again = RunAssembler(evidence=found).assemble(tree)
+    assert [f.id for f in again.grouping.findings] == [f.id for f in assembly.grouping.findings]
+
+
+def test_identical_copies_of_a_bag_are_one_run_without_a_finding() -> None:
+    tree = layout_with(
+        {
+            "a/metadata.yaml": "meta",
+            "a/bag_0.mcap": "same",
+            "b/metadata.yaml": "meta",
+            "b/bag_0.mcap": "same",
+        }
+    )
+    found = Evidence({content("meta"): file_list("a/metadata.yaml", "bag_0.mcap")}, ())
+    assembly = RunAssembler(evidence=found).assemble(tree)
+    assert not [f for f in assembly.grouping.findings if f.code == BAG_COPIES_DIFFER]
+    [stated] = assembly.records
+    assert len(stated.members) == 4
+
+
+def test_a_nested_bags_part_listed_by_two_stated_records_is_a_finding() -> None:
+    tree = layout("outer/metadata.yaml", "outer/inner/metadata.yaml", "outer/inner/inner_0.mcap")
+    outer = file_list("outer/metadata.yaml", "inner/inner_0.mcap")
+    inner = file_list("outer/inner/metadata.yaml", "inner_0.mcap")
+    found = Evidence(
+        {content("outer/metadata.yaml"): outer, content("outer/inner/metadata.yaml"): inner}, ()
+    )
+    assembly = RunAssembler(evidence=found).assemble(tree)
+    claims = [f for f in assembly.grouping.findings if f.code == PART_CLAIMED_TWICE]
+    assert [f.subject for f in claims] == [LocalPath("outer/inner/inner_0.mcap")] * len(claims)
+    [claim] = claims
+    assert claim.details["count"] == 2
+    assert set(claim.records) == {outer.file_lists[0].run, inner.file_lists[0].run}
+    assert len(assembly.records) == 2  # both statements stand; neither is picked
+    again = RunAssembler(evidence=found).assemble(tree)
+    assert [f.id for f in again.grouping.findings] == [f.id for f in assembly.grouping.findings]
+
+
+def test_a_part_listed_by_one_record_is_never_a_claim() -> None:
+    tree = layout("bag/metadata.yaml", "bag/bag_0.mcap")
+    found = Evidence(
+        {content("bag/metadata.yaml"): file_list("bag/metadata.yaml", "bag_0.mcap")}, ()
+    )
+    assembly = RunAssembler(evidence=found).assemble(tree)
+    assert not [f for f in assembly.grouping.findings if f.code == PART_CLAIMED_TWICE]
+
+
+def test_only_identifier_shaped_words_are_kept_from_a_document() -> None:
+    transform = record_id("transform_record", {"t": 1})
+    source = content("docs/sop.md")
+    evidence = EvidenceRef(source, (ByteRange(0, 40),))
+    block = DocumentBlock(
+        id=record_id("document_block", {"n": 1}),
+        provenance=Provenance(evidence, transform, AssertionKind.OBSERVED),
+        document=record_id("document", {"n": 1}),
+        order=0,
+        role=NotCovered(),
+        level=NotCovered(),
+        text=Known("Clean the camera lens of robot amr-07 (serial SN_4412.b), then calibrate."),
+        region=NotApplicable(),
+    )
+    words = EvidenceBuilder().add([block]).build().sources[source].words
+    assert words == {"amr-07", "SN_4412.b"}
