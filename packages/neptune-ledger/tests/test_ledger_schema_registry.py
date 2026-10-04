@@ -62,7 +62,6 @@ from neptune_ledger.contract_tests.examples import (
     evidence_anchor,
     materialise,
     reparse,
-    with_changed_body,
     write,
 )
 
