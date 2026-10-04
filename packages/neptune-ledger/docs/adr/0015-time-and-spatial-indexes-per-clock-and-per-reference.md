@@ -26,12 +26,12 @@ the other way, every lookup scans every interval or extent of the tenant.
 
 ## Decision
 
-1. **Two derived tables in the catalog, written by registration.** Migration 0010 adds
+1. **Two derived tables in the catalog, written by registration.** Migration 0009 adds
    `time_interval` and `spatial_extent` to the tenant schema. Registration computes every row
    from the verified package and writes it in the registration transaction, after the record
    and thread rows. The tables are append-only like every registration table (ADR 0002 §6).
    A replay writes them again, so `ledger rebuild` reproduces them and `ledger dump` holds them.
-   A catalog with packages from before 0010 refuses the migration and is rebuilt, as for 0007.
+   A catalog with packages from before 0009 refuses the migration and is rebuilt, as for 0007.
    They live in PostgreSQL, not under ADR 0013 §2's object-store layout, because a lookup must
    read them at the same catalog point (`as_of`) as the records they name.
 2. **`time_interval`: one row per interval on one clock.**
@@ -141,7 +141,7 @@ the other way, every lookup scans every interval or extent of the tenant.
   descriptor and reads its clock columns, so the rows match the bytes the package id names.
   This is linear in the file. An already registered package is not read again. The spatial
   rows come from the records registration already parsed.
-- Two more append-only tables, rebuilt and dumped with the rest. Migration 0010 refuses a
+- Two more append-only tables, rebuilt and dumped with the rest. Migration 0009 refuses a
   catalog that already holds packages.
 - ADR 0013 left two things to this issue. The file-level time index is `subject = 'series'`: it
   names the series files a window needs, on any clock, without opening a footer. Merging rows of

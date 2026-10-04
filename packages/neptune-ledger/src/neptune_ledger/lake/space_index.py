@@ -292,7 +292,7 @@ _PLACED_3D: Final = _PLACED + "   AND dims = 3 AND min_z <= %(z1)s AND max_z >= 
 # The members the box cannot be compared with, as four ranges of the B-tree on (reference_kind,
 # reference, unit, dims), each read at most ``cap`` rows deep, so the lookup never reads the
 # reference's comparable members: no Known unit (which every member without an extent is, by
-# migration 0010's checks), a unit before or after the named one, and 2-axis extents in the
+# migration 0009's checks), a unit before or after the named one, and 2-axis extents in the
 # named unit when the box has three.
 _UNPLACED: Final = " UNION ALL ".join(
     f"({_MEMBERS}   AND {test}\n   LIMIT %(cap)s)"

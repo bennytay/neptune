@@ -1,4 +1,4 @@
--- 0010 the derived time and spatial indexes (Ledger ADR 0015).
+-- 0009 the derived time and spatial indexes (Ledger ADR 0015).
 --
 -- Applied in the same tenant schema, with search_path set to that schema alone. Both tables are
 -- derived: registration computes every row from the verified package (its record lines and its
@@ -11,7 +11,7 @@
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM package) THEN
-    RAISE EXCEPTION 'packages registered before migration 0010 have no time or spatial index;'
+    RAISE EXCEPTION 'packages registered before migration 0009 have no time or spatial index;'
       ' rebuild this catalog from its packages and registration log (ADR 0015)';
   END IF;
 END

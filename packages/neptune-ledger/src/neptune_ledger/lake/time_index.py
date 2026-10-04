@@ -55,7 +55,7 @@ READ_ROWS: Final = 65_536
 HASH_CHUNK: Final = 1 << 20
 
 # The rows of one clock whose stated extent [first, last or first] meets [lo, hi], at a catalog
-# point: one R-tree search inside the clock's entries (``span``, migration 0010), then the exact
+# point: one R-tree search inside the clock's entries (``span``, migration 0009), then the exact
 # test on the bigint ticks, which is what decides.
 _WINDOW: Final = """
 SELECT subject, kind, record_id, package_id, clock, first_tick, last_tick, rows_known,
