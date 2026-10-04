@@ -113,6 +113,10 @@ class Run:
     def codes(self) -> list[str]:
         return sorted(finding.code for finding in self.outcome.findings)
 
+    def failures(self) -> list[IngestFinding]:
+        """Every finding but the salvage accounts (``source_partial``, ADR 0069)."""
+        return [f for f in self.outcome.findings if f.code != "neptune.runtime.source_partial"]
+
     def finding(self, code: str) -> IngestFinding:
         (found,) = [f for f in self.outcome.findings if f.code == code]
         return found
@@ -168,12 +172,21 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
         "neptune.runtime.adapter_crashed",
         "neptune.runtime.limit_exceeded",
         "neptune.runtime.limit_exceeded",
+        "neptune.runtime.source_partial",
+        "neptune.runtime.source_partial",
+        "neptune.runtime.source_partial",
     ]
-    for finding in run.outcome.findings:
+    for finding in run.failures():
         assert (finding.category, finding.severity) == (FindingCategory.FAILED, Severity.ERROR)
         assert finding.details["adapter"] == "hostile" and finding.details["version"] == "1.0.0"
         assert finding.details["step"] == "ingest"
         assert str(finding.details["chunk"]).startswith("chunk:sha256:")
+        extent = finding.details["extent"]  # the attacking line's bytes, exactly
+        assert isinstance(extent, dict) and extent["length"] in (
+            len("segfault"),
+            len("hang"),
+            len("hog"),
+        )
     crash = run.finding("neptune.runtime.adapter_crashed")
     assert crash.details["signal"] == "SIGSEGV" and crash.details["attempts"] == 2
     limits = {
@@ -183,29 +196,25 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
     }
     assert limits == {"memory_bytes": 256 * MIB, "wall_seconds": 2}
 
-    # Every other source landed whole: the text, the series, the clean hostile file.
-    assert len(run.outcome.ingested) == 3
-    assert {"calm", "quiet"} <= set(run.texts())
-    assert not {"before", "after"} & set(run.texts())  # the attacked sources are quarantined
+    # Every other source landed whole: the text, the series, the clean hostile file; each attacked
+    # source landed without its attacking line (ADR 0069).
+    assert len(run.outcome.ingested) == 6
+    assert {"calm", "quiet", "before", "after"} <= set(run.texts())
+    assert not {"segfault", "hang", "hog"} & set(run.texts())
     assert run.package.series  # the tally's stream
-    # Every other chunk of the attacked sources ran and committed, so a fixed adapter redoes one.
     for path in ("crash.hostile", "hang.hostile", "hog.hostile"):
         assert run.committed_for(run.source(path)) == 3  # the document, before, after
     # Nothing of a stopped call reached the workspace, not even half a chunk.
-    for finding in run.outcome.findings:
+    for finding in run.failures():
         assert not run.workspace.committed(str(finding.details["chunk"]))
     assert run.staging_is_empty()
 
     # A crash may be transient and is retried; a limit would be hit again and is not.
     assert [e.details.get("signal") for e in run.of("chunk_retried")] == ["SIGSEGV"]
-    quarantined = sorted(str(e.details["codes"]) for e in run.of("source_quarantined"))
-    assert quarantined == sorted(
-        str([code])
-        for code in (
-            "neptune.runtime.adapter_crashed",
-            "neptune.runtime.limit_exceeded",
-            "neptune.runtime.limit_exceeded",
-        )
+    assert not run.of("source_quarantined")
+    salvaged = sorted(e.details["source"] for e in run.of("source_salvaged"))
+    assert salvaged == sorted(
+        run.source(p) for p in ("crash.hostile", "hang.hostile", "hog.hostile")
     )
     (ready,) = run.of("sandbox_ready")
     assert ready.details == {
@@ -245,7 +254,7 @@ def test_a_spinning_parser_is_stopped_at_its_cpu_limit(tmp_path: Path) -> None:
     run = Run(root, tmp_path, sandboxed(cpu_seconds=1, wall_seconds=60))
     finding = run.finding("neptune.runtime.limit_exceeded")
     assert (finding.details["limit"], finding.details["value"]) == ("cpu_seconds", 1)
-    assert len(run.outcome.ingested) == 1 and run.staging_is_empty()
+    assert len(run.outcome.ingested) == 2 and run.staging_is_empty()  # spin.hostile salvaged
 
 
 def test_a_plan_that_hangs_or_crashes_is_a_finding(tmp_path: Path) -> None:
@@ -293,7 +302,7 @@ def test_every_way_of_dying_is_a_finding(
     (retried,) = run.of("chunk_retried")
     assert all(retried.details[key] == value for key, value in cause.items() if key != "step")
     assert not run.workspace.committed(str(finding.details["chunk"]))
-    assert len(run.outcome.ingested) == 1 and run.staging_is_empty()
+    assert len(run.outcome.ingested) == 2 and run.staging_is_empty()  # victim.hostile salvaged
 
 
 @pytest.mark.parametrize(
@@ -332,12 +341,20 @@ def test_a_call_spools_through_its_scratch_and_a_flood_is_the_scratch_limit(
     (root / "flood.hostile").write_bytes(HOSTILE.hostile("flood"))
     (root / "unlock.hostile").write_bytes(HOSTILE.hostile("unlock"))
     run = Run(root, tmp_path, sandboxed(scratch_bytes=4 * MIB))
-    assert run.codes() == ["neptune.runtime.chunk_failed", "neptune.runtime.limit_exceeded"]
+    assert run.codes() == [
+        "neptune.runtime.chunk_failed",
+        "neptune.runtime.limit_exceeded",
+        "neptune.runtime.source_partial",
+        "neptune.runtime.source_partial",
+    ]
     unlock = run.finding("neptune.runtime.chunk_failed")  # the lock is outside its scratch
     assert (unlock.details["error"], unlock.details["step"]) == ("PermissionError", "ingest")
     finding = run.finding("neptune.runtime.limit_exceeded")
     assert (finding.details["limit"], finding.details["value"]) == ("scratch_bytes", 4 * MIB)
-    assert [source for source, _ in run.outcome.ingested] == [run.source("spool.hostile")]
+    # Each lost its only line; their documents are salvaged, the spool is whole.
+    assert sorted(source for source, _ in run.outcome.ingested) == sorted(
+        run.source(p) for p in ("flood.hostile", "spool.hostile", "unlock.hostile")
+    )
     assert {"before", "spool", "after"} <= set(run.texts())
     assert list((run.home / "scratch").iterdir()) == [] and run.staging_is_empty()
     assert sorted(p.name for p in root.iterdir()) == [
@@ -360,7 +377,11 @@ def test_a_call_that_needs_scratch_and_has_none_fails_for_that_run_only(tmp_path
     (root / "spool.hostile").write_bytes(HOSTILE.hostile("before", "spool", "after"))
     (root / "plan.hostile").write_bytes(HOSTILE.hostile("plan-spool", "x"))
     starved = Run(root, tmp_path, sandboxed(scratch_bytes=0), name="starved")
-    assert starved.codes() == ["neptune.runtime.chunk_failed", "neptune.runtime.plan_failed"]
+    assert starved.codes() == [
+        "neptune.runtime.chunk_failed",
+        "neptune.runtime.plan_failed",
+        "neptune.runtime.source_partial",
+    ]
     chunk = starved.finding("neptune.runtime.chunk_failed")
     spooled = chunk.details["chunk"]
     assert chunk.details == {
@@ -369,6 +390,7 @@ def test_a_call_that_needs_scratch_and_has_none_fails_for_that_run_only(tmp_path
         "cause": "scratch_unavailable",
         "chunk": spooled,
         "error": "ScratchUnavailableError",
+        "extent": {"length": len("spool"), "offset": 16},  # the line's bytes (ADR 0069)
         "step": "ingest",
         "version": "1.0.0",
     }
@@ -382,7 +404,10 @@ def test_a_call_that_needs_scratch_and_has_none_fails_for_that_run_only(tmp_path
     assert not starved.of("chunk_retried")
     assert isinstance(spooled, str) and not starved.workspace.committed(spooled)
     assert starved.committed_for(starved.source("spool.hostile")) == 3  # every other chunk
-    assert [source for source, _ in starved.outcome.ingested] == [starved.source("notes.txt")]
+    assert sorted(source for source, _ in starved.outcome.ingested) == sorted(
+        starved.source(p)
+        for p in ("notes.txt", "spool.hostile")  # salvaged without "spool"
+    )
     sound = Run(root, tmp_path, sandboxed(), name="sound")  # the same workspace, with scratch
     fresh = Run(root, tmp_path, sandboxed(), name="fresh", home="fresh-home")
     assert sound.codes() == [] and sound.workspace.committed(spooled)
@@ -513,7 +538,7 @@ def test_killing_the_sandboxed_process_leaves_no_partial_chunk(
     assert not run.workspace.committed(str(finding.details["chunk"]))
     assert run.committed_for(run.source("hang.hostile")) == 3  # "after" ran too
     assert run.staging_is_empty()
-    assert len(run.outcome.ingested) == 3
+    assert len(run.outcome.ingested) == 4  # hang.hostile salvaged without its killed chunk
 
 
 def test_killing_the_job_kills_its_sandboxed_call_and_the_rerun_completes(
@@ -549,7 +574,7 @@ def test_killing_the_job_kills_its_sandboxed_call_and_the_rerun_completes(
     assert stopped.details["limit"] == "wall_seconds"
     assert not rerun.workspace.committed(str(stopped.details["chunk"]))
     assert len(rerun.of("chunk_skipped")) >= 3  # what the killed job committed is kept
-    assert len(rerun.outcome.ingested) == 3 and rerun.staging_is_empty()
+    assert len(rerun.outcome.ingested) == 4 and rerun.staging_is_empty()  # hang.hostile salvaged
 
 
 def test_a_host_that_cannot_sandbox_fails_the_job_before_any_work(
