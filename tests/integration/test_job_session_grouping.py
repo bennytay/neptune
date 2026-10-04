@@ -15,9 +15,9 @@ from typing import Any, Final
 import pytest
 
 from neptune.adapters.builtin import default_registry
+from neptune.derived.assembly import ASSEMBLY_ID, RunAssembler, evidence_of
 from neptune.derived.grouping import (
     CONTESTED,
-    GROUPING_ID,
     DeclaredSession,
     GroupingConfig,
     LayoutGrouper,
@@ -103,21 +103,29 @@ def test_a_job_writes_the_grouping_into_the_package_and_it_recomputes(
     messy: Path, tmp_path: Path
 ) -> None:
     package, seen = ingest(messy, tmp_path / "package", tmp_path / "home")
-    grouper = LayoutGrouper()
-    # The package's proposals are the grouper's over what the package itself records.
-    recomputed = grouper.propose(layout_from_package(package.records))
-    assert package.derived == {k: tuple(v) for k, v in recomputed.tables().items()}
+    # The package's proposals are the assembler's (ADR 0066) over what the package itself
+    # records: its layout, and the evidence its adapters committed.
+    grouper = RunAssembler(evidence=evidence_of(package.records))
+    tree = layout_from_package(package.records)
+    recomputed = grouper.propose(tree)
+    sessions = {k: v for k, v in package.derived.items() if k.startswith("session_")}
+    assert sessions == {k: tuple(v) for k, v in recomputed.tables().items()}
     assert proposals(package) == list(recomputed.proposals)
     # Its findings and transform are in the evidence tables; its proposals are not.
     transforms = {t.adapter_id: t for t in package.receipt.transforms}
-    assert transforms[GROUPING_ID].id == grouper.transform.id
+    assert transforms[ASSEMBLY_ID].id == grouper.transform.id
     findings = {r.id for r in package.records if isinstance(r, IngestFinding)}
     assert {f.id for f in recomputed.findings} <= findings
     assert any(f.code == CONTESTED for f in recomputed.findings)
     assert not any(getattr(r, "kind", "").startswith("session") for r in package.records)
-    # One event says what grouping proposed, in the inspect phase.
+    # One event says what the layout alone proposed, in the inspect phase (a dry run's view);
+    # another what the assembly proposed over the records, in assemble.
     [event] = [e for e in seen if e.kind == "sessions_proposed"]
-    assert event.phase is Phase.INSPECT and event.details == recomputed.summary()
+    assert event.phase is Phase.INSPECT
+    assert event.details == LayoutGrouper().propose(tree).summary()
+    [assembled] = [e for e in seen if e.kind == "runs_assembled"]
+    assert assembled.phase is Phase.ASSEMBLE
+    assert assembled.details == {**recomputed.summary(), "run_assemblies": 0}
 
 
 def test_the_package_holds_the_runs_of_the_tree(messy: Path, tmp_path: Path) -> None:
@@ -160,7 +168,8 @@ def test_a_declared_session_reaches_the_package_under_its_own_transform(
     assert proposal.assertion_kind == "stated" and proposal.status is Status.PROPOSED
     assert not any(p.rule == Rule.NAME_TIME_PROXIMITY for p in proposals(declared))
     transforms = {t.adapter_id: t for t in declared.receipt.transforms}
-    assert transforms[GROUPING_ID].id == LayoutGrouper(config).transform.id
+    expected = RunAssembler(config, evidence_of(declared.records)).transform
+    assert transforms[ASSEMBLY_ID].id == expected.id
     assert plain.id != declared.id
     # The evidence is the same; only the interpretation and its transform differ.
     assert {r.id for r in plain.records if isinstance(r, SourceRevision)} == {

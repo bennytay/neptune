@@ -1,0 +1,27 @@
+{
+  "schema": "neptune-deploy.diagnostics-mapping/1",
+  "id": "ros2.diagnostics",
+  "version": "1",
+  "vendor": "ros2",
+  "description": "ROS 2 diagnostic_msgs/DiagnosticArray exported as a JSON array. A status level is mapped to a target event-kind string by the codes diagnostic_msgs/DiagnosticStatus defines (OK 0, WARN 1, ERROR 2, STALE 3). The strings are this file's declaration, not a registered vocabulary: validating them against one is deferred (Deploy ADR 0010). Copy the file to map a vendor's own names.",
+  "array": "/status",
+  "fields": {
+    "level": "level",
+    "name": "name",
+    "message": "message",
+    "hardware_id": "hardware_id",
+    "values": "values"
+  },
+  "stamp": {
+    "sec": "/header/stamp/sec",
+    "nanosec": "/header/stamp/nanosec"
+  },
+  "topics": ["/diagnostics", "/diagnostics_agg"],
+  "levels": {
+    "0": "diagnostic.ok",
+    "1": "diagnostic.warn",
+    "2": "diagnostic.error",
+    "3": "diagnostic.stale"
+  },
+  "names": {}
+}
