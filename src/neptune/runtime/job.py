@@ -86,6 +86,7 @@ from neptune.adapters.contract import (
 )
 from neptune.adapters.registry import AdapterRegistry, Candidate, SelectionStatus
 from neptune.derived.assembly import EvidenceBuilder, RunAssembler
+from neptune.derived.bindings import Bindings, bind_snapshots, binding_inputs
 from neptune.derived.grouping import Grouping, GroupingConfig, LayoutGrouper
 from neptune.derived.introspection import Introspection, introspect
 from neptune.derived.media import MediaIndex, index_media
@@ -124,7 +125,7 @@ from neptune.model.ids import ContentId, ExternalObjectRef, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.package import ReceiptEnvelope, package_manifest_from_json
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
-from neptune.model.run import Stream
+from neptune.model.run import Run, Stream
 from neptune.model.series import SEQ, SeriesBatch
 from neptune.model.source import (
     LocalPath,
@@ -133,6 +134,7 @@ from neptune.model.source import (
     SourceLocation,
     local_location,
 )
+from neptune.model.world import StructuredRecord, StructuredTable
 from neptune.runtime import events, explain, lineage, references, sandbox, wire
 from neptune.runtime.cache import (
     VERDICT_FILE,
@@ -579,6 +581,17 @@ def _run_problems(stream: Stream, runs: list[tuple[str, Path]]) -> list[JsonObje
     return problems
 
 
+# Declared rows snapshot binding holds per source while it reads a source with no run yet.
+_HELD_ROWS: Final = 65_536
+
+
+def _declared_rows(records: Iterable[object]) -> Iterator[StructuredRecord | StructuredTable]:
+    """The rows and tables a source declares: what snapshot binding reads of a run's source."""
+    for record in records:
+        if isinstance(record, StructuredRecord | StructuredTable):
+            yield record
+
+
 class IngestJob:
     """One ingest of ``root`` into a package at ``destination``, through ``workspace``.
 
@@ -693,6 +706,9 @@ class IngestJob:
             self._record(finding, self._plugins.transform)
         self._layout = Layout(())
         self._grouping: Grouping | None = None
+        # What ``_assemble_runs`` keeps for snapshot binding from its one pass (ADR 0064 §1).
+        self._binding_inputs: list[object] = []
+        self._statements: list[StructuredRecord | StructuredTable] = []
         self._dry = False  # a dry run: stops after plan and explains (ADR 0035, 0044)
         self._inventory = explain.Inventory.of((), (), ())
         self._inspected = 0  # adapter ``inspect`` calls, in a dry run
@@ -2464,6 +2480,7 @@ class IngestJob:
                 self._producers[connector.id] = connector
                 cited.add(connector.id)
             derived: dict[str, Iterable[JsonObject]] | None = None
+            bound: tuple[object, ...] = ()
             if self._grouping is not None:  # its derived tables name its transform
                 cited.add(self._grouping.transform.id)
                 derived = dict(self._grouping.tables())
@@ -2477,11 +2494,19 @@ class IngestJob:
             if (clocks := self._align_clocks()) is not None:
                 cited.add(clocks.transform.id)
                 derived = {**(derived or {}), **clocks.tables()}
+            if (
+                self._grouping is not None
+                and (bindings := self._bind_snapshots(self._grouping, assembled)) is not None
+            ):
+                cited.add(bindings.transform.id)
+                derived = {**(derived or {}), **bindings.tables()}
+                bound = bindings.stated
             self._connector_findings()  # and what introspection's reads found
             extra = [
                 *(self._producers[transform] for transform in sorted(cited)),
                 *self._findings.values(),
                 *assembled,
+                *bound,
             ]
             assert self.destination is not None  # ``run`` refuses to start without one
             try:  # tables too large to sort in memory spill to the workspace's scratch space
@@ -2532,14 +2557,37 @@ class IngestJob:
         evidence states, for the package's records."""
         self._check_cancel()
         evidence = EvidenceBuilder()
+        self._binding_inputs, self._statements = [], []
         try:
             for content, transform in sorted(set(self._ingested)):
                 self._check_cancel()  # each source's records are read whole: a checkpoint between
                 plan = self.workspace.load_plan(content, transform)
                 if plan is None:
                     continue  # staging refuses the package and says why
+                # One read serves assembly and snapshot binding (ADR 0064 §1): binding keeps runs
+                # and snapshots, and the declared rows of a source that holds a run. Rows are held
+                # while reading; a source past ``_HELD_ROWS`` with no run yet (a large table) is
+                # not held, and read for its rows again only if a run turns up after all.
+                rows: list[StructuredRecord | StructuredTable] | None = []
+                holds_run = False
                 for chunk_id in self._kept_ids(plan.chunks):
-                    evidence.add(self.workspace.load(chunk_id).records)
+                    records = self.workspace.load(chunk_id).records
+                    evidence.add(records)
+                    for record in binding_inputs(records):
+                        self._binding_inputs.append(record)
+                        holds_run = holds_run or isinstance(record, Run)
+                    if rows is not None:
+                        rows.extend(_declared_rows(records))
+                        if not holds_run and len(rows) > _HELD_ROWS:
+                            rows = None
+                if holds_run:
+                    if rows is None:
+                        rows = [
+                            row
+                            for chunk_id in self._kept_ids(plan.chunks)
+                            for row in _declared_rows(self.workspace.load(chunk_id).records)
+                        ]
+                    self._statements.extend(rows)
         except (WorkspaceError, ValueError, OSError) as exc:
             raise JobError(f"the package cannot be assembled: {exc}") from exc
         upstream = (self._declared.loaded.transform.id,) if self._declared is not None else ()
@@ -2558,6 +2606,25 @@ class IngestJob:
             events.RUNS_ASSEMBLED, {**grouping.summary(), "run_assemblies": len(assembly.records)}
         )
         return assembly.records
+
+    def _bind_snapshots(self, grouping: Grouping, assembled: Sequence[object]) -> Bindings | None:
+        """Bind each admitted run to the configuration, software, hardware and calibration
+        snapshots evidence relates it to (ADR 0064), over the assembled grouping and run
+        assemblies. Reads what ``_assemble_runs`` kept in its one pass over the committed records:
+        runs, snapshots and canonical bindings, and the declared rows of the sources that hold a
+        run. A package with no run gets no binding: no table, no transform, no finding."""
+        self._check_cancel()
+        found = bind_snapshots(
+            [*self._binding_inputs, *assembled], self._statements, self._layout, grouping
+        )
+        self._binding_inputs, self._statements = [], []
+        if found is None:
+            return None
+        self._producers[found.transform.id] = found.transform
+        for finding in found.findings:
+            self._record(finding, found.transform)
+        self._emit(events.SNAPSHOTS_BOUND, found.summary())
+        return found
 
     def _streams(self) -> tuple[list[Stream], dict[RecordId, int]]:
         """The admitted sources' streams, and each stream's series rows, counted from its runs'

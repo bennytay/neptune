@@ -98,13 +98,14 @@ def run(
 
 
 def codes(package: Any) -> list[str]:
-    """The receipt's codes but validation's (ADR 0054): these tests pin what the runtime says.
-    Validation's rules must all have run, though: none of them failed."""
+    """The receipt's codes but validation's (ADR 0054) and snapshot binding's (ADR 0064): these
+    tests pin what the runtime says. Validation's rules must all have run, though: none of them
+    failed."""
     assert all(f.code != RULE_FAILED for f in package.receipt.findings)
     return sorted(
         finding.code
         for finding in package.receipt.findings
-        if not finding.code.startswith("neptune.validate.")
+        if not finding.code.startswith(("neptune.validate.", "neptune.bindings."))
     )
 
 
@@ -278,7 +279,7 @@ def test_seq_repeated_across_chunks_is_caught_without_holding_every_seq(tmp_path
     outcome, package, _ = run(root, tmp_path, adapters)
     assert codes(package) == ["neptune.runtime.output_invalid"]
     assert len(outcome.ingested) == 1
-    (finding,) = outcome.findings
+    (finding,) = [f for f in outcome.findings if not f.code.startswith("neptune.bindings.")]
     assert "(seq_ranges_overlap)" in finding.message
     (problem,) = finding.details["problems"]
     assert problem["law"] == "seq_ranges_overlap"

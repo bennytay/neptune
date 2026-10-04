@@ -84,7 +84,13 @@ def test_every_log_lands_read_by_flightlog_inside_the_sandbox(
         for c in codes
         if c.startswith("neptune.")
         and not c.startswith(
-            ("neptune.grouping.", "neptune.introspection.", "neptune.clocks.", "neptune.validate.")
+            (
+                "neptune.grouping.",
+                "neptune.introspection.",
+                "neptune.clocks.",
+                "neptune.bindings.",
+                "neptune.validate.",
+            )
         )
     }
     assert RULE_FAILED not in codes  # every validation rule ran

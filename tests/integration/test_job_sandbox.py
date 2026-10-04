@@ -110,12 +110,17 @@ class Run:
         assert self.outcome.state is JobState.COMMITTED
         self.package: Any = read_package(tmp_path / name)
 
+    @property
+    def found(self) -> list[IngestFinding]:
+        """The job's findings but snapshot binding's (ADR 0064): its runs bind to nothing here."""
+        return [f for f in self.outcome.findings if not f.code.startswith("neptune.bindings.")]
+
     def codes(self) -> list[str]:
-        return sorted(finding.code for finding in self.outcome.findings)
+        return sorted(finding.code for finding in self.found)
 
     def failures(self) -> list[IngestFinding]:
         """Every finding but the salvage accounts (``source_partial``, ADR 0069)."""
-        return [f for f in self.outcome.findings if f.code != "neptune.runtime.source_partial"]
+        return [f for f in self.found if f.code != "neptune.runtime.source_partial"]
 
     def finding(self, code: str) -> IngestFinding:
         (found,) = [f for f in self.outcome.findings if f.code == code]
@@ -191,7 +196,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
     assert crash.details["signal"] == "SIGSEGV" and crash.details["attempts"] == 2
     limits = {
         f.details["limit"]: f.details["value"]
-        for f in run.outcome.findings
+        for f in run.found
         if f.code == "neptune.runtime.limit_exceeded"
     }
     assert limits == {"memory_bytes": 256 * MIB, "wall_seconds": 2}
@@ -243,7 +248,7 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
         "scratch_bytes": 1024 * MIB,
         "wall_seconds": 2,
     }
-    assert {f.transform for f in run.outcome.findings} == {runtime.id}
+    assert {f.transform for f in run.found} == {runtime.id}
 
 
 def test_a_spinning_parser_is_stopped_at_its_cpu_limit(tmp_path: Path) -> None:

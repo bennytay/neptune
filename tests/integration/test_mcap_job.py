@@ -98,7 +98,13 @@ def test_every_recording_lands_read_by_mcap_inside_the_sandbox(
         for c in codes
         if c.startswith("neptune.")
         and not c.startswith(
-            ("neptune.grouping.", "neptune.introspection.", "neptune.clocks.", "neptune.validate.")
+            (
+                "neptune.grouping.",
+                "neptune.introspection.",
+                "neptune.clocks.",
+                "neptune.bindings.",
+                "neptune.validate.",
+            )
         )
     }
     # session grouping may say a recording's session is ambiguous; introspection, that a schema's
