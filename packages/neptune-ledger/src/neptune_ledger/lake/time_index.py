@@ -66,6 +66,8 @@ SELECT subject, kind, record_id, package_id, clock, first_tick, last_tick, rows_
                    point(index_key(%(clock)s), %(hi)s::float8))
    AND first_tick <= %(hi)s AND coalesce(last_tick, first_tick) >= %(lo)s
    AND registration_key <= %(as_of)s
+ ORDER BY first_tick, coalesce(last_tick, first_tick), registration_key, subject,
+          record_id COLLATE "C", package_id COLLATE "C"
  LIMIT %(cap)s
 """
 
@@ -266,24 +268,41 @@ def read_window(
             continue
         found = _lookup(conn, tenant, clock, lo, hi, limit, cap - used)
         used += len(found)
-        for entry in found:
-            if clock == window.clock:
-                keyed.append((_merged_key(entry.first, entry.end, entry), entry))
-                continue
-            placed = mapper.map(clock, entry.first, entry.end)
-            if isinstance(placed, Unmapped):
-                findings.append(_out_of_range(entry, placed))
-                continue
-            if placed.lo > window.last or placed.hi < window.first:
-                continue
-            if placed.lo < INT64_MIN or placed.hi > INT64_MAX:
-                findings.append(_beyond_ticks(entry))
-                continue
-            mapped = MappedInterval(window.clock, placed.lo, placed.hi, placed.path)
-            keyed.append((_merged_key(placed.lo, placed.hi, entry), _with_mapped(entry, mapped)))
+        placed, missed = place(window, clock, found, mapper)
+        keyed += placed
+        findings += missed
     keyed.sort(key=lambda pair: pair[0])
     findings.sort(key=lambda f: (f.code, f.subject.encode("utf-8"), f.detail))
     return tuple(e for _, e in keyed), tuple(findings)
+
+
+def place(
+    window: TimeWindow, clock: str, entries: Iterable[IntervalEntry], mapper: IntervalMapper
+) -> tuple[list[tuple[tuple[Any, ...], IntervalEntry]], list[CatalogFinding]]:
+    """One clock's entries keyed for the merged order, and the findings of those not placed.
+
+    Entries are taken in ``_native_key`` order, whatever order the store returned them in: the
+    mapper's step budget is shared by the request, so once it runs out, which intervals were
+    placed must depend on the catalog's content alone, never on a scan's row order.
+    """
+    keyed: list[tuple[tuple[Any, ...], IntervalEntry]] = []
+    findings: list[CatalogFinding] = []
+    for entry in sorted(entries, key=_native_key):
+        if clock == window.clock:
+            keyed.append((_merged_key(entry.first, entry.end, entry), entry))
+            continue
+        placed = mapper.map(clock, entry.first, entry.end)
+        if isinstance(placed, Unmapped):
+            findings.append(_out_of_range(entry, placed))
+            continue
+        if placed.lo > window.last or placed.hi < window.first:
+            continue
+        if placed.lo < INT64_MIN or placed.hi > INT64_MAX:
+            findings.append(_beyond_ticks(entry))
+            continue
+        mapped = MappedInterval(window.clock, placed.lo, placed.hi, placed.path)
+        keyed.append((_merged_key(placed.lo, placed.hi, entry), _with_mapped(entry, mapped)))
+    return keyed, findings
 
 
 INT64_MIN: Final = -(2**63)

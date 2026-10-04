@@ -112,7 +112,8 @@ CREATE TABLE spatial_extent (
 -- A query names its reference and unit: the R-tree over that reference's extents in that unit,
 -- and the reference's members for those it cannot compare.
 CREATE INDEX spatial_extent_by_scope ON spatial_extent USING gist (scope, xy);
-CREATE INDEX spatial_extent_by_reference ON spatial_extent (reference_kind, reference, unit);
+CREATE INDEX spatial_extent_by_reference
+  ON spatial_extent (reference_kind, reference, unit, dims);
 CREATE INDEX spatial_extent_by_record ON spatial_extent (record_id);
 
 -- Append-only, like every table registration writes (ADR 0002 §6).

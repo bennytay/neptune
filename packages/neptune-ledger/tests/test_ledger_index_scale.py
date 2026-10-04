@@ -22,7 +22,14 @@ from neptune.store.package import package_contents, write_package
 from neptune.store.series import SERIES_SETTINGS, write_series
 from neptune_ledger.catalog.check import check_package, open_root
 from neptune_ledger.catalog.migrate import apply_migrations
-from neptune_ledger.lake.space_index import _PLACED, FrameReference, extent_rows, reference_text
+from neptune_ledger.lake.space_index import (
+    _LIMIT,
+    _PLACED,
+    _UNPLACED,
+    FrameReference,
+    extent_rows,
+    reference_text,
+)
 from neptune_ledger.lake.time_index import _WINDOW, series_intervals
 
 Conn = psycopg.Connection[tuple[object, ...]]
@@ -173,11 +180,17 @@ def test_a_box_lookup_searches_its_reference_not_the_index(pg: Conn) -> None:
         "x1": 12.0,
         "y1": 0.0,
     }
-    measured = []
+    measured, others = [], []
     for start, stop in ((0, 20_000), (20_000, 80_000)):
         _fill_space(pg, start, stop, references)
         measured.append(_explain(pg, _PLACED, params))
+        others.append(_explain(pg, _UNPLACED + _LIMIT, {**params, "three": False, "cap": 11}))
     (small, plan, rows), (large, _, rows_large) = measured
     assert "spatial_extent_by_scope" in plan and "Seq Scan" not in plan
     assert rows == rows_large == 3, "x 10, 11 and 12 on row y 0 of robot 0's grid"
     assert large <= 2 * small + 4, f"{small} buffers at 20k extents, {large} at 80k"
+    # Every member is comparable (metres, three axes): the unplaced lookup reads none of them.
+    (few, unplaced_plan, none), (few_large, _, none_large) = others
+    assert none == none_large == 0
+    assert "spatial_extent_by_reference" in unplaced_plan and "Seq Scan" not in unplaced_plan
+    assert few_large <= few + 4 <= 40, f"{few} buffers at 20k extents, {few_large} at 80k"

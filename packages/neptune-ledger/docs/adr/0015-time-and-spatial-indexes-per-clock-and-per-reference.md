@@ -93,18 +93,21 @@ the other way, every lookup scans every interval or extent of the tenant.
    `xy` the extent's box. A search therefore descends only into one clock's or one reference's
    entries. Ticks become float8 in the key only. Rounding never reverses an order, so the key
    keeps every row the exact test can keep, and the bigint ticks and the stored text decide. A
-   B-tree on `(reference_kind, reference, unit)` serves `unplaced`.
-7. **Bounded work.** A request names at most 64 clocks and 256 mappings. `max_entries` (10 000
-   by default, at most 100 000) bounds the rows a request reads: a window's candidates summed
-   over all its clocks, and each of a box's two lists. Each lookup asks for one row more than is
-   left. If it gets it, the request is refused as `invalid_request`, naming the clock or `box`.
-   So an answer holds all of its rows or none, never a prefix that depends on the engine's scan
-   order. On another clock the candidates are the native ticks any named path could carry into
-   the window, so wide bounds count rows that will not be placed; past 256 paths the candidates
-   are the whole clock. The path search shares ADR 0010 §6's step budgets. A malformed request
-   (a window that is not a `TimeWindow` of int64 ticks, ids that are not record ids, a box that
-   is not finite, `low <= high` on two or three axes) is a refusal, never an exception. A store
-   failure is `CatalogUnavailable`.
+   B-tree on `(reference_kind, reference, unit, dims)` serves `unplaced` as four key ranges (no
+   Known unit, a unit before or after the named one, 2-axis extents for a 3-axis box), so it
+   never reads the members the box can be compared with.
+7. **Bounded work.** A request names at most 64 clocks and 256 mappings. `max_entries` (10 000 by
+   default, at most 100 000) bounds the rows a request reads: a window's candidates summed over all
+   its clocks, and each of a box's two lists. Each lookup asks for one row more than is left. If it
+   gets it, the request is refused as `invalid_request`, naming the clock or `box`. So an answer
+   holds all of its rows or none, never a prefix that depends on the engine's scan order. On another
+   clock the candidates are the native ticks any named path could carry into the window, so wide
+   bounds count rows that will not be placed; past 256 paths the candidates are the whole clock. The
+   path search shares ADR 0010 §6's step budgets. Each clock's candidates are carried in native-key
+   order, so when the budget runs out, what was placed depends on the catalog alone and never on a
+   scan's row order. A malformed request (a window that is not a `TimeWindow` of int64 ticks, ids
+   that are not record ids, a box that is not finite, `low <= high` on two or three axes) is a
+   refusal, never an exception. A store failure is `CatalogUnavailable`.
 8. **Not a catalog-API call yet.** `IndexCatalog` is the Ledger-internal surface. `query`
    (MVL-98) and `access/` (MVL-99) decide what the catalog API exposes, so `contracts/` is
    unchanged.

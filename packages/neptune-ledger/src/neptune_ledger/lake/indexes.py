@@ -394,11 +394,19 @@ def _box_ok(box: object) -> bool:
         return False
     for a, b in zip(low, high, strict=True):
         for v in (a, b):
-            if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
+            if isinstance(v, bool) or not isinstance(v, int | float) or not _finite(v):
                 return False
         if a > b:
             return False
     return True
+
+
+def _finite(value: int | float) -> bool:
+    """A coordinate a float8 holds: an int too large for one is not, rather than an error."""
+    try:
+        return math.isfinite(float(value))
+    except OverflowError:
+        return False
 
 
 def _record_id(value: object) -> bool:

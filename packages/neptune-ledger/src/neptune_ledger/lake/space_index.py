@@ -289,9 +289,19 @@ _PLACED: Final = (
 """
 )
 _PLACED_3D: Final = _PLACED + "   AND dims = 3 AND min_z <= %(z1)s AND max_z >= %(z0)s\n"
-_UNPLACED: Final = (
-    _MEMBERS
-    + "   AND (dims IS NULL OR unit IS DISTINCT FROM %(unit)s OR (%(three)s AND dims = 2))\n"
+# The members the box cannot be compared with, as four ranges of the B-tree on (reference_kind,
+# reference, unit, dims), each read at most ``cap`` rows deep, so the lookup never reads the
+# reference's comparable members: no Known unit (which every member without an extent is, by
+# migration 0010's checks), a unit before or after the named one, and 2-axis extents in the
+# named unit when the box has three.
+_UNPLACED: Final = " UNION ALL ".join(
+    f"({_MEMBERS}   AND {test}\n   LIMIT %(cap)s)"
+    for test in (
+        "unit IS NULL",
+        "unit < %(unit)s",
+        "unit > %(unit)s",
+        "%(three)s AND unit = %(unit)s AND dims = 2",
+    )
 )
 
 
@@ -328,14 +338,14 @@ def read_within(
         "unit": unit,
         "scope": f"{kind} {text} {unit}",
         "three": three,
-        "x0": box.low[0],
-        "y0": box.low[1],
-        "x1": box.high[0],
-        "y1": box.high[1],
+        "x0": float(box.low[0]),
+        "y0": float(box.low[1]),
+        "x1": float(box.high[0]),
+        "y1": float(box.high[1]),
         "cap": cap + 1,
     }
     if three:
-        params |= {"z0": box.low[2], "z1": box.high[2]}
+        params |= {"z0": float(box.low[2]), "z1": float(box.high[2])}
     found = conn.execute((_PLACED_3D if three else _PLACED) + _LIMIT, params).fetchall()
     if len(found) > cap:
         raise TooMany(cap)

@@ -9,8 +9,10 @@ written at registration and reproduced by a rebuild.
 """
 
 import os
+import random
 import shutil
 from collections.abc import Iterator
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +59,8 @@ from neptune_ledger.lake.space_index import (
     SpatialBox,
     SpatialResult,
 )
-from neptune_ledger.lake.time_index import WindowResult, series_intervals
+from neptune_ledger.lake.time_index import IntervalEntry, WindowResult, place, series_intervals
+from neptune_ledger.threads.merge import ClockMapping, IntervalMapper
 from test_ledger_registration import dump as dump_tables
 from test_ledger_registration import fresh
 
@@ -345,6 +348,49 @@ def test_the_window_clock_named_again_is_not_another_clock(
 # --- time: determinism -------------------------------------------------------------------------
 
 
+@pytest.mark.slow
+def test_what_a_spent_step_budget_placed_does_not_depend_on_row_order() -> None:
+    """256 parallel mappings and 10 000 intervals spend the request's step budget part-way; the
+    intervals placed before it ran out are the same whatever order the store returned them in."""
+    source, reference = "rec:sha256:" + "a" * 64, "rec:sha256:" + "b" * 64
+    mappings = [
+        ClockMapping(
+            "rec:sha256:" + f"{k:064x}",
+            source,
+            reference,
+            Fraction(1),
+            Fraction(k),
+            Fraction(k),
+            (None, None),
+        )
+        for k in range(256)
+    ]
+    window = TimeWindow(reference, INT64_MIN, INT64_MAX)
+    entries = [
+        IntervalEntry(
+            "series",
+            "stream",
+            f"rec:sha256:{i:064x}",
+            "sha256:" + "c" * 64,
+            source,
+            1_000 * i,
+            1_000 * i + 10,
+            1,
+        )
+        for i in range(10_000)
+    ]
+    answers = []
+    for seed in (1, 2):
+        shuffled = list(entries)
+        random.Random(seed).shuffle(shuffled)
+        answers.append(place(window, source, shuffled, IntervalMapper(reference, mappings)))
+    (placed, missed), again = answers
+    assert (placed, missed) == again
+    assert 0 < len(placed) < len(entries), "the budget ran out part-way"
+    assert missed and all("step budget" in f.detail for f in missed)
+    assert [e.record_id for _, e in placed] == [e.record_id for e in entries[: len(placed)]]
+
+
 def test_a_window_answer_does_not_depend_on_request_order(
     index: IndexCatalog, flight: dict[str, Any], catalog: PostgresCatalog, tmp_path: Path
 ) -> None:
@@ -504,6 +550,7 @@ def test_crs_codes_are_compared_verbatim(index: IndexCatalog, site_map: dict[str
             ["box"],
         ),
         (CrsReference("EPSG", "4326"), "m", SpatialBox([0.0, 0.0], [1.0, 1.0]), {}, ["box"]),  # type: ignore[arg-type]
+        (CrsReference("EPSG", "4326"), "m", SpatialBox((10**400, 0), (10**401, 1)), {}, ["box"]),
         (
             CrsReference("EPSG", "4326"),
             "m",
