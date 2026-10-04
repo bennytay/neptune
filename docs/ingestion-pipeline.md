@@ -54,6 +54,8 @@ state machine over the stages above, in nine phases (ADR 0028):
 - **Resume.** A new job over the same root and workspace is the resume: it hashes again (bytes may
   have changed), reuses saved plans, skips committed chunk ids, and builds the same package. Killing
   the process at any instant is safe: every workspace write is an atomic rename.
+  A connector's fetch that stops part way (full disk, connector error) fails the job but saves the
+  URI's ledger with every object already hashed, so the retry fetches only the rest (ADR 0069 §5).
 - **Salvage** (ADR 0069). A chunk that fails for good (it raises after every attempt, crashes,
   hits a limit, or its output is refused, now or when a kept chunk is judged again) is *lost*:
   `chunk_failed`, `adapter_crashed` or `limit_exceeded` cites its bytes when its adapter declares

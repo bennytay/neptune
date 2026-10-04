@@ -82,6 +82,11 @@ the receipt states exactly what was lost.
    `plan` is never retried within a job. Lost chunks are never committed, so the next job over
    the same workspace retries exactly them; after a transient fault or an adapter fix it writes
    the package a fresh workspace writes (ADR 0028 §2). No quarantine or loss is ever cached.
+   The same holds one level up for a connector's source (ADR 0067): a fetch that stops part way
+   (a full disk, a connector that raises) still fails the job, but the URI's ledger is saved
+   first with every object already fetched and hashed (whole observations only; nothing is
+   marked absent from an unfinished pass), so the retry recognises those by token and fetches
+   only the rest instead of failing identically every time.
 6. **Quarantine state** is the set of runtime finding codes a source carries (`_Source.quarantined`
    plus its lost chunks' codes in the `source_quarantined` event), the `quarantined` status of a
    dry run's explanation (ADR 0044), and in the package the runtime's findings citing it with no

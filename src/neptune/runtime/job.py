@@ -1375,9 +1375,21 @@ class IngestJob:
             )
             self._finish(Phase.DISCOVER, {"files": listed, "skipped": 0, "symlinks": 0})
         with self._enter(Phase.FINGERPRINT):
-            result = self._connector(
-                root, "fetch", lambda: fingerprint_external(root.source, ledger, discovery, spool)
-            )
+            try:
+                result = self._connector(
+                    root,
+                    "fetch",
+                    lambda: fingerprint_external(root.source, ledger, discovery, spool),
+                )
+            except BaseException:
+                # A fetch that stops part way (a full disk, a connector that fails) keeps every
+                # hash it observed: the retry recognises those objects by token and fetches only
+                # the rest. Only whole observations are in the ledger, and absences are marked
+                # after a whole pass, so nothing is asserted that was not seen. A ledger that will
+                # not save then never hides why the job failed (ADR 0069 §5).
+                with contextlib.suppress(JobError, WorkspaceError):
+                    self._save_ledger(ledger)
+                raise
             self._save_ledger(ledger)
             for finding in result.findings:  # what could not be fetched, or changed size
                 self._record(finding, DISCOVERY_TRANSFORM)
