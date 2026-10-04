@@ -1013,7 +1013,8 @@ class _TemplateMapper(_Clocks):
         """Two records of this template stating one identifier: both kept, one finding."""
         holders: dict[LogicalId, list[Any]] = defaultdict(list)
         for record in records:
-            for identifier in record.identifiers:
+            ids = record.identifiers  # a Known list from this mapper (root ADR 0061 §4)
+            for identifier in ids.value if isinstance(ids, Known) else ():
                 if isinstance(identifier, Known):
                     holders[identifier.value].append(record)
         scopes = {view.evidence: view.scope for view in self.views}

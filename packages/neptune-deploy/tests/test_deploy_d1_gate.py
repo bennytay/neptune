@@ -94,12 +94,12 @@ def _ids(states: Any) -> set[str]:
 
 
 def _named(package: IngestPackage, kind: str, value: str) -> Any:
-    (record,) = [r for r in _of(package, kind) if value in _ids(r.identifiers)]
+    (record,) = [r for r in _of(package, kind) if value in _ids(r.identifiers.value)]
     return record
 
 
 def _on(package: IngestPackage, kind: str, machine: str) -> list[Any]:
-    return [r for r in _of(package, kind) if machine in _ids(r.machines)]
+    return [r for r in _of(package, kind) if machine in _ids(r.machines.value)]
 
 
 def _cited(state: Any) -> EvidenceRef:
@@ -156,8 +156,13 @@ def _before(package: IngestPackage, a: State, b: State, one_record: bool = False
 
 
 def _states(value: Any, path: str = "") -> Iterator[tuple[str, Any]]:
-    """Every knowledge state in a lifecycle record, its parts' included, with its JSON pointer."""
-    if isinstance(value, Known | Unknown | NotCovered | KnownAbsent):
+    """Every knowledge state in a lifecycle record, its parts' included, with its JSON pointer.
+
+    A Known list is structure, not a value: its items are walked at the list's pointer.
+    """
+    if isinstance(value, Known) and isinstance(value.value, tuple):
+        yield from _states(value.value, path)
+    elif isinstance(value, Known | Unknown | NotCovered | KnownAbsent):
         yield path, value
     elif isinstance(value, tuple):
         for index, item in enumerate(value):
@@ -325,7 +330,7 @@ def test_both_archetypes_map_byte_identically_under_any_hash_seed() -> None:
 def test_q1_fleet_the_authorised_configuration_is_not_covered_and_the_receipt_says_so() -> None:
     package = MAPPED[FLEET]
     incident = _named(package, "incident_record", "INC-0007")
-    assert _ids(incident.machines) == {"AMR-07"} and incident.zone.value.value == "PICK-A"
+    assert _ids(incident.machines.value) == {"AMR-07"} and incident.zone.value.value == "PICK-A"
     # The report states no configuration, and the template says it does not read one.
     assert isinstance(incident.configuration, NotCovered)
     assert "configuration" in _about(package, "template_matched", incident).details["not_covered"]
@@ -333,10 +338,10 @@ def test_q1_fleet_the_authorised_configuration_is_not_covered_and_the_receipt_sa
     envelopes = [
         e
         for e in _on(package, "authorisation_envelope", "AMR-07")
-        if "PICK-A" in {z.zone.value.value for z in e.zones}
+        if "PICK-A" in {z.zone.value.value for z in e.zones.value}
     ]
     (envelope,) = envelopes
-    assert _ids(envelope.identifiers) == {"ENV-S007-04"}
+    assert _ids(envelope.identifiers.value) == {"ENV-S007-04"}
     assert _before(package, envelope.valid_from, incident.occurred) is True
     assert _before(package, incident.occurred, envelope.valid_until) is True
     # ... states no configuration: the register has none, and the rule says it does not read one.
@@ -349,7 +354,10 @@ def test_q1_fleet_the_authorised_configuration_is_not_covered_and_the_receipt_sa
     before = [o for o in orders if _before(package, o.performed, incident.occurred) is True]
     assert {o.configuration.value.value for o in before} == {"4.2.0"}
     change = _named(package, "change_record", "CHG0050023")
-    assert (change.changes[0].before.value, change.changes[0].after.value) == ("4.2.0", "4.3.1")
+    assert (change.changes.value[0].before.value, change.changes.value[0].after.value) == (
+        "4.2.0",
+        "4.3.1",
+    )
     assert _before(package, incident.occurred, change.effective) is True
     for order in before:
         assert order.configuration.provenance.evidence.locator[-1].column_name == "Firmware After"
@@ -363,14 +371,17 @@ def test_q1_cell_there_is_no_authorisation_record_and_the_configuration_is_state
     assert _seconds(package, near_miss.occurred.value)[2]  # an instant: the ticket states -04:00
     assert not _of(package, "authorisation_envelope")  # nothing the cell declared states one
     # The ticket names no machine: an empty list the receipt marks as not read, not as "none".
-    assert near_miss.machines == ()
+    assert near_miss.machines.value == ()
     assert "machines" in _about(package, "fields_not_covered", near_miss).details["not_covered"]
     baseline = _named(package, "commissioning_baseline", "CR-C3-2026-02")
     assert baseline.configuration.value.value == "cfg-c3-1.4"
     change = _named(package, "change_record", "CHG0030012")
     assert _before(package, baseline.commissioned, change.effective) is True
     assert _before(package, change.effective, near_miss.occurred) is True
-    assert (change.changes[0].before.value, change.changes[0].after.value) == ("5.4.2", "5.6.0")
+    assert (change.changes.value[0].before.value, change.changes.value[0].after.value) == (
+        "5.4.2",
+        "5.6.0",
+    )
     # The inspection after the near miss is an INSP work order no rule reads: no record, but its
     # row is named, so it is not lost.
     cmms = [f for f in _findings(package, "row_unmatched") if f.subject.source in _sources(CELL)]
@@ -391,7 +402,7 @@ def _sources(name: str) -> set[Any]:
 def test_q2_cell_every_change_since_commissioning_is_a_cited_record_ordered_by_the_reader() -> None:
     package = MAPPED[CELL]
     baseline = _named(package, "commissioning_baseline", "CR-C3-2026-02")
-    assert _ids(baseline.calibrations) == {"CAL-ARM3A-0226"}
+    assert _ids(baseline.calibrations.value) == {"CAL-ARM3A-0226"}
     since = {
         kind: [
             r
@@ -404,23 +415,23 @@ def test_q2_cell_every_change_since_commissioning_is_a_cited_record_ordered_by_t
         ]
         for kind in ("change_record", "maintenance_event")
     }
-    assert {i for r in since["change_record"] for i in _ids(r.identifiers)} == {
+    assert {i for r in since["change_record"] for i in _ids(r.identifiers.value)} == {
         "CHG0030012",
         "CHG0030013",
     }
     swapped = {
         p.part.value
         for r in since["maintenance_event"]
-        for p in r.parts
+        for p in r.parts.value
         if isinstance(p.part, Known)
     }
     assert {"Joint 4 drive unit", "Finger set PG-80", "Retaining screw set"} <= swapped
-    calibrations = {i for r in since["maintenance_event"] for i in _ids(r.related)}
+    calibrations = {i for r in since["maintenance_event"] for i in _ids(r.related.value)}
     assert {"CAL-ARM3A-0415", "CAL-ARM3A-0623", "CAL-ARM3A-0818"} <= calibrations
     # The finger change is stated twice, by the CMMS and by the SOP's work record: two records,
     # two namespaces, never merged (identity is MVL-35's).
-    finger = [r for r in since["maintenance_event"] if "WO-26-0391" in _ids(r.identifiers)]
-    assert {r.identifiers[0].value.namespace for r in finger} == {
+    finger = [r for r in since["maintenance_event"] if "WO-26-0391" in _ids(r.identifiers.value)]
+    assert {r.identifiers.value[0].value.namespace for r in finger} == {
         "cmms.work_order",
         "plant2.work_order",
     }
@@ -436,7 +447,7 @@ def test_q2_fleet_has_no_commissioning_record_so_since_commissioning_is_not_cove
 def test_q3_fleet_one_requalification_is_complete_before_return_and_one_return_is_unknown() -> None:
     package = MAPPED[FLEET]
     done = _named(package, "requalification_record", "RQ-S007-0007")
-    assert done.result.value == "PASS" and [t.result.value for t in done.tests] == [
+    assert done.result.value == "PASS" and [t.result.value for t in done.tests.value] == [
         "0.94 m",
         "PASS",
         "PASS",
@@ -455,7 +466,9 @@ def test_q3_fleet_one_requalification_is_complete_before_return_and_one_return_i
     assert _column(_cited(time)) == "Decided On"
     blank = [f for f in _findings(package, "value_blank") if f.details["column"] == "Decided On"]
     assert len(blank) == 1 and blank[0].subject == _cited(time)
-    assert len(restricted.tests) == 2  # the third pair is blank: item_blank, not an empty test
+    assert (
+        len(restricted.tests.value) == 2
+    )  # the third pair is blank: item_blank, not an empty test
 
 
 def test_q3_cell_the_last_return_to_service_time_is_unknown_and_cited() -> None:
@@ -541,7 +554,7 @@ def test_attack_a_cmms_date_that_contradicts_the_incident_report_is_kept_cited_a
     )
     repair = _named(attacked, "maintenance_event", "WO-26-0402")
     incident = _named(attacked, "incident_record", "INC-0007")
-    assert "INC-0007" in _ids(repair.related)
+    assert "INC-0007" in _ids(repair.related.value)
     # Both stated as declared, each citing its own source; the reader sees the contradiction ...
     assert _before(attacked, repair.performed, incident.occurred) is True
     assert repair.performed.provenance.evidence.locator[-1].column_name == "Completed"
@@ -553,7 +566,9 @@ def test_attack_a_cmms_date_that_contradicts_the_incident_report_is_kept_cited_a
 def test_attack_maintenance_events_with_no_configuration_are_kept_and_say_why() -> None:
     package = MAPPED[CELL]
     # The SOP's work record names no configuration, and its template does not read one.
-    (sop,) = [r for r in _of(package, "maintenance_event") if "SOP-CELL-014" in _ids(r.related)]
+    (sop,) = [
+        r for r in _of(package, "maintenance_event") if "SOP-CELL-014" in _ids(r.related.value)
+    ]
     assert isinstance(sop.configuration, NotCovered)
     assert "configuration" in _about(package, "template_matched", sop).details["not_covered"]
     # A blank firmware cell: the event is kept, its configuration Unknown citing that cell.
@@ -579,7 +594,9 @@ def test_attack_maintenance_events_with_no_configuration_are_kept_and_say_why() 
 def test_attack_an_sop_revision_with_no_change_record_is_cited_and_no_change_is_invented() -> None:
     attacked = _map(CELL, _retext(BASES[CELL], "Revision: A", "Revision: B"))
     clean = MAPPED[CELL]
-    (sop,) = [r for r in _of(attacked, "maintenance_event") if "SOP-CELL-014" in _ids(r.related)]
+    (sop,) = [
+        r for r in _of(attacked, "maintenance_event") if "SOP-CELL-014" in _ids(r.related.value)
+    ]
     # The template reads no revision: the line is listed unread, with its own span, not dropped.
     unread = _about(attacked, "text_unread", sop)
     (line,) = unread.related
@@ -588,7 +605,7 @@ def test_attack_an_sop_revision_with_no_change_record_is_cited_and_no_change_is_
     assert {r.id for r in _of(attacked, "change_record")} == {
         r.id for r in _of(clean, "change_record")
     }
-    assert not any("SOP-CELL-014" in _ids(r.related) for r in _of(attacked, "change_record"))
+    assert not any("SOP-CELL-014" in _ids(r.related.value) for r in _of(attacked, "change_record"))
     assert len(_of(attacked, "ingest_finding")) == len(_of(clean, "ingest_finding"))
 
 
@@ -605,7 +622,7 @@ def test_partial_success_damage_to_some_rows_leaves_every_other_record_byte_iden
         return {
             r.id: canonical_json.dumps(r.to_json())
             for r in records
-            if not touched & _ids(r.identifiers)
+            if not touched & _ids(r.identifiers.value)
         }
 
     assert kept(damaged) == kept(MAPPED[FLEET])
@@ -707,7 +724,7 @@ def test_a_list_cell_is_read_into_at_most_a_thousand_parts(
     base = _set_cell(BASES[FLEET], ("Envelope ID", "ENV-S007-04"), "Robots", robots)
     package = read_files(map_files(base, [preset("register_zone")]))
     envelope = _named(package, "authorisation_envelope", "ENV-S007-04")
-    assert len(envelope.machines) == kept
+    assert len(envelope.machines.value) == kept
     found = _findings(package, "list_truncated")
     assert bool(found) is truncated
     if truncated:
@@ -725,7 +742,9 @@ def test_repeated_ids_in_one_cell_are_one_finding_however_many() -> None:
     base = _set_cell(BASES[FLEET], ("Envelope ID", "ENV-S007-04"), "Robots", robots)
     files = map_files(base, [preset("register_zone")])
     package = read_files(files)
-    assert _ids(_named(package, "authorisation_envelope", "ENV-S007-04").machines) == {"AMR-07"}
+    assert _ids(_named(package, "authorisation_envelope", "ENV-S007-04").machines.value) == {
+        "AMR-07"
+    }
     (finding,) = _findings(package, "list_id_repeated")
     assert finding.details["count"] == 999  # the parts past the thousandth are not read
     assert len(finding.related) == 10 and finding.subject.locator[-1].column_name == "Robots"

@@ -15,7 +15,7 @@ from neptune.identity import canonical_json
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.frames import FrameRef
 from neptune.model.ids import LogicalId, RecordId
-from neptune.model.knowledge import Known, Unknown
+from neptune.model.knowledge import Ambiguous, Known, Unknown
 from neptune.model.provenance import EvidenceRef
 from neptune.model.time import Timestamp
 from neptune.model.versions import version_to_json
@@ -330,6 +330,7 @@ def _timestamps(record: Any) -> Iterator[Timestamp]:
 # Fields holding the id of another record, and the kind that record must be.
 _REFERENCES: Final = (
     ("calibration", "extrinsics", "frame_transform"),
+    ("civil_time_zone", "domain", "timestamp_domain"),
     ("document_block", "document", "document_record"),
     ("hardware_component", "configuration", "hardware_configuration"),
     ("stream", "clocks", "timestamp_domain"),
@@ -368,6 +369,37 @@ def dangling_reference(context: Context) -> Iterator[Draft]:
             related=[evidence_of(r) for r in records[1:]],
             records=[r.id for r in records],
         )
+
+
+def civil_zone_repeated(context: Context) -> Iterator[Draft]:
+    """Several ``civil_time_zone`` records name one clock (ADR 0061 §3): which zone it counts is
+    in doubt, even when they agree, since an adapter writes at most one per domain."""
+    by_domain: dict[str, list[Any]] = defaultdict(list)
+    for zone in context.records("civil_time_zone"):
+        by_domain[zone.domain].append(zone)
+    for domain, zones in sorted(by_domain.items()):
+        if len(zones) < 2:
+            continue
+        zones.sort(key=lambda z: z.id)
+        names = sorted({name for z in zones for name in _zone_names(z.zone)})
+        yield Draft(
+            subject=evidence_of(zones[1]),
+            message=f"{plural(len(zones), 'civil_time_zone record')} name clock {short(domain)}",
+            details={
+                "domain": domain,
+                "zones": names[: context.bounds.values_per_detail],
+            },
+            related=[evidence_of(z) for z in zones if z is not zones[1]],
+            records=[z.id for z in zones],
+        )
+
+
+def _zone_names(state: Any) -> list[str]:
+    if isinstance(state, Known):
+        return [state.value]
+    if isinstance(state, Ambiguous):
+        return [candidate.value for candidate in state.candidates]
+    return []
 
 
 # --- unresolved frames ---------------------------------------------------------------------------
@@ -627,10 +659,12 @@ RULES_ON: Final = (
     Rule("calibration_revision_mismatch", 1, _C.INCONSISTENT, _W,
          "a calibration's hardware revision is none its machine's configurations declare",
          calibration_revision_mismatch),
+    Rule("civil_zone_repeated", 1, _C.AMBIGUOUS, _W,
+         "several civil_time_zone records name one clock", civil_zone_repeated),
     Rule("count_mismatch", 1, _C.INCONSISTENT, _W,
          "a stream's declared message count differs from the rows its series holds",
          count_mismatch),
-    Rule("dangling_reference", 1, _C.MISSING, _W,
+    Rule("dangling_reference", 2, _C.MISSING, _W,
          "a record names a run, clock, table or configuration the package does not hold",
          dangling_reference),
     Rule("duplicate_id", 1, _C.AMBIGUOUS, _W,

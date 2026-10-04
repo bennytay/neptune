@@ -990,22 +990,24 @@ class Records:
     def text(self, pointer: str) -> Known[str]:
         return Known(str(self.get(pointer)), self.cite(pointer))
 
-    def texts(self, pointer: str) -> tuple[Known[str], ...]:
-        return tuple(self.text(f"{pointer}/{i}") for i in range(len(self.get(pointer))))
+    def texts(self, pointer: str) -> Known[tuple[Knowledge[str], ...]]:
+        return Known(tuple(self.text(f"{pointer}/{i}") for i in range(len(self.get(pointer)))))
 
     def ref(self, namespace: str, pointer: str) -> Known[LogicalId]:
         return Known(LogicalId(namespace, self.get(pointer)), self.cite(pointer))
 
-    def refs(self, *named: tuple[str, str]) -> tuple[Known[LogicalId], ...]:
+    def refs(self, *named: tuple[str, str]) -> Known[tuple[Knowledge[LogicalId], ...]]:
         """Declared ids: ``(namespace, pointer)`` to a value, or to a list of them."""
-        found = []
+        found: list[Known[LogicalId]] = []
         for namespace, pointer in named:
             value = self.get(pointer)
             if isinstance(value, list):
                 found += [self.ref(namespace, f"{pointer}/{i}") for i in range(len(value))]
             else:
                 found.append(self.ref(namespace, pointer))
-        return tuple(sorted(found, key=lambda known: (known.value.namespace, known.value.value)))
+        found.sort(key=lambda known: (known.value.namespace, known.value.value))
+        ordered: tuple[Knowledge[LogicalId], ...] = tuple(found)
+        return Known(ordered)
 
     def time(self, pointer: str) -> Known[Timestamp]:
         instant = datetime.fromisoformat(self.get(pointer))
@@ -1021,17 +1023,19 @@ class Records:
     def decision(self, decision: str, authority: str, time: str) -> Decision:
         return Decision(self.text(decision), self.text(authority), self.time(time))
 
-    def tests(self, pointer: str) -> tuple[TestResult, ...]:
-        return tuple(
-            TestResult(
-                self.text(f"{pointer}/{i}/test"),
-                self.text(f"{pointer}/{i}/result"),
-                self.time(f"{pointer}/{i}/date"),
+    def tests(self, pointer: str) -> Known[tuple[TestResult, ...]]:
+        return Known(
+            tuple(
+                TestResult(
+                    self.text(f"{pointer}/{i}/test"),
+                    self.text(f"{pointer}/{i}/result"),
+                    self.time(f"{pointer}/{i}/date"),
+                )
+                for i in range(len(self.get(pointer)))
             )
-            for i in range(len(self.get(pointer)))
         )
 
-    def inventory(self, pointer: str) -> tuple[InventoryItem, ...]:
+    def inventory(self, pointer: str) -> Known[tuple[InventoryItem, ...]]:
         items = []
         for i, item in enumerate(self.get(pointer)):
             at = f"{pointer}/{i}"
@@ -1045,26 +1049,30 @@ class Records:
                 InventoryItem(
                     name=self.text(f"{at}/item"),
                     model=self.text(f"{at}/model") if "model" in item else NotCovered(),
-                    identifiers=self.refs(("serial", f"{at}/serial")) if "serial" in item else (),
+                    identifiers=(
+                        self.refs(("serial", f"{at}/serial")) if "serial" in item else Known(())
+                    ),
                     version=version,
                 )
             )
-        return tuple(items)
+        return Known(tuple(items))
 
-    def hazards(self, pointer: str) -> tuple[Hazard, ...]:
+    def hazards(self, pointer: str) -> Known[tuple[Hazard, ...]]:
         hazards = []
         for i, hazard in enumerate(self.get(pointer)):
             at = f"{pointer}/{i}"
             # Every other column is a score, named by its column, in the form's order.
-            scores = tuple(
-                Score(name, self.text(f"{at}/{name}"))
-                for name in hazard
-                if name not in {"hazard", "mitigations"}
+            scores = Known(
+                tuple(
+                    Score(name, self.text(f"{at}/{name}"))
+                    for name in hazard
+                    if name not in {"hazard", "mitigations"}
+                )
             )
             hazards.append(
                 Hazard(self.text(f"{at}/hazard"), scores, self.texts(f"{at}/mitigations"))
             )
-        return tuple(hazards)
+        return Known(tuple(hazards))
 
     def add(self, cls: Any, pointer: str, **values: Any) -> Any:
         provenance = self.cite(pointer)
@@ -1087,7 +1095,7 @@ def warehouse_amr() -> Example:
         site=site,
         machines=r.refs(("fleet", f"{c}/machine")),
         configuration=r.ref("siteops.configuration", f"{c}/configuration"),
-        related=(),
+        related=Known(()),
         commissioned=r.time(f"{c}/commissioned"),
         hardware=r.inventory(f"{c}/hardware"),
         software=r.inventory(f"{c}/software"),
@@ -1097,12 +1105,14 @@ def warehouse_amr() -> Example:
         sign_off=r.decision(f"{c}/acceptance", f"{c}/signed_off_by", f"{c}/signed_off"),
     )
     a = "/authorisations/0"
-    zones = tuple(
-        ZoneLimit(
-            r.ref("siteops.zone", f"{a}/zones/{i}/zone"),
-            r.quantity(f"{a}/zones/{i}/speed_limit", f"{a}/zones/{i}/unit"),
+    zones = Known(
+        tuple(
+            ZoneLimit(
+                r.ref("siteops.zone", f"{a}/zones/{i}/zone"),
+                r.quantity(f"{a}/zones/{i}/speed_limit", f"{a}/zones/{i}/unit"),
+            )
+            for i in range(len(r.get(f"{a}/zones")))
         )
-        for i in range(len(r.get(f"{a}/zones")))
     )
     r.add(
         AuthorisationEnvelope,
@@ -1130,7 +1140,7 @@ def warehouse_amr() -> Example:
         site=site,
         machines=r.refs(("fleet", f"{n}/machine")),
         configuration=NotCovered(),  # a ticket has no place for one
-        related=(),
+        related=Known(()),
         mode=r.text(f"{n}/mode"),
         authority=r.text(f"{n}/authority"),
         reason=r.text(f"{n}/reason"),
@@ -1154,9 +1164,11 @@ def warehouse_amr() -> Example:
         zone=r.ref("siteops.zone", f"{i}/zone"),
         location=r.text(f"{i}/location"),
         assets=r.refs(("siteops.asset", f"{i}/assets")),
-        timeline=tuple(
-            TimelineEntry(r.time(f"{i}/timeline/{k}/time"), r.text(f"{i}/timeline/{k}/entry"))
-            for k in range(len(r.get(f"{i}/timeline")))
+        timeline=Known(
+            tuple(
+                TimelineEntry(r.time(f"{i}/timeline/{k}/time"), r.text(f"{i}/timeline/{k}/entry"))
+                for k in range(len(r.get(f"{i}/timeline")))
+            )
         ),
         description=r.text(f"{i}/description"),
         root_cause=r.text(f"{i}/root_cause"),
@@ -1170,14 +1182,16 @@ def warehouse_amr() -> Example:
         machines=r.refs(("fleet", f"{g}/machines")),
         configuration=r.ref("siteops.configuration", f"{g}/configuration"),
         related=r.refs(("siteops.incident", f"{g}/incident")),
-        changes=tuple(
-            ChangeItem(
-                r.text(f"{g}/items/{k}/type"),
-                r.text(f"{g}/items/{k}/target"),
-                r.text(f"{g}/items/{k}/from"),
-                r.text(f"{g}/items/{k}/to"),
+        changes=Known(
+            tuple(
+                ChangeItem(
+                    r.text(f"{g}/items/{k}/type"),
+                    r.text(f"{g}/items/{k}/target"),
+                    r.text(f"{g}/items/{k}/from"),
+                    r.text(f"{g}/items/{k}/to"),
+                )
+                for k in range(len(r.get(f"{g}/items")))
             )
-            for k in range(len(r.get(f"{g}/items")))
         ),
         approval=r.decision(f"{g}/decision", f"{g}/approved_by", f"{g}/approved"),
         effective=r.time(f"{g}/effective"),
@@ -1191,7 +1205,7 @@ def warehouse_amr() -> Example:
         site=site,
         machines=r.refs(("fleet", f"{k}/machines")),
         configuration=r.ref("siteops.configuration", f"{k}/configuration"),
-        related=(),
+        related=Known(()),
         assessed=r.time(f"{k}/assessed"),
         method=r.text(f"{k}/method"),
         hazards=r.hazards(f"{k}/hazards"),
@@ -1215,7 +1229,7 @@ def manipulator_cell() -> Example:
         site=site,
         machines=r.refs(("robot.serial", f"{c}/robot")),
         configuration=r.ref("plant.configuration", f"{c}/configuration"),
-        related=(),
+        related=Known(()),
         commissioned=r.time(f"{c}/date"),
         hardware=r.inventory(f"{c}/hardware"),
         software=r.inventory(f"{c}/software"),
@@ -1232,7 +1246,7 @@ def manipulator_cell() -> Example:
         site=site,
         machines=r.refs(("robot.serial", f"{k}/robot")),
         configuration=r.ref("plant.configuration", f"{k}/configuration"),
-        related=(),
+        related=Known(()),
         assessed=r.time(f"{k}/date"),
         method=r.text(f"{k}/method"),
         hazards=r.hazards(f"{k}/hazards"),
@@ -1247,17 +1261,19 @@ def manipulator_cell() -> Example:
         machines=r.refs(("robot.serial", f"{m}/robot")),
         # The as-maintained configuration the work order states resulted.
         configuration=r.ref("plant.configuration", f"{m}/as_maintained_configuration"),
-        related=(),
+        related=Known(()),
         performed=r.time(f"{m}/date"),
         diagnosis=r.text(f"{m}/diagnosis"),
         actions=r.texts(f"{m}/actions"),
-        parts=tuple(
-            PartReplacement(
-                r.text(f"{m}/parts/{p}/part"),
-                r.refs(("serial", f"{m}/parts/{p}/removed")),
-                r.refs(("serial", f"{m}/parts/{p}/installed")),
+        parts=Known(
+            tuple(
+                PartReplacement(
+                    r.text(f"{m}/parts/{p}/part"),
+                    r.refs(("serial", f"{m}/parts/{p}/removed")),
+                    r.refs(("serial", f"{m}/parts/{p}/installed")),
+                )
+                for p in range(len(r.get(f"{m}/parts")))
             )
-            for p in range(len(r.get(f"{m}/parts")))
         ),
     )
     q = "/requalification"
