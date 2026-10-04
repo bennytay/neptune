@@ -13,7 +13,7 @@ are never interleaved; adjacency means something only within one ``clock`` value
 """
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final, Protocol
 
 import pyarrow as pa
@@ -272,19 +272,101 @@ def series_sql(plan: SeriesPlan, tables: Sequence[str]) -> str:
     )
 
 
+@dataclass(frozen=True)
+class SeriesRead:
+    """A read's rows, in the plan's schema, and why any planned row is missing: the plan's
+    findings, then the read's own (a file whose pages do not decode)."""
+
+    table: Any  # pyarrow.Table
+    findings: tuple[CatalogFinding, ...]
+
+
 class SeriesReader(Protocol):
     """An engine that runs a ``SeriesPlan`` over the files in place."""
 
     name: str
 
-    def read(self, plan: SeriesPlan) -> Any:  # pyarrow.Table
-        ...
+    def read(self, plan: SeriesPlan) -> SeriesRead: ...
 
     def explain(self, plan: SeriesPlan, *, analyze: bool = False) -> str: ...
 
 
-def _empty(plan: SeriesPlan) -> Any:
-    return plan.schema.empty_table()
+def _isolating(
+    engine: str, run: Any, plan: SeriesPlan, errors: tuple[type[BaseException], ...]
+) -> SeriesRead:
+    """Run the plan; if the engine fails, read each file alone and keep the files that read.
+
+    A file can pass every planning check (size, no link, a Parquet footer with the columns) and
+    still hold pages that do not decode, which only the engine notices. Then each scan runs
+    alone: one that fails is a ``file_digest_mismatch`` finding naming its stream, and the rows
+    of the others are merged in Arrow into the order the statement gives (``_merge``). One
+    damaged file never costs another file's rows, and an engine error never escapes
+    (non-negotiable 7). A request error is the caller's and is raised.
+
+    The finding names the file and the engine, never the engine's message: which damaged page
+    an engine's threads reach first varies from run to run, and a read is deterministic.
+    """
+    if not plan.scans:
+        return SeriesRead(plan.schema.empty_table(), plan.findings)
+    try:
+        raw = run(plan)
+    except LakeRequestError:
+        raise
+    except errors:
+        raw = None
+    if raw is not None:
+        return SeriesRead(_conform(raw, plan), plan.findings)
+    good: list[Scan] = []
+    parts: list[Any] = []
+    found: list[CatalogFinding] = []
+    for scan in plan.scans:
+        try:
+            part = run(replace(plan, scans=(scan,)))
+        except LakeRequestError:
+            raise
+        except errors:
+            detail = f"{scan.file.location.url} has pages {engine} cannot decode"
+            found.append(CatalogFinding("file_digest_mismatch", scan.file.stream_id, detail))
+        else:
+            good.append(scan)
+            parts.append(part)
+    rest = replace(plan, scans=tuple(good))
+    return SeriesRead(_merge(parts, rest), (*plan.findings, *found))
+
+
+def _merge(parts: list[Any], plan: SeriesPlan) -> Any:
+    """Single-scan engine tables, one per ``plan.scans`` entry, as the plan's one table.
+
+    Each part is renumbered to its scan's index and sorted by the statement's own key
+    (partition, ticks unknown last, scan, seq). That key is total, so the result equals the
+    statement's over the same files.
+    """
+    if not parts:
+        return plan.schema.empty_table()
+    values = [f for i, f in enumerate(plan.schema) if i >= len(FIXED)]
+    common = pa.schema(
+        [
+            pa.field(_PARTITION, pa.int32()),
+            pa.field(_SCAN, pa.int32()),
+            pa.field("ticks", pa.int64()),
+            pa.field("ticks_state", pa.string()),
+            pa.field("seq", pa.int64()),
+            *(pa.field(f.name, f.type) for f in values),
+        ]
+    )
+    tables = []
+    for index, (scan, part) in enumerate(zip(plan.scans, parts, strict=True)):
+        rows = part.num_rows
+        arrays = [
+            pa.repeat(pa.scalar(scan.partition, pa.int32()), rows),
+            pa.repeat(pa.scalar(index, pa.int32()), rows),
+            *(part.column(i - 1).cast(f.type) for i, f in enumerate(common) if i >= 2),
+        ]
+        tables.append(pa.Table.from_arrays(arrays, schema=common))
+    merged = pa.concat_tables(tables)
+    keys = [(name, "ascending", "at_end") for name in (_PARTITION, "ticks", _SCAN, "seq")]
+    order = pc.sort_indices(merged, sort_keys=keys)
+    return _conform(merged.take(order).drop_columns([_PARTITION]), plan)
 
 
 def _ids(scan_index: Any, per_scan: list[str]) -> Any:
@@ -354,14 +436,19 @@ class DuckDBReader:
             tables.append(name)
         return con, tables
 
-    def read(self, plan: SeriesPlan) -> Any:
-        if not plan.scans:
-            return _empty(plan)
+    def _run(self, plan: SeriesPlan) -> Any:
         con, tables = self._connect(plan)
         try:
-            return _conform(con.execute(series_sql(plan, tables)).to_arrow_table(), plan)
+            return con.execute(series_sql(plan, tables)).to_arrow_table()
         finally:
             con.close()
+
+    def read(self, plan: SeriesPlan) -> SeriesRead:
+        """The plan's rows; a file the engine cannot decode is left out and named in the
+        read's findings, never raised (ADR 0013 §4)."""
+        import duckdb
+
+        return _isolating(self.name, self._run, plan, (duckdb.Error, pa.ArrowException, OSError))
 
     def explain(self, plan: SeriesPlan, *, analyze: bool = False) -> str:
         """DuckDB's physical plan as JSON: an operator tree whose scans list their filters."""
@@ -413,11 +500,15 @@ class DataFusionReader:
             ctx.register_parquet(name, scan.file.location.url)
         return ctx, tables
 
-    def read(self, plan: SeriesPlan) -> Any:
-        if not plan.scans:
-            return _empty(plan)
+    def _run(self, plan: SeriesPlan) -> Any:
         ctx, tables = self._context(plan)
-        return _conform(ctx.sql(series_sql(plan, tables)).to_arrow_table(), plan)
+        return ctx.sql(series_sql(plan, tables)).to_arrow_table()
+
+    def read(self, plan: SeriesPlan) -> SeriesRead:
+        """The plan's rows; a file the engine cannot decode is left out and named in the
+        read's findings, never raised (ADR 0013 §4)."""
+        # DataFusion raises plain Exception for every execution error, Parquet decoding included.
+        return _isolating(self.name, self._run, plan, (Exception,))
 
     def explain(self, plan: SeriesPlan, *, analyze: bool = False) -> str:
         if not plan.scans:
