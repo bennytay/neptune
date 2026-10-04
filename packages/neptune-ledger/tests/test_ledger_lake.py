@@ -718,13 +718,55 @@ def test_a_file_whose_pages_do_not_decode_costs_only_its_own_rows(
     assert plan.findings == () and len(plan.scans) == 3, "planning cannot see page damage"
     read = reader.read(plan)
     assert [(f.code, f.subject) for f in read.findings] == [("file_digest_mismatch", odom.id)]
-    assert "does not decode" in read.findings[0].detail
+    url = files[[f.stream_id for f in files].index(odom.id)].location.url
+    assert read.findings[0].detail == f"{url} has pages {reader.name} cannot decode"
     assert set(read.table.column("stream_id").to_pylist()) == {power.id, arm[1]}
     without = [f for f in files if f.stream_id != odom.id]
     good = reader.read(plan_series(without, columns=["locator/0/offset"]))
     assert good.findings == () and read.table.equals(good.table)
     assert read.table.schema == plan.schema
     assert reader.read(plan) == read, "deterministic"
+
+
+@pytest.mark.parametrize("reader", READERS, ids=lambda r: r.name)
+def test_repeated_reads_of_a_file_damaged_in_several_places_are_equal(
+    catalog: PostgresCatalog, series: SeriesCatalog, tmp_path: Path, reader: SeriesReader
+) -> None:
+    """Three row groups of a base's odometry damaged, each differently: which one an engine's
+    threads reach first varies, so the finding must not repeat the engine's message. Every
+    read returns the same rows and the same findings."""
+    import pyarrow.parquet as pq
+
+    rows_ = subset(*MOBILE)
+    odom, power = stream_of(rows_, "/wheel_odom"), stream_of(rows_, "/battery")
+    n = 4 * 65_536  # four row groups
+    package = write(
+        rows_,
+        tmp_path / "multi",
+        {
+            "/wheel_odom": batch(odom, n, START, 100, odometry),
+            "/battery": batch(power, 4, START + 50, 1_000, battery),
+        },
+    )
+    register(catalog, tmp_path / "multi")
+    path = tmp_path / "multi" / "series" / f"{odom.id.removeprefix('rec:sha256:')}.parquet"
+    meta = pq.ParquetFile(path).metadata
+    assert meta.num_row_groups == 4
+    seq = meta.schema.names.index("seq")
+    data = bytearray(path.read_bytes())
+    for group in (0, 2, 3):
+        chunk = meta.row_group(group).column(seq)
+        start = chunk.data_page_offset
+        for k in range(start + 1, start + min(64, chunk.total_compressed_size)):
+            data[k] ^= (group * 37 + 11) & 0xFF
+    path.write_bytes(bytes(data))
+    files = series.files([(package, odom.id), (package, power.id)]).files
+    plan = plan_series(files)
+    assert plan.findings == () and len(plan.scans) == 2
+    reads = [reader.read(plan) for _ in range(5)]
+    assert all(r == reads[0] for r in reads), "the same rows and findings every time"
+    assert [(f.code, f.subject) for f in reads[0].findings] == [("file_digest_mismatch", odom.id)]
+    assert set(reads[0].table.column("stream_id").to_pylist()) == {power.id}
 
 
 @pytest.mark.parametrize("reader", READERS, ids=lambda r: r.name)
