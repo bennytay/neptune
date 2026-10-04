@@ -179,3 +179,13 @@ def test_salvage_refused_is_one_of_two_cases(lost: int, problems: list[dict[str,
 def test_every_problem_names_its_law() -> None:
     with pytest.raises(ValueError, match="names its law"):
         lineage.salvage_refused(*ADAPTER, 2, 1, [{"stream": "x"}])
+
+
+def test_an_empty_lost_window_is_cited_and_covers_nothing() -> None:
+    """A planned window of no bytes (a log with nothing after its header) can still be lost."""
+    failed = lineage.chunk_failed(*ADAPTER, chunk(1), 2, CRASH, extent=(16, 16))
+    assert check_ingest_finding(failed) == failed
+    assert failed.subject == EvidenceRef(SOURCE, (ByteRange(16, 0),))
+    partial = lineage.source_partial(*ADAPTER, 2, [Lost(chunk(1), CHUNK_FAILED, (16, 16))])
+    assert partial.details["not_covered"] == [] and partial.details["undeclared"] == 0
+    assert partial.details["not_covered_bytes"] == 0 and partial.related == ()
