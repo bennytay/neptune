@@ -12,7 +12,7 @@ import gzip
 import io
 import tarfile
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -236,7 +236,7 @@ def test_every_worked_example_citation_resolves_to_its_bytes(lake: Lake, tmp_pat
     }
 
 
-def assert_row_states(made: Artefact, record: dict[str, Any]) -> None:
+def assert_row_states(made: Artefact, record: Mapping[str, Any]) -> None:
     """Every cell the compiler states as known is the text the hydrated row holds there."""
     row = canonical_json.loads(made.read())
     assert isinstance(row, dict) and row["format"] == "csv" and row["delimiter"] == ","
@@ -339,7 +339,13 @@ def test_a_frame_from_a_referenced_mcap_and_from_a_materialised_one(lake: Lake) 
     assert raw.evidence_ref == materialised
     assert raw.transform == transform_for("frame").to_json()
     assert raw.transform["decoder"] == "neptune_ledger.media.frame"
-    assert set(raw.transform["libraries"]) == {"lz4", "mcap", "mcap-ros2-support", "pillow", "zstandard"}
+    assert set(raw.transform["libraries"]) == {
+        "lz4",
+        "mcap",
+        "mcap-ros2-support",
+        "pillow",
+        "zstandard",
+    }
     assert raw.transform_id == transform_for("frame").id
     assert raw.sha256 == "sha256:" + __import__("hashlib").sha256(raw.read()).hexdigest()
 
@@ -711,3 +717,181 @@ def test_the_media_table_lives_under_the_tenants_prefix(lake: Lake) -> None:
     assert lake.store.get("sha256:" + "0" * 64) is None
     assert lake.store.get("x' OR '1'='1") is None
     assert threading.active_count() >= 1
+
+
+# --- MCAP variants: compressed, unindexed, nested, and a chunk bomb ----------------------------
+
+
+def rewrite_mcap(data: bytes, **options: Any) -> bytes:
+    """The recording's messages written again with other writer options (same bytes per message)."""
+    from mcap.reader import make_reader
+    from mcap.writer import Writer
+
+    out = io.BytesIO()
+    writer = Writer(out, **options)
+    writer.start(profile="ros2", library="neptune-ledger tests")
+    schemas: dict[int, int] = {}
+    channels: dict[int, int] = {}
+    for schema, channel, message in make_reader(io.BytesIO(data)).iter_messages(
+        log_time_order=False
+    ):
+        assert schema is not None
+        if schema.id not in schemas:
+            schemas[schema.id] = writer.register_schema(schema.name, schema.encoding, schema.data)
+        if channel.id not in channels:
+            channels[channel.id] = writer.register_channel(
+                channel.topic, channel.message_encoding, schemas[schema.id], channel.metadata
+            )
+        writer.add_message(
+            channels[channel.id], message.log_time, message.data, message.publish_time
+        )
+    writer.finish()  # type: ignore[no-untyped-call]
+    return out.getvalue()
+
+
+def test_compressed_unindexed_and_nested_recordings_give_the_same_frame(lake: Lake) -> None:
+    from mcap.writer import CompressionType
+
+    head = fixture("head_camera.mcap")
+    variants = {
+        "zstd.mcap": rewrite_mcap(head, compression=CompressionType.ZSTD),
+        "lz4.mcap": rewrite_mcap(head, compression=CompressionType.LZ4),
+        "unchunked.mcap": rewrite_mcap(head, use_chunking=False),  # no index: read through once
+    }
+    members = io.BytesIO()
+    with tarfile.open(fileobj=members, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        info = tarfile.TarInfo("walk/head_camera.mcap")
+        info.size = len(head)
+        archive.addfile(info, io.BytesIO(head))
+    bundle = members.getvalue()
+    lake.package("legged", {**variants, "walk.tar": bundle}, materialise=frozenset(variants))
+    lake.stores = [LocalSourceStore(ingest_root(lake.tmp / "ingest", {"walk.tar": bundle}))]
+    at = START + PERIOD
+    frame1 = record_range(HEAD_TOPIC, at, at + 1)
+    expected = lake.artefact(anchor(variants["zstd.mcap"], frame1), "frame")
+    assert_frame(picture(expected), HEAD_SIZE, 1, (0, 0))
+    for data in (*variants.values(),):
+        made = lake.artefact(anchor(data, record_range(HEAD_TOPIC, at, at + 1)), "frame")
+        assert made.read() == expected.read() and made.sha256 == expected.sha256
+        two = START + 2 * PERIOD
+        assert lake.codes(anchor(data, record_range(HEAD_TOPIC, two, two + 1)), "frame") == [
+            "invalid_request"
+        ]
+    assert variants["zstd.mcap"] != head
+    with tarfile.open(fileobj=io.BytesIO(bundle)) as archive:
+        member = archive.getmember("walk/head_camera.mcap")
+    nested = anchor(
+        bundle, byte_range(member.offset_data, member.size), record_range(HEAD_TOPIC, at, at + 1)
+    )
+    assert lake.artefact(nested, "frame").read() == expected.read()
+
+
+def test_an_mcap_chunk_inflating_past_the_limit_is_unsafe(lake: Lake) -> None:
+    from mcap.writer import CompressionType, Writer
+
+    from ledger_media_fixtures import IMAGE_DEF
+
+    out = io.BytesIO()
+    writer = Writer(out, compression=CompressionType.ZSTD)
+    writer.start(profile="ros2")
+    schema = writer.register_schema("sensor_msgs/msg/Image", "ros2msg", IMAGE_DEF.encode())
+    channel = writer.register_channel(HEAD_TOPIC, "cdr", schema)
+    writer.add_message(channel, START, b"\0" * (4 << 20), START)  # 4 MiB of zeros, a few KiB packed
+    writer.finish()  # type: ignore[no-untyped-call]
+    bomb = out.getvalue()
+    assert len(bomb) < 64 << 10
+    lake.package("hostile", {"bomb.mcap": bomb}, materialise=frozenset({"bomb.mcap"}))
+    small = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=1 << 20))
+    made = small.hydrate(anchor(bomb, record_range(HEAD_TOPIC, START, START + 1)), "frame").read()
+    assert made.value is None and [f.code for f in made.findings] == ["unsafe_entry"]
+    assert "MCAP chunk" in made.findings[0].detail
+
+
+# --- Tables as the compiler reads them, and pointers into JSON and YAML -------------------------
+
+
+def test_csv_rows_follow_the_compilers_grammar(lake: Lake) -> None:
+    # An arm's joint-limit sheet: a byte-order mark, tabs, CRLF, a blank line (not a record), a
+    # quoted cell holding a line break and doubled quotes, and a cell that is not UTF-8.
+    sheet = (
+        b"\xef\xbb\xbfjoint\tlimit\tnote\r\n\r\n"
+        b'shoulder\t2.5\t"soft ""stop""\nat 2.4"\r\n'
+        b"elbow\t1.9\t\r\n"
+        b"wrist\t\xff\tok\n"
+    )
+    single = b"joint;limit\n"  # one record: no delimiter can be sniffed, so the default applies
+    lake.package(
+        "arm",
+        {"limits.tsv": sheet, "one.csv": single},
+        materialise=frozenset({"limits.tsv", "one.csv"}),
+    )
+
+    def row(data: bytes, **step: Any) -> Any:
+        kind = "row_cell" if "column" in step else "row"
+        return canonical_json.loads(
+            lake.artefact(anchor(data, {"kind": kind, **step}), "row").read()
+        )
+
+    shoulder = row(sheet, row=1)
+    assert shoulder["cells"] == ["shoulder", "2.5", 'soft "stop"\nat 2.4']
+    assert (shoulder["delimiter"], shoulder["delimiter_rule"]) == ("\t", "sniffed")
+    assert row(sheet, row=2)["cells"] == ["elbow", "1.9", ""]
+    assert row(sheet, row=3, column=1, column_name="limit")["cell"] == {"hex": "ff"}
+    assert row(sheet, row=0)["cells"] == ["joint", "limit", "note"]
+    assert lake.codes(anchor(sheet, {"kind": "row", "row": 4}), "row") == ["invalid_request"]
+    one = row(single, row=0)
+    assert one["cells"] == ["joint;limit"] and one["delimiter_rule"] == "default"
+
+
+def test_pointers_into_json_and_yaml(lake: Lake) -> None:
+    # A legged robot's controller config: YAML whose scalars a reader could type two ways.
+    config = (
+        b"controller:\n"
+        b"  gait: trot\n"
+        b"  on: yes\n"
+        b"  gains: [1.5, 0x10]\n"
+        b"  'a/b': 3\n"
+        b"twice: 1\n"
+        b"twice: 2\n"
+    )
+    document = b'{"wheel": {"radius": 0.0825, "count": 4}, "dup": 1, "dup": 2, "ok": [null]}'
+    lake.package(
+        "fleet",
+        {"controller.yaml": config, "base.json": document},
+        materialise=frozenset({"controller.yaml", "base.json"}),
+    )
+
+    def value(data: bytes, pointer: str) -> Artefact:
+        return lake.artefact(anchor(data, {"kind": "json_pointer", "pointer": pointer}), "value")
+
+    on = value(config, "/controller/on")
+    assert on.read() == b"yes" and on.media_type == "application/yaml"
+    assert on.metadata == {
+        "format": "yaml",
+        "pointer": "/controller/on",
+        "tag": "tag:yaml.org,2002:bool",
+    }
+    assert value(config, "/controller/gains/1").read() == b"0x10"
+    assert value(config, "/controller/a~1b").read() == b"3"
+    assert value(config, "/controller").read().startswith(b"gait: trot\n  on: yes")
+    for missing in ("/twice", "/controller/gains/2", "/controller/gains/01", "/nowhere"):
+        ref = anchor(config, {"kind": "json_pointer", "pointer": missing})
+        assert lake.codes(ref, "value") == ["invalid_request"], missing
+
+    radius = value(document, "/wheel/radius")
+    assert radius.read() == b"0.0825" and radius.media_type == "application/json"
+    assert value(document, "/ok/0").read() == b'{"null":true}'
+    assert lake.codes(anchor(document, {"kind": "json_pointer", "pointer": "/dup"}), "value") == [
+        "invalid_request"
+    ]
+
+
+def test_a_stored_artefact_still_needs_the_catalog_and_bytes_take_no_snapshot(lake: Lake) -> None:
+    head = fixture("head_camera.mcap")
+    lake.package("legged", {"head.mcap": head}, materialise=frozenset({"head.mcap"}))
+    ref = anchor(head, record_range(HEAD_TOPIC, START, START + 1))
+    stored = lake.artefact(ref, "frame")
+    assert lake.codes(ref, "frame", as_of=99) == ["as_of_out_of_range"]
+    assert lake.codes(ref, "frame", as_of=99, snapshot=stored.snapshot) == ["as_of_out_of_range"]
+    whole = anchor(head, byte_range(0, len(head)))
+    assert lake.codes(whole, "bytes", snapshot=1) == ["invalid_request"]
