@@ -23,6 +23,7 @@ flowchart LR
   end
 
   PKG -->|read via package schema| CAT
+  PKG -->|series Parquet, read in place| LAKE
   CON -->|published interfaces| CAT
   CAT --> THR
   CAT --> LIN
@@ -47,8 +48,8 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class LIN,K1 built
-  class CAT,THR,CLI,K2 partial
-  class LAKE,QRY,ACC,K3 todo
+  class CAT,THR,CLI,LAKE,K2 partial
+  class QRY,ACC,K3 todo
   class PKG,CON,MEM,CTX,DEP,LRN ext
   style L fill:#8b949e0f,stroke:#8b949e
   style UP fill:none,stroke:#8b949e
