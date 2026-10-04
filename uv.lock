@@ -716,6 +716,7 @@ source = { editable = "packages/neptune-ledger" }
 dependencies = [
     { name = "datafusion" },
     { name = "duckdb" },
+    { name = "lz4" },
     { name = "mcap" },
     { name = "mcap-ros2-support" },
     { name = "neptune" },
@@ -725,6 +726,7 @@ dependencies = [
     { name = "pylance" },
     { name = "pypdfium2" },
     { name = "pyyaml" },
+    { name = "zstandard" },
 ]
 
 [package.optional-dependencies]
@@ -743,6 +745,7 @@ requires-dist = [
     { name = "datafusion", specifier = "==54.0.0" },
     { name = "duckdb", specifier = "==1.5.6" },
     { name = "jsonschema", marker = "extra == 'contract-tests'", specifier = ">=4.23" },
+    { name = "lz4", specifier = "==4.4.5" },
     { name = "mcap", specifier = "==1.5.0" },
     { name = "mcap-ros2-support", specifier = "==0.5.7" },
     { name = "neptune", editable = "." },
@@ -753,6 +756,7 @@ requires-dist = [
     { name = "pypdfium2", specifier = "==5.13.0" },
     { name = "pytest", marker = "extra == 'contract-tests'", specifier = ">=8.3" },
     { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "zstandard", specifier = "==0.25.0" },
 ]
 provides-extras = ["contract-tests"]
 
