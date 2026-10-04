@@ -180,19 +180,21 @@ def build_interventions(
             skipped += 1
             continue
         where = cite(document, "items", index)
+        # Lists are Known states inheriting the record's provenance (root ADR 0061 §4), so they
+        # stay the version 4 bare arrays.
         records.append(
             Intervention(
                 id=evidence_record_id(Intervention.kind, where, transform),
                 provenance=item.prov(),
-                identifiers=identifiers,
+                identifiers=Known(identifiers),
                 site=NotCovered(),
-                machines=item.ident("deviceId", DEVICE_NAMESPACE),
+                machines=Known(item.ident("deviceId", DEVICE_NAMESPACE)),
                 configuration=NotCovered(),
-                related=(),
+                related=Known(()),
                 mode=item.text("interventionType"),
                 authority=item.text("authority"),
                 reason=item.text("message"),
-                commands=item.commands(),
+                commands=Known(item.commands()),
                 start=item.time("time"),
                 end=item.time("endTime"),
                 outcome=item.text("outcome"),

@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:c98ac0d9ac1c1f9c0aa19091bb53a72b1a946d4ab5e3e9bd23a169e20ca4fc3d`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:a399af30569e96d2a5d29f7a39d0a0beab34655073f62f2c49244fb4c58c349f`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -24,7 +24,7 @@ Receipt `rec:sha256:c98ac0d9ac1c1f9c0aa19091bb53a72b1a946d4ab5e3e9bd23a169e20ca4
 | `neptune.frames` | `0.1.0` | `sha256:44136fa355b3` | none | `rec:ebb96c0ca1d5` |
 | `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:bb62e25c331a` |
 | `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:a4c22d1acf45` |
-| `neptune.validate` | `0.1.0` | `sha256:0a0d08ccf4b7` | none | `rec:c712df3eb7ab` |
+| `neptune.validate` | `0.2.0` | `sha256:e29ee45e7bd8` | none | `rec:cc0ca8e2997c` |
 
 ## Records
 
@@ -73,7 +73,7 @@ Receipt `rec:sha256:c98ac0d9ac1c1f9c0aa19091bb53a72b1a946d4ab5e3e9bd23a169e20ca4
 - **info** `neptune.clocks.anchors_absent` (missing): no row holds both readings, so these two clocks stay unrelated · `rec:b3d2298c7e9d`
 - **info** `neptune.clocks.latency_unbounded` (missing): 4 clock mapping(s) fitted by stream.co_recorded: each anchor's two readings mark two events, and nothing bounds the time between them, so the mappings' residual bounds are unknown; the fit residuals are in the details · `rec:c717a7b0cdc0`
 - **info** `neptune.clocks.unsynchronised` (missing): the package's clocks form 3 groups that no clock mapping joins; times in different groups cannot be compared · `rec:82a1cb9f89e6`
-- **info** `neptune.validate.time_out_of_order` (inconsistent): stream rec:06073a27e94a is not in time order on clock 0 in source order · `rec:ac29a7c08790`
+- **info** `neptune.validate.time_out_of_order` (inconsistent): stream rec:06073a27e94a is not in time order on clock 0 in source order · `rec:f51c126c6e19`
 
 ## Ambiguous fields
 

@@ -452,13 +452,13 @@ def test_lifecycle_values_are_what_the_forms_say() -> None:
     incident = _record("warehouse_amr", "incident_record")
     assert incident.severity.value == export["incidents"][0]["severity"] == "S3"
     envelope = _record("warehouse_amr", "authorisation_envelope")
-    limit = envelope.zones[0].speed_limit
+    limit = envelope.zones.value[0].speed_limit
     assert (limit.value.value, limit.unit.value.symbol) == (1.5, "m.s^-1")  # as declared, m/s
     occurred = calendar.timegm((2026, 9, 24, 18, 12, 0, 0, 0, 0))  # 04:12 at +10:00
     assert incident.occurred.value.ticks == occurred
     cell = json.loads(source_files("manipulator_cell")["records.json"])
     risk = _record("manipulator_cell", "risk_assessment")
     hazard = cell["risk_assessment"]["hazards"][0]
-    assert [(s.name, s.value.value) for s in risk.hazards[0].scores] == [
+    assert [(s.name, s.value.value) for s in risk.hazards.value[0].scores.value] == [
         (name, hazard[name]) for name in ("severity", "exposure", "avoidance", "PLr")
     ]

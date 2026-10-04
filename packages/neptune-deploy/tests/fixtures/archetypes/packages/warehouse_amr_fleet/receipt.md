@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:5f304db8596f01a068d2f3b50ad6c291af514a7a4c8f3bd747389381c6de383f`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:e34494dcbbc8dbb300944705d1c86eb5ab122a0a65f343e221e895843c9e0ba1`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -52,7 +52,7 @@ Receipt `rec:sha256:5f304db8596f01a068d2f3b50ad6c291af514a7a4c8f3bd747389381c6de
 | `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:a4c22d1acf45` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
 | `neptune.plugins` | `0.1.0` | `sha256:44136fa355b3` | neptune-deploy 0.0.1 | `rec:c97e34263879` |
-| `neptune.validate` | `0.1.0` | `sha256:0a0d08ccf4b7` | none | `rec:c712df3eb7ab` |
+| `neptune.validate` | `0.2.0` | `sha256:e29ee45e7bd8` | none | `rec:cc0ca8e2997c` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
 | `rosbag2` | `0.2.0` | `sha256:6407455961dc` | none | `rec:4df8cd116009` |
 | `tabular` | `0.2.0` | `sha256:f3ca9581546a` | pyarrow 25.0.1 | `rec:a849dd895889` |
@@ -146,7 +146,7 @@ Receipt `rec:sha256:5f304db8596f01a068d2f3b50ad6c291af514a7a4c8f3bd747389381c6de
 - **warning** `neptune.introspection.definition_unreadable` (unsupported): the stream's definition cannot be used: the definition is not one byte range · `rec:1c4eb3c5948e`
 - **warning** `neptune.introspection.definition_unreadable` (unsupported): the stream's definition cannot be used: the definition is not one byte range · `rec:331368f51f35`
 - **warning** `neptune.introspection.definition_unreadable` (unsupported): the stream's definition cannot be used: the definition is not one byte range · `rec:ba0b6d23c6ac`
-- **warning** `neptune.validate.source_incomplete` (corrupt): source sha256:9ce9e303f7db is incomplete: 2 findings report cut-off or corrupt bytes; 9 records hold what was read · `rec:0ea7c84d76ef`
+- **warning** `neptune.validate.source_incomplete` (corrupt): source sha256:9ce9e303f7db is incomplete: 2 findings report cut-off or corrupt bytes; 9 records hold what was read · `rec:16539d470a56`
 - **info** `geojson.crs_legacy` (inconsistent): the file states CRS local:site-grid-m in a crs member, which RFC 7946 removed · `rec:b14603956bb4`
 - **info** `geojson.crs_legacy` (inconsistent): the file states CRS local:site-grid-m in a crs member, which RFC 7946 removed · `rec:e36dbe8c6388`
 - **info** `mcap.payload_not_decoded` (unsupported): channel 3's message payloads are not decoded (message encoding 'json' is not ROS 1 or CDR); each row cites its message · `rec:281ba9763a3a`
