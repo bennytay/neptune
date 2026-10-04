@@ -42,18 +42,20 @@ that no package records (root ADR 0010).
 2. **Resolution to bytes.** `EvidenceResolver.resolve(ref, as_of)` calls the catalog's
    `resolve`. It then tries each route of `fetch` in registration order. Within a referenced
    route, it tries each stated location in each source store, in order.
-   - A **materialised** source is the package's `blobs/sha256/..` object, read through the
-     package's `ObjectStore` (`locate`, ADR 0013 §2).
+   - A **materialised** source is the package's `blobs/sha256/..` object (the catalog's stated
+     `blob_path`), read through the package's `ObjectStore` (`locate`, ADR 0013 §2).
    - A **referenced** source is a `local` or `local_raw` location: a root-relative path. It is
      looked up in the deployment's `SourceStore`s for that package
      (`source_roots(package_id, root_locator)`, the ADR 0007 interface). The default is none,
      so a referenced source is unavailable until a deployment says where its ingest roots
      are. Another kind of location (an external object) is reached by its connector, not by
      the Ledger.
-   - The first object with the source's stated size is the **route**. The locator is parsed
-     strictly by the compiler's step reader. A leading `byte_range` is the **span** of stored
-     bytes; any other step 0 means the whole source. The remaining steps are **inner**. A span
-     past the source's size is refused.
+   - The first object with the source's stated size is the **route**. Every later object of
+     that size, under the same chunk ids, is a fallback: a chunk is read from the first copy
+     whose bytes still hash to it, so one edited copy never hides an intact one.
+   - The locator is parsed strictly by the compiler's step reader. A leading `byte_range` is
+     the **span** of stored bytes; any other step 0 means the whole source. The remaining
+     steps are **inner**. A span past the source's size is refused.
    - Status is one of four:
      - `resolved`: `open()` reads the span;
      - `unavailable`: no route has the bytes (moved, removed or resized);
