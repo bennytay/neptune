@@ -14,10 +14,11 @@ clock. Intervals on another clock are returned only when the caller names that c
 refused, never answered by comparing ticks of two clocks. Ticks are never converted.
 """
 
+import hashlib
 import os
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Final, Literal
+from typing import Any, BinaryIO, Final, Literal
 
 import psycopg
 import pyarrow as pa
@@ -48,8 +49,10 @@ from neptune_ledger.threads.merge import (
 Conn = psycopg.Connection[tuple[Any, ...]]
 Subject = Literal["record", "series"]
 
-# Rows per batch when a series file's clock columns are read at registration.
+# Rows per batch when a series file's clock columns are read at registration, and bytes per read
+# when it is hashed first.
 READ_ROWS: Final = 65_536
+HASH_CHUNK: Final = 1 << 20
 
 # The rows of one clock whose stated extent [first, last or first] meets [lo, hi], at a catalog
 # point: one R-tree search inside the clock's entries (``span``, migration 0010), then the exact
@@ -100,20 +103,28 @@ def record_intervals(records: Iterable[Any]) -> tuple[IntervalRow, ...]:
 def series_intervals(root_fd: int, package: IngestPackage) -> tuple[IntervalRow, ...]:
     """The per-clock intervals of a verified package's series files, read from ``root_fd``.
 
-    Each file is opened below the package root without following a link (ADR 0006 §3), and only
-    its ``time/<i>`` columns are read. A clock with no known tick in the file has no interval.
-    Raises ``OSError``, ``ValueError``, ``KeyError`` or ``pyarrow.ArrowException`` when a file
-    cannot be read as the stream's series.
+    Each file is opened once below the package root without following a link (ADR 0006 §3).
+    Through that one descriptor it is hashed against the manifest, then only its ``time/<i>``
+    columns are read, and its inode must not change meanwhile (size, mtime and ctime), so the
+    rows come from the bytes the package id names and a rebuild reads the same. A clock with no
+    known tick in the file has no interval. Raises ``OSError``, ``ValueError``, ``KeyError`` or
+    ``pyarrow.ArrowException`` when a file cannot be read as the stream's verified series.
     """
     streams = {r.id: r for r in package.records if isinstance(r, Stream)}
+    listed = {f.path: f for f in package.manifest.files}
     out: list[IntervalRow] = []
     for stream_id in sorted(package.series):
         stream = streams[stream_id]
+        path = series_path(stream_id)
         names = [time_column(i) for i in range(len(stream.clocks))]
         spans: list[tuple[int, int] | None] = [None] * len(names)
         known = [0] * len(names)
         unknown = [0] * len(names)
-        with os.fdopen(open_below(root_fd, series_path(stream_id)), "rb") as handle:
+        with os.fdopen(open_below(root_fd, path), "rb") as handle:
+            before = _identity(os.fstat(handle.fileno()))
+            if _digest(handle) != listed[path].sha256 or before[0] != listed[path].size:
+                raise ValueError(f"{path} no longer holds the bytes the manifest lists")
+            handle.seek(0)
             parquet = pq.ParquetFile(handle)
             for batch in parquet.iter_batches(batch_size=READ_ROWS, columns=names):
                 for i, name in enumerate(names):
@@ -131,6 +142,8 @@ def series_intervals(root_fd: int, package: IngestPackage) -> tuple[IntervalRow,
                     spans[i] = (
                         (low, high) if span is None else (min(span[0], low), max(span[1], high))
                     )
+            if _identity(os.fstat(handle.fileno())) != before:
+                raise ValueError(f"{path} changed while its clock columns were read")
         for i, clock in enumerate(stream.clocks):
             span = spans[i]
             if span is not None:
@@ -140,6 +153,18 @@ def series_intervals(root_fd: int, package: IngestPackage) -> tuple[IntervalRow,
                     )
                 )
     return tuple(sorted(out, key=_row_key))
+
+
+def _identity(stat: os.stat_result) -> tuple[int, int, int, int, int]:
+    """What changes when a file's bytes do: ctime moves on any write, and cannot be set."""
+    return stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino, stat.st_dev
+
+
+def _digest(handle: BinaryIO) -> str:
+    sha = hashlib.sha256()
+    while chunk := handle.read(HASH_CHUNK):
+        sha.update(chunk)
+    return "sha256:" + sha.hexdigest()
 
 
 def _row_key(row: IntervalRow) -> tuple[str, str, str]:
@@ -197,7 +222,7 @@ class WindowResult:
 
 
 class TooMany(Exception):
-    """More than ``cap`` intervals on ``clock`` meet the lookup: the request is refused."""
+    """More than ``cap`` candidate intervals, the last lookup's on ``clock``: refused."""
 
     def __init__(self, clock: str, cap: int) -> None:
         super().__init__(clock, cap)
@@ -220,7 +245,7 @@ def read_window(
     request was refused otherwise). Each clock is one index lookup: the window itself on its own
     clock, and on another clock the native range ``IntervalMapper.candidates`` bounds; each
     candidate is then carried through its best usable path and kept if it meets the window.
-    Raises ``TooMany`` when a lookup finds more than ``cap`` intervals.
+    Raises ``TooMany`` when the lookups find more than ``cap`` candidate intervals in all.
     """
     mapper = IntervalMapper(window.clock, mappings)
     findings = [
@@ -232,13 +257,16 @@ def read_window(
         for m in mapper.unusable
     ]
     keyed: list[tuple[tuple[Any, ...], IntervalEntry]] = []
+    used = 0  # candidates read so far: ``cap`` bounds them across every clock of the request
     for clock in (window.clock, *clocks):
         bounds = mapper.candidates(clock, window.first, window.last)
         lo, hi = bounds if bounds is not None else (INT64_MIN, INT64_MAX)
         lo, hi = max(lo, INT64_MIN), min(hi, INT64_MAX)
         if lo > hi:  # no int64 tick on this clock can be carried into the window
             continue
-        for entry in _lookup(conn, tenant, clock, lo, hi, limit, cap):
+        found = _lookup(conn, tenant, clock, lo, hi, limit, cap - used)
+        used += len(found)
+        for entry in found:
             if clock == window.clock:
                 keyed.append((_merged_key(entry.first, entry.end, entry), entry))
                 continue

@@ -14,6 +14,7 @@ from bisect import bisect_right
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
+from functools import cached_property
 from typing import Final
 
 from neptune_ledger.api.types import (
@@ -434,8 +435,12 @@ class IntervalMapper:
             )
         )
         self._edges = _edges(mappings)
-        self._index = _index(self._edges)
         self._budget = _Budget(MAX_MERGE_STEPS)
+
+    @cached_property
+    def _index(self) -> dict[str, _Outgoing]:
+        """The stabbing index ``map`` searches, built on first use: ``reaches`` needs none."""
+        return _index(self._edges)
 
     def reaches(self, clock: str) -> bool:
         """Whether a path of usable mappings joins ``clock`` to the reference, windows aside."""

@@ -251,7 +251,13 @@ class PostgresCatalog:
         unread: CatalogFinding | None = None
         try:
             checked = check_package(root_fd, "register")
-            if not checked.findings and checked.package is not None:
+            wanted = expected is None or checked.package_id == expected
+            if (
+                not checked.findings
+                and checked.package is not None
+                and wanted
+                and not self._holds(str(checked.package_id))
+            ):
                 try:  # while the root is open: the series files just verified (ADR 0015 §2)
                     series = series_intervals(root_fd, checked.package)
                 except (OSError, ValueError, KeyError, pa.ArrowException) as exc:
@@ -261,12 +267,12 @@ class PostgresCatalog:
             os.close(root_fd)
         if checked.findings:
             return self._refusal(root, checked, list(checked.findings))
-        if unread is not None:
-            return self._refusal(root, checked, [unread])
         if expected is not None and checked.package_id != expected:
             detail = f"it hashes to {checked.package_id}, not the logged package {expected}"
             finding = CatalogFinding("manifest_digest_mismatch", MANIFEST, detail)
             return self._refusal(root, checked, [finding])
+        if unread is not None:
+            return self._refusal(root, checked, [unread])
         try:
             rows = package_rows(str(checked.package_id), checked.manifest, checked.lines)
         except UnindexedVersion as exc:
@@ -281,11 +287,8 @@ class PostgresCatalog:
         except MembershipError as exc:  # a thread key the catalog API cannot express
             finding = CatalogFinding("record_invalid", exc.record_id, exc.detail)
             return self._refusal(root, checked, [finding])
-        try:
-            extents = extent_rows(checked.lines)
-        except (TypeError, ValueError, KeyError) as exc:  # the compiler's readers accepted it
-            finding = CatalogFinding("record_invalid", str(checked.package_id), str(exc)[:500])
-            return self._refusal(root, checked, [finding])
+        assert checked.package is not None  # every check passed
+        extents = extent_rows(checked.package.records)
         indexes = Indexes((*record_intervals(rows.records), *series), extents)
         try:
             outcome, key, locator, version = self._run(
@@ -304,6 +307,17 @@ class PostgresCatalog:
             record_counts=_counts(checked),
             findings=(),
         )
+
+    def _holds(self, package_id: str) -> bool:
+        """Whether the package is already registered: its series need not be read again, since
+        ``_write`` then writes nothing. A registration racing this one still serialises there."""
+        row = self._run(
+            lambda conn: conn.execute(
+                "SELECT 1 FROM package WHERE tenant_id = %s AND package_id = %s",
+                (self._tenant, package_id),
+            ).fetchone()
+        )
+        return row is not None
 
     def _inside_roots(self, resolved: str) -> bool:
         """ADR 0006 §3: inside a tenant root, both fully resolved, compared by path components."""

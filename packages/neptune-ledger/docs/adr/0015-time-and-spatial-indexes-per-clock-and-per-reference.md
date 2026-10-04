@@ -94,11 +94,14 @@ the other way, every lookup scans every interval or extent of the tenant.
    entries. Ticks become float8 in the key only. Rounding never reverses an order, so the key
    keeps every row the exact test can keep, and the bigint ticks and the stored text decide. A
    B-tree on `(reference_kind, reference, unit)` serves `unplaced`.
-7. **Bounded work.** A request names at most 64 clocks and 256 mappings. An answer holds at most
-   `max_entries` entries per lookup: 10 000 by default, at most 100 000. A lookup asks for one
-   row more. If it gets it, the request is refused as `invalid_request` with the clock or `box`
-   it exceeded, so an answer is all of its rows or none, never a prefix that depends on the
-   engine's scan order. The path search shares ADR 0010 §6's step budgets. A malformed request
+7. **Bounded work.** A request names at most 64 clocks and 256 mappings. `max_entries` (10 000
+   by default, at most 100 000) bounds the rows a request reads: a window's candidates summed
+   over all its clocks, and each of a box's two lists. Each lookup asks for one row more than is
+   left. If it gets it, the request is refused as `invalid_request`, naming the clock or `box`.
+   So an answer holds all of its rows or none, never a prefix that depends on the engine's scan
+   order. On another clock the candidates are the native ticks any named path could carry into
+   the window, so wide bounds count rows that will not be placed; past 256 paths the candidates
+   are the whole clock. The path search shares ADR 0010 §6's step budgets. A malformed request
    (a window that is not a `TimeWindow` of int64 ticks, ids that are not record ids, a box that
    is not finite, `low <= high` on two or three axes) is a refusal, never an exception. A store
    failure is `CatalogUnavailable`.
@@ -131,8 +134,10 @@ the other way, every lookup scans every interval or extent of the tenant.
 - "What exists on clock C" and "what lies in this box of frame F" are one index search each,
   for records and series files alike, at any catalog point. Cross-clock answers exist only with
   named mappings and carry their path.
-- Registration reads each series file's clock columns once more after verifying it: linear in
-  its rows. The spatial rows come from the record lines registration already reads.
+- Registration reads each new package's series files once more: it hashes each through one
+  descriptor and reads its clock columns, so the rows match the bytes the package id names.
+  This is linear in the file. An already registered package is not read again. The spatial
+  rows come from the records registration already parsed.
 - Two more append-only tables, rebuilt and dumped with the rest. Migration 0010 refuses a
   catalog that already holds packages.
 - ADR 0013 left two things to this issue. The file-level time index is `subject = 'series'`: it

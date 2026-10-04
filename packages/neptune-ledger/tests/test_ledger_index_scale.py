@@ -17,7 +17,6 @@ import psycopg
 
 from ledger_index_packages import child_frame, drone, one_of, ticks_batch, urdf
 from ledger_series_packages import read
-from neptune.identity import canonical_json
 from neptune.model.run import Stream
 from neptune.store.package import package_contents, write_package
 from neptune.store.series import SERIES_SETTINGS, write_series
@@ -45,9 +44,8 @@ def _best(run: Callable[[], object], times: int = 3) -> float:
 
 def test_extent_rows_grow_linearly_with_the_records() -> None:
     camera = one_of(urdf(), "frame_transform", lambda r: child_frame(r) == "front_camera")
-    line = canonical_json.dumps(camera)
-    small = {"frame_transform": (line,) * 5_000}
-    large = {"frame_transform": (line,) * 20_000}
+    record = read(camera)
+    small, large = (record,) * 5_000, (record,) * 20_000
     assert len(extent_rows(large)) == 4 * len(extent_rows(small)) == 40_000
     ratio = _best(lambda: extent_rows(large)) / _best(lambda: extent_rows(small))
     assert ratio < 8, f"4x the records took {ratio:.1f}x the time"

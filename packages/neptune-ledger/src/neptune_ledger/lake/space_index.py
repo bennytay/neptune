@@ -23,7 +23,7 @@ named reference and one named unit; members of that reference it cannot compare 
 unplaced, each with the reason, never dropped and never guessed into the box.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
@@ -31,7 +31,6 @@ import psycopg
 
 from neptune.identity import canonical_json
 from neptune.model.frames import FrameRef, HomogeneousMatrix, MatrixLayout, Pose, TransformDirection
-from neptune.model.kinds import RECORD_KINDS
 from neptune.model.knowledge import Knowledge, Known
 from neptune.model.spatial import CrsCode, GeodeticPosition
 from neptune_ledger.api.types import CatalogFinding, TransactionKey
@@ -74,14 +73,15 @@ class ExtentRow:
     high: tuple[float, ...] | None = None
 
 
-def extent_rows(lines: Mapping[str, Sequence[bytes]]) -> tuple[ExtentRow, ...]:
-    """The rows of a package's verified record lines, sorted by record id and pointer."""
+def extent_rows(records: Iterable[Any]) -> tuple[ExtentRow, ...]:
+    """The rows of a verified package's records (the compiler's model objects, as
+    ``IngestPackage.records`` holds them), sorted by record id and pointer."""
     out: list[ExtentRow] = []
-    for kind in SPATIAL_KINDS:
-        _, read = RECORD_KINDS[kind]
-        for line in lines.get(kind, ()):
-            out.extend(_rows(kind, read(canonical_json.loads(line))))
-    return tuple(sorted(out, key=lambda r: (r.record_id, r.pointer)))
+    for record in records:
+        kind = getattr(record, "kind", None)
+        if kind in SPATIAL_KINDS:
+            out.extend(_rows(kind, record))
+    return tuple(sorted(out, key=lambda r: (r.record_id.encode("utf-8"), r.pointer)))
 
 
 def _rows(kind: str, record: Any) -> list[ExtentRow]:
