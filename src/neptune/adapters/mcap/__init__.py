@@ -26,6 +26,7 @@ from typing import Final
 
 from neptune.adapters.contract import (
     ABI_VERSION,
+    ChunkExtent,
     SIGNATURE,
     VERIFIED,
     AdapterConfig,
@@ -285,6 +286,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         " from a length the file states without that check.",
         "zstd and lz4 frames are decoded by the zstandard and lz4 libraries inside the sandbox.",
     ),
+    extent=ChunkExtent(),  # data chunks name their [start, end) bytes (ADR 0069)
 )
 
 

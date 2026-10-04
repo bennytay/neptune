@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Final
 
 from neptune.adapters.contract import (
     ABI_VERSION,
+    ChunkExtent,
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
@@ -269,6 +270,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         " forward pass; a problem met many times is one finding, never one per message.",
         "No decompression, no native code, no network; the standard library's struct only.",
     ),
+    extent=ChunkExtent(),  # data chunks name their [start, end) bytes (ADR 0069)
 )
 
 

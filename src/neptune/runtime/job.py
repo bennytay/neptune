@@ -71,6 +71,7 @@ from neptune.adapters.contract import (
     ProbeHints,
     ProbeResult,
     ScratchUnavailableError,
+    chunk_extent,
     chunk_from_json,
     configure,
 )
@@ -290,6 +291,7 @@ class _Source:
     chunks: tuple[Chunk, ...] = ()
     planned: bool = False
     quarantined: list[str] = field(default_factory=list)  # the codes of its runtime findings
+    lost: dict[str, lineage.Lost] = field(default_factory=dict)  # chunks failed for good, by id
     replaced: ContentId | None = None  # bytes a location of it held before, if any
     plan_cache: PlanCache | None = None  # set once the job decides to plan or reuse
     hits: set[str] = field(default_factory=set)  # chunks the workspace had committed
@@ -307,6 +309,22 @@ class _Source:
     def key(self) -> tuple[ContentId, RecordId]:
         assert self.config is not None  # only selected sources have a key
         return (self.content_id, self.config.transform.id)
+
+    def extent(self, chunk: Chunk) -> lineage.Extent | None:
+        """The bytes ``chunk`` decodes, as its adapter's ``ChunkExtent`` names them (ADR 0069).
+
+        Read from the plan's context, so a kept plan answers as a fresh one does. ``None`` if the
+        adapter names none, or the context does not hold a well-formed one.
+        """
+        assert self.adapter is not None
+        try:
+            return chunk_extent(self.adapter.descriptor.extent, chunk, self.artifact.size)
+        except ContractError:
+            return None
+
+    def kept(self) -> tuple[Chunk, ...]:
+        """The planned chunks not lost: what a package holds of this source."""
+        return tuple(chunk for chunk in self.chunks if chunk.id not in self.lost)
 
 
 class _Opener:
@@ -932,6 +950,12 @@ class IngestJob:
         self._record(finding)
         source.quarantined.append(finding.code)
 
+    def _lose(self, source: _Source, chunk: Chunk, finding: IngestFinding) -> None:
+        """A runtime finding about one chunk of ``source``: its output leaves this package, and
+        ``assemble`` decides whether the rest of the source can stand without it (ADR 0069)."""
+        self._record(finding)
+        source.lost[chunk.id] = lineage.Lost(chunk.id, finding.code, source.extent(chunk))
+
     def _skip(self, entry: SkippedEntry) -> None:
         """A walk entry that was not read: discovery's finding says why; this is its event."""
         location = local_location(entry.raw_path)
@@ -1507,7 +1531,8 @@ class IngestJob:
         chunk: Chunk | None,
         attempts: int,
     ) -> None:
-        """A sandboxed ``plan`` or ``ingest`` died or was stopped: quarantine its source."""
+        """A sandboxed ``plan`` or ``ingest`` died or was stopped: quarantine its source, or for
+        ``ingest``, lose the chunk (ADR 0069)."""
         assert item.adapter is not None
         descriptor = item.adapter.descriptor
         common = (
@@ -1519,11 +1544,17 @@ class IngestJob:
             step,
             None if chunk is None else chunk.id,
         )
+        extent = None if chunk is None else item.extent(chunk)
         if isinstance(outcome, Crashed):
-            finding = lineage.adapter_crashed(*common, outcome.cause(), attempts)
+            finding = lineage.adapter_crashed(*common, outcome.cause(), attempts, extent=extent)
         else:
-            finding = lineage.limit_exceeded(*common, str(outcome.limit), outcome.value)
-        self._quarantine(item, finding)
+            finding = lineage.limit_exceeded(
+                *common, str(outcome.limit), outcome.value, extent=extent
+            )
+        if chunk is None:
+            self._quarantine(item, finding)
+        else:
+            self._lose(item, chunk, finding)
         details: dict[str, JsonValue] = {
             "adapter": descriptor.id,
             "source": item.content_id,
@@ -1578,13 +1609,9 @@ class IngestJob:
                     parsed = self._parse(item, reader, chunk)
                     if parsed is None:
                         failed += 1
-                        if item.quarantined and item.quarantined[-1] in (
-                            lineage.SOURCE_CHANGED,
-                            lineage.SOURCE_UNREADABLE,
-                            SHORT_READ,
-                        ):
+                        if item.quarantined:  # changed, unreadable or read short
                             break  # nothing more of this source can be read
-                        continue
+                        continue  # a lost chunk: the source's other chunks still run
                     output, attempt = parsed
                     if self._normalize(item, reader, chunk, output, attempt):
                         committed += 1
@@ -1658,8 +1685,9 @@ class IngestJob:
     def _fail_chunk(self, item: _Source, chunk: Chunk, attempts: int, failure: Failure) -> None:
         assert item.adapter is not None
         descriptor = item.adapter.descriptor
-        self._quarantine(
+        self._lose(
             item,
+            chunk,
             lineage.chunk_failed(
                 self.transform,
                 item.content_id,
@@ -1669,6 +1697,7 @@ class IngestJob:
                 chunk.id,
                 attempts,
                 failure,
+                extent=item.extent(chunk),
             ),
         )
         self._emit(
