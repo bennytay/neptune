@@ -906,3 +906,55 @@ def test_calibration_rules_scale_n_log_n_on_hostile_counts(tmp_path: Path, name:
         )
         assert all(len(f.records) <= Bounds().records_per_finding for f in report.findings)
     assert seconds[1] / seconds[0] <= 5.5, seconds
+
+
+def _config_package(directory: Path, drop: Iterable[str]) -> IngestPackage:
+    """A robot controller's config read by the config adapter, without the records ``drop``
+    picks by kind or id: what a package with a dangling reference would hold."""
+    from neptune.adapters.config import ConfigAdapter
+    from neptune.adapters.harness import ingest_source
+    from neptune.discovery.reader import BytesReader
+
+    data = b'{"arm": {"joint_1_max_rad": 2.9, "joint_1_max_rad": 3.1}, "payload_kg": 5}\n'
+    output = ingest_source(ConfigAdapter(chunk_values=1), BytesReader(data))
+    ledger = SourceLedger()
+    ledger.observe(LocalPath("controller.json"), digest_stream(io.BytesIO(data)))
+    gone = set(drop)
+    every: list[Any] = [r for o in output.outputs for r in (*o.records, *o.findings)]
+    kept = [r for r in every if r.kind not in gone and r.id not in gone]
+    records = [*ledger.artifacts(), *ledger.revisions(), output.config.transform, *kept]
+    directory.mkdir(parents=True, exist_ok=True)
+    write_package(directory / "package", package_contents(records))
+    return read_package(directory / "package")
+
+
+def test_a_value_naming_a_snapshot_the_package_lacks(tmp_path: Path) -> None:
+    package = _config_package(tmp_path, ["configuration_snapshot"])
+    (finding,) = [
+        f for f in validate_package(package).findings if f.code.endswith("dangling_reference")
+    ]
+    assert (finding.details["kind"], finding.details["field"]) == (
+        "configuration_value",
+        "snapshot",
+    )
+    assert finding.details["target_kind"] == "configuration_snapshot"
+
+
+def test_a_finding_naming_a_record_the_package_lacks(tmp_path: Path) -> None:
+    whole = _config_package(tmp_path / "whole", [])
+    assert not [
+        f for f in validate_package(whole).findings if f.code.endswith("dangling_reference")
+    ]
+    (duplicate,) = [r for r in whole.records if getattr(r, "code", "") == "config.duplicate_key"]
+    lost = duplicate.records[-1]
+    package = _config_package(tmp_path / "part", [lost])
+    (finding,) = [
+        f for f in validate_package(package).findings if f.code.endswith("dangling_reference")
+    ]
+    assert finding.details == {
+        "field": "records",
+        "kind": "ingest_finding",
+        "rule": "neptune.validate.dangling_reference/2",
+        "target": lost,
+    }
+    assert finding.records == (duplicate.id,)

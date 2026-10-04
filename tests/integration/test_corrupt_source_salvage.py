@@ -16,6 +16,7 @@ from typing import Any, Final
 import pytest
 
 from neptune.adapters.builtin import builtin_adapters
+from neptune.adapters.config import ConfigAdapter
 from neptune.adapters.contract import (
     Adapter,
     AdapterConfig,
@@ -228,10 +229,79 @@ def test_a_lost_table_that_kept_records_name_refuses_the_salvage(tmp_path: Path)
     root = corpus(tmp_path, ("ardupilot/copter.bin", "rover.bin"))
     run = Run(root, tmp_path, registry(FailOn(adapter, lambda c: c.id == middle.id)))
     problems = run.only(REFUSED).details["problems"]
-    assert [(p["law"], p["target_kind"]) for p in problems] == [
-        ("reference_lost", "structured_table")
+    assert [(p["law"], p["kind"], p["field"]) for p in problems] == [
+        ("reference_lost", "structured_record", "table")
     ]
     assert len(run.ingested()) == 2
+
+
+# A robot's controller config with a key given twice: values in chunks of two, the snapshot and
+# the duplicate-key finding (naming both values) in the first chunk.
+CONFIG: Final = (
+    b'{"arm": {"joint_1_max_rad": 2.9, "joint_2_max_rad": 1.7, "joint_1_max_rad": 3.1},'
+    b' "base": {"speed_max_mps": 1.2}, "mode": "collaborative", "payload_kg": 5}\n'
+)
+
+
+def config_salvage(tmp_path: Path, lose: Callable[[Chunk], bool]) -> Run:
+    """The config adapter, two values a chunk, with the chunks ``lose`` picks lost."""
+    adapter = ConfigAdapter(chunk_values=2)
+    chunks = chunks_of(adapter, CONFIG)
+    assert any(lose(c) for c in chunks), "the test picked no chunk to lose"
+    root = tmp_path / "site"
+    root.mkdir()
+    shutil.copy(FIXTURES / "text" / "notes.txt", root / "notes.txt")
+    (root / "controller.json").write_bytes(CONFIG)
+    return Run(root, tmp_path, registry(FailOn(adapter, lose)))
+
+
+def test_values_whose_snapshot_was_lost_refuse_the_salvage(tmp_path: Path) -> None:
+    """Every value names its snapshot, which only the first chunk holds: refused, never values
+    pointing at a snapshot the package lacks (ADR 0069 §2)."""
+    run = config_salvage(tmp_path, lambda chunk: chunk.context.get("start") == 0)
+    refused = run.only(REFUSED)
+    laws = {(p["law"], p["kind"], p["field"]) for p in refused.details["problems"]}
+    assert laws == {("reference_lost", "configuration_value", "snapshot")}
+    assert len(refused.details["problems"]) == 1  # one per target: the snapshot
+    assert not [f for f in run.outcome.findings if f.code == PARTIAL]
+    assert len(run.ingested()) == 1  # the note
+
+
+def test_a_kept_finding_naming_a_lost_value_refuses_the_salvage(tmp_path: Path) -> None:
+    """The duplicate-key finding, kept in the first chunk, names a value only a later chunk
+    holds: losing that chunk would leave the finding's ``records`` dangling, so it is refused."""
+    adapter = ConfigAdapter(chunk_values=2)
+    reader, config = BytesReader(CONFIG), configure(adapter.descriptor, None)
+    chunks = adapter.plan(reader, config).chunks
+    outputs = [adapter.ingest(reader, c, config) for c in chunks]
+    (duplicate,) = [f for o in outputs for f in o.findings if f.code == "config.duplicate_key"]
+    holders = [
+        c.id
+        for c, o in zip(chunks, outputs, strict=True)
+        if c.context.get("start") != 0 and {r.id for r in o.records} & set(duplicate.records)
+    ]
+    assert holders, "the fixture needs a named value outside the first chunk"
+    run = config_salvage(tmp_path, lambda chunk: chunk.id == holders[0])
+    problems = run.only(REFUSED).details["problems"]
+    assert [(p["law"], p["kind"], p["field"]) for p in problems] == [
+        ("reference_lost", "ingest_finding", "records")
+    ]
+    assert problems[0]["record"] == duplicate.id
+    assert problems[0]["target"] in duplicate.records
+
+
+def test_losing_a_value_nothing_names_salvages_the_config(tmp_path: Path) -> None:
+    """The last chunk's values are named by nothing kept: the config lands without them."""
+    last = chunks_of(ConfigAdapter(chunk_values=2), CONFIG)[-1].context["start"]
+    run = config_salvage(tmp_path, lambda chunk: chunk.context.get("start") == last)
+    partial = run.only(PARTIAL)
+    assert partial.details["undeclared"] == 1  # values are not byte windows: no extent
+    assert len(run.ingested()) == 2
+    held = {getattr(r, "id", None) for r in run.package.records}
+    snapshots = [r for r in run.package.records if r.kind == "configuration_snapshot"]
+    assert snapshots and all(
+        r.snapshot in held for r in run.package.records if r.kind == "configuration_value"
+    )
 
 
 def test_a_source_that_loses_every_chunk_is_quarantined(tmp_path: Path) -> None:

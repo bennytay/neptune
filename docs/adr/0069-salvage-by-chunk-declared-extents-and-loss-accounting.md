@@ -44,15 +44,28 @@ the receipt states exactly what was lost.
      series derivative key names exactly those chunks). The job emits `source_salvaged`, not
      `source_admitted`, and records one `neptune.runtime.source_partial` finding;
    - nothing committed, or what committed breaks a law without the rest (rows of a stream
-     declared in a lost chunk, an output that says nothing, or `reference_lost`: a kept record
-     naming, in a field validation's `dangling_reference` rule checks, a record of the source no
-     kept chunk holds, such as a text block whose document was lost): the source is
+     declared in a lost chunk, an output that says nothing, or `reference_lost`): the source is
      **quarantined** with `neptune.runtime.salvage_refused`, naming the laws and the problems,
      or "every chunk was lost". `source_quarantined` then lists the lost chunks' codes beside it.
-   `reference_lost` applies to salvaged sources only: a whole source whose references dangle is an
-   adapter bug that validation reports, as before. A source that lost nothing is judged as before
-   (`output_invalid` if it breaks a law). There is no partial repair: the runtime never drops
-   records from a committed chunk to make the rest pass.
+
+   `reference_lost`: a kept record or finding names a record the kept chunks do not hold, such
+   as a text block whose document, a configuration value whose snapshot, or a finding whose
+   `records` was in a lost chunk. References are read from the model, not a hand list
+   (`runtime.references.named`): every field typed as a `RecordId`, alone, in a tuple, in a
+   `Knowledge`, or nested in a value such as a `Timestamp`'s `domain_id` or a `FrameRef`'s
+   `frame_graph_id`, and every finding's `records`; not a record's own `id`, its `provenance`,
+   or a finding's `transform`. Fields typed as data (cells, configuration values) are never read,
+   so text that looks like an id names nothing. One problem per target. It applies to salvaged
+   sources only: a whole source whose references dangle is an adapter bug that validation
+   reports, as before; validation's `dangling_reference` (rule version 2) now also checks a
+   value's snapshot and every finding's `records`. A source that lost nothing is judged as
+   before (`output_invalid` if it breaks a law).
+
+   **Refuse, never drop.** Such a source is refused, not admitted without the dangling records:
+   dropping them would edit committed chunks' output at assembly, a value without its snapshot
+   (or a finding without what it qualifies) is not evidence a reader can use, and the package
+   could no longer say which part of the source it holds by chunk. Adapters that keep what others
+   name (declarations, documents, snapshots, tables) in a chunk of their own keep salvage useful.
 3. **Exact byte extents are declared, not guessed.** `AdapterDescriptor.extent` (optional,
    `ChunkExtent(start="start", end="end")`) names the chunk-context keys holding the `[start,
    end)` source bytes a chunk decodes. A chunk with neither key (a declarations chunk, a whole

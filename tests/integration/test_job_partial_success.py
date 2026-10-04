@@ -838,11 +838,10 @@ def test_blocks_whose_document_was_lost_refuse_the_salvage(tmp_path: Path) -> No
     assert isinstance(problems, list) and len(problems) == 1  # one per target, not per block
     (problem,) = problems
     assert isinstance(problem, dict)
-    assert (problem["law"], problem["field"], problem["kind"], problem["target_kind"]) == (
+    assert (problem["law"], problem["field"], problem["kind"]) == (
         "reference_lost",
         "document",
         "document_block",
-        "document_record",
     )
     assert "(reference_lost)" in refused.message
     assert len(outcome.ingested) == 1  # the notes

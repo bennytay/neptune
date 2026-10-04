@@ -64,7 +64,7 @@ from datetime import UTC, datetime
 from functools import partial
 from itertools import pairwise
 from pathlib import Path
-from typing import BinaryIO, Final, Protocol, TypeAlias, TypeVar
+from typing import Any, BinaryIO, Final, Protocol, TypeAlias, TypeVar
 
 from neptune.adapters.check import check_chunk_output, check_plan
 from neptune.adapters.contract import (
@@ -133,7 +133,7 @@ from neptune.model.source import (
     SourceLocation,
     local_location,
 )
-from neptune.runtime import events, explain, lineage, sandbox, wire
+from neptune.runtime import events, explain, lineage, references, sandbox, wire
 from neptune.runtime.cache import (
     VERDICT_FILE,
     CacheReport,
@@ -188,7 +188,6 @@ from neptune.store.workspace import (
     WorkspaceError,
 )
 from neptune.validate import validate_package
-from neptune.validate.rules import references
 
 DEFAULT_ATTEMPTS: Final = 2
 ADAPTER_FAILED: Final = f"{PROBE_ID}.adapter_failed"
@@ -2238,11 +2237,12 @@ class IngestJob:
         are unique overall. Memory is one range per chunk, never one entry per row.
 
         Only the chunks ``item`` kept are judged: a salvaged source must stand without the ones
-        it lost (ADR 0069), so for one that lost chunks a kept record must not name a record of
-        the source that no kept chunk holds (``reference_lost``: a block whose document, a stream
-        whose run or clock, was in a lost chunk). One problem per target, so memory is one entry
-        per distinct target. Each problem is an object naming its ``Law`` and the ids it
-        concerns, never text.
+        it lost (ADR 0069), so for one that lost chunks no kept record or finding may name a
+        record the kept chunks do not hold (``reference_lost``: a block whose document, a value
+        whose snapshot, a finding whose ``records``, was in a lost chunk). References are every
+        field the model types as a record id (``runtime.references``), never a hand list. One
+        problem per target, so memory is one entry per distinct target. Each problem is an object
+        naming its ``Law`` and the ids it concerns, never text.
         """
         assert item.config is not None
         problems: list[JsonObject] = []
@@ -2251,6 +2251,18 @@ class IngestJob:
         streams: dict[RecordId, Stream] = {}
         runs: dict[RecordId, list[tuple[str, Path]]] = defaultdict(list)
         named: dict[str, JsonObject] = {}  # salvage only: each target a kept record names, once
+
+        def note(chunk: str | None, record: Any) -> None:
+            for field_name, target in references.named(record):
+                problem: JsonObject = {
+                    "field": field_name,
+                    "kind": record.kind,
+                    "law": str(Law.REFERENCE_LOST),
+                    "record": record.id,
+                    "target": target,
+                }
+                named.setdefault(target, problem if chunk is None else {**problem, "chunk": chunk})
+
         try:
             stored = self.workspace.load_plan(item.content_id, item.config.transform.id)
         except (WorkspaceError, ValueError, OSError) as exc:
@@ -2262,6 +2274,8 @@ class IngestJob:
         said_something = bool(stored.findings)
         for finding in stored.findings:
             finding_ids.add(finding.id)
+            if item.lost:
+                note(None, finding)
         for chunk in item.kept():
             try:
                 output = self.workspace.load(chunk.id)
@@ -2283,20 +2297,10 @@ class IngestJob:
                 if isinstance(record, Stream):
                     streams[record.id] = record
                 if item.lost:
-                    for field_name, target, target_kind in references(record):
-                        named.setdefault(
-                            target,
-                            {
-                                "chunk": chunk.id,
-                                "field": field_name,
-                                "kind": record.kind,
-                                "law": str(Law.REFERENCE_LOST),
-                                "record": record.id,
-                                "target": target,
-                                "target_kind": target_kind,
-                            },
-                        )
+                    note(chunk.id, record)
             for finding in output.findings:
+                if item.lost:
+                    note(chunk.id, finding)
                 if finding.id in finding_ids:
                     problems.append(
                         {
@@ -2310,7 +2314,13 @@ class IngestJob:
                 runs[stream].append((chunk.id, run))
         if not said_something:
             problems.append({"law": str(Law.OUTPUT_SILENT)})
-        problems.extend(named[target] for target in sorted(set(named) - set(record_ids)))
+        held = {
+            *record_ids,
+            *finding_ids,
+            item.config.transform.id,
+            *item.config.transform.upstream,
+        }
+        problems.extend(named[target] for target in sorted(set(named) - held))
         for stream in sorted(set(runs) - set(streams)):
             problems.append({"law": str(Law.STREAM_UNDECLARED), "stream": stream})
         for stream in sorted(set(streams) - set(runs)):

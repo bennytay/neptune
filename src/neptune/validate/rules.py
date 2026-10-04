@@ -330,6 +330,7 @@ def _timestamps(record: Any) -> Iterator[Timestamp]:
 # Fields holding the id of another record, and the kind that record must be.
 _REFERENCES: Final = (
     ("calibration", "extrinsics", "frame_transform"),
+    ("configuration_value", "snapshot", "configuration_snapshot"),
     ("document_block", "document", "document_record"),
     ("hardware_component", "configuration", "hardware_configuration"),
     ("stream", "clocks", "timestamp_domain"),
@@ -341,30 +342,25 @@ _REFERENCES: Final = (
 _TIMED: Final = ("calibration", "frame_transform", "image", "run", "video")
 
 
-def references(record: Any) -> Iterator[tuple[str, str, str]]:
-    """Every ``(field, target id, target kind)`` by which ``record`` names another record: the
-    fields ``_REFERENCES`` lists for its kind, and the clocks its own times lie on (``_TIMED``).
-    The runtime asks the same of a salvaged source's kept records (ADR 0069)."""
+def dangling_reference(context: Context) -> Iterator[Draft]:
+    """A record names another record (a run, a clock, a table, a snapshot) the package does not
+    hold; or a finding's ``records`` name one (version 2: snapshots and findings, ADR 0069)."""
+    missing: dict[tuple[str, str, str, str], list[Any]] = defaultdict(list)
+
+    def check(record: Any, field: str, target: str, kind: str) -> None:
+        held = context.by_id.get(target)
+        if held is None or held.kind != kind:
+            missing[record.kind, field, kind, target].append(record)
+
     for kind, field, target_kind in _REFERENCES:
-        if record.kind == kind:
+        for record in context.records(kind):
             value = getattr(record, field)
             for target in value if isinstance(value, tuple) else (value,):
-                yield field, target, target_kind
-    if record.kind in _TIMED:
-        for stamp in sorted({t.domain_id for t in _timestamps(record)}):
-            yield "timestamp", stamp, "timestamp_domain"
-
-
-def dangling_reference(context: Context) -> Iterator[Draft]:
-    """A record names another record (a run, a clock, a table) the package does not hold."""
-    missing: dict[tuple[str, str, str, str], list[Any]] = defaultdict(list)
-    kinds = {kind for kind, _, _ in _REFERENCES} | set(_TIMED)
-    for kind in sorted(kinds):
+                check(record, field, target, target_kind)
+    for kind in _TIMED:
         for record in context.records(kind):
-            for field, target, target_kind in references(record):
-                held = context.by_id.get(target)
-                if held is None or held.kind != target_kind:
-                    missing[record.kind, field, target_kind, target].append(record)
+            for stamp in sorted({t.domain_id for t in _timestamps(record)}):
+                check(record, "timestamp", stamp, "timestamp_domain")
     for (kind, field, target_kind, target), records in sorted(missing.items()):
         yield Draft(
             subject=evidence_of(records[0]),
@@ -373,6 +369,20 @@ def dangling_reference(context: Context) -> Iterator[Draft]:
             details={"field": field, "kind": kind, "target": target, "target_kind": target_kind},
             related=[evidence_of(r) for r in records[1:]],
             records=[r.id for r in records],
+        )
+    named: dict[str, list[IngestFinding]] = defaultdict(list)
+    for finding in context.findings:
+        for target in finding.records:
+            if target not in context.by_id:
+                named[target].append(finding)
+    for target, findings in sorted(named.items()):
+        yield Draft(
+            subject=findings[0].subject,
+            message=f"{plural(len(findings), 'finding')} name record {short(target)} in records,"
+            " which this package does not hold",
+            details={"field": "records", "kind": "ingest_finding", "target": target},
+            related=[f.subject for f in findings[1:] if isinstance(f.subject, EvidenceRef)],
+            records=[f.id for f in findings],
         )
 
 
@@ -636,8 +646,9 @@ RULES_ON: Final = (
     Rule("count_mismatch", 1, _C.INCONSISTENT, _W,
          "a stream's declared message count differs from the rows its series holds",
          count_mismatch),
-    Rule("dangling_reference", 1, _C.MISSING, _W,
-         "a record names a run, clock, table or configuration the package does not hold",
+    Rule("dangling_reference", 2, _C.MISSING, _W,
+         "a record names a run, clock, table, configuration or snapshot the package does not"
+         " hold, or a finding names a record it does not hold",
          dangling_reference),
     Rule("duplicate_id", 1, _C.AMBIGUOUS, _W,
          "one source states one logical id for two records of a kind", duplicate_id),
