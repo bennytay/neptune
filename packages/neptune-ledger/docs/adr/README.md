@@ -20,3 +20,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0011](0011-schema-version-registry-and-record-kinds-by-package-schema-version.md) | Schema-version registry: per-version projections, refusal of unknown versions, and record kinds by package-schema version | Accepted |
 | [0012](0012-rebuild-from-packages-registry-manifest-dump-and-replay.md) | Rebuild from packages: the registry manifest, a canonical dump, and a one-transaction replay | Accepted |
 | [0013](0013-lakehouse-layout-and-in-place-series-reads.md) | Lakehouse layout: packages read in place, a series catalog, and pushed-down window reads | Accepted |
+| [0014](0014-lance-media-store-and-evidence-resolution-to-bytes.md) | Lance media store: evidence references resolved to verified bytes, and lazy hydration | Accepted |

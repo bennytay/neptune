@@ -99,6 +99,29 @@ with both engines.
 scan into Arrow): `test_a_million_row_window_reads_under_200_ms` (`slow`). Measured: DuckDB about
 55 ms, DataFusion about 75 ms (ADR 0013 §6).
 
+## 3. Cited bytes are served verified, and media are derivatives that replace nothing
+
+**Statement.** An evidence reference resolves to the source's bytes through a registered
+package: its blob, or a stated location under an ingest root the deployment names. Every byte
+returned is hashed, chunk by chunk, against the chunk ids the package's `source_artifact`
+states, so a moved, removed, resized or same-size edited source is a finding (`file_missing`,
+`file_digest_mismatch`), never served. A read touches only the chunks it overlaps. Frames,
+image regions, pages, rows and values are extracted on request into the tenant's Lance media
+table, each row naming its evidence reference and its transform (decoder, decoder version,
+library versions). Two hydrations of one reference give equal rows and byte-identical
+artefacts, and a pinned media snapshot returns what it returned before. Hostile input (links,
+escaping paths, truncation, decompression and pixel bombs, aliases) is a finding
+([ADR 0014](adr/0014-lance-media-store-and-evidence-resolution-to-bytes.md)).
+
+**Held by.** `tests/test_ledger_media.py`:
+`test_every_worked_example_citation_resolves_to_its_bytes` resolves every citation of the four
+worked examples to its exact bytes and hydrates their pointers and rows;
+`test_a_frame_from_a_referenced_mcap_and_from_a_materialised_one`,
+`test_two_hydrations_are_byte_identical`, `test_a_snapshot_pins_what_a_hydration_returns`,
+`test_hydration_is_lazy_and_video_bytes_slice_by_range`,
+`test_a_moved_source_resolves_to_a_finding_not_a_crash`, `test_a_changed_source_is_never_served`
+and the hostile-input cases in the same file.
+
 ## Scale
 
 The catalog's query budget (ADR 0005 §5) re-measured with every record's stored body (ADR 0009 §1)

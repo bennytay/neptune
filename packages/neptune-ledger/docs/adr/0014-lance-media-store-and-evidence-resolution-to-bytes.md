@@ -1,7 +1,7 @@
 # 0014 — Lance media store: evidence references resolved to verified bytes, and lazy hydration
 
 - Status: Accepted
-- Date: 2026-10-03
+- Date: 2026-10-05
 - Issue: MVL-96
 - Amends: ADR 0013 §3 (`ObjectStore` gains `read_range`).
 
@@ -36,8 +36,9 @@ that no package records (root ADR 0010).
 
    None is a catalog-API call. `query` (MVL-98) and `access/` (MVL-99) decide the surface, so
    `contracts/` is unchanged, as in ADR 0013. The Ledger never imports the compiler's
-   adapters. It decodes with pinned libraries: `mcap`, `mcap-ros2-support`, `pillow`,
-   `pypdfium2`, `pyarrow` and `pyyaml`.
+   adapters. It decodes with pinned libraries: `mcap`, `mcap-ros2-support`, `lz4`,
+   `zstandard`, `pillow`, `pypdfium2`, `pyarrow` and `pyyaml`. No migration: nothing new is
+   stored in PostgreSQL.
 2. **Resolution to bytes.** `EvidenceResolver.resolve(ref, as_of)` calls the catalog's
    `resolve`. It then tries each route of `fetch` in registration order. Within a referenced
    route, it tries each stated location in each source store, in order.
@@ -60,7 +61,8 @@ that no package records (root ADR 0010).
      - `invalid`: the reference or `as_of` is outside the contract.
 3. **Reads are lazy and verified per chunk.** A `SourceReader` serves any range of the span.
    - It reads only the chunks the range overlaps, using `ObjectStore.read_range`, or a seek on
-     the `SourceStore`'s stream.
+     the `SourceStore`'s stream. The last chunk read is kept, so sequential reads hash each
+     chunk once. A nested `byte_range` (an archive member) narrows the reader and stays lazy.
    - It hashes each chunk against the chunk ids in the route package's `source_artifact`
      record, from the catalog's stored body (ADR 0009).
    - A chunk that differs is `file_digest_mismatch`, and one that has gone is `file_missing`.
@@ -73,11 +75,30 @@ that no package records (root ADR 0010).
    | Variant | Innermost step | Artefact |
    |---|---|---|
    | `bytes` | any | the span itself: no decode, no copy |
-   | `frame` | `record_range` | the one message in the range (MCAP, ROS 2 CDR `sensor_msgs/{Image,CompressedImage}`), as PNG |
+   | `frame` | `record_range` | the one message in the range (MCAP log time, ROS 2 CDR `sensor_msgs/{Image,CompressedImage}`), as PNG |
    | `image_region` | `image_region` | the box of a stored image, or of a frame (`[record_range, image_region]`), as PNG |
    | `page` | `page`, `page_region` | the page rendered by PDFium at 2 px/pt, or its box, as PNG |
    | `row` | `row`, `row_cell` | a CSV or Parquet row or cell as canonical JSON (a null is `{"null": true}`) |
-   | `value` | `json_pointer`, `span` | the JSON or YAML value as canonical JSON; a span's text as UTF-8 |
+   | `value` | `json_pointer`, `span` | a JSON value as canonical JSON; a YAML node as its own text; a span's text as UTF-8 |
+
+   - **Frames.** With an MCAP summary, only the chunks its index says overlap the range and
+     hold the channel are read; without one, the file is read through once. Chunks are
+     inflated here, never by the library: to exactly their stated size, which must not exceed
+     `max_decoded_bytes`, so a forged chunk header is `unsafe_entry`.
+   - **Tables as the compiler reads them.** A `row` counts records, the header included
+     (root ADR 0016). The CSV grammar and delimiter sniffing mirror the compiler's tabular
+     adapter (root ADR 0042): records end at an LF outside quotes, a blank line is not a
+     record, a leading BOM is skipped, and the delimiter is the one of `,`, tab, `;` that the
+     first 64 KiB agree on, else `,`. The artefact names the delimiter and whether it was
+     sniffed. A delimiter declared in the compiler's config (`csv_delimiter`) is not in the
+     citation, so the Ledger cannot know it; a `row_cell`'s stated column name catches most
+     such mismatches. A cell that is not UTF-8 is `{"hex": ...}`; bytes holding NUL are not a
+     table.
+   - **Pointers.** JSON is typed by its grammar, so a JSON value is re-encoded canonically. A
+     YAML scalar's type depends on the YAML version a reader assumes (`yes`, `0x10`), so a
+     YAML node is returned verbatim, from its first character to its last, with its resolved
+     tag in the metadata. Keys are matched by their text, as the compiler cites them. A key
+     held twice on the path is `invalid_request`: no silent choice of one.
 
    - **Inner steps.** Before each inner step, a gzip stream is decompressed, bounded by
      `Limits.max_decoded_bytes`. No other container is unwrapped. A nested `byte_range` must
@@ -96,7 +117,8 @@ that no package records (root ADR 0010).
      as missing and nothing outside a store is opened. A stated path that would escape is
      `unsafe_entry`.
    - Every library decoder runs inside `guarded`, so anything it raises on hostile bytes is
-     `undecodable` (root ADR 0029).
+     `undecodable` (root ADR 0029). One read of more than `max_decoded_bytes` through a span
+     (a forged length field) is `unsafe_entry`, before the bytes are fetched.
    - Bombs are `unsafe_entry`: gzip output and whole-scope reads above `max_decoded_bytes`
      (256 MiB), and rasters or page renders above `max_pixels` (64 M).
    - YAML is read with a safe loader that refuses aliases.
@@ -135,7 +157,9 @@ that no package records (root ADR 0010).
    - For an artefact, `read()` first looks the id up in the table. Only on a miss does it
      resolve, verify, decode and store.
    - Each write is a Lance version. `Artefact.snapshot` is the version it was read at.
-     `hydrate(..., snapshot=v)` reads only from version `v` and never extracts. Versions are
+     `hydrate(..., snapshot=v)` reads only from version `v` and never extracts; a `bytes`
+     hydration takes no snapshot (`invalid_request`). The catalog must resolve the reference
+     at `as_of` before anything is served, a stored artefact included. Versions are
      never cleaned up automatically (no `auto_cleanup`), so an extraction is reproducible for
      as long as an operator keeps the version.
    - Stored values hold no wall clock and no randomness, so two hydrations of one reference,
@@ -150,8 +174,10 @@ that no package records (root ADR 0010).
    - every citation in the four worked examples (drone, manipulator, mobile robot,
      quadruped) resolves to its exact bytes: `byte_range`, `json_pointer`, `row` and six
      adapter steps;
+   - every `json_pointer` and `row` citation in them hydrates, and each row holds the text the
+     compiler's record states for each known cell;
    - frames from a manipulator's referenced MCAP and a quadruped's materialised MCAP, checked
-     pixel by pixel;
+     pixel by pixel, and the same frame from zstd, lz4, unchunked and tar-nested recordings;
    - pages and page regions of a drone report, an image region of the mobile robot's photo,
      Parquet and CSV rows and cells, a span of a drone mission note, and archive members (plain
      and gzip) of a quadruped calibration tar;
@@ -159,8 +185,8 @@ that no package records (root ADR 0010).
      hydrations;
    - laziness, and one-chunk range reads of a video;
    - a moved source, a moved package, changed and resized sources, links, escaping paths,
-     truncated MCAP, gzip and pixel bombs, YAML aliases, and malformed requests: all
-     findings.
+     truncated MCAP, MCAP chunk, gzip and pixel bombs, YAML aliases, duplicate keys, and
+     malformed requests: all findings.
 
 ## Alternatives considered
 
@@ -191,8 +217,12 @@ that no package records (root ADR 0010).
 - Layers above get cited bytes, frames, pages, rows and values without parsing anything. Every
   artefact says what it came from and what made it.
 - The Ledger depends on `pylance` (with `numpy`, `pydantic` and others transitively), `mcap`,
-  `mcap-ros2-support`, `pillow` and `pypdfium2`, all pinned. A bump to any decoder library is a
-  new extraction lineage. mypy skips numpy's 3.12-syntax stubs.
+  `mcap-ros2-support`, `lz4`, `zstandard`, `pillow` and `pypdfium2`, all pinned. A bump to any
+  decoder library is a new extraction lineage. mypy skips numpy's 3.12-syntax stubs.
+- Decoders run in the Ledger's process. `guarded` turns a Python exception into a finding, but
+  a native crash in PDFium, Pillow or a decompressor on hostile bytes would end the process.
+  The sources were already ingested by the compiler in its sandbox. Revisit with a decoding
+  subprocess before `access/` (MVL-99) lets untrusted callers trigger hydrations.
 - Referenced sources need a deployment to name its ingest roots per package (`source_roots`).
   Until it does, they are `unavailable`. Recording ingest roots, or a registry of them, is for
   `access/` (MVL-99).
