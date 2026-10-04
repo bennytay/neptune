@@ -252,9 +252,9 @@ class PostgresCatalog:
         try:
             checked = check_package(root_fd, "register")
             if not checked.findings and checked.package is not None:
-                try:  # while the root is open: the series files just verified (ADR 0015 §1)
+                try:  # while the root is open: the series files just verified (ADR 0015 §2)
                     series = series_intervals(root_fd, checked.package)
-                except (OSError, ValueError, pa.ArrowException) as exc:
+                except (OSError, ValueError, KeyError, pa.ArrowException) as exc:
                     detail = f"a series file's clock columns cannot be read: {exc}"[:500]
                     unread = CatalogFinding("record_invalid", str(checked.package_id), detail)
         finally:

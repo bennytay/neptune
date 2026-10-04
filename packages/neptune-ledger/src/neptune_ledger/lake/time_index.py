@@ -1,4 +1,4 @@
-"""The time index: every interval a package states or holds, per clock (ADR 0015 §1, §3).
+"""The time index: every interval a package states or holds, per clock (ADR 0015 §2, §3).
 
 Registration writes one ``time_interval`` row per interval, from the verified package:
 
@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Final, Literal
 
 import psycopg
+import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
@@ -51,19 +52,19 @@ Subject = Literal["record", "series"]
 READ_ROWS: Final = 65_536
 
 # The rows of one clock whose stated extent [first, last or first] meets [lo, hi], at a catalog
-# point. The GiST range search and the B-tree on (clock, first_tick) both serve it; the extent
-# test on first_tick and last_tick is what decides.
+# point: one R-tree search inside the clock's entries (``span``, migration 0010), then the exact
+# test on the bigint ticks, which is what decides.
 _WINDOW: Final = """
 SELECT subject, kind, record_id, package_id, clock, first_tick, last_tick, rows_known,
        rows_unknown, registration_key
   FROM time_interval
  WHERE tenant_id = %(tenant)s AND clock = %(clock)s
-   AND span && int8range(%(lo)s, %(hi)s, '[]')
+   AND span && box(point(index_key(%(clock)s), %(lo)s::float8),
+                   point(index_key(%(clock)s), %(hi)s::float8))
    AND first_tick <= %(hi)s AND coalesce(last_tick, first_tick) >= %(lo)s
    AND registration_key <= %(as_of)s
+ LIMIT %(cap)s
 """
-# The same, for a clock read whole: a window whose upper end is the largest tick.
-_WINDOW_TO_END: Final = _WINDOW.replace("int8range(%(lo)s, %(hi)s, '[]')", "int8range(%(lo)s, NULL)")
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,9 @@ def record_intervals(records: Iterable[Any]) -> tuple[IntervalRow, ...]:
     return tuple(
         sorted(
             (
-                IntervalRow("record", r.kind, r.record_id, r.world_clock, r.world_first, r.world_last)
+                IntervalRow(
+                    "record", r.kind, r.record_id, r.world_clock, r.world_first, r.world_last
+                )
                 for r in records
                 if r.world_clock is not None
             ),
@@ -99,7 +102,8 @@ def series_intervals(root_fd: int, package: IngestPackage) -> tuple[IntervalRow,
 
     Each file is opened below the package root without following a link (ADR 0006 §3), and only
     its ``time/<i>`` columns are read. A clock with no known tick in the file has no interval.
-    Raises ``OSError`` or ``ValueError`` when a file cannot be read as the stream's series.
+    Raises ``OSError``, ``ValueError``, ``KeyError`` or ``pyarrow.ArrowException`` when a file
+    cannot be read as the stream's series.
     """
     streams = {r.id: r for r in package.records if isinstance(r, Stream)}
     out: list[IntervalRow] = []
@@ -112,10 +116,10 @@ def series_intervals(root_fd: int, package: IngestPackage) -> tuple[IntervalRow,
         with os.fdopen(open_below(root_fd, series_path(stream_id)), "rb") as handle:
             parquet = pq.ParquetFile(handle)
             for batch in parquet.iter_batches(batch_size=READ_ROWS, columns=names):
-                for i in range(len(names)):
-                    column = batch.column(i)
-                    if str(column.type) != "int64":
-                        raise ValueError(f"{names[i]} of stream {stream_id} is not int64 ticks")
+                for i, name in enumerate(names):
+                    column = batch.column(name)  # by name: a batch keeps the file's order
+                    if not pa.types.is_int64(column.type):
+                        raise ValueError(f"{name} of stream {stream_id} is not int64 ticks")
                     unknown[i] += column.null_count
                     count = len(column) - column.null_count
                     if not count:
@@ -124,7 +128,9 @@ def series_intervals(root_fd: int, package: IngestPackage) -> tuple[IntervalRow,
                     extremes = pc.min_max(column).as_py()
                     low, high = int(extremes["min"]), int(extremes["max"])
                     span = spans[i]
-                    spans[i] = (low, high) if span is None else (min(span[0], low), max(span[1], high))
+                    spans[i] = (
+                        (low, high) if span is None else (min(span[0], low), max(span[1], high))
+                    )
         for i, clock in enumerate(stream.clocks):
             span = spans[i]
             if span is not None:
@@ -190,6 +196,15 @@ class WindowResult:
     findings: tuple[CatalogFinding, ...]
 
 
+class TooMany(Exception):
+    """More than ``cap`` intervals on ``clock`` meet the lookup: the request is refused."""
+
+    def __init__(self, clock: str, cap: int) -> None:
+        super().__init__(clock, cap)
+        self.clock = clock
+        self.cap = cap
+
+
 def read_window(
     conn: Conn,
     tenant: str,
@@ -197,6 +212,7 @@ def read_window(
     clocks: Sequence[str],
     mappings: Sequence[ClockMapping],
     limit: int,
+    cap: int,
 ) -> tuple[tuple[IntervalEntry, ...], tuple[CatalogFinding, ...]]:
     """The entries of a validated window query at ``limit`` (a tx_seq), and its findings.
 
@@ -204,6 +220,7 @@ def read_window(
     request was refused otherwise). Each clock is one index lookup: the window itself on its own
     clock, and on another clock the native range ``IntervalMapper.candidates`` bounds; each
     candidate is then carried through its best usable path and kept if it meets the window.
+    Raises ``TooMany`` when a lookup finds more than ``cap`` intervals.
     """
     mapper = IntervalMapper(window.clock, mappings)
     findings = [
@@ -217,8 +234,11 @@ def read_window(
     keyed: list[tuple[tuple[Any, ...], IntervalEntry]] = []
     for clock in (window.clock, *clocks):
         bounds = mapper.candidates(clock, window.first, window.last)
-        lo, hi = bounds if bounds is not None else (_INT64_MIN, _INT64_MAX)
-        for entry in _lookup(conn, tenant, clock, max(lo, _INT64_MIN), min(hi, _INT64_MAX), limit):
+        lo, hi = bounds if bounds is not None else (INT64_MIN, INT64_MAX)
+        lo, hi = max(lo, INT64_MIN), min(hi, INT64_MAX)
+        if lo > hi:  # no int64 tick on this clock can be carried into the window
+            continue
+        for entry in _lookup(conn, tenant, clock, lo, hi, limit, cap):
             if clock == window.clock:
                 keyed.append((_merged_key(entry.first, entry.end, entry), entry))
                 continue
@@ -228,25 +248,33 @@ def read_window(
                 continue
             if placed.lo > window.last or placed.hi < window.first:
                 continue
+            if placed.lo < INT64_MIN or placed.hi > INT64_MAX:
+                findings.append(_beyond_ticks(entry))
+                continue
             mapped = MappedInterval(window.clock, placed.lo, placed.hi, placed.path)
-            keyed.append(
-                (_merged_key(placed.lo, placed.hi, entry), _with_mapped(entry, mapped))
-            )
+            keyed.append((_merged_key(placed.lo, placed.hi, entry), _with_mapped(entry, mapped)))
     keyed.sort(key=lambda pair: pair[0])
     findings.sort(key=lambda f: (f.code, f.subject.encode("utf-8"), f.detail))
     return tuple(e for _, e in keyed), tuple(findings)
 
 
-_INT64_MIN: Final = -(2**63)
-_INT64_MAX: Final = 2**63 - 1
+INT64_MIN: Final = -(2**63)
+INT64_MAX: Final = 2**63 - 1
 
 
-def _lookup(conn: Conn, tenant: str, clock: str, lo: int, hi: int, limit: int) -> list[IntervalEntry]:
-    statement = _WINDOW_TO_END if hi == _INT64_MAX else _WINDOW
+def _lookup(
+    conn: Conn, tenant: str, clock: str, lo: int, hi: int, limit: int, cap: int
+) -> list[IntervalEntry]:
+    """Every interval on ``clock`` meeting ``[lo, hi]`` at ``limit``; at most ``cap`` of them.
+
+    The lookup asks for one row more than ``cap`` and refuses when it gets it, so the answer is
+    every match or none and never depends on which rows an engine returns first."""
     rows = conn.execute(
-        statement,
-        {"tenant": tenant, "clock": clock, "lo": lo, "hi": hi, "as_of": limit},
+        _WINDOW,
+        {"tenant": tenant, "clock": clock, "lo": lo, "hi": hi, "as_of": limit, "cap": cap + 1},
     ).fetchall()
+    if len(rows) > cap:
+        raise TooMany(clock, cap)
     return [
         IntervalEntry(
             subject=subject,
@@ -294,6 +322,15 @@ def _with_mapped(entry: IntervalEntry, mapped: MappedInterval) -> IntervalEntry:
         entry.rows_unknown,
         mapped,
     )
+
+
+def _beyond_ticks(entry: IntervalEntry) -> CatalogFinding:
+    detail = (
+        "its interval carried onto the window's clock leaves the int64 tick range; it is not"
+        f" compared with the window ({entry.subject} on clock {entry.clock},"
+        f" package {entry.package_id})"
+    )
+    return CatalogFinding("mapping_out_of_range", entry.record_id, detail)
 
 
 def _out_of_range(entry: IntervalEntry, search: Unmapped) -> CatalogFinding:

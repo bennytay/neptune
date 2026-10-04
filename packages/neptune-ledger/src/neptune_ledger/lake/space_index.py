@@ -1,17 +1,20 @@
-"""The spatial index: records by the frame or CRS they declare, with their extents (ADR 0015 §2).
+"""The spatial index: records by the frame or CRS they declare, and their extents (ADR 0015 §4).
 
 Registration writes one ``spatial_extent`` row per spatial reference a record states as Known,
 from its verified line read with the compiler's own reader:
 
-| Kind | Reference (pointer) | Extent, in that reference |
-|---|---|---|
-| ``frame`` | ``/ref`` | — |
-| ``frame_binding`` | ``/parent``, ``/child`` | — |
-| ``frame_transform`` | ``/parent``, ``/child`` | on the target frame of a Known ``direction``: the source frame's origin, the declared translation (``/value/translation/values``, or column 3 of a matrix of Known ``layout``, ``/value/values``) |
-| ``hardware_component`` | ``/frame/value`` | — |
-| ``spatial_artifact`` | ``/frame/value``, ``/crs/value`` | — (its geometry stays in the file) |
-| ``site``, ``asset`` | ``/location/value/crs/value`` | the declared point: longitude as x, latitude as y (``/location/value``) |
-| ``image``, ``video`` | ``/capture/position/value/crs/value`` | the declared capture point (``/capture/position/value``) |
+- ``frame``: ``/ref``, no extent;
+- ``frame_binding``: ``/parent`` and ``/child``, no extent;
+- ``frame_transform``: ``/parent`` and ``/child``; with a Known ``direction``, the target frame's
+  row carries the source frame's origin as the declared translation
+  (``/value/translation/values``, or a matrix's translation column at ``/value/values`` when its
+  ``layout`` is Known);
+- ``hardware_component``: ``/frame/value``, no extent;
+- ``spatial_artifact``: ``/frame/value`` and ``/crs/value``, no extent (the geometry stays in its
+  file);
+- ``site``, ``asset``: ``/location/value/crs/value``, with the declared point at
+  ``/location/value``, longitude as x and latitude as y;
+- ``image``, ``video``: ``/capture/position/value/crs/value``, with the declared capture point.
 
 Coordinates are stored as declared, with the unit the record states (NULL when it is not Known).
 Nothing is converted, reprojected or carried between frames, and there is no default world
@@ -172,7 +175,7 @@ def _translation(value: Any) -> tuple[str, str | None, tuple[float, ...]] | None
 
 def _position(kind: str, rid: str, at: str, position: Any) -> list[ExtentRow]:
     """A declared geodetic point in its Known CRS, longitude as x and latitude as y. Height is
-    not indexed: what it is measured from varies (ADR 0015 §2)."""
+    not indexed: what it is measured from varies (ADR 0015 §4)."""
     if not isinstance(position, Known):
         return []
     value: GeodeticPosition = position.value
@@ -280,20 +283,41 @@ SELECT kind, record_id, package_id, pointer, registration_key, extent_pointer, d
 _PLACED: Final = (
     _MEMBERS
     + """
+   AND scope && box(point(index_key(%(scope)s), 0), point(index_key(%(scope)s), 0))
    AND unit = %(unit)s AND xy && box(point(%(x0)s, %(y0)s), point(%(x1)s, %(y1)s))
    AND min_x <= %(x1)s AND max_x >= %(x0)s AND min_y <= %(y1)s AND max_y >= %(y0)s
 """
 )
 _PLACED_3D: Final = _PLACED + "   AND dims = 3 AND min_z <= %(z1)s AND max_z >= %(z0)s\n"
 _UNPLACED: Final = (
-    _MEMBERS + "   AND (dims IS NULL OR unit IS DISTINCT FROM %(unit)s OR (%(three)s AND dims = 2))\n"
+    _MEMBERS
+    + "   AND (dims IS NULL OR unit IS DISTINCT FROM %(unit)s OR (%(three)s AND dims = 2))\n"
 )
 
 
+class TooMany(Exception):
+    """More than ``cap`` members of the queried reference would be returned: refused."""
+
+    def __init__(self, cap: int) -> None:
+        super().__init__(cap)
+        self.cap = cap
+
+
 def read_within(
-    conn: Conn, tenant: str, reference: Reference, unit: str, box: SpatialBox, limit: int
+    conn: Conn,
+    tenant: str,
+    reference: Reference,
+    unit: str,
+    box: SpatialBox,
+    limit: int,
+    cap: int,
+    with_unplaced: bool = True,
 ) -> tuple[tuple[SpatialEntry, ...], tuple[Unplaced, ...]]:
-    """The placed and unplaced members of a validated box query at ``limit`` (a tx_seq)."""
+    """The placed and (with ``with_unplaced``) unplaced members of a validated box query at
+    ``limit`` (a tx_seq).
+
+    Each lookup asks for one row more than ``cap`` and raises ``TooMany`` when it gets it, so an
+    answer is every member or none."""
     kind, text = reference_text(reference)
     three = len(box.low) == 3
     params: dict[str, Any] = {
@@ -302,17 +326,25 @@ def read_within(
         "reference": text,
         "as_of": limit,
         "unit": unit,
+        "scope": f"{kind} {text} {unit}",
         "three": three,
         "x0": box.low[0],
         "y0": box.low[1],
         "x1": box.high[0],
         "y1": box.high[1],
+        "cap": cap + 1,
     }
     if three:
         params |= {"z0": box.low[2], "z1": box.high[2]}
-    placed = [_entry(row)[0] for row in conn.execute(_PLACED_3D if three else _PLACED, params)]
+    found = conn.execute((_PLACED_3D if three else _PLACED) + _LIMIT, params).fetchall()
+    if len(found) > cap:
+        raise TooMany(cap)
+    placed = [_entry(row)[0] for row in found]
+    found = conn.execute(_UNPLACED + _LIMIT, params).fetchall() if with_unplaced else []
+    if len(found) > cap:
+        raise TooMany(cap)
     unplaced = []
-    for row in conn.execute(_UNPLACED, params):
+    for row in found:
         entry, dims = _entry(row)
         reason: Reason = (
             "no_extent" if dims is None else "unit" if entry.unit != unit else "dimensions"
@@ -321,6 +353,9 @@ def read_within(
     placed.sort(key=lambda e: (e.low, e.high, *_identity(e)))
     unplaced.sort(key=lambda u: (u.reason, *_identity(u.entry)))
     return tuple(placed), tuple(unplaced)
+
+
+_LIMIT: Final = "   LIMIT %(cap)s\n"
 
 
 def _identity(entry: SpatialEntry) -> tuple[bytes, bytes, bytes]:
