@@ -46,9 +46,9 @@ from neptune_ledger.lake.read import (
     DuckDBReader,
     LakeRequestError,
     SeriesPlan,
+    SeriesRead,
     SeriesReader,
     plan_series,
-    read_findings,
 )
 from neptune_ledger.lake.series import SeriesCatalog, SeriesFile
 from neptune_ledger.lake.store import LocalObjectStore, StoreError
@@ -78,7 +78,9 @@ def register(catalog: PostgresCatalog, root: Path) -> None:
 
 def read_all(plan: SeriesPlan) -> Any:
     """The table both engines return, after checking they agree row for row."""
-    tables = [reader.read(plan) for reader in READERS]
+    reads = [reader.read(plan) for reader in READERS]
+    assert [r.findings for r in reads] == [plan.findings] * 2, "a read of good files adds none"
+    tables = [r.table for r in reads]
     assert tables[0].schema == tables[1].schema == plan.schema
     assert tables[0].equals(tables[1]), "DuckDB and DataFusion disagree"
     return tables[0]
@@ -324,7 +326,7 @@ def test_window_boundaries_are_inclusive_and_an_empty_window_is_an_empty_table(
         "seq",
     ]
     nothing = plan_series([], windows=[TimeWindow(clock, 0, 1)])
-    assert all(r.read(nothing).num_rows == 0 for r in READERS)
+    assert all(r.read(nothing) == SeriesRead(nothing.schema.empty_table(), ()) for r in READERS)
     assert all(r.explain(nothing) == "" for r in READERS)
 
 
@@ -660,7 +662,7 @@ def test_duckdb_refuses_columns_that_differ_only_in_case(
     plan = plan_series(series.files([(package, odom.id)]).files, columns=["value/x"])
     with pytest.raises(LakeRequestError, match="only in case"):
         DuckDBReader().read(plan)
-    assert DataFusionReader().read(plan).column("value/x").to_pylist() == [30, 30]
+    assert DataFusionReader().read(plan).table.column("value/x").to_pylist() == [30, 30]
 
 
 def test_a_link_swapped_in_after_resolution_is_caught_before_the_scan(
@@ -689,6 +691,13 @@ def test_a_parquet_file_without_the_scanned_columns_is_a_finding(
     assert plan.scans == () and [f.code for f in plan.findings] == ["file_digest_mismatch"]
 
 
+def _damage_pages(path: Path) -> None:
+    """Invert bytes 8..200 in place: the size and the footer are unchanged, the pages are not."""
+    data = bytearray(path.read_bytes())
+    data[8:200] = bytes(b ^ 0xFF for b in data[8:200])
+    path.write_bytes(bytes(data))
+
+
 @pytest.mark.parametrize("reader", READERS, ids=lambda r: r.name)
 def test_a_file_whose_pages_do_not_decode_costs_only_its_own_rows(
     series: SeriesCatalog,
@@ -699,25 +708,39 @@ def test_a_file_whose_pages_do_not_decode_costs_only_its_own_rows(
 ) -> None:
     """Pages damaged in place at the same size: the footer still parses, so planning passes,
     and only the engine notices. The base's odometry becomes a finding; the arm's rows from
-    another package, and the base's battery, still come back."""
+    another package, and the base's battery, come back as a read without the file returns them."""
     odom, power = mobile["odom"], mobile["power"]
     arm = arm_run["pairs"][0]
     pairs = [(mobile["package"], odom.id), (mobile["package"], power.id), arm]
     files = series.files(pairs).files
-    path = tmp_path / "base" / "series" / f"{odom.id.removeprefix('rec:sha256:')}.parquet"
-    data = bytearray(path.read_bytes())
-    data[8:200] = bytes(b ^ 0xFF for b in data[8:200])
-    path.write_bytes(bytes(data))
+    _damage_pages(tmp_path / "base" / "series" / f"{odom.id.removeprefix('rec:sha256:')}.parquet")
     plan = plan_series(files, columns=["locator/0/offset"])
     assert plan.findings == () and len(plan.scans) == 3, "planning cannot see page damage"
-    table = reader.read(plan)
-    findings = read_findings(table)
-    assert [(f.code, f.subject) for f in findings] == [("file_digest_mismatch", odom.id)]
-    assert set(table.column("stream_id").to_pylist()) == {power.id, arm[1]}
-    good = reader.read(
-        plan_series([f for f in files if f.stream_id != odom.id], columns=["locator/0/offset"])
-    )
-    assert table.equals(good) and read_findings(good) == ()
+    read = reader.read(plan)
+    assert [(f.code, f.subject) for f in read.findings] == [("file_digest_mismatch", odom.id)]
+    assert "does not decode" in read.findings[0].detail
+    assert set(read.table.column("stream_id").to_pylist()) == {power.id, arm[1]}
+    without = [f for f in files if f.stream_id != odom.id]
+    good = reader.read(plan_series(without, columns=["locator/0/offset"]))
+    assert good.findings == () and read.table.equals(good.table)
+    assert read.table.schema == plan.schema
+    assert reader.read(plan) == read, "deterministic"
+
+
+@pytest.mark.parametrize("reader", READERS, ids=lambda r: r.name)
+def test_a_read_whose_every_file_is_damaged_is_findings_and_no_rows(
+    series: SeriesCatalog, mobile: dict[str, Any], tmp_path: Path, reader: SeriesReader
+) -> None:
+    odom, power = mobile["odom"], mobile["power"]
+    files = series.files([(mobile["package"], odom.id), (mobile["package"], power.id)]).files
+    for stream in (odom, power):
+        name = f"{stream.id.removeprefix('rec:sha256:')}.parquet"
+        _damage_pages(tmp_path / "base" / "series" / name)
+    plan = plan_series(files)
+    read = reader.read(plan)
+    assert read.table.num_rows == 0 and read.table.schema == plan.schema
+    assert sorted(f.subject for f in read.findings) == sorted([odom.id, power.id])
+    assert {f.code for f in read.findings} == {"file_digest_mismatch"}
 
 
 def test_every_read_carries_its_plans_findings(
@@ -727,10 +750,9 @@ def test_every_read_carries_its_plans_findings(
         [(mobile["package"], mobile["odom"].id), (mobile["package"], mobile["power"].id)]
     ).files
     plan = plan_series(files, windows=[TimeWindow(mobile["odom"].clocks[1], 0, INT64_MAX)])
+    assert plan.findings != ()
     for reader in READERS:
-        assert read_findings(reader.read(plan)) == plan.findings != ()
-    with pytest.raises(LakeRequestError, match="not a series read"):
-        read_findings(pa.table({"x": [1]}))
+        assert reader.read(plan).findings == plan.findings
 
 
 # --- the budget: a 10^6-row window under 200 ms ----------------------------------------------
@@ -765,7 +787,7 @@ def test_a_million_row_window_reads_under_200_ms(
         for _ in range(6):
             began = perf_counter()
             plan = plan_series(series.files(pairs).files, windows=[window])
-            table = reader.read(plan)
+            table = reader.read(plan).table
             laps.append(perf_counter() - began)
             assert table.num_rows == BUDGET_ROWS
         timings[reader.name] = sorted(laps[1:])[2]

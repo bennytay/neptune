@@ -88,7 +88,8 @@ without a named `ClockMapping` (ADR 0003 §3). Registration accepts only local p
    | `manifest_digest_mismatch` | the manifest bytes no longer hash to the package id |
    | `manifest_invalid` | the manifest has no valid `store.series` |
    | `file_missing` | the stream has no series file (a records-only package), or the object is missing or a link |
-   | `file_digest_mismatch` | the object's size differs from the manifest, or its footer is not Parquet |
+   | `file_digest_mismatch` | the object's size differs from the manifest, its footer is not Parquet with int64 `seq` and the scanned `time/<i>`, or an engine cannot decode its pages |
+   | `record_invalid` | the stream's stored clocks are not a list of record ids |
    | `unsafe_entry` | the location contains `* ? [ ] { }`, which both engines read as a glob |
    | `conflicting_id` | one stream id has two different series files |
 
@@ -101,11 +102,16 @@ without a named `ClockMapping` (ADR 0003 §3). Registration accepts only local p
    size, just before reading its footer. It also checks that the footer holds `seq` and the
    scanned `time/<i>` as int64. A file that fails either check is a finding (`file_missing`,
    `file_digest_mismatch`), and the read goes on without it. The window left open is between
-   planning and the scan, a few milliseconds.
+   planning and the scan, a few milliseconds. A file can pass both checks and still hold pages
+   that do not decode. Only the engine sees that, so when a statement fails the reader runs
+   each file's scan alone, reports each failing one as `file_digest_mismatch` for its stream,
+   and merges the other files' rows in the statement's order (§5). A same-size rewrite that is
+   still valid Parquet with those columns reads silently: byte equality is `verify`'s job.
 5. **Readers: DuckDB and DataFusion, one plan, one result.** `plan_series(files, windows,
    columns)` builds a `SeriesPlan`, and `DuckDBReader` and `DataFusionReader` run it as one
-   SQL statement over the files in place. Both return the same `pyarrow.Table`; the tests
-   compare them row for row.
+   SQL statement over the files in place. Both return a `SeriesRead`: the same `pyarrow.Table`,
+   which the tests compare row for row, and the plan's findings followed by the read's own. No
+   engine error escapes a read; a `LakeRequestError` is the caller's.
    - **Windows** are `TimeWindow(clock, first, last)`: ticks on one clock, inclusive, as in the
      catalog API. There is at most one window per clock. Each file is scanned on the one window
      clock its stream carries, through the `time/<i>` column the `SeriesFile` names. A file
@@ -141,10 +147,10 @@ without a named `ClockMapping` (ADR 0003 §3). Registration accepts only local p
      read never fetches code. DuckDB matches identifiers without case and renames a later twin
      (`value/X` beside `value/x`), so `DuckDBReader` refuses a file with such twins as a
      `LakeRequestError` rather than return one column's data under the other's name.
-     DataFusion reads it as written. It reads local files through its own Parquet reader and S3 objects
-     as pyarrow datasets over the store's filesystem, which push the filter into the Arrow scan.
-     DataFusion reads both through its own Parquet reader, registering an `AmazonS3` object
-     store per bucket. One bucket named with two sets of settings in a read is a request error.
+     DataFusion reads it as written. DuckDB reads local files through its own Parquet reader and
+     S3 objects as pyarrow datasets over the store's filesystem, which push the filter into the
+     Arrow scan. DataFusion reads both through its own Parquet reader, registering an `AmazonS3`
+     object store per bucket. One bucket named with two sets of settings in a read is a request error.
      Engines are pinned (`duckdb==1.5.6`, `datafusion==54.0.0`); a bump re-runs the pushdown and
      budget tests.
 6. **Budget.** A 10⁶-row window reads in **under 200 ms** locally, end to end: resolving the
@@ -200,7 +206,8 @@ without a named `ClockMapping` (ADR 0003 §3). Registration accepts only local p
 ## Consequences
 
 - No package byte is duplicated. The lake is as current as the catalog and needs nothing
-  rebuilt. A moved or changed package is a finding at read time.
+  rebuilt. A moved, linked or resized series file, or one whose footer or pages do not decode,
+  is a finding at read time; a same-size valid rewrite is found only by `verify`.
 - The Ledger now depends on DuckDB and DataFusion (pinned). The `lake` box is partially built.
   Ledger-owned tables and cross-clock merges of rows come with MVL-96 and MVL-97, and no
   catalog-api call exposes series reads yet: `query` (MVL-98) and `access/` (MVL-99) decide

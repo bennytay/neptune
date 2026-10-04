@@ -20,10 +20,8 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from neptune.identity import canonical_json
 from neptune.model.ids import parse_record_id
 from neptune.model.time import INT64_MAX, INT64_MIN
-from neptune_ledger.api import codec
 from neptune_ledger.api.types import CatalogFinding, TimeWindow
 from neptune_ledger.lake.series import SeriesFile
 from neptune_ledger.lake.store import LocalObjectStore, Location, S3Settings, arrow_s3
@@ -274,86 +272,100 @@ def series_sql(plan: SeriesPlan, tables: Sequence[str]) -> str:
     )
 
 
+@dataclass(frozen=True)
+class SeriesRead:
+    """A read's rows, in the plan's schema, and why any planned row is missing: the plan's
+    findings, then the read's own (a file whose pages do not decode)."""
+
+    table: Any  # pyarrow.Table
+    findings: tuple[CatalogFinding, ...]
+
+
 class SeriesReader(Protocol):
     """An engine that runs a ``SeriesPlan`` over the files in place."""
 
     name: str
 
-    def read(self, plan: SeriesPlan) -> Any:  # pyarrow.Table
-        ...
+    def read(self, plan: SeriesPlan) -> SeriesRead: ...
 
     def explain(self, plan: SeriesPlan, *, analyze: bool = False) -> str: ...
 
 
-class LakeReadError(RuntimeError):
-    """The engine failed on the read as a whole although every file read alone: an outage
-    (memory, the store), not a damaged file. Nothing is returned."""
+_DETAIL_LIMIT: Final = 300
 
 
-FINDINGS_KEY: Final = b"neptune.lake.findings"
-
-
-def _with_findings(table: Any, findings: Sequence[CatalogFinding]) -> Any:
-    """``table`` carrying ``findings`` in its schema metadata, as a query result carries its
-    ``QueryMeta``: the rows and why any asked-for row is missing travel together."""
-    data = canonical_json.dumps([codec.to_json(f) for f in findings])
-    return table.replace_schema_metadata({FINDINGS_KEY: data})
-
-
-def read_findings(table: Any) -> tuple[CatalogFinding, ...]:
-    """The findings a reader's table carries: the plan's, then the read's own."""
-    data = (table.schema.metadata or {}).get(FINDINGS_KEY)
-    if data is None:
-        raise LakeRequestError("not a series read: no neptune.lake.findings metadata")
-    items = canonical_json.loads(data)
-    assert isinstance(items, list)
-    return tuple(codec.from_json(CatalogFinding, item) for item in items)
-
-
-def _empty(plan: SeriesPlan) -> Any:
-    return _with_findings(plan.schema.empty_table(), plan.findings)
-
-
-def _isolating(run: Any, plan: SeriesPlan, errors: tuple[type[BaseException], ...]) -> Any:
-    """Run the plan; if the engine fails, find the files it fails on and read the rest.
+def _isolating(run: Any, plan: SeriesPlan, errors: tuple[type[BaseException], ...]) -> SeriesRead:
+    """Run the plan; if the engine fails, read each file alone and keep the files that read.
 
     A file can pass every planning check (size, no link, a Parquet footer with the columns) and
-    still hold pages that do not decode. Each scan is then run alone; those that fail become
-    ``file_digest_mismatch`` findings, and the plan is run again without them, so one damaged
-    file never costs the other files' rows (non-negotiable 7).
+    still hold pages that do not decode, which only the engine notices. Then each scan runs
+    alone: one that fails is a ``file_digest_mismatch`` finding naming its stream, and the rows
+    of the others are merged in Arrow into the order the statement gives (``_merge``). One
+    damaged file never costs another file's rows, and an engine error never escapes
+    (non-negotiable 7). A request error is the caller's and is raised.
     """
     if not plan.scans:
-        return _empty(plan)
+        return SeriesRead(plan.schema.empty_table(), plan.findings)
     try:
-        return _with_findings(_conform(run(plan), plan), plan.findings)
+        raw = run(plan)
     except LakeRequestError:
         raise
-    except errors as exc:
-        whole = exc
+    except errors:
+        raw = None
+    if raw is not None:
+        return SeriesRead(_conform(raw, plan), plan.findings)
     good: list[Scan] = []
+    parts: list[Any] = []
     found: list[CatalogFinding] = []
     for scan in plan.scans:
         try:
-            run(replace(plan, scans=(scan,)))
+            part = run(replace(plan, scans=(scan,)))
         except LakeRequestError:
             raise
         except errors as exc:
-            reason = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:300]
+            reason = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:_DETAIL_LIMIT]
             detail = f"{scan.file.location.url} does not decode: {reason}"
             found.append(CatalogFinding("file_digest_mismatch", scan.file.stream_id, detail))
         else:
             good.append(scan)
-    if not found:
-        raise LakeReadError(f"the read failed although every file reads alone: {whole}") from whole
+            parts.append(part)
     rest = replace(plan, scans=tuple(good))
-    findings = (*plan.findings, *found)
-    if not good:
-        return _with_findings(plan.schema.empty_table(), findings)
-    try:
-        table = _conform(run(rest), rest)
-    except errors as exc:
-        raise LakeReadError(f"the read failed without its damaged files: {exc}") from exc
-    return _with_findings(table, findings)
+    return SeriesRead(_merge(parts, rest), (*plan.findings, *found))
+
+
+def _merge(parts: list[Any], plan: SeriesPlan) -> Any:
+    """Single-scan engine tables, one per ``plan.scans`` entry, as the plan's one table.
+
+    Each part is renumbered to its scan's index and sorted by the statement's own key
+    (partition, ticks unknown last, scan, seq). That key is total, so the result equals the
+    statement's over the same files.
+    """
+    if not parts:
+        return plan.schema.empty_table()
+    values = [f for i, f in enumerate(plan.schema) if i >= len(FIXED)]
+    common = pa.schema(
+        [
+            pa.field(_PARTITION, pa.int32()),
+            pa.field(_SCAN, pa.int32()),
+            pa.field("ticks", pa.int64()),
+            pa.field("ticks_state", pa.string()),
+            pa.field("seq", pa.int64()),
+            *(pa.field(f.name, f.type) for f in values),
+        ]
+    )
+    tables = []
+    for index, (scan, part) in enumerate(zip(plan.scans, parts, strict=True)):
+        rows = part.num_rows
+        arrays = [
+            pa.repeat(pa.scalar(scan.partition, pa.int32()), rows),
+            pa.repeat(pa.scalar(index, pa.int32()), rows),
+            *(part.column(i - 1).cast(f.type) for i, f in enumerate(common) if i >= 2),
+        ]
+        tables.append(pa.Table.from_arrays(arrays, schema=common))
+    merged = pa.concat_tables(tables)
+    keys = [(name, "ascending") for name in (_PARTITION, "ticks", _SCAN, "seq")]
+    order = pc.sort_indices(merged, sort_keys=keys, null_placement="at_end")
+    return _conform(merged.take(order).drop_columns([_PARTITION]), plan)
 
 
 def _ids(scan_index: Any, per_scan: list[str]) -> Any:
@@ -430,9 +442,9 @@ class DuckDBReader:
         finally:
             con.close()
 
-    def read(self, plan: SeriesPlan) -> Any:
+    def read(self, plan: SeriesPlan) -> SeriesRead:
         """The plan's rows; a file the engine cannot decode is left out and named in the
-        table's findings (``read_findings``), never raised (ADR 0013 §5)."""
+        read's findings, never raised (ADR 0013 §4)."""
         import duckdb
 
         return _isolating(self._run, plan, (duckdb.Error, pa.ArrowException, OSError))
@@ -491,9 +503,9 @@ class DataFusionReader:
         ctx, tables = self._context(plan)
         return ctx.sql(series_sql(plan, tables)).to_arrow_table()
 
-    def read(self, plan: SeriesPlan) -> Any:
+    def read(self, plan: SeriesPlan) -> SeriesRead:
         """The plan's rows; a file the engine cannot decode is left out and named in the
-        table's findings (``read_findings``), never raised (ADR 0013 §5)."""
+        read's findings, never raised (ADR 0013 §4)."""
         # DataFusion raises plain Exception for every execution error, Parquet decoding included.
         return _isolating(self._run, plan, (Exception,))
 
