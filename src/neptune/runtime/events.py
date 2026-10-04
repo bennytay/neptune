@@ -83,6 +83,7 @@ STREAMS_INTROSPECTED: Final = "streams_introspected"  # introspection's counts (
 DECLARED_EXTRACTED: Final = "declared_extracted"  # the declared-records pass's counts (ADR 0063)
 MEDIA_INDEXED: Final = "media_indexed"  # media streams indexed (ADR 0056)
 CLOCKS_ALIGNED: Final = "clocks_aligned"  # the clock-alignment pass's counts (ADR 0060)
+FRAMES_ALIGNED: Final = "frames_aligned"  # the frame-alignment pass's counts (ADR 0068)
 PACKAGE_STAGED: Final = "package_staged"
 PACKAGE_VERIFIED: Final = "package_verified"
 JOB_COMMITTED: Final = "job_committed"

@@ -17,7 +17,7 @@ flowchart LR
     CAN["Canonical model<br/>records + provenance"]
     PKG[("Ingest package")]
     VAL["Validation &amp; alignment"]
-    DER["Derived annotations<br/>run assembly · session proposals<br/>stream layouts · semantics<br/>media streams · clock mappings<br/>declared candidates<br/>snapshot bindings"]
+    DER["Derived annotations<br/>run assembly · session proposals<br/>stream layouts · semantics<br/>media streams · clock mappings<br/>declared candidates<br/>snapshot bindings<br/>frame trees · links · spatial refs"]
     DCL["Declared records<br/>sites · assets · briefs<br/>requirements · SOP steps"]
     MAN["Optional manifest<br/>neptune.yaml · init-manifest"]
   end
