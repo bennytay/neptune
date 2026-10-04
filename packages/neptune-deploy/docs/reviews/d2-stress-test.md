@@ -82,7 +82,7 @@ All five come from the same proxy code for every connector (timeout 0.5 s, hard 
 | Redirect loop | `302` to the request's own URL | `redirect_refused`, never followed (Formant: `part_failed`, cause `redirect_refused`, per part) | `redirect_refused`. OneDrive's one allowed download hop meets the loop and stops at its second `302`. |
 | Truncated body | The upstream's headers and full `Content-Length`, half the body, then close | `listing_failed` / `part_failed`, cause `short_read` | `short_read` |
 | Slow | No byte for 3 s | `listing_failed` / `part_failed`, cause `deadline_exceeded`, at the 0.5 s timeout | `read_failed` (cause `deadline_exceeded`) |
-| Trickle | Headers, then one byte per 0.2 s | `listing_failed` / `part_failed`, cause `deadline_exceeded`: the deadline shuts the socket, however steadily bytes arrive | `read_failed` (cause `deadline_exceeded`), for every connector that reads bytes |
+| Trickle | Headers, then one byte per 0.2 s | `listing_failed` / `part_failed`, cause `deadline_exceeded`: the deadline shuts the socket, however steadily bytes arrive | `read_failed`, for every connector that reads bytes |
 | Oversized | `200` and 40 MiB of JSON-like bytes | object stores, Foxglove, Roboto, Rerun, Formant: cause `response_too_large`; record systems: `response_invalid` (both at the page limit: 8 MiB Roboto, 32 MiB the others) | `object_changed`: a `200` whose length is not the listed size is refused before its body |
 | Over budget (declared) | The connector's own `max_objects`, `max_recordings` or `max_records` set below the listing | `listing_limit` (`part_limit` for Formant), with an incomplete listing | n/a |
 
