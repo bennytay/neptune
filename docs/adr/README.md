@@ -13,14 +13,14 @@ header).
 | [0002](0002-serialization-and-ingest-package.md) | Canonical serialization and ingest-package layout | Accepted |
 | [0003](0003-identity-tiers.md) | Identity tiers and parser-upgrade survival | Accepted; amended by 0017 |
 | [0004](0004-epistemic-states.md) | Epistemic states (`Knowledge[T]`) and the field-scope rule | Accepted |
-| [0005](0005-timestamp-domains.md) | Timestamp domains | Accepted |
+| [0005](0005-timestamp-domains.md) | Timestamp domains | Accepted; amended by 0061 |
 | [0006](0006-provenance-and-locators.md) | Provenance and locator model | Accepted; amended by 0037 |
 | [0007](0007-coordinate-frames.md) | Coordinate-frame semantics | Accepted |
 | [0008](0008-adapter-abi.md) | Adapter ABI surface and runtime/adapter responsibility split | Accepted |
 | [0009](0009-source-revisions-and-id-rendering.md) | Source revisions, dedup policy and id rendering | Accepted; §3–§5 amended by [0010](0010-lossless-local-locations.md); amended by 0067 |
 | [0010](0010-lossless-local-locations.md) | Lossless local locations: raw names, symlinks, absences | Accepted; amended by 0067 |
 | [0011](0011-knowledge-json-and-types.md) | `Knowledge[T]`: JSON shape, Python types, provenance slot | Accepted; amended by 0023 |
-| [0012](0012-time-types-and-clock-roles.md) | Time types: `Timestamp`, `Duration`, `TimestampDomain`, clock roles | Accepted; amended by 0023 |
+| [0012](0012-time-types-and-clock-roles.md) | Time types: `Timestamp`, `Duration`, `TimestampDomain`, clock roles | Accepted; amended by 0023, 0061 |
 | [0013](0013-unit-catalogue-and-si-normalisation.md) | Units: declared-unit catalogue and exact SI normalisation | Accepted |
 | [0014](0014-version-primitives.md) | Version primitives: one type per kind, stored verbatim | Accepted |
 | [0015](0015-frame-rotation-and-transform-types.md) | Frames, rotations and frame transforms: types and named conventions | Accepted |
@@ -67,6 +67,7 @@ header).
 | [0058](0058-plugin-adapters-and-sources-from-entry-points.md) | Plugin adapters and Sources from entry points, in a fixed order, refused as findings | Accepted; amended by 0067 |
 | [0059](0059-xlsx-workbooks-in-the-tabular-adapter-sheets-as-cited-tables.md) | XLSX workbooks in the tabular adapter: sheets as tables of cited cells | Accepted |
 | [0060](0060-clock-alignment-fitted-mappings-found-clocks-and-bounded-instants.md) | Clock alignment: fitted mappings, found clocks and bounded instants | Accepted |
+| [0061](0061-declared-civil-time-zones-and-list-states.md) | Declared civil time zones, and lists that can be blank | Accepted |
 | [0062](0062-assertion-records-human-assertions-as-stated-evidence.md) | Assertion records: human assertions, acceptances and retractions as stated evidence | Accepted |
 | [0064](0064-snapshot-binding-stated-joins-nearest-session-candidates-and-explicit-gaps.md) | Snapshot binding: stated joins, nearest session candidates, explicit gaps | Accepted |
 | [0065](0065-streaming-package-write-bounded-spill-and-byte-identical-output.md) | Streaming package write: bounded spill, byte-identical output | Accepted |
