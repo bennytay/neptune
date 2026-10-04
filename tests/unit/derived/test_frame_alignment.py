@@ -51,7 +51,7 @@ from neptune.identity import canonical_json
 from neptune.identity.ids import record_id
 from neptune.model.frames import FrameRef, TransformDirection
 from neptune.model.knowledge import Ambiguous, Known, Unknown
-from neptune.model.reference import FrameTransform
+from neptune.model.reference import Frame, FrameTransform
 from neptune.model.run import Stream
 from neptune.model.spatial import CrsCode
 from neptune.model.time import Timestamp
@@ -555,3 +555,67 @@ def test_a_header_stream_outside_every_tf_namespace_is_in_the_root_tree() -> Non
         if isinstance(r, Stream) and isinstance(r.topic, Known) and r.topic.value == "/joint_states"
     )
     assert root.streams == (joint_states.id,)
+
+
+def _namespaced(
+    names: tuple[str, ...], prefixes: tuple[str, ...], keep_root: tuple[str, ...] = ()
+) -> tuple[list[Any], Any]:
+    """The corpus with every stream but ``keep_root`` cloned under each prefix."""
+    corpus = Corpus(*names)
+    streams = [r for r in corpus.records if isinstance(r, Stream) and isinstance(r.topic, Known)]
+    moved = {s.id: s for s in streams if s.topic.value not in keep_root}  # type: ignore[union-attr]
+    clones: dict[str, Stream] = {}
+    records = [r for r in corpus.records if getattr(r, "id", None) not in moved]
+    for prefix in prefixes:
+        for stream in sorted(moved.values(), key=lambda s: s.id):
+            assert isinstance(stream.topic, Known)
+            clone = dataclasses.replace(
+                stream,
+                id=record_id("stream", {"prefix": prefix, "topic": stream.topic.value}),
+                topic=dataclasses.replace(stream.topic, value=prefix + stream.topic.value),
+            )
+            clones[clone.id] = stream
+            records.append(clone)
+
+    def rows(of: Stream, columns: Sequence[str]) -> Iterator[Mapping[str, object]]:
+        return corpus.rows(clones.get(of.id, of), columns)
+
+    return records, rows
+
+
+@pytest.mark.parametrize("keep_root", [("/tf_static",), ()])
+def test_a_calibration_never_bridges_two_robots(keep_root: tuple[str, ...]) -> None:
+    """Two quadrupeds under ``/fleet/robot1`` and ``/fleet/robot2`` (their static transforms
+    at the root, or each its own) and one Kalibr file naming ``imu``, ``cam0`` and ``cam1``:
+    the file says which robot it describes nowhere, so it links to neither, and ``imu`` of one
+    robot never reaches the other's, even through links."""
+    records, rows = _namespaced(
+        ("quadruped", "kalibr"), ("/fleet/robot1", "/fleet/robot2"), keep_root
+    )
+    found = align_frames(records, rows)
+    assert found is not None
+    trees = {tree.namespace: tree for tree in found.trees}
+    assert {"/fleet/robot1", "/fleet/robot2"} <= set(trees)
+    kalibr = {r.ref.frame_graph_id for r in records if isinstance(r, Frame)}
+    kalibr |= {r.parent.frame_graph_id for r in records if isinstance(r, FrameTransform)}
+    assert not [x for x in found.links if {x.left.frame_graph_id, x.right.frame_graph_id} & kalibr]
+    (ambiguous,) = [f for f in found.findings if f.code.endswith(".link_ambiguous")]
+    assert {"/fleet/robot1", "/fleet/robot2"} <= set(ambiguous.details["namespaces"])  # type: ignore[arg-type]
+    assert "imu" in ambiguous.details["frames"]  # type: ignore[operator]
+    index = frame_index(records, (*found.edges, *found.links, *found.groups))
+    one, two = (FrameRef("imu", trees[ns].id) for ns in ("/fleet/robot1", "/fleet/robot2"))
+    for links in (False, True):
+        answer = index.compare(FrameAt(one), FrameAt(two), links=links)
+        assert isinstance(answer, NotComparable) and answer.reason is Reason.DISCONNECTED
+
+
+def test_a_calibration_attaches_to_the_one_namespace_its_names_resolve_in() -> None:
+    records, rows = _namespaced(("quadruped", "kalibr"), ("/fleet/robot1",))
+    found = align_frames(records, rows)
+    assert found is not None
+    (tree,) = found.trees
+    assert tree.namespace == "/fleet/robot1"
+    assert not [f for f in found.findings if f.code.endswith(".link_ambiguous")]
+    linked = {x.right.frame_id for x in found.links if x.right.frame_graph_id == tree.id}
+    linked |= {x.left.frame_id for x in found.links if x.left.frame_graph_id == tree.id}
+    assert {"imu", "cam0", "cam1"} <= linked

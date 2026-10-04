@@ -6,14 +6,22 @@ the file's layout, the chunk index records of its chunks (indexed layout), the s
 chunk's messages it emits (``first``, ``last``), and per channel with messages in it the ``seq``
 its rows start from and the record its schema is read from (``channels``), or that the config
 does not select it (``ignore``), or that nothing declares it (``undeclared``).
+
+The plan also decides which channels' definitions fall past the source's decoding budget
+(``over_budget``, ADR 0068 §1): it reads every channel's schema once, in channel id order, so
+every chunk decides alike; a context names those of its channels (only when there are any).
 """
 
+from collections.abc import Callable
+
 from neptune.adapters.contract import AdapterConfig, Plan, SourceReader, make_chunk
+from neptune.adapters.mcap.ingest import Records, as_int, as_list, declared_of
 from neptune.adapters.mcap.layout import DATA_START, Directory, read_head, read_tail
 from neptune.adapters.mcap.ranges import Layout, plan_layout, seq_starts
-from neptune.adapters.mcap.records import MAGIC, RECORD_HEADER
+from neptune.adapters.mcap.records import MAGIC, RECORD_HEADER, Channel
 from neptune.adapters.mcap.report import Reporter, Selection, selection
 from neptune.adapters.mcap.scan import Place
+from neptune.adapters.rosmsg.streams import Declared, over_budget
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.jsonvalue import JsonObject, JsonValue
 
@@ -26,7 +34,11 @@ _SUMMARY_PROBLEMS = {
 
 
 def _declarations(
-    layout: Layout, header: Place | None, statistics: Place | None, directory: Directory
+    layout: Layout,
+    header: Place | None,
+    statistics: Place | None,
+    directory: Directory,
+    over: list[int],
 ) -> JsonObject:
     schemas = sorted(
         {
@@ -46,12 +58,38 @@ def _declarations(
     }
     if header is not None:
         context["header"] = header.to_json()
+    if over:
+        context["over_budget"] = list(over)
     if statistics is not None:
         context["statistics"] = statistics.to_json()
     return context
 
 
-def _data(layout: Layout, directory: Directory, chosen: Selection) -> list[tuple[JsonObject, int]]:
+def _over_budget(
+    source: SourceReader, config: AdapterConfig, directory: Directory, limit: int
+) -> list[int]:
+    """The channels whose definitions fall past the source's decoding budget (ADR 0068 §1)."""
+    if not config.flag("decode_payloads"):
+        return []
+    read = Records(source, limit)
+    schemas = {i: declared.place for i, declared in directory.schemas.items()}
+    read.load((), sorted(set(schemas.values()), key=lambda place: place.steps))
+
+    def declared(channel: Channel) -> Callable[[], Declared]:
+        return lambda: declared_of(read, channel, schemas.get(channel.schema_id))
+
+    return over_budget(
+        (
+            (channel_id, declared(channel))
+            for channel_id, (_, channel) in directory.channels.items()
+        ),
+        config,
+    )
+
+
+def _data(
+    layout: Layout, directory: Directory, chosen: Selection, over: list[int]
+) -> list[tuple[JsonObject, int]]:
     contexts: list[tuple[JsonObject, int]] = []
     starts = seq_starts(layout.ranges, layout.chunked)
     for current, start in zip(layout.ranges, starts, strict=True):
@@ -87,6 +125,9 @@ def _data(layout: Layout, directory: Directory, chosen: Selection) -> list[tuple
             context["first"] = current.first
             if current.last is not None:
                 context["last"] = current.last
+        listed = {as_int(as_list(entry)[0]) for entry in channels}
+        if mine := [channel for channel in over if channel in listed]:
+            context["over_budget"] = list(mine)
         contexts.append((context, current.end - current.start))
     return contexts
 
@@ -150,9 +191,10 @@ def make_plan(source: SourceReader, config: AdapterConfig, chunk_bytes: int, max
         )
     statistics = tail.summary.statistics[0] if tail.summary and tail.summary.statistics else None
     header = head.header[0] if head.header else None
-    declarations = _declarations(layout, header, statistics, directory)
+    over = _over_budget(source, config, directory, limit)
+    declarations = _declarations(layout, header, statistics, directory, over)
     cost = sum(declared.place.steps[0][1] for declared, _ in directory.channels.values())
     chunks = [make_chunk(source, config, declarations, cost)]
-    for context, size in _data(layout, directory, chosen):
+    for context, size in _data(layout, directory, chosen, over):
         chunks.append(make_chunk(source, config, context, size))
     return Plan(tuple(chunks), tuple(findings))

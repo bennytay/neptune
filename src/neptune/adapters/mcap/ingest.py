@@ -6,7 +6,7 @@ become series rows citing their exact bytes, metadata records become tables, att
 anything else are findings, and every chunk is decompressed and checked on the way.
 """
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -40,6 +40,7 @@ from neptune.adapters.mcap.scan import (
 )
 from neptune.adapters.rosmsg.streams import (
     HEADER_STAMP,
+    Declared,
     Decoding,
     NotDecoded,
     decoded_columns,
@@ -112,24 +113,41 @@ def columns(
     return tuple(sorted(found))
 
 
-def decoding_of(
-    read: "Records", channel: Channel, schema: Place | None, config: AdapterConfig
-) -> Decoding | NotDecoded:
-    """How a channel's payloads decode, from what the channel and its schema declare."""
+def declared_of(read: "Records", channel: Channel, schema: Place | None) -> Declared:
+    """What a channel and its schema declare that its decoding is planned from."""
     name = encoding = definition = None
     if schema is not None:
         parsed = read.schema(schema)
         name, encoding = parsed.name.value, parsed.encoding.value
         start, length = parsed.data
         definition = read.content(schema)[start : start + length] if length else None
+    return Declared(channel.message_encoding.value, encoding, name, definition)
+
+
+def decoding_of(
+    read: "Records",
+    channel: Channel,
+    schema: Place | None,
+    config: AdapterConfig,
+    over: "frozenset[int]" = frozenset(),
+) -> Decoding | NotDecoded:
+    """How a channel's payloads decode, from what the channel and its schema declare; ``over``:
+    the channels the plan put past the source's decoding budget."""
+    declared = declared_of(read, channel, schema)
     return plan_stream(
         config=config,
-        message_encoding=channel.message_encoding.value,
-        schema_encoding=encoding,
-        schema_name=name,
-        definition=definition,
+        message_encoding=declared.message_encoding,
+        schema_encoding=declared.schema_encoding,
+        schema_name=declared.schema_name,
+        definition=declared.definition,
         reserved=RESERVED,
+        budget=channel.id not in over,
     )
+
+
+def over_of(context: Mapping[str, JsonValue]) -> frozenset[int]:
+    """The channels a chunk's context names as past the source's decoding budget."""
+    return frozenset(as_int(item) for item in as_list(context.get("over_budget", [])))
 
 
 def series_template(source: SourceReader, chunked: bool) -> SeriesProvenance:
@@ -418,7 +436,7 @@ class Declarations:
         )
         name, encoding, definition = self._schema(channel, place, ids.stream)
         schema_place = self.schemas.get(channel.schema_id) if channel.schema_id else None
-        decoding = decoding_of(self.read, channel, schema_place, cite.config)
+        decoding = decoding_of(self.read, channel, schema_place, cite.config, over_of(self.context))
         clocks = [cite.log_time, ids.publish]
         records: list[EvidenceRecord] = [publish]
         if isinstance(decoding, Decoding) and decoding.has_header:

@@ -29,6 +29,7 @@ from neptune.adapters.rosbag1.ingest import (
     as_place,
     columns,
     decoding_of,
+    over_of,
 )
 from neptune.adapters.rosbag1.records import (
     FieldError,
@@ -155,10 +156,11 @@ class Data:
         self.declared: dict[int, tuple[Place, bytes]] = {}
         entries = [as_list(item) for item in as_list(context["channels"])]
         reader = ConnectionReader(source, self.limits)
+        over = over_of(context)
         # In file order, so each chunk that holds declarations is decompressed once.
         for conn, where, seq in sorted(entries, key=lambda item: as_place(item[1]).steps):
             place = as_place(where)
-            decoding = decoding_of(parse_connection(reader.record(place)), config)
+            decoding = decoding_of(parse_connection(reader.record(place)), config, over)
             kinds = columns(decoding)
             self.slots[as_int(conn)] = Slot(
                 self.cite.stream(place),

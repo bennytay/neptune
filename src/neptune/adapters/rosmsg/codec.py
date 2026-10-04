@@ -16,13 +16,20 @@ alignment counted from after it, either byte order) or ROS 1's serialisation (li
 packed). Every count and length is checked against the bytes left before anything is read or
 allocated, an array is bounded by ``max_array_items``, a whole message by ``max_message_bytes``,
 and the walk by ``max_walk_items``: every element of every array walked one at a time costs one,
-whatever its size, so arrays of a type with no bytes (an empty message, ``T[0]``) cannot make a
-payload of a few bytes cost a walk of millions. Parts of a layout that take no bytes on the wire
-read nothing and store nothing, so they are never walked. A payload that breaks its layout raises
-``Malformed``, never anything else. Text that is not UTF-8 makes only its own cell unknown.
+whatever its size, so arrays of a type with no bytes (a ROS 1 empty message, ``T[0]``) cannot
+make a payload of a few bytes cost a walk of millions. Parts of a layout that take no bytes on the
+wire read nothing and store nothing, so they are never walked.
+
+An empty message is not the same on both wires. ROS 1 serialises it as nothing. rosidl gives a
+ROS 2 message with no fields one ``uint8 structure_needs_at_least_one_member`` that its ``.msg``
+text does not show, so under CDR an empty message is one byte, read and given no column. A payload
+that breaks its layout raises ``Malformed``, never anything else. Text that is not UTF-8 makes only
+its own cell unknown.
 
 Compiling is bounded too: a definition is a graph of types, and the layout unrolls it along every
-path, so ``MAX_LAYOUT_NODES`` caps the fields the layout visits (with and without a column).
+path, so ``MAX_LAYOUT_NODES`` caps the fields the layout visits (with and without a column). The
+count is taken over the graph before anything is unrolled (``layout_nodes``), so a definition past
+the cap costs its own size, not the cap.
 """
 
 import struct
@@ -385,6 +392,9 @@ class _Compiler:
     ) -> _Struct:
         if len(ancestors) > MAX_DEPTH:
             raise DefinitionError("nesting_limit", f"fields nest deeper than {MAX_DEPTH}")
+        if not message.fields and not self.ros1:
+            # rosidl's one-byte placeholder of a ROS 2 message with no fields: read, no column
+            return _Struct([_Primitive("uint8", None)])
         return _Struct([self.field(f, prefix, arrays, ancestors) for f in message.fields])
 
     def field(self, field: FieldDef, prefix: str, arrays: int, ancestors: tuple[str, ...]) -> _Node:
@@ -421,6 +431,39 @@ class _Compiler:
         if wire == "string":
             return _String(field.bound, slot)
         return _Primitive(wire, slot)
+
+
+def layout_nodes(definition: Definition, fields: Sequence[FieldDef], cap: int) -> int:
+    """How many fields a layout of ``fields`` visits, unrolled along every path, counted over the
+    type graph without unrolling it (each type once); at most ``cap + 1``. A type that holds itself
+    counts as nothing here: compiling refuses it."""
+    counted: dict[str, int] = {}
+    open_types: set[str] = set()
+
+    def of_type(name: str) -> int:
+        if name in counted:
+            return counted[name]
+        if name in open_types:
+            return 0
+        open_types.add(name)
+        message = definition.types.get(name)
+        total = of_fields(message.fields) if message is not None else 0
+        open_types.discard(name)
+        counted[name] = total
+        return total
+
+    def of_fields(items: Sequence[FieldDef]) -> int:
+        total = 0
+        for item in items:
+            total += 1
+            byte_array = item.array is not None and item.declared in BYTE_NAMES
+            if item.wire is None and not byte_array:
+                total += of_type(item.type)
+            if total > cap:
+                return cap + 1
+        return total
+
+    return of_fields(fields)
 
 
 def header_field(definition: Definition) -> FieldDef | None:
@@ -471,6 +514,11 @@ def compile_layout(
     compiler = _Compiler(definition, limits, ros1, reserved)
     header = header_field(definition)
     root = definition.root_type
+    walked = [header] if header_only and header is not None else root.fields
+    if layout_nodes(definition, walked, MAX_LAYOUT_NODES) > MAX_LAYOUT_NODES:
+        raise DefinitionError(
+            "node_limit", f"the layout visits more than {MAX_LAYOUT_NODES} fields"
+        )
     if header_only:
         if header is None:
             raise DefinitionError("unsupported", "the type has no leading std_msgs/Header")

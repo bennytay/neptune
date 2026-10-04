@@ -23,6 +23,7 @@ chunks are rowid ranges, each with the ``seq`` its topics start from. A chunk wa
 from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Final
 
 from neptune.adapters.contract import (
@@ -51,6 +52,7 @@ from neptune.adapters.rosbag2._sqlite import (
 )
 from neptune.adapters.rosmsg.streams import (
     HEADER_STAMP,
+    Declared,
     Decoding,
     NotDecoded,
     Undecoded,
@@ -59,6 +61,7 @@ from neptune.adapters.rosmsg.streams import (
     decoded_columns,
     decoding_report,
     header_domain,
+    over_budget,
     plan_stream,
     undecoded_report,
 )
@@ -113,26 +116,49 @@ def columns(
     return tuple(sorted(found))
 
 
-def decoding_of(
-    source: SourceReader,
-    topic: "Topic",
-    definitions: "dict[str, Definition]",
-    config: AdapterConfig,
-) -> Decoding | NotDecoded:
-    """How a topic's payloads decode, from its row and its type's ``message_definitions`` row."""
+def declared_of(
+    source: SourceReader, topic: "Topic", definitions: "dict[str, Definition]"
+) -> Declared:
+    """A topic's row and its type's ``message_definitions`` row."""
     kind = topic.values.get("type") or None
     found = definitions.get(kind or "")
     text = None
     if found is not None and found.text is not None:
         text = source.read(found.text.offset, found.text.length)
-    return plan_stream(
-        config=config,
-        message_encoding=topic.values.get("serialization_format") or None,
-        schema_encoding=found.encoding if found is not None else None,
-        schema_name=kind,
-        definition=text,
-        reserved=RESERVED,
+    return Declared(
+        topic.values.get("serialization_format") or None,
+        found.encoding if found is not None else None,
+        kind,
+        text,
     )
+
+
+def decodings_of(
+    source: SourceReader,
+    topics: "list[Topic]",
+    definitions: "dict[str, Definition]",
+    config: AdapterConfig,
+) -> dict[int, Decoding | NotDecoded]:
+    """How each topic's payloads decode, by row id. Every call reads every topic, so each
+    decides the source's decoding budget alike, over the topics in row id order (ADR 0068 §1)."""
+    declared = {topic.row.rowid: declared_of(source, topic, definitions) for topic in topics}
+    over = set(over_budget(((rowid, partial(_given, d)) for rowid, d in declared.items()), config))
+    return {
+        rowid: plan_stream(
+            config=config,
+            message_encoding=d.message_encoding,
+            schema_encoding=d.schema_encoding,
+            schema_name=d.schema_name,
+            definition=d.definition,
+            reserved=RESERVED,
+            budget=rowid not in over,
+        )
+        for rowid, d in declared.items()
+    }
+
+
+def _given(declared: Declared) -> Declared:
+    return declared
 
 
 PROBLEMS: Final = {
@@ -653,8 +679,16 @@ class _Declarations:
         counts = {_ints(t): _ints(n) for t, n in (tuple(p) for p in _pairs(self.context["counts"]))}
         topics, _ = read_topics(self.db, self.layout, Walk())
         definitions = read_definitions(self.db, self.layout)
+        decodings = decodings_of(self.source, topics, definitions, cite.config)
         for topic in topics:
-            self._stream(topic, run.id, clock.id, counts.get(topic.row.rowid, 0), definitions)
+            self._stream(
+                topic,
+                run.id,
+                clock.id,
+                counts.get(topic.row.rowid, 0),
+                definitions,
+                decodings[topic.row.rowid],
+            )
         return ChunkOutput(tuple(self.records), tuple(self.series), tuple(self.findings))
 
     def _extent(self, name: str, clock: RecordId) -> Knowledge[Timestamp]:
@@ -689,6 +723,7 @@ class _Declarations:
         clock: RecordId,
         count: int,
         definitions: dict[str, Definition],
+        decoding: Decoding | NotDecoded,
     ) -> None:
         cite = self.cite
         stream_id = self.ids.stream_id(topic)
@@ -721,7 +756,6 @@ class _Declarations:
             for key in ("offered_qos_profiles", "type_description_hash")
             if (value := topic.values.get(key))
         )
-        decoding = decoding_of(self.source, topic, definitions, cite.config)
         clocks = [clock]
         if isinstance(decoding, Decoding) and decoding.has_header:
             assert found is not None and found.text is not None
@@ -819,10 +853,7 @@ class _Rows:
         topics, _ = read_topics(self.db, self.layout, Walk())
         streams = {topic.row.rowid: self.ids.stream_id(topic) for topic in topics}
         definitions = read_definitions(self.db, self.layout)
-        decodings = {
-            topic.row.rowid: decoding_of(self.source, topic, definitions, self.ids.cite.config)
-            for topic in topics
-        }
+        decodings = decodings_of(self.source, topics, definitions, self.ids.cite.config)
         kinds = {rowid: columns(decoding) for rowid, decoding in decodings.items()}
         undecoded: dict[int, Undecoded] = {}
         rows: dict[int, dict[str, list[object]]] = {}

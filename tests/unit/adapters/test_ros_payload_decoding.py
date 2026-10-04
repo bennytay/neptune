@@ -7,7 +7,6 @@ fixture's ``/imu``, flattened to the decoder's column paths. Every decoded cell 
 payload the official reader refuses must have every value ``unknown`` and a finding.
 """
 
-import importlib.util
 import json
 import struct
 import time
@@ -33,9 +32,11 @@ from neptune.adapters.rosmsg.definitions import DefinitionError, parse_definitio
 from neptune.adapters.rosmsg.streams import (
     LIMIT_REASONS,
     LISTED_LEFT_OUT,
+    Declared,
     Decoding,
     NotDecoded,
     decode_row,
+    over_budget,
     plan_stream,
 )
 from neptune.discovery.reader import BytesReader
@@ -416,42 +417,70 @@ def msgs(root: str, **types: str) -> bytes:
     return "\n".join(sections).encode()
 
 
-def _frames_writer() -> Any:
-    spec = importlib.util.spec_from_file_location(
-        "make_frames_writer", FIXTURES / "frames" / "make_frames.py"
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def mcap(
+    schema_encoding: str,
+    message_encoding: str,
+    schemas: dict[str, str],
+    channels: list[tuple[int, str, str]],
+    messages: list[tuple[int, bytes]],
+) -> bytes:
+    """A small unchunked MCAP: ``channels`` as (id, topic, type), ``messages`` as (channel,
+    payload), each type's definition from ``schemas``."""
+
+    def text(value: str) -> bytes:
+        data = value.encode()
+        return struct.pack("<I", len(data)) + data
+
+    def record(opcode: int, content: bytes) -> bytes:
+        return struct.pack("<BQ", opcode, len(content)) + content
+
+    out = bytearray(b"\x89MCAP0\r\n")
+    out += record(0x01, text("ros") + text("neptune test"))
+    ids = {name: i + 1 for i, name in enumerate(sorted(schemas))}
+    for name, schema_id in ids.items():
+        data = schemas[name].encode()
+        head = struct.pack("<H", schema_id) + text(name) + text(schema_encoding)
+        out += record(0x03, head + struct.pack("<I", len(data)) + data)
+    for channel_id, topic, kind in channels:
+        head = struct.pack("<HH", channel_id, ids[kind]) + text(topic) + text(message_encoding)
+        out += record(0x04, head + struct.pack("<I", 0))
+    sequence: dict[int, int] = {}
+    for i, (channel_id, payload) in enumerate(messages):
+        sequence[channel_id] = sequence.get(channel_id, 0) + 1
+        at = 1_800_000_000 * 10**9 + i * 1_000
+        out += record(
+            0x05, struct.pack("<HIQQ", channel_id, sequence[channel_id], at, at) + payload
+        )
+    out += record(0x0F, struct.pack("<I", 0))
+    out += record(0x02, struct.pack("<QQI", 0, 0, 0))
+    return bytes(out + b"\x89MCAP0\r\n")
 
 
 def ros2_mcap(
     schemas: dict[str, str], channels: dict[str, str], payloads: dict[str, bytes]
 ) -> bytes:
     """A small unchunked ROS 2 MCAP: ``channels`` topic to type, one message per topic."""
-    writer = _frames_writer()
-    listed = [
-        writer.Channel(i + 1, topic, kind) for i, (topic, kind) in enumerate(channels.items())
-    ]
-    ids = {channel.topic: channel.id for channel in listed}
-    messages = [
-        writer.Message(ids[topic], 1_000 + ids[topic], data) for topic, data in payloads.items()
-    ]
-    return writer.write_mcap("ros2msg", schemas, listed, messages)  # type: ignore[no-any-return]
+    listed = [(i + 1, topic, kind) for i, (topic, kind) in enumerate(channels.items())]
+    ids = {topic: channel_id for channel_id, topic, _ in listed}
+    messages = [(ids[topic], data) for topic, data in payloads.items()]
+    return mcap("ros2msg", "cdr", schemas, listed, messages)
 
 
-def test_arrays_of_a_type_with_no_bytes_walk_nothing_and_cost_no_source() -> None:
-    """625 bytes of MCAP once cost a 60 s sandbox kill: 65,536 x 65,536 empty elements walked
-    for a payload of four bytes, and the good channel beside it was lost with the source."""
-    data = ros2_mcap(
-        {
-            "pkg/msg/Outer": "pkg/Inner[65536] a\n"
-            f"{SEPARATOR}\nMSG: pkg/Inner\npkg/Empty[65536] e\n{SEPARATOR}\nMSG: pkg/Empty\n",
-            "std_msgs/msg/String": "string data\n",
-        },
-        {"/nested": "pkg/msg/Outer", "/chatter": "std_msgs/msg/String"},
-        {"/nested": cdr(), "/chatter": cdr(b"\x06\x00\x00\x00hello\x00")},
+NESTED_EMPTY: Final = (
+    f"pkg/Inner[65536] a\n{SEPARATOR}\nMSG: pkg/Inner\npkg/Empty[65536] e\n"
+    f"{SEPARATOR}\nMSG: pkg/Empty\n"
+)
+
+
+def test_ros1_arrays_of_a_type_with_no_bytes_walk_nothing_and_cost_no_source() -> None:
+    """ROS 1 serialises an empty message as nothing: 65,536 x 65,536 of them are a payload of
+    no bytes, once a 60 s sandbox kill that lost the good channel beside it with the source."""
+    data = mcap(
+        "ros1msg",
+        "ros1",
+        {"pkg/Outer": NESTED_EMPTY, "std_msgs/String": "string data\n"},
+        [(1, "/nested", "pkg/Outer"), (2, "/chatter", "std_msgs/String")],
+        [(1, b""), (2, struct.pack("<I", 5) + b"hello")],
     )
     started = time.monotonic()
     output = ingest_source(McapAdapter(), BytesReader(data), {})
@@ -459,24 +488,94 @@ def test_arrays_of_a_type_with_no_bytes_walk_nothing_and_cost_no_source() -> Non
     topics = by_topic(output)
     _, chatter = topics["/chatter"]
     assert [(row["value/data"], row["state/value/data"]) for row in chatter] == [("hello", "known")]
-    _, nested = topics["/nested"]
-    assert len(nested) == 1  # decoded: the type has no bytes, so the payload is its header
+    assert len(topics["/nested"][1]) == 1
     assert not [f for f in output.findings() if f.code == "mcap.payload_undecodable"]
+
+
+def test_ros2_arrays_of_an_empty_type_are_bounded_by_their_bytes() -> None:
+    """Under CDR an empty message is one byte, so the same arrays need 2^32 bytes: four are a
+    short payload at once, and the good channel still decodes."""
+    data = ros2_mcap(
+        {"pkg/msg/Outer": NESTED_EMPTY, "std_msgs/msg/String": "string data\n"},
+        {"/nested": "pkg/msg/Outer", "/chatter": "std_msgs/msg/String"},
+        {"/nested": cdr(), "/chatter": cdr(b"\x06\x00\x00\x00hello\x00")},
+    )
+    started = time.monotonic()
+    output = ingest_source(McapAdapter(), BytesReader(data), {})
+    assert time.monotonic() - started < 10
+    topics = by_topic(output)
+    assert [row["value/data"] for row in topics["/chatter"][1]] == ["hello"]
+    (finding,) = [f for f in output.findings() if f.code == "mcap.payload_undecodable"]
+    assert finding.details["counts"] == {"short": 1}
+
+
+# What ``rosbags`` 0.11.5 serialises (the official-reader stand-in, never a dependency), run as
+# ``uv run --no-project --with rosbags==0.11.5``: ``serialize_cdr`` / ``serialize_ros1`` of each
+# message, hex. ROS 2 gives an empty message one byte (rosidl's
+# ``structure_needs_at_least_one_member``); ROS 1 none.
+EMPTY_TYPES: Final = {
+    "AfterEmpty": (f"std_msgs/Empty e\nuint8 x\n{SEPARATOR}\nMSG: std_msgs/Empty\n", [7]),
+    "NestedEmpty": (
+        f"pkg/Inner i\nuint16 x\n{SEPARATOR}\nMSG: pkg/Inner\nstd_msgs/Empty e\n"
+        f"{SEPARATOR}\nMSG: std_msgs/Empty\n",
+        [0x1234],
+    ),
+    "EmptyArrays": (  # three in a sequence, two in a fixed array
+        f"std_msgs/Empty[] es\nstd_msgs/Empty[2] fixed\nuint32 x\n{SEPARATOR}\n"
+        "MSG: std_msgs/Empty\n",
+        [9],
+    ),
+    "Empty": ("", []),
+}
+ROSBAGS_BYTES: Final = {
+    ("ros2msg", "AfterEmpty"): "000100000007",
+    ("ros2msg", "NestedEmpty"): "0001000000003412",
+    ("ros2msg", "EmptyArrays"): "0001000003000000000000000000000009000000",
+    ("ros2msg", "Empty"): "0001000000",
+    ("ros1msg", "AfterEmpty"): "07",
+    ("ros1msg", "NestedEmpty"): "3412",
+    ("ros1msg", "EmptyArrays"): "0300000009000000",
+    ("ros1msg", "Empty"): "",
+}
+
+
+@pytest.mark.parametrize(("encoding", "name"), sorted(ROSBAGS_BYTES))
+def test_empty_messages_decode_as_the_official_writer_serialises_them(
+    encoding: str, name: str
+) -> None:
+    text, expected = EMPTY_TYPES[name]
+    root = f"pkg/msg/{name}" if encoding == "ros2msg" else f"pkg/{name}"
+    definition = parse_definition(text.encode(), encoding, root)
+    layout = compile_layout(definition, DecodeLimits())
+    assert [c.path for c in layout.columns] == (["x"] if expected else [])  # no placeholder column
+    decoder = Decoder(layout, encoding == "ros2msg", DecodeLimits())
+    assert decoder.decode(bytes.fromhex(ROSBAGS_BYTES[encoding, name])) == expected
+
+
+def test_a_cdr_empty_message_read_as_no_bytes_would_shift_what_follows() -> None:
+    """The bytes rosbags writes for ``Empty e; uint8 x`` hold x = 7; reading the empty message
+    as nothing would take the placeholder (0) for x and the 7 for padding."""
+    text, _ = EMPTY_TYPES["AfterEmpty"]
+    definition = parse_definition(text.encode(), "ros2msg", "pkg/msg/AfterEmpty")
+    decoder = Decoder(compile_layout(definition, DecodeLimits()), True, DecodeLimits())
+    assert decoder.decode(bytes.fromhex("000100000007")) == [7]
+    with pytest.raises(Malformed):  # the placeholder byte is not optional
+        decoder.decode(bytes.fromhex("00010000"))
 
 
 def test_a_walk_past_its_budget_is_a_limit_of_that_message_only() -> None:
     definition = parse_definition(
         msgs("pkg/Inner[] a", **{"pkg/Inner": "pkg/Empty[] e", "pkg/Empty": ""}),
-        "ros2msg",
-        "pkg/msg/Outer",
+        "ros1msg",
+        "pkg/Outer",
     )
     limits = DecodeLimits()
-    decoder = Decoder(compile_layout(definition, limits), True, limits)
+    decoder = Decoder(compile_layout(definition, limits), False, limits)
     full = struct.pack("<I", 65_536)
-    assert decoder.decode(cdr(struct.pack("<I", 3), full * 3)) == []  # 196,611 elements
+    assert decoder.decode(struct.pack("<I", 3) + full * 3) == []  # 196,611 elements
     started = time.monotonic()
     with pytest.raises(Malformed) as caught:  # 100 x 65,536 elements in 404 bytes
-        decoder.decode(cdr(struct.pack("<I", 100), full * 100))
+        decoder.decode(struct.pack("<I", 100) + full * 100)
     assert time.monotonic() - started < 5
     assert (caught.value.reason, caught.value.limit) == ("walk_limit", True)
     assert "walk_limit" in LIMIT_REASONS  # a limit finding, not corruption
@@ -578,3 +677,50 @@ def test_an_mcap_payload_of_exactly_the_message_limit_decodes(over: int) -> None
         assert row["state/value/values[]"] == "not_covered"
     else:
         assert (row["value/values[]"], row["state/value/values[]"]) == ((1.5, 2.5), "known")
+
+
+def test_a_source_past_its_decoding_budget_keeps_its_other_channels() -> None:
+    """100 distinct definitions costing 12,311 fields each pass the source's 2^20 fields after
+    85; the rest are not decoded, by channel id whatever their order in the file, and
+    ``/chatter``, small and last, still is. The source is never lost."""
+    schemas = {
+        f"pkg/msg/D{i}": _doubling(12).decode().replace("pkg/T", f"pkg/U{i}x") for i in range(100)
+    }
+    schemas["std_msgs/msg/String"] = "string data\n"
+    channels = [(100 - i, f"/d{i}", f"pkg/msg/D{i}") for i in range(100)]  # file order reversed
+    channels.append((60_000, "/chatter", "std_msgs/msg/String"))
+    data = mcap(
+        "ros2msg",
+        "cdr",
+        schemas,
+        channels,
+        [(60_000, cdr(b"\x06\x00\x00\x00hello\x00"))],
+    )
+    started = time.monotonic()
+    output = ingest_source(McapAdapter(), BytesReader(data), {})
+    assert time.monotonic() - started < 60
+    over = sorted(
+        int(f.details["id"])  # type: ignore[arg-type]
+        for f in output.findings()
+        if f.code == "mcap.payload_not_decoded" and f.details["reason"] == "layout_budget"
+    )
+    assert over == list(range(86, 101))
+    budget = next(f for f in output.findings() if f.details.get("reason") == "layout_budget")
+    assert (budget.category, budget.severity) == ("limit", "warning")
+    assert [row["value/data"] for row in by_topic(output)["/chatter"][1]] == ["hello"]
+
+
+def test_the_budget_is_decided_in_stream_order_and_by_definition() -> None:
+    small = Declared("cdr", "ros2msg", "pkg/msg/S", b"uint8 x\n")
+    big = Declared("cdr", "ros2msg", "pkg/msg/T0", _doubling(12))
+    other = Declared("cdr", "ros2msg", "pkg/msg/T0", _doubling(12).replace(b"x\n", b"y\n", 1))
+    streams = [(i, lambda: big) for i in range(100)]  # one definition: taken once
+    streams += [(1_000, lambda: other), (1_001, lambda: small), (1_002, lambda: other)]
+    assert over_budget(streams, config()) == []
+    many = [
+        (i, lambda i=i: Declared("cdr", "ros2msg", "pkg/msg/T0", _doubling(12) + b"#%d\n" % i))
+        for i in range(100)
+    ]
+    first = over_budget(many, config())
+    assert first == list(range(85, 100)) == over_budget(list(reversed(many)), config())
+    assert over_budget(many, config(decode_payloads=False)) == []

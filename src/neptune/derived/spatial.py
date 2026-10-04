@@ -22,7 +22,8 @@ and the findings of what does not hold together:
 - **findings**: a run's frames in groups no transform joins (``disconnected``), a frame with two
   parents, a loop, a static transform restated with other values, rows naming no frame, names
   differing by a leading ``/``, a subject with no frame and no CRS (``origin_unknown``), one name
-  in two namespaces' trees of a run (``frame_name_ambiguous``).
+  in two namespaces' trees of a run (``frame_name_ambiguous``), a declared graph whose names
+  resolve in two namespaces of a run, so it is linked to neither (``link_ambiguous``).
 
 Everything is ``inferred``: a run's frames being one graph is ROS's convention, a topic being
 static is tf2's, a name match is a proposal. The pass reads only the time and value columns its
@@ -554,7 +555,7 @@ def _run(
         for count in reference.frames:
             if count.frame not in work.evidence:
                 work.evidence[count.frame].extend(reference.evidence)
-    links = _links(work, sorted(declared, key=_key), tree_frames)
+    links = _links(work, sorted(declared, key=_key), trees, tree_frames)
     groups = _groups(work, union, parents, identities, dynamic)
     _disconnected(work, trees, tree_frames, union)
     return FrameAlignment(
@@ -803,8 +804,14 @@ def _references(
 def _links(
     work: _Pass,
     declared: list[FrameRef],
+    trees: Mapping[tuple[RecordId, str], _Tree],
     tree_frames: Mapping[RecordId, list[FrameRef]],
 ) -> list[FrameLink]:
+    """Links within each tree (``leading_slash``), and from each declared graph into the trees
+    of each run. A declared graph attaches to a run only where its frame names resolve in exactly
+    one of the run's tf namespaces; where they resolve in several, it is linked into none of
+    them and the run has a ``link_ambiguous`` finding, so no declared frame bridges two robots
+    (ADR 0068 §3)."""
     transform_id = work.transform.id
     found: dict[RecordId, FrameLink] = {}
 
@@ -827,16 +834,65 @@ def _links(
         for name, ref in names.items():
             if name.startswith("/") and name[1:] in names:
                 link(names[name[1:]], ref, LinkRule.LEADING_SLASH)
+    graphs: dict[str, list[FrameRef]] = defaultdict(list)
     for ref in declared:
-        for _, refs in sorted(tree_frames.items()):
-            names = {r.frame_id: r for r in refs}
-            if ref.frame_id in names:
-                link(ref, names[ref.frame_id], LinkRule.SAME_NAME)
-                continue
-            other = ref.frame_id[1:] if ref.frame_id.startswith("/") else "/" + ref.frame_id
-            if other in names:
-                link(ref, names[other], LinkRule.LEADING_SLASH)
+        graphs[ref.frame_graph_id].append(ref)
+    runs: dict[RecordId, list[_Tree]] = defaultdict(list)
+    for key in sorted(trees):
+        runs[key[0]].append(trees[key])
+    for graph, refs in sorted(graphs.items()):
+        for run, run_trees in runs.items():
+            matches: dict[str, list[tuple[FrameRef, FrameRef, LinkRule]]] = {}
+            for tree in run_trees:
+                names = {r.frame_id: r for r in tree_frames[tree.id]}
+                found_here = []
+                for ref in refs:
+                    if ref.frame_id in names:
+                        found_here.append((ref, names[ref.frame_id], LinkRule.SAME_NAME))
+                        continue
+                    other = ref.frame_id[1:] if ref.frame_id.startswith("/") else "/" + ref.frame_id
+                    if other in names:
+                        found_here.append((ref, names[other], LinkRule.LEADING_SLASH))
+                if found_here:
+                    matches[tree.namespace] = found_here
+            if len(matches) == 1:
+                for ref, target, rule in next(iter(matches.values())):
+                    link(ref, target, rule)
+            elif matches:
+                _ambiguous_link(work, graph, run, matches, run_trees)
     return list(found.values())
+
+
+def _ambiguous_link(
+    work: _Pass,
+    graph: str,
+    run: RecordId,
+    matches: Mapping[str, list[tuple[FrameRef, FrameRef, LinkRule]]],
+    run_trees: list[_Tree],
+) -> None:
+    namespaces = sorted(matches)
+    named = sorted({ref.frame_id for found in matches.values() for ref, _, _ in found})
+    first = min((ref for found in matches.values() for ref, _, _ in found), key=_key)
+    involved = [tree for tree in run_trees if tree.namespace in matches]
+    work.finding(
+        "link_ambiguous",
+        FindingCategory.AMBIGUOUS,
+        Severity.WARNING,
+        work.evidence[first][0]
+        if work.evidence[first]
+        else involved[0].streams[0].provenance.evidence,
+        f"{len(named)} frame name(s) of a declared graph name frames of {len(namespaces)} tf"
+        " namespaces of one run; which robot the graph describes is not stated, so it is linked"
+        " to none of them",
+        {
+            "count": len(named),
+            "frames": named[:_LISTED],
+            "graph": graph,
+            "namespaces": namespaces,
+            "run": run,
+        },
+        [*(tree.id for tree in involved)],
+    )
 
 
 def _groups(

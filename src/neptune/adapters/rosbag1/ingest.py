@@ -6,7 +6,7 @@ claim, recorded in the bag. The format itself defines the message and schema enc
 cite the magic.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Final
 
@@ -23,6 +23,7 @@ from neptune.adapters.rosbag1.scan import (
 )
 from neptune.adapters.rosmsg.streams import (
     HEADER_STAMP,
+    Declared,
     Decoding,
     NotDecoded,
     decoded_columns,
@@ -79,20 +80,37 @@ def columns(
     return tuple(sorted(found))
 
 
-def decoding_of(connection: Connection, config: AdapterConfig) -> Decoding | NotDecoded:
-    """How a connection's payloads decode, from the type and definition its header states."""
+def declared_of(connection: Connection) -> Declared:
+    """The type and definition a connection's header states."""
     kind = connection.text(b"type")
     field = connection.header.find(b"message_definition")
     definition = None
     if field is not None and field.length:
         definition = connection.header.data[field.start : field.start + field.length]
+    return Declared(
+        MESSAGE_ENCODING, SCHEMA_ENCODING, kind.value if kind is not None else None, definition
+    )
+
+
+def decoding_of(
+    connection: Connection, config: AdapterConfig, over: frozenset[int] = frozenset()
+) -> Decoding | NotDecoded:
+    """How a connection's payloads decode, from the type and definition its header states;
+    ``over``: the connections the plan put past the source's decoding budget."""
+    declared = declared_of(connection)
     return plan_stream(
         config=config,
-        message_encoding=MESSAGE_ENCODING,
-        schema_encoding=SCHEMA_ENCODING,
-        schema_name=kind.value if kind is not None else None,
-        definition=definition,
+        message_encoding=declared.message_encoding,
+        schema_encoding=declared.schema_encoding,
+        schema_name=declared.schema_name,
+        definition=declared.definition,
+        budget=connection.id not in over,
     )
+
+
+def over_of(context: Mapping[str, JsonValue]) -> frozenset[int]:
+    """The connections a chunk's context names as past the source's decoding budget."""
+    return frozenset(as_int(item) for item in as_list(context.get("over_budget", [])))
 
 
 class ConnectionReader:
@@ -346,7 +364,7 @@ class Declarations:
         if conn in counts:
             total, span = counts[conn]
             count = Known(total, cite.provenance(span, kind=AssertionKind.STATED))
-        decoding = decoding_of(connection, cite.config)
+        decoding = decoding_of(connection, cite.config, over_of(self.context))
         clocks = [cite.clock]
         if isinstance(decoding, Decoding) and decoding.has_header:
             assert isinstance(definition, Known)

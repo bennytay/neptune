@@ -19,19 +19,21 @@ cell ``unknown``.
 """
 
 import hashlib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
 from neptune.adapters.contract import AdapterConfig, ConfigOption
 from neptune.adapters.rosmsg.codec import (
     BAD_TEXT,
+    MAX_LAYOUT_NODES,
     Column,
     DecodeLimits,
     Decoder,
     LeftOut,
     Malformed,
     compile_layout,
+    layout_nodes,
 )
 from neptune.adapters.rosmsg.definitions import (
     Definition,
@@ -56,6 +58,10 @@ HEADER_FRAME: Final = value_column("header.frame_id")
 LIMIT_REASONS: Final = frozenset({"array_limit", "message_limit", "not_local", "walk_limit"})
 # Left-out paths a finding lists before it only counts them.
 LISTED_LEFT_OUT: Final = 64
+# What planning one source's definitions may cost in all, its distinct definitions taken in
+# stream order (``over_budget``): fixed bounds, not config (ADR 0068 §1).
+MAX_SOURCE_DEFINITION_BYTES: Final = 16 << 20
+MAX_SOURCE_LAYOUT_NODES: Final = 1 << 20
 # Distinct definitions one worker keeps planned, by digest (channels share schemas).
 _PLANNED_MAX: Final = 64
 
@@ -150,6 +156,75 @@ class Decoding:
         }
 
 
+@dataclass(frozen=True)
+class Declared:
+    """What a stream declares that its decoding is planned from."""
+
+    message_encoding: str | None
+    schema_encoding: str | None
+    schema_name: str | None
+    definition: bytes | None
+
+
+def over_budget(
+    streams: Iterable[tuple[int, Callable[[], Declared]]], config: AdapterConfig
+) -> list[int]:
+    """The streams of one source whose definitions fall past its decoding budget, sorted.
+
+    A source's distinct definitions are taken in stream key order (a channel's id, a
+    connection's, a topic's row id), never in the order they are met. Reading one costs its bytes
+    (``MAX_SOURCE_DEFINITION_BYTES`` in all, read or not taken); taking one costs the fields its
+    layout visits, counted over its type graph (``MAX_SOURCE_LAYOUT_NODES`` in all). A definition
+    is taken when it fits what is left of both, else its streams are over budget and
+    ``plan_stream`` leaves them undecoded (``layout_budget``); a later, smaller one may still fit.
+    Every call of an adapter must decide alike, so a planner computes this once and hands it to
+    its chunks, or every call computes it over all of the source's streams. Streams that would
+    not be decoded anyway cost nothing.
+    """
+    if not config.flag("decode_payloads"):
+        return []
+    limits = Limits()
+    decided: dict[bytes, bool] = {}
+    spent_bytes = spent_nodes = 0
+    found: list[int] = []
+    for key, declared_of in sorted(streams, key=lambda item: item[0]):
+        declared = declared_of()
+        schemas = SCHEMAS.get(declared.message_encoding or "")
+        definition, name = declared.definition, declared.schema_name
+        if schemas is None or declared.schema_encoding not in schemas or not definition or not name:
+            continue
+        definition = bytes(definition)
+        if len(definition) > limits.max_definition_bytes:
+            continue  # refused unread
+        assert declared.schema_encoding is not None
+        digest = hashlib.sha256(
+            b"\0".join((declared.schema_encoding.encode(), name.encode(), definition))
+        ).digest()
+        if digest not in decided:
+            taken = False
+            if spent_bytes + len(definition) <= MAX_SOURCE_DEFINITION_BYTES:
+                spent_bytes += len(definition)
+                nodes = _definition_cost(definition, declared.schema_encoding, name, limits)
+                if spent_nodes + nodes <= MAX_SOURCE_LAYOUT_NODES:
+                    spent_nodes += nodes
+                    taken = True
+            decided[digest] = taken
+        if not decided[digest]:
+            found.append(key)
+    return found
+
+
+def _definition_cost(definition: bytes, encoding: str, name: str, limits: Limits) -> int:
+    """The fields planning a definition walks: its graph once, and the layout it compiles."""
+    try:
+        parsed = parse_definition(definition, encoding, name, limits)
+    except DefinitionError:
+        return 0
+    fields = sum(len(message.fields) for message in parsed.types.values())
+    nodes = layout_nodes(parsed, parsed.root_type.fields, MAX_LAYOUT_NODES)
+    return fields + (nodes if nodes <= MAX_LAYOUT_NODES else 0)
+
+
 def plan_stream(
     *,
     config: AdapterConfig,
@@ -158,11 +233,20 @@ def plan_stream(
     schema_name: str | None,
     definition: bytes | None,
     reserved: frozenset[str] = frozenset(),
+    budget: bool = True,
 ) -> Decoding | NotDecoded:
     """How a stream's payloads are decoded, or why they are not (module docstring).
-    ``reserved``: paths the adapter's own value columns use, never a decoded column's."""
+    ``reserved``: paths the adapter's own value columns use, never a decoded column's.
+    ``budget``: ``False`` for a stream ``over_budget`` named, which is not decoded."""
     if not config.flag("decode_payloads"):
         return NotDecoded("disabled", "the config turns payload decoding off")
+    if not budget:
+        return NotDecoded(
+            "layout_budget",
+            "the source's definitions taken before this stream's, in stream order, leave too"
+            f" little of its decoding budget ({MAX_SOURCE_DEFINITION_BYTES} bytes,"
+            f" {MAX_SOURCE_LAYOUT_NODES} fields) for its own",
+        )
     schemas = SCHEMAS.get(message_encoding or "")
     if schemas is None:
         return NotDecoded(
@@ -363,10 +447,11 @@ def decoding_report(
     their paths have no column; ``None`` when every field has one. ``what`` names the stream as
     its format does (``channel 3``)."""
     if isinstance(decoding, NotDecoded):
+        budget = decoding.reason == "layout_budget"
         return Report(
             "payload_not_decoded",
-            FindingCategory.UNSUPPORTED,
-            Severity.INFO,
+            FindingCategory.LIMIT if budget else FindingCategory.UNSUPPORTED,
+            Severity.WARNING if budget else Severity.INFO,
             f"{what}'s message payloads are not decoded ({decoding.detail}); each row cites its"
             " message",
             {**details, "reason": decoding.reason},

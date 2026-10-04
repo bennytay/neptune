@@ -59,12 +59,25 @@ why. Forces:
      of two fields each unroll to 2^21 paths); past it the layout keeps only a leading header, else
      the stream is `payload_not_decoded` with `layout_node_limit`. Decoding one message walks at
      most 2^22 array elements one at a time (`max_walk_items`; a packed primitive array is one
-     step), each costing one whatever its size, so arrays of a type with no bytes (an empty
+     step), each costing one whatever its size, so arrays of a type with no bytes (a ROS 1 empty
      message, `T[0]`) cannot turn a few bytes into millions of steps; past it the message is
      `not_covered` (`walk_limit`, a limit, not corruption). Parts of a layout that take no bytes
      read and store nothing and are never walked. `payload_partly_decoded` lists at most 64
      left-out paths and counts them all (`left_out_count`); a stream adapter keeps the plans of at
      most 64 distinct definitions, keyed by digest, and refuses an over-large definition before.
+     The layout's field count is taken over the type graph before anything is unrolled, so a
+     definition past the cap costs its own size.
+   - An empty message is one byte under CDR (rosidl's `uint8 structure_needs_at_least_one_member`,
+     which the `.msg` text does not show: read, no column) and nothing under ROS 1, as `rosbags`
+     serialises them.
+   - A source's definitions share one budget: 16 MiB of definition bytes read and 2^20 layout
+     fields taken, its distinct definitions taken in stream id order (MCAP channel id, ROS 1
+     connection id, rosbag2 topic row id), never in file order. A definition is taken when it fits
+     what is left; else its streams are `payload_not_decoded` with `layout_budget` (a `limit`
+     warning), and a later, smaller definition may still fit. Every call decides alike: the MCAP
+     and ROS 1 planners decide once and name the streams past the budget in their chunks'
+     contexts (`over_budget`, only when there are any), and rosbag2, whose every call reads every
+     topic, decides in each call.
    - MCAP, rosbag1 and rosbag2 become version 0.2.0: new lineage, nothing rewritten.
 2. **A leading `std_msgs/Header` is a clock.** Where the root's first field is a header whose
    stamp and frame id are ROS's (checked on the definition, not the name), the stream gains a
@@ -86,6 +99,11 @@ why. Forces:
      fleet's robots each publish `base_link`, the nav2 multi-robot pattern): they are two frames,
      the run has one `frame_name_ambiguous` finding listing them, and `compare` across them is
      never `same_frame` (no step joins them: `disconnected`).
+     A declared graph (a calibration, a URDF) links into a run only where its frame names resolve
+     in exactly one of the run's tf namespaces. Where they resolve in several, it links into none
+     of them and the run has a `link_ambiguous` finding: nothing states which robot it describes,
+     and one declared frame linked into two trees would join two robots through links
+     (`compare(links=True)` stays `disconnected`).
    - `frame_edge {tree, stream, parent, child, persistence, direction, translation_unit,
      quaternion_convention, samples, first, last}`: one per pair one TF stream states. `static` on
      tf2's static topic (`tf_static` under any namespace). `direction` `Known(child_to_parent)`
@@ -109,7 +127,8 @@ why. Forces:
 4. **Findings** (`neptune.frames.*`): `disconnected` (a run's frames in more than one group, the
    groups listed), `multiple_parents`, `loop`, `static_changed` (a static pair restated with other
    values), `frame_unset`, `name_variants`, `frame_name_ambiguous` (one frame name in two tf
-   namespaces' trees of a run), `origin_unknown` (a subject with no frame, CRS or
+   namespaces' trees of a run), `link_ambiguous` (a declared graph whose names resolve in two
+   namespaces of a run), `origin_unknown` (a subject with no frame, CRS or
    geodetic type), `untimed_transforms`, `frame_unrepresentable`.
 5. **Comparability is a query** (`neptune.derived.frames.FrameIndex.compare`, built by
    `frame_index(records, derived)`), like ADR 0060's `ClockGraph.align`:

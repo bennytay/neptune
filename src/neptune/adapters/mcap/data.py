@@ -36,6 +36,7 @@ from neptune.adapters.mcap.ingest import (
     as_place,
     columns,
     decoding_of,
+    over_of,
     ticks,
 )
 from neptune.adapters.mcap.ranges import CHANNEL_ID, index_counts, skipped
@@ -171,11 +172,12 @@ class Data:
             (as_place(entry[1]) for entry in entries),
             (as_place(entry[3]) for entry in entries if len(entry) > 3),
         )
+        over = over_of(context)
         for entry in entries:
             channel, where, seq = entry[:3]
             place = as_place(where)
             schema = as_place(entry[3]) if len(entry) > 3 else None
-            decoding = decoding_of(declared, declared.channel(place), schema, config)
+            decoding = decoding_of(declared, declared.channel(place), schema, config, over)
             usable = decoding if isinstance(decoding, Decoding) else None
             kinds = columns(self.chunked, decoding)
             self.slots[as_int(channel)] = Slot(
