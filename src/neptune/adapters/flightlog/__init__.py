@@ -31,6 +31,7 @@ from neptune.adapters.contract import (
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
+    ChunkExtent,
     ChunkOutput,
     Documented,
     FormatSpec,
@@ -269,6 +270,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         " forward pass; a problem met many times is one finding, never one per message.",
         "No decompression, no native code, no network; the standard library's struct only.",
     ),
+    extent=ChunkExtent(),  # data chunks name their [start, end) bytes (ADR 0069)
 )
 
 

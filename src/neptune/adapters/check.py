@@ -31,6 +31,7 @@ from neptune.adapters.contract import (
     ContractError,
     Plan,
     SourceReader,
+    chunk_extent,
 )
 from neptune.identity import canonical_json
 from neptune.identity.findings import check_ingest_finding
@@ -135,6 +136,7 @@ def check_plan(
         raise ContractError(f"adapter {descriptor.id}: plan returned {plan!r}")
     for chunk in plan.chunks:
         _check_owner(chunk, source, config)
+        chunk_extent(descriptor.extent, chunk, source.size)  # a declared extent is well formed
     for finding in plan.findings:
         check_finding(descriptor, source, config, finding)
 

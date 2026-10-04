@@ -131,7 +131,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive,
         default=JobOptions.attempts,
         metavar="N",
-        help="tries per adapter call before its source is quarantined (default %(default)s)",
+        help="tries per adapter call before its chunk is lost or its source quarantined"
+        " (default %(default)s)",
     )
     ingest.add_argument(
         "-w",
