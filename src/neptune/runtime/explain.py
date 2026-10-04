@@ -811,6 +811,8 @@ class Explanation:
             f"Sessions (inferred from names and folders, ADR 0036): {counts['proposals']}"
             f" proposals ({counts['contested']} contested), {counts['ambiguous']} ambiguous and"
             f" {counts['unknown']} unplaced files",
+            "  a dry run writes nothing to the package and only warms the workspace cache; a real"
+            " run reassembles sessions over the evidence it reads (ADR 0066)",
         ]
         for proposal in self.grouping.proposals:
             place = proposal.directory

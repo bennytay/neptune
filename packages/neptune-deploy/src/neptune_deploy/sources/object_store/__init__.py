@@ -35,6 +35,7 @@ from neptune_deploy.sources.object_store.clients import (
 )
 from neptune_deploy.sources.object_store.config import (
     CONNECTOR_IDS,
+    SCHEMES,
     ObjectStoreConfigError,
     Options,
     credentials_for,
@@ -149,6 +150,12 @@ def _factory(provider: Provider, doc: str) -> SourceFactory:
 
     factory.__name__ = factory.__qualname__ = f"{provider.value}_source"
     factory.__doc__ = doc
+    # The URI scheme this factory reads, for a compiler that dispatches plain URIs to a
+    # ``neptune.sources`` factory by its ``schemes`` attribute (compiler ADR 0067, MVL-45). A plain
+    # attribute: nothing here depends on that compiler change.
+    factory.schemes = tuple(  # type: ignore[attr-defined]
+        scheme for scheme, named in SCHEMES.items() if named is provider
+    )
     return factory
 
 

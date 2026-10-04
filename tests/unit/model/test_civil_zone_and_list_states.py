@@ -8,6 +8,7 @@ import calendar
 import io
 from dataclasses import replace
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Final
 
 import pytest
@@ -45,6 +46,7 @@ from neptune.model.source import LocalPath
 from neptune.model.time import SECOND, ClockRole, Epoch, Timestamp
 from neptune.store.package import MANIFEST, PackageError, package_files, read_files, table_path
 from neptune.store.receipt import build_receipt
+from neptune.store.writer import PackageWriter
 
 EXPORT: Final = (
     b"# timezone: Europe/Berlin\n"
@@ -353,6 +355,29 @@ def test_a_package_is_written_at_its_records_version_not_only_its_kinds() -> Non
     with pytest.raises(ValueError, match="later"):
         build_receipt(package_records(blank), version=LIFECYCLE_SINCE)
     assert MANIFEST in files
+
+
+@pytest.mark.parametrize("spill", [False, True], ids=["in_memory", "spilled"])
+@pytest.mark.parametrize("blank_last", [False, True], ids=["bare_wins", "blank_wins"])
+def test_a_replaced_record_does_not_set_the_version(
+    spill: bool, blank_last: bool, tmp_path: Path
+) -> None:
+    # The same work order twice, the later replacing the earlier (``last_wins``): only the one
+    # that survives decides the version, in memory and spilled alike (ADR 0061 §6, ADR 0065).
+    blank, bare = work_order(), work_order(related=Known(()), actions=Known(()), parts=Known(()))
+    assert blank.id == bare.id
+    survivor = blank if blank_last else bare
+    order = (bare, blank) if blank_last else (blank, bare)
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    with PackageWriter(scratch if spill else None, budget=1 if spill else 10**9) as writer:
+        writer.extend(package_records())
+        writer.extend(order, last_wins=True)
+        manifest = writer.finish(tmp_path / "package" if spill else None)[MANIFEST]
+    expected = package_files(package_records(survivor))
+    assert manifest == expected[MANIFEST]  # the manifest hashes every file: the same bytes
+    want = LIST_STATES_SINCE if blank_last else LIFECYCLE_SINCE
+    assert read_files(expected).manifest.version == want
 
 
 def test_the_schema_describes_both_list_shapes_and_the_new_kind() -> None:
