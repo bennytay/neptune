@@ -117,6 +117,9 @@ escaping paths, truncation, decompression and pixel bombs, aliases) is a finding
 `test_every_worked_example_citation_resolves_to_its_bytes` resolves every citation of the four
 worked examples to its exact bytes and hydrates their pointers and rows;
 `test_a_frame_from_a_referenced_mcap_and_from_a_materialised_one`,
+`test_frames_hydrate_from_the_compilers_own_message_citations` (a package `neptune ingest` wrote),
+`test_documents_past_the_limit_are_refused_and_parsing_costs_no_tree`,
+`test_parquet_guards_hold_before_any_page_is_decoded`,
 `test_two_hydrations_are_byte_identical`, `test_a_snapshot_pins_what_a_hydration_returns`,
 `test_hydration_is_lazy_and_video_bytes_slice_by_range`,
 `test_a_moved_source_resolves_to_a_finding_not_a_crash`, `test_a_changed_source_is_never_served`

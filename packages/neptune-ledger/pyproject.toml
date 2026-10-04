@@ -12,10 +12,12 @@ authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 # version can change plans and pruning, so a bump re-runs the pushdown and budget tests.
 # The media store (ADR 0014): pylance holds extracted artefacts as Lance blobs; mcap and
 # mcap-ros2-support read frames from MCAP, whose chunks lz4 and zstandard inflate (bounded, in
-# lake.decode), pillow encodes rasters, pypdfium2 renders pages and pyyaml reads YAML for JSON
-# pointers. numpy (pylance's) is pinned below 2.4, whose stubs use Python 3.12 syntax that every
-# workspace member's 3.11 mypy check would fail to parse. Each one's version is part of every artefact's transform,
-# so all are pinned: a bump is a new extraction lineage.
+# lake.decode), pillow encodes rasters, pypdfium2 renders pages and pyyaml walks YAML for JSON
+# pointers. Each decoder library's version is part of every artefact's transform, so they are
+# pinned: a bump is a new extraction lineage. pyarrow (the row decoder) keeps the compiler's
+# floor instead, so the workspace shares one pyarrow; its installed version is still in every
+# row artefact's transform. numpy (pylance's) is pinned below 2.4, whose stubs use Python 3.12
+# syntax that every workspace member's 3.11 mypy check would fail to parse.
 dependencies = [
   "datafusion==54.0.0",
   "duckdb==1.5.6",

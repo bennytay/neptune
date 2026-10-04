@@ -986,7 +986,7 @@ def _csv_sniff(data: bytes) -> tuple[str, str]:
 
 
 def _row(scope: _Scope, step: Row | RowCell, subject: str, limits: Limits) -> Decoded:
-    if scope.size >= 12 and scope.head(4) == b"PAR1" and scope.tail(4) == b"PAR1":
+    if scope.size >= 12 and scope.head(4) == b"PAR1" and scope.tail(4) in (b"PAR1", b"PARE"):
         made = guarded(
             subject,
             "not a readable Parquet file",

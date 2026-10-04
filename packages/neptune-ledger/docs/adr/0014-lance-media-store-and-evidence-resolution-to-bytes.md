@@ -76,17 +76,32 @@ that no package records (root ADR 0010).
 
    | Variant | Innermost step | Artefact |
    |---|---|---|
-   | `bytes` | any | the span itself: no decode, no copy |
-   | `frame` | `record_range` | the one message in the range (MCAP log time, ROS 2 CDR `sensor_msgs/{Image,CompressedImage}`), as PNG |
-   | `image_region` | `image_region` | the box of a stored image, or of a frame (`[record_range, image_region]`), as PNG |
+   | `bytes` | `byte_range` only | the bytes every step addresses: the source itself, lazily, or decoded bytes when a step lies inside compressed content |
+   | `frame` | `record_range`, or `byte_range` of one MCAP Message record | the one image message (ROS 2 CDR `sensor_msgs/{Image,CompressedImage}`), as PNG |
+   | `image_region` | `image_region` | the box of a stored image, or of a frame, as PNG |
    | `page` | `page`, `page_region` | the page rendered by PDFium at 2 px/pt, or its box, as PNG |
    | `row` | `row`, `row_cell` | a CSV or Parquet row or cell as canonical JSON (a null is `{"null": true}`) |
-   | `value` | `json_pointer`, `span` | a JSON value as canonical JSON; a YAML node as its own text; a span's text as UTF-8 |
+   | `value` | `json_pointer`, `span` | the JSON or YAML node as its own text; a span's text as UTF-8 |
 
-   - **Frames.** With an MCAP summary, only the chunks its index says overlap the range and
-     hold the channel are read; without one, the file is read through once. Chunks are
-     inflated here, never by the library: to exactly their stated size, which must not exceed
-     `max_decoded_bytes`, so a forged chunk header is `unsafe_entry`.
+   - **Inner steps.** A step addresses inside what the step before decodes to (root ADR
+     0016). Before each inner step the scope is decoded: an MCAP source's scope that is
+     exactly one Chunk record becomes the chunk's uncompressed records (none, zstd or lz4,
+     inflated to exactly the stated size, its CRC checked when stated); a gzip, bzip2, xz or
+     zstd stream is decompressed; anything else is used as it is. Every inflation is bounded
+     by `max_decoded_bytes`. A nested `byte_range` must lie inside its scope, so an archive
+     member cannot leave its archive.
+   - **`bytes` never drops a step.** It follows every `byte_range` step. When none needed
+     decompression, the result is still the source, read lazily and verified per chunk. When
+     one did, the result is the decoded bytes, and `inflated` names each decompression
+     (`mcap-chunk:zstd`). A locator with any other step is `invalid_request` for `bytes`:
+     those steps are read by a decoding variant.
+   - **Frames.** The compiler cites a message as the Chunk record's byte range, then the
+     Message record's byte range in the chunk's records (root ADR 0034), or as one byte range
+     when unchunked. That Message record's channel and schema are looked up in the recording's
+     summary, else in one bounded pass over its records. A `record_range` is served too: with
+     a summary, only the chunks its index says overlap the range and hold the channel are
+     read; without one, the file is read through once. MCAP chunks are always inflated here,
+     never by the library.
    - **Tables as the compiler reads them.** A `row` counts records, the header included
      (root ADR 0016). The CSV grammar and delimiter sniffing mirror the compiler's tabular
      adapter (root ADR 0042): records end at an LF outside quotes, a blank line is not a
@@ -95,24 +110,23 @@ that no package records (root ADR 0010).
      sniffed. A delimiter declared in the compiler's config (`csv_delimiter`) is not in the
      citation, so the Ledger cannot know it; a `row_cell`'s stated column name catches most
      such mismatches. A cell that is not UTF-8 is `{"hex": ...}`; bytes holding NUL are not a
-     table.
-   - **Pointers.** JSON is typed by its grammar, so a JSON value is re-encoded canonically. A
-     YAML scalar's type depends on the YAML version a reader assumes (`yes`, `0x10`), so a
-     YAML node is returned verbatim, from its first character to its last, with its resolved
-     tag in the metadata. Keys are matched by their text, as the compiler cites them. A key
-     held twice on the path is `invalid_request`: no silent choice of one.
-
-   - **Inner steps.** Before each inner step, a gzip stream is decompressed, bounded by
-     `Limits.max_decoded_bytes`. No other container is unwrapped. A nested `byte_range` must
-     lie inside its scope. An archive member is a `byte_range` over its entry (root ADR 0016),
-     so it cannot leave its archive.
+     table. A Parquet row has one cell per leaf column, named by its dotted path, as the
+     compiler's header lists them. A date, time, timestamp or duration is its stored integer
+     (its unit and zone are in `type`), a decimal its exact text, and a leaf inside a list or
+     map is `"decoded": false`, as in the compiler.
+   - **Pointers.** The node is returned verbatim, from its first character to its last: no
+     reader's typing of a scalar is assumed (YAML `yes` or `0x10`, a float's digits). The
+     document is walked as a stream (JSON tokens; PyYAML's pure-Python parser events, as the
+     compiler reads YAML), so nothing is built from it. Keys are matched by their text, as
+     the compiler cites them. A key held twice on the path is `invalid_request`: no silent
+     choice of one.
    - **No silent choices.** A frame is exactly one message: a range holding none, or several
      sharing a tick, is `invalid_request` (cite `[t, t + 1)`). Multi-frame images are not
      decoded. A `row_cell` whose stated `column_name` differs from the table's header is
      refused. EXIF orientation and PDF `/Rotate` are not applied to rasters or regions. A
      `page_region` on a rotated or cropped page is `no_decoder` in this version.
-   - **Not decoded in this version (`no_decoder`):** `video_frame` (only its bytes are
-     served), ROS 1 bags, non-CDR MCAP channels, adapter-specific steps, `object` and `frame`.
+   - **Not decoded in this version (`no_decoder`):** `video_frame` (cite its byte range for
+     bytes), ROS 1 bags, non-CDR MCAP channels, adapter-specific steps, `object` and `frame`.
 5. **Hostile input.**
    - Paths are checked with `location_path`: no `..`, `.`, empty part or NUL.
    - They are opened component by component with `O_NOFOLLOW` (ADR 0006 §3), so a link reads
@@ -121,9 +135,22 @@ that no package records (root ADR 0010).
    - Every library decoder runs inside `guarded`, so anything it raises on hostile bytes is
      `undecodable` (root ADR 0029). One read of more than `max_decoded_bytes` through a span
      (a forged length field) is `unsafe_entry`, before the bytes are fetched.
-   - Bombs are `unsafe_entry`: gzip output and whole-scope reads above `max_decoded_bytes`
-     (256 MiB), and rasters or page renders above `max_pixels` (64 M).
-   - YAML is read with a safe loader that refuses aliases.
+   - Bombs are `unsafe_entry`: decompressed output and whole-scope reads above
+     `max_decoded_bytes` (256 MiB), and rasters or page renders above `max_pixels` (64 M).
+   - A JSON or YAML document is at most `max_document_bytes` (8 MiB, the compiler's limit for
+     parsed documents), and walking it costs its text plus its nesting: an 8 MiB document of
+     tiny nodes peaks at 8.4 MB (JSON) and 18 MB (YAML) beyond its bytes, where building it
+     cost 1.5 GB and 1.1 GB per 48 and 4 MiB. Time is linear: on a loaded 20-thread host
+     such a worst case takes about 19 s (JSON) and 160 s (YAML); real documents take far less.
+     YAML aliases are refused.
+   - Parquet repeats the compiler's guards before a page is decoded: a footer of at most
+     16 MiB that fits the file (an encrypted one is `no_decoder`), at most 16 384 leaf columns,
+     row-group counts that are not negative and add up, and every column chunk read lying
+     before the footer and decoding, as stated, to at most `max_decoded_bytes` in all. Only
+     the cited leaves' top-level columns of the cited row group are read, 1 024 rows at a
+     time, so a run-length column decodes one batch, not its group. A footer and page headers
+     that both understate are bounded only by the batch: the decoding subprocess (§
+     Consequences) bounds the rest.
    - PDFium is not thread-safe, so every call into it holds one process-wide lock.
 6. **Findings.** `MediaFinding(code, subject, detail)`, never an exception. The codes shared
    with the catalog API (`as_of_out_of_range`, `file_digest_mismatch`, `file_missing`,
@@ -180,6 +207,10 @@ that no package records (root ADR 0010).
      compiler's record states for each known cell;
    - frames from a manipulator's referenced MCAP and a quadruped's materialised MCAP, checked
      pixel by pixel, and the same frame from zstd, lz4, unchunked and tar-nested recordings;
+   - every message the compiler's own package cites (zstd and lz4 chunks) hydrates as a frame
+     and as its Message record's bytes;
+   - archive members inside bzip2 and xz streams, the document limit with its peak memory,
+     and forged, lying and encrypted Parquet footers;
    - pages and page regions of a drone report, an image region of the mobile robot's photo,
      Parquet and CSV rows and cells, a span of a drone mission note, and archive members (plain
      and gzip) of a quadruped calibration tar;
@@ -226,6 +257,11 @@ that no package records (root ADR 0010).
   a native crash in PDFium, Pillow or a decompressor on hostile bytes would end the process.
   The sources were already ingested by the compiler in its sandbox. Revisit with a decoding
   subprocess before `access/` (MVL-99) lets untrusted callers trigger hydrations.
+- A stored artefact is served without rehashing its blob against its `sha256`: the table is
+  Ledger-owned. Check it when `access/` exposes the store.
+- The tests' compiled package (`tests/fixtures/media/compiled/`) is written by `neptune
+  ingest` as a subprocess (`tests/ledger_media_compiled.py`), so its citations are the
+  compiler's own; regenerate it when the compiler's MCAP citations change.
 - Referenced sources need a deployment to name its ingest roots per package (`source_roots`).
   Until it does, they are `unavailable`. Recording ingest roots, or a registry of them, is for
   `access/` (MVL-99).

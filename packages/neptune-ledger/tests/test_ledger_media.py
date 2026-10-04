@@ -923,3 +923,184 @@ def test_small_limits_bound_parsers_not_read_ahead(lake: Lake) -> None:
     pointer = {"kind": "json_pointer", "pointer": "/data"}
     ref = anchor(head, record_range(HEAD_TOPIC, START, START + 1), pointer)
     assert lake.codes(ref, "value") == ["no_decoder"]
+
+
+# --- Frames from the compiler's own citations ---------------------------------------------------
+
+
+def compiled_citations() -> list[tuple[str, int, EvidenceAnchor]]:
+    """Every message the compiled package's series cite: (topic, seq, its evidence anchor)."""
+    import pyarrow.parquet as pq
+
+    from ledger_media_compiled import PACKAGE
+
+    made = []
+    for line in (PACKAGE / "records" / "stream.jsonl").read_text().splitlines():
+        stream = json.loads(line)
+        source = stream["provenance"]["evidence"]["source"]
+        series = PACKAGE / "series" / (stream["id"].split(":")[-1] + ".parquet")
+        for row in pq.read_table(series).to_pylist():
+            steps = [byte_range(row["locator/0/offset"], row["locator/0/length"])]
+            if row.get("locator/1/length") is not None:
+                steps.append(byte_range(row["locator/1/offset"], row["locator/1/length"]))
+            made.append(
+                (stream["topic"]["value"], row["seq"], EvidenceAnchor(source, tuple(steps)))
+            )
+    return made
+
+
+def test_frames_hydrate_from_the_compilers_own_message_citations(lake: Lake) -> None:
+    from mcap.reader import make_reader
+
+    from ledger_media_compiled import HEAD, PACKAGE, SOURCES, WRIST
+
+    lake.register(PACKAGE)
+    lake.stores = [LocalSourceStore(SOURCES)]
+    cited = compiled_citations()
+    assert {topic for topic, _, _ in cited} == {HEAD_TOPIC, WRIST_TOPIC} and len(cited) == 7
+    payloads = {
+        topic: [
+            m.data
+            for _, c, m in make_reader(io.BytesIO((SOURCES / path).read_bytes())).iter_messages()
+            if c.topic == topic
+        ]
+        for topic, path in ((HEAD_TOPIC, HEAD), (WRIST_TOPIC, WRIST))
+    }
+    for topic, seq, ref in cited:
+        assert len(ref.locator) == 2  # the Chunk record, then the Message record inside it
+        frame = lake.artefact(ref, "frame")
+        size = HEAD_SIZE if topic == HEAD_TOPIC else WRIST_SIZE
+        assert_frame(picture(frame), size, seq, (0, 0))
+        assert frame.metadata["channel"] == topic and frame.evidence_ref == ref
+        # bytes follows both steps: the Message record, inflated from its zstd or lz4 chunk.
+        sliced = lake.read(ref, "bytes").value
+        assert isinstance(sliced, SourceSlice) and sliced.reader is None
+        assert sliced.inflated == (
+            ("mcap-chunk:zstd",) if topic == HEAD_TOPIC else ("mcap-chunk:lz4",)
+        )
+        record = sliced.read()
+        assert (
+            isinstance(record, bytes)
+            and record[0] == 0x05
+            and len(record) == ref.locator[1]["length"]
+        )
+        assert record[31:] == payloads[topic][seq]
+    topic, seq, ref = cited[-1]
+    crop = {"kind": "image_region", "x0": 1, "x1": 5, "y0": 2, "y1": 4}
+    region = lake.artefact(EvidenceAnchor(ref.source, (*ref.locator, crop)), "image_region")
+    size = HEAD_SIZE if topic == HEAD_TOPIC else WRIST_SIZE
+    assert_frame(picture(region), (4, 2), seq, (1, 2))
+    # A range inside the chunk that is not exactly one Message record is not a frame.
+    off = EvidenceAnchor(ref.source, (ref.locator[0], byte_range(ref.locator[1]["offset"] + 1, 30)))
+    assert lake.codes(off, "frame") == ["invalid_request"]
+    beyond = EvidenceAnchor(ref.source, (ref.locator[0], byte_range(0, 10**6)))
+    assert lake.codes(beyond, "bytes") == ["invalid_request"]
+    del size
+
+
+def test_archive_members_inside_bzip2_and_xz_streams(lake: Lake) -> None:
+    import bz2
+    import lzma
+
+    bundle = fixture("leg_calibration.tar")
+    with tarfile.open(fileobj=io.BytesIO(bundle)) as archive:
+        member = archive.getmember("intrinsics.yaml")
+    packed = {"cal.tar.bz2": bz2.compress(bundle, 9), "cal.tar.xz": lzma.compress(bundle)}
+    lake.package("legged", packed, materialise=frozenset(packed))
+    for data in packed.values():
+        ref = anchor(
+            data,
+            byte_range(0, len(data)),
+            byte_range(member.offset_data, member.size),
+            {"kind": "json_pointer", "pointer": "/fx"},
+        )
+        assert lake.artefact(ref, "value").read() == b"412.5"
+        inner = anchor(data, byte_range(0, len(data)), byte_range(member.offset_data, member.size))
+        sliced = lake.read(inner, "bytes").value
+        assert (
+            isinstance(sliced, SourceSlice)
+            and sliced.read() == bundle[member.offset_data : member.offset_data + member.size]
+        )
+    tiny = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=4096))
+    data = packed["cal.tar.bz2"]
+    ref = anchor(data, byte_range(0, len(data)), byte_range(0, 10))
+    assert [f.code for f in tiny.hydrate(ref, "bytes").read().findings] == ["unsafe_entry"]
+
+
+# --- Bounded documents and Parquet --------------------------------------------------------------
+
+
+def test_documents_past_the_limit_are_refused_and_parsing_costs_no_tree(lake: Lake) -> None:
+    import tracemalloc
+
+    limit = 1 << 20
+    flat_json = b"[" + b",".join([b"{}"] * ((limit - 2) // 3)) + b"]"
+    flat_yaml = b"[" + b",".join([b"a"] * ((limit - 2) // 2)) + b"]"
+    nested = b"x:\n" + b"".join(b"  k%d: [1, 2]\n" % i for i in range(60_000))
+    over = flat_json[:-1] + b",{}" * 400 + b"]"
+    docs = {
+        "flat.json": flat_json,
+        "flat.yaml": flat_yaml,
+        "nested.yaml": nested[:limit],
+        "over.json": over,
+    }
+    lake.package("hostile", docs, materialise=frozenset(docs))
+    media = MediaLake(lake.resolver, lake.store, limits=Limits(max_document_bytes=limit))
+    pointer = {"kind": "json_pointer", "pointer": "/5"}
+    assert (
+        all(len(d) <= limit for name, d in docs.items() if name != "over.json")
+        and len(over) > limit
+    )
+    made = media.hydrate(anchor(over, pointer), "value").read()
+    assert [f.code for f in made.findings] == ["unsafe_entry"]
+    for name, expected in (("flat.json", b"{}"), ("flat.yaml", b"a")):
+        tracemalloc.start()
+        made = media.hydrate(anchor(docs[name], pointer), "value").read()
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        assert isinstance(made.value, Artefact) and made.value.read() == expected, made.findings
+        # The document's bytes and text, a source chunk and the store's own work: no tree.
+        assert peak < 16 * limit, (name, peak)
+
+
+def test_parquet_guards_hold_before_any_page_is_decoded(lake: Lake) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    def written(table: Any, **options: Any) -> bytes:
+        out = io.BytesIO()
+        pq.write_table(table, out, **options)
+        return out.getvalue()
+
+    # A wheel-odometry log: one constant column of 2M rows packs to a few KiB (run-length) and
+    # decodes to 16 MB; a cited row decodes one batch of it, never the row group.
+    odometry = written(
+        pa.table({"ticks": pa.array([7] * 2_000_000, pa.int64())}), row_group_size=2_000_000
+    )
+    small = written(pa.table({"ticks": pa.array([1, 2, 3], pa.int64())}))
+    big = written(pa.table({"ticks": pa.array(range(50_000), pa.int64())}), compression="NONE")
+    # Forged: the small file's data under the big file's footer, which points past its data.
+    footer = int.from_bytes(big[-8:-4], "little")
+    forged = small[: len(small) - 8 - int.from_bytes(small[-8:-4], "little")] + big[-8 - footer :]
+    lying = big[:-8] + (len(big)).to_bytes(4, "little") + b"PAR1"
+    encrypted = small[:-4] + b"PARE"
+    files = {
+        "odo.parquet": odometry,
+        "forged.parquet": forged,
+        "lying.parquet": lying,
+        "enc.parquet": encrypted,
+        "big.parquet": big,
+    }
+    lake.package("mobile", files, materialise=frozenset(files))
+    cell = {"column": 0, "column_name": "ticks", "kind": "row_cell", "row": 1_999_999}
+    value = canonical_json.loads(lake.artefact(anchor(odometry, cell), "row").read())
+    assert isinstance(value, dict) and value["cells"] == [
+        {"column": 0, "name": "ticks", "type": "int64", "value": 7}
+    ]
+    row = {"kind": "row", "row": 2}
+    assert lake.codes(anchor(forged, row), "row") == ["undecodable"]
+    assert lake.codes(anchor(lying, row), "row") == ["undecodable"]
+    assert lake.codes(anchor(encrypted, row), "row") == ["no_decoder"]
+    tight = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=100_000))
+    made = tight.hydrate(anchor(big, row), "row").read()
+    assert [f.code for f in made.findings] == ["unsafe_entry"]
