@@ -69,11 +69,11 @@ def png(size: tuple[int, int], raw_rgb: bytes) -> bytes:
     width, height = size
 
     def chunk(kind: bytes, body: bytes) -> bytes:
-        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+        return (
+            struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+        )
 
-    rows = b"".join(
-        b"\x00" + raw_rgb[y * width * 3 : (y + 1) * width * 3] for y in range(height)
-    )
+    rows = b"".join(b"\x00" + raw_rgb[y * width * 3 : (y + 1) * width * 3] for y in range(height))
     header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
     return (
         b"\x89PNG\r\n\x1a\n"
@@ -102,7 +102,7 @@ def wrist_camera() -> bytes:
             "data": png(WRIST_SIZE, rgb_rows(WRIST_SIZE, frame)),
         }
         writer.write_message(WRIST_TOPIC, schema, message, log_time=at, publish_time=at)
-    writer.finish()
+    writer.finish()  # type: ignore[no-untyped-call]
     return out.getvalue()
 
 
@@ -127,7 +127,7 @@ def head_camera() -> bytes:
             "data": rgb_rows(HEAD_SIZE, frame),
         }
         writer.write_message(HEAD_TOPIC, schema, message, log_time=at, publish_time=at)
-    writer.finish()
+    writer.finish()  # type: ignore[no-untyped-call]
     return out.getvalue()
 
 
@@ -154,7 +154,10 @@ def _stream(content: bytes) -> bytes:
 
 def inspection_report() -> bytes:
     """Page 0: 200 x 100 pt, a red box at [20, 120) x [10, 60) and a label. Page 1: rotated."""
-    page0 = b"1 0 0 rg 20 10 100 50 re f 0 0 1 rg 150 70 30 20 re f BT /F1 10 Tf 20 80 Td (Blade 2) Tj ET"
+    page0 = (
+        b"1 0 0 rg 20 10 100 50 re f 0 0 1 rg 150 70 30 20 re f"
+        b" BT /F1 10 Tf 20 80 Td (Blade 2) Tj ET"
+    )
     page1 = b"0 0.5 0 rg 10 10 40 40 re f"
     return _pdf(
         [
@@ -190,7 +193,9 @@ def sites_parquet() -> bytes:
     return out.getvalue()
 
 
-INTRINSICS: Final = b"camera: head\nfx: 412.5\nfy: 412.5\ncx: 4.0\ncy: 3.0\ndistortion: [0.01, -0.002]\n"
+INTRINSICS: Final = (
+    b"camera: head\nfx: 412.5\nfy: 412.5\ncx: 4.0\ncy: 3.0\ndistortion: [0.01, -0.002]\n"
+)
 EXTRINSICS: Final = {"child": "head_camera_optical", "parent": "body", "x": 0.21, "z": 0.05}
 
 
@@ -244,4 +249,4 @@ if __name__ == "__main__":
     FIXTURES.mkdir(parents=True, exist_ok=True)
     for name, data in build().items():
         (FIXTURES / name).write_bytes(data)
-        print(f"{name}: {len(data)} bytes", file=sys.stderr)
+        sys.stderr.write(f"{name}: {len(data)} bytes\n")

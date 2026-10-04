@@ -69,8 +69,15 @@ mypy_path = "src"
 # pyarrow ships no type information; api.arrow and lake/ import it. datafusion's object_store
 # module is a compiled extension without stubs.
 [[tool.mypy.overrides]]
-module = ["pyarrow", "pyarrow.*", "datafusion.object_store"]
+module = ["pyarrow", "pyarrow.*", "datafusion.object_store", "pypdfium2", "mcap_ros2.*"]
 ignore_missing_imports = true
+
+# numpy (from pylance and Pillow) ships stubs in Python 3.12 syntax, which a 3.11 check cannot
+# parse; the Ledger never calls numpy, so its stubs are not followed.
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
