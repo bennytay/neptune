@@ -1,0 +1,11 @@
+{
+  "content_id": "sha256:30f0a897b521f4fa37166dd834efca6d0a66071f242c02411d47debee387fa40",
+  "id": "rec:sha256:069ede077d2b6d09ce4ae9d05cacf9bd5b66257900b7062bcf861e9703273040",
+  "kind": "source_revision",
+  "location": {
+    "kind": "local",
+    "path": "ops/assertions/cell_baseline.json"
+  },
+  "schema_version": 1,
+  "supersedes": []
+}

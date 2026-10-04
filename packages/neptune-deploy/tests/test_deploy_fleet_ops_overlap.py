@@ -52,12 +52,15 @@ def iso_ms(text: str) -> int:
     return int(datetime.datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
 
 
+def _ir(record: Any) -> str:
+    """An intervention's Formant id: its first identifier's value."""
+    return str(record.identifiers.value[0].value.value)
+
+
 def test_the_fixture_really_overlaps_in_real_time() -> None:
     """The oracle: standard-library arithmetic, here and nowhere in the connectors."""
     fm, rmf = both()
-    intervention = next(
-        r for r in fm.catalog().of("intervention") if r.identifiers[0].value.value == "ir-0001"
-    )
+    intervention = next(r for r in fm.catalog().of("intervention") if _ir(r) == "ir-0001")
     task = next(
         r for r in rmf.catalog().of("run") if r.logical_id.value.value == "delivery.dispatch-12"
     )
@@ -70,18 +73,16 @@ def test_the_fixture_really_overlaps_in_real_time() -> None:
 
 def test_both_are_kept_each_under_its_own_system_and_nothing_is_merged() -> None:
     fm, rmf = both()
-    intervention = next(
-        r for r in fm.catalog().of("intervention") if r.identifiers[0].value.value == "ir-0001"
-    )
+    intervention = next(r for r in fm.catalog().of("intervention") if _ir(r) == "ir-0001")
     task = next(
         r for r in rmf.catalog().of("run") if r.logical_id.value.value == "delivery.dispatch-12"
     )
     assert intervention.id != task.id
     # The names look alike and are not matched: two namespaces, two ids, no link between them.
-    assert intervention.machines[0].value.namespace == "formant.device"
+    assert intervention.machines.value[0].value.namespace == "formant.device"
     assert task.machine.value.namespace == "rmf.robot"
-    assert intervention.machines[0].value != task.machine.value
-    assert intervention.related == ()
+    assert intervention.machines.value[0].value != task.machine.value
+    assert intervention.related == Known(())
     # Each cites only its own system's document and was made by its own transform.
     fm_docs = {d.content_id for d in fm.catalog().documents}
     rmf_docs = {d.content_id for d in rmf.catalog().documents}
@@ -110,9 +111,7 @@ def test_no_record_of_either_source_cites_the_other_or_links_anything() -> None:
 
 def test_their_times_are_on_different_clocks_that_nothing_here_compares() -> None:
     fm, rmf = both()
-    intervention = next(
-        r for r in fm.catalog().of("intervention") if r.identifiers[0].value.value == "ir-0001"
-    )
+    intervention = next(r for r in fm.catalog().of("intervention") if _ir(r) == "ir-0001")
     task = next(
         r for r in rmf.catalog().of("run") if r.logical_id.value.value == "delivery.dispatch-12"
     )

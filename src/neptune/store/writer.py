@@ -36,7 +36,7 @@ from neptune.identity.ids import RECORD_ID_SCHEME
 from neptune.identity.provenance import check_transform_record
 from neptune.model.ids import ContentId, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.kinds import RECORD_KINDS, kinds_at, package_version, record_key
+from neptune.model.kinds import RECORD_KINDS, kinds_at, package_version, record_key, record_version
 from neptune.model.package import (
     IngestReceipt,
     PackageFile,
@@ -420,10 +420,13 @@ class PackageWriter:
         self._finished = True
         series, blobs, store = dict(series or {}), dict(blobs or {}), dict(store or {})
         settings = _series_settings(store) if series else None
+        # The lowest schema version that holds the records that survive replacement: their kinds'
+        # versions, raised to any record's own later version (ADR 0037 §1, ADR 0061 §6). Lines
+        # carry their own versions, so the tables are written before it is known; it decides only
+        # which empty tables the package has, and the receipt's and manifest's version.
         version = package_version(self._tables)
-        kinds = kinds_at(version)
-        order: list[str] = [kind for kind in _FIRST if kind in kinds]
-        order += sorted(kind for kind in kinds if kind not in _FIRST)
+        order: list[str] = [kind for kind in _FIRST if kind in self._tables]
+        order += sorted(kind for kind in self._tables if kind not in _FIRST)
         receipt = _Receipt(self._sorter)
         files: dict[str, Content] = {}
         digests: dict[str, tuple[int, ContentId]] = {}
@@ -452,6 +455,7 @@ class PackageWriter:
                         if settings is not None and record.id in series:
                             _check_series(record, series[record.id], settings)
                     receipt.add(record, data)
+                    version = max(version, record_version(record))
                     table.write(encoded)
                     count += 1
             except BaseException:
@@ -464,6 +468,11 @@ class PackageWriter:
             if kind == "transform_record":
                 for transform in transforms.values():
                     check_record_lineage(transform, transforms)
+        kinds = kinds_at(version)
+        for kind in sorted(set(kinds) - set(counts)):  # a kind of this version with no records
+            path = table_path(kind)
+            files[path], digests[path] = sink(path).close()
+            counts[kind] = 0
 
         for stream, file in sorted(series.items()):
             if stream not in streams:

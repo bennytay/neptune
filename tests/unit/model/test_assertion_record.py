@@ -108,7 +108,7 @@ def roundtrip(record: Assertion) -> Assertion:
 def test_the_kind_is_registered_in_its_own_family_from_its_version() -> None:
     assert RECORD_KINDS["assertion"] == (Assertion, assertion_from_json)
     assert Assertion.family is Family.ASSERTION
-    assert KIND_SINCE["assertion"] == ASSERTION_SINCE == SCHEMA_VERSION
+    assert KIND_SINCE["assertion"] == ASSERTION_SINCE == 5 < SCHEMA_VERSION
     assert "assertion" in kinds_at(ASSERTION_SINCE)
     assert "assertion" not in kinds_at(ASSERTION_SINCE - 1)
     assert package_version(["assertion", "timestamp_domain"]) == ASSERTION_SINCE

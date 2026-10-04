@@ -35,7 +35,7 @@ from neptune.model.machine import (
 )
 from neptune.model.package import SEVERITY_ORDER
 from neptune.model.provenance import ByteRange, EvidenceRef, Provenance, Row, adapter_locator
-from neptune.model.reference import Frame, FrameGraph, TimestampDomain
+from neptune.model.reference import CivilTimeZone, Frame, FrameGraph, TimestampDomain
 from neptune.model.run import Run, Stream
 from neptune.model.series import (
     ColumnType,
@@ -511,6 +511,51 @@ def test_a_stream_naming_a_clock_the_package_lacks(tmp_path: Path) -> None:
     kit.stream(run, [clock, ghost], [[0, 1], [0, 1]])
     (finding,) = validate_package(build(tmp_path, kit)).findings
     assert finding.code.endswith("dangling_reference") and finding.details["target"] == ghost.id
+
+
+def _zone(kit: Kit, domain: RecordId, name: str) -> CivilTimeZone:
+    """A zone the kit's source declares on its own row (ADR 0061)."""
+    at = kit.row(len(kit.records))
+    return kit.add(
+        CivilTimeZone(
+            id=kit.id_of("civil_time_zone", at), provenance=at, domain=domain, zone=Known(name)
+        )
+    )
+
+
+def test_a_civil_zone_naming_a_clock_the_package_lacks(tmp_path: Path) -> None:
+    kit = Kit("register", "cmms")
+    ghost = Kit("register", "other").clock()
+    zone = _zone(kit, ghost.id, "Europe/Berlin")
+    (finding,) = validate_package(build(tmp_path, kit)).findings
+    assert finding.code.endswith("dangling_reference")
+    assert finding.details["kind"] == "civil_time_zone" and finding.details["target"] == ghost.id
+    assert list(finding.records) == [zone.id]
+
+
+@pytest.mark.parametrize(
+    ("names", "zones"),
+    [
+        (("Europe/Berlin", "Europe/Vienna"), ["Europe/Berlin", "Europe/Vienna"]),
+        (("Europe/Berlin", "Europe/Berlin"), ["Europe/Berlin"]),
+    ],
+    ids=["disagree", "agree"],
+)
+def test_two_civil_zones_on_one_clock_are_in_doubt_even_when_they_agree(
+    tmp_path: Path, names: tuple[str, str], zones: list[str]
+) -> None:
+    kit = Kit("register", "cmms")
+    clock = kit.clock()
+    first = _zone(kit, clock.id, names[0])
+    second = _zone(kit, clock.id, names[1])
+    (finding,) = validate_package(build(tmp_path, kit)).findings
+    assert finding.code.endswith("civil_zone_repeated")
+    assert finding.category is FindingCategory.AMBIGUOUS
+    assert finding.details["zones"] == zones
+    assert set(finding.records) == {first.id, second.id}
+    one = Kit("register", "cmms")
+    _zone(one, one.clock().id, "UTC")
+    assert validate_package(build(tmp_path / "one", one)).findings == ()
 
 
 # --- Unresolved frames ----------------------------------------------------------------------------
