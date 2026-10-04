@@ -32,7 +32,7 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
 
 ## Decision
 
-1. **`civil_time_zone` (family `reference`, since 5)** is a companion of `timestamp_domain`. It
+1. **`civil_time_zone` (family `reference`, since 6)** is a companion of `timestamp_domain`. It
    follows the extension rule of ADR 0023 §1 and ADR 0019 §4.
    - Its fields are `domain` (the `TimestampDomain` record id) and `zone: Knowledge[str]`.
    - `zone` is the IANA tz database name exactly as declared, such as `Europe/Berlin`, `UTC` or
@@ -109,7 +109,7 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
 6. **A record is written at the lowest version whose readers read it.** This amends ADR 0037 §1:
    a field may gain states, as an enum gains members.
    - A lifecycle record whose lists are all bare arrays is written at 4, as before. One holding
-     any other list state is written at 5 (`LIST_STATES_SINCE`), so a version 4 reader refuses it
+     any other list state is written at 6 (`LIST_STATES_SINCE`), so a version 4 or 5 reader refuses it
      by version and never by key.
    - A reader refuses a line whose declared version is not exactly the version its content
      uses. An older one is refused by version; a newer one would be a second encoding of the same
@@ -117,16 +117,17 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
    - The record's version is its `schema_version` property, and `kinds.record_version` reads it.
    - A package is written at `records_version`: the highest of its records' versions, not only
      its kinds'. The package reader checks the manifest against the records it read.
-7. **Schema version 5.** It adds `civil_time_zone` and the list states.
-   - Package-schema is published at **5.0.0**, because `SCHEMA_VERSION` is the registry major
+7. **Schema version 6.** It adds `civil_time_zone` and the list states. Version 5 is the
+   `assertion` kind (ADR 0062).
+   - Package-schema is published at **6.0.0**, because `SCHEMA_VERSION` is the registry major
      (platform ADR 0002 §3).
    - Catalog-api does not move and stays at 1.6.0. Since 1.6.0 it names record kinds by the
      package-schema contract instead of listing them (Ledger ADR 0011 §4), so a new compiler kind
      changes no catalog-api file.
-   - The Ledger's schema-version registry (`catalog/projections.json`) gains version 5, generated
-     by `python -m neptune_ledger.catalog.projection contracts/package-schema/v5.0.0/schema.json`.
+   - The Ledger's schema-version registry (`catalog/projections.json`) gains version 6, generated
+     by `python -m neptune_ledger.catalog.projection contracts/package-schema/v6.0.0/schema.json`.
      No migration is needed: `civil_time_zone` states no hot filter, and list states add no
-     projection. Without the entry the Ledger would refuse every version 5 package with
+     projection. Without the entry the Ledger would refuse every version 6 package with
      `unsupported_schema_version`.
    - No worked example or golden package changes, because none uses a zone or a list state.
 8. **Every value on a lifecycle record is stated, not only the record** (enforces ADR 0051 §1).
@@ -168,7 +169,7 @@ are on package-schema 4 (ADR 0051), and Deploy is about to pin them.
   `civil_time_zone` per civil clock instead of the zone in scope and config. It writes `Unknown`
   instead of `()` plus `list_cell_blank`.
 - Consumers that read lifecycle lists must handle a state where they read an array before. A
-  version 4 consumer is protected: it refuses a version 5 record by version.
+  version 4 or 5 consumer is protected: it refuses a version 6 record by version.
 - A package's version can depend on a record's content, not only its kinds. The store and the
   receipt compute it from the records, and `kinds_at(version)` still decides the tables.
 - Readers that want instants from civil times must join `civil_time_zone` to the domain and apply

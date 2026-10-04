@@ -53,6 +53,9 @@ WORKSPACE_SWEPT: Final = "workspace_swept"  # scratch and staging debris removed
 ENTRY_SKIPPED: Final = "entry_skipped"
 SYMLINK_RECORDED: Final = "symlink_recorded"
 SOURCE_HASHED: Final = "source_hashed"
+# A connector's object whose revision token the ledger knows for its bytes: carried forward,
+# neither fetched nor hashed (ADR 0067).
+SOURCE_RECOGNISED: Final = "source_recognised"
 SOURCE_ABSENT: Final = "source_absent"
 SANDBOX_READY: Final = "sandbox_ready"  # isolation, and the limits and Landlock ABI if sandboxed
 PROBE_FAILED: Final = "probe_failed"
@@ -60,6 +63,7 @@ SOURCE_SELECTED: Final = "source_selected"
 SOURCE_UNSUPPORTED: Final = "source_unsupported"
 SOURCE_AMBIGUOUS: Final = "source_ambiguous"
 SESSIONS_PROPOSED: Final = "sessions_proposed"  # grouping's counts, at the end of inspect
+SNAPSHOTS_BOUND: Final = "snapshots_bound"  # snapshot binding's counts (ADR 0064)
 SOURCE_UNREADABLE: Final = "source_unreadable"
 SOURCE_CHANGED: Final = "source_changed"
 SOURCE_SHORT_READ: Final = "source_short_read"  # a call read the source short (ADR 0033 §3)

@@ -154,7 +154,7 @@ def timestamp_domain_from_json(data: JsonValue) -> TimestampDomain:
 
 
 # The schema version that added ``CivilTimeZone`` (ADR 0061, ADR 0037 §1).
-CIVIL_ZONE_SINCE: Final = 5
+CIVIL_ZONE_SINCE: Final = 6
 
 # An IANA time zone database name, by syntax only: components of letters, digits and ``._+-``,
 # none starting with ``.``, ``-`` or ``+``, joined by ``/``: ``Europe/Berlin``, ``Etc/GMT-5``,

@@ -525,13 +525,13 @@ def test_the_newest_version_is_read_and_the_next_is_refused(
     catalog: PostgresCatalog, tmp_path: Path
 ) -> None:
     """Boundary: the registry's newest version registers; the same package one version past it is
-    a future version. No worked example reaches schema 5 (root ADR 0061 §7), so the newest is the
+    a future version. No worked example reaches schema 6 (root ADR 0061 §7), so the newest is the
     manipulator cell with one maintenance event's parts left blank: an ``Unknown`` list, which
-    writes that record, and so the package, at version 5 (root ADR 0061 §6)."""
+    writes that record, and so the package, at version 6 (root ADR 0061 §6)."""
     blank = with_changed_body(
         "manipulator_cell",
         "maintenance_event",
-        lambda record: {**record, "parts": {"knowledge": "unknown"}, "schema_version": 5},
+        lambda record: {**record, "parts": {"knowledge": "unknown"}, "schema_version": 6},
     )
     cell = write("manipulator_cell", tmp_path / "manipulator_cell", blank)
     assert cell.schema_version == shipped_registry().latest.version == SCHEMA_VERSION

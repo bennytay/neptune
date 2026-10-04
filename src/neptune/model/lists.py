@@ -38,7 +38,7 @@ from neptune.model.knowledge import (
 from neptune.model.record import OLDEST_READABLE_VERSION
 
 # The schema version from which a list field may hold a state other than an inherited Known.
-LIST_STATES_SINCE: Final = 5
+LIST_STATES_SINCE: Final = 6
 
 T = TypeVar("T")
 
