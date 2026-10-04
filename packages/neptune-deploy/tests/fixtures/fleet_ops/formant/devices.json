@@ -1,0 +1,5 @@
+{"items": [
+  {"id": "dev-amr-07", "name": "AMR-07", "organizationId": "org-acme", "type": "default", "enabled": true, "tags": {"fleet": "warehouse", "role": "amr"}, "createdAt": "2026-01-12T08:00:00.000Z"},
+  {"id": "dev-arm-cell3", "name": "Cell3 Arm", "organizationId": "org-acme", "type": "default", "enabled": true, "tags": {"fleet": "cell3", "role": "manipulator"}, "createdAt": "2026-01-14T09:30:00.000Z"},
+  {"id": "dev-quad-02", "name": "Quadruped 2", "organizationId": "org-acme", "type": "default", "enabled": false, "tags": {"fleet": "inspection", "role": "legged"}, "createdAt": "2026-02-02T10:15:00.000Z"}
+]}

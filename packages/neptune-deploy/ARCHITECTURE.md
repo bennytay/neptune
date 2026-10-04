@@ -4,9 +4,10 @@
 flowchart LR
   EXT[("object stores · Foxglove · CMMS · tickets · fleet managers · forms")]
   subgraph P["neptune-deploy"]
-    SRC["sources/ read-only connectors: S3 · GCS · Azure · Foxglove · Roboto · Rerun Hub"]
+    SRC["sources/ read-only connectors: S3 · GCS · Azure · Foxglove · Roboto · Rerun Hub · Formant · Open-RMF"]
     LIF["adapters/lifecycle"]
     MAP["lifecycle/ mapper · mapping files · document templates · vendor presets"]
+    DIAG["diagnostics/ ROS 2 vendor mapping: statuses to event rows"]
     PACKS["packs/ evidence-pack compiler"]
     CONSOLE["console/"]
   end
@@ -26,6 +27,8 @@ flowchart LR
   STORE -->|tables and documents of a package| MAP
   MAP -->|new package of lifecycle records| STORE
   MODEL -->|record kinds| MAP
+  STORE -->|exported diagnostics tables| DIAG
+  DIAG -->|new package of stated event rows| STORE
   CON -->|package-schema 4.0.0| PACKS
   PACKS --> CONSOLE
 
@@ -41,7 +44,7 @@ flowchart LR
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
   class K1,CONF,MODEL,STORE,MAP built
-  class K2,LIF,EP,SRC partial
+  class K2,LIF,EP,SRC,DIAG partial
   class PACKS,CONSOLE,K3 todo
   class CON,EXT ext
   style P fill:#8b949e0f,stroke:#8b949e

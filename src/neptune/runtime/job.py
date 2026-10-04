@@ -2043,16 +2043,25 @@ class IngestJob:
                 *bound,
             ]
             assert self.destination is not None  # ``run`` refuses to start without one
-            try:
-                self._staged = stage(
-                    self.destination,
-                    self.workspace,
-                    scanned,
-                    self._ingested,
-                    extra=extra,
-                    derived=derived,
-                )
-            except (PackageError, WorkspaceError, SeriesError, ValueError, OSError) as exc:
+            try:  # tables too large to sort in memory spill to the workspace's scratch space
+                with scratch_space(self.workspace.scratch, ingest_root=self.root) as spill:
+                    self._staged = stage(
+                        self.destination,
+                        self.workspace,
+                        scanned,
+                        self._ingested,
+                        extra=extra,
+                        derived=derived,
+                        spill=spill,
+                    )
+            except (
+                PackageError,
+                WorkspaceError,
+                SeriesError,
+                ScratchError,
+                ValueError,
+                OSError,
+            ) as exc:
                 raise JobError(f"the package cannot be assembled: {exc}") from exc
             for use in self._staged.derivatives:
                 self._derived(use.key, use.held)
