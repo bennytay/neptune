@@ -76,7 +76,7 @@ never a silent guess. Constraints:
 5. **Conflicts are findings, never choices.** Candidates of one run tied for nearest, or one
    declared value naming several snapshots, give `neptune.bindings.conflicting_snapshots` (ambiguous, warning)
    with the run and every candidate in `records`, each candidate's declaration in `related` and
-   their paths in `details`, and no binding. A declared snapshot that is not its slot's nearest gives
+   its paths inside the run's unit in `details` (up to 64, with `path_count`), and no binding. A declared snapshot that is not its slot's nearest gives
    `stated_differs_from_nearest` (inconsistent, warning) and the declaration stays bound.
 6. **Unresolved is explicit.** For each of the four kinds a run has no binding of (canonical,
    adapter-made or inferred), one finding naming the run and the kind:

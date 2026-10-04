@@ -404,37 +404,71 @@ def test_each_run_binds_its_own_sidecar_never_another_recordings() -> None:
     assert SHARED_SNAPSHOT not in codes(found)
 
 
-def test_cost_and_output_are_linear_in_runs() -> None:
-    """One robot directory per run (the review's second repro): bindings and findings grow with
-    R, and R=2000 binds in seconds (it took 42 s when each run rescanned its session)."""
+def _robots(r: int, tie: bool) -> tuple[list[LayoutFile], list[Any]]:
+    """One robot directory per run with its own ``hw.yaml``. With ``tie``, every ``hw.yaml`` is
+    the same bytes (one content at R paths) and each robot has a second ``sub/hw.yaml`` as near."""
     d = "session_2026-09-01T10-00-00"
+    same = content("hw.yaml, the same bytes in every robot directory")
+    files: list[LayoutFile] = []
+    records: list[Any] = []
+    for i in range(r):
+        rec, hw, sub = (
+            f"{d}/robot_{i:04d}/{name}" for name in ("rec.mcap", "hw.yaml", "sub/hw.yaml")
+        )
+        files.append(LayoutFile(rid("rev", rec), local_location(rec.encode()), content(rec)))
+        files.append(
+            LayoutFile(rid("rev", hw), local_location(hw.encode()), same if tie else content(hw))
+        )
+        records.append(run(rec))
+        if tie:
+            files.append(LayoutFile(rid("rev", sub), local_location(sub.encode()), content(sub)))
+            records.append(hardware(sub))
+        else:
+            records.append(hardware(hw))
+    if tie:
+        shared = HardwareConfiguration(
+            id=rid("hw", "same"),
+            provenance=Provenance(
+                EvidenceRef(same, (ByteRange(0, 16),)), TRANSFORM, AssertionKind.OBSERVED
+            ),
+            machine=NotCovered(),
+            name=Known("ur5e"),
+            revision=Unknown(),
+        )
+        records.append(shared)
+    return sorted(files, key=lambda file: file.path), records
+
+
+@pytest.mark.parametrize("tie", [False, True], ids=["own", "identical_bytes_tie"])
+def test_cost_and_output_are_linear_in_runs(tie: bool) -> None:
+    """One robot directory per run (the review's second repro): bindings and findings grow with
+    R, and R=2000 binds in seconds (it took 42 s when each run rescanned its session). With one
+    content at every robot's ``hw.yaml`` tied with a ``sub/hw.yaml``, each run's conflict lists
+    only its own path of that content: finding bytes stay linear (211 MB at R=2000 when it listed
+    all R)."""
     sizes = (500, 2000)
-    counts = []
+    counts, sizes_of_findings = [], []
     for r in sizes:
-        paths = [
-            p
-            for i in range(r)
-            for p in (f"{d}/robot_{i:04d}/rec.mcap", f"{d}/robot_{i:04d}/hw.yaml")
-        ]
-        records = [
-            x
-            for i in range(r)
-            for x in (run(f"{d}/robot_{i:04d}/rec.mcap"), hardware(f"{d}/robot_{i:04d}/hw.yaml"))
-        ]
-        files = [
-            LayoutFile(rid("rev", p), local_location(p.encode()), content(p)) for p in sorted(paths)
-        ]
+        files, records = _robots(r, tie)
         layout = layout_of(files)
         grouping = LayoutGrouper().propose(layout)
         start = time.perf_counter()
         found = bind_snapshots(records, [], layout, grouping)
         elapsed = time.perf_counter() - start
         assert found is not None
-        assert len(found.inferred) == r
+        assert len(found.inferred) == (0 if tie else r)
+        if tie:
+            assert codes(found).count(CONFLICTING_SNAPSHOTS) == r
+            first = next(f for f in found.findings if f.code == CONFLICTING_SNAPSHOTS)
+            listed = first.details["candidates"]
+            assert isinstance(listed, list)
+            assert [c["path_count"] for c in listed] == [1, 1]
         counts.append(len(found.inferred) + len(found.findings))
+        sizes_of_findings.append(sum(len(json.dumps(f.to_json())) for f in found.findings))
         if r == sizes[-1]:
             assert elapsed < 20, elapsed  # generous for a loaded host; quadratic took 42 s
     assert counts[1] == counts[0] * sizes[1] // sizes[0]
+    assert sizes_of_findings[1] == sizes_of_findings[0] * sizes[1] // sizes[0]
 
 
 def test_a_file_as_near_to_several_recordings_is_bound_to_none() -> None:

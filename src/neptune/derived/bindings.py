@@ -307,8 +307,8 @@ Slot: TypeAlias = tuple[SnapshotKind, bytes]
 @dataclass
 class _Unit:
     """One recording unit (module docstring): its contents and paths, the sessions holding them,
-    its runs, and the snapshots that are its own, by slot with each one's nearness and by the
-    identities they declare."""
+    its runs, and the snapshots that are its own, by slot with each one's nearness, by the
+    identities they declare and by the paths that make them its own."""
 
     contents: tuple[ContentId, ...]
     paths: tuple[bytes, ...]
@@ -318,6 +318,7 @@ class _Unit:
     slots: dict[Slot, dict[ContentId, int]] = field(default_factory=lambda: defaultdict(dict))
     identities: dict[bytes, set[ContentId]] = field(default_factory=lambda: defaultdict(set))
     versions: dict[bytes, set[ContentId]] = field(default_factory=lambda: defaultdict(set))
+    owned: dict[ContentId, set[bytes]] = field(default_factory=lambda: defaultdict(set))
 
 
 class _Union:
@@ -576,6 +577,7 @@ class _Binder:
     def _own(self, unit: _Unit, content: ContentId, path: bytes) -> None:
         """``content``, at ``path``, is one of ``unit``'s own snapshots."""
         directory = parent(path)
+        unit.owned[content].add(path)
         near = max((_depth(directory, mine) for mine in unit.directories), default=0)
         for kind in sorted({kind for _, kind in self.snapshots[content]}):
             slot = unit.slots[kind, basename(path)]
@@ -605,7 +607,7 @@ class _Binder:
                     f" {where}, so it is no one run's own: no run binds it by nearness"
                 ),
                 details={
-                    "candidates": self._candidates([content], None),
+                    "candidates": self._candidates([content], None, None),
                     "directory": directory,
                     "recordings": shared.count,
                     "runs": list(runs),
@@ -655,7 +657,7 @@ class _Binder:
                 )
                 if len(named) > 1:
                     conflicted |= named
-                    self._conflict(run, DECLARED_BY_RUN, None, sorted(named), cited)
+                    self._conflict(run, unit, DECLARED_BY_RUN, None, sorted(named), cited)
                     continue
                 (content,) = named
                 previous = found.get(content)
@@ -719,13 +721,20 @@ class _Binder:
         )
         self.inferred[binding.id] = binding
 
-    def _candidates(self, contents: Sequence[ContentId], kind: SnapshotKind | None) -> JsonValue:
+    def _candidates(
+        self, contents: Sequence[ContentId], kind: SnapshotKind | None, unit: _Unit | None
+    ) -> JsonValue:
+        """Each content's snapshots and paths. In a run's finding only the paths inside the run's
+        unit are listed, so one content at every robot's path does not repeat in every run's
+        finding: up to ``_LISTED`` of them, with their count."""
         listed: list[JsonValue] = []
         for content in contents[:_LISTED]:
+            paths = sorted(unit.owned.get(content, ())) if unit is not None else self.paths[content]
             listed.append(
                 {
                     "content": content,
-                    "paths": [p.decode("utf-8", "backslashreplace") for p in self.paths[content]],
+                    "path_count": len(paths),
+                    "paths": [p.decode("utf-8", "backslashreplace") for p in paths[:_LISTED]],
                     "snapshots": [
                         s.id for s, k in self.snapshots[content] if kind is None or k is kind
                     ],
@@ -747,6 +756,7 @@ class _Binder:
     def _conflict(
         self,
         run: Run,
+        unit: _Unit,
         rule: str,
         slot: Slot | None,
         contents: Sequence[ContentId],
@@ -765,7 +775,7 @@ class _Binder:
         else:
             what = f"one value the run declares names {len(contents)} different snapshots"
         details: dict[str, JsonValue] = {
-            "candidates": self._candidates(contents, kind),
+            "candidates": self._candidates(contents, kind, unit),
             "count": len(contents),
             "rule": rule,
             "run": run.id,
@@ -838,12 +848,12 @@ class _Binder:
             if slot in settled:  # the run's own statement settles its slot, wherever it points
                 said = sorted(settled[slot])
                 if winners != said:
-                    self._differs(run, slot, said, winners)
+                    self._differs(run, unit, slot, said, winners)
                 continue
             if conflicted & set(candidates):
                 continue  # a declared value named these among others: reported, not chosen
             if len(winners) > 1:
-                self._conflict(run, SESSION_NEAREST, slot, winners, run.provenance.evidence)
+                self._conflict(run, unit, SESSION_NEAREST, slot, winners, run.provenance.evidence)
                 continue
             for snapshot, snapshot_kind in self.snapshots[winners[0]]:
                 if snapshot_kind is kind:
@@ -856,6 +866,7 @@ class _Binder:
     def _differs(
         self,
         run: Run,
+        unit: _Unit,
         slot: Slot,
         stated: Sequence[ContentId],
         nearest: Sequence[ContentId],
@@ -874,10 +885,10 @@ class _Binder:
                 ),
                 details={
                     "file_name": name,
-                    "nearest": self._candidates(nearest, slot[0]),
+                    "nearest": self._candidates(nearest, slot[0], unit),
                     "run": run.id,
                     "snapshot_kind": str(slot[0]),
-                    "stated": self._candidates(stated, slot[0]),
+                    "stated": self._candidates(stated, slot[0], unit),
                 },
                 related=self._related([*stated, *nearest], run.provenance.evidence),
                 records=[run.id],
