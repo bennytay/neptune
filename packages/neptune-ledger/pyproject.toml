@@ -8,7 +8,15 @@ requires-python = ">=3.11"
 authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 # psycopg 3 is the PostgreSQL driver for the catalog (ADR 0002). Pinned; bump deliberately.
 # pyarrow: query() returns a pyarrow.Table (catalog API, ADR 0004); same floor as the compiler.
-dependencies = ["neptune", "psycopg[binary]==3.3.6", "pyarrow>=25.0.1"]
+# duckdb and datafusion scan packages' series Parquet in place (ADR 0013). Pinned: a new engine
+# version can change plans and pruning, so a bump re-runs the pushdown and budget tests.
+dependencies = [
+  "datafusion==54.0.0",
+  "duckdb==1.5.6",
+  "neptune",
+  "psycopg[binary]==3.3.6",
+  "pyarrow>=25.0.1",
+]
 
 # `ledger register <root>`, `ledger verify <id>` (MVL-90); a thin front end until access/ lands.
 [project.scripts]
@@ -48,9 +56,10 @@ warn_unreachable = true
 files = ["src", "tests"]
 mypy_path = "src"
 
-# pyarrow ships no type information; neptune_ledger.api.arrow is the only module that imports it.
+# pyarrow ships no type information; api.arrow and lake/ import it. datafusion's object_store
+# module is a compiled extension without stubs.
 [[tool.mypy.overrides]]
-module = ["pyarrow", "pyarrow.*"]
+module = ["pyarrow", "pyarrow.*", "datafusion.object_store"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
