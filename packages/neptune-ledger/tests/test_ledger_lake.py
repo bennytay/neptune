@@ -48,6 +48,7 @@ from neptune_ledger.lake.read import (
     SeriesPlan,
     SeriesReader,
     plan_series,
+    read_findings,
 )
 from neptune_ledger.lake.series import SeriesCatalog, SeriesFile
 from neptune_ledger.lake.store import LocalObjectStore, StoreError
@@ -686,6 +687,50 @@ def test_a_parquet_file_without_the_scanned_columns_is_a_finding(
     swapped = dataclasses.replace(file, location=location, size=other.stat().st_size)
     plan = plan_series([swapped])
     assert plan.scans == () and [f.code for f in plan.findings] == ["file_digest_mismatch"]
+
+
+@pytest.mark.parametrize("reader", READERS, ids=lambda r: r.name)
+def test_a_file_whose_pages_do_not_decode_costs_only_its_own_rows(
+    series: SeriesCatalog,
+    mobile: dict[str, Any],
+    arm_run: dict[str, Any],
+    tmp_path: Path,
+    reader: SeriesReader,
+) -> None:
+    """Pages damaged in place at the same size: the footer still parses, so planning passes,
+    and only the engine notices. The base's odometry becomes a finding; the arm's rows from
+    another package, and the base's battery, still come back."""
+    odom, power = mobile["odom"], mobile["power"]
+    arm = arm_run["pairs"][0]
+    pairs = [(mobile["package"], odom.id), (mobile["package"], power.id), arm]
+    files = series.files(pairs).files
+    path = tmp_path / "base" / "series" / f"{odom.id.removeprefix('rec:sha256:')}.parquet"
+    data = bytearray(path.read_bytes())
+    data[8:200] = bytes(b ^ 0xFF for b in data[8:200])
+    path.write_bytes(bytes(data))
+    plan = plan_series(files, columns=["locator/0/offset"])
+    assert plan.findings == () and len(plan.scans) == 3, "planning cannot see page damage"
+    table = reader.read(plan)
+    findings = read_findings(table)
+    assert [(f.code, f.subject) for f in findings] == [("file_digest_mismatch", odom.id)]
+    assert set(table.column("stream_id").to_pylist()) == {power.id, arm[1]}
+    good = reader.read(
+        plan_series([f for f in files if f.stream_id != odom.id], columns=["locator/0/offset"])
+    )
+    assert table.equals(good) and read_findings(good) == ()
+
+
+def test_every_read_carries_its_plans_findings(
+    series: SeriesCatalog, mobile: dict[str, Any]
+) -> None:
+    files = series.files(
+        [(mobile["package"], mobile["odom"].id), (mobile["package"], mobile["power"].id)]
+    ).files
+    plan = plan_series(files, windows=[TimeWindow(mobile["odom"].clocks[1], 0, INT64_MAX)])
+    for reader in READERS:
+        assert read_findings(reader.read(plan)) == plan.findings != ()
+    with pytest.raises(LakeRequestError, match="not a series read"):
+        read_findings(pa.table({"x": [1]}))
 
 
 # --- the budget: a 10^6-row window under 200 ms ----------------------------------------------
