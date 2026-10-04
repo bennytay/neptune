@@ -134,7 +134,9 @@ def test_registration_writes_exactly_the_walkthrough_rows(
         "time_interval",
         "spatial_extent",
     )
-    assert all(real[table] for table in (*derived[:2], *derived[-2:])) and not any(harness[t] for t in derived)
+    assert all(real[table] for table in (*derived[:2], *derived[-2:])) and not any(
+        harness[t] for t in derived
+    )
     assert {t: r for t, r in real.items() if t not in derived} == {
         t: r for t, r in harness.items() if t not in derived
     }
