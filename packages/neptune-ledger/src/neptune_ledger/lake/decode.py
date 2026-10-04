@@ -26,6 +26,8 @@ encoding this version cannot decode, ``invalid_request`` for a citation the byte
 ``unsafe_entry`` for a decompression or pixel bomb.
 """
 
+import codecs
+import functools
 import hashlib
 import io
 import json
@@ -124,6 +126,7 @@ class ExtractionTransform:
         return "sha256:" + hashlib.sha256(canonical_json.dumps(self.to_json())).hexdigest()
 
 
+@functools.cache
 def transform_for(variant: Variant) -> ExtractionTransform:
     """The transform this Ledger extracts ``variant`` with, from the installed libraries."""
     libraries = tuple((name, library_version(name)) for name in _LIBRARIES[variant])
@@ -209,7 +212,7 @@ class _Scope:
         out = bytearray()
         try:
             with self.file() as f:
-                while block := f.read(1 << 20):
+                while block := f.read(min(1 << 20, max(1, limit))):
                     out += inflate.decompress(block, limit + 1 - len(out))
                     if len(out) > limit or inflate.unconsumed_tail:
                         detail = f"the gzip stream inflates past the {limit}-byte limit"
@@ -257,7 +260,11 @@ def decode(
     for at, step in enumerate(steps[:-1]):
         if isinstance(step, ByteRange):
             scope = scope.decoded(subject).slice(step, subject)
-        elif isinstance(step, RecordRange) and at == len(steps) - 2:
+        elif (
+            isinstance(step, RecordRange)
+            and at == len(steps) - 2
+            and isinstance(steps[-1], ImageRegion)
+        ):
             image = _frame(scope.decoded(subject), step, subject, limits)
         else:
             detail = f"this Ledger decodes no {step.kind} step with further steps inside it"
@@ -844,6 +851,30 @@ def _json_value(value: Any) -> Any:
 # --- Values from JSON or YAML, and text spans --------------------------------------------------
 
 
+# Byte-order marks, longest first (a UTF-32 LE mark begins with the UTF-16 LE one), as the
+# compiler's text and structured readers take them: the mark names the encoding and is not text.
+_MARKS: Final = (
+    (codecs.BOM_UTF32_LE, "utf-32-le"),
+    (codecs.BOM_UTF32_BE, "utf-32-be"),
+    (codecs.BOM_UTF8, "utf-8"),
+    (codecs.BOM_UTF16_LE, "utf-16-le"),
+    (codecs.BOM_UTF16_BE, "utf-16-be"),
+)
+
+
+def _text(data: bytes, subject: str) -> str:
+    """The text of a document: UTF-8 unless a byte-order mark names another encoding."""
+    encoding, skip = "utf-8", 0
+    for mark, named in _MARKS:
+        if data.startswith(mark):
+            encoding, skip = named, len(mark)
+            break
+    try:
+        return data[skip:].decode(encoding)
+    except UnicodeDecodeError as exc:
+        raise DecodeFailure("undecodable", subject, f"not {encoding} text: {exc}") from exc
+
+
 class _Keys(dict[str, Any]):
     """A JSON object; ``repeated`` names the keys it holds more than once."""
 
@@ -870,12 +901,8 @@ def _pointer(scope: _Scope, step: JsonPointer, subject: str) -> Decoded:
     the document's own text from the node's first character to its last. Keys are matched by
     their text, as the compiler cites them. A key held twice on the path is ambiguous.
     """
-    data = scope.whole(subject, "a document")
+    text = _text(scope.whole(subject, "a document"), subject)
     tokens = [t.replace("~1", "/").replace("~0", "~") for t in step.pointer.split("/")[1:]]
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise DecodeFailure("undecodable", subject, f"a document must be UTF-8: {exc}") from exc
     try:
         document = json.loads(text, object_pairs_hook=_pairs, parse_constant=_refuse_constant)
     except ValueError:
@@ -942,10 +969,7 @@ def _yaml_pointer(text: str, tokens: list[str], pointer: str, subject: str) -> D
 
 
 def _span(scope: _Scope, step: Span, subject: str) -> Decoded:
-    try:
-        text = scope.whole(subject, "a text").decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise DecodeFailure("undecodable", subject, f"a span needs UTF-8 text: {exc}") from exc
+    text = _text(scope.whole(subject, "a text"), subject)
     if step.end > len(text):
         detail = f"span [{step.start}, {step.end}) is past the text's {len(text)} code points"
         raise DecodeFailure("invalid_request", subject, detail)

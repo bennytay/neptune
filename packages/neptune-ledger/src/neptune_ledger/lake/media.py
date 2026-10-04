@@ -332,7 +332,9 @@ class Hydration:
         found = store.get(made_id)
         if found is not None:
             return Hydrated(found, ())
-        evidence = self.resolve()
+        evidence = self._media.resolver.resolve(
+            self.evidence_ref, as_of=self.as_of, resolution=cataloged
+        )
         if evidence.status != "resolved":
             return Hydrated(None, evidence.findings)
         try:

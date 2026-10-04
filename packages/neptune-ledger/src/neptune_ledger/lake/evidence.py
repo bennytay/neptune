@@ -36,7 +36,7 @@ from neptune_ledger.api.types import CatalogFinding, EvidenceAnchor, Resolution,
 from neptune_ledger.catalog.migrate import tenant_schema
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.catalog.sources import SourceStore, location_path
-from neptune_ledger.lake.store import ObjectStore, local_store
+from neptune_ledger.lake.store import ObjectStore, StoreError, check_key, local_store
 
 Conn = psycopg.Connection[tuple[Any, ...]]
 Locate = Callable[[str, str], ObjectStore]
@@ -169,10 +169,12 @@ class _Located(_Source):
                         block := stream.read(min(1 << 20, offset - skipped))
                     ):
                         skipped += len(block)
-                data = stream.read(length)
+                data = bytearray()
+                while len(data) < length and (block := stream.read(length - len(data))):
+                    data += block
             except OSError:
                 return None
-        return data if len(data) == length else None
+        return bytes(data) if len(data) == length else None
 
 
 class ReadFailure(Exception):
@@ -197,14 +199,14 @@ class SourceReader:
 
     def __init__(
         self,
-        source: _Source,
+        sources: Sequence[_Source],
         content_id: str,
         span: ByteSpan,
         chunk_size: int,
         chunks: Sequence[str],
         size: int,
     ) -> None:
-        self._source = source
+        self._sources = tuple(sources)
         self._content = content_id
         self.span = span
         self._chunk_size = chunk_size
@@ -236,7 +238,7 @@ class SourceReader:
             raise ValueError(f"[{offset}, +{length}) is outside a {self.span.length}-byte span")
         span = ByteSpan(self.span.offset + offset, length)
         return SourceReader(
-            self._source, self._content, span, self._chunk_size, self._chunks, self._size
+            self._sources, self._content, span, self._chunk_size, self._chunks, self._size
         )
 
     def file(self, max_read: int) -> io.BufferedReader:
@@ -246,7 +248,9 @@ class SourceReader:
         length field asking a parser to load a huge record), raises ``ReadFailure``.
         """
         raw = _SpanFile(self, max_read)
-        return io.BufferedReader(raw, buffer_size=min(self._chunk_size, 1 << 20))
+        # Read-ahead never asks for more than ``max_read``, so only a parser's own request can.
+        size = max(1, min(self._chunk_size, 1 << 20, max_read))
+        return io.BufferedReader(raw, buffer_size=size)
 
     def _read(self, at: int, length: int) -> bytes:
         out = bytearray()
@@ -265,18 +269,24 @@ class SourceReader:
             return self._cached[1]
         at = index * self._chunk_size
         length = min(self._chunk_size, self._size - at)
-        data = self._source.read(at, length)
-        if data is None:
-            detail = f"{self._source.describe()} can no longer be read at [{at}, +{length})"
-            raise ReadFailure(MediaFinding("file_missing", self._content, detail))
-        if (
-            index >= len(self._chunks)
-            or "sha256:" + hashlib.sha256(data).hexdigest() != (self._chunks[index])
-        ):
-            detail = f"chunk {index} of {self._source.describe()} is not the stated bytes"
+        missing: list[str] = []
+        changed: list[str] = []
+        # Every object that held the stated size when resolved is a copy of the same content:
+        # a chunk is taken from the first one whose bytes hash to the stated chunk id.
+        for source in self._sources:
+            data = source.read(at, length)
+            if data is None:
+                missing.append(source.describe())
+            elif index < len(self._chunks) and _digest(data) == self._chunks[index]:
+                self._cached = (index, data)
+                return data
+            else:
+                changed.append(source.describe())
+        if changed:
+            detail = f"chunk {index} is not the stated bytes at {'; '.join(changed[:5])}"
             raise ReadFailure(MediaFinding("file_digest_mismatch", self._content, detail))
-        self._cached = (index, data)
-        return data
+        detail = f"[{at}, +{length}) can no longer be read at {'; '.join(missing[:5])}"
+        raise ReadFailure(MediaFinding("file_missing", self._content, detail))
 
 
 class _SpanFile(io.RawIOBase):
@@ -426,9 +436,20 @@ class EvidenceResolver:
         """The catalog's own answer for the anchor at ``as_of``; no byte is touched."""
         return self._catalog.resolve(anchor, as_of=as_of)
 
-    def resolve(self, anchor: EvidenceAnchor, *, as_of: int | None = None) -> EvidenceBytes:
-        """Where the anchor's bytes are, at one catalog point; a finding when nowhere."""
-        resolution = self._catalog.resolve(anchor, as_of=as_of)
+    def resolve(
+        self,
+        anchor: EvidenceAnchor,
+        *,
+        as_of: int | None = None,
+        resolution: Resolution | None = None,
+    ) -> EvidenceBytes:
+        """Where the anchor's bytes are, at one catalog point; a finding when nowhere.
+
+        ``resolution`` is the catalog's answer for the same anchor and ``as_of`` when the caller
+        already holds it (``cataloged``), so the catalog is not asked twice.
+        """
+        if resolution is None or resolution.evidence_ref != anchor:
+            resolution = self._catalog.resolve(anchor, as_of=as_of)
         if resolution.status != "resolved":
             findings = catalog_findings(resolution)
             unresolvable = any(f.code == "unresolvable_evidence" for f in findings)
@@ -465,6 +486,8 @@ class EvidenceResolver:
         findings: list[MediaFinding] = []
         tried: list[str] = []
         wrong: list[str] = []
+        first: tuple[SourceRoute, tuple[int, tuple[str, ...]]] | None = None
+        copies: list[_Source] = []
         for route in resolution.fetch:
             root, body = packages.get(route.package_id, (None, None))
             chunks = _chunks(body, size)
@@ -472,6 +495,8 @@ class EvidenceResolver:
                 # The bytes could not be verified through this package, so it is not a route.
                 tried.append(f"package {route.package_id} (no chunk ids for {size} bytes)")
                 continue
+            if first is not None and chunks != first[1]:
+                continue  # another chunking: its chunk ids cannot verify these reads
             for source, made in self._candidates(anchor.source, root, route, findings):
                 tried.append(source.describe())
                 found = source.size(size)
@@ -480,16 +505,21 @@ class EvidenceResolver:
                 if found != size:
                     wrong.append(f"{source.describe()} holds {found} bytes")
                     continue
-                chunk_size, hashes = chunks
+                if first is None:
+                    first = (made, chunks)
+                copies.append(source)
+        if first is not None:
+            # The route is the first object of the stated size; every later one is a fallback
+            # for a chunk the earlier ones no longer hold intact.
+            made, (chunk_size, hashes) = first
+            sources = tuple(copies)
 
-                def reader(
-                    source: _Source = source, chunk_size: int = chunk_size, hashes: Any = hashes
-                ) -> SourceReader:
-                    return SourceReader(source, anchor.source, span, chunk_size, hashes, size)
+            def reader() -> SourceReader:
+                return SourceReader(sources, anchor.source, span, chunk_size, hashes, size)
 
-                return EvidenceBytes(
-                    anchor, "resolved", resolution, span, inner, made, tuple(findings), reader
-                )
+            return EvidenceBytes(
+                anchor, "resolved", resolution, span, inner, made, tuple(findings), reader
+            )
         if wrong:
             detail = f"the stated {size} bytes are not where stated: {'; '.join(wrong[:5])}"
             findings.append(MediaFinding("file_digest_mismatch", anchor.source, detail))
@@ -505,7 +535,15 @@ class EvidenceResolver:
         """Every object that may hold the bytes on one package's route, in order."""
         package_id = route.package_id
         if route.storage == "materialised":
-            blob = _Blob(self._locate(package_id, root), blob_path(content_id))  # type: ignore[arg-type]
+            # The path the catalog states, else the compiler's layout for the content id.
+            stated = route.blob_path
+            key = stated.value if isinstance(stated, Known) else blob_path(content_id)  # type: ignore[arg-type]
+            try:
+                blob = _Blob(self._locate(package_id, root), check_key(key))
+            except StoreError as exc:
+                detail = f"package {package_id}'s blob cannot be reached: {exc}"
+                findings.append(MediaFinding("unsafe_entry", package_id, detail[:500]))
+                return []
             return [(blob, SourceRoute(package_id, "materialised", blob.describe(), None))]
         out: list[tuple[_Source, SourceRoute]] = []
         stores = self._source_roots(package_id, root)
@@ -545,6 +583,10 @@ def _chunks(body: Any, size: int) -> tuple[int, tuple[str, ...]] | None:
     ):
         return None
     return chunk_size, tuple(chunks)
+
+
+def _digest(data: bytes) -> str:
+    return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
 def _is_count(value: object) -> bool:

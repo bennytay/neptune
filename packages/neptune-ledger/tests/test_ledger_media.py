@@ -895,3 +895,55 @@ def test_a_stored_artefact_still_needs_the_catalog_and_bytes_take_no_snapshot(la
     assert lake.codes(ref, "frame", as_of=99, snapshot=stored.snapshot) == ["as_of_out_of_range"]
     whole = anchor(head, byte_range(0, len(head)))
     assert lake.codes(whole, "bytes", snapshot=1) == ["invalid_request"]
+
+
+def test_byte_order_marks_name_the_encoding_and_are_not_text(lake: Lake) -> None:
+    import codecs
+
+    note = codecs.BOM_UTF8 + MISSION.encode("utf-8")
+    params = codecs.BOM_UTF16_LE + '{"gait": "trot", "hz": 400}'.encode("utf-16-le")
+    lake.package(
+        "legged",
+        {"note.txt": note, "params.json": params},
+        materialise=frozenset({"note.txt", "params.json"}),
+    )
+    start = MISSION.index("façade")
+    span = anchor(note, {"end": start + 6, "kind": "span", "start": start})
+    assert lake.artefact(span, "value").read() == "façade".encode()
+    gait = lake.artefact(anchor(params, {"kind": "json_pointer", "pointer": "/gait"}), "value")
+    assert gait.read() == b'"trot"' and gait.media_type == "application/json"
+
+
+def test_a_changed_copy_falls_back_to_an_intact_one(lake: Lake) -> None:
+    wrist = fixture("wrist_camera.mcap")
+    lake.package("arm-referenced", {"wrist.mcap": wrist}, chunk_size=1024)
+    lake.package(
+        "arm-materialised",
+        {"wrist.mcap": wrist},
+        chunk_size=1024,
+        materialise=frozenset({"wrist.mcap"}),
+    )
+    edited = bytearray(wrist)
+    edited[100] ^= 0xFF  # same size, chunk 0 changed
+    lake.stores = [
+        LocalSourceStore(ingest_root(lake.tmp / "ingest", {"wrist.mcap": bytes(edited)}))
+    ]
+    whole = anchor(wrist, byte_range(0, len(wrist)))
+    evidence = lake.media.resolve(whole)
+    assert evidence.status == "resolved" and evidence.route is not None
+    assert evidence.route.storage == "referenced"  # the first copy of the stated size
+    assert evidence.open().read_all() == wrist  # chunk 0 comes from the intact blob
+    frame = lake.artefact(anchor(wrist, record_range(WRIST_TOPIC, START, START + 1)), "frame")
+    assert_frame(picture(frame), WRIST_SIZE, 0, (0, 0))
+
+
+def test_small_limits_bound_parsers_not_read_ahead(lake: Lake) -> None:
+    head = fixture("head_camera.mcap")
+    lake.package("legged", {"head.mcap": head}, materialise=frozenset({"head.mcap"}))
+    tight = MediaLake(lake.resolver, lake.store, limits=Limits(max_decoded_bytes=4096))
+    made = tight.hydrate(anchor(head, record_range(HEAD_TOPIC, START, START + 1)), "frame").read()
+    assert isinstance(made.value, Artefact), made.findings
+    # A frame step with a further step other than image_region inside it has no decoder.
+    pointer = {"kind": "json_pointer", "pointer": "/data"}
+    ref = anchor(head, record_range(HEAD_TOPIC, START, START + 1), pointer)
+    assert lake.codes(ref, "value") == ["no_decoder"]
