@@ -1,0 +1,3419 @@
+{
+ "arm_cell.mcap": {
+  "/ft_sensor": [
+   {
+    "header.frame_id": "ft_sensor_link",
+    "header.stamp.nanosec": 14000000,
+    "header.stamp.sec": 1800000000,
+    "wrench.force.x": 0.0,
+    "wrench.force.y": 0.0,
+    "wrench.force.z": -9.8,
+    "wrench.torque.x": 0.0,
+    "wrench.torque.y": 0.01,
+    "wrench.torque.z": 0.0
+   },
+   {
+    "header.frame_id": "ft_sensor_link",
+    "header.stamp.nanosec": 64000000,
+    "header.stamp.sec": 1800000000,
+    "wrench.force.x": 0.0,
+    "wrench.force.y": 0.0,
+    "wrench.force.z": -10.8,
+    "wrench.torque.x": 0.0,
+    "wrench.torque.y": 0.01,
+    "wrench.torque.z": 0.0
+   },
+   {
+    "header.frame_id": "ft_sensor_link",
+    "header.stamp.nanosec": 114000000,
+    "header.stamp.sec": 1800000000,
+    "wrench.force.x": 0.0,
+    "wrench.force.y": 0.0,
+    "wrench.force.z": -11.8,
+    "wrench.torque.x": 0.0,
+    "wrench.torque.y": 0.01,
+    "wrench.torque.z": 0.0
+   },
+   {
+    "header.frame_id": "ft_sensor_link",
+    "header.stamp.nanosec": 164000000,
+    "header.stamp.sec": 1800000000,
+    "wrench.force.x": 0.0,
+    "wrench.force.y": 0.0,
+    "wrench.force.z": -12.8,
+    "wrench.torque.x": 0.0,
+    "wrench.torque.y": 0.01,
+    "wrench.torque.z": 0.0
+   }
+  ],
+  "/joint_states": [
+   {
+    "effort[]": [],
+    "header.frame_id": "",
+    "header.stamp.nanosec": 12000000,
+    "header.stamp.sec": 1800000000,
+    "name[]": [
+     "shoulder_pan",
+     "shoulder_lift",
+     "elbow",
+     "wrist_1",
+     "wrist_2",
+     "wrist_3"
+    ],
+    "position[]": [
+     0.0,
+     0.1,
+     0.2,
+     0.30000000000000004,
+     0.4,
+     0.5
+    ],
+    "velocity[]": [
+     0.01,
+     0.01,
+     0.01,
+     0.01,
+     0.01,
+     0.01
+    ]
+   },
+   {
+    "effort[]": [],
+    "header.frame_id": "",
+    "header.stamp.nanosec": 62000000,
+    "header.stamp.sec": 1800000000,
+    "name[]": [
+     "shoulder_pan",
+     "shoulder_lift",
+     "elbow",
+     "wrist_1",
+     "wrist_2",
+     "wrist_3"
+    ],
+    "position[]": [
+     0.01,
+     0.11,
+     0.21000000000000002,
+     0.31000000000000005,
+     0.41000000000000003,
+     0.51
+    ],
+    "velocity[]": [
+     0.01,
+     0.01,
+     0.01,
+     0.01,
+     0.01,
+     0.01
+    ]
+   },
+   {
+    "effort[]": [],
+    "header.frame_id": "",
+    "header.stamp.nanosec": 112000000,
+    "header.stamp.sec": 1800000000,
+    "name[]": [
+     "shoulder_pan",
+     "shoulder_lift",
+     "elbow",
+     "wrist_1",
+     "wrist_2",
+     "wrist_3"
+    ],
+    "position[]": [
+     0.02,
+     0.12000000000000001,
+     0.22,
+     0.32000000000000006,
+     0.42000000000000004,
+     0.52
+    ],
+    "velocity[]": [
+     0.01,
+     0.01,
+     0.01,
+     0.01,
+     0.01,
+     0.01
+    ]
+   },
+   {
+    "effort[]": [],
+    "header.frame_id": "",
+    "header.stamp.nanosec": 162000000,
+    "header.stamp.sec": 1800000000,
+    "name[]": [
+     "shoulder_pan",
+     "shoulder_lift",
+     "elbow",
+     "wrist_1",
+     "wrist_2",
+     "wrist_3"
+    ],
+    "position[]": [
+     0.03,
+     0.13,
+     0.23,
+     0.33000000000000007,
+     0.43000000000000005,
+     0.53
+    ],
+    "velocity[]": [
+     0.01,
+     0.01,
+     0.01,
+     0.01,
+     0.01,
+     0.01
+    ]
+   }
+  ],
+  "/tf": [
+   {
+    "transforms[].child_frame_id": [
+     "shoulder_link",
+     "upper_arm_link",
+     "forearm_link",
+     "wrist_link",
+     "tool0"
+    ],
+    "transforms[].header.frame_id": [
+     "base_link",
+     "shoulder_link",
+     "upper_arm_link",
+     "forearm_link",
+     "wrist_link"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     10000000,
+     10000000,
+     10000000,
+     10000000,
+     10000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.138,
+     -0.131,
+     0.0,
+     0.0996
+    ],
+    "transforms[].transform.translation.z": [
+     0.1625,
+     0.0,
+     0.425,
+     0.3922,
+     0.0
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "shoulder_link",
+     "upper_arm_link",
+     "forearm_link",
+     "wrist_link",
+     "tool0"
+    ],
+    "transforms[].header.frame_id": [
+     "base_link",
+     "shoulder_link",
+     "upper_arm_link",
+     "forearm_link",
+     "wrist_link"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     60000000,
+     60000000,
+     60000000,
+     60000000,
+     60000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     0.9999499987499375,
+     0.9999499987499375,
+     0.9999499987499375,
+     0.9999499987499375,
+     0.9999499987499375
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.01,
+     0.01,
+     0.01,
+     0.01,
+     0.01
+    ],
+    "transforms[].transform.translation.x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.138,
+     -0.131,
+     0.0,
+     0.0996
+    ],
+    "transforms[].transform.translation.z": [
+     0.1625,
+     0.0,
+     0.425,
+     0.3922,
+     0.0
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "shoulder_link",
+     "upper_arm_link",
+     "forearm_link",
+     "wrist_link",
+     "tool0"
+    ],
+    "transforms[].header.frame_id": [
+     "base_link",
+     "shoulder_link",
+     "upper_arm_link",
+     "forearm_link",
+     "wrist_link"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     110000000,
+     110000000,
+     110000000,
+     110000000,
+     110000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     0.999799979995999,
+     0.999799979995999,
+     0.999799979995999,
+     0.999799979995999,
+     0.999799979995999
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.02,
+     0.02,
+     0.02,
+     0.02,
+     0.02
+    ],
+    "transforms[].transform.translation.x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.138,
+     -0.131,
+     0.0,
+     0.0996
+    ],
+    "transforms[].transform.translation.z": [
+     0.1625,
+     0.0,
+     0.425,
+     0.3922,
+     0.0
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "shoulder_link",
+     "upper_arm_link",
+     "forearm_link",
+     "wrist_link",
+     "tool0"
+    ],
+    "transforms[].header.frame_id": [
+     "base_link",
+     "shoulder_link",
+     "upper_arm_link",
+     "forearm_link",
+     "wrist_link"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     160000000,
+     160000000,
+     160000000,
+     160000000,
+     160000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     0.9995498987044118,
+     0.9995498987044118,
+     0.9995498987044118,
+     0.9995498987044118,
+     0.9995498987044118
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.03,
+     0.03,
+     0.03,
+     0.03,
+     0.03
+    ],
+    "transforms[].transform.translation.x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.138,
+     -0.131,
+     0.0,
+     0.0996
+    ],
+    "transforms[].transform.translation.z": [
+     0.1625,
+     0.0,
+     0.425,
+     0.3922,
+     0.0
+    ]
+   }
+  ],
+  "/tf_static": [
+   {
+    "transforms[].child_frame_id": [
+     "base_link",
+     "gripper"
+    ],
+    "transforms[].header.frame_id": [
+     "world",
+     "tool0"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     0,
+     0
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000,
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0,
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.75,
+     0.12
+    ]
+   }
+  ]
+ },
+ "mcap/robot.mcap": {
+  "/imu": [
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 8000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.1,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 18000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.12,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 23000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.13,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 28000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.14,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 26000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.15,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 38000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.16,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 48000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.17,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 58000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.18,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 68000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.19,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 78000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.2,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.01,
+    "angular_velocity_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu_link",
+    "header.stamp.nanosec": 88000000,
+    "header.stamp.sec": 1790000000,
+    "linear_acceleration.x": 0.21,
+    "linear_acceleration.y": -0.1,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  ]
+ },
+ "quadruped_walk.mcap": {
+  "/imu": [
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.02,
+    "angular_velocity_covariance[]": [
+     0.001,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu",
+    "header.stamp.nanosec": 25000000,
+    "header.stamp.sec": 1800000000,
+    "linear_acceleration.x": 0.0,
+    "linear_acceleration.y": 0.0,
+    "linear_acceleration.z": 9.81,
+    "linear_acceleration_covariance[]": [
+     0.1,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.02,
+    "angular_velocity_covariance[]": [
+     0.001,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu",
+    "header.stamp.nanosec": 65000000,
+    "header.stamp.sec": 1800000000,
+    "linear_acceleration.x": 0.0,
+    "linear_acceleration.y": 0.0,
+    "linear_acceleration.z": 9.82,
+    "linear_acceleration_covariance[]": [
+     0.1,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.02,
+    "angular_velocity_covariance[]": [
+     0.001,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu",
+    "header.stamp.nanosec": 105000000,
+    "header.stamp.sec": 1800000000,
+    "linear_acceleration.x": 0.0,
+    "linear_acceleration.y": 0.0,
+    "linear_acceleration.z": 9.83,
+    "linear_acceleration_covariance[]": [
+     0.1,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.02,
+    "angular_velocity_covariance[]": [
+     0.001,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu",
+    "header.stamp.nanosec": 145000000,
+    "header.stamp.sec": 1800000000,
+    "linear_acceleration.x": 0.0,
+    "linear_acceleration.y": 0.0,
+    "linear_acceleration.z": 9.84,
+    "linear_acceleration_covariance[]": [
+     0.1,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.02,
+    "angular_velocity_covariance[]": [
+     0.001,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "imu",
+    "header.stamp.nanosec": 185000000,
+    "header.stamp.sec": 1800000000,
+    "linear_acceleration.x": 0.0,
+    "linear_acceleration.y": 0.0,
+    "linear_acceleration.z": 9.85,
+    "linear_acceleration_covariance[]": [
+     0.1,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  ],
+  "/tf": [
+   {
+    "transforms[].child_frame_id": [
+     "body"
+    ],
+    "transforms[].header.frame_id": [
+     "odom"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     20000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.32
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "body"
+    ],
+    "transforms[].header.frame_id": [
+     "odom"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     60000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.1
+    ],
+    "transforms[].transform.translation.y": [
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.32
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "body"
+    ],
+    "transforms[].header.frame_id": [
+     "odom"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     100000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.2
+    ],
+    "transforms[].transform.translation.y": [
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.32
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "body"
+    ],
+    "transforms[].header.frame_id": [
+     "odom"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     140000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.30000000000000004
+    ],
+    "transforms[].transform.translation.y": [
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.32
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "body"
+    ],
+    "transforms[].header.frame_id": [
+     "odom"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     180000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.4
+    ],
+    "transforms[].transform.translation.y": [
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.32
+    ]
+   }
+  ],
+  "/tf_static": [
+   {
+    "transforms[].child_frame_id": [
+     "imu",
+     "cam0",
+     "cam1",
+     "front_left_hip",
+     "front_right_hip",
+     "rear_left_hip",
+     "rear_right_hip"
+    ],
+    "transforms[].header.frame_id": [
+     "body",
+     "body",
+     "body",
+     "body",
+     "body",
+     "body",
+     "body"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000,
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.0,
+     0.3,
+     0.3,
+     0.2,
+     0.2,
+     -0.2,
+     -0.2
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.05,
+     -0.05,
+     0.1,
+     -0.1,
+     0.1,
+     -0.1
+    ],
+    "transforms[].transform.translation.z": [
+     0.05,
+     0.1,
+     0.1,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  ]
+ },
+ "rosbag1/robot_none.bag": {
+  "/joint_states": [
+   {
+    "effort[]": [
+     0.5,
+     1.0,
+     1.5,
+     2.0,
+     2.5,
+     3.0
+    ],
+    "header.frame_id": "base_link",
+    "header.seq": 0,
+    "header.stamp.nsecs": 10000000,
+    "header.stamp.secs": 1790000000,
+    "name[]": [
+     "shoulder_pan_joint",
+     "shoulder_lift_joint",
+     "elbow_joint",
+     "wrist_1_joint",
+     "wrist_2_joint",
+     "wrist_3_joint"
+    ],
+    "position[]": [
+     0.1,
+     0.2,
+     0.30000000000000004,
+     0.4,
+     0.5,
+     0.6000000000000001
+    ],
+    "velocity[]": [
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06
+    ]
+   },
+   {
+    "effort[]": [
+     0.5,
+     1.0,
+     1.5,
+     2.0,
+     2.5,
+     3.0
+    ],
+    "header.frame_id": "base_link",
+    "header.seq": 1,
+    "header.stamp.nsecs": 110000000,
+    "header.stamp.secs": 1790000000,
+    "name[]": [
+     "shoulder_pan_joint",
+     "shoulder_lift_joint",
+     "elbow_joint",
+     "wrist_1_joint",
+     "wrist_2_joint",
+     "wrist_3_joint"
+    ],
+    "position[]": [
+     0.11,
+     0.21000000000000002,
+     0.31000000000000005,
+     0.41000000000000003,
+     0.51,
+     0.6100000000000001
+    ],
+    "velocity[]": [
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06
+    ]
+   },
+   {
+    "effort[]": [
+     0.5,
+     1.0,
+     1.5,
+     2.0,
+     2.5,
+     3.0
+    ],
+    "header.frame_id": "base_link",
+    "header.seq": 2,
+    "header.stamp.nsecs": 210000000,
+    "header.stamp.secs": 1790000000,
+    "name[]": [
+     "shoulder_pan_joint",
+     "shoulder_lift_joint",
+     "elbow_joint",
+     "wrist_1_joint",
+     "wrist_2_joint",
+     "wrist_3_joint"
+    ],
+    "position[]": [
+     0.12000000000000001,
+     0.22,
+     0.32000000000000006,
+     0.42000000000000004,
+     0.52,
+     0.6200000000000001
+    ],
+    "velocity[]": [
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06
+    ]
+   },
+   {
+    "effort[]": [
+     0.5,
+     1.0,
+     1.5,
+     2.0,
+     2.5,
+     3.0
+    ],
+    "header.frame_id": "base_link",
+    "header.seq": 3,
+    "header.stamp.nsecs": 310000000,
+    "header.stamp.secs": 1790000000,
+    "name[]": [
+     "shoulder_pan_joint",
+     "shoulder_lift_joint",
+     "elbow_joint",
+     "wrist_1_joint",
+     "wrist_2_joint",
+     "wrist_3_joint"
+    ],
+    "position[]": [
+     0.13,
+     0.23,
+     0.33000000000000007,
+     0.43000000000000005,
+     0.53,
+     0.6300000000000001
+    ],
+    "velocity[]": [
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06
+    ]
+   },
+   {
+    "effort[]": [
+     0.5,
+     1.0,
+     1.5,
+     2.0,
+     2.5,
+     3.0
+    ],
+    "header.frame_id": "base_link",
+    "header.seq": 4,
+    "header.stamp.nsecs": 410000000,
+    "header.stamp.secs": 1790000000,
+    "name[]": [
+     "shoulder_pan_joint",
+     "shoulder_lift_joint",
+     "elbow_joint",
+     "wrist_1_joint",
+     "wrist_2_joint",
+     "wrist_3_joint"
+    ],
+    "position[]": [
+     0.14,
+     0.24000000000000002,
+     0.34,
+     0.44,
+     0.54,
+     0.6400000000000001
+    ],
+    "velocity[]": [
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06
+    ]
+   },
+   {
+    "effort[]": [
+     0.5,
+     1.0,
+     1.5,
+     2.0,
+     2.5,
+     3.0
+    ],
+    "header.frame_id": "base_link",
+    "header.seq": 5,
+    "header.stamp.nsecs": 520000000,
+    "header.stamp.secs": 1790000000,
+    "name[]": [
+     "shoulder_pan_joint",
+     "shoulder_lift_joint",
+     "elbow_joint",
+     "wrist_1_joint",
+     "wrist_2_joint",
+     "wrist_3_joint"
+    ],
+    "position[]": [
+     0.15000000000000002,
+     0.25,
+     0.35000000000000003,
+     0.45,
+     0.55,
+     0.6500000000000001
+    ],
+    "velocity[]": [
+     0.01,
+     0.02,
+     0.03,
+     0.04,
+     0.05,
+     0.06
+    ]
+   }
+  ],
+  "/odom": [
+   {
+    "child_frame_id": "base_link",
+    "header.frame_id": "odom",
+    "header.seq": 0,
+    "header.stamp.nsecs": 30000000,
+    "header.stamp.secs": 1790000000,
+    "pose.covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "pose.pose.orientation.w": 1.0,
+    "pose.pose.orientation.x": 0.0,
+    "pose.pose.orientation.y": 0.0,
+    "pose.pose.orientation.z": 0.0,
+    "pose.pose.position.x": 0.0,
+    "pose.pose.position.y": 0.0,
+    "pose.pose.position.z": 0.0,
+    "twist.covariance[]": [
+     0.02,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "twist.twist.angular.x": 0.0,
+    "twist.twist.angular.y": 0.0,
+    "twist.twist.angular.z": 0.05,
+    "twist.twist.linear.x": 0.2,
+    "twist.twist.linear.y": 0.0,
+    "twist.twist.linear.z": 0.0
+   },
+   {
+    "child_frame_id": "base_link",
+    "header.frame_id": "odom",
+    "header.seq": 1,
+    "header.stamp.nsecs": 130000000,
+    "header.stamp.secs": 1790000000,
+    "pose.covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "pose.pose.orientation.w": 1.0,
+    "pose.pose.orientation.x": 0.0,
+    "pose.pose.orientation.y": 0.0,
+    "pose.pose.orientation.z": 0.01,
+    "pose.pose.position.x": 0.05,
+    "pose.pose.position.y": 0.0,
+    "pose.pose.position.z": 0.0,
+    "twist.covariance[]": [
+     0.02,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "twist.twist.angular.x": 0.0,
+    "twist.twist.angular.y": 0.0,
+    "twist.twist.angular.z": 0.05,
+    "twist.twist.linear.x": 0.2,
+    "twist.twist.linear.y": 0.0,
+    "twist.twist.linear.z": 0.0
+   },
+   {
+    "child_frame_id": "base_link",
+    "header.frame_id": "odom",
+    "header.seq": 2,
+    "header.stamp.nsecs": 230000000,
+    "header.stamp.secs": 1790000000,
+    "pose.covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "pose.pose.orientation.w": 1.0,
+    "pose.pose.orientation.x": 0.0,
+    "pose.pose.orientation.y": 0.0,
+    "pose.pose.orientation.z": 0.02,
+    "pose.pose.position.x": 0.1,
+    "pose.pose.position.y": 0.0,
+    "pose.pose.position.z": 0.0,
+    "twist.covariance[]": [
+     0.02,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "twist.twist.angular.x": 0.0,
+    "twist.twist.angular.y": 0.0,
+    "twist.twist.angular.z": 0.05,
+    "twist.twist.linear.x": 0.2,
+    "twist.twist.linear.y": 0.0,
+    "twist.twist.linear.z": 0.0
+   },
+   {
+    "child_frame_id": "base_link",
+    "header.frame_id": "odom",
+    "header.seq": 3,
+    "header.stamp.nsecs": 330000000,
+    "header.stamp.secs": 1790000000,
+    "pose.covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "pose.pose.orientation.w": 1.0,
+    "pose.pose.orientation.x": 0.0,
+    "pose.pose.orientation.y": 0.0,
+    "pose.pose.orientation.z": 0.03,
+    "pose.pose.position.x": 0.15000000000000002,
+    "pose.pose.position.y": 0.0,
+    "pose.pose.position.z": 0.0,
+    "twist.covariance[]": [
+     0.02,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "twist.twist.angular.x": 0.0,
+    "twist.twist.angular.y": 0.0,
+    "twist.twist.angular.z": 0.05,
+    "twist.twist.linear.x": 0.2,
+    "twist.twist.linear.y": 0.0,
+    "twist.twist.linear.z": 0.0
+   },
+   {
+    "child_frame_id": "base_link",
+    "header.frame_id": "odom",
+    "header.seq": 4,
+    "header.stamp.nsecs": 430000000,
+    "header.stamp.secs": 1790000000,
+    "pose.covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "pose.pose.orientation.w": 1.0,
+    "pose.pose.orientation.x": 0.0,
+    "pose.pose.orientation.y": 0.0,
+    "pose.pose.orientation.z": 0.04,
+    "pose.pose.position.x": 0.2,
+    "pose.pose.position.y": 0.0,
+    "pose.pose.position.z": 0.0,
+    "twist.covariance[]": [
+     0.02,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "twist.twist.angular.x": 0.0,
+    "twist.twist.angular.y": 0.0,
+    "twist.twist.angular.z": 0.05,
+    "twist.twist.linear.x": 0.2,
+    "twist.twist.linear.y": 0.0,
+    "twist.twist.linear.z": 0.0
+   }
+  ],
+  "/tf": [
+   {
+    "transforms[].child_frame_id": [
+     "base_link",
+     "arm_base"
+    ],
+    "transforms[].header.frame_id": [
+     "odom",
+     "base_link"
+    ],
+    "transforms[].header.seq": [
+     0,
+     0
+    ],
+    "transforms[].header.stamp.nsecs": [
+     40000000,
+     40000000
+    ],
+    "transforms[].header.stamp.secs": [
+     1790000000,
+     1790000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0,
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.1,
+     0.1
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "base_link",
+     "arm_base"
+    ],
+    "transforms[].header.frame_id": [
+     "odom",
+     "base_link"
+    ],
+    "transforms[].header.seq": [
+     1,
+     1
+    ],
+    "transforms[].header.stamp.nsecs": [
+     140000000,
+     140000000
+    ],
+    "transforms[].header.stamp.secs": [
+     1790000000,
+     1790000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0,
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.05,
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.1,
+     0.1
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "base_link",
+     "arm_base"
+    ],
+    "transforms[].header.frame_id": [
+     "odom",
+     "base_link"
+    ],
+    "transforms[].header.seq": [
+     2,
+     2
+    ],
+    "transforms[].header.stamp.nsecs": [
+     240000000,
+     240000000
+    ],
+    "transforms[].header.stamp.secs": [
+     1790000000,
+     1790000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0,
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.1,
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.1,
+     0.1
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "base_link",
+     "arm_base"
+    ],
+    "transforms[].header.frame_id": [
+     "odom",
+     "base_link"
+    ],
+    "transforms[].header.seq": [
+     3,
+     3
+    ],
+    "transforms[].header.stamp.nsecs": [
+     340000000,
+     340000000
+    ],
+    "transforms[].header.stamp.secs": [
+     1790000000,
+     1790000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0,
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.15000000000000002,
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.1,
+     0.1
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "base_link",
+     "arm_base"
+    ],
+    "transforms[].header.frame_id": [
+     "odom",
+     "base_link"
+    ],
+    "transforms[].header.seq": [
+     4,
+     4
+    ],
+    "transforms[].header.stamp.nsecs": [
+     440000000,
+     440000000
+    ],
+    "transforms[].header.stamp.secs": [
+     1790000000,
+     1790000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0,
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.2,
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.1,
+     0.1
+    ]
+   }
+  ],
+  "/tf_static": [
+   {
+    "transforms[].child_frame_id": [
+     "lidar"
+    ],
+    "transforms[].header.frame_id": [
+     "base_link"
+    ],
+    "transforms[].header.seq": [
+     0
+    ],
+    "transforms[].header.stamp.nsecs": [
+     5000000
+    ],
+    "transforms[].header.stamp.secs": [
+     1790000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.3
+    ],
+    "transforms[].transform.translation.y": [
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.1
+    ]
+   }
+  ]
+ },
+ "rosbag2/mobile_base_sqlite3": {
+  "/battery_voltage": [
+   {
+    "data": 12.5
+   },
+   {
+    "data": 12.399999618530273
+   },
+   {
+    "data": 12.300000190734863
+   },
+   {
+    "data": 12.199999809265137
+   },
+   {
+    "data": 12.100000381469727
+   }
+  ],
+  "/cmd_vel": [
+   {
+    "angular.x": 0.0,
+    "angular.y": 0.0,
+    "angular.z": 0.0,
+    "linear.x": 0.2,
+    "linear.y": 0.0,
+    "linear.z": 0.0
+   },
+   {
+    "angular.x": 0.0,
+    "angular.y": 0.0,
+    "angular.z": 0.1,
+    "linear.x": 0.21000000000000002,
+    "linear.y": 0.0,
+    "linear.z": 0.0
+   },
+   {
+    "angular.x": 0.0,
+    "angular.y": 0.0,
+    "angular.z": 0.2,
+    "linear.x": 0.22,
+    "linear.y": 0.0,
+    "linear.z": 0.0
+   },
+   {
+    "angular.x": 0.0,
+    "angular.y": 0.0,
+    "angular.z": 0.0,
+    "linear.x": 0.23,
+    "linear.y": 0.0,
+    "linear.z": 0.0
+   },
+   {
+    "angular.x": 0.0,
+    "angular.y": 0.0,
+    "angular.z": 0.1,
+    "linear.x": 0.24000000000000002,
+    "linear.y": 0.0,
+    "linear.z": 0.0
+   },
+   {
+    "angular.x": 0.0,
+    "angular.y": 0.0,
+    "angular.z": 0.2,
+    "linear.x": 0.25,
+    "linear.y": 0.0,
+    "linear.z": 0.0
+   },
+   {
+    "angular.x": 0.0,
+    "angular.y": 0.0,
+    "angular.z": 0.0,
+    "linear.x": 0.26,
+    "linear.y": 0.0,
+    "linear.z": 0.0
+   },
+   {
+    "angular.x": 0.0,
+    "angular.y": 0.0,
+    "angular.z": 0.1,
+    "linear.x": 0.27,
+    "linear.y": 0.0,
+    "linear.z": 0.0
+   },
+   {
+    "angular.x": 0.0,
+    "angular.y": 0.0,
+    "angular.z": 0.2,
+    "linear.x": 0.28,
+    "linear.y": 0.0,
+    "linear.z": 0.0
+   },
+   {
+    "angular.x": 0.0,
+    "angular.y": 0.0,
+    "angular.z": 0.0,
+    "linear.x": 0.29000000000000004,
+    "linear.y": 0.0,
+    "linear.z": 0.0
+   }
+  ],
+  "/status": [
+   {
+    "data": "idle"
+   },
+   {
+    "data": "driving"
+   },
+   {
+    "data": "docking"
+   }
+  ]
+ },
+ "usv_survey.mcap": {
+  "/dvl": [
+   {
+    "header.frame_id": "dvl_link",
+    "header.stamp.nanosec": 33000000,
+    "header.stamp.sec": 1800000000,
+    "twist.covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "twist.twist.angular.x": 0.0,
+    "twist.twist.angular.y": 0.0,
+    "twist.twist.angular.z": 0.01,
+    "twist.twist.linear.x": 1.5,
+    "twist.twist.linear.y": 0.2,
+    "twist.twist.linear.z": 0.0
+   },
+   {
+    "header.frame_id": "dvl_link",
+    "header.stamp.nanosec": 133000000,
+    "header.stamp.sec": 1800000000,
+    "twist.covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "twist.twist.angular.x": 0.0,
+    "twist.twist.angular.y": 0.0,
+    "twist.twist.angular.z": 0.01,
+    "twist.twist.linear.x": 1.5,
+    "twist.twist.linear.y": 0.2,
+    "twist.twist.linear.z": 0.0
+   },
+   {
+    "header.frame_id": "dvl_link",
+    "header.stamp.nanosec": 233000000,
+    "header.stamp.sec": 1800000000,
+    "twist.covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "twist.twist.angular.x": 0.0,
+    "twist.twist.angular.y": 0.0,
+    "twist.twist.angular.z": 0.01,
+    "twist.twist.linear.x": 1.5,
+    "twist.twist.linear.y": 0.2,
+    "twist.twist.linear.z": 0.0
+   },
+   {
+    "header.frame_id": "dvl_link",
+    "header.stamp.nanosec": 333000000,
+    "header.stamp.sec": 1800000000,
+    "twist.covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "twist.twist.angular.x": 0.0,
+    "twist.twist.angular.y": 0.0,
+    "twist.twist.angular.z": 0.01,
+    "twist.twist.linear.x": 1.5,
+    "twist.twist.linear.y": 0.2,
+    "twist.twist.linear.z": 0.0
+   }
+  ],
+  "/fix": [
+   {
+    "altitude": 1.2,
+    "header.frame_id": "gps",
+    "header.stamp.nanosec": 31000000,
+    "header.stamp.sec": 1800000000,
+    "latitude": -33.8568,
+    "longitude": 151.2153,
+    "position_covariance[]": [
+     4.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "position_covariance_type": 2,
+    "status.service": 1,
+    "status.status": 0
+   },
+   {
+    "altitude": 1.2,
+    "header.frame_id": "gps",
+    "header.stamp.nanosec": 131000000,
+    "header.stamp.sec": 1800000000,
+    "latitude": -33.85679,
+    "longitude": 151.21532000000002,
+    "position_covariance[]": [
+     4.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "position_covariance_type": 2,
+    "status.service": 1,
+    "status.status": 0
+   },
+   {
+    "altitude": 1.2,
+    "header.frame_id": "gps",
+    "header.stamp.nanosec": 231000000,
+    "header.stamp.sec": 1800000000,
+    "latitude": -33.85678,
+    "longitude": 151.21534000000003,
+    "position_covariance[]": [
+     4.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "position_covariance_type": 2,
+    "status.service": 1,
+    "status.status": 0
+   },
+   {
+    "altitude": 1.2,
+    "header.frame_id": "gps",
+    "header.stamp.nanosec": 331000000,
+    "header.stamp.sec": 1800000000,
+    "latitude": -33.85677,
+    "longitude": 151.21536,
+    "position_covariance[]": [
+     4.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "position_covariance_type": 2,
+    "status.service": 1,
+    "status.status": 0
+   }
+  ],
+  "/imu": [
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.02,
+    "angular_velocity_covariance[]": [
+     0.001,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "base_link",
+    "header.stamp.nanosec": 34000000,
+    "header.stamp.sec": 1800000000,
+    "linear_acceleration.x": 0.0,
+    "linear_acceleration.y": 0.0,
+    "linear_acceleration.z": 9.8,
+    "linear_acceleration_covariance[]": [
+     0.1,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.02,
+    "angular_velocity_covariance[]": [
+     0.001,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "/base_link",
+    "header.stamp.nanosec": 134000000,
+    "header.stamp.sec": 1800000000,
+    "linear_acceleration.x": 0.0,
+    "linear_acceleration.y": 0.0,
+    "linear_acceleration.z": 9.8,
+    "linear_acceleration_covariance[]": [
+     0.1,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.02,
+    "angular_velocity_covariance[]": [
+     0.001,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "base_link",
+    "header.stamp.nanosec": 234000000,
+    "header.stamp.sec": 1800000000,
+    "linear_acceleration.x": 0.0,
+    "linear_acceleration.y": 0.0,
+    "linear_acceleration.z": 9.8,
+    "linear_acceleration_covariance[]": [
+     0.1,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   },
+   {
+    "angular_velocity.x": 0.0,
+    "angular_velocity.y": 0.0,
+    "angular_velocity.z": 0.02,
+    "angular_velocity_covariance[]": [
+     0.001,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "header.frame_id": "/base_link",
+    "header.stamp.nanosec": 334000000,
+    "header.stamp.sec": 1800000000,
+    "linear_acceleration.x": 0.0,
+    "linear_acceleration.y": 0.0,
+    "linear_acceleration.z": 9.8,
+    "linear_acceleration_covariance[]": [
+     0.1,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "orientation.w": 1.0,
+    "orientation.x": 0.0,
+    "orientation.y": 0.0,
+    "orientation.z": 0.0,
+    "orientation_covariance[]": [
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  ],
+  "/sonar/range": [
+   {
+    "field_of_view": 0.10000000149011612,
+    "header.frame_id": "sonar",
+    "header.stamp.nanosec": 32000000,
+    "header.stamp.sec": 1800000000,
+    "max_range": 100.0,
+    "min_range": 0.5,
+    "radiation_type": 0,
+    "range": 12.5
+   },
+   {
+    "field_of_view": 0.10000000149011612,
+    "header.frame_id": "sonar",
+    "header.stamp.nanosec": 132000000,
+    "header.stamp.sec": 1800000000,
+    "max_range": 100.0,
+    "min_range": 0.5,
+    "radiation_type": 0,
+    "range": 11.5
+   },
+   null,
+   {
+    "field_of_view": 0.10000000149011612,
+    "header.frame_id": "sonar",
+    "header.stamp.nanosec": 332000000,
+    "header.stamp.sec": 1800000000,
+    "max_range": 100.0,
+    "min_range": 0.5,
+    "radiation_type": 0,
+    "range": 9.5
+   }
+  ],
+  "/tf": [
+   {
+    "transforms[].child_frame_id": [
+     "base_link"
+    ],
+    "transforms[].header.frame_id": [
+     "odom"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     30000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     0.0
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "base_link"
+    ],
+    "transforms[].header.frame_id": [
+     "odom"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     130000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     1.5
+    ],
+    "transforms[].transform.translation.y": [
+     0.2
+    ],
+    "transforms[].transform.translation.z": [
+     0.0
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "base_link"
+    ],
+    "transforms[].header.frame_id": [
+     "odom"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     230000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     3.0
+    ],
+    "transforms[].transform.translation.y": [
+     0.4
+    ],
+    "transforms[].transform.translation.z": [
+     0.0
+    ]
+   },
+   {
+    "transforms[].child_frame_id": [
+     "base_link"
+    ],
+    "transforms[].header.frame_id": [
+     "odom"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     330000000
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     4.5
+    ],
+    "transforms[].transform.translation.y": [
+     0.6000000000000001
+    ],
+    "transforms[].transform.translation.z": [
+     0.0
+    ]
+   }
+  ],
+  "/tf_static": [
+   {
+    "transforms[].child_frame_id": [
+     "gps",
+     "sonar"
+    ],
+    "transforms[].header.frame_id": [
+     "base_link",
+     "base_link"
+    ],
+    "transforms[].header.stamp.nanosec": [
+     0,
+     0
+    ],
+    "transforms[].header.stamp.sec": [
+     1800000000,
+     1800000000
+    ],
+    "transforms[].transform.rotation.w": [
+     1.0,
+     1.0
+    ],
+    "transforms[].transform.rotation.x": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.rotation.z": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.x": [
+     0.0,
+     0.4
+    ],
+    "transforms[].transform.translation.y": [
+     0.0,
+     0.0
+    ],
+    "transforms[].transform.translation.z": [
+     1.2,
+     -0.5
+    ]
+   }
+  ]
+ }
+}

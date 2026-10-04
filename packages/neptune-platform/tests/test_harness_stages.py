@@ -37,7 +37,7 @@ def test_today_only_the_compiler_resolves_to_real() -> None:
     registry = contracts.registry()
     resolved = {stage.id: resolve(stage, registry) for stage in STAGES}
     assert resolved["compiler"].mode == "real"
-    assert resolved["compiler"].contract_version == "4.0.0"
+    assert resolved["compiler"].contract_version == "6.0.0"
     assert resolved["ledger"].mode == "stub"
     # neptune_ledger.api is importable (MVL-88) but only as a contract and stub: no real driver.
     assert "no real driver for neptune-ledger" in resolved["ledger"].reason

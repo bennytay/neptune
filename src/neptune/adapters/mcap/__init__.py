@@ -10,8 +10,11 @@ What it emits for a file (ADR 0034):
 - one ``Stream`` per channel, citing its Channel record, with its schema's name, encoding and the
   exact bytes of its definition, its metadata verbatim and its declared message count;
 - one series row per message: ``seq``, both clocks, the message's ``sequence`` and a locator to
-  its exact Message record, in the file or inside its chunk's uncompressed records. Payloads are
-  not decoded (MVL-21); a finding per stream says so;
+  its exact Message record, in the file or inside its chunk's uncompressed records. ROS 1 and
+  ROS 2 (CDR) payloads are decoded by the channel's declared ``ros1msg``, ``ros2msg`` or
+  ``ros2idl`` definition into ``value/<field path>`` columns (``neptune.adapters.rosmsg``, ADR
+  0068); a leading ``std_msgs/Header`` adds the stamp as a third clock. Any other payload is not
+  decoded, and a finding per stream says why;
 - one ``StructuredTable`` per Metadata record and a ``StructuredRecord`` per entry (key, value);
 - findings for attachments, which no record kind holds yet, and for every problem met.
 
@@ -31,6 +34,7 @@ from neptune.adapters.contract import (
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
+    ChunkExtent,
     ChunkOutput,
     ConfigOption,
     Documented,
@@ -59,6 +63,7 @@ from neptune.adapters.mcap.records import (
 )
 from neptune.adapters.mcap.report import LOG_TIME_MAX
 from neptune.adapters.mcap.summary import summarize
+from neptune.adapters.rosmsg.streams import with_decode_options
 
 DEFAULT_CHUNK_BYTES: Final = 64 * 1024 * 1024
 DEFAULT_MAX_ROWS: Final = 100_000
@@ -75,13 +80,13 @@ def _code(name: str, description: str) -> Documented:
 
 DESCRIPTOR: Final = AdapterDescriptor(
     id="mcap",
-    version="0.1.0",
+    version="0.2.0",
     abi=ABI_VERSION,
     summary="MCAP recordings: a run, a stream per channel with every message's clocks and exact"
     " bytes, metadata as tables.",
     formats=(FormatSpec("MCAP", extensions=(".mcap",), magic=(Magic(0, MAGIC),)),),
     record_kinds=("run", "stream", "structured_record", "structured_table", "timestamp_domain"),
-    config=(
+    config=with_decode_options(
         ConfigOption(
             "log_time_end",
             LOG_TIME_MAX,
@@ -174,7 +179,19 @@ DESCRIPTOR: Final = AdapterDescriptor(
         ),
         _code(
             "payload_not_decoded",
-            "a stream's payloads are not decoded; each row cites its message (unsupported, info)",
+            "a stream's payloads are not decoded, with the reason: not ROS 1 or CDR, no"
+            " definition, a definition that does not parse, decoding turned off; each row cites"
+            " its message (unsupported, info)",
+        ),
+        _code(
+            "payload_partly_decoded",
+            "a stream's payloads are decoded, but byte arrays or arrays of arrays are walked"
+            " without a column, or only the leading header is decoded (unsupported, info)",
+        ),
+        _code(
+            "payload_undecodable",
+            "payloads that do not hold their definition's layout (corrupt), or pass a decoding"
+            " limit (limit); their values are unknown or not covered (warning)",
         ),
         _code(
             "record_too_large",
@@ -235,7 +252,8 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "mcap:time_field",
             "the time field `name` (log_time, publish_time) that the specification defines on"
-            " every Message, cited after what declares the clock: the magic or a Channel record",
+            " every Message, or header.stamp, which a channel's definition declares, cited after"
+            " what declares the clock: the magic or a Channel record",
         ),
     ),
     conventions=(
@@ -247,8 +265,10 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "clocks",
             "clock 0 is log_time (scope (), the recorder's), clock 1 the channel's publish_time"
-            " (scope (topic,), or ('channel', id) without a topic); ticks as stored, never"
-            " converted",
+            " (scope (topic,), or ('channel', id) without a topic), clock 2 a leading"
+            " std_msgs/Header's stamp where the payload decodes (sec * 10^9 + nanosec, state"
+            " unknown where the payload does not decode or nanosec is out of range); ticks as"
+            " stored, never converted",
         ),
         Documented(
             "declarations",
@@ -268,7 +288,9 @@ DESCRIPTOR: Final = AdapterDescriptor(
         Documented(
             "series",
             "seq, time/0 log_time, time/1 publish_time (state unknown past 2^63-1),"
-            " value/sequence (uint32), locator/<i>/offset and length",
+            " value/sequence (uint32), locator/<i>/offset and length; a decoded payload's fields"
+            " as value/<path> (segments joined by '.', '[]' after an array: a list column), each"
+            " with its state column; ROS 1 time and duration as <path>.secs and <path>.nsecs",
         ),
     ),
     # A call holds one chunk's stored bytes and what they decode to, each at most
@@ -285,6 +307,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         " from a length the file states without that check.",
         "zstd and lz4 frames are decoded by the zstandard and lz4 libraries inside the sandbox.",
     ),
+    extent=ChunkExtent(),  # data chunks name their [start, end) bytes (ADR 0069)
 )
 
 

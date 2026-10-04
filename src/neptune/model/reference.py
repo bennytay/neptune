@@ -1,15 +1,17 @@
 """Clocks and frames as records: what other records' times and poses are expressed in.
 
-``TimestampDomain`` (ADR 0005, ADR 0012) and ``FrameGraph``, ``Frame`` and ``FrameTransform``
-(ADR 0007, ADR 0015) are evidence records (ADR 0017): each carries the envelope, a tier-2 id and
-the record-level provenance of the evidence that declares it. Their values are the primitives in
+``TimestampDomain`` (ADR 0005, ADR 0012), its companion ``CivilTimeZone`` (ADR 0061) and
+``FrameGraph``, ``Frame`` and ``FrameTransform`` (ADR 0007, ADR 0015) are evidence records
+(ADR 0017): each carries the envelope, a tier-2 id and the record-level provenance of the
+evidence that declares it. Their values are the primitives in
 ``neptune.model.time`` and ``neptune.model.frames``. The records live here, not beside those
 primitives, because a record needs ``Provenance`` and provenance's locators need the primitives.
 """
 
+import re
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import ClassVar
+from typing import ClassVar, Final
 
 from neptune.model._fields import (
     check_type,
@@ -17,6 +19,7 @@ from neptune.model._fields import (
     json_array,
     json_bool,
     json_str,
+    text_decoder,
     values_of,
 )
 from neptune.model.frames import (
@@ -34,9 +37,17 @@ from neptune.model.frames import (
     validity_from_json,
     validity_to_json,
 )
-from neptune.model.ids import RecordId, check_text
+from neptune.model.ids import RecordId, check_text, parse_record_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.knowledge import Knowledge, Known, from_json, to_json
+from neptune.model.knowledge import (
+    Ambiguous,
+    Knowledge,
+    Known,
+    NotCovered,
+    Unknown,
+    from_json,
+    to_json,
+)
 from neptune.model.provenance import (
     Provenance,
     check_evidence_record,
@@ -139,6 +150,84 @@ def timestamp_domain_from_json(data: JsonValue) -> TimestampDomain:
         epoch=from_json(obj["epoch"], enum_decoder(Epoch), provenance_from_json),
         timescale=from_json(obj["timescale"], enum_decoder(Timescale), provenance_from_json),
         declared_monotonic=from_json(obj["declared_monotonic"], json_bool, provenance_from_json),
+    )
+
+
+# The schema version that added ``CivilTimeZone`` (ADR 0061, ADR 0037 §1).
+CIVIL_ZONE_SINCE: Final = 6
+
+# An IANA time zone database name, by syntax only: components of letters, digits and ``._+-``,
+# none starting with ``.``, ``-`` or ``+``, joined by ``/``: ``Europe/Berlin``, ``Etc/GMT-5``,
+# ``UTC``, ``America/Argentina/Buenos_Aires``. No IANA component starts with a sign, so a fixed
+# offset (``+05``, ``+0100``) is refused: it is not a zone (ADR 0061 §1).
+# Whether the name is in a tz database is never checked here: that depends on the database's
+# release, and a record's bytes may not (ADR 0061 §1).
+_ZONE_PART: Final = r"[A-Za-z0-9_][A-Za-z0-9._+\-]*"
+_IANA_ZONE: Final = re.compile(f"{_ZONE_PART}(?:/{_ZONE_PART})*")
+_IANA_ZONE_MAX: Final = 255
+
+
+def check_iana_zone(field: str, name: str) -> None:
+    """``name`` is spelled as an IANA zone name; it is not looked up in any tz database."""
+    if not isinstance(name, str):
+        raise TypeError(f"{field} must be a str, got {type(name).__name__}")
+    if len(name) > _IANA_ZONE_MAX or not _IANA_ZONE.fullmatch(name):
+        raise ValueError(f"{field} is not spelled as an IANA time zone name: {name!r}")
+
+
+@dataclass(frozen=True)
+class CivilTimeZone:
+    """The civil time zone a source declares for one clock's civil date-times (ADR 0061 §1).
+
+    A companion of the ``TimestampDomain`` named by ``domain`` (the extension rule of ADR 0023
+    §1): a CMMS export's ``2026-03-04 14:10`` read on a clock whose zone the export, or the
+    mapping that reads it, states as ``Europe/Berlin``. ``zone`` is the IANA name exactly as
+    declared: ``Known`` (or ``Ambiguous`` between declarations that disagree), ``Unknown`` where
+    the source could state one and does not, ``NotCovered`` where its format has no place for one.
+    Nothing converts: the domain's ticks still count the civil clock (ADR 0023 §2), and reading
+    them as instants needs a tz database release, which is a derived transform's.
+    ``provenance`` cites what declares the zone.
+    """
+
+    kind: ClassVar[str] = "civil_time_zone"
+    family: ClassVar[Family] = Family.REFERENCE
+    since: ClassVar[int] = CIVIL_ZONE_SINCE
+    id: RecordId
+    provenance: Provenance
+    domain: RecordId
+    zone: Knowledge[str]
+
+    def __post_init__(self) -> None:
+        check_evidence_record(self.id, self.provenance)
+        parse_record_id(self.domain)
+        # A civil clock always has a zone; the question is only whether the source says it, so
+        # KnownAbsent and NotApplicable are refused (ADR 0061 §1).
+        if not isinstance(self.zone, Known | Ambiguous | Unknown | NotCovered):
+            raise ValueError(f"zone is declared, Unknown or NotCovered, not {self.zone!r}")
+        check_type("zone", self.zone, str)
+        for name in values_of(self.zone):
+            check_iana_zone("zone", name)
+
+    def to_json(self) -> JsonObject:
+        return evidence_record_json(
+            self.kind,
+            self.id,
+            self.provenance,
+            {"domain": self.domain, "zone": to_json(self.zone)},
+            self.since,
+        )
+
+
+def civil_time_zone_from_json(data: JsonValue) -> CivilTimeZone:
+    """Parse strictly: unexpected or missing keys and wrongly typed values are errors."""
+    obj, record_id, provenance = evidence_record_object(
+        data, CivilTimeZone.kind, {"domain", "zone"}, CivilTimeZone.since
+    )
+    return CivilTimeZone(
+        id=record_id,
+        provenance=provenance,
+        domain=parse_record_id(json_str(obj["domain"], "domain")),
+        zone=from_json(obj["zone"], text_decoder("zone"), provenance_from_json),
     )
 
 

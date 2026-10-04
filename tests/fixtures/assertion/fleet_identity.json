@@ -1,0 +1,32 @@
+{
+  "format": "neptune.assertions",
+  "version": 1,
+  "assertions": [
+    {
+      "id": {"namespace": "dc-north.fleet-console", "value": "ASR-2026-0107"},
+      "assertion_type": "same_identity",
+      "author": {"namespace": "dc-north.staff", "value": "m.okafor"},
+      "authored_at": "2026-09-14T10:32:05+02:00",
+      "authored_zone": "Europe/Berlin",
+      "scope": [
+        {"namespace": "dc-north.asset_tag", "value": "AMR-07"},
+        {"namespace": "vda5050.serial_number", "value": "OTTO-1500-22871"}
+      ],
+      "payload": {"checked": ["chassis plate", "fleet manager pairing"], "shift": "B"},
+      "rationale": "Chassis plate on AMR-07 reads 22871, and the fleet manager pairs that serial with tag AMR-07.",
+      "ticket": {"namespace": "jira.dc-north", "value": "FLEET-412"}
+    },
+    {
+      "id": {"namespace": "dc-north.fleet-console", "value": "ASR-2026-0108"},
+      "assertion_type": "distinct_identity",
+      "author": {"namespace": "dc-north.staff", "value": "m.okafor"},
+      "authored_at": "2026-09-14T10:40:51+02:00",
+      "authored_zone": "Europe/Berlin",
+      "scope": [
+        {"namespace": "dc-north.asset_tag", "value": "AMR-07"},
+        {"namespace": "dc-north.asset_tag", "value": "AMR-12"}
+      ],
+      "rationale": "Same model and identical robot description, but two robots: AMR-12 was on charge in bay 3 while AMR-07 ran aisle 14."
+    }
+  ]
+}

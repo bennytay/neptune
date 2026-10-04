@@ -44,7 +44,8 @@ the wrong size, a raise naming another reader) and the call failed like any othe
 2. **Determinism of `plan`.** Chunk ids are stable across runs; this is what makes resume and caching work.
 3. **Findings, not exceptions.** Recoverable problems are `IngestFinding`s in `ChunkOutput`, built with
    `identity.findings.ingest_finding` and a documented `<adapter id>.<name>` code (ADR 0017 §9). An uncaught
-   exception is treated by the runtime as a crash: the chunk is quarantined with a finding; the job continues.
+   exception is treated by the runtime as a crash: after its retries the chunk is lost with a finding, the
+   source is salvaged from its other chunks when they stand alone (ADR 0069), and the job continues.
 4. **Leaf packages.** Adapters import `model/`, `identity/`, `adapters.contract` and, for JSON, TOML and YAML,
    the shared `adapters.structured` readers (ADR 0055); never each other, the registry or `runtime/`.
 5. **Locators are exact.** Every emitted record carries an `EvidenceRef` that resolves to the bytes it came from.
@@ -61,8 +62,8 @@ the wrong size, a raise naming another reader) and the call failed like any othe
 10. **Sandboxed by default** (ADR 0030). Every call runs in a fresh child process: nothing an adapter
     keeps on itself survives to the next call, and opening a socket, writing a file, starting a
     process or signalling another one fails with an `OSError`. Reading files (lazy imports, codec
-    and time-zone tables) works. A crash, a hang or runaway memory is a finding about the source,
-    never a failed job.
+    and time-zone tables) works. A crash, a hang or runaway memory is a finding about the plan's
+    source or the chunk's bytes, never a failed job.
 11. **Scratch, only where given** (ADR 0033 §2). `contract.scratch_directory()` is an empty private
     directory a `plan` or `ingest` call may write temporary files in (a spool for a nested
     archive, a decoder that wants a file), removed when the call returns; each file is at most
@@ -85,6 +86,18 @@ the wrong size, a raise naming another reader) and the call failed like any othe
 - **Chunks.** `make_chunk(source, config, context, cost)`. `context` is everything `ingest` needs
   besides the bytes (byte range, starting offsets, a schema table); document it in `conventions`. The
   id hashes transform, source and context; `cost` (bytes to read) is for scheduling only.
+- **Extent** (optional, ADR 0069). A descriptor's `extent=ChunkExtent()` says each chunk's context
+  names the `[start, end)` source bytes it decodes under `start` and `end` (other keys if given);
+  a chunk with neither key (a declarations chunk) names none. `check_plan` refuses one key without
+  the other, non-integers, and ranges outside the source. The runtime reads it from the plan to
+  cite a lost chunk's exact bytes in its finding and in the source's `source_partial` account; it
+  never changes a chunk id. Declare it when your chunks are byte windows (MCAP, ROS 1 bags, flight
+  logs and text do); without it a lost chunk cites the whole source.
+- **Lost chunks** (ADR 0069). A chunk that fails for good (raise, crash, limit, refused output) is
+  left out and its source is admitted with the rest if those pass the cross-chunk laws without it,
+  so put stream declarations in a chunk of their own that rarely fails, and type each stream there
+  with its empty batch, as MCAP and ROS 1 do: rows of a stream declared in a lost chunk refuse the
+  whole source (`salvage_refused`).
 - **Output.** `ChunkOutput(records, series, findings)`. A `SeriesBatch(stream, columns)`
   (`neptune.model.series`) holds one stream's rows from one chunk as typed `SeriesColumn`s (see
   "Streams and series" below for names).
@@ -139,7 +152,8 @@ need finer locators (an adapter step if necessary), never a counter.
 - **Civil date-times.** With a stated offset or `Z`, a time is an exact instant: count POSIX seconds from
   1970-01-01T00:00:00Z (epoch `unix`, timescale `posix`). With no zone, count the same way on the source's own
   civil clock: epoch `unix`, timescale `Unknown`. A date alone counts days (resolution 86,400 s). Never assume
-  UTC or the site's zone.
+  UTC or the site's zone. Where the source (or your transform's configuration) declares the clock's zone,
+  write a `CivilTimeZone` naming the domain, with the IANA name verbatim; never convert (ADR 0061).
 - **Several fields, one value.** A value read from several fields (start plus duration, latitude plus longitude
   columns) cites the smallest part that holds them all.
 - **Degrees, minutes and seconds** with a hemisphere (EXIF GPS) are read into signed degrees, exactly and then
@@ -165,7 +179,9 @@ For formats with timestamped samples (logs, bags, flight logs, telemetry tables,
 - A column that can be blank or hold a sentinel your format's spec defines is wrapped: add
   `state/<column>` and leave the value null where the state is not `known`. `KnownAbsent` and `Ambiguous`
   do not fit one cell: write `unknown` plus a finding.
-- A payload you do not decode still gets its rows (times and locators) plus a finding.
+- A payload you do not decode still gets its rows (times and locators) plus a finding. ROS payloads
+  (ROS 1, CDR) are decoded by the stream's declared definition with the shared
+  `neptune.adapters.rosmsg` (ADR 0068): `value/<field path>` columns, each with its state column.
 - The chunk that emits a `Stream` emits a `SeriesBatch` for it, empty if that chunk holds none of
   its rows: the batch types the stream's columns, so a stream with no samples still has a series.
 - Give each `SeriesColumn` the `ColumnType` the source encodes (a ROS `float32` stays `float32`,

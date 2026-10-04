@@ -52,6 +52,7 @@ from neptune.adapters.contract import (
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
+    ChunkExtent,
     ChunkOutput,
     Documented,
     FormatSpec,
@@ -92,6 +93,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
     ),
     resources=Resources(max_memory=1024 * 1024, streaming=False),
     security=("Test-only. Attacks its host on purpose; run it only in the sandbox.",),
+    extent=ChunkExtent(),  # each line's chunk names its [start, end) bytes (ADR 0069)
 )
 
 
