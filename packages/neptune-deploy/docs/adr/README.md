@@ -16,3 +16,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0007](0007-foxglove-recordings-are-read-only-sources-over-the-documented-streaming-api.md) | Foxglove recordings are read-only Sources over the documented REST and streaming API | Accepted |
 | [0008](0008-record-systems-are-read-only-sources-with-revision-identity-and-change-feeds.md) | Record systems are read-only Sources with revision identity and change feeds | Accepted |
 | [0009](0009-roboto-and-rerun-hub-connectors-with-catalog-metadata-as-stated-records.md) | Roboto and Rerun Hub connectors: files as Sources, catalog metadata as stated records | Accepted |
+| [0010](0010-fleet-ops-connectors-formant-open-rmf-and-ros-2-diagnostics-as-stated-records.md) | Fleet-ops connectors: Formant and Open-RMF as read-only Sources, ROS 2 diagnostics as a declared mapping | Accepted |

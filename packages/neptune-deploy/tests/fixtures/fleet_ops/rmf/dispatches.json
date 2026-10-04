@@ -1,0 +1,4 @@
+[
+  {"task_id": "delivery.dispatch-12", "fleet_name": "tinyRobot", "robot_name": "AMR-07", "status": "completed", "unix_millis_dispatched": 1772372390000},
+  {"task_id": "patrol.dispatch-13", "fleet_name": "tinyRobot", "robot_name": "AMR-09", "status": "completed", "unix_millis_dispatched": 1772374190000}
+]
