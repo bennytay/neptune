@@ -101,7 +101,7 @@ def test_phase_summaries_count_what_each_phase_did(root: Path, tmp_path: Path) -
     assert summaries[Phase.PLAN] == {"chunks": 4, "committed": 0, "failed": 0, "sources": 2}
     assert summaries[Phase.PARSE] == {"chunks": 4, "failed": 0, "skipped": 0}
     assert summaries[Phase.NORMALIZE] == {"committed": 4}
-    assert summaries[Phase.ASSEMBLE] == {"quarantined": 0, "sources": 2}
+    assert summaries[Phase.ASSEMBLE] == {"quarantined": 0, "salvaged": 0, "sources": 2}
     assert summaries[Phase.VALIDATE]["series"] == 0
     assert summaries[Phase.COMMIT] == {"package": read_package(tmp_path / "package").id}
 

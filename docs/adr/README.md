@@ -36,7 +36,7 @@ header).
 | [0025](0025-series-files-sorted-merged-and-pinned.md) | Series files: one sorted Parquet file per stream, merged from runs, written with pinned settings | Accepted |
 | [0026](0026-local-workspace-in-place-reads-and-assembly.md) | The local workspace, reading sources in place, and assembling packages | Accepted; amended by 0031, 0067 |
 | [0027](0027-probe-engine-sniffing-containers-and-selection-findings.md) | The probe engine: sniffing, bounded container inspection, and selection as findings | Accepted; amended by 0033 |
-| [0028](0028-ingest-job-phases-resume-quarantine-and-events.md) | The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events | Accepted; amended by 0033 |
+| [0028](0028-ingest-job-phases-resume-quarantine-and-events.md) | The ingest job: nine phases, the workspace as the only checkpoint, quarantine by source, cancellation and events | Accepted; amended by 0033, 0069 |
 | [0029](0029-hostile-file-handling.md) | Hostile file handling: walk findings, archive limits, source verification, scratch space | Accepted; amended by 0033 |
 | [0030](0030-parser-sandbox-fork-per-call-confinement-and-limits.md) | The parser sandbox: a confined child process per adapter call, limits, and crash findings | Accepted; amended by 0033 |
 | [0031](0031-cache-keys-invalidation-lazy-derivatives-and-collection.md) | The cache: chunk ids as keys, named invalidation rules, lazy derivatives, a report and collection | Accepted; amended by 0033 |
@@ -75,3 +75,4 @@ header).
 | [0066](0066-run-assembly-evidence-graph-over-the-layout-reading.md) | Run assembly: an evidence graph over the layout reading | Accepted |
 | [0067](0067-connector-sources-uri-dispatch-carried-revisions-and-a-job-spool.md) | Connector Sources: URI dispatch, revisions carried by token, and a job spool | Accepted |
 | [0068](0068-payload-decoding-and-frame-alignment-run-trees-links-and-comparable-references.md) | Payload decoding and frame alignment: declared definitions into columns, run trees, links and comparable references | Accepted |
+| [0069](0069-salvage-by-chunk-declared-extents-and-loss-accounting.md) | Salvage by chunk: a lost chunk, declared extents, and an exact account of what was lost | Accepted |

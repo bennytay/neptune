@@ -1,4 +1,5 @@
-"""Series files as workspace derivatives: merged once, copied after, rebuilt if damaged."""
+"""Series files as workspace derivatives: merged once, copied after, rebuilt if damaged; and the
+chunks a salvaged source lost, left out (ADR 0069)."""
 
 import importlib.util
 from pathlib import Path
@@ -15,8 +16,8 @@ from neptune.discovery.source import LocalSource
 from neptune.identity.revisions import SourceLedger
 from neptune.model.ids import ContentId, RecordId
 from neptune.store.assemble import SERIES_FILE, SERIES_RECIPE, series_key, stage
-from neptune.store.package import read_package
-from neptune.store.series import SERIES_SETTINGS
+from neptune.store.package import PackageError, read_package
+from neptune.store.series import SERIES_SETTINGS, count_rows
 from neptune.store.workspace import Held, Workspace
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures" / "adapters"
@@ -119,3 +120,36 @@ def test_a_records_only_package_needs_no_series_derivative(tmp_path: Path) -> No
     staged = stage(tmp_path / "p", workspace, ledger, pair(output))
     assert staged.derivatives == ()
     assert list(workspace.derivatives()) == []
+
+
+def test_omitted_chunks_leave_their_records_and_rows_out(
+    kept: tuple[Workspace, SourceLedger, SourceOutput], tmp_path: Path
+) -> None:
+    """A salvaged source's lost chunks are left out of the package, and its streams are merged
+    from the runs that remain, under a series key of their own (ADR 0069)."""
+    workspace, ledger, output = kept
+    whole = stage(tmp_path / "whole", workspace, ledger, pair(output))
+    lost = output.plan.chunks[2]  # the second chunk of rows
+    lost_records = {r.id for r in output.outputs[2].records}
+    salvaged = stage(tmp_path / "part", workspace, ledger, pair(output), omit={lost.id})
+    package, full = read_package(salvaged.path), read_package(whole.path)
+    ids = {getattr(r, "id", None) for r in package.records}
+    assert not lost_records & ids
+    ((stream, path),) = package.series.items()
+    ((_, whole_path),) = full.series.items()
+    assert isinstance(path, Path) and isinstance(whole_path, Path)
+    assert count_rows(path) == count_rows(whole_path) - output.outputs[2].series[0].length
+    assert salvaged.id != whole.id
+    assert salvaged.derivatives[0].key != whole.derivatives[0].key  # merged without the chunk
+    again = stage(tmp_path / "again", workspace, ledger, pair(output), omit=[lost.id])
+    assert again.id == salvaged.id and stream in read_package(again.path).series
+
+
+def test_omitting_a_chunk_no_ingested_source_planned_is_refused(
+    kept: tuple[Workspace, SourceLedger, SourceOutput], tmp_path: Path
+) -> None:
+    workspace, ledger, output = kept
+    stray = "chunk:sha256:" + "f" * 64
+    with pytest.raises(PackageError, match="no ingested source's"):
+        stage(tmp_path / "p", workspace, ledger, pair(output), omit={stray})
+    assert not (tmp_path / "p").exists()

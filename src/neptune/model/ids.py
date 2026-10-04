@@ -7,8 +7,9 @@ functions below or from the derivation functions in ``neptune.identity``, never 
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
-from typing import NewType
+from dataclasses import Field, dataclass
+from types import MappingProxyType
+from typing import Any, Final, NewType
 
 from neptune.model.jsonvalue import JsonObject, JsonValue
 
@@ -19,6 +20,17 @@ ContentId = NewType("ContentId", str)
 ConfigHash = NewType("ConfigHash", str)
 # Tier 2: one canonical record in one lineage, e.g. "rec:sha256:3a7b…".
 RecordId = NewType("RecordId", str)
+
+# Field metadata for record ids that may name a record of another package (ADR 0069 §2): an
+# assertion's scope, a revision's supersedes. ``model.references`` does not count them, so no check
+# calls them dangling. ``field(metadata=EXTERNAL)`` on the record's field.
+EXTERNAL: Final = MappingProxyType({"reference": "external"})
+
+
+def is_external(field: Field[Any]) -> bool:
+    """Whether ``field`` holds record ids that may name records of another package."""
+    return field.metadata.get("reference") == "external"
+
 
 _SHA256 = "sha256:[0-9a-f]{64}"
 _CONTENT_ID = re.compile(_SHA256)

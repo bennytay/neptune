@@ -34,6 +34,7 @@ from neptune.adapters.contract import (
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
+    ChunkExtent,
     ChunkOutput,
     ConfigOption,
     Documented,
@@ -306,6 +307,7 @@ DESCRIPTOR: Final = AdapterDescriptor(
         " from a length the file states without that check.",
         "zstd and lz4 frames are decoded by the zstandard and lz4 libraries inside the sandbox.",
     ),
+    extent=ChunkExtent(),  # data chunks name their [start, end) bytes (ADR 0069)
 )
 
 

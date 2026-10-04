@@ -22,7 +22,7 @@ consumer's decision (Memory's identity and baseline policies), never the compile
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar, Final, TypeAlias
 
@@ -34,7 +34,13 @@ from neptune.model._fields import (
     text_decoder,
     values_of,
 )
-from neptune.model.ids import LogicalId, RecordId, logical_id_from_json, parse_record_id
+from neptune.model.ids import (
+    EXTERNAL,
+    LogicalId,
+    RecordId,
+    logical_id_from_json,
+    parse_record_id,
+)
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.knowledge import (
     Ambiguous,
@@ -163,7 +169,7 @@ class Assertion:
     author: Knowledge[LogicalId]
     authored_at: Knowledge[Timestamp]
     authored_zone: Knowledge[str]
-    scope: Knowledge[tuple[ScopeRef, ...]]
+    scope: Knowledge[tuple[ScopeRef, ...]] = field(metadata=EXTERNAL)  # any package's (ADR 0069)
     retracts: Knowledge[LogicalId]
     payload: Knowledge[str]
     rationale: Knowledge[str]
