@@ -4,9 +4,9 @@ Corrupt comes in degrees. A source whose adapter copes (bad rows, invalid UTF-8)
 adapter's findings. A source whose adapter cannot plan, or whose committed output breaks a
 cross-chunk law, is quarantined with the runtime's finding and nothing else is touched. A chunk
 whose adapter crashes or breaks the contract is lost, and its source is salvaged without it, with
-a ``source_partial`` account of what the package lacks (MVL-42, ADR 0069). A file that changes under the
-job, or cannot be opened, is reported the same way. The ``brittle`` fixture adapter supplies the
-crashes on demand; ``tally`` and ``text`` supply ordinary corruption.
+a ``source_partial`` account of what the package lacks (MVL-42, ADR 0069). A file that changes
+under the job, or cannot be opened, is quarantined too. The ``brittle`` fixture adapter supplies
+the crashes on demand; ``tally`` and ``text`` supply ordinary corruption.
 """
 
 import importlib.util

@@ -14,7 +14,7 @@ together — M2's runtime is complete.
 | 4 | inspect | cheap per-source summary (streams, extents, counts) without full parse | adapters | MVL-7 |
 | 5 | group | v0 done: `derived.grouping.LayoutGrouper` proposes sessions from the scan's observed layout (`discovery.layout`: locations, links, what names state; never contents or mtimes) by named rules with confidence bands; conflicting readings are contested, never chosen; nested session directories include the inner reading by id, at most 16 deep; every file lies in a proposal or is unassigned; findings `neptune.grouping.*`; this layout-only reading is what a dry run shows (ADR 0036). In a package it is replaced at `assemble` by the run assembler (`derived.assembly.RunAssembler`, `neptune.grouping` 0.2.0, same `Grouper` interface): v0's readings set against the committed records (rosbag2 file lists as canonical `run_assembly` records with listed-versus-present findings, machine/clock/software edges, per-machine splits, machine-and-time merges, documents that name a session, shared configuration held by none), scored by one fixed formula and explained by reasons (ADR 0066) | discovery (layout) + derived (rules, assembly) | MVL-13, MVL-34 |
 | 6 | plan | adapters emit chunks with deterministic ids and cost estimates | adapters | MVL-7 |
-| 7 | ingest | done: per-chunk pure parse → canonical records + findings; the job (ADR 0028) reuses every committed chunk by its id, across jobs and roots (ADR 0031), retries a chunk that raises and quarantines its source with a `neptune.runtime.*` finding | runtime + adapters | MVL-6, MVL-9 |
+| 7 | ingest | done: per-chunk pure parse → canonical records + findings; the job (ADR 0028) reuses every committed chunk by its id, across jobs and roots (ADR 0031), retries a chunk that raises, then loses that chunk and salvages its source from the rest (ADR 0069), each with a `neptune.runtime.*` finding | runtime + adapters | MVL-6, MVL-9 |
 | 8 | store | done: each chunk's records, findings and sorted series runs are committed to the workspace atomically; each stream's runs are merged once into its series file, kept as a derivative and copied into every package that holds it (ADRs 0025, 0026, 0031) | store | MVL-5, MVL-16, MVL-9 |
 | 9 | validate | done: `neptune.validate` runs versioned integrity and data-quality rules over the verified package (truncation roll-up, counts, time order, reversed intervals, missing metadata, schema and id conflicts, dangling references, unresolved frames, stale calibrations, software conflicts); findings are cited, capped, `warning`, and added to the package so the receipt lists them; rules whose kinds are not on main are off and listed as not covered (ADR 0054) | validate | MVL-41 |
 | 10 | receipt | done: core computed from the package's records (store); the job writes the volatile envelope (job id, clocks, host, root, seconds per phase) into the package before publishing it | store + runtime | MVL-5, MVL-6 |
@@ -28,7 +28,7 @@ records with their own provenance and never rewrites what stages 1–10 produced
 |---|---|---|
 | Resume after crash | runtime | deterministic chunk ids + the workspace's committed chunks and saved plans (ADR 0026; ADR 0028 §2) |
 | Cache | runtime | key = chunk id, which covers (source id, adapter id, adapter version, config hash, libraries, context) (ADR 0024 §4); derivatives by `DerivativeKey`; each miss names its rule (ADR 0031) |
-| Partial failure | runtime | per-chunk isolation and retries; adapter crash → finding, the source is quarantined, the job continues (ADR 0028 §3) |
+| Partial failure | runtime | per-chunk isolation and retries; adapter crash → finding, the chunk is lost and the source salvaged when its other chunks stand alone (`source_partial` says what is not covered), else quarantined; the job continues (ADR 0028 §3, ADR 0069) |
 | Sandboxing | runtime | done: each source's probe (the engine, containers included), each plan and each `ingest` in a forked child confined by limits (CPU, wall, memory, a separate 64 MiB `reply_bytes` cap), seccomp and Landlock; its reply decoded as bounded JSON; plan and ingest may write only beneath a per-call scratch directory (`scratch_bytes` per file); only the job writes the workspace; fails closed below Landlock ABI 3 unless `allow_degraded_sandbox`; in-process only when chosen (ADRs 0030, 0033) |
 | Adapter-local problems | adapter | `IngestFinding`s in the chunk output |
 | Cross-source validation | validate | runs over the store after all chunks |
@@ -47,15 +47,24 @@ state machine over the stages above, in nine phases (ADR 0028):
 | `plan` | 6 | reuses the workspace's saved plan for (source, transform) or calls `plan`, checks it, saves it |
 | `parse` | 7 | `ingest` on one chunk the workspace has not committed; `attempts` tries (default 2) |
 | `normalize` | 7–8 | `check_chunk_output` plus `seq` unique within the chunk; commit, whole or not at all |
-| `assemble` | 8 | admits each source whose chunks all committed and pass the cross-chunk laws (each run checked against its stream and agreeing on columns, disjoint `seq` ranges, no duplicate ids, every run has its stream); assembles runs and sessions from the admitted sources' records and the layout, replacing inspect's grouping in the package (ADR 0066); stages the package beside its destination; before staging, it introspects the admitted sources' streams: each cited schema definition is read once, bounded, and parsed into one `definition_layout` line per distinct definition (within name, pointer, per-layout and per-package output limits) that each stream's `stream_layout` line names, and `stream_semantic` lines infer what each stream carries (ADR 0049); then each stream carrying images, video or point clouds gets a `media_stream` line from its semantic and its runs' row counts (no row read), within a per-package frame budget (ADR 0056); then, when the package holds two or more clocks, the `neptune.clocks` pass reads the time and value columns its rules name, fits `clock_mapping` lines from sync anchors, writes `timestamp_domain` lines for clocks found in values, and reports clocks it cannot relate (ADR 0060) |
+| `assemble` | 8 | admits each source whose committed chunks pass the cross-chunk laws, whole or salvaged without the chunks it lost (ADR 0069) (each run checked against its stream and agreeing on columns, disjoint `seq` ranges, no duplicate ids, every run has its stream); assembles runs and sessions from the admitted sources' records and the layout, replacing inspect's grouping in the package (ADR 0066); stages the package beside its destination; before staging, it introspects the admitted sources' streams: each cited schema definition is read once, bounded, and parsed into one `definition_layout` line per distinct definition (within name, pointer, per-layout and per-package output limits) that each stream's `stream_layout` line names, and `stream_semantic` lines infer what each stream carries (ADR 0049); then each stream carrying images, video or point clouds gets a `media_stream` line from its semantic and its runs' row counts (no row read), within a per-package frame budget (ADR 0056); then, when the package holds two or more clocks, the `neptune.clocks` pass reads the time and value columns its rules name, fits `clock_mapping` lines from sync anchors, writes `timestamp_domain` lines for clocks found in values, and reports clocks it cannot relate (ADR 0060) |
 | `validate` | 9 | `read_package` over the staged package, then `validate_package`; any findings are added with the validator's transform (`amend`: restaged, verified again); `package_verified` carries the rules' coverage (ADR 0054) |
 | `commit` | 10 | writes the envelope into the staged package and renames it into place |
 
 - **Resume.** A new job over the same root and workspace is the resume: it hashes again (bytes may
   have changed), reuses saved plans, skips committed chunk ids, and builds the same package. Killing
   the process at any instant is safe: every workspace write is an atomic rename.
-- **Partial success.** A chunk that raises after every attempt, a plan that raises, a source that
-  changes under the job or cannot be opened, a read that comes up short, or output breaking a
+- **Salvage** (ADR 0069). A chunk that fails for good (it raises after every attempt, crashes,
+  hits a limit, or its output is refused, now or when a kept chunk is judged again) is *lost*:
+  `chunk_failed`, `adapter_crashed` or `limit_exceeded` cites its bytes when its adapter declares
+  an `extent`. At `assemble` the source is admitted with its committed chunks if they pass every
+  cross-chunk law without the lost ones (`source_salvaged` event; one `source_partial` finding:
+  chunks planned and committed, each lost chunk with its code and extent, the merged byte ranges
+  not covered, and how many lost chunks named no extent). If nothing committed, or the rest break a
+  law (rows of a stream declared in a lost chunk), it is quarantined with `salvage_refused`. Lost
+  chunks are never committed, so the next job retries exactly them.
+- **Partial success.** A plan that raises, a source that changes under the job or cannot be
+  opened, a read that comes up short, a salvage refused, or a whole source's output breaking a
   cross-chunk law quarantines that source: its output stays out of the package and a finding
   citing it says why (`neptune.runtime.*`; a short read from a source that no longer matches its
   artifact is `neptune.discovery.short_read`, never retried, and a changed or short source also
@@ -68,7 +77,8 @@ state machine over the stages above, in nine phases (ADR 0028):
 - **Sandbox.** Each adapter call runs in a confined child process (ADR 0030). One that dies is
   `adapter_crashed` (its signal or exit status) and is retried like a raise; one stopped at
   `cpu_seconds`, `wall_seconds` or `memory_bytes` is `limit_exceeded` and is not. Both name the
-  adapter, its version, the step and the chunk, and quarantine the source as any failure does.
+  adapter, its version, the step and the chunk; a plan's quarantines its source, a chunk's loses
+  that chunk (salvage, above).
   `JobOptions(isolation=Isolation.IN_PROCESS)` runs adapters in the job's process instead.
   Each `plan` and `ingest` call gets a fresh scratch directory under `<workspace>/scratch`
   (`contract.scratch_directory()`), the only place it may write, removed when it returns; a
@@ -84,7 +94,7 @@ state machine over the stages above, in nine phases (ADR 0028):
   propagates with the job `committed` (`IngestJob.committed`), never `failed` (ADR 0035 §3).
 - **Events.** `on_event(JobEvent(kind, phase, details))` for every phase start and finish, the
   start's sweep (`workspace_swept`: scratch and staging entries removed), every source (hashed,
-  selected, unsupported, ambiguous, short read, planned, admitted, quarantined, …) and chunk
+  selected, unsupported, ambiguous, short read, planned, admitted, salvaged, quarantined, …) and chunk
   (skipped, parsed, retried, committed, failed), `probe_failed` (the source's probe call, then
   each adapter that fails on its own), and `sandbox_ready` (the isolation, the limits, the host's
   Landlock ABI, and on a degraded host a `degraded` list of the guarantees it could not give) as

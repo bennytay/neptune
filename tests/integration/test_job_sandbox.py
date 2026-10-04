@@ -212,10 +212,10 @@ def test_crash_hang_and_hog_are_findings_and_everything_else_lands(
     # A crash may be transient and is retried; a limit would be hit again and is not.
     assert [e.details.get("signal") for e in run.of("chunk_retried")] == ["SIGSEGV"]
     assert not run.of("source_quarantined")
-    salvaged = sorted(e.details["source"] for e in run.of("source_salvaged"))
-    assert salvaged == sorted(
-        run.source(p) for p in ("crash.hostile", "hang.hostile", "hog.hostile")
-    )
+    salvaged = {str(e.details["source"]) for e in run.of("source_salvaged")}
+    assert salvaged == {
+        str(run.source(p)) for p in ("crash.hostile", "hang.hostile", "hog.hostile")
+    }
     (ready,) = run.of("sandbox_ready")
     assert ready.details == {
         "isolation": "subprocess",
@@ -352,9 +352,9 @@ def test_a_call_spools_through_its_scratch_and_a_flood_is_the_scratch_limit(
     finding = run.finding("neptune.runtime.limit_exceeded")
     assert (finding.details["limit"], finding.details["value"]) == ("scratch_bytes", 4 * MIB)
     # Each lost its only line; their documents are salvaged, the spool is whole.
-    assert sorted(source for source, _ in run.outcome.ingested) == sorted(
-        run.source(p) for p in ("flood.hostile", "spool.hostile", "unlock.hostile")
-    )
+    assert {str(source) for source, _ in run.outcome.ingested} == {
+        str(run.source(p)) for p in ("flood.hostile", "spool.hostile", "unlock.hostile")
+    }
     assert {"before", "spool", "after"} <= set(run.texts())
     assert list((run.home / "scratch").iterdir()) == [] and run.staging_is_empty()
     assert sorted(p.name for p in root.iterdir()) == [
@@ -404,10 +404,8 @@ def test_a_call_that_needs_scratch_and_has_none_fails_for_that_run_only(tmp_path
     assert not starved.of("chunk_retried")
     assert isinstance(spooled, str) and not starved.workspace.committed(spooled)
     assert starved.committed_for(starved.source("spool.hostile")) == 3  # every other chunk
-    assert sorted(source for source, _ in starved.outcome.ingested) == sorted(
-        starved.source(p)
-        for p in ("notes.txt", "spool.hostile")  # salvaged without "spool"
-    )
+    landed = {str(source) for source, _ in starved.outcome.ingested}
+    assert landed == {str(starved.source(p)) for p in ("notes.txt", "spool.hostile")}  # no "spool"
     sound = Run(root, tmp_path, sandboxed(), name="sound")  # the same workspace, with scratch
     fresh = Run(root, tmp_path, sandboxed(), name="fresh", home="fresh-home")
     assert sound.codes() == [] and sound.workspace.committed(spooled)

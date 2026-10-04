@@ -29,7 +29,7 @@ python -m neptune.cli ingest ...        # the same command
 | `-n, --dry-run` | discover, fingerprint, probe and plan only; no package. The plans are kept, so the ingest that follows plans nothing again |
 | `--explain` | a dry run that also prints its explanation (ADR 0044): every file, each adapter's verdict and why, the proposed sessions, the work left, what would be left out. Implies `--dry-run`; `--out` with it is a usage error (exit 2) |
 | `--resume` | continue earlier work on this source in the workspace (an interrupted ingest or a dry run); exit 7 if there is none. A plain rerun reuses that work too; `--resume` only refuses to start from nothing |
-| `--attempts N` | tries per adapter call before its source is quarantined (default 2) |
+| `--attempts N` | tries per adapter call before its chunk is lost or its source quarantined (default 2) |
 | `-w, --workspace DIR` | the workspace (cache and checkpoints). Default `$NEPTUNE_HOME`, else `$XDG_CACHE_HOME/neptune`, else `~/.cache/neptune` |
 | `--ignore PATTERN` | leave matching entries unread; repeatable |
 | `--no-default-ignores` | read version-control internals and OS metadata too |

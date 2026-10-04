@@ -2053,7 +2053,8 @@ class IngestJob:
                 }
                 if item.quarantined:
                     quarantined += 1
-                    details["codes"] = sorted(set(item.quarantined))
+                    lost = {gone.code for gone in item.lost.values()}
+                    details["codes"] = sorted(set(item.quarantined) | lost)
                     self._emit(events.SOURCE_QUARANTINED, details)
                 elif partial is not None:
                     salvaged += 1
