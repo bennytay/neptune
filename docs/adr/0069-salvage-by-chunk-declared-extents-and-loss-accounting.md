@@ -86,7 +86,11 @@ the receipt states exactly what was lost.
    (a full disk, a connector that raises) still fails the job, but the URI's ledger is saved
    first with every object already fetched and hashed (whole observations only; nothing is
    marked absent from an unfinished pass), so the retry recognises those by token and fetches
-   only the rest instead of failing identically every time.
+   only the rest instead of failing identically every time. A connector that broke the Source
+   protocol saves nothing (what it listed, or began to call gone, is not trusted). The retry
+   sees an object fetched by the failed job as already observed, so its cache report does not
+   name the bytes that revision replaced (ADR 0031 §3); the package is the one a fresh workspace
+   writes.
 6. **Quarantine state** is the set of runtime finding codes a source carries (`_Source.quarantined`
    plus its lost chunks' codes in the `source_quarantined` event), the `quarantined` status of a
    dry run's explanation (ADR 0044), and in the package the runtime's findings citing it with no

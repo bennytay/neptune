@@ -1381,14 +1381,16 @@ class IngestJob:
                     "fetch",
                     lambda: fingerprint_external(root.source, ledger, discovery, spool),
                 )
-            except BaseException:
+            except BaseException as exc:
                 # A fetch that stops part way (a full disk, a connector that fails) keeps every
                 # hash it observed: the retry recognises those objects by token and fetches only
                 # the rest. Only whole observations are in the ledger, and absences are marked
-                # after a whole pass, so nothing is asserted that was not seen. A ledger that will
-                # not save then never hides why the job failed (ADR 0069 §5).
-                with contextlib.suppress(JobError, WorkspaceError):
-                    self._save_ledger(ledger)
+                # after a whole pass. A connector that broke the protocol is not trusted with
+                # anything, absences it began to mark included: nothing is saved. A ledger that
+                # will not save never hides why the job failed (ADR 0069 §5).
+                if not isinstance(exc.__cause__, ExternalSourceError):
+                    with contextlib.suppress(JobError, WorkspaceError):
+                        self._save_ledger(ledger)
                 raise
             self._save_ledger(ledger)
             for finding in result.findings:  # what could not be fetched, or changed size

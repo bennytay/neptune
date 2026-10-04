@@ -128,3 +128,28 @@ def test_a_fetch_that_stops_part_way_keeps_its_hashes_and_the_retry_resumes(
         fake_store, store, Workspace(tmp_path / "fresh"), tmp_path / "fresh-pkg", []
     ).run()
     assert retry.package == fresh.package  # resuming changes nothing the package says
+
+
+def test_a_connector_that_breaks_the_protocol_saves_nothing(
+    fake_store: ModuleType, store: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Absences are marked after the fetch; a connector caught breaking the Source protocol while
+    they are (an object both listed and called gone) is trusted with none of it: the ledger stays
+    as the last good job left it, no absence half-marked."""
+    workspace = Workspace(tmp_path / "ws")
+    job(fake_store, store, workspace, tmp_path / "first", []).run()
+    before = workspace.load_ledger(URI)
+    fake_store.remove(store, KEYS[3])
+    fake_store.put(store, "amr-7/e-new.txt", b"new\n", "etag-new")
+    absences = external._absences
+
+    def broken(source: Any, ledger: Any, discovery: Any, listed: Any) -> Any:
+        absences(source, ledger, discovery, listed)  # marks d.txt absent, then the break shows
+        raise external.ExternalSourceError("listed and called gone")
+
+    monkeypatch.setattr(external, "_absences", broken)
+    with pytest.raises(JobError, match="broke the Source protocol"):
+        job(fake_store, store, workspace, tmp_path / "second", []).run()
+    after = workspace.load_ledger(URI)
+    assert not after.absences() and held(workspace) == {f"fleet/{key}" for key in KEYS}
+    assert list(after.heads()) == list(before.heads())
