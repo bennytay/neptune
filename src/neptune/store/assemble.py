@@ -49,6 +49,7 @@ from neptune.store.package import (
 from neptune.store.receipt import cited_sources
 from neptune.store.series import SERIES_SETTINGS, merge_runs
 from neptune.store.workspace import DerivativeKey, Held, Owner, Workspace, WorkspaceError
+from neptune.store.writer import PackageWriter
 
 _COPY_SIZE: Final = 1024 * 1024
 # A stream's series file, as a derivative of the runs of the chunks it merges (ADR 0031 §4). The
@@ -133,6 +134,14 @@ def _series_file(
     if not _copy_checked(derivative.file(SERIES_FILE), target, derivative.files[SERIES_FILE]):
         raise PackageError(f"the series file of {stream.id} changed while it was copied")
     return Held.REBUILT
+
+
+def _remove_empty(directory: Path) -> None:
+    """Remove ``directory`` and the directories under it, which must hold no file: anything left
+    is a file that should have moved into the package, and fails the stage."""
+    for path in sorted(directory.rglob("*"), reverse=True):
+        path.rmdir()
+    directory.rmdir()
 
 
 class SourceOpener(Protocol):
@@ -275,6 +284,7 @@ def stage(
     source: SourceOpener | None = None,
     extra: Iterable[Any] = (),
     derived: Mapping[str, Iterable[JsonObject]] | None = None,
+    spill: Path | None = None,
 ) -> StagedPackage:
     """Build the package of ``ingested`` sources, each a (content id, transform id) pair.
 
@@ -293,6 +303,10 @@ def stage(
     Each stream's series file is a derivative (``series_key``): merged from its runs the first
     time a package needs it, kept in the workspace, and copied, checked against its hash, into
     every later package that holds the stream.
+
+    The package is written as a stream (``PackageWriter``, ADR 0065): one committed chunk's
+    records are held at a time, and the tables are sorted in bounded memory, spilling to ``spill``
+    (a workspace's scratch space; by default the staging directory's own) and removed after.
     """
     if destination.exists():
         raise PackageError(f"{destination} exists; a package is written once")
@@ -302,58 +316,69 @@ def stage(
     locations = _head_locations((*ledger.revisions(), *ledger.absences()), wanted)
     if lost := sorted(wanted - set(locations)):
         raise PackageError(f"no local location holds sources to materialise: {lost}")
-    records: dict[tuple[str, str], Any] = {}
-    for item in extra:
-        records[item.kind, item.id] = item
-    runs: dict[RecordId, list[tuple[str, Path, Owner]]] = defaultdict(list)
-    for content, transform in sorted(set(ingested)):
-        if ledger.artifact(content) is None:
-            raise PackageError(f"source {content} was ingested but the ledger does not hold it")
-        with _workspace_io():
-            plan = workspace.load_plan(content, transform)
-        if plan is None:
-            raise PackageError(f"no plan of {content} under transform {transform}")
-        found: list[Any] = [plan.transform, *plan.findings]
-        for chunk in plan.chunks:
-            chunk_id = str(chunk["id"])
-            with _workspace_io():
-                output = workspace.load(chunk_id)
-            found += [*output.records, *output.findings]
-            for stream, run in output.runs.items():
-                runs[stream].append((chunk_id, run, (content, transform)))
-        for item in found:
-            records[item.kind, item.id] = item
-    streams = {r.id: r for r in records.values() if isinstance(r, Stream)}
-    if strays := set(runs) - set(streams):
-        raise PackageError(f"runs of streams the package does not hold: {sorted(strays)}")
-    if silent := set(streams) - set(runs):
-        raise PackageError(f"streams without a series run: {sorted(silent)}")
-
     staging = _open_staging(destination)
     try:
         scratch = staging / ".scratch"
         scratch.mkdir()
-        series: dict[RecordId, Content] = {}
-        uses: list[DerivativeUse] = []
-        for stream_id, stream_runs in sorted(runs.items()):
-            key = series_key(
-                stream_id, (chunk for chunk, _, _ in stream_runs), (o for _, _, o in stream_runs)
+        with PackageWriter(spill if spill is not None else scratch) as writer:
+            writer.extend((*ledger.artifacts(), *ledger.revisions(), *ledger.absences()))
+            streams: dict[RecordId, Stream] = {}
+
+            def add(items: Iterable[Any]) -> None:
+                """Add records no ledger lists. One given again (a transform shared by sources,
+                say) replaces the one before it, as the last of each kind and id always has."""
+                for item in items:
+                    writer.add(item, last_wins=True)
+                    if isinstance(item, Stream):
+                        streams[item.id] = item
+
+            add(extra)
+            runs: dict[RecordId, list[tuple[str, Path, Owner]]] = defaultdict(list)
+            for content, transform in sorted(set(ingested)):
+                if ledger.artifact(content) is None:
+                    raise PackageError(
+                        f"source {content} was ingested but the ledger does not hold it"
+                    )
+                with _workspace_io():
+                    plan = workspace.load_plan(content, transform)
+                if plan is None:
+                    raise PackageError(f"no plan of {content} under transform {transform}")
+                add([plan.transform, *plan.findings])
+                for chunk in plan.chunks:
+                    chunk_id = str(chunk["id"])
+                    with _workspace_io():
+                        output = workspace.load(chunk_id)
+                    add(output.records)
+                    add(output.findings)
+                    for stream, run in output.runs.items():
+                        runs[stream].append((chunk_id, run, (content, transform)))
+            if strays := set(runs) - set(streams):
+                raise PackageError(f"runs of streams the package does not hold: {sorted(strays)}")
+            if silent := set(streams) - set(runs):
+                raise PackageError(f"streams without a series run: {sorted(silent)}")
+
+            series: dict[RecordId, Content] = {}
+            uses: list[DerivativeUse] = []
+            for stream_id, stream_runs in sorted(runs.items()):
+                key = series_key(
+                    stream_id,
+                    (chunk for chunk, _, _ in stream_runs),
+                    (o for _, _, o in stream_runs),
+                )
+                merged = scratch / f"{stream_id.removeprefix('rec:sha256:')}.parquet"
+                paths = sorted(run for _, run, _ in stream_runs)
+                held = _series_file(workspace, key, streams[stream_id], paths, merged)
+                series[stream_id] = merged
+                uses.append(DerivativeUse(key, held))
+            contents = writer.finish(
+                scratch / "package",
+                series=series,
+                blobs=_land(scratch, locations, source) if source is not None else {},
+                store={"series": SERIES_SETTINGS} if series else {},
+                derived=derived,
             )
-            merged = scratch / f"{stream_id.removeprefix('rec:sha256:')}.parquet"
-            paths = sorted(run for _, run, _ in stream_runs)
-            held = _series_file(workspace, key, streams[stream_id], paths, merged)
-            series[stream_id] = merged
-            uses.append(DerivativeUse(key, held))
-        ledger_records = (*ledger.artifacts(), *ledger.revisions(), *ledger.absences())
-        contents = package_contents(
-            [*ledger_records, *records.values()],
-            series=series,
-            blobs=_land(scratch, locations, source) if source is not None else {},
-            store={"series": SERIES_SETTINGS} if series else {},
-            derived=derived,
-        )
         copied = _lay_out(staging, contents, movable=scratch)
-        scratch.rmdir()  # every merged series and landed source was moved into place
+        _remove_empty(scratch)  # every merged series, landed source and written file was moved
         _check_copies(staging, contents, copied)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -366,9 +391,10 @@ def amend(staged: StagedPackage, package: IngestPackage, extra: Iterable[Any]) -
 
     ``package`` is ``staged`` as ``read_package`` read it. The new package is built in a fresh
     sibling: its tables, receipt and manifest are rewritten, and its series and blobs are moved
-    (never copied) out of ``staged``, which is then removed. ``package_contents`` verifies the
-    whole (``read_files``) before anything moves, so the result needs no second read. On failure
-    the new sibling is removed and ``staged`` may have lost files; the caller discards it.
+    (never copied) out of ``staged``, which is then removed. ``package_contents`` checks the
+    whole as the reader does (ADR 0065 §4) before anything moves, so the result needs no second
+    read. On failure the new sibling is removed and ``staged`` may have lost files; the caller
+    discards it.
     """
     contents = package_contents(
         [*package.records, *extra],
@@ -412,6 +438,7 @@ def assemble(
     source: SourceOpener | None = None,
     extra: Iterable[Any] = (),
     derived: Mapping[str, Iterable[JsonObject]] | None = None,
+    spill: Path | None = None,
 ) -> ContentId:
     """``stage`` then ``publish``: write the package of ``ingested`` sources at ``destination``.
 
@@ -426,6 +453,7 @@ def assemble(
         source=source,
         extra=extra,
         derived=derived,
+        spill=spill,
     )
     try:
         return publish(staged)

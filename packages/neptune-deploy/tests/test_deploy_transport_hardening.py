@@ -14,6 +14,8 @@ import pytest
 
 from deploy_foxglove_fake import API_KEY, FakeFoxglove
 from neptune.store.workspace import Workspace
+from neptune_deploy.sources.fleet_ops import FleetOpsConfigError, formant_source
+from neptune_deploy.sources.fleet_ops.formant_api import QueryTransport
 from neptune_deploy.sources.foxglove import FoxgloveConfigError, foxglove_source
 from neptune_deploy.sources.foxglove.client import FoxgloveTransport
 from neptune_deploy.sources.object_store import (
@@ -129,6 +131,18 @@ def test_foxglove_posts_with_a_value_that_cannot_be_encoded_fail_as_a_transport_
         transport.drop()
 
 
+def test_formant_queries_with_a_value_that_cannot_be_encoded_fail_as_a_transport_error(
+    tmp_path: Path,
+) -> None:
+    with serve_raw(_short(len(BODY), BODY)) as endpoint:
+        transport = QueryTransport(endpoint, _online(tmp_path), "test", timeout=5)
+        with pytest.raises(TransportError):
+            transport.post_query("/v1/admin/events/query", b"{}", {"Authorization": "€"})
+        with pytest.raises(ValueError, match="five documented"):
+            transport.post_query("/v1/admin/events/1", b"{}")
+        transport.drop()
+
+
 # --- (b) timeout is bounded above ---------------------------------------------------------------
 
 
@@ -171,6 +185,12 @@ def _refusals(tmp_path: Path, timeout: float) -> dict[str, Callable[[], object]]
             options={"timeout": timeout},
             environ={"NEPTUNE_JIRA_EMAIL": "ops@example.com", "NEPTUNE_JIRA_API_TOKEN": "t"},
         ),
+        "formant": lambda: formant_source(
+            "formant://org-acme",
+            network=network,
+            options={"timeout": timeout},
+            credentials={"formant_access_token": "t0ken"},
+        ),
         "foxglove": lambda: foxglove_source(
             "foxglove://prj_a",
             network=network,
@@ -181,15 +201,21 @@ def _refusals(tmp_path: Path, timeout: float) -> dict[str, Callable[[], object]]
 
 
 @pytest.mark.parametrize("timeout", [1e10, MAX_TIMEOUT + 1, 10**30, float("inf"), float("nan")])
-@pytest.mark.parametrize("connector", ["s3", "gcs", "azure", "roboto", "rerun", "jira", "foxglove"])
+@pytest.mark.parametrize(
+    "connector", ["s3", "gcs", "azure", "roboto", "rerun", "jira", "foxglove", "formant"]
+)
 def test_an_absurd_timeout_is_a_configuration_error_for_every_connector(
     tmp_path: Path, connector: str, timeout: float
 ) -> None:
-    with pytest.raises((ObjectStoreConfigError, FoxgloveConfigError, RecordConfigError)):
+    with pytest.raises(
+        (ObjectStoreConfigError, FoxgloveConfigError, RecordConfigError, FleetOpsConfigError)
+    ):
         _refusals(tmp_path, timeout)[connector]()
 
 
-@pytest.mark.parametrize("connector", ["s3", "gcs", "azure", "roboto", "rerun", "jira", "foxglove"])
+@pytest.mark.parametrize(
+    "connector", ["s3", "gcs", "azure", "roboto", "rerun", "jira", "foxglove", "formant"]
+)
 def test_the_refusal_is_the_timeout_and_nothing_else_in_the_fixture(
     tmp_path: Path, connector: str
 ) -> None:

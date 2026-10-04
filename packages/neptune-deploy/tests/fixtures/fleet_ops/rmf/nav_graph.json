@@ -1,0 +1,17 @@
+{
+  "name": "warehouse_1",
+  "coordinate_system": "cartesian_meters",
+  "levels": {
+    "L1": {
+      "vertices": [{"name": "dock_1", "x": 0.5, "y": 0.5, "is_charger": true}, {"name": "aisle_14_start", "x": 12.0, "y": -3.0}, {"name": "aisle_14_end", "x": 12.0, "y": 9.0}],
+      "lanes": [{"from": 0, "to": 1, "speed_limit": 1.2, "bidirectional": true}, {"from": 1, "to": 2, "speed_limit": 0.8, "bidirectional": false}],
+      "zones": [{"name": "aisle_14", "polygon": [[11.0, -3.5], [13.0, -3.5], [13.0, 9.5], [11.0, 9.5]]}]
+    },
+    "L2": {
+      "vertices": [{"name": "mezzanine_1", "x": 3.0, "y": 3.0}],
+      "lanes": [],
+      "zones": []
+    }
+  },
+  "lifts": {"lift_A": {"doors": ["front"]}}
+}
