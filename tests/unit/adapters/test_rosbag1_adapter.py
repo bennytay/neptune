@@ -252,12 +252,26 @@ def test_the_run_cites_the_bag_header_and_its_extent_the_chunk_info_fields() -> 
 
 
 def test_the_record_time_is_one_clock_on_the_recorder_never_converted() -> None:
-    (domain,) = of(BAG, TimestampDomain)
+    domains: dict[str, list[TimestampDomain]] = {d.field: [] for d in of(BAG, TimestampDomain)}
+    for found in of(BAG, TimestampDomain):
+        domains[found.field].append(found)
+    (domain,) = domains["time"]
     assert (domain.field, domain.scope) == ("time", ())
     assert isinstance(domain.role, Known) and domain.role.value is ClockRole.RECEIVE
     assert isinstance(domain.resolution, Known) and domain.resolution.value == NANOSECOND
     assert (domain.epoch, domain.timescale) == (Unknown(), Unknown())  # ROS time: never assumed
-    assert {stream.clocks for stream in of(BAG, Stream)} == {(domain.id,)}
+    assert {stream.clocks[0] for stream in of(BAG, Stream)} == {domain.id}
+    # Every stream whose type leads with a Header has its stamp as a second, separate clock.
+    headers = {d.id: d for d in domains["header.stamp"]}
+    for stream in of(BAG, Stream):
+        topic = stream.topic.value if isinstance(stream.topic, Known) else ""
+        stamped = topic in ("/joint_states", "/odom")  # a TFMessage has a header per transform
+        assert len(stream.clocks) == (2 if stamped else 1)
+        if stamped:
+            header = headers[stream.clocks[1]]
+            assert header.scope == (topic,)
+            assert header.role == Unknown()  # what a stamp marks is the publisher's
+            assert (header.epoch, header.timescale) == (Unknown(), Unknown())
 
 
 def test_a_stream_holds_its_connection_as_the_publisher_stated_it() -> None:
@@ -313,10 +327,9 @@ def test_message_counts_are_stated_and_cite_the_chunk_infos_that_state_them() ->
         assert span.count(b"op=\x06") >= 1 and b"op=\x05" not in span  # chunk infos only
 
 
-def test_every_stream_has_a_payload_finding_and_nothing_else_is_reported() -> None:
+def test_every_payload_decodes_and_nothing_is_reported() -> None:
     assert codes(BAG) == []
-    payloads = [f for f in BAG.findings() if f.code == "rosbag1.payload_not_decoded"]
-    assert len(payloads) == 4 and all(len(f.records) == 1 for f in payloads)
+    assert not [f for f in BAG.findings() if f.code.startswith("rosbag1.payload_")]
 
 
 # --- Every message a row, every row its bytes ----------------------------------------------------
