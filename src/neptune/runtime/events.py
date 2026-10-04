@@ -53,6 +53,9 @@ WORKSPACE_SWEPT: Final = "workspace_swept"  # scratch and staging debris removed
 ENTRY_SKIPPED: Final = "entry_skipped"
 SYMLINK_RECORDED: Final = "symlink_recorded"
 SOURCE_HASHED: Final = "source_hashed"
+# A connector's object whose revision token the ledger knows for its bytes: carried forward,
+# neither fetched nor hashed (ADR 0067).
+SOURCE_RECOGNISED: Final = "source_recognised"
 SOURCE_ABSENT: Final = "source_absent"
 SANDBOX_READY: Final = "sandbox_ready"  # isolation, and the limits and Landlock ABI if sandboxed
 PROBE_FAILED: Final = "probe_failed"

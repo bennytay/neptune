@@ -1,9 +1,11 @@
 """Scratch space: the only place Neptune writes while handling untrusted input (ADR 0029 §4).
 
 - The caller names a **private root** and the **ingest root**; both are required, so the overlap
-  check always runs. The private root is created ``0700`` if missing, must be a real directory
-  owned by this user, is tightened to ``0700`` if looser, and must not overlap the ingest root in
-  either direction. Nothing is ever written into, or swept from, the source tree.
+  check always runs where there is a local tree to overlap. A connector's source (ADR 0067) has
+  none: its ingest root is ``None``, said explicitly, never a default. The private root is
+  created ``0700`` if missing, must be a real directory owned by this user, is tightened to
+  ``0700`` if looser, and must not overlap the ingest root in either direction. Nothing is ever
+  written into, or swept from, the source tree.
 - ``scratch_space`` yields a fresh ``0700`` directory under the root for one unit of work and
   removes it on exit, success or not. While it lives, a lock file inside it is held with
   ``flock``.
@@ -34,17 +36,19 @@ class ScratchError(Exception):
     """The private root cannot be used as scratch space."""
 
 
-def prepare_private_root(private_root: Path, *, ingest_root: Path) -> Path:
+def prepare_private_root(private_root: Path, *, ingest_root: Path | None) -> Path:
     """Create or check the private root; raise ``ScratchError`` if it is unsafe.
 
     ``ingest_root`` has no default: a root that may overlap the source tree is never assumed safe.
+    ``None`` says the source is no local tree (a connector's), so there is nothing to overlap.
     """
     root = Path(private_root)
     # Checked first, on resolved paths, so nothing is ever created inside the source tree.
     private = root.resolve()
-    ingest = Path(ingest_root).resolve()
-    if private == ingest or private in ingest.parents or ingest in private.parents:
-        raise ScratchError(f"{root}: the private root overlaps the ingest root {ingest_root}")
+    if ingest_root is not None:
+        ingest = Path(ingest_root).resolve()
+        if private == ingest or private in ingest.parents or ingest in private.parents:
+            raise ScratchError(f"{root}: the private root overlaps the ingest root {ingest_root}")
     try:
         info = os.lstat(root)
     except FileNotFoundError:
@@ -62,7 +66,7 @@ def prepare_private_root(private_root: Path, *, ingest_root: Path) -> Path:
 
 
 @contextmanager
-def scratch_space(private_root: Path, *, ingest_root: Path) -> Iterator[Path]:
+def scratch_space(private_root: Path, *, ingest_root: Path | None) -> Iterator[Path]:
     """A fresh private directory for one unit of work, removed when the block ends."""
     root = prepare_private_root(private_root, ingest_root=ingest_root)
     with _root_lock(root, fcntl.LOCK_SH):  # no sweep runs until the new lock is held
@@ -88,7 +92,7 @@ def scratch_space(private_root: Path, *, ingest_root: Path) -> Iterator[Path]:
         os.close(lock)
 
 
-def clear_scratch(private_root: Path, *, ingest_root: Path) -> int:
+def clear_scratch(private_root: Path, *, ingest_root: Path | None) -> int:
     """Remove leftover scratch nobody holds a lock on; return how many entries were removed.
 
     Anything in the private root that is not a scratch directory is debris and is removed too, so

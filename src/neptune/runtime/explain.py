@@ -36,7 +36,7 @@ from neptune.identity import canonical_json
 from neptune.identity.findings import ingest_finding
 from neptune.identity.provenance import transform_record
 from neptune.model.finding import FindingCategory, FindingSubject, IngestFinding, Severity
-from neptune.model.ids import ContentId, RecordId
+from neptune.model.ids import ContentId, ExternalObjectRef, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune.model.provenance import ByteRange, EvidenceRef, TransformRecord
 from neptune.model.source import LocalPath, RawLocalPath
@@ -98,7 +98,16 @@ def explain_transform(bounds: Bounds) -> TransformRecord:
     )
 
 
-Location = LocalPath | RawLocalPath
+Location = LocalPath | RawLocalPath | ExternalObjectRef
+
+
+def order(location: Location) -> tuple[bytes, ...]:
+    """How locations are listed: local paths in byte order, then a connector's objects by
+    connector, object and revision token (ADR 0067)."""
+    if isinstance(location, ExternalObjectRef):
+        parts = (location.connector_id, location.object_id, location.revision_token)
+        return (b"1", *(part.encode("utf-8") for part in parts))
+    return (b"0", location.raw)
 
 
 def _printable(text: str) -> str:
@@ -111,12 +120,14 @@ def _printable(text: str) -> str:
 
 def show(location: Location) -> str:
     """A location for people, on one line: bytes that are not UTF-8, and control characters (a
-    newline, an escape sequence: names are hostile), as ``\\xNN`` escapes."""
-    text = (
-        location.path
-        if isinstance(location, LocalPath)
-        else location.path.decode("utf-8", errors="backslashreplace")
-    )
+    newline, an escape sequence: names are hostile), as ``\\xNN`` escapes. A connector's object
+    is ``<connector>:<object>@<revision token>``."""
+    if isinstance(location, ExternalObjectRef):
+        text = f"{location.connector_id}:{location.object_id}@{location.revision_token}"
+    elif isinstance(location, LocalPath):
+        text = location.path
+    else:
+        text = location.path.decode("utf-8", errors="backslashreplace")
     return _printable(text)
 
 
@@ -191,11 +202,11 @@ class Inventory:
         skipped: Iterable[InventorySkipped],
     ) -> "Inventory":
         """Everything, each list sorted by location bytes."""
-        listed = tuple(sorted(files, key=lambda f: f.location.raw))
+        listed = tuple(sorted(files, key=lambda f: order(f.location)))
         return cls(
             listed,
-            tuple(sorted(links, key=lambda link: link.location.raw)),
-            tuple(sorted(skipped, key=lambda entry: (entry.location.raw, str(entry.reason)))),
+            tuple(sorted(links, key=lambda link: order(link.location))),
+            tuple(sorted(skipped, key=lambda entry: (order(entry.location), str(entry.reason)))),
             sum(entry.size for entry in listed),
             len({entry.source for entry in listed}),
         )
@@ -612,7 +623,7 @@ def left_out(sources: Iterable[SourceExplanation], inventory: Inventory) -> tupl
         LeftOut(entry.location, Disposition.SKIPPED, f"not read: {entry.reason}")
         for entry in inventory.skipped
     )
-    return tuple(sorted(found, key=lambda entry: (entry.location.raw, str(entry.disposition))))
+    return tuple(sorted(found, key=lambda entry: (order(entry.location), str(entry.disposition))))
 
 
 # --- Grouping and work ---------------------------------------------------------------------------
@@ -811,6 +822,8 @@ class Explanation:
             f"Sessions (inferred from names and folders, ADR 0036): {counts['proposals']}"
             f" proposals ({counts['contested']} contested), {counts['ambiguous']} ambiguous and"
             f" {counts['unknown']} unplaced files",
+            "  a dry run writes nothing to the package and only warms the workspace cache; a real"
+            " run reassembles sessions over the evidence it reads (ADR 0066)",
         ]
         for proposal in self.grouping.proposals:
             place = proposal.directory
