@@ -20,6 +20,7 @@ word until an adapter reads the file's own.
 method to check that every attribute it reads is set.
 """
 
+import hashlib
 from collections.abc import Mapping
 from functools import cached_property
 from typing import Final
@@ -79,7 +80,14 @@ CATALOG_CODES: Final[dict[str, tuple[FindingCategory, Severity, str]]] = {
     "object_not_found": (
         FindingCategory.MISSING,
         Severity.WARNING,
-        "the store does not list the object a segment layer names (or the listing failed)",
+        "the store's complete listing of the key a segment layer names does not hold the object",
+    ),
+    "object_unresolved": (
+        FindingCategory.FAILED,
+        Severity.WARNING,
+        "the store's listing of the key a segment layer names did not complete (it failed or"
+        " stopped at a limit; the store's own finding says why): whether the object exists is not"
+        " known, and it is not read",
     ),
     "catalog_size_differs": (
         FindingCategory.INCONSISTENT,
@@ -277,8 +285,10 @@ class RerunSource(ObjectStoreSource):
 
     def _resolve(
         self, provider: Provider, bucket: str, account: str | None, key: str
-    ) -> tuple[ObjectStoreSource, ObjectEntry] | None:
-        """The one object at exactly ``key``: a listing of that prefix, keeping its entry."""
+    ) -> tuple[ObjectStoreSource, ObjectEntry] | bool:
+        """The one object at exactly ``key``: a listing of that prefix, keeping its entry. Else
+        whether that listing was complete: only a complete listing says the object is not there
+        (D2 gate B2, ADR 0011 §3)."""
         options = self.rerun.storage_options(provider)
         location = StoreLocation(provider, bucket, key, account, options.store)
         probe = Options(
@@ -296,10 +306,17 @@ class RerunSource(ObjectStoreSource):
             location, self._client(provider, bucket, account), self._network, probe
         )
         self._inner_sources.append(inner)
-        for entry in inner.listing().entries:
+        listing = inner.listing()
+        for entry in listing.entries:
             if entry.key == key:
                 return inner, entry
-        return None
+        raw = key.encode("utf-8", "surrogateescape")
+        digest = hashlib.sha256(raw).hexdigest()
+        if any(skipped.sha256 == digest for skipped in listing.skipped):
+            return False  # listed, but not usable (duplicated, too long, ...): not known
+        # The store lists in byte order and the exact key sorts first among the keys it prefixes,
+        # so a listed key past it shows it absent even when the probe stopped at its limit.
+        return listing.complete or any(e.key.encode("utf-8") > raw for e in listing.entries)
 
     @cached_property
     def _segment_rows(self) -> tuple[Mapping[str, JsonValue], ...]:
@@ -329,9 +346,9 @@ class RerunSource(ObjectStoreSource):
             count += 1
             provider, bucket, account, key = target
             found = self._resolve(provider, bucket, account, key)
-            if found is None:
+            if isinstance(found, bool):  # not listed: absent only if the listing was complete
                 self.report(
-                    "object_not_found",
+                    "object_not_found" if found else "object_unresolved",
                     self.listing_ref,
                     {"provider": provider.value, "key_hex": _hex(key)},
                 )

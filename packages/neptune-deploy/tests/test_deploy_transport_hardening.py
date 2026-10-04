@@ -68,11 +68,14 @@ def _drain(conn: socket.socket) -> None:
 
 
 @contextmanager
-def serve_raw(response: bytes) -> Iterator[Endpoint]:
-    """A server that answers every request with ``response`` verbatim, then closes."""
+def serve_raw(response: bytes, *, hold: bool = False) -> Iterator[Endpoint]:
+    """A server that answers every request with ``response`` verbatim, then closes; or, with
+    ``hold``, then says nothing more and keeps the connection open until the test ends."""
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(8)
+    held: list[socket.socket] = []
+    lock = threading.Lock()
 
     def run() -> None:
         while True:
@@ -80,13 +83,17 @@ def serve_raw(response: bytes) -> Iterator[Endpoint]:
                 conn, _ = listener.accept()
             except OSError:
                 return
-            with conn:
-                conn.settimeout(2)
-                try:
-                    _drain(conn)
-                    conn.sendall(response)
-                except OSError:
-                    pass
+            conn.settimeout(2)
+            try:
+                _drain(conn)
+                conn.sendall(response)
+            except OSError:
+                pass
+            if hold:
+                with lock:
+                    held.append(conn)
+            else:
+                conn.close()
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
@@ -94,6 +101,9 @@ def serve_raw(response: bytes) -> Iterator[Endpoint]:
         yield Endpoint.parse(f"http://127.0.0.1:{listener.getsockname()[1]}")
     finally:
         listener.close()
+        with lock:
+            for conn in held:
+                conn.close()
 
 
 def _short(declared: int, sent: bytes) -> bytes:
@@ -342,3 +352,60 @@ def test_a_body_trickling_after_connection_close_is_cut_off_at_the_deadline(
             transport.get("/x").body(1_000_000)
         assert time.monotonic() - started < 5
         transport.drop()
+
+
+# --- (e) a socket timeout is the deadline, however late the deadline's timer runs (D2 gate) -----
+
+
+@pytest.mark.parametrize(
+    "head",
+    [b"", b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial"],
+    ids=["no-headers", "stalled-body"],
+)
+def test_a_socket_timeout_is_deadline_exceeded_even_when_the_timer_thread_is_late(
+    monkeypatch: pytest.MonkeyPatch, head: bytes
+) -> None:
+    """Regression (D2 gate B1): under CPU load the deadline's timer thread can run after the
+    socket's own timeout, which is the same length. The cause then read ``transport_failed`` in
+    some runs and ``deadline_exceeded`` in others, so one server gave two finding ids. Holding the
+    timer back makes the late-timer case happen every time."""
+    from neptune_deploy.sources.object_store import transport as module
+
+    original = module._Deadline.__init__
+
+    def late(self: Any, transport: Any, seconds: float) -> None:
+        original(self, transport, seconds + 30)
+
+    monkeypatch.setattr(module._Deadline, "__init__", late)
+
+    class Open:
+        def require_network(self, purpose: str) -> None:
+            pass
+
+    with serve_raw(head, hold=True) as endpoint:
+        transport = Transport(endpoint, Open(), "test", timeout=0.3)
+        started = time.monotonic()
+        with pytest.raises(DeadlineExceeded):
+            transport.get("/").body(1000)
+        assert time.monotonic() - started < 5
+
+
+def test_a_deadline_that_fires_after_its_request_ended_touches_nothing() -> None:
+    """Regression (D2 gate review): ``Timer.cancel`` cannot stop a timer thread that is already
+    running, so a starved timer used to shut down the socket of the request sent after its own.
+    Calling the expiry by hand after the request ended is exactly that late thread."""
+
+    class Open:
+        def require_network(self, purpose: str) -> None:
+            pass
+
+    answer = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"
+    with serve_raw(answer, hold=True) as endpoint:
+        transport = Transport(endpoint, Open(), "test", timeout=5)
+        response = transport.get("/")
+        assert response.body(10) == b"ok"
+        alive = transport._socket
+        assert alive is not None
+        response._deadline._expire()  # the late timer thread
+        assert not response._deadline.expired
+        assert alive.fileno() != -1  # the kept-alive connection was not shut down
