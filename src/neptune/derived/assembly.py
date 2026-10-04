@@ -44,7 +44,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from fractions import Fraction
-from typing import Final
+from typing import Final, TypeAlias
 
 from neptune.derived.grouping import (
     _LISTED,
@@ -90,7 +90,15 @@ ASSEMBLY_VERSION: Final = "0.2.0"
 LISTED_PART_MISSING: Final = f"{ASSEMBLY_ID}.listed_part_missing"
 UNLISTED_PART: Final = f"{ASSEMBLY_ID}.unlisted_part"
 MIXED_MACHINES_FINDING: Final = f"{ASSEMBLY_ID}.mixed_machines"
-FINDING_CODES: Final = (LISTED_PART_MISSING, MIXED_MACHINES_FINDING, UNLISTED_PART)
+BAG_COPIES_DIFFER: Final = f"{ASSEMBLY_ID}.bag_copies_differ"
+PART_CLAIMED_TWICE: Final = f"{ASSEMBLY_ID}.part_claimed_twice"
+FINDING_CODES: Final = (
+    BAG_COPIES_DIFFER,
+    LISTED_PART_MISSING,
+    MIXED_MACHINES_FINDING,
+    PART_CLAIMED_TWICE,
+    UNLISTED_PART,
+)
 
 # Unassigned reason: a document naming several readings that share no file.
 SEVERAL_NAMED: Final = "several_named"
@@ -99,7 +107,8 @@ SEVERAL_NAMED: Final = "several_named"
 FILE_LIST_TABLE: Final = "relative_file_paths"
 
 # Words a document must name for ``named_in_document``: at least this long, so ``a.bag`` or
-# ``run_1`` in prose never places a note; and at most this many words are kept per document.
+# ``run_1`` in prose never places a note; and at most this many identifier-shaped words are kept
+# per document (prose words are never kept: they can never join).
 MIN_NAME: Final = 6
 MAX_WORDS: Final = 100_000
 _WORD: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]*")
@@ -286,7 +295,10 @@ class EvidenceBuilder:
             if not isinstance(record.text, Known) or len(found.words) >= MAX_WORDS:
                 return
             for word in _WORD.findall(record.text.value):
-                found.words.add(word.rstrip("._-"))
+                name = word.rstrip("._-")
+                if not _identifier(name):
+                    continue  # only an identifier-shaped word can join a session
+                found.words.add(name)
                 if len(found.words) >= MAX_WORDS:
                     break
         self.transforms.add(provenance.transform)
@@ -437,6 +449,10 @@ def _listed_path(directory: bytes, text: str, files: Mapping[bytes, object]) -> 
     return joined
 
 
+# One copy's present storage files, by name relative to the bag's directory, with their bytes' ids.
+_Contents: TypeAlias = tuple[tuple[bytes, str], ...]
+
+
 class _Assembler(_Proposer):
     """One run of the assembler: v0's readings of the layout, then the evidence (ADR 0066)."""
 
@@ -475,6 +491,7 @@ class _Assembler(_Proposer):
         # their metadata's Run, and the record lists every copy's files (ADR 0066 §1).
         members: dict[ContentId, dict[RecordId, RunMember]] = defaultdict(dict)
         stated: dict[ContentId, FileList] = {}
+        copies: dict[ContentId, list[tuple[bytes, _Contents]]] = defaultdict(list)
         for path in sorted(self.files):
             if basename(path) != BAG_METADATA:
                 continue
@@ -483,7 +500,11 @@ class _Assembler(_Proposer):
                 continue
             content = ContentId(self.files[path].content_id)
             stated[content] = found.file_lists[0]
-            members[content].update(self._file_list(path, stated[content], holders, by_directory))
+            held, contents = self._file_list(path, stated[content], holders, by_directory)
+            members[content].update(held)
+            copies[content].append((path, contents))
+        self._copies_differ(stated, copies)
+        self._claims(stated, members)
         for content, statement in sorted(stated.items()):
             held = members[content]
             self.assemblies.append(
@@ -499,6 +520,69 @@ class _Assembler(_Proposer):
                 )
             )
 
+    def _copies_differ(
+        self,
+        stated: Mapping[ContentId, FileList],
+        copies: Mapping[ContentId, list[tuple[bytes, _Contents]]],
+    ) -> None:
+        """Copies of a bag share their metadata's bytes, and so one run assembly that lists every
+        copy's files. When the copies' present storage files are not the same bytes (a damaged or
+        replaced copy), that union is a finding, never a silent merge (ADR 0066 §1)."""
+        for content, held in sorted(copies.items()):
+            variants = sorted({contents for _, contents in held})
+            if len(variants) < 2:
+                continue
+            where = sorted(metadata for metadata, _ in held)
+            self.findings.append(
+                ingest_finding(
+                    code=BAG_COPIES_DIFFER,
+                    category=FindingCategory.INCONSISTENT,
+                    severity=Severity.WARNING,
+                    subject=local_location(where[0]),
+                    transform=self.transform,
+                    message=f"{len(held)} copies of one bag share their metadata.yaml bytes but"
+                    f" their storage files differ ({len(variants)} variants); the run assembly"
+                    " lists the files of every copy, so check which copy is the bag",
+                    details={
+                        "copies": _locations(where),
+                        "count": len(held),
+                        "variants": len(variants),
+                    },
+                    related=[stated[content].evidence],
+                    records=[stated[content].run],
+                )
+            )
+
+    def _claims(
+        self,
+        stated: Mapping[ContentId, FileList],
+        members: Mapping[ContentId, Mapping[RecordId, RunMember]],
+    ) -> None:
+        """A file two different stated records both list (a nested bag's part, listed by the bag
+        around it) is a finding: both statements stand and neither is picked."""
+        claimed: dict[RecordId, list[ContentId]] = defaultdict(list)
+        for content in sorted(members):
+            for revision in members[content]:
+                claimed[revision].append(content)
+        paths = {file.revision: path for path, file in self.files.items()}
+        for revision, contents in sorted(claimed.items(), key=lambda item: paths[item[0]]):
+            if len(contents) < 2:
+                continue
+            self.findings.append(
+                ingest_finding(
+                    code=PART_CLAIMED_TWICE,
+                    category=FindingCategory.AMBIGUOUS,
+                    severity=Severity.WARNING,
+                    subject=local_location(paths[revision]),
+                    transform=self.transform,
+                    message=f"{len(contents)} stated run records list this file; each keeps it"
+                    " as its member, and neither is taken as its run",
+                    details={"count": len(contents), "runs": [stated[c].run for c in contents]},
+                    related=[members[c][revision].evidence for c in contents],
+                    records=[stated[c].run for c in contents],
+                )
+            )
+
     def _assembly_id(self, stated: FileList) -> RecordId:
         return evidence_record_id(RunAssembly.kind, stated.evidence, self.transform)
 
@@ -508,8 +592,9 @@ class _Assembler(_Proposer):
         stated: FileList,
         holders: Mapping[bytes, list[int]],
         by_directory: Mapping[bytes, list[bytes]],
-    ) -> dict[RecordId, RunMember]:
-        """One copy of a bag: its findings, its readings, and its members of the run."""
+    ) -> tuple[dict[RecordId, RunMember], _Contents]:
+        """One copy of a bag: its findings, its readings, its members of the run, and the bytes
+        of its present storage files by name (to compare copies)."""
         directory = parent(metadata)
         listed: dict[bytes, EvidenceRef] = {}
         for text, evidence in stated.entries:
@@ -595,7 +680,9 @@ class _Assembler(_Proposer):
                         {"run_assembly": assembly},
                     )
                 )
-        return members
+        base = directory + b"/" if directory else b""
+        contents = tuple((path.removeprefix(base), self.files[path].content_id) for path in present)
+        return members, contents
 
     # --- 2 and 3. edges, and splits by machine -------------------------------------------------
 
