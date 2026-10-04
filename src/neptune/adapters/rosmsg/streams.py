@@ -18,9 +18,9 @@ whose bytes are not in one cited range, ``not_covered``; text that is not UTF-8 
 cell ``unknown``.
 """
 
+import hashlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Final
 
 from neptune.adapters.contract import AdapterConfig, ConfigOption
@@ -53,7 +53,11 @@ SCHEMAS: Final = {"cdr": frozenset({"ros2msg", "ros2idl"}), "ros1": frozenset({"
 HEADER_STAMP: Final = "header.stamp"
 HEADER_FRAME: Final = value_column("header.frame_id")
 # The reasons a payload is left undecoded that are a decoding limit, not a fault of its bytes.
-LIMIT_REASONS: Final = frozenset({"array_limit", "message_limit", "not_local"})
+LIMIT_REASONS: Final = frozenset({"array_limit", "message_limit", "not_local", "walk_limit"})
+# Left-out paths a finding lists before it only counts them.
+LISTED_LEFT_OUT: Final = 64
+# Distinct definitions one worker keeps planned, by digest (channels share schemas).
+_PLANNED_MAX: Final = 64
 
 DECODE_OPTIONS: Final = (
     ConfigOption(
@@ -136,7 +140,11 @@ class Decoding:
     def details(self) -> dict[str, JsonValue]:
         return {
             "columns": len(self.columns),
-            "left_out": [{"path": item.path, "reason": item.reason} for item in self.left_out],
+            "left_out": [
+                {"path": item.path, "reason": item.reason}
+                for item in self.left_out[:LISTED_LEFT_OUT]
+            ],
+            "left_out_count": len(self.left_out),
             "mode": self.mode,
             "type": self.root,
         }
@@ -168,32 +176,41 @@ def plan_stream(
     if definition is None or not schema_name:
         return NotDecoded("definition_absent", "the stream declares no definition to decode by")
     assert schema_encoding is not None
-    return _planned(
-        bytes(definition),
+    definition = bytes(definition)
+    limits = Limits()
+    if len(definition) > limits.max_definition_bytes:  # refused before the cache sees it
+        return NotDecoded(
+            "definition_too_large",
+            f"the definition is {len(definition)} bytes, more than {limits.max_definition_bytes}",
+        )
+    key = (
+        hashlib.sha256(definition).digest(),
         schema_encoding,
         schema_name,
         limits_of(config),
         message_encoding == "cdr",
         reserved,
     )
+    planned = _PLANNED.get(key)
+    if planned is None:
+        try:
+            parsed = parse_definition(definition, schema_encoding, schema_name, limits)
+        except DefinitionError as exc:
+            planned = NotDecoded(f"definition_{exc.reason}", str(exc))
+        else:
+            planned = _layout(parsed, key[3], key[4], reserved)
+        if len(_PLANNED) >= _PLANNED_MAX:
+            _PLANNED.pop(next(iter(_PLANNED)))  # the oldest
+        _PLANNED[key] = planned
+    return planned
 
 
-@lru_cache(maxsize=64)
-def _planned(
-    definition: bytes,
-    schema_encoding: str,
-    schema_name: str,
-    limits: DecodeLimits,
-    cdr: bool,
-    reserved: frozenset[str],
-) -> Decoding | NotDecoded:
-    """One parse and layout per distinct definition in a call: channels sharing a schema (often
-    hundreds) share it. Both are pure functions of these arguments."""
-    try:
-        parsed = parse_definition(definition, schema_encoding, schema_name, Limits())
-    except DefinitionError as exc:
-        return NotDecoded(f"definition_{exc.reason}", str(exc))
-    return _layout(parsed, limits, cdr, reserved)
+# One parse and layout per distinct definition in a worker: channels sharing a schema (often
+# hundreds) share it. Keyed by the definition's digest, never its bytes; both are pure functions
+# of the key, so the cache changes no output.
+_PLANNED: dict[
+    tuple[bytes, str, str, DecodeLimits, bool, frozenset[str]], "Decoding | NotDecoded"
+] = {}
 
 
 def _layout(

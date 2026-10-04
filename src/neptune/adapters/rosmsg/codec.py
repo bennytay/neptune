@@ -14,9 +14,15 @@ holds a list of lists), and nothing else. ROS 1's ``time`` and ``duration`` are 
 ``Decoder.decode`` walks one payload: ROS 2's CDR (the encapsulation header, then XCDR1 with
 alignment counted from after it, either byte order) or ROS 1's serialisation (little-endian,
 packed). Every count and length is checked against the bytes left before anything is read or
-allocated, an array is bounded by ``max_array_items``, a whole message by ``max_message_bytes``;
-a payload that breaks its layout raises ``Malformed``, never anything else. Text that is not
-UTF-8 makes only its own cell unknown.
+allocated, an array is bounded by ``max_array_items``, a whole message by ``max_message_bytes``,
+and the walk by ``max_walk_items``: every element of every array walked one at a time costs one,
+whatever its size, so arrays of a type with no bytes (an empty message, ``T[0]``) cannot make a
+payload of a few bytes cost a walk of millions. Parts of a layout that take no bytes on the wire
+read nothing and store nothing, so they are never walked. A payload that breaks its layout raises
+``Malformed``, never anything else. Text that is not UTF-8 makes only its own cell unknown.
+
+Compiling is bounded too: a definition is a graph of types, and the layout unrolls it along every
+path, so ``MAX_LAYOUT_NODES`` caps the fields the layout visits (with and without a column).
 """
 
 import struct
@@ -63,6 +69,9 @@ _CODES: Final = {
 }
 _U32: Final = (struct.Struct("<I"), struct.Struct(">I"))
 MAX_DEPTH: Final = 32
+# Fields one layout may visit, columns and left-out paths alike (a definition is a DAG of types
+# the layout unrolls along every path: 21 types of two fields each are 2^21 paths).
+MAX_LAYOUT_NODES: Final = 16_384
 NANOS: Final = 1_000_000_000
 
 
@@ -101,6 +110,9 @@ class DecodeLimits:
     max_columns: int = 512
     max_array_items: int = 65_536
     max_message_bytes: int = 16 << 20
+    # Array elements one message's walk visits one at a time (packed primitive arrays are one
+    # step): a fixed bound of the decoder, not configurable; past it the message is not covered.
+    max_walk_items: int = 1 << 22
 
 
 # --- The program --------------------------------------------------------------------------------
@@ -109,7 +121,7 @@ class DecodeLimits:
 class _State:
     """One walk: the payload, where it is, its byte order, where alignment counts from."""
 
-    __slots__ = ("big", "buf", "cdr", "cells", "limits", "origin", "pos")
+    __slots__ = ("big", "buf", "cdr", "cells", "limits", "origin", "pos", "walked")
 
     def __init__(
         self,
@@ -124,6 +136,13 @@ class _State:
         self.origin = pos
         self.cells = cells
         self.limits = limits
+        self.walked = 0
+
+    def walk(self, items: int) -> None:
+        """Charge ``items`` array elements to the message's walk budget."""
+        self.walked += items
+        if self.walked > self.limits.max_walk_items:
+            raise Malformed("walk_limit", limit=True)
 
     def align(self, size: int) -> None:
         if self.cdr and size > 1:
@@ -227,7 +246,9 @@ class _Time(_Node):
 
 class _Struct(_Node):
     def __init__(self, members: list[_Node]) -> None:
-        self.members = members
+        # A member that takes no bytes on the wire (an empty message, ``T[0]``, arrays of those)
+        # reads nothing and stores nothing: it is not walked.
+        self.members = [member for member in members if member.min_size]
         self.min_size = sum(member.min_size for member in members)
 
     def read(self, state: _State, depth: int) -> None:
@@ -274,6 +295,9 @@ class _Array(_Node):
             return
         # a count past what the bytes left could hold is a lie, refused before the walk
         state.need(count * self.element.min_size)
+        state.walk(count)
+        if not self.element.min_size:
+            return  # elements that take no bytes read and store nothing
         for _ in range(count):
             self.element.read(state, depth + 1)
 
@@ -333,6 +357,14 @@ class _Compiler:
         self.reserved = reserved
         self.columns: list[Column] = []
         self.left_out: list[LeftOut] = []
+        self.nodes = 0
+
+    def visit(self) -> None:
+        self.nodes += 1
+        if self.nodes > MAX_LAYOUT_NODES:
+            raise DefinitionError(
+                "node_limit", f"the layout visits more than {MAX_LAYOUT_NODES} fields"
+            )
 
     def column(self, path: str, wire: str, arrays: int) -> int | None:
         if arrays > 1:
@@ -356,6 +388,7 @@ class _Compiler:
         return _Struct([self.field(f, prefix, arrays, ancestors) for f in message.fields])
 
     def field(self, field: FieldDef, prefix: str, arrays: int, ancestors: tuple[str, ...]) -> _Node:
+        self.visit()
         path = prefix + field.name + ("[]" if field.array is not None else "")
         inner = arrays + (1 if field.array is not None else 0)
         if field.array is not None and field.declared in BYTE_NAMES:
@@ -431,8 +464,8 @@ def compile_layout(
 
     ``reserved`` are paths the adapter's own columns already use (MCAP's ``sequence``): a field at
     one of them is walked without a column (``name_taken``), never a second column of one name.
-    Raises ``DefinitionError`` (``column_limit``, ``nesting_limit``, ``unsupported``) where the
-    layout cannot be built; a caller may then try ``header_only``.
+    Raises ``DefinitionError`` (``column_limit``, ``node_limit``, ``nesting_limit``,
+    ``unsupported``) where the layout cannot be built; a caller may then try ``header_only``.
     """
     ros1 = definition.encoding == "ros1msg"
     compiler = _Compiler(definition, limits, ros1, reserved)

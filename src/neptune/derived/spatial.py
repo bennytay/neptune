@@ -4,9 +4,13 @@
 returns, under its transform (``neptune.frames``), the tables ``neptune.derived.frames`` defines
 and the findings of what does not hold together:
 
-- **run trees**: per run, the frames its ``tf2_msgs/TFMessage`` streams and its streams' headers
-  name, one graph (``frame_tree``); each ``parent → child`` pair a transform stream holds is a
-  ``frame_edge``, static on tf2's static topic, with its samples' first and last instants;
+- **run trees**: per run and tf namespace, the frames its ``tf2_msgs/TFMessage`` streams and its
+  streams' headers name, one graph (``frame_tree``); each ``parent → child`` pair a transform
+  stream holds is a ``frame_edge``, static on tf2's static topic, with its samples' first and last
+  instants. A tf stream's namespace is its topic without the last segment (``/robot1/tf`` is
+  ``/robot1``; ``/tf`` and ``/tf_static`` are the root, ``/``); a header stream is in the tree of
+  the longest tf namespace its topic is under, else the root's. Two namespaces' frames are never
+  one frame, whatever their names (a fleet's robots each publish ``base_link``);
 - **links**: frames of a declared graph (a calibration's, a URDF's) named as a run tree's frame
   is (``same_name``), and names that differ by a leading ``/`` (``leading_slash``);
 - **groups**: frames joined by declared transforms, stated bindings and tree edges, never by a
@@ -17,7 +21,8 @@ and the findings of what does not hold together:
   declared frame and CRS;
 - **findings**: a run's frames in groups no transform joins (``disconnected``), a frame with two
   parents, a loop, a static transform restated with other values, rows naming no frame, names
-  differing by a leading ``/``, a subject with no frame and no CRS (``origin_unknown``).
+  differing by a leading ``/``, a subject with no frame and no CRS (``origin_unknown``), one name
+  in two namespaces' trees of a run (``frame_name_ambiguous``).
 
 Everything is ``inferred``: a run's frames being one graph is ROS's convention, a topic being
 static is tf2's, a name match is a proposal. The pass reads only the time and value columns its
@@ -78,6 +83,7 @@ _PREFIX: Final = "neptune.frames."
 TF_TYPES: Final = frozenset({"tf2_msgs/TFMessage", "tf/tfMessage"})
 GEODETIC_TYPES: Final = frozenset({"sensor_msgs/NavSatFix"})
 HEADER_STAMP: Final = "header.stamp"
+ROOT_NAMESPACE: Final = "/"
 _LISTED: Final = 20  # entries a finding's details list before they are counted
 
 _T = "value/transforms[]."
@@ -119,6 +125,12 @@ def _topic(stream: Stream) -> str:
     return stream.topic.value if isinstance(stream.topic, Known) else ""
 
 
+def tf_namespace(topic: str) -> str:
+    """The namespace a tf stream publishes in: its topic without the last segment, ``/`` for
+    none (``/tf``, ``/tf_static``). Verbatim otherwise: ``robot1/tf`` is ``robot1``."""
+    return topic.rstrip("/").rpartition("/")[0] or ROOT_NAMESPACE
+
+
 def is_static_topic(topic: str) -> bool:
     """tf2 publishes static transforms on ``tf_static``, under any namespace."""
     return topic.rstrip("/").split("/")[-1] == "tf_static"
@@ -157,6 +169,7 @@ class _Edge:
 @dataclass
 class _Tree:
     run: RecordId
+    namespace: str
     id: RecordId
     streams: list[Stream] = field(default_factory=list)
     frames: set[str] = field(default_factory=set)
@@ -444,23 +457,36 @@ def _run(
     rows: RowReader,
 ) -> FrameAlignment:
     transform_id = work.transform.id
-    trees: dict[RecordId, _Tree] = {}
+    trees: dict[tuple[RecordId, str], _Tree] = {}
+    tree_of_stream: dict[RecordId, _Tree] = {}
 
-    def tree_of(stream: Stream) -> _Tree:
-        if stream.run not in trees:
-            tree_id = record_id(TREE_KIND, {"run": stream.run, "transform": transform_id})
-            trees[stream.run] = _Tree(stream.run, tree_id)
-        return trees[stream.run]
-
-    for stream in tf_streams:
-        tree = tree_of(stream)
+    def tree_of(stream: Stream, namespace: str) -> _Tree:
+        key = (stream.run, namespace)
+        if key not in trees:
+            tree_id = record_id(
+                TREE_KIND, {"namespace": namespace, "run": stream.run, "transform": transform_id}
+            )
+            trees[key] = _Tree(stream.run, namespace, tree_id)
+        tree = trees[key]
         tree.streams.append(stream)
-        work.read_transforms(tree, stream, rows)
+        tree_of_stream[stream.id] = tree
+        return tree
+
+    namespaces: dict[RecordId, set[str]] = defaultdict(set)
+    for stream in tf_streams:
+        namespace = tf_namespace(_topic(stream))
+        namespaces[stream.run].add(namespace)
+        work.read_transforms(tree_of(stream, namespace), stream, rows)
     header_counts: dict[RecordId, tuple[dict[str, int], int, int]] = {}
     for stream in header_streams:
-        tree = tree_of(stream)
-        tree.streams.append(stream)
-        header_counts[stream.id] = work.read_headers(tree, stream, rows)
+        topic = _topic(stream)
+        under = [
+            ns
+            for ns in namespaces.get(stream.run, ())
+            if ns != ROOT_NAMESPACE and topic.startswith(ns.rstrip("/") + "/")
+        ]
+        namespace = max(under, key=lambda ns: (len(ns), ns)) if under else ROOT_NAMESPACE
+        header_counts[stream.id] = work.read_headers(tree_of(stream, namespace), stream, rows)
 
     union = _Union()
     parents: dict[FrameRef, set[FrameRef]] = defaultdict(set)
@@ -468,15 +494,16 @@ def _run(
     edge_lines: list[FrameEdge] = []
     tree_lines: list[FrameTree] = []
     tree_frames: dict[RecordId, list[FrameRef]] = {}
-    for run in sorted(trees):
-        tree = trees[run]
+    for key in sorted(trees):
+        tree = trees[key]
         evidence = _sorted_refs(s.provenance.evidence for s in tree.streams)
         tree_lines.append(
             FrameTree(
                 tree.id,
                 transform_id,
                 evidence,
-                run,
+                tree.run,
+                tree.namespace,
                 tuple(sorted({s.id for s in tree.streams})),
             )
         )
@@ -496,6 +523,7 @@ def _run(
             if not work.evidence[ref]:  # named only by transforms that set no edge
                 work.evidence[ref].append(evidence[0])
         _tree_findings(work, tree, refs, evidence)
+    _ambiguous_names(work, trees)
 
     # Declared graphs: transforms, frames and stated bindings.
     declared: dict[FrameRef, None] = {}
@@ -521,12 +549,12 @@ def _run(
         for mine, theirs in ((binding.parent, bound.parent), (binding.child, bound.child)):
             union.union(mine, theirs)
             identities.union(mine, theirs)
-    references = _references(work, header_streams, header_counts, trees, artifacts, union)
+    references = _references(work, header_streams, header_counts, tree_of_stream, artifacts, union)
     for reference in references:
         for count in reference.frames:
             if count.frame not in work.evidence:
                 work.evidence[count.frame].extend(reference.evidence)
-    links = _links(work, sorted(declared, key=_key), trees, tree_frames)
+    links = _links(work, sorted(declared, key=_key), tree_frames)
     groups = _groups(work, union, parents, identities, dynamic)
     _disconnected(work, trees, tree_frames, union)
     return FrameAlignment(
@@ -704,10 +732,11 @@ def _references(
     artifacts: list[SpatialArtifact | Site | Asset],
     union: _Union,
 ) -> list[SpatialReference]:
+    """``trees``: each header stream's tree, by stream id."""
     transform_id = work.transform.id
     found: list[SpatialReference] = []
     for stream in header_streams:
-        tree = trees[stream.run]
+        tree = trees[stream.id]
         named, unset, read = counts[stream.id]
         if not read:
             continue  # no row: no value to place
@@ -774,7 +803,6 @@ def _references(
 def _links(
     work: _Pass,
     declared: list[FrameRef],
-    trees: Mapping[RecordId, _Tree],
     tree_frames: Mapping[RecordId, list[FrameRef]],
 ) -> list[FrameLink]:
     transform_id = work.transform.id
@@ -863,14 +891,50 @@ def _groups(
     return found
 
 
+def _ambiguous_names(work: _Pass, trees: Mapping[tuple[RecordId, str], _Tree]) -> None:
+    """One finding per run whose trees of two or more namespaces name one frame: two frames
+    (two robots' ``base_link``), never merged, so a comparison across them is never
+    ``same_frame``."""
+    by_run: dict[RecordId, list[_Tree]] = defaultdict(list)
+    for key in sorted(trees):
+        by_run[key[0]].append(trees[key])
+    for run, run_trees in by_run.items():
+        if len(run_trees) < 2:
+            continue
+        seen: dict[str, list[str]] = defaultdict(list)
+        for tree in run_trees:
+            for name in tree.frames:
+                seen[name].append(tree.namespace)
+        shared = {name: sorted(spaces) for name, spaces in seen.items() if len(spaces) > 1}
+        if not shared:
+            continue
+        involved = sorted({ns for spaces in shared.values() for ns in spaces})
+        listed = [t for t in run_trees if t.namespace in involved]
+        work.finding(
+            "frame_name_ambiguous",
+            FindingCategory.AMBIGUOUS,
+            Severity.WARNING,
+            listed[0].streams[0].provenance.evidence,
+            f"{len(shared)} frame name(s) of a run appear in the trees of more than one tf"
+            " namespace; each namespace's frame is its own (two robots' frames may share a name),"
+            " so they are kept apart and never compare as one frame",
+            {
+                "count": len(shared),
+                "frames": {name: shared[name] for name in sorted(shared)[:_LISTED]},
+                "run": run,
+            },
+            [*(t.id for t in listed), *(s.id for t in listed for s in t.streams)],
+        )
+
+
 def _disconnected(
     work: _Pass,
-    trees: Mapping[RecordId, _Tree],
+    trees: Mapping[tuple[RecordId, str], _Tree],
     tree_frames: Mapping[RecordId, list[FrameRef]],
     union: _Union,
 ) -> None:
-    for run in sorted(trees):
-        tree = trees[run]
+    for key in sorted(trees):
+        tree = trees[key]
         refs = tree_frames[tree.id]
         groups: dict[FrameRef, list[str]] = defaultdict(list)
         for ref in refs:
@@ -897,4 +961,5 @@ __all__ = [
     "align_frames",
     "frame_records",
     "is_static_topic",
+    "tf_namespace",
 ]

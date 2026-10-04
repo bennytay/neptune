@@ -124,21 +124,26 @@ def _check(record_id: RecordId, transform: RecordId, evidence: tuple[EvidenceRef
 
 @dataclass(frozen=True)
 class FrameTree:
-    """The frames one run's ROS messages name, as one graph (rule ``ros.run_frames``): ROS names
-    a frame by its id within one tf tree, so the ids a run's transforms and headers write are one
-    graph's. ``streams`` are those that name frames, sorted; the evidence cites each."""
+    """The frames one run's ROS messages in one tf namespace name, as one graph (rule
+    ``ros.run_frames``): ROS names a frame by its id within one tf tree, so the ids a run's
+    transforms and headers write under one namespace are one graph's. ``namespace`` is the tf
+    topics' (``/robot1`` for ``/robot1/tf``, ``/`` for ``/tf``); two namespaces are two trees.
+    ``streams`` are those that name frames, sorted; the evidence cites each."""
 
     kind: ClassVar[str] = TREE_KIND
     id: RecordId
     transform: RecordId
     evidence: tuple[EvidenceRef, ...]
     run: RecordId
+    namespace: str
     streams: tuple[RecordId, ...]
     rule: str = RUN_FRAMES
 
     def __post_init__(self) -> None:
         _check(self.id, self.transform, self.evidence)
         parse_record_id(self.run)
+        if not self.namespace:
+            raise ValueError("a frame tree names its tf namespace ('/' for the root)")
         if not self.streams or list(self.streams) != sorted(set(self.streams)):
             raise ValueError("a frame tree names its streams, sorted and unique")
         if self.rule != RUN_FRAMES:
@@ -151,6 +156,7 @@ class FrameTree:
     def to_json(self) -> JsonObject:
         return {
             **_envelope(self.kind, self.id, self.provenance),
+            "namespace": self.namespace,
             "rule": self.rule,
             "run": self.run,
             "streams": list(self.streams),
@@ -158,13 +164,16 @@ class FrameTree:
 
 
 def frame_tree_from_json(data: JsonValue) -> FrameTree:
-    obj = derived_object(data, TREE_KIND, {"evidence", "id", "rule", "run", "streams", "transform"})
+    obj = derived_object(
+        data, TREE_KIND, {"evidence", "id", "namespace", "rule", "run", "streams", "transform"}
+    )
     record_id, transform, evidence = _common(obj)
     return FrameTree(
         record_id,
         transform,
         evidence,
         parse_record_id(json_str(obj["run"], "run")),
+        json_str(obj["namespace"], "namespace"),
         _ids(obj["streams"], "streams"),
         json_str(obj["rule"], "rule"),
     )

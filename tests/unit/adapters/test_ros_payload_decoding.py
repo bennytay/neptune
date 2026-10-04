@@ -7,8 +7,10 @@ fixture's ``/imu``, flattened to the decoder's column paths. Every decoded cell 
 payload the official reader refuses must have every value ``unknown`` and a finding.
 """
 
+import importlib.util
 import json
 import struct
+import time
 from pathlib import Path
 from typing import Any, Final
 
@@ -19,9 +21,23 @@ from neptune.adapters.harness import SourceOutput, ingest_source
 from neptune.adapters.mcap import McapAdapter
 from neptune.adapters.rosbag1 import Rosbag1Adapter
 from neptune.adapters.rosbag2 import Rosbag2Adapter
-from neptune.adapters.rosmsg.codec import DecodeLimits, Decoder, Malformed, compile_layout
+from neptune.adapters.rosmsg import streams as ros_streams
+from neptune.adapters.rosmsg.codec import (
+    MAX_LAYOUT_NODES,
+    DecodeLimits,
+    Decoder,
+    Malformed,
+    compile_layout,
+)
 from neptune.adapters.rosmsg.definitions import DefinitionError, parse_definition
-from neptune.adapters.rosmsg.streams import Decoding, NotDecoded, decode_row, plan_stream
+from neptune.adapters.rosmsg.streams import (
+    LIMIT_REASONS,
+    LISTED_LEFT_OUT,
+    Decoding,
+    NotDecoded,
+    decode_row,
+    plan_stream,
+)
 from neptune.discovery.reader import BytesReader
 from neptune.model.knowledge import Known
 from neptune.model.run import Stream
@@ -387,3 +403,178 @@ def test_a_bounded_string_in_an_idl_sequence_keeps_its_bound() -> None:
     with pytest.raises(Malformed) as caught:
         decoder.decode(cdr(b"\x01\x00\x00\x00", b"\x04\x00\x00\x00abc\x00"))
     assert caught.value.reason == "string_bound"
+
+
+# --- Work bounded by more than bytes ------------------------------------------------------------
+
+SEPARATOR: Final = "=" * 80
+
+
+def msgs(root: str, **types: str) -> bytes:
+    """A ``ros1msg``/``ros2msg`` definition: ``root``'s fields, then each ``MSG:`` section."""
+    sections = [root, *(f"{SEPARATOR}\nMSG: {name}\n{body}" for name, body in types.items())]
+    return "\n".join(sections).encode()
+
+
+def _frames_writer() -> Any:
+    spec = importlib.util.spec_from_file_location(
+        "make_frames_writer", FIXTURES / "frames" / "make_frames.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def ros2_mcap(
+    schemas: dict[str, str], channels: dict[str, str], payloads: dict[str, bytes]
+) -> bytes:
+    """A small unchunked ROS 2 MCAP: ``channels`` topic to type, one message per topic."""
+    writer = _frames_writer()
+    listed = [
+        writer.Channel(i + 1, topic, kind) for i, (topic, kind) in enumerate(channels.items())
+    ]
+    ids = {channel.topic: channel.id for channel in listed}
+    messages = [
+        writer.Message(ids[topic], 1_000 + ids[topic], data) for topic, data in payloads.items()
+    ]
+    return writer.write_mcap("ros2msg", schemas, listed, messages)  # type: ignore[no-any-return]
+
+
+def test_arrays_of_a_type_with_no_bytes_walk_nothing_and_cost_no_source() -> None:
+    """625 bytes of MCAP once cost a 60 s sandbox kill: 65,536 x 65,536 empty elements walked
+    for a payload of four bytes, and the good channel beside it was lost with the source."""
+    data = ros2_mcap(
+        {
+            "pkg/msg/Outer": "pkg/Inner[65536] a\n"
+            f"{SEPARATOR}\nMSG: pkg/Inner\npkg/Empty[65536] e\n{SEPARATOR}\nMSG: pkg/Empty\n",
+            "std_msgs/msg/String": "string data\n",
+        },
+        {"/nested": "pkg/msg/Outer", "/chatter": "std_msgs/msg/String"},
+        {"/nested": cdr(), "/chatter": cdr(b"\x06\x00\x00\x00hello\x00")},
+    )
+    started = time.monotonic()
+    output = ingest_source(McapAdapter(), BytesReader(data), {})
+    assert time.monotonic() - started < 10
+    topics = by_topic(output)
+    _, chatter = topics["/chatter"]
+    assert [(row["value/data"], row["state/value/data"]) for row in chatter] == [("hello", "known")]
+    _, nested = topics["/nested"]
+    assert len(nested) == 1  # decoded: the type has no bytes, so the payload is its header
+    assert not [f for f in output.findings() if f.code == "mcap.payload_undecodable"]
+
+
+def test_a_walk_past_its_budget_is_a_limit_of_that_message_only() -> None:
+    definition = parse_definition(
+        msgs("pkg/Inner[] a", **{"pkg/Inner": "pkg/Empty[] e", "pkg/Empty": ""}),
+        "ros2msg",
+        "pkg/msg/Outer",
+    )
+    limits = DecodeLimits()
+    decoder = Decoder(compile_layout(definition, limits), True, limits)
+    full = struct.pack("<I", 65_536)
+    assert decoder.decode(cdr(struct.pack("<I", 3), full * 3)) == []  # 196,611 elements
+    started = time.monotonic()
+    with pytest.raises(Malformed) as caught:  # 100 x 65,536 elements in 404 bytes
+        decoder.decode(cdr(struct.pack("<I", 100), full * 100))
+    assert time.monotonic() - started < 5
+    assert (caught.value.reason, caught.value.limit) == ("walk_limit", True)
+    assert "walk_limit" in LIMIT_REASONS  # a limit finding, not corruption
+
+
+def _doubling(depth: int, header: bool = False) -> bytes:
+    """``T0`` .. ``T{depth}``, each two fields of the next, the last a byte array: 2^depth paths
+    from a definition of a few hundred bytes."""
+    root = ("Header header\n" if header else "") + "pkg/T1 a\npkg/T1 b"
+    types = {f"pkg/T{i}": f"pkg/T{i + 1} a\npkg/T{i + 1} b" for i in range(1, depth)}
+    types[f"pkg/T{depth}"] = "uint8[] x"
+    if header:
+        types["std_msgs/Header"] = "uint32 seq\ntime stamp\nstring frame_id"
+    return msgs(root, **types)
+
+
+def test_a_layout_that_unrolls_past_its_node_budget_is_refused_quickly() -> None:
+    """A definition of a few kilobytes (763 bytes with short separators) once compiled to
+    1,048,576 left-out paths: 822 MiB, 7.7 s."""
+    text = _doubling(20)
+    assert len(text) < 4096
+    started = time.monotonic()
+    with pytest.raises(DefinitionError) as caught:
+        compile_layout(parse_definition(text, "ros1msg", "pkg/T0"), DecodeLimits())
+    assert caught.value.reason == "node_limit"
+    found = plan_stream(
+        config=config(),
+        message_encoding="ros1",
+        schema_encoding="ros1msg",
+        schema_name="pkg/T0",
+        definition=text,
+    )
+    assert isinstance(found, NotDecoded) and found.reason == "layout_node_limit"
+    assert time.monotonic() - started < 5
+    headed = plan_stream(
+        config=config(),
+        message_encoding="ros1",
+        schema_encoding="ros1msg",
+        schema_name="pkg/T0",
+        definition=_doubling(20, header=True),
+    )
+    assert isinstance(headed, Decoding) and headed.mode == "header_only"
+    small = compile_layout(parse_definition(_doubling(4), "ros1msg", "pkg/T0"), DecodeLimits())
+    assert len(small.left_out) == 2**4 < MAX_LAYOUT_NODES
+
+
+def test_a_finding_lists_a_bounded_number_of_left_out_paths() -> None:
+    text = "".join(f"uint8[] b{i:03}\n" for i in range(100)).encode()
+    found = plan_stream(
+        config=config(),
+        message_encoding="cdr",
+        schema_encoding="ros2msg",
+        schema_name="pkg/msg/Blobs",
+        definition=text,
+    )
+    assert isinstance(found, Decoding) and found.mode == "partial"
+    details = found.details()
+    assert details["left_out_count"] == 100
+    assert isinstance(details["left_out"], list) and len(details["left_out"]) == LISTED_LEFT_OUT
+
+
+def test_planned_definitions_are_kept_by_digest_and_bounded() -> None:
+    too_large = b"float64 x\n" + b"#" * (1 << 20)
+    before = dict(ros_streams._PLANNED)
+    found = plan_stream(
+        config=config(),
+        message_encoding="cdr",
+        schema_encoding="ros2msg",
+        schema_name="pkg/msg/Big",
+        definition=too_large,
+    )
+    assert isinstance(found, NotDecoded) and found.reason == "definition_too_large"
+    assert before == ros_streams._PLANNED  # refused before the cache: nothing kept
+    for i in range(80):
+        plan_stream(
+            config=config(),
+            message_encoding="cdr",
+            schema_encoding="ros2msg",
+            schema_name="pkg/msg/Values",
+            definition=f"float64 x{i}\n".encode(),
+        )
+    assert len(ros_streams._PLANNED) <= 64
+    assert all(len(key[0]) == 32 for key in ros_streams._PLANNED)  # a digest, not the bytes
+
+
+@pytest.mark.parametrize("over", [0, 1])
+def test_an_mcap_payload_of_exactly_the_message_limit_decodes(over: int) -> None:
+    payload = cdr(struct.pack("<I", 2), bytes(4), struct.pack("<2d", 1.5, 2.5))
+    data = ros2_mcap(
+        {"pkg/msg/Values": "float64[] values\n"},
+        {"/values": "pkg/msg/Values"},
+        {"/values": payload},
+    )
+    output = ingest_source(
+        McapAdapter(), BytesReader(data), {"max_message_bytes": len(payload) - over}
+    )
+    (row,) = by_topic(output)["/values"][1]
+    if over:
+        assert row["state/value/values[]"] == "not_covered"
+    else:
+        assert (row["value/values[]"], row["state/value/values[]"]) == ((1.5, 2.5), "known")

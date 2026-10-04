@@ -6,6 +6,7 @@ and a mobile manipulator (ROS 1 bag). The pass reads the adapters' records and d
 rows, as the job hands them over; nothing here decodes a payload.
 """
 
+import dataclasses
 import math
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
@@ -44,9 +45,10 @@ from neptune.derived.frames import (
     spatial_reference_from_json,
 )
 from neptune.derived.sessions import read_derived
-from neptune.derived.spatial import FrameAlignment, align_frames, is_static_topic
+from neptune.derived.spatial import FrameAlignment, align_frames, is_static_topic, tf_namespace
 from neptune.discovery.reader import BytesReader
 from neptune.identity import canonical_json
+from neptune.identity.ids import record_id
 from neptune.model.frames import FrameRef, TransformDirection
 from neptune.model.knowledge import Ambiguous, Known, Unknown
 from neptune.model.reference import FrameTransform
@@ -477,3 +479,79 @@ def test_a_pair_stated_both_ways_is_a_loop() -> None:
     assert found is not None
     loop = next(f for f in found.findings if f.code.endswith(".loop"))
     assert ["shoulder_link", "base_link"] in loop.details["pairs"]  # type: ignore[operator]
+
+
+# --- Namespaces: two robots, one recording -------------------------------------------------------
+
+
+def test_tf_namespaces_are_the_topic_without_its_last_segment() -> None:
+    cases = {"/tf": "/", "/tf_static": "/", "tf": "/", "/robot1/tf": "/robot1"}
+    cases |= {"/fleet/robot2/tf_static": "/fleet/robot2", "robot1/tf": "robot1", "/a/tf/": "/a"}
+    assert {topic: tf_namespace(topic) for topic in cases} == cases
+
+
+def _fleet() -> tuple[list[Any], Any, dict[str, Stream]]:
+    """The arm recording as two robots of one fleet (the nav2 multi-robot pattern): each robot's
+    ``/tf``, ``/tf_static`` and ``/ft_sensor`` under ``/robot1`` or ``/robot2``, its frames
+    unprefixed, so both name ``base_link``. ``/joint_states`` stays at the root."""
+    corpus = Corpus("arm")
+    moved = {corpus.stream(t).id: t for t in ("/tf", "/tf_static", "/ft_sensor")}
+    clones: dict[str, Stream] = {}  # clone id -> original stream
+    records = [r for r in corpus.records if getattr(r, "id", None) not in moved]
+    named: dict[str, Stream] = {}
+    for robot in ("/robot1", "/robot2"):
+        for original_id, topic in sorted(moved.items(), key=lambda item: item[1]):
+            original = next(r for r in corpus.records if getattr(r, "id", None) == original_id)
+            assert isinstance(original.topic, Known)
+            clone = dataclasses.replace(
+                original,
+                id=record_id("stream", {"robot": robot, "topic": topic}),
+                topic=dataclasses.replace(original.topic, value=robot + topic),
+            )
+            clones[clone.id] = original
+            named[robot + topic] = clone
+            records.append(clone)
+
+    def rows(of: Stream, columns: Sequence[str]) -> Iterator[Mapping[str, object]]:
+        return corpus.rows(clones.get(of.id, of), columns)
+
+    return records, rows, named
+
+
+def test_two_robots_frames_of_one_name_are_two_frames_never_one() -> None:
+    records, rows, named = _fleet()
+    found = align_frames(records, rows)
+    assert found is not None
+    trees = {tree.namespace: tree for tree in found.trees}
+    assert set(trees) == {"/", "/robot1", "/robot2"}
+    for robot in ("/robot1", "/robot2"):
+        expected = {named[robot + t].id for t in ("/tf", "/tf_static", "/ft_sensor")}
+        assert set(trees[robot].streams) == expected  # the header stream under its namespace
+    one, two = (FrameRef("base_link", trees[ns].id) for ns in ("/robot1", "/robot2"))
+    assert one != two
+    assert not {"loop", "multiple_parents"} & set(codes(found))  # no merge to contradict itself
+    (ambiguous,) = [f for f in found.findings if f.code.endswith("frame_name_ambiguous")]
+    frames = ambiguous.details["frames"]
+    assert isinstance(frames, dict) and frames["base_link"] == ["/robot1", "/robot2"]
+    assert trees["/robot1"].id in ambiguous.records and trees["/robot2"].id in ambiguous.records
+    index = frame_index(records, (*found.edges, *found.links, *found.groups))
+    for links in (False, True):
+        answer = index.compare(FrameAt(one), FrameAt(two), links=links)
+        assert isinstance(answer, NotComparable) and answer.reason is Reason.DISCONNECTED
+    within = index.compare(FrameAt(one), FrameAt(FrameRef("tool0", trees["/robot1"].id)))
+    assert isinstance(within, Comparable) and within.basis is Basis.CONNECTED
+    for group in found.groups:  # no group spans two robots
+        assert len({member.frame_graph_id for member in group.members}) == 1
+
+
+def test_a_header_stream_outside_every_tf_namespace_is_in_the_root_tree() -> None:
+    records, rows, _ = _fleet()
+    found = align_frames(records, rows)
+    assert found is not None
+    (root,) = [tree for tree in found.trees if tree.namespace == "/"]
+    joint_states = next(
+        r
+        for r in records
+        if isinstance(r, Stream) and isinstance(r.topic, Known) and r.topic.value == "/joint_states"
+    )
+    assert root.streams == (joint_states.id,)

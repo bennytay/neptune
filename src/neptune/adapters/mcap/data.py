@@ -378,8 +378,8 @@ class Data:
             rows[state_column(column)].append(KNOWN if tick is not None else UNKNOWN)
         rows[SEQ].append(seq)
         rows[SEQUENCE].append(sequence)
-        for step, (offset, size) in enumerate(steps):
-            rows[locator_column(step, "length")].append(size)
+        for step, (offset, length) in enumerate(steps):
+            rows[locator_column(step, "length")].append(length)
             rows[locator_column(step, "offset")].append(offset)
         if slot.decoding is not None and payload is not None:
             decoded = decode_row(slot.decoding, payload, size)

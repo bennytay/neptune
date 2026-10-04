@@ -141,7 +141,8 @@ a bug, not a value.
 - `FrameTransform(id, provenance, parent, child, direction, value, validity)`: one graph, `direction` `Knowledge`-wrapped
   (`Ambiguous` when a calibration file does not say), validity `STATIC` or a `Timestamp`. Not to be confused
   with `TransformRecord`, the provenance record. Nothing composes transforms.
-- Across graphs (ADR 0068, derived): a run's tf and header frame ids form one `frame_tree`, each tf pair a
+- Across graphs (ADR 0068, derived): a run's tf and header frame ids form one `frame_tree` per tf namespace
+  (`/robot1/tf` and `/robot2/tf` are two trees; same-named frames in two are never merged), each tf pair a
   `frame_edge` (static or dynamic, its samples' first and last instants, direction `child_to_parent`, unit and
   quaternion algebra `Unknown`); names a declared graph and a run share, or that differ by a leading `/`, are
   `frame_link` proposals; `frame_group`s are frames transforms, edges and stated bindings join (never links),

@@ -53,6 +53,18 @@ why. Forces:
      with a construct the decoder does not read, keeps only a leading header. Every count is
      checked against the bytes left before anything is allocated. Payloads that do not decode
      cost one `payload_undecodable` finding per stream and chunk, never the chunk.
+   - Two fixed bounds of the decoder, not config (changing one is a new adapter version), because
+     a definition is a graph of types and bytes alone do not bound the work. Compiling a layout
+     visits at most 16,384 fields, columns and left-out paths alike (`MAX_LAYOUT_NODES`: 21 types
+     of two fields each unroll to 2^21 paths); past it the layout keeps only a leading header, else
+     the stream is `payload_not_decoded` with `layout_node_limit`. Decoding one message walks at
+     most 2^22 array elements one at a time (`max_walk_items`; a packed primitive array is one
+     step), each costing one whatever its size, so arrays of a type with no bytes (an empty
+     message, `T[0]`) cannot turn a few bytes into millions of steps; past it the message is
+     `not_covered` (`walk_limit`, a limit, not corruption). Parts of a layout that take no bytes
+     read and store nothing and are never walked. `payload_partly_decoded` lists at most 64
+     left-out paths and counts them all (`left_out_count`); a stream adapter keeps the plans of at
+     most 64 distinct definitions, keyed by digest, and refuses an over-large definition before.
    - MCAP, rosbag1 and rosbag2 become version 0.2.0: new lineage, nothing rewritten.
 2. **A leading `std_msgs/Header` is a clock.** Where the root's first field is a header whose
    stamp and frame id are ROS's (checked on the definition, not the name), the stream gains a
@@ -64,9 +76,16 @@ why. Forces:
    pass (stage 9d), over the admitted records and committed series, reading only the frame and
    transform columns. It writes five derived tables, every line `inferred`, and runs only when
    something is spatial:
-   - `frame_tree {run, streams, rule: ros.run_frames}`: the frames one run's TF streams
-     (`tf2_msgs/TFMessage`, `tf/tfMessage`) and header streams name are one graph, the line's id
-     their `frame_graph_id`. ROS names frames per tf tree, which is a convention, so it is inferred.
+   - `frame_tree {run, namespace, streams, rule: ros.run_frames}`: the frames one run's TF
+     streams (`tf2_msgs/TFMessage`, `tf/tfMessage`) and header streams name under one tf namespace
+     are one graph, the line's id their `frame_graph_id`. ROS names frames per tf tree, which is a
+     convention, so it is inferred. Frame identity is scoped by the publishing tf topic's
+     namespace: the topic without its last segment (`/robot1/tf` is `/robot1`; `/tf` and
+     `/tf_static` share the root, `/`). A header stream joins the tree of the longest tf namespace
+     its topic is under, else the root's. Same-named frames of two namespaces are never merged (a
+     fleet's robots each publish `base_link`, the nav2 multi-robot pattern): they are two frames,
+     the run has one `frame_name_ambiguous` finding listing them, and `compare` across them is
+     never `same_frame` (no step joins them: `disconnected`).
    - `frame_edge {tree, stream, parent, child, persistence, direction, translation_unit,
      quaternion_convention, samples, first, last}`: one per pair one TF stream states. `static` on
      tf2's static topic (`tf_static` under any namespace). `direction` `Known(child_to_parent)`
@@ -89,7 +108,8 @@ why. Forces:
      CRS code is invented for it.
 4. **Findings** (`neptune.frames.*`): `disconnected` (a run's frames in more than one group, the
    groups listed), `multiple_parents`, `loop`, `static_changed` (a static pair restated with other
-   values), `frame_unset`, `name_variants`, `origin_unknown` (a subject with no frame, CRS or
+   values), `frame_unset`, `name_variants`, `frame_name_ambiguous` (one frame name in two tf
+   namespaces' trees of a run), `origin_unknown` (a subject with no frame, CRS or
    geodetic type), `untimed_transforms`, `frame_unrepresentable`.
 5. **Comparability is a query** (`neptune.derived.frames.FrameIndex.compare`, built by
    `frame_index(records, derived)`), like ADR 0060's `ClockGraph.align`:
@@ -121,6 +141,9 @@ why. Forces:
   scans and point clouds are what frame alignment needs most.
 - **Let a name match join groups**, or link two recordings' trees: two robots' `base_link` become
   one frame silently, which ADR 0007 forbids; a proposal kept apart costs a flag.
+- **One tree per run**, whatever the tf topics' namespaces: a multi-robot recording's
+  `/robot1/tf` and `/robot2/tf` with unprefixed `base_link` become one frame, with no finding and a
+  `same_frame` answer: the silent identity merge ADR 0007 forbids.
 - **Compose paths into a pose.** Needs the unit, quaternion algebra and direction that are
   `Unknown` for tf, and floats chosen for the consumer; the path and its caveats are the evidence.
 - **An EPSG code for `NavSatFix`** (4326 or 4979): the definition names an ellipsoid, not a
