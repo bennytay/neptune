@@ -19,11 +19,11 @@ from neptune.runtime import Isolation, JobEvent, JobOptions, Phase
 from neptune.sdk import (
     AsyncIngestion,
     AsyncNeptune,
+    ConfigurationError,
     DestinationExistsError,
     IngestResult,
     InvalidSourceError,
     Neptune,
-    NetworkRefusedError,
     committed_result,
     read_package,
 )
@@ -149,8 +149,8 @@ def test_a_bad_call_raises_before_anything_runs(root: Path, home: Path) -> None:
             await client.ingest(root, root)
         with pytest.raises(InvalidSourceError):
             await client.dry_run(root / "missing")
-        with pytest.raises(NetworkRefusedError):
-            await client.dry_run("s3://fleet/run-7")
+        with pytest.raises(ConfigurationError):
+            await AsyncNeptune(home, plugins=False).dry_run("s3://fleet/run-7")
 
     asyncio.run(main())
     assert no_job_threads()
