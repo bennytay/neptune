@@ -120,6 +120,7 @@ from neptune.discovery.verify import short_read_finding, verify_artifact
 from neptune.identity import canonical_json
 from neptune.identity.revisions import Observation, SourceLedger
 from neptune.manifest import LoadedManifest, ManifestError
+from neptune.model import references
 from neptune.model.finding import IngestFinding
 from neptune.model.ids import ContentId, ExternalObjectRef, RecordId
 from neptune.model.jsonvalue import JsonObject, JsonValue
@@ -135,7 +136,7 @@ from neptune.model.source import (
     local_location,
 )
 from neptune.model.world import StructuredRecord, StructuredTable
-from neptune.runtime import events, explain, lineage, references, sandbox, wire
+from neptune.runtime import events, explain, lineage, sandbox, wire
 from neptune.runtime.cache import (
     VERDICT_FILE,
     CacheReport,
@@ -2256,7 +2257,7 @@ class IngestJob:
         it lost (ADR 0069), so for one that lost chunks no kept record or finding may name a
         record the kept chunks do not hold (``reference_lost``: a block whose document, a value
         whose snapshot, a finding whose ``records``, was in a lost chunk). References are every
-        field the model types as a record id (``runtime.references``), never a hand list. One
+        field the model types as a record id (``model.references``), never a hand list. One
         problem per target, so memory is one entry per distinct target. Each problem is an object
         naming its ``Law`` and the ids it concerns, never text.
         """

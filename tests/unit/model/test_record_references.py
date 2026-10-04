@@ -1,4 +1,4 @@
-"""``runtime.references.named``: what a record names, read from the model's field types, so the
+"""``model.references.named``: what a record names, read from the model's field types, so the
 salvage check (ADR 0069 §2) needs no hand list of reference fields."""
 
 from pathlib import Path
@@ -9,7 +9,7 @@ from neptune.adapters.harness import ingest_source
 from neptune.adapters.mcap import McapAdapter
 from neptune.adapters.tabular import TabularAdapter
 from neptune.discovery.reader import BytesReader
-from neptune.runtime.references import named
+from neptune.model.references import named
 
 FIXTURES: Final = Path(__file__).parents[2] / "fixtures"
 LOOKALIKE: Final = "rec:sha256:" + "a" * 64

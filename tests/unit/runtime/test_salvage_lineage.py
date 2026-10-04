@@ -154,7 +154,7 @@ def test_salvage_refused_names_the_laws_the_rest_break() -> None:
     assert check_ingest_finding(finding) == finding
     assert finding.subject == EvidenceRef(SOURCE, (ByteRange(0, SIZE),))
     assert finding.message == (
-        "mcap 1.2.0: 1 of 5 chunks were lost and the rest break 3 cross-chunk laws without"
+        "mcap 1.2.0: 1 of 5 chunks were lost and the rest break 2 cross-chunk laws without"
         " them (stream_undeclared, output_silent); the source is not in this package"
     )
     assert finding.details["problems"] == problems

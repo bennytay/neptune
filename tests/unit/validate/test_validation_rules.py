@@ -561,10 +561,14 @@ def test_frames_a_graph_never_declares_or_a_graph_that_is_missing(tmp_path: Path
             )
         )
     found = validate_package(build(tmp_path, kit)).findings
-    assert sorted((f.details["frame"], f.details["reason"]) for f in found) == [
+    frames = [f for f in found if f.code.endswith("frame_unresolved")]
+    assert sorted((f.details["frame"], f.details["reason"]) for f in frames) == [
         ("tcp", "graph_missing"),
         ("wrist_camera", "frame_undeclared"),
     ]
+    # The missing graph is also a dangling reference: the model types frame_graph_id as one.
+    (dangling,) = [f for f in found if f.code.endswith("dangling_reference")]
+    assert (dangling.details["field"], dangling.details["target"]) == ("frame", missing_graph)
 
 
 # --- Stale configuration -------------------------------------------------------------------------

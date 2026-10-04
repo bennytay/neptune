@@ -32,9 +32,11 @@ from neptune.adapters.contract import (
 from neptune.adapters.registry import AdapterRegistry
 from neptune.discovery.verify import verify_artifact
 from neptune.identity.hashing import content_id
+from neptune.identity.provenance import evidence_record_id
+from neptune.model.assertion import Assertion
 from neptune.model.finding import FindingCategory, Severity, subject_to_json
-from neptune.model.knowledge import Known
-from neptune.model.provenance import ByteRange, EvidenceRef
+from neptune.model.knowledge import AssertionKind, Known, NotApplicable, NotCovered, Unknown
+from neptune.model.provenance import ByteRange, EvidenceRef, Provenance, Span
 from neptune.model.series import ColumnType, SeriesBatch, SeriesColumn
 from neptune.model.world import DocumentBlock, DocumentRecord
 from neptune.runtime import IngestJob, Isolation, JobError, JobEvent, JobOptions, JobState, Phase
@@ -847,4 +849,69 @@ def test_blocks_whose_document_was_lost_refuse_the_salvage(tmp_path: Path) -> No
     assert "(reference_lost)" in refused.message
     assert len(outcome.ingested) == 1  # the notes
     assert not [e for e in seen if e.kind == "source_salvaged"]
+    assert not [f for f in package.receipt.findings if f.code.endswith("dangling_reference")]
+
+
+class ScopingBrittle(BRITTLE.BrittleAdapter):  # type: ignore[misc, name-defined]
+    """The line ``about`` also states an ``Assertion`` whose scope names the first line's block:
+    a reference the model marks external (an assertion may be about any package's record). The
+    first line's chunk crashes."""
+
+    descriptor = replace(
+        BRITTLE.DESCRIPTOR, record_kinds=("assertion", "document_block", "document_record")
+    )
+
+    def ingest(self, source: SourceReader, chunk: Chunk, config: AdapterConfig) -> ChunkOutput:
+        if chunk.context.get("order") == 0:
+            raise RuntimeError("the first line's chunk was asked to crash")
+        output: ChunkOutput = super().ingest(source, chunk, config)
+        if chunk.context.get("part") == "document":
+            return output
+        start, end = chunk.context["start"], chunk.context["end"]
+        assert isinstance(start, int) and isinstance(end, int)
+        if source.read(start, end - start) != b"about":
+            return output
+        first_start, first = BRITTLE._lines(source)[0]
+        first_block = evidence_record_id(
+            DocumentBlock.kind,
+            EvidenceRef(source.content_id, (Span(first_start, first_start + len(first)),)),
+            config.transform,
+        )
+        evidence = EvidenceRef(source.content_id, (ByteRange(start, end - start),))
+        stated = Provenance(evidence, config.transform.id, AssertionKind.STATED)
+        about = Assertion(
+            id=evidence_record_id(Assertion.kind, evidence, config.transform),
+            provenance=stated,
+            identifier=Unknown(),
+            assertion_type=Unknown(),
+            author=Unknown(),
+            authored_at=Unknown(),
+            authored_zone=Unknown(),
+            scope=Known((first_block,), stated),
+            retracts=NotApplicable(),
+            payload=NotCovered(),
+            rationale=NotCovered(),
+            signature=NotCovered(),
+            ticket=NotCovered(),
+        )
+        return ChunkOutput((*output.records, about), output.series, output.findings)
+
+
+def test_an_external_reference_to_a_lost_record_does_not_refuse_the_salvage(
+    tmp_path: Path,
+) -> None:
+    """An assertion's scope may name a record of any package (ADR 0069 §2): kept, it naming a
+    block only the lost chunk held is no dangling reference, so the source is salvaged and
+    validation stays silent on it."""
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "scoped.brittle").write_bytes(BRITTLE.brittle("first", "about"))
+    adapters = AdapterRegistry([*builtin_adapters(), ScopingBrittle()])
+    _, package, seen = run(root, tmp_path, adapters)
+    assert codes(package) == ["neptune.runtime.chunk_failed", "neptune.runtime.source_partial"]
+    assert [e for e in seen if e.kind == "source_salvaged"]
+    (about,) = [r for r in package.records if r.kind == "assertion"]
+    assert isinstance(about.scope, Known)
+    held = {getattr(r, "id", None) for r in package.records}
+    assert not set(about.scope.value) & held  # it names the lost block, and that is allowed
     assert not [f for f in package.receipt.findings if f.code.endswith("dangling_reference")]

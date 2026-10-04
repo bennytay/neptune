@@ -50,16 +50,19 @@ the receipt states exactly what was lost.
 
    `reference_lost`: a kept record or finding names a record the kept chunks do not hold, such
    as a text block whose document, a configuration value whose snapshot, or a finding whose
-   `records` was in a lost chunk. References are read from the model, not a hand list
-   (`runtime.references.named`): every field typed as a `RecordId`, alone, in a tuple, in a
-   `Knowledge`, or nested in a value such as a `Timestamp`'s `domain_id` or a `FrameRef`'s
-   `frame_graph_id`, and every finding's `records`; not a record's own `id`, its `provenance`,
-   or a finding's `transform`. Fields typed as data (cells, configuration values) are never read,
-   so text that looks like an id names nothing. One problem per target. It applies to salvaged
-   sources only: a whole source whose references dangle is an adapter bug that validation
-   reports, as before; validation's `dangling_reference` (rule version 2) now also checks a
-   value's snapshot and every finding's `records`. A source that lost nothing is judged as
-   before (`output_invalid` if it breaks a law).
+   `records` was in a lost chunk. References are read from the model, not a hand list, by one
+   walker both checks call (`model.references.named`): every field typed as a `RecordId`, alone,
+   in a tuple, in a `Knowledge`, or nested in a value such as a `Timestamp`'s `domain_id` or a
+   `FrameRef`'s `frame_graph_id`, and every finding's `records`; not a record's own `id`, its
+   `provenance`, or a finding's `transform`. Fields typed as data (cells, configuration values)
+   are never read, so text that looks like an id names nothing. Fields marked external
+   (`ids.EXTERNAL` field metadata: an assertion's `scope`, a revision's or absence's
+   `supersedes`, a transform's `upstream`) may name another package's records and are checked by
+   neither. One problem per target. It applies to salvaged sources only: a whole source whose
+   references dangle is an adapter bug that validation reports; validation's
+   `dangling_reference` (rule version 2) checks every reference the same walker reads, keeping a
+   table only for the kind a reference must name where the model states one. A source that lost
+   nothing is judged as before (`output_invalid` if it breaks a law).
 
    **Refuse, never drop.** Such a source is refused, not admitted without the dangling records:
    dropping them would edit committed chunks' output at assembly, a value without its snapshot

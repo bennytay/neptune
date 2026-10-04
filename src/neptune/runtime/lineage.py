@@ -568,7 +568,7 @@ def salvage_refused(
         f"every chunk was lost ({_plural(chunks, 'chunk')})"
         if lost == chunks
         else f"{lost} of {_plural(chunks, 'chunk')} were lost and the rest break"
-        f" {_plural(len(problems), 'cross-chunk law')} without them ({', '.join(laws)})"
+        f" {_plural(len(laws), 'cross-chunk law')} without them ({', '.join(laws)})"
     )
     return ingest_finding(
         code=SALVAGE_REFUSED,

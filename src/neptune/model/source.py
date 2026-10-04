@@ -7,11 +7,12 @@ provenance, because every other record's provenance points at them.
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, Final, TypeAlias
 
 from neptune.model._fields import exact_object, json_array, json_int, json_str
 from neptune.model.ids import (
+    EXTERNAL,
     ContentId,
     ExternalObjectRef,
     RecordId,
@@ -165,7 +166,7 @@ class SourceRevision:
     id: RecordId
     location: SourceLocation
     content_id: ContentId
-    supersedes: tuple[RecordId, ...]
+    supersedes: tuple[RecordId, ...] = field(metadata=EXTERNAL)  # earlier scans' (ADR 0069)
 
     def __post_init__(self) -> None:
         parse_record_id(self.id)
@@ -202,7 +203,7 @@ class SourceAbsence:
     family: ClassVar[Family] = Family.SOURCE
     id: RecordId
     location: SourceLocation
-    supersedes: tuple[RecordId, ...]
+    supersedes: tuple[RecordId, ...] = field(metadata=EXTERNAL)  # earlier scans' (ADR 0069)
 
     def __post_init__(self) -> None:
         parse_record_id(self.id)
