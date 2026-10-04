@@ -362,6 +362,49 @@ def test_sources_are_admitted_uncalled_and_refused_like_adapters(
     ]
 
 
+def test_a_source_declares_the_schemes_it_reads(
+    plugin_dists: ModuleType, plugin_site: Path
+) -> None:
+    module = (
+        "def make(*args, **kwargs):\n    return object()\n\n"
+        "def s3(*a, **k):\n    return object()\n\ns3.schemes = ('s3', 'minio+s3')\n\n"
+        "def none(*a, **k):\n    return object()\n\n"
+        "def upper(*a, **k):\n    return object()\n\nupper.schemes = ('S3',)\n\n"
+        "def local(*a, **k):\n    return object()\n\nlocal.schemes = ['file']\n\n"
+        "def twice(*a, **k):\n    return object()\n\ntwice.schemes = ['gs', 'gs']\n\n"
+        "def text(*a, **k):\n    return object()\n\ntext.schemes = 'gs'\n\n"
+        "class Raising:\n    @property\n    def schemes(self):\n        raise RuntimeError\n"
+        "    def __call__(self, *a, **k):\n        return object()\n\nraising = Raising()\n"
+    )
+    plugin_dists.install(
+        plugin_site,
+        "neptune-test-schemes",
+        "1.0.0",
+        sources={
+            "s3": ":s3",
+            "none": ":none",
+            "upper": ":upper",
+            "local": ":local",
+            "twice": ":twice",
+            "text": ":text",
+            "raising": ":raising",
+        },
+        module=module,
+    )
+    plugins = _load(plugin_site, groups=[SOURCES_GROUP])
+    assert [(s.id, s.schemes) for s in plugins.sources] == [
+        ("none", ()),
+        ("s3", ("minio+s3", "s3")),
+    ]
+    assert _codes(plugins) == [
+        (LOAD_FAILED, "raising", None),
+        (REFUSED, "local", "invalid_schemes"),
+        (REFUSED, "text", "invalid_schemes"),
+        (REFUSED, "twice", "invalid_schemes"),
+        (REFUSED, "upper", "invalid_schemes"),
+    ]
+
+
 def test_only_the_named_groups_are_read(plugin_dists: ModuleType, plugin_site: Path) -> None:
     plugin_dists.install(
         plugin_site,
