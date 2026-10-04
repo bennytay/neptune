@@ -28,10 +28,10 @@ from typing import TYPE_CHECKING, Final
 
 from neptune.adapters.contract import (
     ABI_VERSION,
-    ChunkExtent,
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
+    ChunkExtent,
     ChunkOutput,
     Documented,
     FormatSpec,

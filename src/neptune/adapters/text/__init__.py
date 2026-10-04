@@ -39,13 +39,13 @@ from typing import Final
 
 from neptune.adapters.contract import (
     ABI_VERSION,
-    ChunkExtent,
     GENERIC,
     NAME_ONLY,
     PROBE_HEAD_SIZE,
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
+    ChunkExtent,
     ChunkOutput,
     ConfigOption,
     Documented,

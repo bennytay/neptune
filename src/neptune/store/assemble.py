@@ -20,7 +20,7 @@ import hashlib
 import secrets
 import shutil
 from collections import defaultdict
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Collection, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -280,6 +280,7 @@ def stage(
     ledger: SourceLedger,
     ingested: Iterable[tuple[ContentId, RecordId]],
     *,
+    omit: Collection[str] = (),
     materialise: Iterable[ContentId] = (),
     source: SourceOpener | None = None,
     extra: Iterable[Any] = (),
@@ -292,7 +293,9 @@ def stage(
     passes its own scan's, never the workspace's history (ADR 0035 §9), since every entry is
     hashed into the package and its receipt.
     Every ingested source must be in ``ledger``, since the package lists the sources it cites,
-    and every chunk of its plan must be committed in ``workspace``. ``extra`` adds records that
+    and every chunk of its plan must be committed in ``workspace``, except the chunk ids in
+    ``omit``: chunks a salvaged source lost, left out with their records, findings and runs
+    (ADR 0069); each must be a chunk of an ingested source's plan. ``extra`` adds records that
     are no adapter's output: the runtime's own transform and findings, and the transforms that
     ``derived`` tables (session proposals, ADR 0036) name. ``materialise`` names
     sources to copy into the package. Each is read as ``export`` reads one: from the head of a
@@ -334,6 +337,7 @@ def stage(
 
             add(extra)
             runs: dict[RecordId, list[tuple[str, Path, Owner]]] = defaultdict(list)
+            omitted, planned = set(omit), set[str]()
             for content, transform in sorted(set(ingested)):
                 if ledger.artifact(content) is None:
                     raise PackageError(
@@ -346,12 +350,17 @@ def stage(
                 add([plan.transform, *plan.findings])
                 for chunk in plan.chunks:
                     chunk_id = str(chunk["id"])
+                    planned.add(chunk_id)
+                    if chunk_id in omitted:
+                        continue
                     with _workspace_io():
                         output = workspace.load(chunk_id)
                     add(output.records)
                     add(output.findings)
                     for stream, run in output.runs.items():
                         runs[stream].append((chunk_id, run, (content, transform)))
+            if unknown := sorted(omitted - planned):
+                raise PackageError(f"chunks to omit are no ingested source's: {unknown}")
             if strays := set(runs) - set(streams):
                 raise PackageError(f"runs of streams the package does not hold: {sorted(strays)}")
             if silent := set(streams) - set(runs):
@@ -434,6 +443,7 @@ def assemble(
     ledger: SourceLedger,
     ingested: Iterable[tuple[ContentId, RecordId]],
     *,
+    omit: Collection[str] = (),
     materialise: Iterable[ContentId] = (),
     source: SourceOpener | None = None,
     extra: Iterable[Any] = (),

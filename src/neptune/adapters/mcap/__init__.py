@@ -26,12 +26,12 @@ from typing import Final
 
 from neptune.adapters.contract import (
     ABI_VERSION,
-    ChunkExtent,
     SIGNATURE,
     VERIFIED,
     AdapterConfig,
     AdapterDescriptor,
     Chunk,
+    ChunkExtent,
     ChunkOutput,
     ConfigOption,
     Documented,

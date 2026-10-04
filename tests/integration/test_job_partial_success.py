@@ -1,8 +1,10 @@
 """MVL-6 acceptance: one corrupt source does not invalidate unrelated successfully ingested sources.
 
 Corrupt comes in degrees. A source whose adapter copes (bad rows, invalid UTF-8) lands with the
-adapter's findings. A source whose adapter crashes, cannot plan, or breaks the contract is
-quarantined with the runtime's finding and nothing else is touched. A file that changes under the
+adapter's findings. A source whose adapter cannot plan, or whose committed output breaks a
+cross-chunk law, is quarantined with the runtime's finding and nothing else is touched. A chunk
+whose adapter crashes or breaks the contract is lost, and its source is salvaged without it, with
+a ``source_partial`` account of what the package lacks (MVL-42, ADR 0069). A file that changes under the
 job, or cannot be opened, is reported the same way. The ``brittle`` fixture adapter supplies the
 crashes on demand; ``tally`` and ``text`` supply ordinary corruption.
 """
@@ -118,6 +120,12 @@ def codes_of(details: Any) -> tuple[str, ...]:
     return tuple(str(code) for code in found)
 
 
+def only(outcome: Any, code: str) -> Any:
+    """The one finding of ``code`` the job made."""
+    (found,) = [f for f in outcome.findings if f.code == code]
+    return found
+
+
 def read_by(package: Any) -> dict[str, int]:
     return {str(s.location.to_json()["path"]): len(s.read_by) for s in package.receipt.sources}
 
@@ -141,38 +149,46 @@ def test_one_crashing_source_does_not_invalidate_the_others(corpus: Path, tmp_pa
         "neptune.probe.unsupported",
         "neptune.runtime.chunk_failed",
         "neptune.runtime.plan_failed",
+        "neptune.runtime.source_partial",
         "tally.bad_row",
         "text.invalid_utf8",
     ]
     assert read_by(package) == {
         "blob.bin": 1,  # by the probe engine, which says no adapter claims it
         "corrupted.txt": 1,
-        "crash.brittle": 1,  # read by the runtime, which says why nothing came of it
+        "crash.brittle": 2,  # by its adapter, for what landed, and the runtime, for what did not
         "lift.tally": 1,
         "notes.txt": 1,
-        "unplannable.brittle": 1,
+        "unplannable.brittle": 1,  # read by the runtime, which says why nothing came of it
     }
     transforms = {t.id: t.adapter_id for t in package.receipt.transforms}
     for source in package.receipt.sources:
-        if source.location.to_json()["path"].endswith(".brittle"):
+        if source.location.to_json()["path"] == "unplannable.brittle":
             assert [transforms[t] for t in source.read_by] == [runtime_lineage.RUNTIME_ID]
-    assert len(outcome.ingested) == 3
+    assert len(outcome.ingested) == 4
     documents = [r for r in package.records if isinstance(r, DocumentRecord)]
-    assert len(documents) == 2  # notes and corrupted; nothing of either brittle file
-    assert not any(
-        isinstance(r, DocumentBlock)
-        and isinstance(r.text, Known)
-        and r.text.value in ("first", "last")
+    assert len(documents) == 3  # notes, corrupted and the crashing brittle file
+    texts = sorted(
+        r.text.value
         for r in package.records
+        if isinstance(r, DocumentBlock) and isinstance(r.text, Known) and r.text.value != ""
     )
+    assert {"first", "last"} <= set(texts) and "crash" not in texts
     failed = [f for f in package.receipt.findings if f.code == "neptune.runtime.chunk_failed"]
     assert [(f.category, f.severity) for f in failed] == [(FindingCategory.FAILED, Severity.ERROR)]
     assert "RuntimeError" in failed[0].message and "crash" not in failed[0].message
+    data = (corpus / "crash.brittle").read_bytes()
+    line = (data.index(b"crash"), data.index(b"crash") + len("crash"))
+    assert f"bytes [{line[0]}, {line[1]})" in failed[0].message  # exactly what was lost
+    partial = only(outcome, "neptune.runtime.source_partial")
+    assert partial.details["not_covered"] == [{"length": 5, "offset": line[0]}]
+    assert (partial.details["chunks"], partial.details["committed"]) == (4, 3)
 
     quarantined = {codes_of(e.details) for e in seen if e.kind == "source_quarantined"}
-    assert quarantined == {("neptune.runtime.chunk_failed",), ("neptune.runtime.plan_failed",)}
+    assert quarantined == {("neptune.runtime.plan_failed",)}
     assert len([e for e in seen if e.kind == "source_admitted"]) == 3
-    # The crashing source's other chunks were committed: a fixed adapter version redoes one chunk.
+    (salvaged,) = [e for e in seen if e.kind == "source_salvaged"]
+    assert salvaged.details["lost"] == 1 and salvaged.details["finding"] == partial.id
     crashed = next(e.details["source"] for e in seen if e.kind == "chunk_failed")
     committed = [e for e in seen if e.kind == "chunk_committed" and e.details["source"] == crashed]
     assert len(committed) == 3  # the document, "first" and "last"
@@ -202,14 +218,14 @@ def test_a_transient_fault_is_retried_and_the_source_lands(tmp_path: Path) -> No
     assert texts == ["flaky", "x", "y"]
 
 
-def test_without_a_retry_the_same_fault_quarantines_the_source(tmp_path: Path) -> None:
+def test_without_a_retry_the_same_fault_loses_the_chunk(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     (root / "wobbly.brittle").write_bytes(BRITTLE.brittle("x", "flaky", "y"))
     outcome, package, seen = run(root, tmp_path, options=JobOptions(attempts=1))
-    assert codes(package) == ["neptune.runtime.chunk_failed"]
-    assert outcome.ingested == ()
-    (finding,) = package.receipt.findings
+    assert codes(package) == ["neptune.runtime.chunk_failed", "neptune.runtime.source_partial"]
+    assert len(outcome.ingested) == 1  # salvaged: the document, "x" and "y"
+    finding = only(outcome, "neptune.runtime.chunk_failed")
     assert "after 1 attempt (OSError at ingest)" in finding.message
     assert not [e for e in seen if e.kind == "chunk_retried"]
 
@@ -221,8 +237,12 @@ def test_output_that_breaks_the_contract_is_a_finding_not_a_crash(tmp_path: Path
     (root / "twice.brittle").write_bytes(BRITTLE.brittle("ok", "dup"))
     (root / "fine.brittle").write_bytes(BRITTLE.brittle("ok", "fine"))
     outcome, package, seen = run(root, tmp_path)
-    assert codes(package) == ["neptune.runtime.chunk_failed", "neptune.runtime.output_invalid"]
-    assert len(outcome.ingested) == 1
+    assert codes(package) == [
+        "neptune.runtime.chunk_failed",
+        "neptune.runtime.output_invalid",
+        "neptune.runtime.source_partial",
+    ]
+    assert len(outcome.ingested) == 2  # fine, and wrong-id without its bad line
     by_code = {f.code: f for f in outcome.findings}
     wrong = by_code["neptune.runtime.chunk_failed"]
     assert wrong.details["error"] == "ContractError"
@@ -433,12 +453,12 @@ def test_batches_of_one_chunk_that_disagree_fail_that_chunk_not_the_job(tmp_path
     (root / "lift.tally").write_bytes(b"TALLY1\n10 1\n20 2\n")
     adapters = AdapterRegistry([*builtin_adapters(), SplitTally(rows_per_chunk=2)])
     outcome, package, _ = run(root, tmp_path, adapters)
-    assert codes(package) == ["neptune.runtime.chunk_failed"]
-    (finding,) = outcome.findings
+    assert codes(package) == ["neptune.runtime.chunk_failed", "neptune.runtime.source_partial"]
+    finding = only(outcome, "neptune.runtime.chunk_failed")
     assert finding.details["error"] == "ContractError" and finding.details["attempts"] == 1
     assert finding.details["step"] == "chunk_series"
     assert finding.details["law"] == "batch_columns_disagree"
-    assert len(outcome.ingested) == 1  # the notes
+    assert len(outcome.ingested) == 2  # the notes, and the tally's declarations without its rows
 
 
 class SilentTally(TALLY.TallyAdapter):  # type: ignore[misc, name-defined]
@@ -456,12 +476,12 @@ def test_ingest_returning_the_wrong_type_fails_that_chunk_not_the_job(tmp_path: 
     (root / "lift.tally").write_bytes(b"TALLY1\n10 1\n20 2\n")
     adapters = AdapterRegistry([*builtin_adapters(), SilentTally(rows_per_chunk=2)])
     outcome, package, seen = run(root, tmp_path, adapters)
-    assert codes(package) == ["neptune.runtime.chunk_failed"]
-    (finding,) = outcome.findings
+    assert codes(package) == ["neptune.runtime.chunk_failed", "neptune.runtime.source_partial"]
+    finding = only(outcome, "neptune.runtime.chunk_failed")
     assert finding.details["step"] == "ingest_result"
     assert finding.details["returned"] == "builtins.NoneType"
     assert finding.details["attempts"] == 1  # a contract violation: never retried
-    assert len(outcome.ingested) == 1 and not [e for e in seen if e.kind == "chunk_retried"]
+    assert len(outcome.ingested) == 2 and not [e for e in seen if e.kind == "chunk_retried"]
 
 
 def test_a_file_removed_after_planning_is_unreadable_in_parse_and_the_rest_land(
@@ -540,12 +560,14 @@ def test_the_same_failing_job_twice_writes_the_same_package(
     ]
     assert outcomes[0].package == outcomes[1].package  # fresh workspaces, different paths
     assert outcomes[0].findings == outcomes[1].findings
-    (finding,) = outcomes[0].findings
-    assert finding.code == code and finding.details["step"] == step
+    finding = only(outcomes[0], code)
+    assert finding.details["step"] == step
     assert {key: finding.details[key] for key in facts} == facts
-    text = finding.message + repr(finding.details)
-    assert "0x" not in text and str(tmp_path) not in text
-    assert len(outcomes[0].ingested) == 1  # the notes
+    for each in outcomes[0].findings:
+        text = each.message + repr(each.details)
+        assert "0x" not in text and str(tmp_path) not in text
+    salvaged = code == "neptune.runtime.chunk_failed"  # the tally's declarations still land
+    assert len(outcomes[0].ingested) == (2 if salvaged else 1)
 
 
 @dataclass(frozen=True)
@@ -582,13 +604,13 @@ def test_a_check_that_raises_on_odd_output_fails_that_chunk_not_the_job(
     (root / "odd.brittle").write_bytes(BRITTLE.brittle("fine", "impostor"))
     adapters = AdapterRegistry([*builtin_adapters(), ImpostorBrittle()])
     outcome, package, seen = run(root, tmp_path, adapters, options=JobOptions(isolation=isolation))
-    assert codes(package) == ["neptune.runtime.chunk_failed"]
-    (finding,) = outcome.findings
+    assert codes(package) == ["neptune.runtime.chunk_failed", "neptune.runtime.source_partial"]
+    finding = only(outcome, "neptune.runtime.chunk_failed")
     assert finding.details["step"] == "check_chunk_output"
     assert finding.details["error"] == "AttributeError"  # no provenance, no to_json
     assert finding.details["attempts"] == 1
-    assert read_by(package) == {"notes.txt": 1, "odd.brittle": 1}  # read by the runtime only
-    assert len(outcome.ingested) == 1
+    assert read_by(package) == {"notes.txt": 1, "odd.brittle": 2}  # its adapter and the runtime
+    assert len(outcome.ingested) == 2
     (failed,) = [e for e in seen if e.kind == "chunk_failed"]
     assert failed.phase is phase and failed.details["step"] == "check_chunk_output"
 
@@ -671,8 +693,14 @@ def test_a_short_read_over_an_intact_source_is_the_adapters_failure(
         "neptune.runtime.chunk_failed",
         "neptune.runtime.chunk_failed",
         "neptune.runtime.plan_failed",
+        "neptune.runtime.source_partial",
+        "neptune.runtime.source_partial",
     ]
-    failed = {f.subject.source: f.details for f in outcome.findings}
+    failed = {
+        f.subject.source: f.details
+        for f in outcome.findings
+        if f.code != "neptune.runtime.source_partial"
+    }
     assert failed[content_id(planned)] == {
         "adapter": "brittle",
         "error": "ShortReadError",
@@ -691,7 +719,7 @@ def test_a_short_read_over_an_intact_source_is_the_adapters_failure(
     assert sorted(verified) == sorted([content_id(short), content_id(planned)])  # never elsewhere
     assert not [e for e in seen if e.kind == "source_short_read"]
     assert not [c for c in codes(package) if c.startswith("neptune.discovery.")]
-    assert len(outcome.ingested) == 1  # the notes
+    assert len(outcome.ingested) == 3  # the notes, and the two salvaged without their bad lines
 
 
 class WindowBrittle(BRITTLE.BrittleAdapter):  # type: ignore[misc, name-defined]

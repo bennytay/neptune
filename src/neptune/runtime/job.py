@@ -8,8 +8,8 @@
     plan         plan each selected source, or reuse the plan the workspace holds; save it
     parse        run the adapter over one chunk the workspace has not committed
     normalize    check that chunk's output against the contract; commit it, whole or not at all
-    assemble     admit each source whose chunks all committed and pass the cross-chunk laws;
-                 build the package beside its destination
+    assemble     admit each source whose committed chunks pass the cross-chunk laws: whole, or
+                 salvaged without the chunks it lost; build the package beside its destination
     validate     read the staged package back and verify it
     commit       write the envelope into it and rename it into place
 
@@ -19,8 +19,10 @@ each written whole or not at all, and the next job over the same root and worksp
 and skips committed chunk ids. There is no job file to repair.
 
 A source's problems are findings, never a failed job: an adapter that raises on a chunk is
-retried and then quarantined with the source it was reading, a file that changes under the job
-is reported and left alone, and every other source still reaches the package. The job itself
+retried and then that chunk is lost, and the source is salvaged without it when the chunks that
+committed stand alone (ADR 0069), with a ``source_partial`` finding saying exactly what is not in
+the package; a file that changes under the job is reported and left alone, and every other source
+still reaches the package. The job itself
 fails (``JobError``) only when it cannot proceed at all: an unreadable root, a destination that
 exists, a config naming an option no adapter has, a workspace or disk that will not write, a
 host that cannot run the sandbox.
@@ -83,7 +85,7 @@ from neptune.derived.media import MediaIndex, index_media
 from neptune.derived.temporal import ClockAlignment, align_clocks, clock_records
 from neptune.discovery.ignore import IgnoreError, IgnorePolicy
 from neptune.discovery.layout import Layout, layout_from_scan
-from neptune.discovery.policy import DISCOVERY_TRANSFORM, SHORT_READ
+from neptune.discovery.policy import DISCOVERY_TRANSFORM
 from neptune.discovery.probe import PROBE_ID, ProbeEngine, SourceProbe
 from neptune.discovery.reader import LocalReader, SourceChangedError
 from neptune.discovery.scan import fingerprint
@@ -581,6 +583,7 @@ class IngestJob:
         self._local: LocalSource | None = None
         self._sources: list[_Source] = []
         self._ingested: list[tuple[ContentId, RecordId]] = []
+        self._omitted: set[str] = set()  # chunks lost by salvaged sources: not in the package
         self._staged: StagedPackage | None = None
         self._calls: dict[str, int] = {"ingest": 0, "plan": 0, "probe": 0}
         self._plugins = plugins if plugins is not None else Plugins()
@@ -1884,7 +1887,9 @@ class IngestJob:
         ranges that do not overlap, with ``seq`` unique inside each chunk (checked at normalize),
         are unique overall. Memory is one range per chunk, never one entry per row.
 
-        Each problem is an object naming its ``Law`` and the ids it concerns, never text.
+        Only the chunks ``item`` kept are judged: a salvaged source must stand without the ones
+        it lost (ADR 0069). Each problem is an object naming its ``Law`` and the ids it concerns,
+        never text.
         """
         assert item.config is not None
         problems: list[JsonObject] = []
@@ -1903,7 +1908,7 @@ class IngestJob:
         said_something = bool(stored.findings)
         for finding in stored.findings:
             finding_ids.add(finding.id)
-        for chunk in item.chunks:
+        for chunk in item.kept():
             try:
                 output = self.workspace.load(chunk.id)
             except (WorkspaceError, ValueError, OSError) as exc:
@@ -1947,9 +1952,10 @@ class IngestJob:
         return problems
 
     def _verdict(self, item: _Source) -> list[JsonObject]:
-        """The cross-chunk laws' verdict on ``item``: kept by the workspace, or computed now.
+        """The cross-chunk laws' verdict on ``item``'s kept chunks: kept by the workspace, or
+        computed now.
 
-        A function of the source's chunk ids (their outputs never change) and of the runtime's
+        A function of those chunk ids (their outputs never change) and of the runtime's
         version (which changes with the laws), so it is a derivative (ADR 0031 §4): an unchanged
         source is not read again to be admitted.
         """
@@ -1957,7 +1963,7 @@ class IngestJob:
         key = admission_key(
             item.content_id,
             item.config.transform.id,
-            [chunk.id for chunk in item.chunks],
+            [chunk.id for chunk in item.kept()],
             lineage.RUNTIME_VERSION,
         )
 
@@ -1984,27 +1990,63 @@ class IngestJob:
         kind = events.DERIVATIVE_REUSED if held is Held.HELD else events.DERIVATIVE_BUILT
         self._emit(kind, {"derivative": key.id, "recipe": key.recipe, "rule": str(entry.rule)})
 
+    def _admit(self, item: _Source) -> IngestFinding | None:
+        """Judge a planned source that is not quarantined by the cross-chunk laws.
+
+        A source that lost no chunk is admitted whole when its outputs pass, else quarantined
+        (``output_invalid``). One that lost chunks (ADR 0069) is judged on the chunks it kept: if
+        some committed and they pass on their own, it is admitted without the lost ones and
+        ``source_partial`` accounts for them; otherwise it is quarantined (``salvage_refused``).
+        Returns a salvaged source's ``source_partial`` finding; ``None`` otherwise.
+        """
+        assert item.adapter is not None
+        descriptor = item.adapter.descriptor
+        kept = item.kept()
+        problems = self._verdict(item) if kept else []
+        if not item.lost:
+            if problems:
+                self._quarantine(
+                    item,
+                    lineage.output_invalid(
+                        self.transform,
+                        item.content_id,
+                        item.artifact.size,
+                        descriptor.id,
+                        problems,
+                    ),
+                )
+            return None
+        lost = sorted(item.lost.values(), key=lambda gone: gone.chunk)
+        common = (
+            self.transform,
+            item.content_id,
+            item.artifact.size,
+            descriptor.id,
+            descriptor.version,
+            len(item.chunks),
+        )
+        if not kept or problems:
+            self._quarantine(item, lineage.salvage_refused(*common, len(lost), problems))
+            return None
+        partial = lineage.source_partial(*common, lost)
+        self._record(partial)
+        self._omitted.update(item.lost)
+        return partial
+
     def _assemble(self, scanned: SourceLedger) -> None:
-        """Admit each source that passes the cross-chunk laws and stage the package of those,
-        listing ``scanned``: this job's scan, never the workspace's history (ADR 0035 §9)."""
+        """Admit each source that passes the cross-chunk laws, whole or salvaged (ADR 0069), and
+        stage the package of those, listing ``scanned``: this job's scan, never the workspace's
+        history (ADR 0035 §9)."""
         with self._enter(Phase.ASSEMBLE):
             self._check_cancel()
-            quarantined = 0
+            quarantined = salvaged = 0
             for item in self._sources:
                 if item.adapter is None or item.config is None:
                     continue  # never selected: nothing to admit, nothing to quarantine
                 self._check_cancel()  # each source's runs are read whole: a checkpoint between
-                if item.planned and not item.quarantined and (problems := self._verdict(item)):
-                    self._quarantine(
-                        item,
-                        lineage.output_invalid(
-                            self.transform,
-                            item.content_id,
-                            item.artifact.size,
-                            item.adapter.descriptor.id,
-                            problems,
-                        ),
-                    )
+                partial = None
+                if item.planned and not item.quarantined:
+                    partial = self._admit(item)
                 details: dict[str, JsonValue] = {
                     "source": item.content_id,
                     "transform": item.key[1],
@@ -2013,6 +2055,15 @@ class IngestJob:
                     quarantined += 1
                     details["codes"] = sorted(set(item.quarantined))
                     self._emit(events.SOURCE_QUARANTINED, details)
+                elif partial is not None:
+                    salvaged += 1
+                    self._ingested.append(item.key)
+                    account = partial.details
+                    for key in ("chunks", "committed", "not_covered_bytes", "undeclared"):
+                        details[key] = account[key]
+                    details["finding"] = partial.id
+                    details["lost"] = len(item.lost)
+                    self._emit(events.SOURCE_SALVAGED, details)
                 else:
                     self._ingested.append(item.key)
                     self._emit(events.SOURCE_ADMITTED, details)
@@ -2054,6 +2105,7 @@ class IngestJob:
                         self.workspace,
                         scanned,
                         self._ingested,
+                        omit=self._omitted,
                         extra=extra,
                         derived=derived,
                         spill=spill,
@@ -2074,8 +2126,17 @@ class IngestJob:
                 {"package": self._staged.id, "sources": len(self._ingested)},
             )
             self._finish(
-                Phase.ASSEMBLE, {"quarantined": quarantined, "sources": len(self._ingested)}
+                Phase.ASSEMBLE,
+                {
+                    "quarantined": quarantined,
+                    "salvaged": salvaged,
+                    "sources": len(self._ingested),
+                },
             )
+
+    def _kept_ids(self, chunks: Iterable[JsonObject]) -> list[str]:
+        """The ids of a stored plan's ``chunks`` the package holds: all but salvaged losses."""
+        return [str(chunk["id"]) for chunk in chunks if str(chunk["id"]) not in self._omitted]
 
     def _assemble_runs(self) -> tuple[object, ...]:
         """Stage 9, over the admitted sources' committed records: assemble runs and sessions
@@ -2091,8 +2152,8 @@ class IngestJob:
                 plan = self.workspace.load_plan(content, transform)
                 if plan is None:
                     continue  # staging refuses the package and says why
-                for chunk in plan.chunks:
-                    evidence.add(self.workspace.load(str(chunk["id"])).records)
+                for chunk_id in self._kept_ids(plan.chunks):
+                    evidence.add(self.workspace.load(chunk_id).records)
         except (WorkspaceError, ValueError, OSError) as exc:
             raise JobError(f"the package cannot be assembled: {exc}") from exc
         upstream = (self._declared.loaded.transform.id,) if self._declared is not None else ()
@@ -2122,8 +2183,8 @@ class IngestJob:
                 plan = self.workspace.load_plan(content, transform)
                 if plan is None:
                     continue  # staging refuses the package and says why
-                for chunk in plan.chunks:
-                    output = self.workspace.load(str(chunk["id"]))
+                for chunk_id in self._kept_ids(plan.chunks):
+                    output = self.workspace.load(chunk_id)
                     streams.extend(r for r in output.records if isinstance(r, Stream))
                     for stream, run in output.runs.items():
                         frames[stream] = frames.get(stream, 0) + count_rows(run)
@@ -2177,8 +2238,8 @@ class IngestJob:
                 plan = self.workspace.load_plan(content, transform)
                 if plan is None:
                     continue  # staging refuses the package and says why
-                for chunk in plan.chunks:
-                    output = self.workspace.load(str(chunk["id"]))
+                for chunk_id in self._kept_ids(plan.chunks):
+                    output = self.workspace.load(chunk_id)
                     records.extend(clock_records(output.records))  # the rest is dropped here
                     for stream, run in sorted(output.runs.items()):
                         runs[stream].append(run)
