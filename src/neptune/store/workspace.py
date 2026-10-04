@@ -5,7 +5,10 @@ Everything an ingest needs to remember between runs lives here, never beside the
     workspace.json                     format version and settings (local-only mode)
     lock                               held shared by every running job, exclusively by ``collect``
     ledgers/<root key>/ledger.jsonl    one ingest root's source ledger, keyed by its resolved path
-    ledgers/<root key>/root            the root's resolved path, as the host names it
+                                       (a connector's source by its URI, exactly as given)
+    ledgers/<root key>/tokens.jsonl    every revision token seen over an external revision's bytes
+                                       besides its own (ADR 0067): what spares a refetch
+    ledgers/<root key>/root            the root's resolved path, as the host names it, or its URI
     plans/<2 hex>/<62 hex>/<64 hex>.json
                                        one source's plan under one transform, with the transform:
                                        by the source's content id, then the transform's id
@@ -124,8 +127,24 @@ def _hex(identifier: str, scheme: str) -> str:
     return match[1]
 
 
-def _root_key(root: Path) -> bytes:
-    """An ingest root as the ledger knows it: resolved, so every spelling of it is one root."""
+# A connector's source is named by its URI (ADR 0067): a scheme, then ``://``.
+_URI_ROOT: Final = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*://.+", re.DOTALL)
+TOKENS_FILE: Final = "tokens.jsonl"
+
+Root: TypeAlias = Path | str  # a local directory or file, or a connector's source URI
+
+
+def _root_key(root: Root) -> bytes:
+    """An ingest root as the ledger knows it.
+
+    A local root is resolved, so every spelling of it is one root. A URI is kept exactly as given:
+    two spellings of one bucket prefix are two roots, since only the connector could say they
+    are the same. A resolved path starts with ``/`` and a URI with a letter, so they never meet.
+    """
+    if isinstance(root, str):
+        if not _URI_ROOT.fullmatch(root):
+            raise WorkspaceError(f"a root given as text is a source URI: {root!r}")
+        return root.encode("utf-8")
     return os.fsencode(Path(root).resolve())
 
 
@@ -597,29 +616,37 @@ class Workspace:
 
     # --- Ledgers -------------------------------------------------------------------------------
 
-    def _ledger_dir(self, root: Path) -> Path:
+    def _ledger_dir(self, root: Root) -> Path:
         return self.home / "ledgers" / hashlib.sha256(_root_key(root)).hexdigest()
 
-    def load_ledger(self, root: Path) -> SourceLedger:
+    def load_ledger(self, root: Root) -> SourceLedger:
         """The source ledger of ``root``'s earlier scans, or an empty one.
 
-        ``root`` is resolved: a relative path, ``..``, or a symlink to the same directory all
-        name one ledger.
+        A local ``root`` is resolved: a relative path, ``..``, or a symlink to the same directory
+        all name one ledger. A connector's source is named by its URI, as given.
         """
         table = self._ledger_dir(root) / "ledger.jsonl"
         if not table.exists():
             return SourceLedger()
         return _ledger(table)
 
-    def has_ledger(self, root: Path) -> bool:
+    def has_ledger(self, root: Root) -> bool:
         """Whether a job (an ingest, a dry run, or one interrupted after its scan) saved a ledger
         of ``root`` here: the earlier work a resume continues (ADR 0043)."""
         return (self._ledger_dir(root) / "ledger.jsonl").is_file()
 
-    def save_ledger(self, root: Path, ledger: SourceLedger) -> None:
+    def save_ledger(self, root: Root, ledger: SourceLedger) -> None:
+        """Save ``ledger`` as ``root``'s. The records first, then the tokens: the ledger only grows,
+        so tokens saved by an earlier save always name revisions it holds, and a crash between
+        the two only forgets tokens, which costs a refetch, never a wrong match."""
         directory = self._ledger_dir(root)
         records = (*ledger.artifacts(), *ledger.revisions(), *ledger.absences())
         self._replace(directory / "ledger.jsonl", _lines(records))
+        tokens = b"".join(
+            canonical_json.dumps({"revision": revision, "tokens": list(seen)}) + b"\n"
+            for revision, seen in ledger.tokens()
+        )
+        self._replace(directory / TOKENS_FILE, tokens)
         self._replace(directory / "root", _root_key(root))
 
     # --- Plans ---------------------------------------------------------------------------------
@@ -1012,12 +1039,38 @@ class Workspace:
 
 
 def _ledger(table: Path) -> SourceLedger:
+    """The ledger in ``table`` and the tokens saved beside it, if any (a ledger saved before ADR
+    0067 has none)."""
     records = _read_lines(table.read_bytes())
     return SourceLedger(
         artifacts=(r for r in records if isinstance(r, SourceArtifact)),
         revisions=(r for r in records if isinstance(r, SourceRevision)),
         absences=(r for r in records if isinstance(r, SourceAbsence)),
+        tokens=_tokens(table.parent / TOKENS_FILE),
     )
+
+
+def _tokens(path: Path) -> dict[RecordId, list[str]]:
+    """The tokens file: one canonical line per revision, sorted by revision id, each once."""
+    if not path.exists():
+        return {}
+    tokens: dict[RecordId, list[str]] = {}
+    previous: RecordId | None = None
+    for line in path.read_bytes().splitlines():
+        value = canonical_json.loads(line)
+        if not isinstance(value, dict) or value.keys() != {"revision", "tokens"}:
+            raise WorkspaceError(f"a tokens line is {{revision, tokens}}: {line[:80]!r}")
+        revision, seen = value["revision"], value["tokens"]
+        if not isinstance(revision, str) or not isinstance(seen, list) or not seen:
+            raise WorkspaceError(f"a tokens line names a revision and its tokens: {line[:80]!r}")
+        identifier = parse_record_id(revision)
+        if previous is not None and identifier <= previous:
+            raise WorkspaceError(f"tokens lines are sorted by revision, each once: {revision}")
+        previous = identifier
+        if not all(isinstance(t, str) for t in seen) or seen != sorted(set(map(str, seen))):
+            raise WorkspaceError(f"the tokens of {revision} are sorted text, each once")
+        tokens[identifier] = [str(t) for t in seen]
+    return tokens
 
 
 def _content(digest: str) -> ContentId:

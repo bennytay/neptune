@@ -48,6 +48,7 @@ from neptune.sdk.client import (
     AsyncNeptune,
     Ingestion,
     Neptune,
+    RemoteSource,
     dry_run,
     ingest,
 )
@@ -103,6 +104,7 @@ __all__ = [
     "PluginPolicy",
     "Plugins",
     "PublishIncompleteError",
+    "RemoteSource",
     "RunContents",
     "SandboxUnavailableError",
     "StreamContents",
