@@ -105,7 +105,7 @@ def write_mcap(
 
 
 def _store() -> Any:
-    from rosbags.typesys import Stores, get_typestore  # type: ignore[import-not-found, unused-ignore]
+    from rosbags.typesys import Stores, get_typestore  # type: ignore[import-not-found]
 
     return get_typestore(Stores.ROS2_HUMBLE)
 
@@ -527,7 +527,7 @@ def _recording_messages(path: Path, ts: Any) -> Iterator[tuple[str, str, bytes]]
 
 
 def oracle() -> dict[str, Any]:
-    from rosbags.highlevel import AnyReader  # type: ignore[import-not-found, unused-ignore]
+    from rosbags.highlevel import AnyReader  # type: ignore[import-not-found]
     from rosbags.typesys import Stores, get_typestore
 
     found: dict[str, Any] = {}
