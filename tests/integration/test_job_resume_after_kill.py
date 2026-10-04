@@ -159,13 +159,14 @@ def test_a_job_killed_mid_ingest_resumes_without_redoing_committed_chunks(
 
 
 @pytest.mark.parametrize(
-    ("point", "count", "workspace_debris", "beside_debris"),
+    ("point", "count", "workspace_debris", "beside_debris", "scratch_debris"),
     [
-        ("chunk-writing", 3, 1, 0),  # a run written into a chunk's staging; the rest not yet
-        ("chunk-staged", 4, 1, 0),  # a chunk staged whole and flushed, not renamed into chunks/
-        # a series merged into a derivative's staging (ADR 0031), the package staged beside
-        ("package-staging", 1, 1, 1),
-        ("before-publish", 1, 0, 1),  # the staged package with its envelope, not renamed
+        ("chunk-writing", 3, 1, 0, 0),  # a run written into a chunk's staging; the rest not yet
+        ("chunk-staged", 4, 1, 0, 0),  # a chunk staged whole and flushed, not renamed into chunks/
+        # a series merged into a derivative's staging (ADR 0031), the package staged beside, and
+        # the package writer's spill directory in the workspace's scratch space (ADR 0065 §3)
+        ("package-staging", 1, 1, 1, 1),
+        ("before-publish", 1, 0, 1, 0),  # the staged package with its envelope, not renamed
     ],
 )
 def test_a_job_killed_inside_a_write_resumes_to_the_clean_package(
@@ -175,6 +176,7 @@ def test_a_job_killed_inside_a_write_resumes_to_the_clean_package(
     count: int,
     workspace_debris: int,
     beside_debris: int,
+    scratch_debris: int,
 ) -> None:
     home, destination, progress = tmp_path / "home", tmp_path / "package", tmp_path / "events"
     assert kill_at(corpus, home, destination, progress, point, count) == -signal.SIGKILL
@@ -199,7 +201,7 @@ def test_a_job_killed_inside_a_write_resumes_to_the_clean_package(
     assert whole_chunks(workspace) == whole_chunks(Workspace(tmp_path / "other"))
     # The resuming job swept the dead writer's staging as it started (ADR 0033 §2).
     (swept,) = [e.details for e in seen if e.kind == "workspace_swept"]
-    assert swept == {"scratch": 0, "staging": workspace_debris}
+    assert swept == {"scratch": scratch_debris, "staging": workspace_debris}
     assert workspace.clear_staging() == 0
 
 
