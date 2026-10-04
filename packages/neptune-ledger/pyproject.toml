@@ -13,7 +13,8 @@ authors = [{ name = "Benjamin Tay", email = "benjamintay07@gmail.com" }]
 # The media store (ADR 0014): pylance holds extracted artefacts as Lance blobs; mcap and
 # mcap-ros2-support read frames from MCAP, whose chunks lz4 and zstandard inflate (bounded, in
 # lake.decode), pillow encodes rasters, pypdfium2 renders pages and pyyaml reads YAML for JSON
-# pointers. Each one's version is part of every artefact's transform,
+# pointers. numpy (pylance's) is pinned below 2.4, whose stubs use Python 3.12 syntax that every
+# workspace member's 3.11 mypy check would fail to parse. Each one's version is part of every artefact's transform,
 # so all are pinned: a bump is a new extraction lineage.
 dependencies = [
   "datafusion==54.0.0",
@@ -22,6 +23,7 @@ dependencies = [
   "mcap==1.5.0",
   "mcap-ros2-support==0.5.7",
   "neptune",
+  "numpy==2.3.5",
   "pillow==12.3.0",
   "psycopg[binary]==3.3.6",
   "pyarrow>=25.0.1",
@@ -74,13 +76,6 @@ mypy_path = "src"
 [[tool.mypy.overrides]]
 module = ["pyarrow", "pyarrow.*", "datafusion.object_store", "pypdfium2", "mcap_ros2.*", "lz4", "lz4.*"]
 ignore_missing_imports = true
-
-# numpy (from pylance and Pillow) ships stubs in Python 3.12 syntax, which a 3.11 check cannot
-# parse; the Ledger never calls numpy, so its stubs are not followed.
-[[tool.mypy.overrides]]
-module = ["numpy", "numpy.*"]
-follow_imports = "skip"
-follow_imports_for_stubs = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
