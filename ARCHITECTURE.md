@@ -33,6 +33,7 @@ flowchart LR
   RT <-->|probes / chunks / records| SB
   SB <-->|one call, limits| AD
   PLG -->|admitted, in fixed order| AD
+  PLG -->|connector Sources, by URI scheme| DISC
   AD -.->|conforms to| CAN
   RT <-->|commit / reuse by key| WS
   WS --> PKG

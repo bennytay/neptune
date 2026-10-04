@@ -10,6 +10,7 @@ from typing import Final
 
 import pytest
 
+from neptune.model.source import local_location
 from neptune.runtime.explain import Disposition, Explanation, SourceStatus, show
 from neptune.sdk import AsyncNeptune, Neptune
 
@@ -93,7 +94,7 @@ def test_a_hostile_folder_is_explained_without_parsing_or_extracting_anything(
     # with the finding that says why. Never a failed job.
     for damaged in ("arm/truncated.mcap", "amr/run_002/unclosed_quote.csv"):
         assert statuses[damaged] in (SourceStatus.PLANNED, SourceStatus.QUARANTINED)
-    raw = next(s for s in explanation.sources if s.locations[0].raw == RAW_NAME)
+    raw = next(s for s in explanation.sources if s.locations[0] == local_location(RAW_NAME))
     assert raw.status is SourceStatus.PLANNED and raw.adapter == "text"
     assert "caf\\xe9.txt" in explanation.render()
 
