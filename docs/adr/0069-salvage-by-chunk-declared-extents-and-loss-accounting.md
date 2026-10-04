@@ -60,7 +60,7 @@ the receipt states exactly what was lost.
    `supersedes`, a transform's `upstream`) may name another package's records and are checked by
    neither. One problem per target. It applies to salvaged sources only: a whole source whose
    references dangle is an adapter bug that validation reports; validation's
-   `dangling_reference` (rule version 2) checks every reference the same walker reads, keeping a
+   `dangling_reference` (rule version 3) checks every reference the same walker reads, keeping a
    table only for the kind a reference must name where the model states one. A source that lost
    nothing is judged as before (`output_invalid` if it breaks a law).
 

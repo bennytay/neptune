@@ -347,7 +347,7 @@ def references_checked(context: Context) -> Iterator[tuple[Any, str, str]]:
 def dangling_reference(context: Context) -> Iterator[Draft]:
     """A record names another record (a run, a clock, a table, a snapshot, a frame graph) the
     package does not hold, or one of another kind than the model states; a finding's
-    ``records`` name one it does not hold. Version 2: every reference the model types, not a
+    ``records`` name one it does not hold. Version 3: every reference the model types, not a
     hand list (ADR 0069); references marked external (another package's) are not checked."""
     missing: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
     for record, field, target in references_checked(context):
@@ -669,7 +669,7 @@ RULES_ON: Final = (
     Rule("count_mismatch", 1, _C.INCONSISTENT, _W,
          "a stream's declared message count differs from the rows its series holds",
          count_mismatch),
-    Rule("dangling_reference", 2, _C.MISSING, _W,
+    Rule("dangling_reference", 3, _C.MISSING, _W,
          "a record or finding names, in a field the model types as a record id, a record the"
          " package does not hold",
          dangling_reference),

@@ -1003,7 +1003,7 @@ def test_a_finding_naming_a_record_the_package_lacks(tmp_path: Path) -> None:
     assert finding.details == {
         "field": "records",
         "kind": "ingest_finding",
-        "rule": "neptune.validate.dangling_reference/2",
+        "rule": "neptune.validate.dangling_reference/3",
         "target": lost,
     }
     assert finding.records == (duplicate.id,)
