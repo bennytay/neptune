@@ -10,7 +10,6 @@ source is a finding, never an exception.
 
 import gzip
 import io
-import os
 import tarfile
 import threading
 from collections.abc import Iterator
@@ -57,7 +56,13 @@ def byte_range(offset: int, length: int) -> dict[str, Any]:
 
 
 def record_range(channel: str, start: int, end: int) -> dict[str, Any]:
-    return {"channel": channel, "domain_id": DOMAIN, "end": end, "kind": "record_range", "start": start}
+    return {
+        "channel": channel,
+        "domain_id": DOMAIN,
+        "end": end,
+        "kind": "record_range",
+        "start": start,
+    }
 
 
 def anchor(data: bytes, *steps: dict[str, Any]) -> EvidenceAnchor:
@@ -77,9 +82,10 @@ class Counting:
 
     def open(self, path: bytes) -> BinaryIO | None:
         self.opens += 1
-        stream = self._inner.open(path)
-        if stream is None:
+        opened = self._inner.open(path)
+        if opened is None:
             return None
+        stream: BinaryIO = opened
         outer = self
 
         class Tap(io.RawIOBase):
@@ -164,7 +170,9 @@ def picture(artefact: Artefact) -> Image.Image:
     return image
 
 
-def assert_frame(image: Image.Image, size: tuple[int, int], frame: int, at: tuple[int, int]) -> None:
+def assert_frame(
+    image: Image.Image, size: tuple[int, int], frame: int, at: tuple[int, int]
+) -> None:
     assert image.size == size
     for y in range(size[1]):
         for x in range(size[0]):
@@ -234,7 +242,12 @@ def test_worked_example_pointers_and_rows_hydrate_to_what_the_records_state(
     whole = canonical_json.loads(value.read())
     assert isinstance(whole, dict) and whole["robot_base_frame"] == "base_link"
     tool = {"kind": "json_pointer", "pointer": "/transformation/qw"}
-    assert canonical_json.loads(lake.artefact(anchor(handeye, byte_range(0, 348), tool), "value").read()) == 0.7071067811865476
+    assert (
+        canonical_json.loads(
+            lake.artefact(anchor(handeye, byte_range(0, 348), tool), "value").read()
+        )
+        == 0.7071067811865476
+    )
 
     sites = fixture_path("mobile_robot", "sites.csv")
     row = lake.artefact(anchor(sites, {"kind": "row", "row": 2}), "row")
@@ -268,7 +281,9 @@ def test_a_frame_from_a_referenced_mcap_and_from_a_materialised_one(lake: Lake) 
     legged = lake.package(
         "legged", {"walk/head_camera.mcap": head}, materialise=frozenset({"walk/head_camera.mcap"})
     )
-    lake.stores = [LocalSourceStore(ingest_root(lake.tmp / "ingest", {"session/wrist_camera.mcap": wrist}))]
+    lake.stores = [
+        LocalSourceStore(ingest_root(lake.tmp / "ingest", {"session/wrist_camera.mcap": wrist}))
+    ]
 
     at = START + PERIOD
     referenced = anchor(wrist, record_range(WRIST_TOPIC, at, at + 1))
@@ -304,7 +319,9 @@ def test_a_frame_from_a_referenced_mcap_and_from_a_materialised_one(lake: Lake) 
 
     # A frame cropped by a later image_region step.
     crop = {"kind": "image_region", "x0": 4, "x1": 10, "y0": 2, "y1": 7}
-    region = lake.artefact(anchor(wrist, record_range(WRIST_TOPIC, at, at + 1), crop), "image_region")
+    region = lake.artefact(
+        anchor(wrist, record_range(WRIST_TOPIC, at, at + 1), crop), "image_region"
+    )
     assert_frame(picture(region), (6, 5), 1, (4, 2))
 
 
@@ -366,7 +383,10 @@ def test_a_snapshot_pins_what_a_hydration_returns(lake: Lake) -> None:
 def test_concurrent_hydrations_all_land(lake: Lake) -> None:
     head = fixture("head_camera.mcap")
     lake.package("legged", {"head.mcap": head}, materialise=frozenset({"head.mcap"}))
-    refs = [anchor(head, record_range(HEAD_TOPIC, START + i * PERIOD, START + i * PERIOD + 1)) for i in (0, 1)]
+    refs = [
+        anchor(head, record_range(HEAD_TOPIC, START + i * PERIOD, START + i * PERIOD + 1))
+        for i in (0, 1)
+    ]
     work = [refs[i % 2] for i in range(6)]
 
     def hydrate(ref: EvidenceAnchor) -> bytes:
@@ -427,7 +447,10 @@ def test_pages_and_page_regions_render_from_a_drone_report(lake: Lake) -> None:
     assert region.size == (200, 100)
     assert {region.getpixel((x, y)) for x in (1, 100, 198) for y in (1, 50, 98)} == {(255, 0, 0)}
 
-    assert lake.artefact(anchor(report, {"index": 1, "kind": "page"}), "page").metadata["rotation"] == 90
+    assert (
+        lake.artefact(anchor(report, {"index": 1, "kind": "page"}), "page").metadata["rotation"]
+        == 90
+    )
     rotated = {**box, "page": 1, "x1": 40.0, "y1": 40.0}
     assert lake.codes(anchor(report, rotated), "page") == ["no_decoder"]
     assert lake.codes(anchor(report, {"index": 2, "kind": "page"}), "page") == ["invalid_request"]
@@ -444,7 +467,7 @@ def test_an_image_region_of_a_mobile_robots_photo(lake: Lake, tmp_path: Path) ->
     box = {"kind": "image_region", "x0": 2, "x1": 7, "y0": 1, "y1": 5}
     region = lake.artefact(anchor(photo, byte_range(0, len(photo)), box), "image_region")
     assert region.metadata["source_width"] == 8 and region.metadata["region"] == [2, 1, 7, 5]
-    assert list(picture(region).getdata()) == list(whole.crop((2, 1, 7, 5)).getdata())
+    assert picture(region).tobytes() == whole.crop((2, 1, 7, 5)).tobytes()
     beyond = {**box, "x1": 9}
     assert lake.codes(anchor(photo, beyond), "image_region") == ["invalid_request"]
     empty = {**box, "x1": 2}
@@ -454,7 +477,9 @@ def test_an_image_region_of_a_mobile_robots_photo(lake: Lake, tmp_path: Path) ->
 def test_parquet_rows_and_cells_of_a_site_register(lake: Lake) -> None:
     sites = fixture("sites.parquet")
     lake.package("mobile", {"sites.parquet": sites}, materialise=frozenset({"sites.parquet"}))
-    row = canonical_json.loads(lake.artefact(anchor(sites, {"kind": "row", "row": 2}), "row").read())
+    row = canonical_json.loads(
+        lake.artefact(anchor(sites, {"kind": "row", "row": 2}), "row").read()
+    )
     assert row == {
         "cells": [
             {"column": 0, "name": "site_id", "type": "string", "value": "S-009"},
@@ -466,9 +491,9 @@ def test_parquet_rows_and_cells_of_a_site_register(lake: Lake) -> None:
         "row": 2,
     }
     cell = {"column": 2, "column_name": "latitude", "kind": "row_cell", "row": 1}
-    assert canonical_json.loads(lake.artefact(anchor(sites, cell), "row").read())["cells"] == [
-        {"column": 2, "name": "latitude", "type": "double", "value": -33.8612}
-    ]
+    made = canonical_json.loads(lake.artefact(anchor(sites, cell), "row").read())
+    assert isinstance(made, dict)
+    assert made["cells"] == [{"column": 2, "name": "latitude", "type": "double", "value": -33.8612}]
     assert lake.codes(anchor(sites, {"kind": "row", "row": 3}), "row") == ["invalid_request"]
     assert lake.codes(anchor(sites, {**cell, "column": 4}), "row") == ["invalid_request"]
 
@@ -489,7 +514,8 @@ def test_archive_members_of_a_quadruped_calibration_bundle(lake: Lake) -> None:
     bundle = fixture("leg_calibration.tar")
     lake.package("legged", {"calibration.tar": bundle}, chunk_size=512)
     lake.stores = [LocalSourceStore(ingest_root(lake.tmp / "ingest", {"calibration.tar": bundle}))]
-    members = {m.name: m for m in tarfile.open(fileobj=io.BytesIO(bundle))}
+    with tarfile.open(fileobj=io.BytesIO(bundle)) as archive:
+        members = {m.name: m for m in archive}
     yaml_member, gz_member = members["intrinsics.yaml"], members["extrinsics.json.gz"]
     fx = anchor(
         bundle,
@@ -506,7 +532,7 @@ def test_archive_members_of_a_quadruped_calibration_bundle(lake: Lake) -> None:
     assert EXTRINSICS["child"] == "head_camera_optical"
     member = lake.read(anchor(bundle, byte_range(gz_member.offset_data, gz_member.size)), "bytes")
     assert isinstance(member.value, SourceSlice)
-    assert gzip.decompress(member.value.read()) .startswith(b"{")  # type: ignore[arg-type]
+    assert gzip.decompress(member.value.read()).startswith(b"{")  # type: ignore[arg-type]
 
     # A member range may not leave the archive, and a nested range may not leave its member.
     escape = anchor(bundle, byte_range(len(bundle) - 4, 8), {"kind": "json_pointer", "pointer": ""})
@@ -529,7 +555,7 @@ def test_a_moved_source_resolves_to_a_finding_not_a_crash(lake: Lake) -> None:
     ingest = ingest_root(lake.tmp / "ingest", {"cam/wrist.mcap": wrist})
     lake.stores = [LocalSourceStore(ingest)]
     ref = anchor(wrist, record_range(WRIST_TOPIC, START, START + 1))
-    os.rename(ingest / "cam" / "wrist.mcap", ingest / "cam" / "moved.mcap")
+    (ingest / "cam" / "wrist.mcap").rename(ingest / "cam" / "moved.mcap")
     evidence = lake.media.resolve(ref)
     assert evidence.status == "unavailable" and evidence.route is None
     assert [f.code for f in evidence.findings] == ["file_missing"]
@@ -542,7 +568,7 @@ def test_a_moved_source_resolves_to_a_finding_not_a_crash(lake: Lake) -> None:
     # Its package moved too: a materialised source in a moved package is missing likewise.
     head = fixture("head_camera.mcap")
     root = lake.package("legged", {"head.mcap": head}, materialise=frozenset({"head.mcap"}))
-    os.rename(root, root.with_name("legged-moved"))
+    root.rename(root.with_name("legged-moved"))
     assert lake.codes(anchor(head, record_range(HEAD_TOPIC, START, START + 1)), "frame") == [
         "file_missing"
     ]
@@ -565,7 +591,9 @@ def test_a_changed_source_is_never_served(lake: Lake) -> None:
     (ingest / "wrist.mcap").write_bytes(wrist + b"!")
     assert lake.codes(ref, "frame") == ["file_digest_mismatch"]
     (ingest / "wrist.mcap").unlink()
-    assert sliced.read_range(0, 10).code == "file_missing"  # type: ignore[union-attr]
+    # The last chunk read is kept, and it was verified; any other chunk is now missing.
+    assert sliced.read_range(0, 10) == wrist[:10]
+    assert sliced.read_range(2048, 10).code == "file_missing"  # type: ignore[union-attr]
 
 
 def test_links_and_escaping_paths_are_never_followed(lake: Lake) -> None:
@@ -584,7 +612,9 @@ def test_links_and_escaping_paths_are_never_followed(lake: Lake) -> None:
     assert lake.codes(ref, "bytes") == ["file_missing"]
     # A stated path that would leave a store is never opened.
     for hostile in ("../outside/mission.txt", "/etc/passwd", "a//b", "./a", "a/\x00"):
-        assert location_path(canonical_json.dumps({"kind": "local", "path": hostile}).decode()) is None
+        assert (
+            location_path(canonical_json.dumps({"kind": "local", "path": hostile}).decode()) is None
+        )
     assert location_path('{"kind":"external","system":"s3","value":"x"}') is None
 
 
@@ -601,7 +631,11 @@ def test_hostile_and_malformed_requests_are_findings(lake: Lake) -> None:
         (EvidenceAnchor("not-a-content-id", (frame,)), "frame", ["invalid_request"]),
         (EvidenceAnchor(content_id(head), ()), "bytes", ["invalid_request"]),
         (anchor(head, {"kind": "teleport"}), "bytes", ["invalid_request"]),
-        (anchor(head, {"kind": "byte_range", "length": 1, "offset": -1}), "bytes", ["invalid_request"]),
+        (
+            anchor(head, {"kind": "byte_range", "length": 1, "offset": -1}),
+            "bytes",
+            ["invalid_request"],
+        ),
         (anchor(head, byte_range(len(head), 1)), "bytes", ["invalid_request"]),
         (anchor(head, frame), "hologram", ["invalid_request"]),
         (anchor(head, frame), "page", ["invalid_request"]),
