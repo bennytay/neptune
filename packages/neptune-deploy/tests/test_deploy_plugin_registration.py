@@ -91,3 +91,17 @@ def test_contracts_declare_the_same_pin() -> None:
     lock = (PACKAGE.parents[1] / "contracts" / "lock.toml").read_text(encoding="utf-8")
     section = lock.split("[neptune-deploy]", 1)[1].split("\n[", 1)[0]
     assert f'package-schema = "{neptune_deploy.PACKAGE_SCHEMA_VERSION}.0.0"' in section
+
+
+def test_the_object_store_factories_declare_their_uri_scheme_and_no_other_connector_does() -> None:
+    """A compiler that dispatches a plain URI (``s3://…``) to a ``neptune.sources`` factory reads
+    the factory's ``schemes`` (compiler ADR 0067, MVL-45). Only the object stores are named by a
+    URI scheme of their own; every other connector is chosen by name (``--connector``)."""
+    eps = distribution("neptune-deploy").entry_points
+    factories = {ep.name: ep.load() for ep in eps if ep.group == SOURCES_GROUP}
+    declared = {name: getattr(f, "schemes", None) for name, f in factories.items()}
+    assert {name: s for name, s in declared.items() if s is not None} == {
+        "deploy_s3": ("s3",),
+        "deploy_gcs": ("gs",),
+        "deploy_azure_blob": ("az",),
+    }
