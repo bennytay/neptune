@@ -17,15 +17,20 @@ from memory_coverage_records import (
     component,
     configuration,
     finding,
+    image,
     series,
     stream,
 )
-from memory_identity_records import Record, at, ledger
+from memory_identity_records import Record, ambiguous, at, cite, ledger, provenance
 from memory_run_records import assembly, domain, revision, run
 from neptune.identity import canonical_json
+from neptune.identity.ids import record_id
 from neptune.model.alignment import MemberRole
-from neptune.model.ids import LogicalId
-from neptune.model.time import INT64_MAX
+from neptune.model.ids import ExternalObjectRef, LogicalId
+from neptune.model.knowledge import Known, Unknown
+from neptune.model.provenance import EvidenceRef
+from neptune.model.run import Run
+from neptune.model.time import INT64_MAX, Timestamp
 from neptune_memory.consolidate.base import (
     Consolidation,
     Consolidator,
@@ -299,35 +304,125 @@ def test_a_run_last_on_another_clock_is_open_and_not_closed() -> None:
     assert undecided.details["reasons"] == ["files_not_attributed", "recording_not_closed"]
 
 
-def test_a_run_with_nothing_unattributed_and_closed_makes_a_configured_sensor_absent() -> None:
-    """The smallest known absence: a closed run a manifest declares, whose assembly holds no
-    recording, no stream and no file of any sensor."""
+def _survey(
+    first: Timestamp | None = None, last: Timestamp | None = None, *, photo: bool = True
+) -> tuple[list[Record], dict[str, RecordId]]:
+    """A closed run a manifest declares (its ``description``), holding one photo whose EXIF names
+    the configured survey camera D; camera C and a nameless IMU are configured beside it."""
     clock_record, clock = domain("boot", civil=False)
-    run_record, run_id = run("w.yaml", first=at(T0, clock), last=at(T0 + SECOND, clock))
-    files = assembly("w.yaml", run_id, [("w.yaml", MemberRole.DESCRIPTION)])[0]
-    config, config_id = configuration("w.urdf", LogicalId("asset-tag", "W"))
-    cam, cam_id = component("w.urdf", config_id, "cam", LogicalId("serial", "C"))
-    nameless = component("w.urdf", config_id, "imu")[0]
-    result = consolidate(
-        {
-            "p": [
-                clock_record,
-                run_record,
-                files,
-                revision("w.yaml")[0],
-                config,
-                cam,
-                nameless,
-                binding("b", run_id, config_id),
-            ]
-        }
+    run_record, run_id = run(
+        "w.yaml", first=first or at(T0, clock), last=last or at(T0 + SECOND, clock)
     )
-    assert predicates(result) == ["sensor_not_recorded", "sensor_not_recorded"]
-    assert {c.object.node_id for c in result.claims} == {  # type: ignore[union-attr]
-        "serial:C",
-        f"record:{nameless['id']}",
+    members = [("w.yaml", MemberRole.DESCRIPTION)]
+    if photo:
+        members.append(("d.jpg", MemberRole.RECORDING))
+    files = assembly("w.yaml", run_id, members)[0]
+    config, config_id = configuration("w.urdf", LogicalId("asset-tag", "W"))
+    cam = component("w.urdf", config_id, "cam", LogicalId("serial", "C"))[0]
+    survey = component("w.urdf", config_id, "survey", LogicalId("serial", "D"))[0]
+    nameless, nameless_id = component("w.urdf", config_id, "imu")
+    records = [clock_record, run_record, files, revision("w.yaml")[0], config, cam, survey]
+    records += [nameless, binding("b", run_id, config_id)]
+    if photo:
+        records += [revision("d.jpg")[0], image("d.jpg", Known(LogicalId("serial", "D")))[0]]
+    return records, {"run": run_id, "imu": nameless_id}
+
+
+def test_sensors_no_file_could_hold_are_absent_beside_the_one_that_recorded() -> None:
+    records, ids = _survey()
+    result = consolidate({"p": records})
+    got = {(c.predicate, c.object.node_id) for c in result.claims}  # type: ignore[union-attr]
+    assert got == {
+        ("sensor_recorded", "serial:D"),
+        ("sensor_not_recorded", "serial:C"),
+        ("sensor_not_recorded", f"record:{ids['imu']}"),
     }
-    del cam_id
+
+
+def test_a_run_whose_ledger_holds_no_recording_is_unknown_for_every_sensor() -> None:
+    """A manifest naming a closed run whose bag was never uploaded: nothing covers the run, so no
+    configured sensor is known absent (review of PR #128)."""
+    records, _ = _survey(photo=False)
+    result = consolidate({"p": records})
+    assert predicates(result) == ["sensor_presence_unknown"] * 3
+    reasons = {
+        tuple(f.details["reasons"])  # type: ignore[arg-type]
+        for f in result.findings
+        if f.code == "coverage.presence_undecided"
+    }
+    assert reasons == {("no_recording",)}
+
+
+def test_the_bytes_declaring_a_run_count_as_its_data_unless_stated_a_description() -> None:
+    """A bag declares the run and a manifest's assembly names it with only the manifest: the bag
+    is still the run's data, and no image or video, so nothing is known absent."""
+    clock_record, clock = domain("boot", civil=False)
+    run_record, run_id = run("x.bag", first=at(T0, clock), last=at(T0 + SECOND, clock))
+    files = assembly("x.yaml", run_id, [("x.yaml", MemberRole.DESCRIPTION)])[0]
+    config, config_id = configuration("x.urdf", LogicalId("asset-tag", "X"))
+    cam = component("x.urdf", config_id, "cam", LogicalId("serial", "C"))[0]
+    scene = [clock_record, run_record, files, revision("x.yaml")[0], config, cam]
+    result = consolidate({"p": [*scene, binding("b", run_id, config_id)]})
+    assert predicates(result) == ["sensor_presence_unknown"]
+    (undecided,) = [f for f in result.findings if f.code == "coverage.presence_undecided"]
+    assert undecided.details["reasons"] == ["files_not_attributed"]
+
+
+def test_a_run_declared_by_an_external_object_is_never_known_absent() -> None:
+    clock_record, clock = domain("boot", civil=False)
+    evidence = EvidenceRef(ExternalObjectRef("s3", "bucket/flight.bag", "etag1"), cite("x").locator)
+    declared = Run(
+        id=record_id("test.run", {"external": "bucket/flight.bag"}),  # no tier-2 id without bytes
+        provenance=provenance(evidence),
+        logical_id=Unknown(),
+        machine=Unknown(),
+        first=Known(at(T0, clock)),
+        last=Known(at(T0 + SECOND, clock)),
+    )
+    config, config_id = configuration("e.urdf", LogicalId("asset-tag", "E"))
+    cam = component("e.urdf", config_id, "cam", LogicalId("serial", "C"))[0]
+    scene = [clock_record, declared.to_json(), config, cam, binding("b", declared.id, config_id)]
+    result = consolidate({"p": scene})  # type: ignore[dict-item]
+    assert predicates(result) == ["sensor_presence_unknown"]
+
+
+def test_an_ambiguous_sensor_identifier_is_possibly_its_own() -> None:
+    """cam_s is serial A or B; cam_t is serial A; the run's one photo says serial A. cam_t
+    recorded; cam_s may have, so it is unknown, never absent (review of PR #128)."""
+    clock_record, clock = domain("boot", civil=False)
+    run_record, run_id = run("m.yaml", first=at(T0, clock), last=at(T0 + SECOND, clock))
+    files = assembly(
+        "m.yaml", run_id, [("m.yaml", MemberRole.DESCRIPTION), ("a.jpg", MemberRole.RECORDING)]
+    )[0]
+    config, config_id = configuration("m.urdf", LogicalId("asset-tag", "M"))
+    either = ambiguous("cal", LogicalId("serial", "A"), LogicalId("serial", "B"))
+    cam_s, cam_s_id = component("m.urdf", config_id, "cam_s", ambiguous=either)
+    cam_t = component("m.urdf", config_id, "cam_t", LogicalId("serial", "A"))[0]
+    photo = image("a.jpg", Known(LogicalId("serial", "A")))[0]
+    scene = [clock_record, run_record, files, revision("m.yaml")[0], revision("a.jpg")[0]]
+    scene += [config, cam_s, cam_t, photo, binding("b", run_id, config_id)]
+    result = consolidate({"p": scene})
+    got = {(c.predicate, c.object.node_id) for c in result.claims}  # type: ignore[union-attr]
+    assert got == {
+        ("sensor_recorded", "serial:A"),
+        ("sensor_presence_unknown", f"record:{cam_s_id}"),
+    }
+    (undecided,) = [f for f in result.findings if f.code == "coverage.presence_undecided"]
+    assert undecided.details["reasons"] == ["files_not_attributed"]
+
+
+def test_an_inferred_message_count_is_an_inferred_record_not_a_claim() -> None:
+    records, ids = base()
+    joints = dict(records[2])
+    count = dict(joints["message_count"])  # type: ignore[call-overload]
+    count["provenance"] = {**joints["provenance"], "assertion_kind": "inferred"}  # type: ignore[dict-item]
+    joints["message_count"] = count
+    result = consolidate({"p": [records[0], records[1], joints]})
+    (inferred,) = [f for f in result.findings if f.code == "coverage.inferred_record"]
+    assert inferred.severity == "info"
+    assert result.claims == ()
+    assert not [f for f in result.findings if f.code.startswith("consolidate.")]
+    del ids
 
 
 # --- Determinism ---------------------------------------------------------------------------------
@@ -425,48 +520,30 @@ def test_a_recording_that_is_no_image_or_video_withholds_known_absence() -> None
 
 
 def test_an_unreadable_run_record_anywhere_withholds_known_absence() -> None:
-    clock_record, clock = domain("boot", civil=False)
-    run_record, run_id = run("w.yaml", first=at(T0, clock), last=at(T0 + SECOND, clock))
-    files = assembly("w.yaml", run_id, [("w.yaml", MemberRole.DESCRIPTION)])[0]
-    config, config_id = configuration("w.urdf", LogicalId("asset-tag", "W"))
-    cam = component("w.urdf", config_id, "cam", LogicalId("serial", "C"))[0]
-    scene = [clock_record, run_record, files, revision("w.yaml")[0], config, cam]
-    scene.append(binding("b", run_id, config_id))
+    scene, ids = _survey()
     broken_records: list[Record] = [
-        {"kind": "run_assembly", "run": run_id},
-        {"kind": "stream", "run": run_id},
+        {"kind": "run_assembly", "run": ids["run"]},
+        {"kind": "stream", "run": ids["run"]},
     ]
     for broken in broken_records:
         result = consolidate({"p": scene, "q": [broken]})
-        assert predicates(result) == ["sensor_presence_unknown"], broken
-        (undecided,) = [f for f in result.findings if f.code == "coverage.presence_undecided"]
-        assert undecided.details["reasons"] == ["ledger_records_unreadable"]
+        assert "sensor_not_recorded" not in predicates(result), broken
+        reasons = {
+            tuple(f.details["reasons"])  # type: ignore[arg-type]
+            for f in result.findings
+            if f.code == "coverage.presence_undecided"
+        }
+        assert reasons == {("ledger_records_unreadable",)}
 
 
 def test_a_run_ending_on_another_clock_of_one_civil_timeline_is_closed() -> None:
     a_record, a = domain("ntp a", civil=True)
     b_record, b = domain("ntp b", civil=True)
-    run_record, run_id = run("v.yaml", first=at(T0, a), last=at(T0 + SECOND, b))
-    files = assembly("v.yaml", run_id, [("v.yaml", MemberRole.DESCRIPTION)])[0]
-    config, config_id = configuration("v.urdf", LogicalId("asset-tag", "V"))
-    cam = component("v.urdf", config_id, "cam", LogicalId("serial", "C"))[0]
-    result = consolidate(
-        {
-            "p": [
-                a_record,
-                b_record,
-                run_record,
-                files,
-                revision("v.yaml")[0],
-                config,
-                cam,
-                binding("b", run_id, config_id),
-            ]
-        }
-    )
-    (claim,) = result.claims
-    assert claim.predicate == "sensor_not_recorded"
-    assert claim.valid_to.ticks == T0 + SECOND + 1  # type: ignore[union-attr]
+    scene, _ = _survey(first=at(T0, a), last=at(T0 + SECOND, b))
+    result = consolidate({"p": [a_record, b_record, *scene]})
+    absent = [c for c in result.claims if c.predicate == "sensor_not_recorded"]
+    assert len(absent) == 2
+    assert {c.valid_to.ticks for c in absent} == {T0 + SECOND + 1}  # type: ignore[union-attr]
 
 
 def test_series_rows_naming_no_stream_or_clock_are_findings() -> None:

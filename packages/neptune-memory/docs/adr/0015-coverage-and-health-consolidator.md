@@ -34,7 +34,8 @@ configuration: `coverage.unknown_config`) decides. Compiler kinds are read with 
 `run`, `run_assembly` and `source_revision` (through `run_records`), `stream`, `ingest_finding`,
 `timestamp_domain`, `snapshot_binding`, `hardware_configuration`, `hardware_component`, `image` and `video`. A
 refused record, or a declared identifier that is blank or padded (ADR 0006 §9), is `coverage.malformed_record`; an
-inferred one `coverage.inferred_record`; one key with two contents `coverage.record_conflict`, neither used.
+record with an inferred provenance anywhere in it (the record's or a value's, such as a stream's `message_count`)
+`coverage.inferred_record` (info), decided before any claim is drafted; one key with two contents `coverage.record_conflict`, neither used.
 Records are admitted by id across packages; assemblies and revisions within their package (ADR 0009 §1).
 
 One kind is a Ledger stand-in until the catalog API publishes the time index's series rows:
@@ -88,15 +89,18 @@ For each run and each `sensor` component of each hardware configuration a `Snaps
 - `sensor_recorded(run → sensor)` when a file of the run (an `Image` or `Video` whose bytes are the run's or a
   member's) declares one of the sensor's `Known` identifiers among its capture's device identifiers, citing it.
 - `sensor_not_recorded(run → sensor)` (**KnownAbsent**) only when nothing in the run could be the sensor's: the run
-  has no `Stream` (streams declare no sensor); every image or video of it definitely declares another configured
-  sensor and not possibly this one; every file holding its samples (its assemblies' `recording` members, or, with no
-  assembly, the bytes that declare it) is such an image or video; every member's revision is in the Ledger; the
+  has no `Stream` (streams declare no sensor); the Ledger holds at least one file of the run's data, and every such
+  file (its assemblies' `recording` members, and the bytes that declare it unless an assembly naming the run states
+  they are its `description`, a manifest or `metadata.yaml`) is an image or video that definitely declares another
+  configured sensor and no identifier this one may have (its `Known` identifiers and its `Ambiguous` candidates); every member's revision is in the Ledger; the
   run's span is closed on one clock; no integrity finding names the run or its streams; and no `run`,
   `run_assembly`, `source_revision`, `stream`, `ingest_finding`, `image` or `video` record anywhere in the Ledger
   was unreadable or in conflict (it could be this run's).
 - `sensor_presence_unknown(run → sensor)` (**Unknown**) otherwise, with `coverage.presence_undecided` naming each
-  reason: `streams_declare_no_sensor`, `files_not_attributed`, `members_unresolved`, `recording_not_closed`,
-  `integrity_findings`, `ledger_records_unreadable`. An `Ambiguous` device identifier that includes the sensor's is never a record.
+  reason: `no_recording`, `streams_declare_no_sensor`, `files_not_attributed`, `members_unresolved`, `recording_not_closed`,
+  `integrity_findings`, `ledger_records_unreadable`. An `Ambiguous` device identifier that includes the sensor's is never a record, and an `Ambiguous` identifier of
+  the sensor is possibly its own: a file citing one of its candidates is never ruled out as its data. A run whose
+  Ledger holds no recording (a manifest whose bag was never uploaded) is Unknown for every sensor: nothing covers it.
 
 Presence is about the run: a binding's validity window is not used, because whether a sensor recorded in the run
 and whether nothing in the run could be its data do not depend on when within the run the configuration applied

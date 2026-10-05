@@ -653,20 +653,29 @@ def _members(view: _View) -> dict[RecordId, set[ContentId]]:
     return contents
 
 
-def _data_files(view: _View) -> dict[RecordId, set[ContentId]]:
-    """The files that hold each run's samples: its assemblies' ``recording`` members, or, for a
-    run no assembly names, the bytes that declare it (a lone recording declares itself)."""
-    files: dict[RecordId, set[ContentId]] = {}
+def _data_files(view: _View) -> dict[RecordId, set[object]]:
+    """The files that may hold each run's samples: its assemblies' ``recording`` members and the
+    bytes that declare it, unless an assembly naming the run states those bytes are its
+    ``description`` (a manifest or a rosbag2 ``metadata.yaml``, which declares the run itself).
+    A source with no content id (an external object) is kept: it is a file whose content is not
+    read here. An empty set means the Ledger holds no recording of the run."""
+    files: dict[RecordId, set[object]] = {rid: set() for rid in view.runs}
+    described: dict[RecordId, set[object]] = {}
     for package_id, assembly in view.assemblies:
-        held = files.setdefault(assembly.run, set())
+        if assembly.run not in files:
+            continue
         for member in assembly.members:
             content = view.revisions.get((package_id, member.revision))
-            if member.role is MemberRole.RECORDING and content is not None:
-                held.add(content)
+            if content is None:
+                continue  # an unresolved member is ``members_unresolved``
+            if member.role is MemberRole.RECORDING:
+                files[assembly.run].add(content)
+            elif member.role is MemberRole.DESCRIPTION:
+                described.setdefault(assembly.run, set()).add(content)
     for rid, run in view.runs.items():
         source = run.provenance.evidence.source
-        if rid not in files and isinstance(source, str):
-            files[rid] = {source}
+        if source not in described.get(rid, set()):
+            files[rid].add(source)
     return files
 
 
@@ -794,11 +803,12 @@ def _presence(
             key=lambda m: m.id,
         )
         # A file that holds the run's samples and is no image or video: whose they are is unknown.
-        opaque = sorted(c for c in data.get(rid, ()) if c not in by_source)
+        held = data.get(rid, set())
+        opaque = [c for c in held if c not in by_source]
         cites = {m.id: _ids(m.capture.device_identifiers) for m in artifacts}
-        own = {c.id: _ids(c.identifiers)[0] for _, c in configured}
+        own = {c.id: _ids(c.identifiers) for _, c in configured}
         for bound, component in configured:
-            mine = own[component.id]
+            mine = own[component.id][0]  # only a Known identifier attributes a file definitely
             recorded = [m for m in artifacts if cites[m.id][0] & mine]
             records = [rid, bound.id, bound.snapshot, component.id]
             evidence = [component.provenance.evidence, bound.provenance.evidence, *span.evidence]
@@ -815,6 +825,7 @@ def _presence(
                     own,
                     has_streams=rid in streams_of,
                     opaque=bool(opaque),
+                    held=bool(held),
                     unreadable=bool(view.unreadable),
                     unresolved=rid in unresolved,
                     closed=span.closed,
@@ -853,27 +864,31 @@ def _undecided(
     component: HardwareComponent,
     artifacts: Sequence[Media],
     cites: Mapping[RecordId, tuple[set[LogicalId], set[LogicalId]]],
-    own: Mapping[RecordId, set[LogicalId]],
+    own: Mapping[RecordId, tuple[set[LogicalId], set[LogicalId]]],
     *,
     has_streams: bool,
     opaque: bool,
+    held: bool,
     unreadable: bool,
     unresolved: bool,
     closed: bool,
     flagged: bool,
 ) -> tuple[str, ...]:
     """Why a sensor no file of the run definitely cites is not known absent; empty when it is."""
-    mine = own[component.id]
+    # Every identifier this sensor may have: its Ambiguous candidates are possibly its own.
+    mine = own[component.id][0] | own[component.id][1]
     others: set[LogicalId] = set().union(
-        *(ids - mine for cid, ids in own.items() if cid != component.id)
+        *(known - mine for cid, (known, _) in own.items() if cid != component.id)
     )
 
     def elsewhere(media: Media) -> bool:
         """The file definitely cites another configured sensor and cannot be this one's."""
         known, possible = cites[media.id]
-        return bool(known & others) and not (possible & mine)
+        return bool(known & others) and not ((known | possible) & mine)
 
     reasons: list[str] = []
+    if not held:
+        reasons.append("no_recording")
     if has_streams:
         reasons.append("streams_declare_no_sensor")
     if opaque or any(not elsewhere(m) for m in artifacts):

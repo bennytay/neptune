@@ -95,11 +95,27 @@ __all__ = [
 ]
 
 
+def _inferred(value: object, depth: int = 0) -> bool:
+    """Whether any provenance in a record says ``inferred`` (its own or a value's, such as a
+    stream's ``message_count``): a derived/ value, never a ground."""
+    if depth > 64:
+        return False  # the strict reader refuses what is this deep
+    if isinstance(value, dict):
+        if value.get("assertion_kind") == "inferred":
+            return True
+        return any(_inferred(v, depth + 1) for v in value.values())
+    if isinstance(value, list):
+        return any(_inferred(v, depth + 1) for v in value)
+    return False
+
+
 def _strict(parse: Callable[[JsonValue], _T], record: Mapping[str, object]) -> _T:
-    """A compiler reader over one record; whatever it refuses is malformed here."""
-    provenance = record.get("provenance")
-    if isinstance(provenance, dict) and provenance.get("assertion_kind") == "inferred":
-        raise Inferred(f"an inferred {record.get('kind')!r} record is a derived/ record")
+    """A compiler reader over one record; whatever it refuses is malformed here. A record with an
+    inferred record or value is ``Inferred``, decided before any claim is drafted."""
+    if _inferred(dict(record)):
+        raise Inferred(
+            f"a {record.get('kind')!r} record with an inferred value is a derived/ record"
+        )
     try:
         return parse(dict(record))  # type: ignore[arg-type]
     except (ValueError, TypeError, KeyError, RecursionError) as exc:
