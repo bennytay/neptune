@@ -167,6 +167,12 @@ def test_the_cli_refuses_an_unreadable_graph(
 ) -> None:
     broken = tmp_path / "graph.json"
     broken.write_text('{"kind": "memory.graph"}', encoding="utf-8")
-    assert main(["--memory", str(broken)]) == 2
-    assert main(["--memory", str(tmp_path / "missing.json")]) == 2
-    assert capsys.readouterr().err.count("neptune mcp:") == 2
+    duplicated = tmp_path / "duplicated.json"
+    duplicated.write_text('{"kind": "memory.graph", "kind": "memory.graph"}', encoding="utf-8")
+    not_a_number = tmp_path / "nan.json"
+    not_a_number.write_text('{"head": NaN}', encoding="utf-8")
+    deep = tmp_path / "deep.json"
+    deep.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
+    for path in (broken, duplicated, not_a_number, deep, tmp_path / "missing.json"):
+        assert main(["--memory", str(path)]) == 2
+    assert capsys.readouterr().err.count("neptune mcp:") == 5

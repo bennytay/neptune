@@ -37,6 +37,7 @@ from neptune_context.packets.model import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from neptune.model.jsonvalue import JsonObject
     from neptune_context.query.model import Query
 
 
@@ -165,6 +166,12 @@ class RetrievalChannel(Protocol):
     @property
     def channel(self) -> Channel:
         """Which channel this is; the ``ChannelHit.channel`` of every hit it returns."""
+        ...
+
+    @property
+    def config(self) -> JsonObject:
+        """Every setting that decides its answers (it enters the engine's config hash, so two
+        engines that may answer differently never share a ``produced_by``)."""
         ...
 
     def retrieve(self, request: Retrieval) -> ChannelAnswer:

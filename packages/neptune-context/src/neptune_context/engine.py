@@ -43,7 +43,7 @@ from neptune_context.pins import CATALOG_API_VERSION
 from neptune_context.query.codec import query_id
 from neptune_context.query.decode import accept
 from neptune_context.query.findings import Refused
-from neptune_context.retrieve.channel import Retrieval, Snapshot
+from neptune_context.retrieve.channel import ChannelAnswer, Retrieval, Snapshot
 from neptune_context.retrieve.fusion import RRF_K, cut, fuse
 from neptune_context.retrieve.graph import GraphChannel
 from neptune_context.sdk.errors import ErrorCode, SdkError
@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from neptune.model.jsonvalue import JsonObject
     from neptune.model.provenance import EvidenceRef
     from neptune_context.query.model import Query
-    from neptune_context.retrieve.channel import ChannelAnswer, RetrievalChannel
+    from neptune_context.retrieve.channel import RetrievalChannel
 
 ENGINE_ID: Final = "neptune-context.local"
 ENGINE_VERSION: Final = "1"
@@ -88,10 +88,7 @@ class LocalEngine:
     def config(self) -> JsonObject:
         """What decides this engine's answers: its channels' settings and fusion's."""
         return {
-            "channels": [
-                getattr(c, "config", {"channel": str(c.channel)})
-                for c in sorted(self._channels, key=lambda c: str(c.channel))
-            ],
+            "channels": [c.config for c in sorted(self._channels, key=lambda c: str(c.channel))],
             "fusion": {"k": RRF_K, "rule": "rrf"},
         }
 
@@ -135,7 +132,7 @@ class LocalEngine:
         query = accepted
         snapshot = self.snapshot(query)
         request = Retrieval(query, snapshot)
-        answers = [channel.retrieve(request) for channel in self._channels]
+        answers = [_retrieve(channel, request) for channel in self._channels]
         limits = Limits(
             query.budget.items, query.budget.tokens, query.budget.bytes, query.budget.latency_ms
         )
@@ -190,13 +187,46 @@ class LocalEngine:
         return self._catalog.resolve(anchor, as_of=as_of)
 
 
+def _retrieve(channel: RetrievalChannel, request: Retrieval) -> ChannelAnswer:
+    """``channel.retrieve``; a channel that raises loses its own answer (a gap), not others'."""
+    try:
+        return channel.retrieve(request)
+    except Exception as exc:  # partial success: one failing channel is a gap
+        detail = f"the {channel.channel} channel failed: {type(exc).__name__}: {exc}"
+        return ChannelAnswer(
+            channel.channel,
+            gaps=(Gap(GapCode.NOT_COVERED, "", channel.channel, (), detail[:2000]),),
+        )
+
+
+def _no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate key {key!r}")
+        out[key] = value
+    return out
+
+
+def _no_constant(token: str) -> object:
+    raise ValueError(f"{token} is not JSON")
+
+
 def read_graph(path: Path) -> ReferenceReader:
-    """A Memory graph document at ``path``, read strictly by Memory's codec (ids, order,
-    generation all checked), as Memory's reference reader. Raises ``ValueError`` or ``OSError``."""
-    data = path.read_bytes()
+    """A Memory graph document at ``path``, read strictly (bounded size, no duplicate keys, no NaN)
+    and decoded by Memory's codec (ids, order, generation all checked) into Memory's reference
+    reader. Raises ``ValueError`` or ``OSError``; nothing else."""
+    with path.open("rb") as handle:
+        data = handle.read(MAX_GRAPH_BYTES + 1)
     if len(data) > MAX_GRAPH_BYTES:
         raise ValueError(f"{path.name} is larger than {MAX_GRAPH_BYTES} bytes")
-    return ReferenceReader(graph_from_json(json.loads(data)))
+    try:
+        document = json.loads(data, object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
+        return ReferenceReader(graph_from_json(document))
+    except RecursionError as exc:
+        raise ValueError(f"{path.name} is nested too deeply") from exc
+    except (TypeError, KeyError) as exc:
+        raise ValueError(f"{path.name} is not a Memory graph document: {exc}") from exc
 
 
 def _gaps(query: Query, answers: Sequence[ChannelAnswer]) -> tuple[Gap, ...]:

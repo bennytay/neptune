@@ -6,7 +6,9 @@ Every answer goes through the SDK ``Client``, so each packet is also checked aga
 
 from __future__ import annotations
 
+from dataclasses import replace
 from fractions import Fraction
+from typing import ClassVar
 
 import pytest
 from neptune_ledger.api import CatalogFinding, FrameWindow, Resolution, TimeWindow
@@ -18,6 +20,7 @@ from neptune_context.engine import ENGINE_ID, LocalEngine
 from neptune_context.packets.codec import canonical_bytes, decode
 from neptune_context.packets.conformance import check
 from neptune_context.packets.model import (
+    Channel,
     ClaimItem,
     ContextPacket,
     FrameItem,
@@ -310,6 +313,17 @@ def test_seeds_memory_cannot_start_from_are_gaps() -> None:
     assert pointers == ["/site", "/site/zones/0", "/subjects/0", "/subjects/1"]
 
 
+def test_a_subject_memory_does_not_hold_never_widens_to_the_whole_site() -> None:
+    packet = ask(
+        q(
+            subjects=frozenset({Subject("machine", "asset-tag:QUAD-99")}),
+            site=SiteScope("site-code:S-007"),
+        )
+    )
+    assert not packet.items
+    assert gaps(packet, GapCode.NOT_COVERED) == [("/subjects/0", ("asset-tag:QUAD-99",))]
+
+
 def test_a_kind_wide_subject_filters_what_a_site_walk_keeps() -> None:
     packet = ask(
         q(
@@ -406,6 +420,38 @@ def test_a_bridged_window_is_not_carried_to_the_ledger_and_ledger_findings_are_g
     details = [g.detail for g in packet.gaps if g.code is GapCode.NOT_COVERED]
     assert any("ADR 0016" in d for d in details)
     assert any("budget_exceeded" in d for d in details)
+
+
+def test_a_ledger_that_fails_or_states_too_little_is_a_gap_not_a_lost_answer() -> None:
+    class Broken(F.FakeCatalog):
+        def query(self, spec: object) -> object:
+            if getattr(spec, "window", None) is not None:
+                raise RuntimeError("catalog store unreachable")
+            return super().query(spec)  # type: ignore[arg-type]
+
+    query = q(subjects=frozenset({AMR}), during=MARCH, graph=GraphClause(None, 2, Direction.BOTH))
+    broken = ask(query, catalog=Broken())
+    assert broken.claim_ids and not [i for i in broken.items if not isinstance(i, ClaimItem)]
+    assert any("could not be read" in g.detail for g in broken.gaps)
+    vague = tuple(replace(r, assertion_kind=None) for r in F.ROWS)
+    packet = ask(query, catalog=F.FakeCatalog(vague))
+    assert not [i for i in packet.items if not isinstance(i, ClaimItem)]
+    assert {r for _, refs in gaps(packet, GapCode.UNKNOWN) for r in refs} == {F.STREAM, F.IMAGE}
+
+
+def test_a_channel_that_raises_is_a_gap_and_the_others_still_answer() -> None:
+    class Failing:
+        channel = Channel.LEXICAL
+        config: ClassVar[dict[str, object]] = {"channel": "lexical"}
+
+        def retrieve(self, request: object) -> object:
+            raise RuntimeError("index missing")
+
+    reader = F.reader()
+    engine = LocalEngine(reader, channels=[GraphChannel(reader), Failing()])  # type: ignore[list-item]
+    packet = Client(engine).query(q(subjects=frozenset({AMR})))
+    assert packet.claim_ids
+    assert any(g.channel is Channel.LEXICAL and "index missing" in g.detail for g in packet.gaps)
 
 
 # --- The engine -----------------------------------------------------------------------------------

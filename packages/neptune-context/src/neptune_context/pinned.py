@@ -62,26 +62,31 @@ def _snapshot() -> Any:
     return json.loads(files("neptune_context").joinpath("pinned.json").read_bytes())
 
 
+@functools.cache
 def node_types() -> frozenset[str]:
     """graph-schema's node types at the pin."""
     return frozenset(_snapshot()["graph-schema"]["defs"]["NodeType"]["enum"])
 
 
+@functools.cache
 def predicates() -> frozenset[str]:
     """graph-schema's predicate names at the pin."""
     return frozenset(_snapshot()["graph-schema"]["predicates"])
 
 
+@functools.cache
 def thread_kinds() -> frozenset[str]:
     """catalog-api's thread kinds at the pin."""
     return frozenset(_snapshot()["catalog-api"]["thread_kinds"])
 
 
+@functools.cache
 def value_types() -> frozenset[str]:
     """graph-schema's literal and record value types at the pin."""
     return frozenset(_snapshot()["graph-schema"]["defs"]["ValueType"]["enum"])
 
 
+@functools.cache
 def finding_codes() -> frozenset[str]:
     """graph-schema's resolver finding codes at the pin."""
     return frozenset(_snapshot()["graph-schema"]["defs"]["FindingCode"]["enum"])

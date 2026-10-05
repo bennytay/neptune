@@ -223,6 +223,7 @@ class _Retrieve:
         self.mappings: dict[str, Claim] = {}  # bridged clock -> the clock_map claim carrying it
         self.used: set[str] = set()  # bridged clocks a carried claim was placed on
         self.views: dict[NodeRef, Any] = {}
+        self.transforms: dict[str, Transform | None] = {}
 
     # --- Reading Memory ------------------------------------------------------------------------
 
@@ -251,11 +252,14 @@ class _Retrieve:
             if record:
                 self.state.other_clock.add(claim.id)
             return False
-        if not claim.valid.overlaps(window.interval()):
-            return False
-        if record and window is not self.window:
+        return claim.valid.overlaps(window.interval())
+
+    def carry(self, claim: Claim, level: int) -> None:
+        """Make ``claim`` a hit, noting the bridged clock it was placed on, if any."""
+        self.state.hit(claim, level)
+        clock = str(claim.valid.domain_id)
+        if clock in self.placed:
             self.used.add(clock)
-        return True
 
     # --- Seeds ---------------------------------------------------------------------------------
 
@@ -264,6 +268,7 @@ class _Retrieve:
         query, node_types = self.query, pinned.node_types()
         subjects = ordered(query.subjects, _subject_json)
         declared: dict[NodeRef, int] = {}
+        asked = False  # whether any subject names one node: then only those may seed the walk
         kinds: set[NodeType] = set()
         kind_wide: list[str] = []
         for index, subject in enumerate(subjects):
@@ -281,6 +286,7 @@ class _Retrieve:
                 kinds.add(NodeType(subject.kind))
                 kind_wide.append(at)
                 continue
+            asked = True
             node = NodeRef(NodeType(subject.kind), subject.declared_id)
             if not isinstance(self.view(node), Known):
                 self.state.gap(
@@ -295,13 +301,13 @@ class _Retrieve:
             for other in self.same_as(node, subject.same_as_depth):
                 declared.setdefault(other, 0)
         anchors = self.site_anchors()
-        if declared and anchors:
-            declared = self.at_site(declared, anchors)
-            seeds = declared
-        elif declared:
-            seeds = declared
+        if not asked:
+            seeds = anchors  # the site and zones are the anchors (ADR 0002 §5)
+        elif declared and anchors:
+            seeds = self.at_site(declared, anchors)
         else:
-            seeds = anchors
+            # Subjects that name nodes were asked; none found is no seed, never the whole site.
+            seeds = declared
         if not seeds:
             for at in kind_wide:
                 self.state.gap(
@@ -331,7 +337,7 @@ class _Retrieve:
                     if isinstance(other, NodeRef) and other not in seen:
                         seen.add(other)
                         reached.append(other)
-                        self.state.hit(claim, 1)
+                        self.carry(claim, 1)
             found.extend(sorted(reached, key=_node_key))
             frontier = reached
         return found
@@ -478,8 +484,7 @@ class _Retrieve:
             nxt: set[NodeRef] = set()
             for here in frontier:
                 if expanded >= self.max_nodes:
-                    if record:
-                        self.state.truncated = True
+                    self.state.truncated = True  # a site check cut short says so too
                     return reached
                 expanded += 1
                 view = self.view(here)
@@ -498,7 +503,7 @@ class _Retrieve:
                         continue
                     other = claim.object if outgoing else claim.subject
                     if record and self.keep(claim, kinds, seeds):
-                        self.state.hit(claim, level)
+                        self.carry(claim, level)
                     if isinstance(other, NodeRef) and other not in reached:
                         reached.add(other)
                         nxt.add(other)
@@ -527,7 +532,7 @@ class _Retrieve:
 
     def superseded(self, claim: Claim) -> Superseded | None:
         """When, in ``(memory_as_of, head]``, Memory stopped holding ``claim``, and what by."""
-        low, high = int(self.as_of), int(self.memory.head)
+        low, high = int(self.as_of), min(int(self.memory.head), int(self.snapshot.head))
         if low >= high or any(c.id == claim.id for c in self.present(claim, high)):
             return None
         while high - low > 1:  # current at ``low``, gone at ``high``
@@ -599,6 +604,8 @@ class _Retrieve:
                 records.append(claim.object.record_id)
             for record in records:
                 named[str(record)] = max(named.get(str(record), 0.0), value)
+        if not named and not cited:
+            return []  # nothing carried names or cites a record: no window read is needed
         specs: list[tuple[str, FrameRegion | None]] = [
             (f"/regions/{i}", r) for i, r in enumerate(regions)
         ] or [("/during", None)]
@@ -668,12 +675,17 @@ class _Retrieve:
         """A stream row as a series window clipped to the window, an image row as a frame;
         ``None`` (and a gap) when the Ledger cannot say what produced it."""
         transform = self.transform(row)
-        if transform is None or row.source_content_id is None or row.source_locator is None:
+        if (
+            transform is None
+            or row.source_content_id is None
+            or row.source_locator is None
+            or row.assertion_kind is None
+        ):
             self.state.gap(
                 GapCode.UNKNOWN,
                 "/during" if self.window is not None else "/regions",
                 [str(row.record_id)],
-                "the Ledger states no source or transform for this record",
+                "the Ledger states no source, transform or assertion kind for this record",
             )
             return None
         evidence = evidence_ref_from_json(
@@ -681,9 +693,7 @@ class _Retrieve:
         )
         provenance = ItemProvenance((evidence,), (row.record_id,), transform)  # type: ignore[arg-type]
         envelope: dict[str, Any] = {
-            "assertion_kind": AssertionKind.STATED
-            if row.assertion_kind == "stated"
-            else AssertionKind.OBSERVED,
+            "assertion_kind": AssertionKind(row.assertion_kind),
             "confidence": NotApplicable(),
             "provenance": provenance,
             "relevance": _PROVISIONAL,
@@ -730,14 +740,18 @@ class _Retrieve:
         )
 
     def transform(self, row: QueryRow) -> Transform | None:
+        """The adapter behind a row's transform, from the Ledger's lineage (once per transform)."""
         if row.transform_id is None or self.catalog is None:
             return None
-        lineage = self.catalog.lineage(row.record_id, as_of=int(self.snapshot.as_of))
-        for node in lineage.nodes:
-            if node.transform_id == row.transform_id and isinstance(node.transform, Known):
-                info = node.transform.value
-                return Transform(info.adapter_id, info.adapter_version, info.config_hash)  # type: ignore[arg-type]
-        return None
+        if row.transform_id not in self.transforms:
+            found = None
+            lineage = self.catalog.lineage(row.record_id, as_of=int(self.snapshot.as_of))
+            for node in lineage.nodes:
+                if node.transform_id == row.transform_id and isinstance(node.transform, Known):
+                    info = node.transform.value
+                    found = Transform(info.adapter_id, info.adapter_version, info.config_hash)  # type: ignore[arg-type]
+            self.transforms[row.transform_id] = found
+        return self.transforms[row.transform_id]
 
     # --- The answer ----------------------------------------------------------------------------
 
@@ -761,7 +775,15 @@ class _Retrieve:
         scored: list[tuple[float, Item]] = [
             (score(claim, level), ClaimItem.of(claim, _PROVISIONAL)) for level, claim in claims
         ]
-        scored += self.ledger([(score(c, lv), c) for lv, c in claims])
+        try:
+            scored += self.ledger([(score(c, lv), c) for lv, c in claims])
+        except Exception as exc:  # the Ledger failing loses its items, never the claims
+            self.state.gap(
+                GapCode.NOT_COVERED,
+                "/during" if self.window is not None else "/regions",
+                [],
+                f"the Ledger could not be read: {type(exc).__name__}: {exc}"[:2000],
+            )
         held = set(state.hits)
         superseded = [s for _, c in claims if (s := self.superseded(c)) is not None]
         findings = [
