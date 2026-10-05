@@ -4,10 +4,10 @@ This page states what Context, Deploy and Learn may rely on when they read Memor
 `contracts/graph-schema/v1.7.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
-configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6). 1.7.0 (minor) adds
-the calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md)
-§4, §6). Every earlier
-golden still validates and its graph still passes the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
+configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
+run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6); 1.7.0 (minor) adds the
+calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md)
+§4, §6). Earlier goldens still validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
 ## Nodes
@@ -47,6 +47,8 @@ major version (ADR 0002 §5).
 
 | Predicate | Subject | Object | Cardinality | Meaning |
 |---|---|---|---|---|
+| `at_site` | run | site | one | the site a run took place at, as declared |
+| `at_site_candidate` | run | site | many | ambiguous: the evidence names several sites for the run |
 | `authorised_configuration` | site | configuration | many | an authorisation envelope approves this configuration at the site over the interval |
 | `calibrated_by` | configuration | record | many | the maintenance or requalification record that states the calibration resulted from it |
 | `calibrated_with` | sensor | configuration | many | a calibration of the sensor, from its valid_from to its stated end or the next one |
@@ -54,14 +56,18 @@ major version (ADR 0002 §5).
 | `configuration_active_during` | run | configuration | many | a configuration the run ran with, over the bound part of the run (a snapshot binding) |
 | `configuration_candidate` | machine, run | configuration | many | ambiguous: the configuration in force could be this one; one claim per reading |
 | `configuration_unknown` | machine, run | record | many | no configuration is stated over the interval; the record leaves it open, never filled |
+| `continues` | run | run | many | a later part of one recording: the next part of a run its assembly states |
+| `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
 | `drift` | sensor | delta | many | observed: two consecutive calibrations' declared values differ by the delta; no judgement |
 | `episode_of` | episode | run | one | the run an episode segments |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
 | `executes_task` | episode, run | task | many | a task attempted |
+| `executes_task_candidate` | episode, run | task | many | ambiguous: the evidence names several tasks |
 | `governed_by` | deployment, fleet, machine, site | policy | many | an operating rule or control policy that applies |
 | `has_calibration` | sensor | configuration | one | the calibration in force |
 | `has_configuration` | deployment, machine, sensor | configuration | many | a parameter set, description file or other configuration in force |
+| `has_member` | run | record | many | a source file the compiler's run assembly places in the run (its `SourceRevision`) |
 | `has_name` | any node | text | one | a declared display name, verbatim; never an identifier |
 | `has_summary` | deployment, fleet, programme | text | one | a context node's summary |
 | `located_at` | asset, machine | site, zone | one | where it is |
@@ -73,6 +79,7 @@ major version (ADR 0002 §5).
 | `part_of_programme` | deployment, fleet | programme | one | the owning programme |
 | `rated_payload` | machine | quantity | one | rated payload, unit as declared |
 | `recorded_by` | run | machine | one | the machine whose log a run is |
+| `recorded_by_candidate` | run | machine | many | ambiguous: the evidence names several machines for the run |
 | `runs_model` | machine | model_version | many | a learned model it runs |
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
@@ -183,7 +190,15 @@ def test_graph_schema_contract(check):
     `succeeds` is claimed across a gap. `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
     made only over windows whose bounds are stated and only where they compare on one clock; an unstated bound or
     envelope end is never read as open.
-13. **Calibration is never converted or judged.** `memory.calibration` ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md))
+13. **Runs are threads, never merged** ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md)). A run
+    node is a compiler `Run`'s declared logical id, else `record:<run record id>`. Every claim about a run holds over
+    its stated `[first, last]` on its own clock, and again on a civil clock only where a `timestamp_domain` or a
+    stated `clock_mapping` puts it there. `continues` links the parts of one run its `RunAssembly` states, in time
+    order on one clock; parts whose clocks cannot be compared are `continues_candidate` both ways. `recorded_by`
+    and `at_site` are `Known` only when every ground names one id, and `executes_task` holds every task stated;
+    otherwise each reading is a `*_candidate` claim. `consolidate.runs.involvement` reads a role back as `Known`,
+    `Ambiguous`, `Unknown` or `NotCovered`.
+14. **Calibration is never converted or judged.** `memory.calibration` ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md))
     places a calibration on a sensor only through its declared machine and subject and the hardware configurations
     the machine declares or its chain places; several readings are `calibration_candidate`s, and so is a calibration
     whose frame binding contradicts its sensor's configuration graph. A `calibrated_with` starts at a stated

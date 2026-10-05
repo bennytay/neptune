@@ -26,6 +26,7 @@ EARLIER: Final = (
     FIRST,
     REGISTRY / "v1.1.0",
     REGISTRY / "v1.2.0",
+    REGISTRY / "v1.3.0",
 )  # every earlier stable minor of major 1
 
 
