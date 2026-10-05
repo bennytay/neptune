@@ -13,13 +13,15 @@ REPO: Final = Path(__file__).resolve().parents[3]
 FIXTURES: Final = REPO / "tests" / "fixtures" / "model"
 
 
-def test_today_the_compiler_is_real_and_the_rest_are_stubs(tmp_path: Path) -> None:
+def test_today_the_compiler_and_the_ledger_are_real_and_the_rest_are_stubs(
+    tmp_path: Path,
+) -> None:
     report, code = run(tmp_path / "run", owner_tests=False)
     assert code == 0 and report["ok"] is True
     modes = {stage["stage"]: (stage["mode"], stage["status"]) for stage in report["stages"]}
     assert modes == {
         "compiler": ("real", "ok"),
-        "ledger": ("stub", "ok"),
+        "ledger": ("real", "ok"),
         "memory": ("stub", "ok"),
         "context": ("stub", "ok"),
     }
@@ -29,16 +31,25 @@ def test_today_the_compiler_is_real_and_the_rest_are_stubs(tmp_path: Path) -> No
         "memory",
         "context",
     ]
-    ledger = report["stages"][1]
-    assert ledger["output"]["contract"] == "catalog-api"
-    assert ledger["output"]["contract_version"] == "1.6.0"
-    served = contracts.registry().latest("catalog-api")
-    assert served is not None
-    assert ledger["output"]["served"] == "goldens"
-    assert len(ledger["output"]["goldens"]) == len(served.goldens)
+    assert report["stages"][1]["contract_version"] == "1.6.0"
     assert report["smoke"]["ok"] is True
     assert report["smoke"]["packet_source"].startswith("canned: query-packet")
     assert report["corpus"] == {"name": "worked-examples", "cases": list(corpus.EXAMPLE_NAMES)}
+
+
+def test_the_ledger_stage_registers_and_verifies_every_compiled_package(tmp_path: Path) -> None:
+    report, _ = run(tmp_path / "run", owner_tests=False)
+    ledger = report["stages"][1]["output"]
+    assert ledger["locked_package_schema"] == "6.0.0" and ledger["tenant"] == "harness"
+    rows = ledger["cases"]
+    assert [row["case"] for row in rows] == list(corpus.EXAMPLE_NAMES)
+    for seq, row in enumerate(rows, start=1):
+        assert row["registration"] == "registered" and row["registration_findings"] == {}
+        assert row["reregistration"] == "already_registered"  # idempotent registration
+        assert row["verify"] == "intact" and row["files_checked"] > 0
+        assert row["responses_valid"] is True  # against the registry's catalog-api schema
+        assert row["tx_seq"] == seq and 1 <= row["schema_version"] <= 6
+        assert row["records"] > 0
 
 
 def test_the_compiler_stage_ingests_validates_and_verifies_every_case(tmp_path: Path) -> None:
@@ -145,3 +156,25 @@ def test_report_json_is_canonical(tmp_path: Path) -> None:
     text = (tmp_path / "run" / "report.json").read_text(encoding="utf-8")
     parsed: Any = json.loads(text)
     assert text == json.dumps(parsed, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
+
+
+def test_a_compiler_that_breaks_package_schema_turns_the_harness_red(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The X1 gate's schema break (docs/reviews/x1-gate.md), in process: the compiler renames a
+    manifest key without a contract bump, so its packages no longer match package-schema."""
+    from neptune.model import package
+
+    def renamed(self: package.PackageManifest) -> Any:
+        data = dict(original(self))
+        data["table_counts"] = data.pop("tables")
+        return data
+
+    original = package.PackageManifest.to_json
+    monkeypatch.setattr(package.PackageManifest, "to_json", renamed)
+    report, code = run(tmp_path / "run", owner_tests=False)
+    assert code == 1 and report["ok"] is False
+    compiler, ledger = report["stages"][0], report["stages"][1]
+    assert compiler["mode"] == "real" and compiler["status"] == "failed"
+    assert all(case["state"] == "error" for case in compiler["output"]["cases"])
+    assert ledger["status"] == "skipped"

@@ -2,7 +2,7 @@ name: harness
 
 # The integration harness (MVL-123, packages/neptune-platform ADR 0004): contracts check, the corpus
 # through compiler -> ledger -> memory -> context, a smoke query, one report. It needs no Docker
-# while every stage is the real compiler or a contract stub. It is not a required status yet:
+# while every real stage runs in process (the ledger on an embedded PostgreSQL, platform ADR 0006). It is not a required status yet:
 # `ci.yml`'s `check` is the only one.
 #
 # - merge_group and the nightly schedule run it unconditionally (a merge group has no path filter);

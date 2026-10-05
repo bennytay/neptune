@@ -12,6 +12,7 @@ from harness.stages import STAGES, Context, Outcome, Stage, resolve
 
 REPO: Final = Path(__file__).resolve().parents[3]
 COMPILER: Final = STAGES[0]
+LEDGER: Final = STAGES[1]
 
 
 def _ok(_: Context) -> Outcome:
@@ -24,23 +25,23 @@ def _context(tmp_path: Path, registry: object | None = None) -> Context:
 
 
 def test_the_stage_order_and_service_flags() -> None:
+    # The real ledger runs on an embedded PostgreSQL (platform ADR 0006), so it needs no services.
     assert [(s.id, s.needs_services) for s in STAGES] == [
         ("compiler", False),
-        ("ledger", True),
+        ("ledger", False),
         ("memory", True),
         ("context", True),
     ]
-    assert STAGES[0].real is not None and all(s.real is None for s in STAGES[1:])
+    assert [s.real is not None for s in STAGES] == [True, True, False, False]
 
 
-def test_today_only_the_compiler_resolves_to_real() -> None:
+def test_today_the_compiler_and_the_ledger_resolve_to_real() -> None:
     registry = contracts.registry()
     resolved = {stage.id: resolve(stage, registry) for stage in STAGES}
     assert resolved["compiler"].mode == "real"
     assert resolved["compiler"].contract_version == "6.0.0"
-    assert resolved["ledger"].mode == "stub"
-    # neptune_ledger.api is importable (MVL-88) but only as a contract and stub: no real driver.
-    assert "no real driver for neptune-ledger" in resolved["ledger"].reason
+    assert resolved["ledger"].mode == "real"
+    assert resolved["ledger"].reason == "neptune_ledger.api is importable and matches 1.6.0"
     assert resolved["ledger"].contract_version == "1.6.0"
     assert resolved["context"].mode == "stub"
     assert resolved["memory"].mode == "stub"  # graph-schema 1.0.0 is published; no driver yet
@@ -144,3 +145,46 @@ def test_the_context_stub_serves_a_published_query_packet_golden(tmp_path: Path)
     assert smoke["packet"] == {"packet": "golden"}
     assert smoke["packet_source"] == "golden query-packet packet.json"
     assert outcome.output["contract_version"] == "0.0.1"
+
+
+def _compiled(tmp_path: Path, registry: object | None = None) -> Context:
+    """A context whose compiler stage has run for real over the worked examples."""
+    ctx = _context(tmp_path, registry)
+    entry = run_stage(COMPILER, ctx, services_up=False, upstream_ok=True)
+    assert entry["status"] == "ok"
+    return ctx
+
+
+def test_a_tampered_package_is_refused_by_the_real_ledger(tmp_path: Path) -> None:
+    ctx = _compiled(tmp_path)
+    manifest = json.loads((tmp_path / "packages" / "drone" / "manifest.json").read_text())
+    victim = tmp_path / "packages" / "drone" / manifest["files"][0]["path"]
+    victim.write_bytes(victim.read_bytes() + b" ")  # the manifest's hash no longer matches
+    entry = run_stage(LEDGER, ctx, services_up=False, upstream_ok=True)
+    assert entry["mode"] == "real" and entry["status"] == "failed"
+    rows = {row["case"]: row for row in entry["output"]["cases"]}
+    assert rows["drone"]["registration"] == "refused"
+    assert rows["drone"]["responses_valid"] is True  # a refusal is still a valid catalog answer
+    assert entry["problems"][0].startswith("drone: register was refused (")
+    assert {rows[c]["registration"] for c in ("manipulator", "mobile_robot", "quadruped")} == {
+        "registered"
+    }  # partial success: one tampered package does not stop the others
+
+
+def test_a_package_newer_than_the_ledger_lock_fails_the_real_ledger(tmp_path: Path) -> None:
+    copy = tmp_path / "contracts"
+    shutil.copytree(REPO / "contracts", copy)
+    lock = (copy / "lock.toml").read_text(encoding="utf-8")
+    pinned = '[neptune-ledger]\npackage-schema = "6.0.0"'
+    assert pinned in lock
+    (copy / "lock.toml").write_text(
+        lock.replace(pinned, '[neptune-ledger]\npackage-schema = "1.0.0"'), encoding="utf-8"
+    )
+    ctx = _compiled(tmp_path / "work", contracts.registry(copy))
+    assert LEDGER.real is not None
+    outcome = LEDGER.real(ctx)  # resolve() would make it a stub: a lock a major behind
+    # The manipulator and quadruped packages need package-schema 2 (compiler ADR 0037).
+    assert outcome.problems == (
+        "manipulator: the package needs package-schema 2, neptune-ledger locks 1.0.0",
+        "quadruped: the package needs package-schema 2, neptune-ledger locks 1.0.0",
+    )

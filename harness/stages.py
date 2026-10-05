@@ -193,6 +193,134 @@ def compiler_real(ctx: Context) -> Outcome:
     return Outcome({"cases": cases}, tuple(problems))
 
 
+# --- Ledger (real) ---------------------------------------------------------------------------
+
+LEDGER_TENANT: Final = "harness"
+
+
+def _embedded_postgres(ctx: Context) -> Any:
+    """A PostgreSQL 16 server from the ``pgserver`` wheel (the server the Ledger's own catalog
+    tests use; platform ADR 0006), with its data directory in the run's scratch."""
+    from pgserver.postgres_server import get_server
+
+    return get_server(ctx.work / "ledger-pgdata", cleanup_mode="delete")
+
+
+def _catalog_database(server_uri: str) -> str:
+    """A new C-collated database (Ledger ADR 0005 §4) on the server, migrated for the tenant."""
+    import psycopg
+    from neptune_ledger.catalog.migrate import apply_migrations
+    from psycopg import sql
+
+    name = "harness_catalog"
+    with psycopg.connect(server_uri, autocommit=True) as admin:
+        admin.execute(
+            sql.SQL(
+                "CREATE DATABASE {} TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'"
+            ).format(sql.Identifier(name))
+        )
+    uri = server_uri.replace("/postgres?", f"/{name}?", 1)
+    if name not in uri:
+        raise RuntimeError("cannot name the catalog database in the embedded server's URI")
+    with psycopg.connect(uri, autocommit=True) as conn:
+        apply_migrations(conn, LEDGER_TENANT)
+    return uri
+
+
+def _known(slot: Any) -> Any:
+    """The value of a ``Known`` slot, else ``None`` (the slot's state is the catalog's answer)."""
+    from neptune.model.knowledge import Known
+
+    return slot.value if isinstance(slot, Known) else None
+
+
+def ledger_real(ctx: Context) -> Outcome:
+    """Register every package the compiler stage committed into the Ledger's real catalog
+    (``PostgresCatalog`` on an embedded PostgreSQL), register it again, verify it, and validate
+    every response against the registry's catalog-api schema. The package-schema version each
+    package needs (its manifest's ``schema_version``, the lowest version whose readers read it;
+    compiler ADR 0037) must be within the major ``neptune-ledger`` locks in ``contracts/lock.toml``.
+    Platform ADR 0006."""
+    from neptune_ledger.api import codec
+    from neptune_ledger.catalog.registry import PostgresCatalog
+
+    tool = load_tool()
+    version = ctx.registry.latest("catalog-api", stable=True)
+    if version is None:
+        return Outcome({"cases": []}, ("catalog-api has no stable version to validate against",))
+    schema = json.loads(version.schema_text)
+    pointers = {
+        "register": _pointer(version, ".registration.json"),
+        "verify": _pointer(version, ".verify_report.json"),
+    }
+    locked = ctx.registry.lock().get("neptune-ledger", {}).get("package-schema")
+    locked_major = tool.parse_semver(locked)[0] if locked else None
+    cases: list[Json] = []
+    problems: list[str] = []
+
+    def breaks(case: str, call: str, response: Any) -> bool:
+        errors = tool.validate_golden(schema, pointers[call], codec.to_json(response))
+        problems.extend(f"{case}: {call} breaks catalog-api: {e}" for e in errors[:3])
+        return bool(errors)
+
+    server = _embedded_postgres(ctx)
+    try:
+        uri = _catalog_database(str(server.get_uri()))
+        root = ctx.work / "packages"
+        with PostgresCatalog(uri, LEDGER_TENANT, package_roots=(root,)) as catalog:
+            for upstream in ctx.upstream.get("compiler", {}).get("cases", []):
+                case, package = str(upstream["case"]), upstream.get("package")
+                row: Json = {"case": case}
+                cases.append(row)
+                if not package:
+                    row["registration"] = "not_attempted"
+                    problems.append(f"{case}: the compiler stage committed no package")
+                    continue
+                first = catalog.register(root / case)
+                again = catalog.register(root / case)
+                report = catalog.verify(str(package))
+                needs = _known(first.schema_version)
+                key = _known(first.registration_key)
+                broken = [
+                    breaks(case, "register", first),
+                    breaks(case, "register", again),
+                    breaks(case, "verify", report),
+                ]
+                row.update(
+                    registration=first.outcome,
+                    registration_findings=dict(
+                        sorted(Counter(f.code for f in first.findings).items())
+                    ),
+                    tx_seq=key.tx_seq if key is not None else None,  # never tx_time: a clock
+                    schema_version=needs,
+                    records=sum(count.count for count in first.record_counts),
+                    reregistration=again.outcome,
+                    verify=report.verdict,
+                    files_checked=report.files_checked,
+                    responses_valid=not any(broken),
+                )
+                if first.outcome != "registered":
+                    codes = ", ".join(sorted({f.code for f in first.findings})) or "no finding"
+                    problems.append(f"{case}: register was {first.outcome} ({codes})")
+                elif _known(first.package_id) != package:
+                    problems.append(
+                        f"{case}: the catalog registered {_known(first.package_id)}, not {package}"
+                    )
+                if again.outcome != "already_registered":
+                    problems.append(f"{case}: a second register was {again.outcome}")
+                if report.verdict != "intact":
+                    problems.append(f"{case}: verify was {report.verdict}")
+                if locked_major is not None and (needs is None or needs > locked_major):
+                    problems.append(
+                        f"{case}: the package needs package-schema {needs}, "
+                        f"neptune-ledger locks {locked}"
+                    )
+    finally:
+        server.cleanup()
+    output: Json = {"cases": cases, "locked_package_schema": locked, "tenant": LEDGER_TENANT}
+    return Outcome(output, tuple(problems))
+
+
 # --- Contract stubs --------------------------------------------------------------------------
 
 
@@ -228,12 +356,12 @@ def _golden_stub(contract_id: str, consumes: str | None) -> Driver:
 
 
 def ledger_stub(ctx: Context) -> Outcome:
-    """Serves the catalog-api goldens (v0.0.0, draft: the registry's only catalog document)."""
+    """Serves the goldens of catalog-api's latest version (used only when the stage is a stub)."""
     return _golden_stub("catalog-api", "compiler")(ctx)
 
 
 def memory_stub(ctx: Context) -> Outcome:
-    """graph-schema has no published version, so this serves a canned empty result."""
+    """Serves the goldens of graph-schema's latest version (a canned marker when none exists)."""
     return _golden_stub("graph-schema", "ledger")(ctx)
 
 
@@ -271,7 +399,7 @@ STAGES: Final[tuple[Stage, ...]] = (
         compiler_real,
         _golden_stub("package-schema", None),
     ),
-    Stage("ledger", "neptune-ledger", "catalog-api", True, None, ledger_stub),
+    Stage("ledger", "neptune-ledger", "catalog-api", False, ledger_real, ledger_stub),
     Stage("memory", "neptune-memory", "graph-schema", True, None, memory_stub),
     Stage("context", "neptune-context", "query-packet", True, None, context_stub),
 )
