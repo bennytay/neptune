@@ -32,9 +32,9 @@ if TYPE_CHECKING:
 # node type widened to ``stream`` and ``document`` (ADR 0008 §6). 4: the configuration lineage
 # predicates joined (ADR 0010 §6). 5: the run thread predicates joined (ADR 0009 §6). 6: the
 # time-domain registry's ``has_clock``, ``maps_to`` and ``clock_map`` joined, and the predicates
-# that hold for every node type widened to ``clock`` (ADR 0011 §1). The vocabulary is part of
-# graph-schema (``GRAPH_SCHEMA_VERSION``).
-VOCABULARY_VERSION: Final = 6
+# that hold for every node type widened to ``clock`` (ADR 0011 §1). 7: the episode predicates
+# joined (ADR 0012 §5). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
+VOCABULARY_VERSION: Final = 7
 
 # Time-domain registry predicates (ADR 0011). Only declared or estimated mappings, and chains of
 # them, ground ``maps_to`` and ``clock_map``; no consolidator estimates an offset.
@@ -70,6 +70,24 @@ CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
         AT_SITE: "at_site_candidate",
         EXECUTES_TASK: "executes_task_candidate",
         CONTINUES: "continues_candidate",
+    }
+)
+
+# Episodes (ADR 0012). ``starts_at`` / ``ends_at`` are an episode's boundaries on one clock, each
+# citing what states it; ``intervened`` names an ``Intervention`` record; ``outcome`` is a declared
+# outcome, verbatim, and is never inferred. The ``_candidate`` forms are ambiguous readings; a
+# start has none, since it is the earliest start the run's records state. ``starts_at`` and
+# ``ends_at`` are ``many``: each claim's instant is on its own clock, so a ``one`` predicate would
+# read an episode placed on two clocks as a cross-clock contradiction. Two instants on one clock
+# disagree, and ``boundary_of`` reads them as ``Ambiguous``.
+STARTS_AT: Final = "starts_at"
+ENDS_AT: Final = "ends_at"
+INTERVENED: Final = "intervened"
+OUTCOME: Final = "outcome"
+EPISODE_CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
+    {
+        ENDS_AT: "ends_at_candidate",
+        INTERVENED: "intervened_candidate",
     }
 )
 
@@ -418,6 +436,48 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
     ),
     _p("operated_by", {_N.RUN}, {_N.PERSON}, _MANY, "a declared operator or supervisor"),
     _p("episode_of", {_N.EPISODE}, {_N.RUN}, _ONE, "the run an episode segments"),
+    _p(
+        "starts_at",
+        {_N.EPISODE},
+        {_V.INSTANT},
+        _MANY,
+        "where an episode starts, as its records state it: one claim per clock, never two on one",
+    ),
+    _p(
+        "ends_at",
+        {_N.EPISODE},
+        {_V.INSTANT},
+        _MANY,
+        "where an episode ends, as its records state it: one claim per clock, never two on one",
+    ),
+    _p(
+        "ends_at_candidate",
+        {_N.EPISODE},
+        {_V.INSTANT},
+        _MANY,
+        "ambiguous: may end here (a stated end, or a stop event inside it); which is undecided",
+    ),
+    _p(
+        "intervened",
+        {_N.EPISODE},
+        {_V.RECORD},
+        _MANY,
+        "a human intervention during the episode (an Intervention record, by id)",
+    ),
+    _p(
+        "intervened_candidate",
+        {_N.EPISODE},
+        {_V.RECORD},
+        _MANY,
+        "ambiguous: the intervention may have been during the episode; the evidence does not say",
+    ),
+    _p(
+        "outcome",
+        {_N.EPISODE},
+        {_V.TEXT},
+        _ONE,
+        "the outcome a record declares for the episode, verbatim; never inferred",
+    ),
     _p(
         "maintenance_state",
         {_N.MACHINE, _N.SENSOR, _N.ASSET},
