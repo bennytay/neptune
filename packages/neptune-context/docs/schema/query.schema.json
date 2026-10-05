@@ -265,17 +265,20 @@
             {
               "items": {
                 "enum": [
+                  "clock_map",
                   "deployed_at",
                   "episode_of",
                   "evidenced_by",
                   "executes_task",
                   "governed_by",
                   "has_calibration",
+                  "has_clock",
                   "has_configuration",
                   "has_name",
                   "has_summary",
                   "located_at",
                   "maintenance_state",
+                  "maps_to",
                   "member_of_fleet",
                   "mounted_on",
                   "operated_by",
@@ -290,7 +293,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 22,
+              "maxItems": 25,
               "minItems": 1,
               "type": "array",
               "uniqueItems": true
@@ -524,6 +527,7 @@
         "kind": {
           "enum": [
             "asset",
+            "clock",
             "configuration",
             "deployment",
             "document",
