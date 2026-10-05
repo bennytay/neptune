@@ -18,7 +18,7 @@ contradictory input is a finding and never a claim, and the rest of the build is
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias
 
 from neptune.identity import canonical_json
 from neptune.model.assertion import AssertionType
@@ -253,7 +253,57 @@ def node_threads(ledger: LedgerReader) -> Mapping[NodeRef, tuple[Thread, ...]]:
 
 # --- Human assertions: retraction ---------------------------------------------------------------
 
-Status = Literal["effective", "retracted", "undecided"]
+Status = Literal["effective", "retracted", "undecided", "doubtful"]
+# A retraction edge: attacker, target, and whether it certainly names the target.
+_Edge: TypeAlias = "tuple[RecordId, RecordId, bool]"
+
+
+def _edges(statements: Sequence[Statement]) -> list[_Edge]:
+    """Which ``retract`` names which assertion. An edge is certain when the retract names one id
+    (``Known``) and the target carries one (``Known``); where either is ``Ambiguous`` the retract
+    only possibly names the target (ADR 0008 §3, graph-schema rule 11)."""
+    by_identifier: dict[Key, list[Statement]] = {}
+    for statement in statements:
+        for identifier in statement.identifiers:
+            by_identifier.setdefault(_key(identifier), []).append(statement)
+    edges: dict[tuple[RecordId, RecordId], bool] = {}
+    for statement in statements:
+        if statement.assertion_type is not AssertionType.RETRACT:
+            continue
+        for named in statement.retracts:
+            for target in by_identifier.get(_key(named), ()):
+                certain = not statement.retracts_ambiguous and not target.identifier_ambiguous
+                pair = (statement.record, target.record)
+                edges[pair] = edges.get(pair, False) or certain
+    return [(attacker, target, certain) for (attacker, target), certain in edges.items()]
+
+
+def _label(records: Iterable[RecordId], edges: Sequence[_Edge]) -> dict[RecordId, Status]:
+    """The grounded labelling over certain and possible retractions, computed with a worklist so
+    a chain of any length is safe. An assertion is effective when every retract that names it,
+    certainly or possibly, is retracted (or none does); retracted when a retract that certainly
+    names it is effective. Anything else is left unlabelled."""
+    attackers: dict[RecordId, int] = dict.fromkeys(records, 0)
+    targets: dict[RecordId, list[tuple[RecordId, bool]]] = {r: [] for r in attackers}
+    for attacker, target, certain in edges:
+        attackers[target] += 1
+        targets[attacker].append((target, certain))
+    status: dict[RecordId, Status] = {}
+    effective = [record for record, count in attackers.items() if count == 0]
+    while effective:
+        record = effective.pop()
+        if record in status:
+            continue
+        status[record] = "effective"
+        for target, certain in targets[record]:
+            if not certain or target in status:
+                continue
+            status[target] = "retracted"
+            for freed, _ in targets[target]:
+                attackers[freed] -= 1
+                if attackers[freed] == 0 and freed not in status:
+                    effective.append(freed)
+    return status
 
 
 def _statuses(statements: Sequence[Statement]) -> dict[RecordId, Status]:
@@ -262,44 +312,32 @@ def _statuses(statements: Sequence[Statement]) -> dict[RecordId, Status]:
     An assertion is retracted when an effective ``retract`` names its declared identifier, and
     effective when every ``retract`` naming it is itself retracted (or none does); a retraction
     of a retraction therefore restores. What neither rule settles is a loop (a ``retract``
-    naming its own id, or two naming each other) and whatever rests on one: undecided. This is
-    the grounded labelling, computed with a worklist so a chain of any length is safe.
+    naming its own id, or two naming each other) and whatever rests on one: undecided. What
+    certain retractions alone would settle but a retract that only possibly names it (an
+    ``Ambiguous`` ``retracts`` or ``identifier``) leaves open is doubtful: never a decided fact.
     """
-    attackers: dict[RecordId, list[RecordId]] = {s.record: [] for s in statements}
-    targets: dict[RecordId, list[RecordId]] = {s.record: [] for s in statements}
-    by_identifier: dict[Key, list[RecordId]] = {}
-    for statement in statements:
-        if statement.identifier is not None:
-            by_identifier.setdefault(_key(statement.identifier), []).append(statement.record)
-    for statement in statements:
-        if statement.assertion_type is AssertionType.RETRACT and statement.retracts is not None:
-            for target in by_identifier.get(_key(statement.retracts), ()):
-                attackers[target].append(statement.record)
-                targets[statement.record].append(target)
-    status: dict[RecordId, Status] = {}
-    pending = {record: len(found) for record, found in attackers.items()}
-    effective = [record for record, count in pending.items() if count == 0]
-    while effective:
-        record = effective.pop()
-        if record in status:
-            continue
-        status[record] = "effective"
-        for target in targets[record]:
-            if target in status:
-                continue
-            status[target] = "retracted"
-            for freed in targets[target]:
-                pending[freed] -= 1
-                if pending[freed] == 0 and freed not in status:
-                    effective.append(freed)
-    return {s.record: status.get(s.record, "undecided") for s in statements}
+    records = [s.record for s in statements]
+    edges = _edges(statements)
+    certain = _label(records, [e for e in edges if e[2]])
+    final = _label(records, edges)
+    return {r: final.get(r, "undecided" if r not in certain else "doubtful") for r in records}
+
+
+def _doubters(
+    record: RecordId, edges: Sequence[_Edge], status: Mapping[RecordId, Status]
+) -> list[RecordId]:
+    """The retracts that leave ``record`` in doubt: those naming it that are not retracted."""
+    return sorted({a for a, t, _ in edges if t == record and status[a] != "retracted"})
 
 
 def _from_statements(view: _View) -> tuple[list[Link], dict[frozenset[Key], set[RecordId]]]:
     """``same_identity`` assertions that stand, as links; ``distinct_identity`` ones, as pairs
-    with the assertions that declare them distinct."""
+    with the assertions that declare them distinct. A ``same_identity`` that may have been
+    retracted, or whose own identifier is ``Ambiguous``, is an undecided link: candidates."""
     status = _statuses(view.statements)
-    known_ids = {_key(s.identifier) for s in view.statements if s.identifier is not None}
+    edges = _edges(view.statements)
+    by_record = {s.record: s for s in view.statements}
+    known_ids = {_key(i) for s in view.statements for i in s.identifiers}
     links: list[Link] = []
     distinct: dict[frozenset[Key], set[RecordId]] = {}
     for statement in view.statements:
@@ -311,15 +349,16 @@ def _from_statements(view: _View) -> tuple[list[Link], dict[frozenset[Key], set[
             continue
         if (
             kind is AssertionType.RETRACT
-            and statement.retracts is not None
-            and _key(statement.retracts) not in known_ids
+            and statement.retracts
+            and not any(_key(named) in known_ids for named in statement.retracts)
         ):
+            named = [r.to_json() for r in statement.retracts]
             view.findings.append(
                 _finding(
                     "retraction_unmatched",
                     "a retract names an assertion id no assertion in the Ledger carries",
                     rid,
-                    retracts=statement.retracts.to_json(),
+                    retracts=named if statement.retracts_ambiguous else named[0],
                 )
             )
         if kind not in (AssertionType.SAME_IDENTITY, AssertionType.DISTINCT_IDENTITY):
@@ -335,6 +374,18 @@ def _from_statements(view: _View) -> tuple[list[Link], dict[frozenset[Key], set[
             continue
         if status[statement.record] == "retracted":
             continue
+        doubters: list[RecordId] = []
+        if status[statement.record] == "doubtful":
+            doubters = _doubters(statement.record, edges, status)
+            view.findings.append(
+                _finding(
+                    "retraction_ambiguous",
+                    f"a retract may name this {kind} assertion; it is not a decided statement",
+                    (statement.record, *doubters),
+                )
+            )
+            if kind is AssertionType.DISTINCT_IDENTITY:
+                continue  # a distinctness that may be withdrawn suppresses nothing
         ids = statement.nodes or ()
         if len(ids) < 2:
             view.findings.append(
@@ -358,9 +409,16 @@ def _from_statements(view: _View) -> tuple[list[Link], dict[frozenset[Key], set[
                 assertion_kind=AssertionKind.STATED,
                 left=ordered[0],
                 right=tuple(Side(node) for node in ordered[1:]),
-                decided=statement.timed,
+                decided=statement.timed
+                and not statement.identifier_ambiguous
+                and not doubters
+                and status[statement.record] == "effective",
                 windows=statement.windows,
-                evidence=statement.evidence,
+                evidence=(
+                    *statement.evidence,
+                    *(ref for d in doubters for ref in by_record[d].evidence),
+                ),
+                also=tuple(doubters),
             )
         )
     return links, distinct
@@ -592,7 +650,7 @@ def _link_candidates(
                     valid_to=t.end,
                     assertion_kind=link.assertion_kind,
                     evidence=(*link.evidence, *side.evidence, *t.evidence),
-                    records=(link.record, *t.records),
+                    records=(link.record, *link.also, *t.records),
                 )
                 for (subject, obj, _), t in zip(directions, timed, strict=True)
             )
