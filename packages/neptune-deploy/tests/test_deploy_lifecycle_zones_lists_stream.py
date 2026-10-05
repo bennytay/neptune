@@ -344,3 +344,77 @@ def test_an_unreadable_cell_beside_items_is_not_reported_as_blank() -> None:
     codes = {f.code.split(".")[-1] for f in _of(package, "ingest_finding")}
     assert "value_unreadable" in codes
     assert "list_cell_blank" not in codes
+
+
+def _with_related(text: str) -> IngestPackage:
+    """The work-order export with every ``Related`` cell the text ``text`` (a typed cell)."""
+    base = _base("warehouse_amr")
+    table = next(
+        t
+        for t in _of(base, "structured_table")
+        if isinstance(t.header, Known) and "Related" in t.header.value
+    )
+    index = table.header.value.index("Related")
+    records = []
+    for record in base.records:
+        if record.kind == "structured_record" and record.table == table.id:
+            cells = list(record.cells)
+            cells[index] = Known(text)
+            record = replace(record, cells=tuple(cells))
+        records.append(record)
+    return read_files(package_files(records))
+
+
+@pytest.mark.parametrize("text", ["   ", "\t\n ", " "])
+def test_a_whitespace_only_cell_is_an_unknown_list_never_stated_none(text: str) -> None:
+    package = _mapped(_with_related(text), _mapping("unstated", RELATED))
+    events = _of(package, "maintenance_event")
+    assert events
+    for event in events:
+        assert isinstance(event.related, Unknown)
+        assert isinstance(event.related.provenance, Provenance)
+    about_related = [
+        f.code.split(".")[-1]
+        for f in _of(package, "ingest_finding")
+        if f.details.get("field") == "/related"
+    ]
+    assert not about_related  # a blank is a state, not a finding
+
+
+def test_a_delimiter_only_cell_is_unknown_with_its_part_finding() -> None:
+    package = _mapped(_with_related(" ; ;;"), _mapping("unstated", RELATED))
+    events = _of(package, "maintenance_event")
+    assert events and all(isinstance(e.related, Unknown) for e in events)
+    empty = [f for f in _of(package, "ingest_finding") if f.code.endswith(".list_part_empty")]
+    assert len(empty) == len(events)  # one per cell, as before
+    assert all(f.details["count"] == 4 for f in empty)
+    assert {r for f in empty for r in f.records} == {e.id for e in events}
+    # No list is stated empty anywhere: `Known(())` comes only from a source that states none.
+    assert not any(isinstance(e.related, Known) and e.related.value == () for e in events)
+
+
+def test_a_write_that_fails_partway_leaves_out_empty_and_no_spill(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import neptune_deploy.lifecycle as lifecycle
+
+    base_root = FIXTURES / "packages" / "warehouse_amr"
+    mappings = [preset("cmms_generic"), preset("jira_json")]
+    real = map_records(read_package(base_root), mappings)
+    assert len(real) > 25
+
+    def failing(*_: Any) -> Any:
+        yield from real[:20]  # records are already in the writer when it fails
+        raise RuntimeError("disk gone")
+
+    monkeypatch.setattr(lifecycle, "iter_records", failing)
+    scratch = tmp_path / "scratch"
+    out = tmp_path / "out"
+    with pytest.raises(RuntimeError, match="disk gone"):
+        map_package(base_root, mappings, out, scratch=scratch)
+    assert out.is_dir() and not any(out.iterdir())  # no partial package
+    assert not any(scratch.iterdir())  # no leftover spill directory
+    monkeypatch.undo()
+    # The same output path then takes a whole package.
+    package_id = map_package(base_root, mappings, out, scratch=scratch)
+    assert read_package(out).id == package_id

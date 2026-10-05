@@ -521,6 +521,8 @@ class _Values:
         if text is None:
             self.cell_finding("value_unreadable", spec.column, path, place)
             return _Read([], Unknown(self.provenance(place)))  # its finding is value_unreadable
+        if not text.strip():
+            return _Read([], Unknown(self.provenance(place)), place)  # whitespace is a blank
         if spec.split is None:
             return _Read([(text, place, place)])
         out: list[tuple[str, EvidenceRef, EvidenceRef]] = []
@@ -548,6 +550,9 @@ class _Values:
             start = stop + len(separator)
         if empty:
             self.cell_finding("list_part_empty", spec.column, path, place, times=empty)
+        if not out:
+            # Only delimiters: no item is stated, so the cell is a blank, not a list stated empty.
+            return _Read([], Unknown(self.provenance(place)), place)
         return _Read(out)
 
     def listed(

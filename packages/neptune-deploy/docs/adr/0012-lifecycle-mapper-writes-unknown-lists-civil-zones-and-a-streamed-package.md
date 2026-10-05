@@ -30,15 +30,15 @@ The compiler now loads plugins (MVL-200), so the archetype generator must say ho
    - `Known(items)` inheriting the record's provenance (the version 4 bare array) when a cell
      states items. Findings about malformed parts are unchanged: `list_part_empty`,
      `list_id_repeated`, `list_truncated`, `value_unreadable`, `item_blank`.
-   - `Unknown(provenance of the blank cell)` when the cell is blank (missing, short row, or the
-     compiler's `Unknown`). No finding: the state is the statement, and it cites the cell. A cell
+   - `Unknown(provenance of the blank cell)` when the cell is blank (missing, short row, the
+     compiler's `Unknown`, or text that is only whitespace) or states no item (only delimiters,
+     which also keeps the `list_part_empty` finding). No finding: the state is the statement, and it cites the cell. A cell
      whose text is not readable as text is `Unknown` with `value_unreadable`, as a scalar is.
    - `NotCovered` when no rule reads the list (what ADR 0005 §5 could only name in
      `fields_not_covered`, which still names it), when the column or section is absent from the
      table or document, or when the compiler's cell is `NotCovered`.
-   - `Known(())` citing the cell when the compiler's cell is `KnownAbsent` (the source states
-     none), and `Known(())` inheriting provenance when the cell holds text that lists nothing
-     (only delimiters). A list of parts (`tests`, `hazards`) whose every part is blank is `Unknown`
+   - `Known(())` citing the cell only when the compiler's cell is `KnownAbsent` (the source
+     states none). Text never gives `Known(())`: no text states "none". A list of parts (`tests`, `hazards`) whose every part is blank is `Unknown`
      citing the row, or `NotCovered` when every column its parts read is absent. A document
      section that shows text but no list item is `Unknown` citing its heading, with
      `value_unreadable`: prose is not a list stated empty.
@@ -102,8 +102,12 @@ The compiler now loads plugins (MVL-200), so the archetype generator must say ho
 - A reader of a mapped package finds every list as an array (items stated) or a state, and joins
   `civil_time_zone` to a domain to learn the declared zone. A package that holds any of these is
   written at schema version 6 and a version 4 or 5 reader refuses it by version.
-- The base packages are unchanged; the lifecycle goldens change (every record's transform id, new
-  `civil_time_zone` records, list states, fewer findings), as the PR explains.
+- The lifecycle goldens change (every record's transform id, new `civil_time_zone` records, list
+  states, fewer findings), as the PR explains. The committed base packages
+  (`archetypes/packages/*`) change too, but not by the mapper: `--no-plugins` drops the
+  `neptune.plugins` transform, and the fleet's `neptune.validate` transform and its
+  `source_incomplete` finding (which already existed) have new ids because the compiler's
+  `dangling_reference` rule went from version 2 to 3.
 - Memory of a run is the base package's records plus one row plus the findings: the D1 gate's
   100,000-work-order case is measured again in `docs/reviews/d1-gate.md`.
 - Revisit if a multi-million-row export needs the base read as a stream (a compiler reader), or if
