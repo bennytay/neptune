@@ -38,7 +38,12 @@ def test_each_pin_is_a_published_version_of_its_contract() -> None:
 
 
 def test_pins_track_what_the_upstream_owners_export() -> None:
-    assert pins.CATALOG_API_VERSION == LEDGER_CATALOG_API_VERSION
+    # A consumer may lag an additive (minor or patch) owner release; the lock check warns until
+    # this package moves its pin (platform ADR 0002). It never runs ahead of the owner or across
+    # a major.
+    pinned = tuple(int(part) for part in pins.CATALOG_API_VERSION.split("."))
+    owner = tuple(int(part) for part in LEDGER_CATALOG_API_VERSION.split("."))
+    assert pinned[0] == owner[0] and pinned <= owner
     assert pins.GRAPH_SCHEMA_VERSION.split(".")[0] == str(MEMORY_GRAPH_SCHEMA_VERSION)
 
 

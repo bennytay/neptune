@@ -31,7 +31,9 @@ async def serve(client: AsyncClient) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="neptune_context.mcp", description=__doc__.split("\n")[0])
+    parser = argparse.ArgumentParser(
+        prog="neptune_context.mcp", description=(__doc__ or "Neptune MCP server").split("\n")[0]
+    )
     where = parser.add_mutually_exclusive_group(required=True)
     where.add_argument("--url", help="base URL of a Neptune engine (https, or loopback http)")
     where.add_argument("--packets", type=Path, help="directory of recorded packet JSON (fixtures)")
@@ -41,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
             client = AsyncClient(args.url, token=os.environ.get(TOKEN_ENV) or None)
         else:
             client = AsyncClient(StubEngine.from_directory(args.packets))
-    except SdkError as error:
+    except (SdkError, OSError) as error:
         sys.stderr.write(f"neptune mcp: {error}\n")
         return 2
     anyio.run(serve, client)

@@ -39,6 +39,7 @@ from neptune_memory.schema.predicates import is_declared_value
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
+    from fractions import Fraction
 
     from neptune.model.alignment import ValidityWindow
     from neptune.model.jsonvalue import JsonValue
@@ -351,10 +352,12 @@ def assertion(record: Mapping[str, object]) -> Statement:
 class Clock:
     """A ``TimestampDomain``, and the ``CivilClock`` it names when it declares a civil timescale,
     an absolute epoch and its resolution (ADR 0002 §3); ``civil`` is ``None`` for any other clock
-    (a boot clock, a GPS week count, an unset RTC), whose instants stay on their own domain."""
+    (a boot clock, a GPS week count, an unset RTC), whose instants stay on their own domain.
+    ``resolution`` is its stated seconds per tick, or ``None`` when it states none."""
 
     record: RecordId
     civil: CivilClock | None
+    resolution: Fraction | None = None
 
 
 def clock(record: Mapping[str, object]) -> Clock:
@@ -363,8 +366,8 @@ def clock(record: Mapping[str, object]) -> Clock:
     epoch: Epoch | None = _known(domain.epoch)
     resolution = _known(domain.resolution)
     if timescale is None or epoch is None or resolution is None:
-        return Clock(domain.id, None)
+        return Clock(domain.id, None, resolution)
     try:
-        return Clock(domain.id, CivilClock(timescale, epoch, resolution))
+        return Clock(domain.id, CivilClock(timescale, epoch, resolution), resolution)
     except ValueError:  # a timescale or epoch that is not civil
-        return Clock(domain.id, None)
+        return Clock(domain.id, None, resolution)

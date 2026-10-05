@@ -17,7 +17,11 @@ A package is a directory::
 series and blobs always give the same bytes and so the same package id. ``package_files`` is the
 same for a package held wholly in memory. ``read_package`` checks all of
 it: the manifest, every file's size and hash, no stray files, every table's order and records,
-lineage ids, every series against its stream, and a receipt that recomputes from the tables.
+lineage ids, every series against its stream, and a receipt that recomputes from the tables. It
+reads as a stream (``neptune.store.reader``, ADR 0070) and gives a package that holds paths: its
+records are read from their tables each time they are iterated. ``write_package`` writes into
+``.<name>.partial`` beside the target and renames it into place, so a killed write leaves the
+target as it was.
 
 Derived tables (ADR 0036, amending ADR 0023 §5) hold what a producer inferred, such as session
 proposals, apart from the evidence in ``records/``. The store checks their structure only, since
@@ -31,37 +35,39 @@ paths: hashed, checked and copied as streams, never held in memory (ADR 0025). E
 opened with ``open_file``: a symlink is refused, not followed, and so is a FIFO or device.
 """
 
+import contextlib
 import errno
+import fcntl
 import hashlib
+import io
 import os
 import re
 import shutil
 import stat
-from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from functools import cached_property
+from itertools import zip_longest
 from pathlib import Path
-from typing import Any, BinaryIO, Final, TypeAlias
+from typing import Any, BinaryIO, Final, TypeAlias, TypeGuard
 
 from neptune.identity import canonical_json
 from neptune.identity.findings import check_ingest_finding
 from neptune.identity.hashing import content_id
-from neptune.identity.provenance import check_evidence_record_id, check_transform_record
+from neptune.identity.provenance import check_evidence_record_id
 from neptune.model.ids import ContentId, RecordId, parse_content_id, parse_record_id
 from neptune.model.jsonvalue import JsonObject, JsonValue
-from neptune.model.kinds import RECORD_KINDS, kinds_at, record_key, records_version
 from neptune.model.package import (
     IngestReceipt,
     PackageManifest,
     ReceiptEnvelope,
-    Storage,
     ingest_receipt_from_json,
     package_manifest_from_json,
     receipt_envelope_from_json,
 )
 from neptune.model.provenance import Provenance, TransformRecord
-from neptune.store.receipt import check_receipt, render_receipt
-from neptune.store.series import SeriesError, check_series, check_settings
+from neptune.store.series import SeriesError, check_settings
+from neptune.store.spill import SPILL_BUDGET
 
 MANIFEST: Final = "manifest.json"
 RECEIPT: Final = "receipt.json"
@@ -73,6 +79,8 @@ _SERIES: Final = re.compile(r"series/([0-9a-f]{64})\.parquet")
 _BLOB: Final = re.compile(r"blobs/sha256/([0-9a-f]{2})/([0-9a-f]{64})")
 _TABLE: Final = re.compile(r"records/([a-z][a-z0-9_]*)\.jsonl")
 _DERIVED: Final = re.compile(r"derived/([a-z][a-z0-9_]*)\.jsonl")
+# A package bound for ``root`` is written in ``.<name>.partial`` beside it, then renamed (ADR 0070).
+PARTIAL_SUFFIX: Final = ".partial"
 
 
 # A package file's content: bytes in memory, or a file on disk read as a stream.
@@ -209,26 +217,6 @@ def _derived_line(kind: str, line: JsonValue, transforms: set[str]) -> str:
     return key
 
 
-def _check_derived(kind: str, data: bytes, transforms: set[str]) -> tuple[JsonObject, ...]:
-    """The structure of one derived table: canonical lines, each a ``kind`` object with an
-    integer ``schema_version``, a record ``id`` and a ``transform`` the package holds, sorted by
-    id, each id once. Its meaning is ``neptune.derived``'s to check."""
-    path = derived_path(kind)
-    lines: list[JsonObject] = []
-    previous: str | None = None
-    for raw in data.splitlines(keepends=True):
-        line = _load(raw.removesuffix(b"\n"), path)
-        if not raw.endswith(b"\n") or canonical_json.dumps(line) + b"\n" != raw:
-            raise PackageError(f"{path} is not one canonical line per record")
-        key = _derived_line(kind, line, transforms)
-        if previous is not None and key <= previous:
-            raise PackageError(f"{path} must be sorted by id, each id once")
-        previous = key
-        assert isinstance(line, Mapping)  # _derived_line refuses anything else
-        lines.append(line)
-    return tuple(lines)
-
-
 def _series_settings(store: JsonObject) -> JsonObject:
     """The settings the package's series were written with, as ``store.series`` records them."""
     try:
@@ -257,20 +245,106 @@ def package_id(files: Mapping[str, Content]) -> ContentId:
     return content_id(_bytes(files[MANIFEST]))
 
 
+def partial_path(root: Path) -> Path:
+    """Where a package bound for ``root`` is written before it is renamed into place."""
+    return root.parent / f".{root.name}{PARTIAL_SUFFIX}"
+
+
+def _claim(partial: Path, root: Path) -> int:
+    """Lock the directory at ``partial`` for one write of ``root``, made if missing.
+
+    One left by a write that was killed (no process holds its lock) is emptied and reused, so a
+    crash leaves at most one such directory per root, and the next write of that root removes it.
+    A write of the same root in progress elsewhere holds the lock: this one is refused.
+    """
+    while True:
+        with contextlib.suppress(FileExistsError):
+            partial.mkdir()
+        try:
+            descriptor = os.open(partial, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            continue  # renamed into place or removed since: make it again
+        except OSError as exc:
+            if exc.errno not in (errno.ELOOP, errno.ENOTDIR):
+                raise
+            partial.unlink()  # a stale file or link where the directory goes: never followed
+            continue
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            here = partial.lstat()
+        except BlockingIOError as exc:
+            os.close(descriptor)
+            raise PackageError(f"{root} is being written by another process") from exc
+        except FileNotFoundError:
+            os.close(descriptor)
+            continue
+        locked = os.fstat(descriptor)
+        if (here.st_dev, here.st_ino) != (locked.st_dev, locked.st_ino):
+            os.close(descriptor)  # the write that held it renamed it into place: not ours
+            continue
+        try:
+            for entry in partial.iterdir():  # what a killed write left
+                if entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry)
+                else:
+                    entry.unlink()
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor
+
+
+@contextlib.contextmanager
+def replacing(root: Path) -> Iterator[Path]:
+    """A directory to write the package bound for ``root`` into, renamed to ``root`` when the
+    block ends without error and removed when it does not (ADR 0070).
+
+    ``root`` must not exist or be an empty directory. The directory is ``partial_path(root)``, in
+    the same parent, so the rename is one atomic step: a process killed at any point leaves
+    ``root`` as it was, never a manifest without the files it lists. It is atomic, not durable:
+    ``neptune.store.assemble.publish`` also flushes to disk (ADR 0026).
+    """
+    if root.is_symlink() or (root.exists() and (not root.is_dir() or any(root.iterdir()))):
+        raise PackageError(f"{root} is not an empty directory")
+    root.parent.mkdir(parents=True, exist_ok=True)
+    partial = partial_path(root)
+    descriptor = _claim(partial, root)
+    try:
+        yield partial
+        try:
+            partial.rename(root)  # replaces an empty directory at ``root`` in the same step
+        except OSError as exc:
+            if exc.errno in (errno.ENOTEMPTY, errno.EEXIST, errno.ENOTDIR, errno.EISDIR):
+                raise PackageError(f"{root} is not an empty directory") from exc
+            raise
+    except BaseException:
+        shutil.rmtree(partial, ignore_errors=True)
+        raise
+    finally:
+        os.close(descriptor)
+
+
+def lay_down(directory: Path, files: Mapping[str, Content]) -> None:
+    """Write ``files`` into ``directory``: bytes as given, paths copied as streams, except a path
+    already where it belongs (a streaming writer's own table)."""
+    for relative, data in sorted(files.items()):
+        target = directory / relative
+        if isinstance(data, bytes):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        elif data != target:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            copy_file(data, target)
+
+
 def write_package(root: Path, files: Mapping[str, Content]) -> ContentId:
     """Write ``package_contents`` output into ``root``, which must not exist or be empty.
 
-    A path is copied as a stream; ``read_package`` checks the result.
+    A path is copied as a stream; ``read_package`` checks the result. The package is written
+    beside ``root`` and renamed into place (``replacing``): ``root`` holds all of it or none.
     """
-    if root.exists() and (not root.is_dir() or any(root.iterdir())):
-        raise PackageError(f"{root} is not an empty directory")
-    for relative, data in sorted(files.items()):
-        path = root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(data, bytes):
-            path.write_bytes(data)
-        else:
-            copy_file(data, path)
+    with replacing(root) as partial:
+        lay_down(partial, files)
     return package_id(files)
 
 
@@ -312,18 +386,138 @@ def read_cache_report(root: Path) -> JsonObject:
 # --- Reading -----------------------------------------------------------------------------------
 
 
+def _lines(content: Content) -> Iterator[bytes]:
+    """A table's lines as stored, each with its newline (a last line may lack one), streamed."""
+    if isinstance(content, bytes):
+        yield from io.BytesIO(content)  # split at b"\n" only, as a file is
+        return
+    with open_file(content) as stream:
+        yield from stream
+
+
+class StoredTable(Collection[Any]):
+    """One table of a verified package, read from its file each time it is iterated, never held.
+
+    Each pass is hashed as it goes: a file changed since the package was verified is refused
+    (``PackageError``) when the pass reaches its end, and one gone or unreadable as soon as the
+    pass meets it. A pass raises nothing else.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        content: Content,
+        listed: tuple[int, ContentId],
+        count: int,
+        parse: Callable[[bytes], Any],
+    ) -> None:
+        self.path = path
+        self._content = content
+        self._listed = listed
+        self._count = count
+        self._parse = parse
+
+    def __iter__(self) -> Iterator[Any]:
+        digest, size = hashlib.sha256(), 0
+        try:
+            for line in _lines(self._content):
+                digest.update(line)
+                size += len(line)
+                yield self._parse(line)
+        except OSError as exc:
+            raise PackageError(f"{self.path} cannot be read since the package was: {exc}") from exc
+        if (size, "sha256:" + digest.hexdigest()) != self._listed:
+            raise PackageError(f"{self.path} changed since the package was read")
+
+    def __len__(self) -> int:
+        return self._count
+
+    def __contains__(self, item: object) -> bool:
+        return any(item == member for member in self)
+
+    def __eq__(self, other: object) -> bool:
+        if not _comparable(other):
+            return NotImplemented
+        return _same(self, other)
+
+
+def _comparable(other: object) -> TypeGuard[Collection[Any]]:
+    return isinstance(other, Collection) and not isinstance(other, str | bytes | Mapping)
+
+
+def _same(lazy: Collection[Any], other: Collection[Any]) -> bool:
+    """Equal members in the same order, compared as both are read: neither is held whole. Equal
+    by content, which is not held, so neither view is hashable."""
+    if len(lazy) != len(other):
+        return False
+    end = object()
+    return all(a == b for a, b in zip_longest(lazy, other, fillvalue=end))
+
+
+class PackageRecords(Collection[Any]):
+    """A verified package's records, table by table (each sorted by id), read from the tables each
+    time they are iterated and never held whole (ADR 0070). ``of(kind)`` reads one table."""
+
+    def __init__(self, tables: Mapping[str, StoredTable]) -> None:
+        self._tables = dict(tables)
+
+    def of(self, kind: str) -> Collection[Any]:
+        """The records of one kind, read from their table; none for a kind the package lacks."""
+        return self._tables.get(kind, ())
+
+    def __iter__(self) -> Iterator[Any]:
+        for table in self._tables.values():
+            yield from table
+
+    def __len__(self) -> int:
+        return sum(len(table) for table in self._tables.values())
+
+    def __contains__(self, item: object) -> bool:
+        kind = getattr(item, "kind", None)
+        return isinstance(kind, str) and item in self.of(kind)
+
+    def __eq__(self, other: object) -> bool:
+        if not _comparable(other):
+            return NotImplemented
+        return _same(self, other)
+
+
+def records_of(records: Iterable[Any], kind: str) -> Collection[Any]:
+    """The records of one kind: a package's table as it is read, or picked from any records."""
+    if isinstance(records, PackageRecords):
+        return records.of(kind)
+    return [record for record in records if record.kind == kind]
+
+
 @dataclass(frozen=True)
 class IngestPackage:
     """A package read and verified: its id, manifest, receipt, records, series and blobs, and its
-    derived tables by kind, each line as JSON (``neptune.derived`` reads them)."""
+    derived tables by kind, each line as JSON (``neptune.derived`` reads them).
+
+    As ``read_package`` gives it, nothing that grows with the records is held (ADR 0070): the
+    records (``PackageRecords``) and each derived table (``StoredTable``) are read from their files
+    each time they are iterated, series and blobs are paths, and the receipt is parsed from
+    ``receipt.json`` when first asked for. ``records`` may be any collection of records, as a
+    caller that builds a package in memory gives it.
+    """
 
     id: ContentId
     manifest: PackageManifest
-    receipt: IngestReceipt
-    records: tuple[Any, ...]
+    records: Collection[Any]
     series: Mapping[RecordId, Content]
     blobs: Mapping[ContentId, Content]
-    derived: Mapping[str, tuple[JsonObject, ...]] = field(default_factory=dict)
+    derived: Mapping[str, Collection[JsonObject]] = field(default_factory=dict)
+    receipt_document: Content = field(default=b"", repr=False, compare=False)
+
+    @cached_property
+    def receipt(self) -> IngestReceipt:
+        """The receipt core, parsed from ``receipt.json`` when first asked for: it lists every
+        finding, so it is held only by a caller that asks."""
+        data = _bytes(self.receipt_document)
+        listed = {file.path: (file.size, file.sha256) for file in self.manifest.files}
+        if _digest(data) != listed.get(RECEIPT):
+            raise PackageError(f"{RECEIPT} changed since the package was read")
+        return ingest_receipt_from_json(_load(data, RECEIPT))
 
     def files(self) -> dict[str, Content]:
         """The package's deterministic files, rebuilt from what was read."""
@@ -336,11 +530,15 @@ class IngestPackage:
         )
 
 
-def read_package(root: Path) -> IngestPackage:
+def read_package(
+    root: Path, *, scratch: Path | None = None, budget: int = SPILL_BUDGET
+) -> IngestPackage:
     """Read a package directory and verify it; ``volatile/`` is left out.
 
-    Series and blobs stay on disk: they are hashed and checked as streams, and the package holds
-    their paths.
+    Every file stays on disk: hashed, checked and read as a stream, and the package holds paths
+    (ADR 0070). ``scratch`` is a directory of the caller's (a workspace's scratch space) where the
+    receipt's large sections are sorted as it is recomputed; without one they are sorted in
+    memory, which grows with the findings and ambiguous fields, never with the records.
     """
     files: dict[str, Content] = {}
     for path in sorted(root.rglob("*")):
@@ -349,9 +547,8 @@ def read_package(root: Path) -> IngestPackage:
             raise PackageError(f"{relative} is a symlink; a package holds regular files only")
         if relative == VOLATILE or relative.startswith(f"{VOLATILE}/") or path.is_dir():
             continue
-        large = _SERIES.fullmatch(relative) or _BLOB.fullmatch(relative)
-        files[relative] = path if large else _bytes(path)
-    return read_files(files)
+        files[relative] = path
+    return read_files(files, scratch=scratch, budget=budget)
 
 
 def read_envelope(root: Path) -> ReceiptEnvelope:
@@ -365,133 +562,17 @@ def _load(data: bytes, what: str) -> JsonValue:
         raise PackageError(f"{what} is not canonical JSON: {exc}") from exc
 
 
-def read_files(files: Mapping[str, Content]) -> IngestPackage:
-    """Verify a package given as its files by path (everything but ``volatile/``)."""
-    if MANIFEST not in files:
-        raise PackageError(f"no {MANIFEST}")
-    manifest_bytes = _bytes(files[MANIFEST])
-    manifest = package_manifest_from_json(_load(manifest_bytes, MANIFEST))
-    listed = {file.path: file for file in manifest.files}
-    present = set(files) - {MANIFEST}
-    if present != set(listed):
-        raise PackageError(
-            f"files do not match the manifest: unlisted {sorted(present - set(listed))},"
-            f" missing {sorted(set(listed) - present)}"
-        )
-    small = {
-        path: _bytes(data)
-        for path, data in files.items()
-        if not (_SERIES.fullmatch(path) or _BLOB.fullmatch(path))
-    }
-    for path, file in listed.items():
-        if _digest(small.get(path, files[path])) != (file.size, file.sha256):
-            raise PackageError(f"{path} does not match its size and hash in the manifest")
-    kinds = kinds_at(manifest.version)
-    if dict(manifest.tables).keys() != set(kinds):
-        raise PackageError(
-            f"the manifest must count a table for every record kind of schema version"
-            f" {manifest.version}, and no other"
-        )
+def read_files(
+    files: Mapping[str, Content], *, scratch: Path | None = None, budget: int = SPILL_BUDGET
+) -> IngestPackage:
+    """Verify a package given as its files by path (everything but ``volatile/``).
 
-    records: list[Any] = []
-    for kind in kinds:
-        read = RECORD_KINDS[kind][1]
-        path = table_path(kind)
-        if path not in small:
-            raise PackageError(f"no table for {kind}: an empty table is an empty file")
-        members = [read(_load(line, path)) for line in small[path].splitlines()]
-        if small[path] != b"".join(_document(record) + b"\n" for record in members):
-            raise PackageError(f"{path} is not one canonical line per record")
-        keys = [record_key(record) for record in members]
-        if keys != sorted(set(keys)):
-            raise PackageError(f"{path} must be sorted by id, each id once")
-        if len(members) != dict(manifest.tables)[kind]:
-            raise PackageError(f"{path} holds {len(members)} records, the manifest says otherwise")
-        records.extend(members)
-    # A package is written at the lowest version that holds its records (ADR 0037 §1, ADR 0061
-    # §6), so the same records have one package: a higher version would be a second package.
-    held = records_version(records)
-    if manifest.version != held:
-        raise PackageError(
-            f"the manifest says schema version {manifest.version}, but its records are of version"
-            f" {held}: a package is written at the lowest version that holds its records"
-        )
-    _check_lineage(records)
+    It is ``neptune.store.reader.verify``: each table is read once as a stream and checked as the
+    writer checks what it writes, and the receipt is recomputed and compared by hash (ADR 0070).
+    """
+    from neptune.store.reader import verify  # the reader builds on this module
 
-    series: dict[RecordId, Content] = {}
-    blobs: dict[ContentId, Content] = {}
-    derived: dict[str, tuple[JsonObject, ...]] = {}
-    transforms = {record.id for record in records if record.kind == "transform_record"}
-    streams = {record.id: record for record in records if record.kind == "stream"}
-    handles = {handle.content_id: handle for handle in manifest.sources}
-    artifacts = {record.content_id for record in records if record.kind == "source_artifact"}
-    if set(handles) != artifacts:
-        raise PackageError("the manifest's sources must be the package's source artifacts")
-    settings: JsonObject | None = None  # validated once, at the first series file
-    for path, data in files.items():
-        if path in (MANIFEST, RECEIPT, RECEIPT_TEXT) or _TABLE.fullmatch(path):
-            continue
-        if match := _DERIVED.fullmatch(path):
-            derived[match[1]] = _check_derived(match[1], small[path], transforms)
-        elif match := _SERIES.fullmatch(path):
-            stream = parse_record_id(f"rec:sha256:{match[1]}")
-            if stream not in streams:
-                raise PackageError(f"{path} names no stream of this package")
-            if settings is None:
-                settings = _series_settings(manifest.store)
-            try:
-                check_series(streams[stream], data, settings)
-            except SeriesError as exc:
-                raise PackageError(f"{path}: {exc}") from exc
-            series[stream] = data
-        elif (match := _BLOB.fullmatch(path)) and match[2].startswith(match[1]):
-            content = parse_content_id(f"sha256:{match[2]}")
-            if _digest(data)[1] != content or handles.get(content) is None:
-                raise PackageError(f"{path} does not hold the source it is named for")
-            blobs[content] = data
-        else:
-            raise PackageError(f"{path} has no place in a package")
-    for content, handle in handles.items():
-        if (handle.storage is Storage.MATERIALISED) != (content in blobs):
-            raise PackageError(f"source {content} is {handle.storage}, but its blob says otherwise")
-
-    receipt = ingest_receipt_from_json(_load(small[RECEIPT], RECEIPT))
-    if receipt.version != manifest.version:
-        raise PackageError("the receipt and the manifest are of different schema versions")
-    try:
-        check_receipt(receipt, records)
-    except ValueError as exc:
-        raise PackageError(str(exc)) from exc
-    if receipt.id != manifest.receipt:
-        raise PackageError("the manifest names another receipt")
-    if small[RECEIPT_TEXT] != render_receipt(receipt).encode("utf-8"):
-        raise PackageError(f"{RECEIPT_TEXT} is not the rendering of {RECEIPT}")
-    return IngestPackage(
-        id=content_id(manifest_bytes),
-        manifest=manifest,
-        receipt=receipt,
-        records=tuple(records),
-        series=series,
-        blobs=blobs,
-        derived=derived,
-    )
-
-
-def _check_lineage(records: list[Any]) -> None:
-    """Every transform, finding and evidence record id recomputes (ADRs 0016, 0017)."""
-    transforms: dict[str, TransformRecord] = {}
-    by_kind: dict[str, list[Any]] = defaultdict(list)
-    for record in records:
-        by_kind[record.kind].append(record)
-    try:
-        for transform in by_kind["transform_record"]:
-            transforms[transform.id] = check_transform_record(transform)
-    except ValueError as exc:
-        raise PackageError(str(exc)) from exc
-    for finding in by_kind["ingest_finding"]:
-        check_record_lineage(finding, transforms, provenance=False)
-    for record in records:
-        check_record_lineage(record, transforms, finding=False)
+    return verify(files, scratch=scratch, budget=budget)
 
 
 def check_record_lineage(

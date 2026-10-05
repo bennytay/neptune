@@ -77,3 +77,4 @@ header).
 | [0067](0067-connector-sources-uri-dispatch-carried-revisions-and-a-job-spool.md) | Connector Sources: URI dispatch, revisions carried by token, and a job spool | Accepted |
 | [0068](0068-payload-decoding-and-frame-alignment-run-trees-links-and-comparable-references.md) | Payload decoding and frame alignment: declared definitions into columns, run trees, links and comparable references | Accepted |
 | [0069](0069-salvage-by-chunk-declared-extents-and-loss-accounting.md) | Salvage by chunk: a lost chunk, declared extents, and an exact account of what was lost | Accepted |
+| [0070](0070-bounded-crash-safe-package-io-atomic-writes-and-a-streaming-reader.md) | Bounded, crash-safe package I/O: atomic writes and a streaming reader | Accepted |

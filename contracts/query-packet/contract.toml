@@ -1,7 +1,18 @@
-title = "Query language and context packet"
-status = "planned"
+title = "Query language and context packet (context ADR 0002, 0003, 0006)"
+status = "active"
 consumers = ["neptune-deploy", "neptune-learn"]
 
+# One registry contract, two halves: the export embeds the query schema and the packet schema
+# verbatim, each as its own resource (#/$defs/Query, #/$defs/ContextPacket); context ADR 0006 §1.
 [owner]
 package = "neptune-context"
 module = "neptune_context.contract"
+schema_export = "neptune_context.contract:contract_schema"
+# An integer constant is the registry major: raise it with QUERY_VERSION or PACKET_VERSION.
+version_constant = "neptune_context.contract:QUERY_PACKET_VERSION"
+golden_generator = "contracts/query-packet/goldens.py"
+contract_tests = [
+  "packages/neptune-context/tests/test_contract_context.py",
+  "packages/neptune-context/tests/test_packet_goldens_context.py",
+  "packages/neptune-context/tests/test_answer_context.py",
+]

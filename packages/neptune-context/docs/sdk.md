@@ -21,8 +21,15 @@ resolution = client.hydrate(evidence_item, as_of=packet.as_of)   # the Ledger's 
 - `AsyncClient` has the same methods and types, awaitable. A sync `Engine` serves it in a worker thread.
 - `include_inferred` has no default on any call: you choose evidence-only or inferences-included, every time.
 - `query` validates first (a refused query never reaches an engine; `SdkError.findings` has the reasons) and
-  verifies the answer after: the packet must carry this query's id, the snapshot the query pinned, and the
-  same inference choice. A packet that does not is `invalid_response`, never data.
+  verifies the answer after (`answer_problems`, ADR 0006 §2). The packet must carry:
+  - this query's id;
+  - the snapshot the query pinned;
+  - the same inference choice;
+  - the query's budget, echoed exactly;
+  - the query's `during` window on its clock.
+
+  Every timed item must be on that clock or on a clock the query bridges to it, and every gap must point
+  into the query. A packet that fails any check is `invalid_response`, never data.
 - Errors are `SdkError(code, message, findings)` with `ErrorCode`: `invalid_argument`, `query_refused`,
   `unauthenticated`, `forbidden`, `not_found`, `unavailable`, `timeout`, `invalid_response`, `engine_error`.
 - Every call is a read, so `unavailable` and `timeout` are retried under `RetryPolicy` (default 3 tries,

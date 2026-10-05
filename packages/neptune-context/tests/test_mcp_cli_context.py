@@ -31,6 +31,15 @@ def test_the_cli_refuses_bad_targets_with_exit_code_two(
     assert "tok-secret" not in err
 
 
+def test_an_unreadable_packet_file_is_exit_code_two(
+    tmp_path: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = tmp_path / "packets"  # type: ignore[operator]
+    (folder / "q01.json").mkdir(parents=True)  # a directory where a packet file should be
+    assert main(["--packets", str(folder)]) == 2
+    assert "neptune mcp:" in capsys.readouterr().err
+
+
 def test_the_cli_needs_exactly_one_target() -> None:
     for argv in ([], ["--url", "https://x", "--packets", "."]):
         with pytest.raises(SystemExit) as raised:
