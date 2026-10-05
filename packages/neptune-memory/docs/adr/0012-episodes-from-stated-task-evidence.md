@@ -49,22 +49,24 @@ holds **no episode** (the issue's third archetype): `episodes_of(claims, run)` r
 ### 3. Boundaries and identity
 
 On each clock the run is placed on, the episode's interval is the span of those placements, and every claim about
-the episode holds over it. Its boundaries are claims with an `instant` object on that clock, each citing what
-states it: `starts_at` for each placement's start, `ends_at` for each stated end (half-open, as `valid_to`). A
-run whose end is not stated has no `ends_at` (`Unknown`). The boundary is `Ambiguous`, every reading a
-`*_candidate` on every clock, when:
+the episode holds over it. Its boundaries are claims with an `instant` object on that clock, each citing the
+records that state it: `starts_at` is the earliest stated start; `ends_at` the latest stated end (half-open, as
+`valid_to`), only when every placement on that clock states its end, since one that does not may run on
+(`Unknown`). Placements of one run node that do not coincide are parts of it (a bag split in two, ADR 0009's one
+declared id across packages) or two statements of it, never two attempts, so they widen the span rather than
+compete.
 
-- records of one run disagree (a bag header and a manifest giving two starts), or
-- a stated stop lies strictly inside the episode: an `incident_record` that names the run in `related`
-  (`stated`) or names its machine (`observed`, by its time) and `occurred` after the start and before the end.
-  The attempt may have ended there; whether it resumed is not stated, so the run's own end stays a reading.
+The end is `Ambiguous`, every reading an `ends_at_candidate` on every clock, when a stated stop lies strictly
+inside the episode: an `incident_record` that names the run in `related` (`stated`) or names its machine
+(`observed`, by its time), and `occurred` after the start and before the end. The attempt may have ended there;
+whether it resumed is not stated, so the stated end stays a reading. A lone candidate (a stop in a run whose end
+is not stated) reads back as `Unknown`: it only might be the end, as ADR 0009 §4 reads a lone candidate. A stop
+on a clock the episode is not placed on, from an incident that names the run, is `episodes.event_unplaced`.
 
-A lone candidate reads back as `Unknown` (it only might be the boundary), as ADR 0009 §4 reads a lone candidate.
-
-The episode node is `episode:sha256:<hex>` over `{run, starts, ends, records}`: the run node, the stated start
-and end instants on every clock, and the records stating them. Stops and interventions are claims about an
-episode, never part of its id, so a late incident or ticket never re-keys it; new placement evidence (another
-`Run` record, a clock mapping) does.
+The episode node is `episode:sha256:<hex>` over `{run, boundaries, records}`: the run node, its window on every
+clock and the records of the placements stating them. Stops and interventions are claims about an episode, never
+part of its id, so a late incident or ticket never re-keys it; new placement evidence (another `Run` record, a
+clock mapping) does.
 
 ### 4. Interventions
 
@@ -81,9 +83,9 @@ the attempt ended (the manipulator archetype). Intervention topics are not read.
 - `episode_of(episode, run)` is the issue's `part_of`; `executes_task` / `executes_task_candidate` (already
   `episode`-domained) are `performs`, copied from the run's grounds with their kinds and evidence.
 - New (vocabulary **7**, graph-schema **1.5.0**, a minor release after MVL-130's 1.4.0 / 6): `starts_at`,
-  `ends_at` (`one`, `instant`), `starts_at_candidate`, `ends_at_candidate`, `intervened`, `intervened_candidate`
-  (`many`; `intervened` objects are `record`s, as ADR 0002 §1 keeps Episode-tier records out of the nodes), and
-  `outcome` (`one`, `text`, verbatim, never inferred). The issue's `episode_interval` is the start and end pair.
+  `ends_at` (`one`, `instant`), `ends_at_candidate`, `intervened`, `intervened_candidate` (`many`; an
+  `intervened` object is a `record`, as ADR 0002 §1 keeps Episode-tier records out of the nodes), and `outcome`
+  (`one`, `text`, verbatim, never inferred). The issue's `episode_interval` is the start and end pair.
 - `outcome` is registered so consumers can traverse it, and **v1 never emits it**: no record declares one.
   `outcome_of` reads `Known` (one declared text), `Ambiguous`, `Unknown` (nothing declares one) or `NotCovered`.
   A success is never inferred from an intervention's text, an incident or a run that ended.
@@ -98,6 +100,8 @@ the attempt ended (the manipulator archetype). Intervention topics are not read.
 - **Memory-local stand-ins for task entries and outcomes**, as ADR 0009 did for `run_declaration`: would let
   missions and declared outcomes be tested now, but the coordinator ruled out new kinds; the gap is reported for
   the compiler (MVL-33's task family) instead.
+- **Records of one run that state different starts or ends as competing readings**: a split recording's parts
+  would read as a disagreement about where one attempt starts.
 - **One `Unknown`-bounded episode per run with no task evidence**: a node per run that states nothing the run
   node does not; aggregates would count attempts nobody declared.
 - **Cut the episode at each incident**: assumes every incident stops the attempt and that nothing resumed; a near

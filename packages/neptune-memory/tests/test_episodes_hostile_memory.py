@@ -207,16 +207,79 @@ def test_an_open_run_has_no_stated_end() -> None:
     assert boundary_of(claims, episode, "start", "rec:sha256:" + "0" * 64) == Unknown()  # type: ignore[arg-type]
 
 
-def test_two_records_of_one_run_that_disagree_leave_the_start_ambiguous() -> None:
+def test_records_of_one_run_widen_its_span_and_cite_what_states_each_end() -> None:
     base, boot = _base()
-    other, _ = run(
+    header, header_id = run(
         "quad/patrol-header.json", first=at(90, boot), last=at(1_000, boot), logical_id=RUN_ID
     )
-    runs, episodes = build({"p": base, "q": [other]})
+    runs, episodes = build({"p": base, "q": [header]})
     claims = every(runs, episodes)
     episode = _episode(claims)
-    assert _ticks(boundary_of(claims, episode, "start", boot)) == {90, 100}
+    assert boundary_of(claims, episode, "start", boot) == Known(at(90, boot))
     assert boundary_of(claims, episode, "end", boot) == Known(at(1_001, boot))
+    (start,) = [c for c in episodes.claims if c.subject == episode and c.predicate == "starts_at"]
+    (end,) = [c for c in episodes.claims if c.subject == episode and c.predicate == "ends_at"]
+    assert header_id in start.provenance.records
+    assert header_id in end.provenance.records  # both state the end; both are cited
+
+
+def test_a_recording_split_in_two_parts_is_one_episode_over_both() -> None:
+    boot_record, boot = domain("quad boot", civil=False)
+    first, _ = run("quad/part-0.mcap", first=at(100, boot), last=at(500, boot), logical_id=RUN_ID)
+    second, _ = run("quad/part-1.mcap", first=at(500, boot), last=at(900, boot), logical_id=RUN_ID)
+    manifest = declaration("R-1", RUN_ID, task=TASK)
+    runs, episodes = build({"a": [boot_record, first, manifest], "b": [second]})
+    claims = every(runs, episodes)
+    episode = _episode(claims)
+    assert boundary_of(claims, episode, "start", boot) == Known(at(100, boot))
+    assert boundary_of(claims, episode, "end", boot) == Known(at(901, boot))
+
+
+def test_an_open_part_leaves_the_end_unstated() -> None:
+    base, boot = _base()
+    tail, _ = run("quad/tail.mcap", first=at(900, boot), logical_id=RUN_ID)
+    runs, episodes = build({"p": [*base, tail]})
+    claims = every(runs, episodes)
+    assert boundary_of(claims, _episode(claims), "end", boot) == Unknown()
+
+
+def test_a_stop_at_a_part_boundary_never_rekeys_the_episode() -> None:
+    boot_record, boot = domain("quad boot", civil=False)
+    first, _ = run("quad/part-0.mcap", first=at(100, boot), last=at(500, boot), logical_id=RUN_ID)
+    second, _ = run("quad/part-1.mcap", first=at(600, boot), last=at(900, boot), logical_id=RUN_ID)
+    records = [boot_record, first, second, declaration("R-1", RUN_ID, task=TASK)]
+    halt, _ = incident("I-1", related=[RUN_ID], occurred=at(501, boot))
+    before = _episode(every(*build({"p": records})))
+    runs, episodes = build({"p": [*records, halt]})
+    claims = every(runs, episodes)
+    assert _episode(claims) == before
+    assert _ticks(boundary_of(claims, before, "end", boot)) == {501, 901}
+
+
+def test_a_clock_with_two_contents_is_civil_for_neither_consolidator() -> None:
+    base, _ = _base()
+    civil_record, civil = domain("site ntp", civil=True)
+    unset = {**civil_record, "epoch": {"knowledge": "unknown"}}
+    on_civil, _ = run(
+        "quad/civil.mcap",
+        first=Timestamp(0, civil),
+        last=Timestamp(800, civil),
+        machine=QUAD,
+        logical_id=LogicalId("site-a.run", "R-2"),
+    )
+    assist, _ = intervention(
+        "T-1", machines=[QUAD], start=Timestamp(300, civil), end=Timestamp(400, civil)
+    )
+    records = [
+        *base,
+        civil_record,
+        on_civil,
+        declaration("R-2", LogicalId("site-a.run", "R-2"), task=TASK),
+        assist,
+    ]
+    _, episodes = build({"p": records, "q": [unset]})
+    # memory.runs keeps R-2 on its raw clock; the intervention is placed there too, so it is held.
+    assert [c.predicate for c in episodes.claims if "intervened" in c.predicate] == ["intervened"]
 
 
 @pytest.mark.parametrize(

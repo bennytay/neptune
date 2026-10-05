@@ -527,18 +527,6 @@
       "version": 1
     },
     {
-      "cardinality": "many",
-      "description": "ambiguous: the evidence states several starts on this clock; which is undecided",
-      "domain": [
-        "episode"
-      ],
-      "name": "starts_at_candidate",
-      "range": [
-        "instant"
-      ],
-      "version": 1
-    },
-    {
       "cardinality": "one",
       "description": "the site a zone belongs to",
       "domain": [

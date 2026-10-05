@@ -4,12 +4,12 @@
     {
       "claim": "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a",
       "code": "clock_mismatch",
-      "id": "finding:sha256:72c2e04019d87700705a5704b749280f5e2900ba8c5584f29fb184f8569c23c2",
+      "id": "finding:sha256:5a699bd948facb4f1b15155bacc61876ed7a8fc71be11f23da0a9a27a131d5d5",
       "others": [
         "claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097"
       ],
       "provenance": {
-        "config_hash": "sha256:ac6a5a1580e6d719354d0daa8064b1ce33c41e990002606761309d59b4e1386f",
+        "config_hash": "sha256:0b27a98ef856eb916b46d1f7b324fd8f902842b0c1361008a3cbef8bd785a216",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -19,12 +19,12 @@
     {
       "claim": "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a",
       "code": "clock_mismatch",
-      "id": "finding:sha256:d5e76757a38f05230d11991f84c87fe51fab99af2b1b89763186d2b204fea1ac",
+      "id": "finding:sha256:f5eace828f00899519120125ebb78bb723100c55d78e80477db3fc5b07931952",
       "others": [
         "claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf"
       ],
       "provenance": {
-        "config_hash": "sha256:ac6a5a1580e6d719354d0daa8064b1ce33c41e990002606761309d59b4e1386f",
+        "config_hash": "sha256:0b27a98ef856eb916b46d1f7b324fd8f902842b0c1361008a3cbef8bd785a216",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -32,14 +32,14 @@
       "superseded_at": "open"
     },
     {
-      "claim": "claim:sha256:1fcdf63715a8b48c5ef5bf01e396b789d82a7eda2ac40ebf054abd3b6e4ceacc",
+      "claim": "claim:sha256:499f3321c50c4b4b5983192778dd3fa11af94b8a335733a4dac85c08ab1dee60",
       "code": "clock_mismatch",
-      "id": "finding:sha256:5dd1293ebf43bbe1873f5604867779e024c37845e66f1b1be9499dc135e1865b",
+      "id": "finding:sha256:def925b6568be4972840b8a90647b72a4c237c091fa2e745623b23513254af18",
       "others": [
         "claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097"
       ],
       "provenance": {
-        "config_hash": "sha256:ac6a5a1580e6d719354d0daa8064b1ce33c41e990002606761309d59b4e1386f",
+        "config_hash": "sha256:0b27a98ef856eb916b46d1f7b324fd8f902842b0c1361008a3cbef8bd785a216",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -47,14 +47,14 @@
       "superseded_at": "open"
     },
     {
-      "claim": "claim:sha256:1fcdf63715a8b48c5ef5bf01e396b789d82a7eda2ac40ebf054abd3b6e4ceacc",
+      "claim": "claim:sha256:499f3321c50c4b4b5983192778dd3fa11af94b8a335733a4dac85c08ab1dee60",
       "code": "clock_mismatch",
-      "id": "finding:sha256:2e891665d21b98befe3715a0347c8bc6efd0475b2aaf8f0e36043a5c81e7a32c",
+      "id": "finding:sha256:0a81e0da8b1718e9a210ebee80ffd174e790f7f135b711ee2014142eb02a8d9e",
       "others": [
         "claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf"
       ],
       "provenance": {
-        "config_hash": "sha256:ac6a5a1580e6d719354d0daa8064b1ce33c41e990002606761309d59b4e1386f",
+        "config_hash": "sha256:0b27a98ef856eb916b46d1f7b324fd8f902842b0c1361008a3cbef8bd785a216",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -77,7 +77,7 @@
           "confidence": {
             "knowledge": "not_applicable"
           },
-          "id": "claim:sha256:1fcdf63715a8b48c5ef5bf01e396b789d82a7eda2ac40ebf054abd3b6e4ceacc",
+          "id": "claim:sha256:499f3321c50c4b4b5983192778dd3fa11af94b8a335733a4dac85c08ab1dee60",
           "object": {
             "kind": "node",
             "node_id": "asset-tag:UAV-0042",
@@ -85,7 +85,7 @@
           },
           "predicate": "recorded_by",
           "provenance": {
-            "config_hash": "sha256:fd6322d479065bc0d307701b9cba43e2a7832b3f22095dd927cbf4b5d44f2fbb",
+            "config_hash": "sha256:74e4feebff3aac511dad730231570546ab10e8ea4f0ffb834ca0b7619945bc8e",
             "consolidator_id": "memory.supersede",
             "consolidator_version": "2",
             "evidence": [

@@ -59,14 +59,14 @@ CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
 
 # Episodes (ADR 0012). ``starts_at`` / ``ends_at`` are an episode's boundaries on one clock, each
 # citing what states it; ``intervened`` names an ``Intervention`` record; ``outcome`` is a declared
-# outcome, verbatim, and is never inferred. The ``_candidate`` forms are ambiguous readings.
+# outcome, verbatim, and is never inferred. The ``_candidate`` forms are ambiguous readings; a
+# start has none, since it is the earliest start the run's records state.
 STARTS_AT: Final = "starts_at"
 ENDS_AT: Final = "ends_at"
 INTERVENED: Final = "intervened"
 OUTCOME: Final = "outcome"
 EPISODE_CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
     {
-        STARTS_AT: "starts_at_candidate",
         ENDS_AT: "ends_at_candidate",
         INTERVENED: "intervened_candidate",
     }
@@ -381,13 +381,6 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_V.INSTANT},
         _ONE,
         "where an episode starts on a clock, as its evidence states",
-    ),
-    _p(
-        "starts_at_candidate",
-        {_N.EPISODE},
-        {_V.INSTANT},
-        _MANY,
-        "ambiguous: the evidence states several starts on this clock; which is undecided",
     ),
     _p(
         "ends_at",

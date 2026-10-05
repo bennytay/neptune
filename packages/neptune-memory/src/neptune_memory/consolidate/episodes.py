@@ -27,6 +27,7 @@ contradictory input is a finding and never a claim.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import TYPE_CHECKING, Final, Literal
 
 from neptune.identity import canonical_json
@@ -132,20 +133,6 @@ class _View:
         return stamp if clock is None else clock.at(stamp.ticks)
 
 
-def _run_id(record: Mapping[str, object]) -> RecordId:
-    return run_records.run(record).id
-
-
-def _clock(record: Mapping[str, object]) -> run_records.Clock:
-    return run_records.clock(record)
-
-
-# Kinds read from each package, in order. Run records and clocks are read for their ids and civil
-# declarations only: ``memory.runs`` reports their faults, so they are not reported twice here.
-_SILENT: Final[Mapping[str, Callable[[Mapping[str, object]], object]]] = {
-    run_records.RUN: _run_id,
-    run_records.TIMESTAMP_DOMAIN: _clock,
-}
 _EVENTS: Final[Mapping[str, Callable[[Mapping[str, object]], events.Event]]] = {
     events.INTERVENTION: events.intervention,
     events.INCIDENT: events.incident,
@@ -153,21 +140,26 @@ _EVENTS: Final[Mapping[str, Callable[[Mapping[str, object]], events.Event]]] = {
 
 
 def _read(ledger: LedgerReader) -> _View:
+    """Run ids, civil clocks and events. Run and clock records are read for their ids and civil
+    declarations only: ``memory.runs`` reports their faults, so they are not reported twice. A
+    clock id with two contents is no clock here, as it is none for ``memory.runs``."""
     view = _View()
+    clocks: dict[RecordId, run_records.Clock | None] = {}  # None: one id, two contents
     seen: dict[RecordId, tuple[bytes, events.Event]] = {}  # by id: its whole content, parsed
     conflicted: set[RecordId] = set()
     for ref in ledger.list_packages():
-        for kind, silent in _SILENT.items():
-            for record in ledger.read_records(ref.package_id, kind) or ():
-                try:
-                    parsed = silent(record)
-                except (run_records.Malformed, run_records.Inferred):
-                    continue
-                if isinstance(parsed, run_records.Clock):
-                    if parsed.civil is not None:
-                        view.clocks[parsed.record] = parsed.civil
-                else:
-                    view.runs.add(parsed)  # type: ignore[arg-type]
+        for record in ledger.read_records(ref.package_id, run_records.RUN) or ():
+            try:
+                view.runs.add(run_records.run(record).id)
+            except (run_records.Malformed, run_records.Inferred):
+                continue
+        for record in ledger.read_records(ref.package_id, run_records.TIMESTAMP_DOMAIN) or ():
+            try:
+                clock = run_records.clock(record)
+            except run_records.Malformed:
+                continue
+            if clocks.setdefault(clock.record, clock) != clock:
+                clocks[clock.record] = None
         for kind, parser in _EVENTS.items():
             for index, record in enumerate(ledger.read_records(ref.package_id, kind) or ()):
                 try:
@@ -189,6 +181,11 @@ def _read(ledger: LedgerReader) -> _View:
                             Severity.ERROR,
                         )
                     )
+    view.clocks = {
+        rid: clock.civil
+        for rid, clock in sorted(clocks.items())
+        if clock is not None and clock.civil is not None
+    }
     for rid in sorted(seen):
         if rid in conflicted:
             continue
@@ -216,15 +213,19 @@ class _Run:
     def on(self, clock: RecordId) -> list[Claim]:
         return [c for c in self.spans if c.valid_from.domain_id == clock]
 
-    def known_machines(self) -> set[str]:
-        return {
+    @cached_property
+    def known_machines(self) -> frozenset[str]:
+        """The machines a ``recorded_by`` claim decides. Read only once ``_runs`` is done."""
+        return frozenset(
             c.object.node_id
             for c in self.machines
             if c.predicate == RECORDED_BY and isinstance(c.object, NodeRef)
-        }
+        )
 
-    def machine_readings(self) -> set[str]:
-        return {c.object.node_id for c in self.machines if isinstance(c.object, NodeRef)}
+    @cached_property
+    def machine_readings(self) -> frozenset[str]:
+        """Every machine the run's claims name, decided or a candidate."""
+        return frozenset(c.object.node_id for c in self.machines if isinstance(c.object, NodeRef))
 
 
 def _runs(previous: Sequence[Claim], view: _View) -> dict[NodeRef, _Run]:
@@ -297,7 +298,7 @@ def _link(event: events.Event, run: _Run) -> _Link | None:
     if named:
         decided = any(n.decided for n in named)
         return _Link(True, decided, tuple(r for n in named for r in n.evidence), ())
-    known, readings = run.known_machines(), run.machine_readings()
+    known, readings = run.known_machines, run.machine_readings
     matches = [n for n in event.machines if readings & _nodes(NodeType.MACHINE, n)]
     if not matches:
         return None
@@ -347,67 +348,49 @@ class _Boundary:
     kind: AssertionKind
     evidence: tuple[EvidenceRef, ...]
     records: tuple[RecordId, ...]
-    stop: bool = False  # a stop event inside the episode: only ever a candidate
+
+
+def _stated(instant: Timestamp, grounds: Sequence[Claim]) -> _Boundary:
+    """A boundary the run's own placements state: every placement at that instant cites it."""
+    return _Boundary(
+        instant,
+        STATED if any(c.assertion_kind is STATED for c in grounds) else OBSERVED,
+        tuple(r for c in grounds for r in c.provenance.evidence),
+        tuple(r for c in grounds for r in c.provenance.records),
+    )
 
 
 @dataclass
 class _Episode:
+    """A run's one episode: its window on each clock, its stated start and end there, and the
+    stops inside it (each an end reading)."""
+
     run: _Run
     windows: dict[RecordId, _Window]
-    starts: dict[RecordId, list[_Boundary]]
-    ends: dict[RecordId, list[_Boundary]]
+    starts: dict[RecordId, _Boundary]
+    ends: dict[RecordId, _Boundary]  # only where every placement on the clock states its end
+    stops: dict[RecordId, list[_Boundary]]
     node: NodeRef = field(init=False)
 
     def __post_init__(self) -> None:
-        self.node = episode_node(
-            self.run.node,
-            [b for found in self.starts.values() for b in found],
-            [b for found in self.ends.values() for b in found if not b.stop],
-        )
+        self.node = episode_node(self.run.node, self.windows, self.run.spans)
 
 
-def episode_node(run: NodeRef, starts: Sequence[_Boundary], ends: Sequence[_Boundary]) -> NodeRef:
-    """An episode's node: a hash of its run, its stated boundaries and the records stating them
-    (ADR 0012 §3). Stop events and interventions are claims about it, never part of its id."""
-
-    def instants(found: Sequence[_Boundary]) -> list[JsonValue]:
-        unique = {b.instant for b in found}
-        return [t.to_json() for t in sorted(unique, key=lambda t: (t.domain_id, t.ticks))]
-
+def episode_node(
+    run: NodeRef, windows: Mapping[RecordId, _Window], spans: Sequence[Claim]
+) -> NodeRef:
+    """An episode's node: a hash of its run, its stated boundaries on every clock and the records
+    stating them (ADR 0012 §3). Stops and interventions are claims about it, never in its id."""
     content: dict[str, JsonValue] = {
-        "ends": instants(ends),
-        "records": sorted({r for b in (*starts, *ends) for r in b.records}),
+        "boundaries": [
+            {"end": windows[clock].end.to_json(), "start": windows[clock].start.to_json()}
+            for clock in sorted(windows)
+        ],
+        "records": sorted({r for c in spans for r in c.provenance.records}),
         "run": run.node_id,
-        "starts": instants(starts),
     }
     digest = record_id(EPISODE_ID_KIND, content).removeprefix("rec:")
     return NodeRef(NodeType.EPISODE, f"episode:{digest}")
-
-
-def _boundary(claim: Claim, instant: Timestamp) -> _Boundary:
-    kind = claim.assertion_kind
-    assert isinstance(kind, AssertionKind)  # inferred claims never reach here
-    return _Boundary(instant, kind, claim.provenance.evidence, claim.provenance.records)
-
-
-def _readings(found: Sequence[_Boundary]) -> list[_Boundary]:
-    """Boundaries with one instant merged: one reading, every ground's evidence and records."""
-    merged: dict[Timestamp, list[_Boundary]] = {}
-    for b in found:
-        merged.setdefault(b.instant, []).append(b)
-    out: list[_Boundary] = []
-    for instant in sorted(merged, key=lambda t: t.ticks):
-        group = merged[instant]
-        out.append(
-            _Boundary(
-                instant,
-                STATED if any(b.kind is STATED for b in group) else OBSERVED,
-                tuple(r for b in group for r in b.evidence),
-                tuple(r for b in group for r in b.records),
-                all(b.stop for b in group),
-            )
-        )
-    return out
 
 
 @dataclass
@@ -443,6 +426,33 @@ class _Build:
             )
 
 
+@dataclass(frozen=True)
+class _Index:
+    """Episodes by the run node ids and machine node ids an event can name, so each event is
+    linked only to the episodes it could bear on."""
+
+    by_run: Mapping[str, _Episode]
+    by_machine: Mapping[str, list[_Episode]]
+
+    @staticmethod
+    def of(episodes: Sequence[_Episode]) -> _Index:
+        by_machine: dict[str, list[_Episode]] = {}
+        for episode in episodes:
+            for machine in sorted(episode.run.machine_readings):
+                by_machine.setdefault(machine, []).append(episode)
+        return _Index({e.run.node.node_id: e for e in episodes}, by_machine)
+
+    def reach(self, event: events.Event) -> list[_Episode]:
+        named = {e for n in event.related for e in _nodes(NodeType.RUN, n)}
+        named |= {
+            e.run.node.node_id
+            for n in event.machines
+            for m in _nodes(NodeType.MACHINE, n)
+            for e in self.by_machine.get(m, ())
+        }
+        return [self.by_run[n] for n in sorted(named) if n in self.by_run]
+
+
 class EpisodeConsolidator:
     """Deterministic episodes from stated task evidence (ADR 0012). Takes no configuration and
     runs after ``memory.runs``, whose claims it reads."""
@@ -476,51 +486,71 @@ class EpisodeConsolidator:
                     severity=Severity.INFO,
                 )
             )
-        build = _Build(view)
         episodes = [
-            _episode(view, runs[node])
+            _episode(runs[node])
             for node in sorted(runs, key=lambda n: n.node_id)
             if runs[node].spans and runs[node].tasks
         ]
+        index = _Index.of(episodes)
+        build = _Build(view)
+        for event in view.incidents:
+            span = _span(view, event)
+            for episode in index.reach(event):
+                link = _link(event, episode.run)
+                if link is not None:
+                    _stop(view, episode, event, link, span)
         for episode in episodes:
             _claims(build, episode)
-        _interventions(build, episodes)
-        _unplaced(view, episodes)
+        for event in view.interventions:
+            span = _span(view, event)
+            for episode in index.reach(event):
+                link = _link(event, episode.run)
+                if link is not None:
+                    _intervened(build, episode, event, link, span)
         return ConsolidatorOutput(tuple(build.drafts), tuple(view.findings))
 
 
-def _episode(view: _View, run: _Run) -> _Episode:
-    """The run's one episode: its windows per clock, the stated starts and ends there, and any
-    stated stop (an ``incident_record`` naming the run or its machine) inside it as an end."""
+def _episode(run: _Run) -> _Episode:
+    """The run's one episode: the span of its placements on each clock. The start is the earliest
+    stated start, cited by every placement that states it; the end likewise, but only when every
+    placement there states its end (one that does not may run on). Placements of one run that do
+    not coincide are parts of it, or statements of the same run, never two attempts."""
     windows = {clock: _window(run.on(clock)) for clock in run.clocks()}
-    starts = {
-        clock: _readings([_boundary(c, c.valid_from) for c in run.on(clock)]) for clock in windows
-    }
-    ends = {
-        clock: [
-            _boundary(c, c.valid_to) for c in run.on(clock) if isinstance(c.valid_to, Timestamp)
-        ]
-        for clock in windows
-    }
-    for event in view.incidents:
-        link = _link(event, run)
-        span = _span(view, event)
-        if link is None or span is None:
-            continue
-        instant, _ = span
-        window = windows.get(instant.domain_id)
-        if window is None or not window.inside(instant):
-            continue
-        ends[instant.domain_id].append(
+    starts: dict[RecordId, _Boundary] = {}
+    ends: dict[RecordId, _Boundary] = {}
+    for clock, window in windows.items():
+        spans = run.on(clock)
+        starts[clock] = _stated(window.start, [c for c in spans if c.valid_from == window.start])
+        if isinstance(window.end, Timestamp):
+            ends[clock] = _stated(window.end, [c for c in spans if c.valid_to == window.end])
+    return _Episode(run, windows, starts, ends, {clock: [] for clock in windows})
+
+
+def _stop(
+    view: _View,
+    episode: _Episode,
+    event: events.Event,
+    link: _Link,
+    span: tuple[Timestamp, Timestamp] | None,
+) -> None:
+    """A stated stop (an ``incident_record`` naming the run or its machine) strictly inside the
+    episode is a reading of its end: the attempt may have ended there."""
+    if span is None:
+        _unplaced(view, episode, event, link)
+        return
+    instant = span[0]
+    window = episode.windows.get(instant.domain_id)
+    if window is None:
+        _unplaced(view, episode, event, link)
+    elif window.inside(instant):
+        episode.stops[instant.domain_id].append(
             _Boundary(
                 instant,
                 STATED if link.stated else OBSERVED,
                 (*event.evidence, *link.evidence),
                 (event.record, *link.records),
-                stop=True,
             )
         )
-    return _Episode(run, windows, starts, {c: _readings(found) for c, found in ends.items()})
 
 
 def _claims(build: _Build, episode: _Episode) -> None:
@@ -550,83 +580,113 @@ def _claims(build: _Build, episode: _Episode) -> None:
             (r for c in grounds for r in c.provenance.evidence),
             (r for c in grounds for r in c.provenance.records),
         )
-    for predicate, found in ((STARTS_AT, episode.starts), (ENDS_AT, episode.ends)):
-        ambiguous = any(len(b) > 1 or any(x.stop for x in b) for b in found.values())
-        out = EPISODE_CANDIDATE_OF[predicate] if ambiguous else predicate
-        for clock in sorted(found):
-            for boundary in found[clock]:
-                build.emit(
-                    episode,
-                    out,
-                    TypedLiteral(ValueType.INSTANT, boundary.instant),
-                    boundary.kind,
-                    boundary.evidence,
-                    boundary.records,
-                    (clock,),
-                )
-
-
-def _interventions(build: _Build, episodes: Sequence[_Episode]) -> None:
-    """``intervened`` when an intervention names the run, or names its one stated machine and
-    overlaps the episode on one clock; ``intervened_candidate`` when the run's machine is
-    ambiguous, or the intervention names the run but its stated times fall outside it."""
-    view = build.view
-    for event in view.interventions:
-        span = _span(view, event)
-        for episode in episodes:
-            link = _link(event, episode.run)
-            if link is None:
-                continue
-            window = None if span is None else episode.windows.get(span[0].domain_id)
-            overlaps = window is not None and span is not None and window.holds(*span)
-            if link.stated:
-                timed_outside = window is not None and not overlaps
-                if timed_outside:
-                    view.findings.append(
-                        _finding(
-                            "intervention_outside",
-                            "an intervention names the run but its stated times fall outside "
-                            "the run's episode; it is only a candidate",
-                            (event.record,),
-                            episode=episode.node.node_id,
-                        )
-                    )
-                definite = link.decided and not timed_outside
-                kind = STATED
-            elif overlaps:
-                definite, kind = link.decided, OBSERVED
-            else:
-                continue
-            build.emit(
+    for clock, start in sorted(episode.starts.items()):
+        _instant(build, episode, STARTS_AT, clock, start)
+    # A stop anywhere makes the end ambiguous on every clock: each stated end and each stop is a
+    # reading, and a lone reading only might be the end.
+    stopped = any(episode.stops.values())
+    for clock in sorted(episode.windows):
+        readings = [
+            *([episode.ends[clock]] if clock in episode.ends else []),
+            *_merged(episode.stops[clock]),
+        ]
+        for boundary in readings:
+            _instant(
+                build,
                 episode,
-                INTERVENED if definite else EPISODE_CANDIDATE_OF[INTERVENED],
-                LedgerRecordRef(event.record),
-                kind,
-                (*event.evidence, *link.evidence),
-                (event.record, *link.records),
+                EPISODE_CANDIDATE_OF[ENDS_AT] if stopped else ENDS_AT,
+                clock,
+                boundary,
             )
 
 
-def _unplaced(view: _View, episodes: Sequence[_Episode]) -> None:
-    """An event that bears on an episode's run but whose instants are on no clock the episode is
-    placed on (and that names the run, so it is not just another time of the same machine)."""
-    for event in (*view.interventions, *view.incidents):
-        span = _span(view, event)
-        for episode in episodes:
-            link = _link(event, episode.run)
-            if link is None or not link.stated:
-                continue
-            if span is None or span[0].domain_id not in episode.windows:
-                view.findings.append(
-                    _finding(
-                        "event_unplaced",
-                        f"the {event.kind} names the run but states no time on a clock the "
-                        "episode is placed on",
-                        (event.record,),
-                        Severity.INFO,
-                        episode=episode.node.node_id,
-                    )
+def _merged(stops: Sequence[_Boundary]) -> list[_Boundary]:
+    """Stops at one instant merged into one reading citing each of them."""
+    by_instant: dict[Timestamp, list[_Boundary]] = {}
+    for stop in stops:
+        by_instant.setdefault(stop.instant, []).append(stop)
+    return [
+        _Boundary(
+            instant,
+            STATED if any(b.kind is STATED for b in group) else OBSERVED,
+            tuple(r for b in group for r in b.evidence),
+            tuple(r for b in group for r in b.records),
+        )
+        for instant, group in sorted(by_instant.items(), key=lambda i: i[0].ticks)
+    ]
+
+
+def _instant(
+    build: _Build, episode: _Episode, predicate: str, clock: RecordId, boundary: _Boundary
+) -> None:
+    build.emit(
+        episode,
+        predicate,
+        TypedLiteral(ValueType.INSTANT, boundary.instant),
+        boundary.kind,
+        boundary.evidence,
+        boundary.records,
+        (clock,),
+    )
+
+
+def _intervened(
+    build: _Build,
+    episode: _Episode,
+    event: events.Event,
+    link: _Link,
+    span: tuple[Timestamp, Timestamp] | None,
+) -> None:
+    """``intervened`` when an intervention names the run, or names its one stated machine and
+    overlaps the episode on one clock; ``intervened_candidate`` when either side's machine is
+    ambiguous, or the intervention names the run but its stated times fall outside it."""
+    view = build.view
+    window = None if span is None else episode.windows.get(span[0].domain_id)
+    overlaps = window is not None and span is not None and window.holds(*span)
+    if link.stated:
+        if window is None:
+            _unplaced(view, episode, event, link)
+        outside = window is not None and not overlaps
+        if outside:
+            view.findings.append(
+                _finding(
+                    "intervention_outside",
+                    "an intervention names the run but its stated times fall outside the run's "
+                    "episode; it is only a candidate",
+                    (event.record,),
+                    episode=episode.node.node_id,
                 )
+            )
+        definite, kind = link.decided and not outside, STATED
+    elif overlaps:
+        definite, kind = link.decided, OBSERVED
+    else:
+        return
+    build.emit(
+        episode,
+        INTERVENED if definite else EPISODE_CANDIDATE_OF[INTERVENED],
+        LedgerRecordRef(event.record),
+        kind,
+        (*event.evidence, *link.evidence),
+        (event.record, *link.records),
+    )
+
+
+def _unplaced(view: _View, episode: _Episode, event: events.Event, link: _Link) -> None:
+    """An event that names the run (so it is not just another time of the same machine) but
+    states no instant on a clock the episode is placed on."""
+    if not link.stated:
+        return
+    view.findings.append(
+        _finding(
+            "event_unplaced",
+            f"the {event.kind} names the run but states no time on a clock the episode is "
+            "placed on",
+            (event.record,),
+            Severity.INFO,
+            episode=episode.node.node_id,
+        )
+    )
 
 
 # --- Reading episodes back ----------------------------------------------------------------------
@@ -683,7 +743,7 @@ def boundary_of(
     if not _named(claims, episode):
         return NotCovered()
     predicate = STARTS_AT if which == "start" else ENDS_AT
-    candidate = EPISODE_CANDIDATE_OF[predicate]
+    candidate = EPISODE_CANDIDATE_OF.get(predicate)
     known: set[Timestamp] = set()
     readings: set[Timestamp] = set()
     for c in claims:

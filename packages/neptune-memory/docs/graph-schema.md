@@ -80,7 +80,6 @@ major version (ADR 0002 §5).
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
 | `same_as_candidate` | any node | same type | many | ambiguous: the evidence could mean either; one claim each way |
 | `starts_at` | episode | instant | one | where an episode starts on a clock, as its evidence states |
-| `starts_at_candidate` | episode | instant | many | ambiguous: the evidence states several starts on this clock |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
@@ -178,8 +177,8 @@ def test_graph_schema_contract(check):
     `Ambiguous`, `Unknown` or `NotCovered`.
 13. **Episodes are stated attempts, never inferred** ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md)).
     A run with stated task evidence holds one episode (`episode_of`, its `executes_task`), bounded on each clock by
-    the instants its records state (`starts_at`, `ends_at`); a run with none holds no episode. Records that
-    disagree, or a stated stop (`incident_record`) inside the episode, make the boundary `*_candidate` readings.
+    the span its records state (`starts_at`, `ends_at`); a run with none holds no episode. A stated stop
+    (`incident_record`) inside the episode makes the end `ends_at_candidate` readings.
     `intervened` names an `Intervention` that names the run, or names its machine and overlaps it on one clock.
     No record declares an outcome yet, so `outcome` reads `Unknown`. `consolidate.episodes.episodes_of`,
     `boundary_of` and `outcome_of` read them back as `Known`, `Ambiguous`, `Unknown` or `NotCovered`.
