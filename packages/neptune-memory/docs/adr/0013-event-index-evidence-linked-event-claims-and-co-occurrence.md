@@ -92,7 +92,8 @@ record in two packages is one record. `consolidate/events.py` decides.
   `events.co_occurrence_undecided` finding per clock, with a count. A clock with no stated resolution cannot
   measure the window (`events.window_unscaled`), and neither can a window shorter than one of its ticks
   (`events.window_below_resolution`). Two event clocks that no mapping relates, directly or through a shared
-  target, are `events.clocks_unrelated`: Unknown, never compared.
+  target, are `events.clocks_unrelated`: Unknown, never compared. Clocks that reach the same clocks are checked
+  together. The first 16 pairs are named, and one more finding says that others exist.
 - **Limits.** The scan visits onsets in order and stops where a later onset can no longer share a window. It
   skips a run of the event's own source in one step and takes at most `max_partners` (default 64) later
   partners per event, so the work is bounded by events times `max_partners`, never by events squared. The

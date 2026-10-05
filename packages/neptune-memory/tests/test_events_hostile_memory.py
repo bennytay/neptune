@@ -27,7 +27,7 @@ from neptune_memory.consolidate.event_records import (
     parse_config,
     resolve_config,
 )
-from neptune_memory.consolidate.events import EventConsolidator, event_node
+from neptune_memory.consolidate.events import MAX_LISTED, EventConsolidator, event_node
 from neptune_memory.consolidate.runs import involvement
 from neptune_memory.schema.interval import OPEN, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
@@ -188,6 +188,18 @@ def test_an_ambiguous_mapping_window_counts_only_where_its_readings_agree() -> N
     result = consolidate({"p": [CLOCK, OTHER, one, two, sync]})
     assert not [c for c in result.claims if c.predicate == "co_occurs_within"]  # not all agree
     assert "events.ambiguous_window" in codes(result)
+
+
+def test_many_unrelated_clocks_are_listed_up_to_a_bound() -> None:
+    records: list[Record] = []
+    for k in range(12):
+        clock, clock_id = domain(f"boot {k}", civil=False)
+        report, _ = incident(f"report {k}", occurred=Timestamp(5, clock_id))
+        records += [clock, report]
+    result = consolidate({"p": records})
+    unrelated = [f for f in result.findings if f.code == "events.clocks_unrelated"]
+    assert len(unrelated) == MAX_LISTED + 1  # 66 pairs: the first listed, then "more"
+    assert len([f for f in unrelated if "clocks" not in f.details]) == 1
 
 
 # --- Event tables ---------------------------------------------------------------------------------

@@ -1161,8 +1161,12 @@ def _emit_pairs(
 def _unrelated(
     view: _View, events: Sequence[_Event], readings: Sequence[Mapping[RecordId, _Reading]]
 ) -> None:
-    """One finding per pair of event clocks that no stated mapping relates, directly or through
-    a shared target: events on them are never compared, so whether they co-occur is Unknown."""
+    """A finding per pair of event clocks that share no clock a stated mapping reaches: events on
+    them are never compared, so whether they co-occur is Unknown.
+
+    Clocks that reach the same clocks are checked once together, so the usual case (every
+    event reaches one civil clock) costs one comparison. The first ``MAX_LISTED`` pairs are named;
+    one more finding says there are others, without scanning for all of them."""
     reach: dict[RecordId, set[RecordId]] = defaultdict(set)
     sources: dict[RecordId, set[str]] = defaultdict(set)
     counts: dict[RecordId, int] = defaultdict(int)
@@ -1171,21 +1175,41 @@ def _unrelated(
         reach[own].update(found)
         sources[own].add(event.source)
         counts[own] += 1
-    clocks = sorted(reach)
-    for n, a in enumerate(clocks):
-        for b in clocks[n + 1 :]:
-            if reach[a] & reach[b] or len(sources[a] | sources[b]) < 2:
+    groups: dict[frozenset[RecordId], list[RecordId]] = defaultdict(list)
+    for clock in sorted(reach):
+        groups[frozenset(reach[clock])].append(clock)
+    signatures = sorted(groups, key=lambda g: groups[g][0])
+    listed = 0
+    for n, one in enumerate(signatures):
+        for two in signatures[n + 1 :]:
+            if one & two:
                 continue
-            view.findings.append(
-                _finding(
-                    "clocks_unrelated",
-                    "no stated clock mapping relates these clocks; events on one are never"
-                    " compared with events on the other, so whether they co-occur is Unknown",
-                    severity=Severity.INFO,
-                    clocks=[a, b],
-                    events=[counts[a], counts[b]],
-                )
-            )
+            for a in groups[one]:
+                for b in groups[two]:
+                    if len(sources[a] | sources[b]) < 2:
+                        continue
+                    if listed == MAX_LISTED:
+                        view.findings.append(
+                            _finding(
+                                "clocks_unrelated",
+                                f"more than {MAX_LISTED} pairs of event clocks share no stated"
+                                " mapping; the rest are not listed",
+                                severity=Severity.INFO,
+                            )
+                        )
+                        return
+                    listed += 1
+                    view.findings.append(
+                        _finding(
+                            "clocks_unrelated",
+                            "no stated clock mapping relates these clocks; events on one are never"
+                            " compared with events on the other, so whether they co-occur is"
+                            " Unknown",
+                            severity=Severity.INFO,
+                            clocks=sorted([a, b]),
+                            events=[counts[a], counts[b]] if a < b else [counts[b], counts[a]],
+                        )
+                    )
 
 
 # --- The consolidator ---------------------------------------------------------------------------
