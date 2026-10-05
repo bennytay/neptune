@@ -185,12 +185,14 @@ def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> Non
     current = tool.show(registry.latest("package-schema", stable=True).version)
     graph = tool.show(registry.latest("graph-schema", stable=True).version)
     catalog = tool.show(registry.latest("catalog-api", stable=True).version)
+    packets = tool.show(registry.latest("query-packet", stable=True).version)
     registry.write_lock(
         {
             "neptune-deploy": {
                 "catalog-api": catalog,
                 "graph-schema": graph,
                 "package-schema": current,
+                "query-packet": packets,
             },
             "neptune-ledger": {"package-schema": current},
         }
@@ -202,7 +204,8 @@ def test_check_all_validates_once_and_runs_each_owner_once(registry: Any) -> Non
         return 0
 
     report = tool.check_packages(registry, registry.lock(), runner=runner)
-    assert report.ok and len(calls) == 3  # one per owner: compiler, neptune-ledger, neptune-memory
+    # One per owner: compiler, neptune-ledger, neptune-memory, neptune-context.
+    assert report.ok and len(calls) == 4
     versions = len(registry.versions("package-schema"))  # each published version, once
     assert sum(
         n.startswith("package-schema ") and "goldens checked" in n for n in report.notes
