@@ -34,6 +34,7 @@
           "items": {
             "enum": [
               "bytes",
+              "memory",
               "rows",
               "time"
             ],

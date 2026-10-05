@@ -926,7 +926,7 @@ class QueryRow:
     world_last: Ticks | None = None
 
 
-BudgetLimit: TypeAlias = Literal["bytes", "rows", "time"]
+BudgetLimit: TypeAlias = Literal["bytes", "memory", "rows", "time"]
 
 
 @dataclass(frozen=True)
@@ -936,9 +936,11 @@ class BudgetReport:
     ``limits`` are the limits that applied: the spec's, with the Ledger's defaults for those it
     left out (an absent ``max_millis`` means no time limit). ``rows`` and ``bytes`` are the
     returned table's rows and Arrow bytes. ``exceeded`` names each limit that cut the answer to
-    a prefix, in name order. ``reproducible`` is false exactly when the time limit cut it: which
-    prefix came back then depends on the wall clock, and the same spec with
-    ``max_rows = rows`` and no time limit returns the same rows.
+    a prefix, in name order: ``memory`` only from SQL passthrough, whose child process has a
+    memory cap (ADR 0016 §7). ``reproducible`` is false exactly when the time or memory limit
+    cut it: which prefix came back then depends on the wall clock or the allocator, and the
+    same spec with ``max_rows = rows`` and no time limit returns the same rows (when ``rows``
+    is 0 there is no such spec, since ``max_rows`` is at least 1: repeat the call).
     """
 
     limits: QueryBudget

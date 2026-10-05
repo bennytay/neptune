@@ -25,6 +25,7 @@ from neptune_ledger.api.protocol import CatalogUnavailable
 from neptune_ledger.api.types import (
     CatalogFinding,
     PlanStep,
+    QueryBudget,
     QueryMeta,
     QuerySpec,
     TransactionKey,
@@ -35,7 +36,7 @@ from neptune_ledger.lake.read import DuckDBReader, SeriesReader
 from neptune_ledger.lake.series import Locate, SeriesCatalog
 from neptune_ledger.lake.store import local_store
 from neptune_ledger.query import spec as specs
-from neptune_ledger.query.budget import Budget, Clock, QueryLimits, effective
+from neptune_ledger.query.budget import Budget, Clock, QueryLimits, effective, over_ceiling
 from neptune_ledger.query.join import read_series
 from neptune_ledger.query.plan import plan_records
 from neptune_ledger.query.records import Lineage, read_records
@@ -205,38 +206,52 @@ class QueryEngine:
 
     # --- SQL passthrough -------------------------------------------------------------------------
 
-    def sql(self, statement: str, scope: QuerySpec) -> Any:
+    def sql(self, statement: str, scope: QuerySpec, budget: QueryBudget | None = None) -> Any:
         """``statement`` (one SELECT) over the views of ``scope``'s answer (ADR 0016 §7).
 
         ``records`` holds the scope's record rows, and with ``scope.series`` the view ``series``
-        holds its joined series rows instead. The statement runs in a sealed, per-call DuckDB
-        under the scope's budget, with the passthrough's default time limit."""
-        answer = self.query(scope)
+        holds its joined series rows instead. The statement runs in a sealed DuckDB in a child
+        process with a memory cap. Two budgets apply: ``scope.budget`` bounds the scope's
+        answer (the views), and ``budget`` bounds the statement's result. The call's time
+        limit, ``budget.max_millis`` (30 s by default), covers both: the scope is loaded under
+        the smaller of its own time limit and the call's. A finding whose subject starts with
+        ``scope.`` says the scope was cut, so the statement saw a prefix of it."""
+        problems = [
+            CatalogFinding("invalid_request", "budget", text)
+            for text in _budget_problems(budget, self.limits)
+        ]
+        given = None if problems else budget
+        out = Budget(effective(given, self.limits, sql=True), self._clock)
+        if problems:
+            with self._read() as conn:
+                point, _, _ = catalog_point(conn, self._tenant, None)
+            return _rejected(point, tuple(problems))
+        answer = self.query(_within(scope, out.limits.max_millis))
         meta = codec.loads(QueryMeta, answer.schema.metadata[META_KEY])
         if meta.budget is None:  # the scope was refused: so is the statement
             return answer
         views = {
             "series" if scope.series is not None else "records": answer.replace_schema_metadata()
         }
-        budget = Budget(effective(_budget(scope), self.limits, sql=True), self._clock)
-        table, findings = run_sql(statement, views, budget, self.limits.sql_memory)
+        table, findings = run_sql(statement, views, out, self.limits.sql_memory)
         if table is None:
-            return _rejected(meta.as_of, (*meta.findings, *findings))
-        table = budget.cut(table)
-        report = budget.report(table)
-        # A statement over a cut scope answers over a prefix: the report says which limits cut
-        # either, and it is no more reproducible than the scope.
+            return _rejected(meta.as_of, (*_of_scope(meta.findings), *findings))
+        table = out.cut(table)
+        report = out.report(table)
+        # A statement over a cut scope answers over a prefix of it: the report lists the limits
+        # that cut either, the findings say which (``scope.*``), and the answer is no more
+        # reproducible than the scope.
         report = replace(
             report,
             exceeded=tuple(sorted({*report.exceeded, *meta.budget.exceeded})),
             reproducible=report.reproducible and meta.budget.reproducible,
         )
-        out = QueryMeta(
+        result = QueryMeta(
             as_of=meta.as_of,
-            findings=(*meta.findings, *findings, *budget.findings(table)),
+            findings=(*_of_scope(meta.findings), *findings, *out.findings(table)),
             budget=report,
         )
-        return _with_meta(table, out)
+        return _with_meta(table, result)
 
     # --- connections -----------------------------------------------------------------------------
 
@@ -265,6 +280,39 @@ class QueryEngine:
             raise CatalogUnavailable(f"the catalog store is unreachable: {exc}") from exc
         except psycopg.Error as exc:
             raise CatalogUnavailable(f"the catalog store refused the call: {exc}") from exc
+
+
+def _budget_problems(budget: object, limits: QueryLimits) -> list[str]:
+    """Why a passthrough's own ``budget`` is refused, or nothing."""
+    if budget is None:
+        return []
+    if not isinstance(budget, QueryBudget):
+        return [f"not a QueryBudget: {type(budget).__name__}"]
+    try:
+        codec.to_json(budget)
+    except (codec.CodecError, TypeError, ValueError) as exc:
+        return [str(exc).splitlines()[0][:300]]
+    return over_ceiling(budget, limits)
+
+
+def _within(scope: QuerySpec, millis: int | None) -> QuerySpec:
+    """``scope`` with its time limit no later than the passthrough call's."""
+    if millis is None or not isinstance(scope, QuerySpec) or not _valid_budget(scope):
+        return scope
+    own = scope.budget or QueryBudget()
+    if own.max_millis is not None and own.max_millis <= millis:
+        return scope
+    return replace(scope, budget=replace(own, max_millis=millis))
+
+
+def _of_scope(findings: tuple[CatalogFinding, ...]) -> tuple[CatalogFinding, ...]:
+    """The scope's findings, with each budget cut marked as the scope's (``scope.rows``)."""
+    return tuple(
+        CatalogFinding(f.code, f"scope.{f.subject}", f"the scope: {f.detail}")
+        if f.code == "budget_exceeded"
+        else f
+        for f in findings
+    )
 
 
 def _budget(spec: object) -> Any:

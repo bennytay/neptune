@@ -4,7 +4,9 @@ A budget never truncates silently. Exceeding a limit returns the longest prefix 
 its order, that fits, with one ``budget_exceeded`` finding per limit that cut it. Row and byte
 cuts depend only on the catalog and the spec. A time cut depends on the wall clock, so the
 answer it gives is flagged as not reproducible; it is still a prefix, so the same spec with
-``max_rows`` set to the rows it returned and no time limit gives the same rows.
+``max_rows`` set to the rows it returned and no time limit gives the same rows. SQL passthrough
+adds a fourth limit, the memory cap of its child process (ADR 0016 §7); a memory cut depends on
+the platform's allocator, so it is not reproducible either.
 """
 
 import time
@@ -16,6 +18,8 @@ from neptune_ledger.api.types import BudgetLimit, BudgetReport, CatalogFinding, 
 
 Clock = Callable[[], float]
 MIB: Final = 2**20
+GIB: Final = 2**30
+UNREPRODUCIBLE: Final = frozenset({"memory", "time"})
 
 
 @dataclass(frozen=True)
@@ -24,14 +28,16 @@ class QueryLimits:
 
     ``batch_rows`` is how many record rows one catalog statement returns when the scan can stop
     between batches (a lineage filter or a time limit); ``max_streams`` bounds the streams a
-    series join reads; ``sql_millis`` and ``sql_memory`` bound an SQL passthrough statement.
+    series join reads; ``sql_millis`` bounds an SQL passthrough call (its scope's load and its
+    statement) and ``sql_memory`` is the address space, in bytes, its child process may map
+    beyond the engine and views it has loaded (ADR 0016 §7).
     """
 
     max_rows: int = 1_000_000
     max_bytes: int = 512 * MIB
     max_millis: int | None = None
     sql_millis: int = 30_000
-    sql_memory: str = "1GB"
+    sql_memory: int = GIB
     ceiling_rows: int = 10_000_000
     ceiling_bytes: int = 4096 * MIB
     ceiling_millis: int = 600_000
@@ -76,6 +82,7 @@ class Budget:
         self._clock = clock
         self._deadline = None if limits.max_millis is None else clock() + limits.max_millis / 1000
         self.exceeded: set[BudgetLimit] = set()
+        self._memory = ""
 
     def remaining(self) -> float | None:
         """Seconds left before the deadline, at least 0; None without a time limit."""
@@ -94,6 +101,11 @@ class Budget:
     def time_ran_out(self) -> None:
         """An engine stopped a statement at the deadline."""
         self.exceeded.add("time")
+
+    def memory_ran_out(self, cap: int, why: str) -> None:
+        """An SQL passthrough statement stopped at its process's memory cap of ``cap`` bytes."""
+        self.exceeded.add("memory")
+        self._memory = f"the statement stopped at its memory cap of {cap} bytes ({why[:200]})"
 
     def cut(self, table: Any) -> Any:
         """The longest prefix of ``table`` within the row and byte limits, as one chunk."""
@@ -121,6 +133,8 @@ class Budget:
         detail = {
             "bytes": f"the answer exceeds {self.max_bytes} bytes of Arrow data; its first {rows}"
             f" rows are returned",
+            "memory": f"{self._memory}; the first {rows} rows it returned are kept, and which"
+            " rows depends on the platform's allocator",
             "rows": f"more than {self.max_rows} rows answer the query; the first {rows} are"
             " returned",
             "time": f"the time budget of {self.limits.max_millis} ms ran out; the first {rows}"
@@ -137,5 +151,5 @@ class Budget:
             rows=table.num_rows,
             bytes=table.nbytes,
             exceeded=tuple(sorted(self.exceeded)),
-            reproducible="time" not in self.exceeded,
+            reproducible=not self.exceeded & UNREPRODUCIBLE,
         )

@@ -9,6 +9,7 @@ SQL passthrough cannot leave its views.
 """
 
 import json
+import resource
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,8 @@ from neptune_ledger.lake.read import (
 from neptune_ledger.lake.series import SeriesCatalog
 from neptune_ledger.lake.space_index import SPATIAL_KINDS, SpatialBox
 from neptune_ledger.query import QueryEngine, QueryLimits
+from neptune_ledger.query import sql as sql_passthrough
+from neptune_ledger.query.sql import can_cap_memory
 from test_ledger_registration import fresh
 
 START = 1_790_762_401_000_000_000
@@ -685,20 +688,113 @@ def test_sql_reads_its_own_settings_as_locked(
     assert table.to_pylist() == [{"external": False, "locked": True, "replacements": False}]
 
 
-def test_sql_is_bounded_by_the_same_budgets(
+def test_sql_is_bounded_by_its_own_budget(
     catalog: PostgresCatalog, mobile_twice: dict[str, Any]
 ) -> None:
     rows = catalog.sql(
         "SELECT range AS n FROM range(100000) ORDER BY n",
-        QuerySpec(kinds=("stream",), budget=QueryBudget(max_rows=10)),
+        QuerySpec(kinds=("stream",)),
+        QueryBudget(max_rows=10),
     )
     assert rows.column("n").to_pylist() == list(range(10))
     assert codes(rows) == [("budget_exceeded", "rows")]
     slow = catalog.sql(
         "SELECT count(*) FROM range(1000000000000)",
-        QuerySpec(kinds=("stream",), budget=QueryBudget(max_millis=300)),
+        QuerySpec(kinds=("stream",)),
+        QueryBudget(max_millis=300),
     )
     meta = meta_of(slow)
     assert ("budget_exceeded", "time") in codes(slow)
     assert meta.budget is not None and meta.budget.reproducible is False
     assert slow.num_rows == 0
+    refused = catalog.sql("SELECT 1", QuerySpec(kinds=("stream",)), QueryBudget(max_rows=10**9))
+    assert codes(refused) == [("invalid_request", "budget")]
+
+
+def test_sql_scope_and_output_budgets_are_separate(
+    catalog: PostgresCatalog, mobile_twice: dict[str, Any]
+) -> None:
+    kinds = ("stream", "run", "image", "site")
+    total = catalog.query(QuerySpec(kinds=kinds)).num_rows
+    assert total > 2
+    count = "SELECT count(*) AS n FROM records"
+    # A small output limit no longer cuts the input: the count is over the whole scope.
+    whole = catalog.sql(count, QuerySpec(kinds=kinds), QueryBudget(max_rows=1))
+    assert whole.to_pylist() == [{"n": total}] and codes(whole) == []
+    # A cut scope is named as the scope's, so the caller knows the statement saw a prefix.
+    part = catalog.sql(count, QuerySpec(kinds=kinds, budget=QueryBudget(max_rows=2)))
+    assert part.to_pylist() == [{"n": 2}]
+    assert codes(part) == [("budget_exceeded", "scope.rows")]
+    meta = meta_of(part)
+    assert meta.budget is not None and meta.budget.exceeded == ("rows",)
+    assert meta.budget.reproducible
+
+
+def test_sql_loads_its_scope_under_the_calls_time_limit(
+    pg_uri: str, catalog: PostgresCatalog, mobile_twice: dict[str, Any]
+) -> None:
+    limits = QueryLimits(batch_rows=2)
+    with QueryEngine(pg_uri, "acme", limits=limits, clock=Ticking(0.25)) as made:
+        table = made.sql(
+            "SELECT count(*) AS n FROM records",
+            QuerySpec(kinds=("stream", "run", "image", "site")),  # no time limit of its own
+            QueryBudget(max_millis=1_000),
+        )
+    found = codes(table)
+    assert ("budget_exceeded", "scope.time") in found, found
+    meta = meta_of(table)
+    assert meta.budget is not None and meta.budget.reproducible is False
+
+
+# The reviewer's repro (8192 rows of 100 kB, about 820 MB of result) and one 1 GB value, under
+# a 256 MiB cap so the child stops in well under a second. Before the cap, the first took this
+# process from 155 MB to 1.7 GB; now the statement's memory is the child's, never this one's.
+HOSTILE_MEMORY = [
+    "SELECT repeat('x', 100000) AS s FROM range(8192)",
+    "SELECT repeat('x', 1000000000) AS s",
+]
+
+
+@pytest.mark.skipif(not can_cap_memory(), reason="needs an OS memory cap (Linux RLIMIT_AS)")
+def test_sql_memory_is_capped_outside_this_process(
+    pg_uri: str, catalog: PostgresCatalog, mobile_twice: dict[str, Any]
+) -> None:
+    limits = QueryLimits(sql_memory=256 * 2**20)
+    with QueryEngine(pg_uri, "acme", limits=limits) as made:
+        made.sql("SELECT 1 AS one", QuerySpec(kinds=("stream",)))  # warm imports first
+        before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
+        for statement in HOSTILE_MEMORY:
+            table = made.sql(statement, QuerySpec(kinds=("stream",)), QueryBudget(max_bytes=1000))
+            meta = meta_of(table)
+            assert meta.budget is not None
+            assert table.num_rows == 0, statement
+            assert [c for c, _ in codes(table)] == ["budget_exceeded"], codes(table)
+            if "memory" in meta.budget.exceeded:
+                assert meta.budget.reproducible is False
+        grown = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024 - before
+    assert grown < 64 * 2**20, f"this process grew by {grown} bytes"
+
+
+@pytest.mark.skipif(not can_cap_memory(), reason="needs an OS memory cap (Linux RLIMIT_AS)")
+def test_sql_cuts_an_honest_large_answer_at_its_byte_limit_early(
+    catalog: PostgresCatalog, mobile_twice: dict[str, Any]
+) -> None:
+    # 10 million rows, about 10 GB as Arrow: fetched in small batches, it stops at once.
+    table = catalog.sql(
+        "SELECT range AS n, repeat('x', 1000) AS s FROM range(10000000)",
+        QuerySpec(kinds=("stream",)),
+        QueryBudget(max_bytes=100_000),
+    )
+    assert codes(table) == [("budget_exceeded", "bytes")]
+    assert 0 < table.num_rows < 100
+    assert table.column("n").to_pylist() == list(range(table.num_rows)), "a prefix"
+    assert table.nbytes <= 100_000
+
+
+def test_sql_is_refused_where_memory_cannot_be_capped(
+    catalog: PostgresCatalog, mobile_twice: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sql_passthrough, "can_cap_memory", lambda: False)
+    table = catalog.sql("SELECT 1 AS one", QuerySpec(kinds=("stream",)))
+    assert table.num_rows == 0
+    assert codes(table) == [("invalid_request", "platform")]

@@ -45,7 +45,8 @@ Four things break if this is wrong:
    - `budget: QueryBudget(max_rows, max_bytes, max_millis)` (§6).
    - `explain: true`: the result's metadata carries the plan (§2).
    - `QueryMeta.budget: BudgetReport`, on every answered query: the limits that applied, the rows
-     and bytes returned, which limits cut the answer, and whether it is reproducible.
+     and bytes returned, which limits cut the answer (`BudgetLimit`: `bytes`, `memory`, `rows`,
+     `time`; `memory` only from SQL passthrough, §7), and whether it is reproducible.
    - `QueryMeta.plan: tuple[PlanStep, ...]`, when `explain` is set.
    - Finding codes: `budget_exceeded` and `ambiguous_lineage`.
    - The codec gains `float` (JSON number, finite) and a `max_items` constraint for box corners.
@@ -146,15 +147,19 @@ Four things break if this is wrong:
      engine that cannot be interrupted) is discarded the same way. The rows returned are still
      a prefix: whole batches of the key-ordered record scan, or, for a series join, either the
      complete series answer or none of it, in the planned schema. Which prefix depends on the wall clock, so
-     a time-cut answer has `reproducible: false`. Every other answer has `reproducible: true`.
+     a time-cut answer has `reproducible: false`. So has SQL passthrough's memory cut (§7).
+     Every other answer has `reproducible: true`.
      The prefix property makes a time-cut answer recoverable. The same spec with
      `max_rows = BudgetReport.rows` and no time limit returns the same rows, and for record rows
-     the last row is the cursor to continue from. DataFusion offers no interrupt from Python at
+     the last row is the cursor to continue from. A time cut that returned 0 rows (always the
+     case for a series join) has no such spec, since `max_rows` is at least 1: the caller
+     repeats the call with a larger time limit. DataFusion offers no interrupt from Python at
      the pinned 54.0.0, so a DataFusion scan runs to its end before an overrun is discarded.
      DuckDB is the default engine.
-7. **SQL passthrough runs inside a sealed, per-call DuckDB over views of one scoped answer.**
-   `QueryEngine.sql(statement, scope)` (and `PostgresCatalog.sql`) is for power users and
-   `access/` (MVL-99). It is not a catalog-API call: `query` still never accepts SQL. Its rules:
+7. **SQL passthrough runs inside a sealed DuckDB, in a memory-capped child process, over views
+   of one scoped answer.** `QueryEngine.sql(statement, scope, budget=None)` (and
+   `PostgresCatalog.sql`) is for power users and `access/` (MVL-99). It is not a catalog-API
+   call: `query` still never accepts SQL. Its rules:
    - **Scope.** `scope` is a `QuerySpec`. It is answered by the typed path under its own budget.
      Its rows become the view `records`, and with `series` the joined rows become `series`.
      Nothing else is loaded, so there is no other tenant's, package's or point's data in the
@@ -163,21 +168,53 @@ Four things break if this is wrong:
      it as a `SELECT`. Two statements, DDL, DML, `SET`, `PRAGMA` writes, `ATTACH`, `COPY`,
      `INSTALL`, `LOAD`, `CALL`, `EXPORT` and `EXPLAIN` are refused as `invalid_request` before
      anything runs.
-   - **Engine.** A new in-memory DuckDB per call, configured before any user text runs:
+     Read-only introspection that DuckDB classifies as a `SELECT` (`PRAGMA database_list`,
+     `SUMMARIZE`, `DESCRIBE`, `duckdb_settings()`, `checkpoint()`) runs. It sees only the
+     views and the locked settings, and writes nothing, since the database is in memory.
+   - **Process.** The statement runs in a child process (`query/sql_child.py`, started as
+     `python -I`), never in the Ledger's own. DuckDB's `memory_limit` bounds only its buffer
+     manager: result chunks and the Arrow conversion sit outside it, so in-process a single
+     statement could grow the Ledger without bound (a 820 MB result took it from 155 MB to
+     1.7 GB). The parent sends the views as Arrow IPC on the child's stdin. The child loads
+     them, seals the engine, and then lowers its own `RLIMIT_AS`, soft and hard, to the address
+     space it has mapped plus `QueryLimits.sql_memory` (1 GiB by default). Only then does it
+     run the statement. An allocation past the cap fails inside the child. If the child can
+     report it, it does, and otherwise it dies. Either way the Ledger keeps the rows it
+     already has, a prefix, and adds a `budget_exceeded` finding with subject `memory`. The
+     limit `memory` is in `BudgetReport.exceeded` and makes the answer `reproducible: false`,
+     because where an allocator fails is the platform's, not the spec's. Measured on the
+     repro: the Ledger stays at about 110 MB, and the child stops at about 0.9 GB. The cap
+     stays at 1 GiB: it is twice the default byte budget, room for DuckDB's read-ahead of a
+     few 2 048-row vectors. Where the operating system cannot enforce the cap (not Linux, no
+     `RLIMIT_AS`, no `/proc`), passthrough is refused with `invalid_request` (subject
+     `platform`) and never runs uncapped. Parsing runs nothing, so the statement is classified
+     in the parent first, and a refused statement starts no process.
+   - **Engine.** A new in-memory DuckDB per call in the child, configured before any user text
+     runs:
      - `enable_external_access=false`: no file, glob, `ATTACH`, `COPY` or HTTP;
      - extension autoinstall and autoload off, and unsigned and community extensions refused;
-     - `python_enable_replacements=false`, so a table name never resolves to a Python object in
-       the caller's frames;
-     - `threads=1`, a memory limit (1 GiB by default) and `max_temp_directory_size=0B`;
+     - `python_enable_replacements=false`, so a table name never resolves to a Python object;
+     - `threads=1`, `memory_limit` equal to the cap, and `max_temp_directory_size=0B`;
      - `lock_configuration=true`, so the statement cannot undo any of this.
 
-     The views are registered Arrow tables, which need no file access. The connection is closed
-     after the call, so nothing survives into the next one.
-   - **Budgets.** The budget of §6 applies to the statement's result. Batches are fetched until
-     the row or byte budget is exceeded. A watchdog interrupts the statement at the deadline,
-     with a `budget_exceeded` finding for `time` and `reproducible: false`. Engine errors
-     (parser, binder, permission, out of memory) are `invalid_request` findings with DuckDB's
-     first message line, never exceptions.
+     The views are registered Arrow tables, which need no file access. The process ends after
+     the call, so nothing survives into the next one.
+   - **Budgets.** Two budgets apply, and the scope's is separate from the statement's.
+     `scope.budget` bounds the scope's answer, which is the input. `budget` bounds the
+     statement's result, with §6's defaults and limits. So "10 output rows" never truncates
+     the input. A finding whose subject is `scope.rows`, `scope.bytes` or `scope.time` says
+     the scope was cut, and the statement then ran over a prefix of it. Such a cut is also
+     listed in `BudgetReport.exceeded`, and the answer is no more reproducible than its
+     scope. The call's time limit is `budget.max_millis`, 30 s by default. It covers the whole
+     call: the scope loads under the smaller of its own time limit and the call's, and the
+     statement gets the time left. The child fetches batches of 1 024 rows, cuts each to the
+     rows and bytes left, and stops at the first cut. So an honest large answer stops after
+     its first batches, and the Ledger never holds more than the byte limit of rows. Batches
+     are counted one by one, which can stop a byte cut a few rows short of the longest prefix
+     of the whole table. It is still a deterministic, flagged prefix. A watchdog kills the
+     child at the deadline. That gives a `budget_exceeded` finding for `time` and
+     `reproducible: false`. Engine errors (parser, binder, permission) are `invalid_request`
+     findings with DuckDB's first message line, never exceptions.
    - **Determinism.** Output order is the statement's. With one thread and insertion order
      preserved, the pinned DuckDB gives the same bytes for the same input. Only a total
      `ORDER BY` makes that a guarantee rather than an observation, and the documentation says so.
@@ -200,8 +237,9 @@ Four things break if this is wrong:
      tick (ADR 0010 §9), and int64 overflows on nanosecond ticks. A per-row Python path misses
      ADR 0013's 200 ms budget by an order of magnitude. A `series` join therefore reads only the
      window's own clock and maps nothing. The thread merge (`thread(…, merge=…)`) and
-     `IndexCatalog.window(clocks=…, mappings=…)` remain the cross-clock tools. This goes to a
-     follow-up issue, together with an exact vectorised mapping (DuckDB `HUGEINT`).
+     `IndexCatalog.window(clocks=…, mappings=…)` remain the cross-clock tools. The work, with
+     an exact vectorised mapping (DuckDB `HUGEINT`), is tracked in a follow-up comment on
+     MVL-98, since Linear is at its issue cap.
    - **Paging of `IndexCatalog` answers.** Its single-clock record lookups are now paged through
      `query` (window and frame filters, keyset cursor). Cross-clock carried answers stay
      all-or-none (ADR 0015 §7) until the row merge above defines an order to page.
@@ -241,7 +279,9 @@ Four things break if this is wrong:
   harness tests). The goldens add a full spec, a frame spec, a series spec and a partial-result
   meta.
 - Every answer states the budget it ran under. A cut answer is always a flagged prefix. Only a
-  time cut is not reproducible, and it says so.
+  time cut, or a passthrough memory cut, is not reproducible, and it says so.
+- SQL passthrough costs a child process per call, about 0.1 s to start (Python, PyArrow and
+  DuckDB imports). In exchange, no statement can grow the Ledger's own memory.
 - Measured on a synthetic catalog of 10⁴ packages (the L1 harness), a thread + window query
   through `PostgresCatalog.query` has p50 **0.8 ms** and p95 2.1 ms over 41 windows on a
   20-thread workstation, far inside the 300 ms acceptance: the thread index narrows the

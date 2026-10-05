@@ -42,6 +42,7 @@ from neptune_ledger.api.types import (
     LineageGraph,
     Order,
     Pinned,
+    QueryBudget,
     QuerySpec,
     RecordRef,
     Region,
@@ -1075,10 +1076,10 @@ class PostgresCatalog:
         """The answer to ``spec`` (ADR 0016): a ``pyarrow.Table`` with ``QueryMeta`` metadata."""
         return self._query_engine().query(spec)
 
-    def sql(self, statement: str, scope: QuerySpec) -> Any:
-        """One SELECT over the views of ``scope``'s answer, sealed (ADR 0016 §7). Not a
-        catalog-API call: ``query`` never accepts SQL."""
-        return self._query_engine().sql(statement, scope)
+    def sql(self, statement: str, scope: QuerySpec, budget: QueryBudget | None = None) -> Any:
+        """One SELECT over the views of ``scope``'s answer, sealed, with ``budget`` on its
+        result (ADR 0016 §7). Not a catalog-API call: ``query`` never accepts SQL."""
+        return self._query_engine().sql(statement, scope, budget)
 
     def _query_engine(self) -> QueryEngine:
         if self._engine is None:
