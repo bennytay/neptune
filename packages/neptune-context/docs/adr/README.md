@@ -8,3 +8,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-place-in-the-programme-and-contract-pins.md) | Context's place in the programme, declared contract versions, and the read-only seam | Accepted |
+| [0003](0003-the-context-packet.md) | The context packet: a typed, cited, content-addressed answer with budgets and an inference flag | Accepted |
