@@ -164,7 +164,8 @@ def test_graph_schema_contract(check):
     the compiler's snapshot bindings. Where the evidence states none, the claim is `configuration_unknown`, never the
     nearest configuration in time; where records disagree, every reading is a `configuration_candidate`. No
     `succeeds` is claimed across a gap. `not_covered_by_authorisation` is an observation about the Ledger's envelopes,
-    made only where the windows compare on one clock.
+    made only over windows whose bounds are stated and only where they compare on one clock; an unstated bound or
+    envelope end is never read as open.
 
 ## Caveat: a resolver configuration is a store generation
 

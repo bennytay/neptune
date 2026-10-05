@@ -69,7 +69,13 @@ run claims (run clocks) meet at the configuration node, never by comparing clock
 For each `Run` with a node, each `SnapshotBinding` naming it gives `configuration_active_during(run →
 configuration)` over the bound window: the binding's `Known` bounds, else the run's own `[first, last + 1 tick)`
 (`last` is inclusive and ticks are integers, so this is exact), else the run thread's start (a convention, ADR 0008
-§2) and `open`. `assertion_kind` is the binding's. Bindings of one snapshot kind naming different configurations
+§2) and `open`. `assertion_kind` is the binding's. Each bound keeps its state: stated (`Known`), stated open
+(`KnownAbsent`: the run's own bound) or unstated (`Unknown`, `NotCovered`, `Ambiguous`). The claim names the run
+either way, but a window is **stated** only if both bounds are stated or stated open and, for a stated-open start,
+the run states `first`; coverage (§5) is decided over stated windows only. The compiler's own stated bindings carry
+`Unknown` validity (root `derived/bindings.py`), so their coverage is undecided until a source states the window. An
+`Ambiguous` validity gives one `configuration_candidate` per reading and `configuration.ambiguous_window`, and
+decides no coverage. Bindings of one snapshot kind naming different configurations
 over overlapping windows are `configuration.binding_overlap`, and each becomes a `configuration_candidate`. A
 binding naming a run or snapshot the Ledger does not hold is `configuration.dangling_binding`; a snapshot with no
 configuration thread leaves the window `configuration_unknown(run → binding record)`. A window whose end is not
@@ -86,15 +92,19 @@ Before a machine's first placement nothing is claimed: `NotCovered`, as for any 
 ### 5. Authorisation
 
 Each envelope with a `Known` configuration, `Known` site and `valid_from` gives `authorised_configuration(site →
-configuration)` over `[valid_from, valid_until)` (`open` without `valid_until`; `valid_until` is the exclusive end,
-as a validity window's is). What it cannot place is `configuration.envelope_unplaced` (or `untimeable_window`).
+configuration)` over `[valid_from, valid_until)` (`valid_until` is the exclusive end, as a validity window's is;
+`open` only where the envelope states it has none, `KnownAbsent`). What it cannot place is
+`configuration.envelope_unplaced` (or `untimeable_window`); a `valid_until` that is not stated (`Unknown`,
+`Ambiguous`, `NotCovered`) is `envelope_unplaced` and no site claim: an unstated end is never "until further
+notice".
 
 For each `configuration_active_during`, the parts of the bound window that no envelope naming its configuration
 covers are `not_covered_by_authorisation(run → configuration)`, `observed`: a fact about the envelopes in the
 Ledger, not a judgement of the run. It is decided only on one clock, and never from a blank. It is
 `configuration.authorisation_undecided`, with no claim, when an envelope naming the configuration cannot be
-compared (another clock, no `valid_from`); when an envelope that might name it (an `Ambiguous` one including it, or
-one whose configuration is not `Known`) cannot be compared or overlaps an uncovered part; or when an `open` run
+compared (another clock, no `valid_from`); when an envelope that might cover it (an `Ambiguous` one including it, one
+whose configuration is not `Known`, or one naming it with no stated `valid_until`, from its `valid_from` on) cannot
+be compared or overlaps an uncovered part; when the bound window is not stated (§3); or when an `open` run
 window is only partly covered (the run may end before or after the envelope does, so only a run uncovered over all
 of its window is surely uncovered). Coverage is by configuration and time; site and machine scope wait for MVL-131's
 run placement.

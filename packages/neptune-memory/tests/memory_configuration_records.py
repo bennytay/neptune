@@ -14,13 +14,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Literal, TypeAlias
 
 from memory_identity_records import TRANSFORM, cite, thread
 from neptune.identity.provenance import evidence_record_id
 from neptune.model.alignment import SnapshotBinding, SnapshotKind, ValidityWindow
 from neptune.model.ids import LogicalId
-from neptune.model.knowledge import AssertionKind, Known, NotCovered, Unknown
+from neptune.model.knowledge import AssertionKind, Known, KnownAbsent, NotCovered, Unknown
 from neptune.model.lifecycle import (
     AuthorisationEnvelope,
     ChangeRecord,
@@ -33,6 +33,7 @@ from neptune.model.lifecycle import (
 from neptune.model.machine import HardwareConfiguration
 from neptune.model.provenance import Provenance
 from neptune.model.run import Run
+from neptune.model.time import Timestamp
 from neptune_memory.schema.nodes import NodeType
 
 if TYPE_CHECKING:
@@ -40,9 +41,12 @@ if TYPE_CHECKING:
 
     from neptune.model.ids import RecordId
     from neptune.model.knowledge import Knowledge
-    from neptune.model.time import Timestamp
 
 Record = dict[str, object]
+if TYPE_CHECKING:
+    # A bound as a test states it: an instant, "open" (stated open: ``KnownAbsent``), any other
+    # ``Knowledge`` as given, or ``None`` (``Unknown``: could be stated and is not).
+    When: TypeAlias = Timestamp | Literal["open"] | Knowledge[Timestamp] | None
 STATED, OBSERVED = AssertionKind.STATED, AssertionKind.OBSERVED
 EXAMPLES: Final = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "model"
 
@@ -76,8 +80,12 @@ def _one(value: LogicalId | Knowledge[LogicalId] | None) -> Knowledge[LogicalId]
     return Known(value) if isinstance(value, LogicalId) else value
 
 
-def _when(at: Timestamp | None) -> Knowledge[Timestamp]:
-    return Known(at) if at is not None else Unknown()
+def _when(at: When, cited: Provenance | None = None) -> Knowledge[Timestamp]:
+    if at is None:
+        return Unknown()
+    if at == "open":
+        return KnownAbsent(cited or _stated("open bound"))
+    return Known(at) if isinstance(at, Timestamp) else at
 
 
 _NO_DECISION: Final = Decision(Unknown(), Unknown(), Unknown())
@@ -185,9 +193,10 @@ def envelope(
     site: LogicalId | None,
     configuration: LogicalId | Knowledge[LogicalId] | None,
     valid_from: Timestamp | None,
-    valid_until: Timestamp | None = None,
+    valid_until: When = None,
     machines: Sequence[LogicalId] = (),
 ) -> Record:
+    """An envelope; ``valid_until`` ``None`` is ``Unknown``, ``"open"`` states it has none."""
     provenance = _stated(name)
     unknown = Quantity(Unknown(), Unknown())
     return AuthorisationEnvelope(
@@ -201,7 +210,7 @@ def envelope(
         supervision=Unknown(),
         dependencies=Known(()),
         valid_from=_when(valid_from),
-        valid_until=_when(valid_until),
+        valid_until=_when(valid_until, provenance),
         approval=_NO_DECISION,
     ).to_json()  # type: ignore[return-value]
 
@@ -249,18 +258,19 @@ def binding(
     run_record: Record,
     snapshot: Record,
     *,
-    start: Timestamp | None = None,
-    end: Timestamp | None = None,
+    start: When = None,
+    end: When = None,
     clock: RecordId | None = None,
     kind: AssertionKind = OBSERVED,
+    validity: Knowledge[ValidityWindow] | None = None,
 ) -> Record:
-    """A ``SnapshotBinding``; a window when ``clock`` is given, else ``NotCovered`` (whole run)."""
+    """A ``SnapshotBinding``: a window when ``clock`` is given (``"open"`` bounds: stated open,
+    the run's own), else ``validity`` as given, else ``NotCovered``."""
     provenance = Provenance(cite(f"bindings/{name}"), TRANSFORM.id, kind)
-    validity: Knowledge[ValidityWindow] = (
-        Known(ValidityWindow(clock, _when(start), _when(end)))
-        if clock is not None
-        else NotCovered()
-    )
+    if clock is not None:
+        validity = Known(ValidityWindow(clock, _when(start, provenance), _when(end, provenance)))
+    elif validity is None:
+        validity = NotCovered()
     return SnapshotBinding(
         id=_id_of("snapshot_binding", provenance),
         provenance=provenance,

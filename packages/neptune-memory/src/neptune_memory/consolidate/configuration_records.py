@@ -23,7 +23,7 @@ A value that is not ``Known`` is kept as its state (``Outcome``), never as a bla
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, Literal, TypeVar
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias, TypeVar
 
 from neptune.model.alignment import SnapshotKind, snapshot_binding_from_json
 from neptune.model.configuration import configuration_snapshot_from_json
@@ -42,16 +42,17 @@ from neptune.model.machine import (
 )
 from neptune.model.provenance import Provenance
 from neptune.model.run import run_from_json
+from neptune.model.time import Timestamp
 from neptune_memory.consolidate.identity_records import Inferred, Malformed, declared
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
 
+    from neptune.model.alignment import ValidityWindow
     from neptune.model.ids import LogicalId, RecordId
     from neptune.model.jsonvalue import JsonValue
     from neptune.model.knowledge import Knowledge
     from neptune.model.provenance import EvidenceRef
-    from neptune.model.time import Timestamp
 
 _T = TypeVar("_T")
 
@@ -78,6 +79,11 @@ SNAPSHOT_KINDS: Final[Mapping[str, Callable[[JsonValue], object]]] = {
 # - ``absent``: the record states there is none (``KnownAbsent``, ``NotApplicable``).
 Outcome = Literal["known", "ambiguous", "unknown", "absent"]
 
+# One bound of a window as its record states it (ADR 0010 §3, §5): an instant; ``open``, stated
+# open on that side (``KnownAbsent``); or ``unstated`` (``Unknown``, ``NotCovered``, ``Ambiguous``,
+# ``NotApplicable``). Only a stated bound decides anything; ``unstated`` is never ``open``.
+Bound: TypeAlias = Timestamp | Literal["open", "unstated"]
+
 
 def _strict(parse: Callable[[JsonValue], _T], record: Mapping[str, object]) -> _T:
     provenance = record.get("provenance")
@@ -97,6 +103,16 @@ def _cited(knowledge: object) -> tuple[EvidenceRef, ...]:
 
 def _known(knowledge: Knowledge[_T]) -> _T | None:
     return knowledge.value if isinstance(knowledge, Known) else None
+
+
+def _bound(knowledge: Knowledge[Timestamp]) -> Bound:
+    match knowledge:
+        case Known(value=value):
+            return value
+        case KnownAbsent():
+            return "open"
+        case _:
+            return "unstated"
 
 
 def _declared_id(knowledge: Knowledge[LogicalId]) -> tuple[Outcome, tuple[LogicalId, ...]]:
@@ -181,7 +197,8 @@ def event(kind: str, record: Mapping[str, object]) -> Event:
 class Envelope:
     """An ``AuthorisationEnvelope``: the configuration it approves at a site, and when.
 
-    ``valid_until`` is the window's exclusive end, as a validity window's is (ADR 0010 §5).
+    ``valid_until`` is the window's exclusive end, as a validity window's is: ``open`` only when
+    the envelope states it has none (ADR 0010 §5).
     """
 
     record: RecordId
@@ -189,7 +206,7 @@ class Envelope:
     outcome: Outcome
     configuration: tuple[LogicalId, ...]
     valid_from: Timestamp | None
-    valid_until: Timestamp | None
+    valid_until: Bound
     evidence: tuple[EvidenceRef, ...]
 
 
@@ -203,7 +220,7 @@ def envelope(record: Mapping[str, object]) -> Envelope:
         outcome=outcome,
         configuration=ids,
         valid_from=_known(parsed.valid_from),
-        valid_until=_known(parsed.valid_until),
+        valid_until=_bound(parsed.valid_until),
         evidence=_evidence(
             parsed.provenance,
             parsed.site,
@@ -265,35 +282,42 @@ def snapshot(kind: str, record: Mapping[str, object]) -> Snapshot:
 class Binding:
     """A ``SnapshotBinding``: run ``run`` ran with ``snapshot`` over a window of the run.
 
-    ``start`` and ``end`` are the window's ``Known`` bounds, else ``None``: a bound the binding
-    does not state, or no window at all, is the run's own (ADR 0010 §3).
+    ``windows`` holds each window the validity states, as ``(start, end)`` bounds: one for a
+    ``Known`` validity, one per candidate for an ``Ambiguous`` one (``ambiguous``), and
+    ``("unstated", "unstated")`` when it states none (ADR 0010 §3).
     """
 
     record: RecordId
     run: RecordId
     snapshot: RecordId
     snapshot_kind: str
-    start: Timestamp | None
-    end: Timestamp | None
+    windows: tuple[tuple[Bound, Bound], ...]
+    ambiguous: bool
     assertion_kind: AssertionKind
     evidence: tuple[EvidenceRef, ...]
 
 
 def binding(record: Mapping[str, object]) -> Binding:
     parsed = _strict(snapshot_binding_from_json, record)
-    window = _known(parsed.validity)
+    validity = parsed.validity
+    stated: tuple[ValidityWindow, ...] = ()
+    if isinstance(validity, Known):
+        stated = (validity.value,)
+    elif isinstance(validity, Ambiguous):
+        stated = tuple(c.value for c in validity.candidates)
+    unstated: tuple[Bound, Bound] = ("unstated", "unstated")
     return Binding(
         record=parsed.id,
         run=parsed.run,
         snapshot=parsed.snapshot,
         snapshot_kind=str(parsed.snapshot_kind),
-        start=None if window is None else _known(window.start),
-        end=None if window is None else _known(window.end),
+        windows=tuple((_bound(w.start), _bound(w.end)) for w in stated) or (unstated,),
+        ambiguous=isinstance(validity, Ambiguous),
         assertion_kind=parsed.provenance.assertion_kind,
         evidence=_evidence(
             parsed.provenance,
-            parsed.validity,
-            *(() if window is None else (window.start, window.end)),
+            validity,
+            *(bound for w in stated for bound in (w.start, w.end)),
         ),
     )
 

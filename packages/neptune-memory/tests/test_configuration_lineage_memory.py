@@ -28,7 +28,7 @@ from memory_configuration_records import (
 from memory_identity_records import STATED, Record, cite, civil_domain, ledger, provenance
 from neptune.identity import canonical_json
 from neptune.model.ids import LogicalId, RecordId
-from neptune.model.knowledge import Knowledge, KnownAbsent, NotApplicable, NotCovered
+from neptune.model.knowledge import Knowledge, KnownAbsent, NotApplicable, NotCovered, Unknown
 from neptune.model.time import Epoch, Timescale, Timestamp
 from neptune_memory.consolidate.base import Consolidation, run_consolidator
 from neptune_memory.consolidate.configuration import ConfigurationLineageConsolidator
@@ -165,8 +165,10 @@ def test_warehouse_authorisation_is_a_site_claim_on_the_envelope_window() -> Non
     )
 
 
-def test_warehouse_runs_after_the_incident_change_are_not_covered_by_the_envelope() -> None:
-    """The demo question: what changed before the incident, and was it authorised?"""
+def _warehouse_runs(*, stated: bool) -> tuple[Consolidation, Record]:
+    """Three shifts of AMR-07: before the incident change (r3), after it (r4), and one no binding
+    names. ``stated``: the bindings state they hold for the whole run (a log's own parameter
+    messages); otherwise their validity is ``Unknown``, as the compiler's stated bindings are."""
     controller, controller_id = civil_domain("AMR-07 controller clock")
 
     def shift(name: str, first: str, last: str) -> Record:
@@ -177,6 +179,12 @@ def test_warehouse_runs_after_the_incident_change_are_not_covered_by_the_envelop
             Timestamp(posix(last), controller_id),
             AMR,
         )
+
+    def bind(name: str, shift_: Record, revision: str) -> Record:
+        snapshot = hardware(f"CFG-AMR07-{revision}.yaml", AMR)
+        if stated:
+            return binding(name, shift_, snapshot, start="open", end="open", clock=controller_id)
+        return binding(name, shift_, snapshot, validity=Unknown())
 
     before = shift("AMR-07/2026-09-23", "2026-09-23T10:00:00+10:00", "2026-09-23T10:59:59+10:00")
     after = shift("AMR-07/2026-09-28", "2026-09-28T10:00:00+10:00", "2026-09-28T10:59:59+10:00")
@@ -193,19 +201,34 @@ def test_warehouse_runs_after_the_incident_change_are_not_covered_by_the_envelop
         unbound,
         hardware("CFG-AMR07-r3.yaml", AMR),
         hardware("CFG-AMR07-r4.yaml", AMR),
-        binding("09-23", before, hardware("CFG-AMR07-r3.yaml", AMR)),
-        binding("09-28", after, hardware("CFG-AMR07-r4.yaml", AMR)),
+        bind("09-23", before, "r3"),
+        bind("09-28", after, "r4"),
     ]
-    result = consolidate(records)
+    return consolidate(records), unbound
+
+
+def test_warehouse_runs_say_which_configuration_each_ran_with() -> None:
+    """The demo question: what changed before the incident, and was it authorised?"""
+    for stated in (True, False):
+        result, unbound = _warehouse_runs(stated=stated)
+        active = {
+            (c.subject.node_id, c.object.node_id)  # type: ignore[union-attr]
+            for c in of(result, "configuration_active_during")
+        }
+        assert active == {
+            ("fleet.run:AMR-07/2026-09-23", "siteops.configuration:CFG-AMR07-r3"),
+            ("fleet.run:AMR-07/2026-09-28", "siteops.configuration:CFG-AMR07-r4"),
+        }
+        (unknown,) = of(result, "configuration_unknown")
+        assert (unknown.subject.node_id, unknown.object) == (
+            "fleet.run:AMR-07/2026-09-29",
+            LedgerRecordRef(record_id_of(unbound)),
+        )
+
+
+def test_a_run_after_the_change_is_not_covered_when_its_binding_states_its_window() -> None:
+    result, _ = _warehouse_runs(stated=True)
     assert result.findings == ()
-    active = {
-        (c.subject.node_id, c.object.node_id)  # type: ignore[union-attr]
-        for c in of(result, "configuration_active_during")
-    }
-    assert active == {
-        ("fleet.run:AMR-07/2026-09-23", "siteops.configuration:CFG-AMR07-r3"),
-        ("fleet.run:AMR-07/2026-09-28", "siteops.configuration:CFG-AMR07-r4"),
-    }
     (uncovered,) = of(result, "not_covered_by_authorisation")
     assert uncovered.subject.node_id == "fleet.run:AMR-07/2026-09-28"
     assert (uncovered.valid_from, uncovered.valid_to) == (
@@ -213,11 +236,22 @@ def test_warehouse_runs_after_the_incident_change_are_not_covered_by_the_envelop
         civil("2026-09-28T11:00:00+10:00"),
     )
     assert uncovered.assertion_kind == "observed"
-    (unknown,) = of(result, "configuration_unknown")
-    assert (unknown.subject.node_id, unknown.object) == (
-        "fleet.run:AMR-07/2026-09-29",
-        LedgerRecordRef(record_id_of(unbound)),
-    )
+
+
+def test_with_the_compilers_unstated_windows_coverage_is_undecided_but_says_why() -> None:
+    """The compiler's bindings state no window, so no not-covered claim is made; the finding still
+    says that no envelope names r4 while one names r3."""
+    result, _ = _warehouse_runs(stated=False)
+    assert of(result, "not_covered_by_authorisation") == []
+    naming = {
+        f.details["configuration"]: f.details["envelopes_naming_it"]
+        for f in result.findings
+        if f.code == "configuration.authorisation_undecided"
+    }
+    assert naming == {
+        "siteops.configuration:CFG-AMR07-r3": 1,
+        "siteops.configuration:CFG-AMR07-r4": 0,
+    }
 
 
 # --- Manipulator cell ---------------------------------------------------------------------------

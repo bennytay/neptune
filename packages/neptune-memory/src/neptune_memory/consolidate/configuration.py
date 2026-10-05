@@ -46,6 +46,7 @@ from neptune_memory.consolidate.configuration_records import (
     SNAPSHOT_BINDING,
     SNAPSHOT_KINDS,
     Binding,
+    Bound,
     Envelope,
     Event,
     RunRecord,
@@ -518,17 +519,28 @@ def _chains(view: _View) -> list[ClaimDraft]:
 # --- Authorisation ------------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _Window:
+    """An envelope's placed window: ``None`` when it cannot be placed. ``stated`` is ``False``
+    when ``valid_until`` is not stated: the window is then ``[valid_from, open)`` as far as it may
+    reach, never as far as it is known to (ADR 0010 §5)."""
+
+    envelope: Envelope
+    interval: Interval | None
+    stated: bool = True
+
+
 @dataclass
 class _Authorisations:
-    """Envelopes with their placed windows (``None`` when they cannot be placed): by the
-    configuration they name, by each candidate of an ``Ambiguous`` one, and those naming none."""
+    """Envelope windows by the configuration they name, by each candidate of an ``Ambiguous``
+    one, and those naming none."""
 
-    naming: dict[NodeRef, list[tuple[Envelope, Interval | None]]] = field(default_factory=dict)
-    maybe: dict[NodeRef, list[tuple[Envelope, Interval | None]]] = field(default_factory=dict)
-    unbound: list[tuple[Envelope, Interval | None]] = field(default_factory=list)
+    naming: dict[NodeRef, list[_Window]] = field(default_factory=dict)
+    maybe: dict[NodeRef, list[_Window]] = field(default_factory=dict)
+    unbound: list[_Window] = field(default_factory=list)
 
 
-def _envelope_window(view: _View, envelope: Envelope) -> Interval | None:
+def _envelope_window(view: _View, envelope: Envelope) -> _Window:
     """``[valid_from, valid_until)`` placed; ``None`` (and a finding) if it cannot be."""
     if envelope.valid_from is None:
         view.findings.append(
@@ -538,9 +550,20 @@ def _envelope_window(view: _View, envelope: Envelope) -> Interval | None:
                 (envelope.record,),
             )
         )
-        return None
+        return _Window(envelope, None)
     start = view.place(envelope.valid_from)
-    end = OPEN if envelope.valid_until is None else view.place(envelope.valid_until)
+    until = envelope.valid_until
+    if until == "unstated":
+        view.findings.append(
+            _finding(
+                "envelope_unplaced",
+                "an authorisation envelope states no valid_until (nor that it has none); where it"
+                " ends is not known, so no site claim and coverage after valid_from is undecided",
+                (envelope.record,),
+            )
+        )
+        return _Window(envelope, Interval(start, OPEN), stated=False)
+    end = OPEN if until == "open" else view.place(until)
     if isinstance(end, Timestamp) and (end.domain_id != start.domain_id or not start < end):
         view.findings.append(
             _finding(
@@ -549,8 +572,8 @@ def _envelope_window(view: _View, envelope: Envelope) -> Interval | None:
                 (envelope.record,),
             )
         )
-        return None
-    return Interval(start, end)
+        return _Window(envelope, None)
+    return _Window(envelope, Interval(start, end))
 
 
 def _authorisations(view: _View) -> tuple[list[ClaimDraft], _Authorisations]:
@@ -563,7 +586,7 @@ def _authorisations(view: _View) -> tuple[list[ClaimDraft], _Authorisations]:
             for candidate in envelope.configuration:
                 node = view.declared(NodeType.CONFIGURATION, candidate, envelope.record)
                 if node is not None:
-                    found.maybe.setdefault(node, []).append((envelope, window))
+                    found.maybe.setdefault(node, []).append(window)
             view.findings.append(
                 _finding(
                     "envelope_unplaced",
@@ -575,7 +598,7 @@ def _authorisations(view: _View) -> tuple[list[ClaimDraft], _Authorisations]:
             )
             continue
         if envelope.outcome != "known":
-            found.unbound.append((envelope, window))
+            found.unbound.append(window)
             view.findings.append(
                 _finding(
                     "envelope_unplaced",
@@ -590,7 +613,7 @@ def _authorisations(view: _View) -> tuple[list[ClaimDraft], _Authorisations]:
         )
         if configuration is None:
             continue
-        found.naming.setdefault(configuration, []).append((envelope, window))
+        found.naming.setdefault(configuration, []).append(window)
         if envelope.site is None:
             view.findings.append(
                 _finding(
@@ -602,21 +625,45 @@ def _authorisations(view: _View) -> tuple[list[ClaimDraft], _Authorisations]:
             )
             continue
         site = view.declared(NodeType.SITE, envelope.site, envelope.record)
-        if site is None or window is None:
+        if site is None or window.interval is None or not window.stated:
             continue
         drafts.append(
             _draft(
                 site,
                 AUTHORISED_CONFIGURATION,
                 configuration,
-                window.start,
-                window.end,
+                window.interval.start,
+                window.interval.end,
                 _STATED,
                 envelope.evidence,
                 record,
             )
         )
     return drafts, found
+
+
+def _undecided(
+    view: _View,
+    found: _Authorisations,
+    run: RunRecord,
+    node: NodeRef,
+    binding: Binding,
+    configuration: NodeRef,
+    reason: str,
+    envelopes: Iterable[RecordId] = (),
+) -> None:
+    naming = [w.envelope.record for w in found.naming.get(configuration, [])]
+    view.findings.append(
+        _finding(
+            "authorisation_undecided",
+            f"whether an authorisation envelope covers this run's configuration is not decided:"
+            f" {reason}; nothing is claimed",
+            (binding.record, run.record, *envelopes, *naming),
+            run=node.node_id,
+            configuration=configuration.node_id,
+            envelopes_naming_it=len(naming),
+        )
+    )
 
 
 def _coverage(
@@ -628,48 +675,53 @@ def _coverage(
     configuration: NodeRef,
     window: Interval,
 ) -> list[ClaimDraft]:
-    """The parts of ``window`` no envelope naming ``configuration`` covers, as observed claims.
+    """The parts of ``window`` (stated bounds only) no envelope naming ``configuration`` covers,
+    as observed claims.
 
     Compared only on one clock. Where an envelope naming it cannot be compared (another clock, no
-    start), one that might name it (``Ambiguous``, or naming none) may cover an uncovered part, or
-    an open run window is only partly covered, the coverage is undecided: a finding, never a
-    claim (ADR 0010 §5).
+    start), one that might cover an uncovered part (``Ambiguous``, naming none, or with no stated
+    end) exists, or an open run window is only partly covered, the coverage is undecided: a
+    finding, never a claim (ADR 0010 §5).
     """
     naming = found.naming.get(configuration, [])
     comparable: list[Interval] = []
     undecided: list[RecordId] = []
-    for envelope, interval in naming:
-        if interval is None or interval.domain_id != window.domain_id:
-            undecided.append(envelope.record)
+    maybe = [*found.maybe.get(configuration, []), *found.unbound]
+    for item in naming:
+        if item.interval is None or item.interval.domain_id != window.domain_id:
+            undecided.append(item.envelope.record)
+        elif item.stated:
+            comparable.append(item.interval)
         else:
-            comparable.append(interval)
+            maybe.append(item)  # it covers from valid_from up to an end it does not state
     pieces = window.minus(comparable)
     if not pieces:
         return []
-    # An envelope that might name the configuration (an Ambiguous one, or one naming none) leaves
-    # undecided whatever part it may cover.
-    for envelope, interval in (*found.maybe.get(configuration, []), *found.unbound):
+    for item in maybe:
         if (
-            interval is None
-            or interval.domain_id != window.domain_id
-            or any(interval.overlaps(piece) for piece in pieces)
+            item.interval is None
+            or item.interval.domain_id != window.domain_id
+            or any(item.interval.overlaps(piece) for piece in pieces)
         ):
-            undecided.append(envelope.record)
-    # An open run window may end at any instant, so only a run no envelope covers at any part of
-    # it is surely uncovered; a closed piece of an open window would overstate it.
-    if undecided or (isinstance(window.end, Open) and pieces != (window,)):
-        view.findings.append(
-            _finding(
-                "authorisation_undecided",
-                "whether an authorisation envelope covers this run's configuration cannot be"
-                " decided on one clock; nothing is claimed",
-                (binding.record, run.record, *undecided, *(e.record for e, _ in naming)),
-                run=node.node_id,
-                configuration=configuration.node_id,
-            )
+            undecided.append(item.envelope.record)
+    if undecided:
+        _undecided(
+            view,
+            found,
+            run,
+            node,
+            binding,
+            configuration,
+            "an envelope that may cover it cannot be compared on one clock or states no end",
+            undecided,
         )
         return []
-    envelopes = [e for e, _ in naming]
+    # An open run window may end at any instant, so only a run no envelope covers at any part of
+    # it is surely uncovered; a closed piece of an open window would overstate it.
+    if isinstance(window.end, Open) and pieces != (window,):
+        _undecided(view, found, run, node, binding, configuration, "the run's end is not stated")
+        return []
+    envelopes = [item.envelope for item in naming]
     return [
         _draft(
             node,
@@ -728,15 +780,26 @@ def _run_window(view: _View, run: RunRecord, node: NodeRef) -> Interval:
 
 
 def _binding_window(
-    view: _View, binding: Binding, run_window: Interval
-) -> Interval | ConsolidationFinding:
-    """The bound part of the run: the binding's stated bounds, else the run's own."""
-    start = view.place(binding.start) if binding.start is not None else run_window.start
-    end: Timestamp | Open = run_window.end
-    if binding.end is not None:
-        end = view.place(binding.end)
-    elif isinstance(end, Timestamp) and end.domain_id != start.domain_id:
-        end = OPEN  # the run's end is on another clock: the binding holds until further notice
+    view: _View, binding: Binding, run: RunRecord, run_window: Interval, bounds: tuple[Bound, Bound]
+) -> tuple[Interval, bool] | ConsolidationFinding:
+    """One window of a binding over its run, and whether its bounds are stated.
+
+    A bound the binding states is used as stated; a stated open bound (``KnownAbsent``) is the
+    run's own; an unstated one is the run's own too, so the claim names the run, but coverage is
+    never decided over it (ADR 0010 §3). The run's start counts as stated only if ``first`` is.
+    """
+    start_bound, end_bound = bounds
+    if isinstance(start_bound, Timestamp):
+        start, start_stated = view.place(start_bound), True
+    else:
+        start, start_stated = run_window.start, start_bound == "open" and run.first is not None
+    end: Timestamp | Open
+    if isinstance(end_bound, Timestamp):
+        end, end_stated = view.place(end_bound), True
+    else:
+        end, end_stated = run_window.end, end_bound == "open"
+        if isinstance(end, Timestamp) and end.domain_id != start.domain_id:
+            end = OPEN  # the run's end is on another clock: until further notice
     if isinstance(end, Timestamp) and (end.domain_id != start.domain_id or not start < end):
         return _finding(
             "untimeable_window",
@@ -744,7 +807,7 @@ def _binding_window(
             " one clock",
             (binding.record,),
         )
-    return Interval(start, end)
+    return Interval(start, end), start_stated and end_stated
 
 
 @dataclass(frozen=True)
@@ -752,6 +815,7 @@ class _Bound:
     binding: Binding
     configuration: NodeRef
     window: Interval
+    stated: bool  # both bounds stated (or stated open): coverage may be decided over it
 
 
 def _overlapping(bound: list[_Bound]) -> set[RecordId]:
@@ -835,9 +899,21 @@ def _runs(view: _View, found: _Authorisations) -> list[ClaimDraft]:
                     (binding.record, run.record, snapshot.record),
                 )
             )
-            if binding.record not in flagged:
+            if binding.record in flagged:
+                continue
+            if item.stated:
                 drafts.extend(
                     _coverage(view, found, run, node, binding, item.configuration, item.window)
+                )
+            else:
+                _undecided(
+                    view,
+                    found,
+                    run,
+                    node,
+                    binding,
+                    item.configuration,
+                    "the binding does not state the part of the run it applies to",
                 )
     return drafts
 
@@ -851,9 +927,14 @@ def _bind(
     bound: list[_Bound],
 ) -> list[ClaimDraft]:
     """One binding: its configuration node into ``bound``, or what it leaves unknown."""
-    window = _binding_window(view, binding, run_window)
-    if isinstance(window, ConsolidationFinding):
-        view.findings.append(window)
+    windows: list[tuple[Interval, bool]] = []
+    for bounds in binding.windows:
+        placed = _binding_window(view, binding, run, run_window, bounds)
+        if isinstance(placed, ConsolidationFinding):
+            view.findings.append(placed)
+        else:
+            windows.append(placed)
+    if not windows:
         return []
     snapshot = view.snapshots.get(binding.snapshot)
     configurations: tuple[NodeRef, ...] = ()
@@ -885,8 +966,19 @@ def _bind(
                     nodes=[n.node_id for n in configurations],
                 )
             )
-    if len(configurations) == 1:
-        bound.append(_Bound(binding, configurations[0], window))
+    if binding.ambiguous:
+        view.findings.append(
+            _finding(
+                "ambiguous_window",
+                "a snapshot binding's window is Ambiguous: each reading is a candidate, and"
+                " coverage is not decided",
+                (binding.record,),
+                readings=len(binding.windows),
+            )
+        )
+    elif len(configurations) == 1:
+        window, stated = windows[0]
+        bound.append(_Bound(binding, configurations[0], window, stated))
         return []
     records = (binding.record, run.record, *(() if snapshot is None else (snapshot.record,)))
     if configurations:
@@ -902,6 +994,7 @@ def _bind(
                 records,
             )
             for configuration in configurations
+            for window, _ in windows
         ]
     return [
         _draft(
@@ -914,6 +1007,7 @@ def _bind(
             binding.evidence,
             records,
         )
+        for window, _ in windows
     ]
 
 

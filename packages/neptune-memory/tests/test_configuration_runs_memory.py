@@ -25,6 +25,7 @@ from memory_configuration_records import (
 )
 from memory_identity_records import CLOCK, Record, civil_domain, ledger
 from neptune.identity import canonical_json
+from neptune.model.alignment import ValidityWindow
 from neptune.model.ids import LogicalId, RecordId
 from neptune.model.knowledge import Ambiguous, Candidate, Known, Unknown
 from neptune.model.time import Epoch, Timescale, Timestamp
@@ -268,20 +269,24 @@ def test_an_inverted_binding_window_is_a_finding() -> None:
 
 
 def authorised(
-    valid_from: int | None, valid_until: int | None, configuration: object = CFG_A
+    valid_from: int | None, valid_until: int | str | None, configuration: object = CFG_A
 ) -> Record:
+    """An envelope; ``valid_until`` ``"open"`` states it has none, ``None`` is ``Unknown``."""
     return envelope(
         f"AUTH {valid_from}-{valid_until}-{configuration}",
         CELL,
         configuration,  # type: ignore[arg-type]
         on_form(valid_from) if valid_from is not None else None,
-        on_form(valid_until) if valid_until is not None else None,
+        on_form(valid_until) if isinstance(valid_until, int) else valid_until,  # type: ignore[arg-type]
     )
 
 
 def covered(*envelopes: Record, last: int | None = 3599) -> Consolidation:
+    """The shift bound to CFG-A by a binding that states it holds for the whole run (both bounds
+    stated open), beside ``envelopes``."""
     records, shift = cell(*envelopes, last=last)
-    return consolidate([*records, binding("b", shift, hardware(URDF_A))])
+    whole = binding("b", shift, hardware(URDF_A), start="open", end="open", clock=RUN_CLOCK_ID)
+    return consolidate([*records, whole])
 
 
 def not_covered(result: Consolidation) -> list[tuple[int, int | None]]:
@@ -304,7 +309,7 @@ def test_an_envelope_is_a_site_claim_on_its_window() -> None:
     [
         ((-86400, 86400), []),  # covers the run
         ((0, 3600), []),  # exactly the run: [first, last + 1)
-        ((0, None), []),  # open-ended
+        ((0, "open"), []),  # states it has no end
         ((1800, 86400), [(0, 1800)]),  # starts mid-run
         ((-86400, 1800), [(1800, 3600)]),  # ends mid-run
         ((-86400, 0), [(0, 3600)]),  # ends as the run starts
@@ -312,7 +317,7 @@ def test_an_envelope_is_a_site_claim_on_its_window() -> None:
     ],
 )
 def test_coverage_is_the_part_of_the_run_no_envelope_window_covers(
-    window: tuple[int, int | None], expected: list[tuple[int, int]]
+    window: tuple[int, int | str], expected: list[tuple[int, int]]
 ) -> None:
     result = covered(authorised(*window))
     assert not_covered(result) == expected
@@ -323,6 +328,102 @@ def test_coverage_is_the_part_of_the_run_no_envelope_window_covers(
             "observed",
         )
     assert "configuration.authorisation_undecided" not in codes(result)
+
+
+def _bound_by(
+    validity_kwargs: dict[str, object], *envelopes: Record, **cell_kwargs: object
+) -> Consolidation:
+    records, shift = cell(*envelopes, **cell_kwargs)  # type: ignore[arg-type]
+    return consolidate([*records, binding("b", shift, hardware(URDF_A), **validity_kwargs)])  # type: ignore[arg-type]
+
+
+UNSTATED_WINDOWS = {
+    "Unknown (the compiler's own stated bindings)": {"validity": Unknown()},
+    "NotCovered": {},
+    "start Known, end Unknown": {"start": on_run(0), "end": None, "clock": RUN_CLOCK_ID},
+    "start Unknown, end Known": {"start": None, "end": on_run(3600), "clock": RUN_CLOCK_ID},
+}
+
+
+@pytest.mark.parametrize("validity", UNSTATED_WINDOWS.values(), ids=UNSTATED_WINDOWS.keys())
+def test_coverage_is_never_decided_over_a_window_the_binding_does_not_state(
+    validity: dict[str, object],
+) -> None:
+    # An envelope ending mid-run: over a stated window, the second half would be not covered.
+    result = _bound_by(validity, authorised(-86400, 1800))
+    (active,) = of(result, "configuration_active_during")  # the run ran with it: still said
+    assert active.object == CONFIG_A
+    assert of(result, "not_covered_by_authorisation") == []
+    (undecided,) = result.findings
+    assert undecided.code == "configuration.authorisation_undecided"
+    assert undecided.details["envelopes_naming_it"] == 1
+    # And with no envelope at all: still undecided, never a whole-run not-covered claim.
+    alone = _bound_by(validity)
+    assert of(alone, "not_covered_by_authorisation") == []
+    (finding,) = alone.findings
+    assert finding.details["envelopes_naming_it"] == 0
+
+
+def test_an_ambiguous_binding_window_is_one_candidate_per_reading_and_decides_nothing() -> None:
+    either = Ambiguous(
+        (
+            Candidate(ValidityWindow(RUN_CLOCK_ID, Known(on_run(0)), Known(on_run(100)))),
+            Candidate(ValidityWindow(RUN_CLOCK_ID, Known(on_run(0)), Known(on_run(200)))),
+        )
+    )
+    result = _bound_by({"validity": either}, authorised(-86400, 1800))
+    assert of(result, "configuration_active_during") == []
+    assert of(result, "not_covered_by_authorisation") == []
+    readings = sorted(
+        (c.valid_from.ticks - T0, c.valid_to.ticks - T0)  # type: ignore[union-attr]
+        for c in of(result, "configuration_candidate")
+    )
+    assert readings == [(0, 100), (0, 200)]
+    assert codes(result) == ["configuration.ambiguous_window"]
+
+
+def test_a_stated_open_start_counts_only_when_the_run_states_its_first_instant() -> None:
+    stated_open = {"start": "open", "end": on_run(3600), "clock": RUN_CLOCK_ID}
+    assert not_covered(_bound_by(stated_open, authorised(-86400, 1800))) == [(1800, 3600)]
+    # With no first instant the run's start is its thread's, a convention: nothing is decided.
+    records, shift = cell(authorised(-86400, 1800), first=None)
+    records = [
+        run_thread(
+            RUN_1, "threads/shift-1", start=on_run(-60)
+        )  # its thread starts on the run clock
+        if r.get("node_type") == "run"
+        else r
+        for r in records
+    ]
+    bound = binding("b", shift, hardware(URDF_A), **stated_open)  # type: ignore[arg-type]
+    result = consolidate([*records, bound])
+    (active,) = of(result, "configuration_active_during")
+    assert active.valid_from == placed(-60)
+    assert of(result, "not_covered_by_authorisation") == []
+    assert codes(result) == ["configuration.authorisation_undecided"]
+
+
+@pytest.mark.parametrize(
+    "until",
+    [None, Ambiguous((Candidate(on_form(1800)), Candidate(on_form(86400))))],
+    ids=["Unknown", "Ambiguous"],
+)
+def test_an_envelope_whose_end_is_not_stated_never_authorises_until_further_notice(
+    until: object,
+) -> None:
+    envelope_ = envelope("AUTH no end", CELL, CFG_A, on_form(-86400), until)  # type: ignore[arg-type]
+    result = covered(envelope_)
+    assert of(result, "authorised_configuration") == []  # no site claim with an open end
+    assert of(result, "not_covered_by_authorisation") == []  # nor a decision after valid_from
+    assert codes(result) == [
+        "configuration.authorisation_undecided",
+        "configuration.envelope_unplaced",
+    ]
+    # Before its valid_from it covers nothing, which is decided.
+    later = covered(envelope("AUTH later", CELL, CFG_A, on_form(1800), until))  # type: ignore[arg-type]
+    assert "configuration.authorisation_undecided" in codes(later)
+    after_run = covered(envelope("AUTH after", CELL, CFG_A, on_form(7200), until))  # type: ignore[arg-type]
+    assert not_covered(after_run) == [(0, 3600)]
 
 
 def test_two_envelopes_together_cover_the_run() -> None:
@@ -399,7 +500,7 @@ def test_envelopes_that_cannot_be_placed_are_findings() -> None:
 
 def test_malformed_records_are_findings_and_the_rest_of_the_build_stands() -> None:
     records, shift = cell(commissioning("CC-3-001", [ARM], CFG_A, on_form(-3600)))
-    good = binding("b", shift, hardware(URDF_A))
+    good = binding("b", shift, hardware(URDF_A), start="open", end="open", clock=RUN_CLOCK_ID)
     broken = {**commissioning("broken", [ARM], CFG_B, on_form(0)), "commissioned": "yesterday"}
     padded = commissioning("padded", [LogicalId("robot.serial", " 20415")], CFG_B, on_form(1))
     inferred = {**binding("guess", shift, hardware(URDF_B))}
