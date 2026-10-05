@@ -147,6 +147,11 @@ def test_graph_schema_contract(check):
     ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md)).
     `same_as_candidate` is pairwise: every candidate of an `Ambiguous` link, and threads citing one source. People are named only by declared
     identifiers: never blank, never padded with whitespace.
+    An `Ambiguous` validity window, window bound or assertion `authored_at` is never read as unstated: the
+    statement becomes `same_as_candidate` pairs, one per reading of its window, each citing that reading (more
+    than 64 readings: `identity.untimeable_window`, no claim). A statement that states no start holds from its
+    subject's first thread record, and the claim lists that thread in `provenance.records`, so a conventional
+    start is told from a stated one.
 
 ## Caveat: a resolver configuration is a store generation
 
