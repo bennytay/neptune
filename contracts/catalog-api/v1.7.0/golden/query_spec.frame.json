@@ -1,0 +1,24 @@
+{
+  "as_of": 4,
+  "frame": {
+    "high": [
+      1.0,
+      1.0,
+      0.5
+    ],
+    "low": [
+      -1.0,
+      -1.0,
+      0.0
+    ],
+    "reference": {
+      "frame_graph_id": "rec:sha256:4e12de3b72e12a5547463a4230660633176fb35ff6498a2e7938a1d278fc162a",
+      "frame_id": "base_link",
+      "reference": "frame"
+    },
+    "unit": "m"
+  },
+  "kinds": [
+    "frame_transform"
+  ]
+}

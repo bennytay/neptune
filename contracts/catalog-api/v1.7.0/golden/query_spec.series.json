@@ -1,0 +1,23 @@
+{
+  "as_of": 4,
+  "budget": {
+    "max_bytes": 268435456,
+    "max_rows": 1000000
+  },
+  "kinds": [
+    "stream"
+  ],
+  "packages": [
+    "sha256:b6cba1bf32cb7de4a65c12d4403de38137fb130b76ea551cbb356be2a2dd501a"
+  ],
+  "series": {
+    "columns": [
+      "value/position"
+    ]
+  },
+  "window": {
+    "clock": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
+    "first": 0,
+    "last": 1099511627776
+  }
+}

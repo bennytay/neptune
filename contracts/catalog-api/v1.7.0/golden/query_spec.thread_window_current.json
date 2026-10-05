@@ -1,0 +1,26 @@
+{
+  "as_of": 4,
+  "budget": {
+    "max_millis": 500,
+    "max_rows": 10000
+  },
+  "columns": [
+    "world_clock",
+    "world_first",
+    "world_last"
+  ],
+  "explain": true,
+  "kinds": [
+    "calibration",
+    "run"
+  ],
+  "lineage": {
+    "preference": "latest_transform"
+  },
+  "thread_id": "sha256:119c901a9dc2fff937cc869ae9c6161ef8f3fbcf23e22528b0f09cd110a86a6b",
+  "window": {
+    "clock": "rec:sha256:930f36cc553dce34af08e794001077c634527116bc12138b8ecd91d415b9ee31",
+    "first": 0,
+    "last": 1099511627776
+  }
+}

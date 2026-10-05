@@ -22,12 +22,16 @@ from neptune.model.spatial import CrsCode
 from neptune.model.units import unit_from_json
 from neptune_ledger.api import codec
 from neptune_ledger.api.protocol import CatalogUnavailable
-from neptune_ledger.api.types import CatalogFinding, TimeWindow, TransactionKey
+from neptune_ledger.api.types import (
+    CatalogFinding,
+    CrsReference,
+    FrameReference,
+    TimeWindow,
+    TransactionKey,
+)
 from neptune_ledger.catalog.migrate import tenant_schema
 from neptune_ledger.lake import space_index, time_index
 from neptune_ledger.lake.space_index import (
-    CrsReference,
-    FrameReference,
     Reference,
     SpatialBox,
     SpatialResult,
@@ -112,7 +116,7 @@ class IndexCatalog:
         named_mappings = _ids(mappings)
 
         def body(conn: Conn) -> WindowResult:
-            point, limit, beyond = _point(conn, self._tenant, as_of)
+            point, limit, beyond = catalog_point(conn, self._tenant, as_of)
             found = problem
             if found is None and beyond:
                 found = (_beyond(as_of),)
@@ -220,7 +224,7 @@ class IndexCatalog:
             problem = (*(problem or ()), CatalogFinding("invalid_request", "unplaced", detail))
 
         def body(conn: Conn) -> SpatialResult:
-            point, limit, beyond = _point(conn, self._tenant, as_of)
+            point, limit, beyond = catalog_point(conn, self._tenant, as_of)
             found = problem
             if found is None and beyond:
                 found = (_beyond(as_of),)
@@ -242,7 +246,7 @@ class IndexCatalog:
         return self._run(body)
 
 
-def _point(
+def catalog_point(
     conn: Conn, tenant: str, as_of: int | None
 ) -> tuple[Knowledge[TransactionKey], int, bool]:
     """The catalog point, its tx_seq, and whether ``as_of`` is beyond the latest point."""
