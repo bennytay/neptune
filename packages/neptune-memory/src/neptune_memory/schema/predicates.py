@@ -31,8 +31,9 @@ if TYPE_CHECKING:
 # core (ADR 0006 §4). 3: ``has_name`` joined (ADR 0007 §2), and the predicates that hold for every
 # node type widened to ``stream`` and ``document`` (ADR 0008 §6). The vocabulary is part of
 # graph-schema (``GRAPH_SCHEMA_VERSION``). 4: the configuration lineage predicates (ADR 0010,
-# MVL-127). 5: the run thread predicates joined (ADR 0009 §6).
-VOCABULARY_VERSION: Final = 5
+# MVL-127). 5: the run thread predicates joined (ADR 0009 §6). 6 to 9 are other consolidators'
+# (MVL-127, MVL-130, MVL-133, MVL-134; renumbered on merge). 10: coverage and health (ADR 0015).
+VOCABULARY_VERSION: Final = 10
 
 # Identity predicates (ADR 0003 §1). Only ``memory.identity`` grounds ``same_as``, never by
 # inference; ``same_as_candidate`` is pairwise, one claim each way. The runner enforces both.
@@ -55,6 +56,17 @@ CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
         CONTINUES: "continues_candidate",
     }
 )
+
+# Coverage and health (ADR 0015). Sensor presence is three predicates, one per state: a claim
+# object cannot be ``KnownAbsent`` or ``Unknown`` (ADR 0002 §2), so the state is the predicate.
+RECORDED: Final = "recorded"
+GAP: Final = "gap"
+RATE_DECLARED: Final = "rate_declared"
+RATE_OBSERVED: Final = "rate_observed"
+INTEGRITY_FINDING: Final = "integrity_finding"
+SENSOR_RECORDED: Final = "sensor_recorded"
+SENSOR_NOT_RECORDED: Final = "sensor_not_recorded"
+SENSOR_PRESENCE_UNKNOWN: Final = "sensor_presence_unknown"
 
 
 class Cardinality(StrEnum):
@@ -356,6 +368,70 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_N.RUN},
         _MANY,
         "ambiguous: may be a later part of the same recording; the evidence does not order them",
+    ),
+    _p(
+        RECORDED,
+        {_N.STREAM},
+        {_N.RUN},
+        _MANY,
+        "the stream's series holds samples over this interval: its first to last known sample"
+        " on one clock (the Ledger's series coverage)",
+    ),
+    _p(
+        GAP,
+        {_N.STREAM},
+        {_N.RUN},
+        _MANY,
+        "the stream's declared first or last instant predicts samples here and its series holds"
+        " none",
+    ),
+    _p(
+        RATE_DECLARED,
+        {_N.STREAM},
+        {_V.QUANTITY},
+        _MANY,
+        "the mean sample rate the source's index declares: (count - 1) over its first-to-last"
+        " span, on a clock with a stated resolution",
+    ),
+    _p(
+        RATE_OBSERVED,
+        {_N.STREAM},
+        {_V.QUANTITY},
+        _MANY,
+        "the mean sample rate the series holds: (known rows - 1) over its first-to-last known"
+        " span, on a clock with a stated resolution",
+    ),
+    _p(
+        INTEGRITY_FINDING,
+        {_N.RUN, _N.STREAM},
+        {_V.TEXT},
+        _MANY,
+        "a compiler finding about the evidence (truncation, corruption, a dropout); the object"
+        " is its severity, verbatim",
+    ),
+    _p(
+        SENSOR_RECORDED,
+        {_N.RUN},
+        {_N.SENSOR},
+        _MANY,
+        "a sensor of a configuration bound to the run recorded in it: a run's file declares the"
+        " sensor's identifier",
+    ),
+    _p(
+        SENSOR_NOT_RECORDED,
+        {_N.RUN},
+        {_N.SENSOR},
+        _MANY,
+        "known absent: a sensor of a configuration bound to the run recorded nothing in it, and"
+        " the recording covers the run",
+    ),
+    _p(
+        SENSOR_PRESENCE_UNKNOWN,
+        {_N.RUN},
+        {_N.SENSOR},
+        _MANY,
+        "unknown: whether a sensor of a configuration bound to the run recorded in it is not"
+        " decided by the evidence",
     ),
     _p("operated_by", {_N.RUN}, {_N.PERSON}, _MANY, "a declared operator or supervisor"),
     _p("episode_of", {_N.EPISODE}, {_N.RUN}, _ONE, "the run an episode segments"),
