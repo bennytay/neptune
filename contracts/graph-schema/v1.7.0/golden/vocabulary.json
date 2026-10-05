@@ -171,6 +171,30 @@
       "version": 1
     },
     {
+      "cardinality": "many",
+      "description": "where an episode ends, as its records state it: one claim per clock, never two on one",
+      "domain": [
+        "episode"
+      ],
+      "name": "ends_at",
+      "range": [
+        "instant"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: may end here (a stated end, or a stop event inside it); which is undecided",
+      "domain": [
+        "episode"
+      ],
+      "name": "ends_at_candidate",
+      "range": [
+        "instant"
+      ],
+      "version": 1
+    },
+    {
       "cardinality": "one",
       "description": "the run an episode segments",
       "domain": [
@@ -348,6 +372,30 @@
       "version": 1
     },
     {
+      "cardinality": "many",
+      "description": "a human intervention during the episode (an Intervention record, by id)",
+      "domain": [
+        "episode"
+      ],
+      "name": "intervened",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the intervention may have been during the episode; the evidence does not say",
+      "domain": [
+        "episode"
+      ],
+      "name": "intervened_candidate",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
       "cardinality": "one",
       "description": "where it is",
       "domain": [
@@ -433,6 +481,18 @@
       "name": "operated_by",
       "range": [
         "person"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the outcome a record declares for the episode, verbatim; never inferred",
+      "domain": [
+        "episode"
+      ],
+      "name": "outcome",
+      "range": [
+        "text"
       ],
       "version": 1
     },
@@ -605,6 +665,18 @@
         "zone"
       ],
       "version": 3
+    },
+    {
+      "cardinality": "many",
+      "description": "where an episode starts, as its records state it: one claim per clock, never two on one",
+      "domain": [
+        "episode"
+      ],
+      "name": "starts_at",
+      "range": [
+        "instant"
+      ],
+      "version": 1
     },
     {
       "cardinality": "many",

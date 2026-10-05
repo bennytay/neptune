@@ -1310,7 +1310,57 @@
       "confidence": {
         "knowledge": "not_applicable"
       },
-      "id": "claim:sha256:28feba477673c7b97e73fd0e383cadad11d6741b4274c86a1d266e3f1447e082",
+      "id": "claim:sha256:48b09f98e866b633b3feae1465ac2c7ef281104f81d6f1621406ac12c7f1355b",
+      "object": {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-06",
+        "node_type": "machine"
+      },
+      "predicate": "recorded_by",
+      "provenance": {
+        "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "consolidator_id": "golden.operator",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "byte_range",
+                "length": 70,
+                "offset": 63
+              }
+            ],
+            "source": "sha256:68c74b9743851a06b3c3d669a28a887ed1475faf75e629c9a048621c08779b79"
+          }
+        ],
+        "records": [
+          "rec:sha256:fb0742011d0e1806c412d178d8ddeb870c592def8d365b963fda1f9a5c67ac36"
+        ]
+      },
+      "recorded_at": 4,
+      "subject": {
+        "kind": "node",
+        "node_id": "record:rec:sha256:0cf852d4efcbb869553993f8644de9e5c9cc319cd584b51cd5a00b29b4a9170b",
+        "node_type": "run"
+      },
+      "superseded_at": "open",
+      "supersedes": [
+        "claim:sha256:8f2e29da5ab992ba0529e5b162e024e2781d475a2d89d699adc0fac799c39125"
+      ],
+      "valid": {
+        "end": "open",
+        "start": {
+          "domain_id": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
+          "ticks": 1790762401010000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
+      "id": "claim:sha256:51638cd56e73acb9ab6c62cc46500d26fe709f9d31be42f1fc4c346cc7d06893",
       "object": {
         "kind": "node",
         "node_id": "asset-tag:ARM-05",
@@ -1318,7 +1368,7 @@
       },
       "predicate": "recorded_by",
       "provenance": {
-        "config_hash": "sha256:acd8f1cc8e7199f31450ae49e8894bceaefa034f3cf14741ce75a3b5619c3047",
+        "config_hash": "sha256:8f67a2fa9d485a375e5cd6ba4883db5efd268fae56a010e788339a229640bd74",
         "consolidator_id": "memory.supersede",
         "consolidator_version": "2",
         "evidence": [
@@ -1374,57 +1424,7 @@
       "confidence": {
         "knowledge": "not_applicable"
       },
-      "id": "claim:sha256:48b09f98e866b633b3feae1465ac2c7ef281104f81d6f1621406ac12c7f1355b",
-      "object": {
-        "kind": "node",
-        "node_id": "asset-tag:ARM-06",
-        "node_type": "machine"
-      },
-      "predicate": "recorded_by",
-      "provenance": {
-        "config_hash": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
-        "consolidator_id": "golden.operator",
-        "consolidator_version": "1",
-        "evidence": [
-          {
-            "locator": [
-              {
-                "kind": "byte_range",
-                "length": 70,
-                "offset": 63
-              }
-            ],
-            "source": "sha256:68c74b9743851a06b3c3d669a28a887ed1475faf75e629c9a048621c08779b79"
-          }
-        ],
-        "records": [
-          "rec:sha256:fb0742011d0e1806c412d178d8ddeb870c592def8d365b963fda1f9a5c67ac36"
-        ]
-      },
-      "recorded_at": 4,
-      "subject": {
-        "kind": "node",
-        "node_id": "record:rec:sha256:0cf852d4efcbb869553993f8644de9e5c9cc319cd584b51cd5a00b29b4a9170b",
-        "node_type": "run"
-      },
-      "superseded_at": "open",
-      "supersedes": [
-        "claim:sha256:8f2e29da5ab992ba0529e5b162e024e2781d475a2d89d699adc0fac799c39125"
-      ],
-      "valid": {
-        "end": "open",
-        "start": {
-          "domain_id": "rec:sha256:64c7daee43c20f86749c8a6d93cd6b8543ee64a3dc06f5a9facb0413fdee9a53",
-          "ticks": 1790762401010000000
-        }
-      }
-    },
-    {
-      "assertion_kind": "stated",
-      "confidence": {
-        "knowledge": "not_applicable"
-      },
-      "id": "claim:sha256:90dc7f8729b9d681b047abccd88109a8bb887f1784a8500f1947f878ec02e52b",
+      "id": "claim:sha256:cdab3525c0ba645e24c5a55701d40d336aaa426b69af81457c48625b7d9550ac",
       "object": {
         "kind": "node",
         "node_id": "asset-tag:UAV-0042",
@@ -1432,7 +1432,7 @@
       },
       "predicate": "recorded_by",
       "provenance": {
-        "config_hash": "sha256:c1677dc8d13be23e9901fdf683be00b54c942ceadb4657a66c1ea47f2fef846c",
+        "config_hash": "sha256:77c5d3e89df9b4fdb0b92ba1a6caadbe6ea46ca9b5388dd3bcf81e486750e2e8",
         "consolidator_id": "memory.supersede",
         "consolidator_version": "2",
         "evidence": [
@@ -1488,12 +1488,12 @@
     {
       "claim": "claim:sha256:1b635d30f06962626b3b64caea462becbcc5aaaa5c6975d1e153036fa6e72730",
       "code": "clock_mismatch",
-      "id": "finding:sha256:9d93848ac34e1a511f73406cf18a6009a05bbf8be7b81a3330578209c0f99571",
+      "id": "finding:sha256:408b5199c6f0a1351cd1ed1bc0a62dc086d19f298097d01c24ad0ce7fd1ceef5",
       "others": [
         "claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf"
       ],
       "provenance": {
-        "config_hash": "sha256:1dbe24c79fea15113a203d879d8f0806c29bd1f44c7ef4282d57540f6f443ef6",
+        "config_hash": "sha256:333b19d4267ffb8a932e50bc001969dc49d7e602f64fa0d268ee6683cc2f4291",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1503,12 +1503,12 @@
     {
       "claim": "claim:sha256:3851e105c8c27785e837ea268680a14f1a468ee8e37c2d32c8059f8cc7c6e28b",
       "code": "overridden_on_arrival",
-      "id": "finding:sha256:11aa51d43add6136c2f71400921a31ceb95fb1ef0c258781aca2baf357cab75c",
+      "id": "finding:sha256:a54455e663aff152ecad609abce9db34e1c7229787d2ebdf18c74c908dd4dff0",
       "others": [
         "claim:sha256:8f2e29da5ab992ba0529e5b162e024e2781d475a2d89d699adc0fac799c39125"
       ],
       "provenance": {
-        "config_hash": "sha256:1dbe24c79fea15113a203d879d8f0806c29bd1f44c7ef4282d57540f6f443ef6",
+        "config_hash": "sha256:333b19d4267ffb8a932e50bc001969dc49d7e602f64fa0d268ee6683cc2f4291",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1518,12 +1518,12 @@
     {
       "claim": "claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097",
       "code": "clock_mismatch",
-      "id": "finding:sha256:a62801b1f7c0eb2a4ec1ebe5f74a1091ab55f460faf4c0f9ec6c316c1eb7db79",
+      "id": "finding:sha256:f37ca17ffbcac3ff0ce6b165008fba570a5ae1c8bd3a258a632e15c7e6fe6a82",
       "others": [
         "claim:sha256:1b635d30f06962626b3b64caea462becbcc5aaaa5c6975d1e153036fa6e72730"
       ],
       "provenance": {
-        "config_hash": "sha256:1dbe24c79fea15113a203d879d8f0806c29bd1f44c7ef4282d57540f6f443ef6",
+        "config_hash": "sha256:333b19d4267ffb8a932e50bc001969dc49d7e602f64fa0d268ee6683cc2f4291",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1533,12 +1533,12 @@
     {
       "claim": "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a",
       "code": "clock_mismatch",
-      "id": "finding:sha256:d63146bd876503e611c3174574ac613e72269f039cf4b8eab32a1c8e41186575",
+      "id": "finding:sha256:57f0a542f195cc4f3695316a88eec4a80b9d4134f9a000482448057d755d51d6",
       "others": [
         "claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097"
       ],
       "provenance": {
-        "config_hash": "sha256:1dbe24c79fea15113a203d879d8f0806c29bd1f44c7ef4282d57540f6f443ef6",
+        "config_hash": "sha256:333b19d4267ffb8a932e50bc001969dc49d7e602f64fa0d268ee6683cc2f4291",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1548,12 +1548,12 @@
     {
       "claim": "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a",
       "code": "clock_mismatch",
-      "id": "finding:sha256:134c3bf63a7bff3cecc0fa88afc44c51d71090e56011b314ac6327d2209596ad",
+      "id": "finding:sha256:24662b35ccb4fd6040f4f3a9905137232e452d5cfdf605f460d034894f75cdbe",
       "others": [
         "claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf"
       ],
       "provenance": {
-        "config_hash": "sha256:1dbe24c79fea15113a203d879d8f0806c29bd1f44c7ef4282d57540f6f443ef6",
+        "config_hash": "sha256:333b19d4267ffb8a932e50bc001969dc49d7e602f64fa0d268ee6683cc2f4291",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1561,14 +1561,14 @@
       "superseded_at": "open"
     },
     {
-      "claim": "claim:sha256:90dc7f8729b9d681b047abccd88109a8bb887f1784a8500f1947f878ec02e52b",
+      "claim": "claim:sha256:cdab3525c0ba645e24c5a55701d40d336aaa426b69af81457c48625b7d9550ac",
       "code": "clock_mismatch",
-      "id": "finding:sha256:55dd98c77bc0ac8ce3236d8e8a26c3ee685bb10c6efdb2fa571e1306e9121d2c",
+      "id": "finding:sha256:1357b33fe038f388661e0a3cefe0f991ebe43761df7f90041629ed8e98d6db9d",
       "others": [
         "claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097"
       ],
       "provenance": {
-        "config_hash": "sha256:1dbe24c79fea15113a203d879d8f0806c29bd1f44c7ef4282d57540f6f443ef6",
+        "config_hash": "sha256:333b19d4267ffb8a932e50bc001969dc49d7e602f64fa0d268ee6683cc2f4291",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1576,14 +1576,14 @@
       "superseded_at": "open"
     },
     {
-      "claim": "claim:sha256:90dc7f8729b9d681b047abccd88109a8bb887f1784a8500f1947f878ec02e52b",
+      "claim": "claim:sha256:cdab3525c0ba645e24c5a55701d40d336aaa426b69af81457c48625b7d9550ac",
       "code": "clock_mismatch",
-      "id": "finding:sha256:bc807b607c67688d045fc113152701c408ab6000c9874f4f0f50424c06d1f332",
+      "id": "finding:sha256:ea973a10d36f90585b8d1c119672da563ec963e425e5c53b3b387aac49eee277",
       "others": [
         "claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf"
       ],
       "provenance": {
-        "config_hash": "sha256:1dbe24c79fea15113a203d879d8f0806c29bd1f44c7ef4282d57540f6f443ef6",
+        "config_hash": "sha256:333b19d4267ffb8a932e50bc001969dc49d7e602f64fa0d268ee6683cc2f4291",
         "resolver_id": "memory.supersede",
         "resolver_version": "2"
       },
@@ -1591,7 +1591,7 @@
       "superseded_at": "open"
     }
   ],
-  "generation": "sha256:1dbe24c79fea15113a203d879d8f0806c29bd1f44c7ef4282d57540f6f443ef6",
+  "generation": "sha256:333b19d4267ffb8a932e50bc001969dc49d7e602f64fa0d268ee6683cc2f4291",
   "graph_schema_version": 1,
   "head": 5,
   "kind": "memory.graph",
@@ -1776,6 +1776,30 @@
           "version": 1
         },
         {
+          "cardinality": "many",
+          "description": "where an episode ends, as its records state it: one claim per clock, never two on one",
+          "domain": [
+            "episode"
+          ],
+          "name": "ends_at",
+          "range": [
+            "instant"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "ambiguous: may end here (a stated end, or a stop event inside it); which is undecided",
+          "domain": [
+            "episode"
+          ],
+          "name": "ends_at_candidate",
+          "range": [
+            "instant"
+          ],
+          "version": 1
+        },
+        {
           "cardinality": "one",
           "description": "the run an episode segments",
           "domain": [
@@ -1953,6 +1977,30 @@
           "version": 1
         },
         {
+          "cardinality": "many",
+          "description": "a human intervention during the episode (an Intervention record, by id)",
+          "domain": [
+            "episode"
+          ],
+          "name": "intervened",
+          "range": [
+            "record"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "many",
+          "description": "ambiguous: the intervention may have been during the episode; the evidence does not say",
+          "domain": [
+            "episode"
+          ],
+          "name": "intervened_candidate",
+          "range": [
+            "record"
+          ],
+          "version": 1
+        },
+        {
           "cardinality": "one",
           "description": "where it is",
           "domain": [
@@ -2038,6 +2086,18 @@
           "name": "operated_by",
           "range": [
             "person"
+          ],
+          "version": 1
+        },
+        {
+          "cardinality": "one",
+          "description": "the outcome a record declares for the episode, verbatim; never inferred",
+          "domain": [
+            "episode"
+          ],
+          "name": "outcome",
+          "range": [
+            "text"
           ],
           "version": 1
         },
@@ -2210,6 +2270,18 @@
             "zone"
           ],
           "version": 3
+        },
+        {
+          "cardinality": "many",
+          "description": "where an episode starts, as its records state it: one claim per clock, never two on one",
+          "domain": [
+            "episode"
+          ],
+          "name": "starts_at",
+          "range": [
+            "instant"
+          ],
+          "version": 1
         },
         {
           "cardinality": "many",

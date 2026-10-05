@@ -1,0 +1,385 @@
+{
+ "entities": [
+  {
+   "aliases": [
+    "tug five"
+   ],
+   "declared_id": "asset_tag:AMR-05",
+   "kind": "machine",
+   "primary_clock": {
+    "epoch": "unix",
+    "kind": "civil",
+    "resolution": {
+     "denominator": 1000000000,
+     "numerator": 1
+    },
+    "timescale": "utc"
+   }
+  },
+  {
+   "declared_id": "asset_tag:AMR-06",
+   "kind": "machine",
+   "primary_clock": {
+    "epoch": "unix",
+    "kind": "civil",
+    "resolution": {
+     "denominator": 1000000000,
+     "numerator": 1
+    },
+    "timescale": "utc"
+   }
+  },
+  {
+   "aliases": [
+    "the north tug"
+   ],
+   "clock_bridges": [
+    {
+     "mapping_id": "rec:sha256:b02e285cdc590a079f0ccee177f30ab86dc89a3f2175d83e3ab9ea2480ee9419",
+     "source": {
+      "domain_id": "rec:sha256:457c8c96b4233cad98a58a9fd74c6c0c503da91c90ad706d89ddd729b4b994c0",
+      "kind": "domain"
+     },
+     "target": {
+      "epoch": "unix",
+      "kind": "civil",
+      "resolution": {
+       "denominator": 1000000000,
+       "numerator": 1
+      },
+      "timescale": "utc"
+     }
+    }
+   ],
+   "declared_id": "asset_tag:AMR-07",
+   "frames": [
+    {
+     "frame_id": "map",
+     "graph_id": "rec:sha256:71e7119c727b30ad129c8410258ec38c62e99430cd09c17678e8ba3876aa2d69"
+    },
+    {
+     "frame_id": "base_footprint",
+     "graph_id": "rec:sha256:71e7119c727b30ad129c8410258ec38c62e99430cd09c17678e8ba3876aa2d69"
+    }
+   ],
+   "kind": "machine",
+   "primary_clock": {
+    "domain_id": "rec:sha256:457c8c96b4233cad98a58a9fd74c6c0c503da91c90ad706d89ddd729b4b994c0",
+    "kind": "domain"
+   }
+  },
+  {
+   "declared_id": "asset_tag:AMR-08",
+   "kind": "machine",
+   "primary_clock": {
+    "epoch": "unix",
+    "kind": "civil",
+    "resolution": {
+     "denominator": 1000000000,
+     "numerator": 1
+    },
+    "timescale": "utc"
+   }
+  },
+  {
+   "declared_id": "asset_tag:AMR-09",
+   "kind": "machine",
+   "primary_clock": {
+    "epoch": "unix",
+    "kind": "civil",
+    "resolution": {
+     "denominator": 1000000000,
+     "numerator": 1
+    },
+    "timescale": "utc"
+   }
+  },
+  {
+   "declared_id": "cmms_asset:AMR-09",
+   "kind": "asset"
+  },
+  {
+   "aliases": [
+    "the north fleet"
+   ],
+   "declared_id": "fleet_registry:amr-north",
+   "kind": "fleet"
+  },
+  {
+   "aliases": [
+    "the north warehouse"
+   ],
+   "declared_id": "site_registry:S-007",
+   "kind": "site"
+  },
+  {
+   "aliases": [
+    "dock 1"
+   ],
+   "declared_id": "zone_map:DOCK-1",
+   "kind": "zone"
+  },
+  {
+   "aliases": [
+    "pick area a"
+   ],
+   "declared_id": "zone_map:PICK-A",
+   "kind": "zone"
+  },
+  {
+   "aliases": [
+    "the cell arm"
+   ],
+   "declared_id": "asset_tag:ARM-3A",
+   "frames": [
+    {
+     "frame_id": "base_link",
+     "graph_id": "rec:sha256:1317769eaba9935bf47295ebbc8944732776ee7a104f1531e2cd94d74017269e"
+    },
+    {
+     "frame_id": "tool0",
+     "graph_id": "rec:sha256:1317769eaba9935bf47295ebbc8944732776ee7a104f1531e2cd94d74017269e"
+    }
+   ],
+   "kind": "machine",
+   "primary_clock": {
+    "domain_id": "rec:sha256:9a0ce868f50c4d7a805084822b47636f596bb851f7ee42cc12cfb2616c757944",
+    "kind": "domain"
+   }
+  },
+  {
+   "declared_id": "cell_registry:CELL-3",
+   "kind": "site"
+  },
+  {
+   "aliases": [
+    "the cell risk assessment"
+   ],
+   "declared_id": "document:risk-assessment-cell3",
+   "kind": "document"
+  },
+  {
+   "declared_id": "deployment_log:cell3-2026-q1",
+   "kind": "deployment"
+  },
+  {
+   "aliases": [
+    "the humanoid"
+   ],
+   "declared_id": "asset_tag:hx-02",
+   "kind": "machine"
+  },
+  {
+   "declared_id": "site_registry:plant-7",
+   "kind": "site"
+  },
+  {
+   "declared_id": "zone_map:cell-a",
+   "kind": "zone"
+  },
+  {
+   "declared_id": "zone_map:aisle-3",
+   "kind": "zone"
+  },
+  {
+   "aliases": [
+    "J. Alvarez"
+   ],
+   "declared_id": "person:j.alvarez",
+   "kind": "person"
+  },
+  {
+   "declared_id": "task_board:inspect-pump-deck",
+   "kind": "task"
+  },
+  {
+   "aliases": [
+    "the drone"
+   ],
+   "declared_id": "airframe:uav-21",
+   "frame_bridges": [
+    {
+     "child": {
+      "frame_id": "odom",
+      "graph_id": "rec:sha256:5a423ed6916134865df6d839604356dfd40922cc3f6101595a56cea361981469"
+     },
+     "parent": {
+      "frame_id": "map",
+      "graph_id": "rec:sha256:5a423ed6916134865df6d839604356dfd40922cc3f6101595a56cea361981469"
+     },
+     "transform_id": "rec:sha256:dd62c101f7cf6d73a79ea2fbafd70606973544ebb95e0419364d8dd77ebe488b"
+    }
+   ],
+   "frames": [
+    {
+     "frame_id": "map",
+     "graph_id": "rec:sha256:5a423ed6916134865df6d839604356dfd40922cc3f6101595a56cea361981469"
+    },
+    {
+     "frame_id": "odom",
+     "graph_id": "rec:sha256:5a423ed6916134865df6d839604356dfd40922cc3f6101595a56cea361981469"
+    }
+   ],
+   "kind": "machine",
+   "primary_clock": {
+    "domain_id": "rec:sha256:288c417170895a2ee54f3e1e4fbd4d1b7a509f72dd8b69d6f776ef9f4afaf813",
+    "kind": "domain"
+   }
+  },
+  {
+   "aliases": [
+    "the rov"
+   ],
+   "declared_id": "asset_tag:rov-3",
+   "kind": "machine",
+   "primary_clock": {
+    "domain_id": "rec:sha256:40750baeda3374d8968f97e27be7295455c33915cefb487e83f4c3b79bdc26df",
+    "kind": "domain"
+   }
+  },
+  {
+   "declared_id": "run_log:rov-3-dive-41",
+   "kind": "run",
+   "primary_clock": {
+    "domain_id": "rec:sha256:40750baeda3374d8968f97e27be7295455c33915cefb487e83f4c3b79bdc26df",
+    "kind": "domain"
+   }
+  },
+  {
+   "aliases": [
+    "the rov pool"
+   ],
+   "declared_id": "fleet_registry:rov-pool",
+   "kind": "fleet"
+  },
+  {
+   "declared_id": "episode_log:rov-3-dive-41-ep2",
+   "kind": "episode"
+  },
+  {
+   "aliases": [
+    "the quadruped"
+   ],
+   "declared_id": "asset_tag:quad-12",
+   "kind": "machine",
+   "primary_clock": {
+    "domain_id": "rec:sha256:96dc1db2cd84c13507cba61690f494548ecc6f5d2cc8e23da3a116b0d26b2d93",
+    "kind": "domain"
+   }
+  },
+  {
+   "declared_id": "run_log:quad-12-2026-09-14-0812",
+   "kind": "run",
+   "primary_clock": {
+    "domain_id": "rec:sha256:96dc1db2cd84c13507cba61690f494548ecc6f5d2cc8e23da3a116b0d26b2d93",
+    "kind": "domain"
+   }
+  },
+  {
+   "aliases": [
+    "the truck"
+   ],
+   "clock_bridges": [
+    {
+     "mapping_id": "rec:sha256:61fd9b4b39201ea4070c683c0f1af4423bf87bb7307545216141ae8db41818e4",
+     "source": {
+      "domain_id": "rec:sha256:11bb04cfa9ddc272e3a0a6278d196f429f03df69a69b59be5766b93204934ba1",
+      "kind": "domain"
+     },
+     "target": {
+      "epoch": "unix",
+      "kind": "civil",
+      "resolution": {
+       "denominator": 1000000000,
+       "numerator": 1
+      },
+      "timescale": "utc"
+     }
+    }
+   ],
+   "declared_id": "vin:5yj3e1ea7kf317000",
+   "kind": "machine",
+   "primary_clock": {
+    "domain_id": "rec:sha256:11bb04cfa9ddc272e3a0a6278d196f429f03df69a69b59be5766b93204934ba1",
+    "kind": "domain"
+   }
+  },
+  {
+   "declared_id": "sensor_serial:imu-0042",
+   "kind": "sensor"
+  },
+  {
+   "declared_id": "software_version:nav2-1.2.0",
+   "kind": "software_version"
+  },
+  {
+   "declared_id": "config_rev:nav2-params-12",
+   "kind": "configuration"
+  },
+  {
+   "declared_id": "model_registry:vla-pick-v7",
+   "kind": "model_version"
+  },
+  {
+   "aliases": [
+    "the zone a speed limit"
+   ],
+   "declared_id": "policy_register:speed-limit-zone-a",
+   "kind": "policy"
+  }
+ ],
+ "profiles": {
+  "agent": {
+   "budget": {
+    "items": 100
+   },
+   "caller": "agent"
+  },
+  "agent_geo": {
+   "budget": {
+    "items": 100
+   },
+   "caller": "agent",
+   "frames": [
+    {
+     "frame_id": "site_map",
+     "graph_id": "rec:sha256:4c7242ee3d81f3fd9b4716754276950884083a85441107fbf10f3dd69178a591"
+    }
+   ],
+   "length_unit": "m"
+  },
+  "agent_ops": {
+   "budget": {
+    "items": 100
+   },
+   "caller": "agent",
+   "clock": {
+    "domain_id": "rec:sha256:b54947da4b8938a9265d04877341d6460753b51ddd2da94056cc5e5be459ff2f",
+    "kind": "domain"
+   }
+  },
+  "agent_utc": {
+   "budget": {
+    "items": 100
+   },
+   "caller": "agent",
+   "civil_time": {
+    "epoch": "unix",
+    "kind": "civil",
+    "resolution": {
+     "denominator": 1000000000,
+     "numerator": 1
+    },
+    "timescale": "utc"
+   }
+  },
+  "policy": {
+   "budget": {
+    "items": 32,
+    "latency_ms": 50,
+    "tokens": 2048
+   },
+   "caller": "policy"
+  }
+ }
+}

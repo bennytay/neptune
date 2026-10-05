@@ -144,7 +144,7 @@ def check_sources(
 
 
 def _check(source: Stated, location: str, stores: Sequence[SourceStore]) -> SourceCheck:
-    path = _path(location)
+    path = location_path(location)
     if path is None:
         detail = "not a root-relative location; its connector resolves it, not the Ledger"
         return SourceCheck(source.content_id, location, "unsupported", detail)
@@ -166,7 +166,7 @@ def _check(source: Stated, location: str, stores: Sequence[SourceStore]) -> Sour
         )
         return SourceCheck(source.content_id, location, "changed", detail)
     for candidate in source.elsewhere:
-        candidate_path = _path(candidate)
+        candidate_path = location_path(candidate)
         if candidate_path is None or candidate == location:
             continue
         for store in stores:
@@ -177,7 +177,7 @@ def _check(source: Stated, location: str, stores: Sequence[SourceStore]) -> Sour
     return SourceCheck(source.content_id, location, "absent", detail)
 
 
-def _path(location: str) -> bytes | None:
+def location_path(location: str) -> bytes | None:
     """The root-relative path of a local location's canonical JSON, or None for another kind."""
     value = canonical_json.loads(location.encode("utf-8"))
     if not isinstance(value, dict):

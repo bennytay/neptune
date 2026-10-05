@@ -7,7 +7,8 @@ records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` 
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
 run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6); 1.4.0 (minor) adds the `clock` node
 type, the `clock_map` value type and `has_clock`, `maps_to` and `clock_map`
-([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)); 1.7.0 (minor) adds the
+([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)); 1.5.0 (minor) adds the
+episode predicates ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md) §5); 1.7.0 (minor) adds the
 calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md)
 §4, §6). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
@@ -66,6 +67,8 @@ major version (ADR 0002 §5).
 | `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
 | `drift` | sensor | delta | many | observed: two consecutive calibrations' declared values differ by the delta; no judgement |
+| `ends_at_candidate` | episode | instant | many | ambiguous: may end here (a stated end, or a stop event inside it) |
+| `ends_at` | episode | instant | many | where an episode ends (half-open, as `valid_to`), as its records state it: one claim per clock |
 | `episode_of` | episode | run | one | the run an episode segments |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
 | `executes_task` | episode, run | task | many | a task attempted |
@@ -77,6 +80,8 @@ major version (ADR 0002 §5).
 | `has_member` | run | record | many | a source file the compiler's run assembly places in the run (its `SourceRevision`) |
 | `has_name` | any node | text | one | a declared display name, verbatim; never an identifier |
 | `has_summary` | deployment, fleet, programme | text | one | a context node's summary |
+| `intervened` | episode | record | many | a human intervention during the episode (an `Intervention` record) |
+| `intervened_candidate` | episode | record | many | ambiguous: the intervention may have been during the episode |
 | `located_at` | asset, machine | site, zone | one | where it is |
 | `maintenance_state` | asset, machine, sensor | text | one | serviceability as a record states it, verbatim |
 | `maps_to` | clock | clock | many | a declared or estimated mapping, or a chain of them, takes its ticks to another clock's |
@@ -84,6 +89,7 @@ major version (ADR 0002 §5).
 | `mounted_on` | sensor | asset, machine | one | what a sensor is attached to |
 | `not_covered_by_authorisation` | run | configuration | many | observed: no authorisation envelope in the Ledger names the configuration then |
 | `operated_by` | run | person | many | a declared operator or supervisor |
+| `outcome` | episode | text | one | the outcome a record declares for the episode, verbatim; never inferred |
 | `part_of_programme` | deployment, fleet | programme | one | the owning programme |
 | `rated_payload` | machine | quantity | one | rated payload, unit as declared |
 | `recorded_by` | run | machine | one | the machine whose log a run is |
@@ -92,6 +98,7 @@ major version (ADR 0002 §5).
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
 | `same_as_candidate` | any node | same type | many | ambiguous: the evidence could mean either; one claim each way |
+| `starts_at` | episode | instant | many | where an episode starts, as its records state it: one claim per clock |
 | `succeeds` | configuration | configuration | many | took over from the object on a machine's chain; valid while the subject is in force |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
@@ -225,7 +232,16 @@ def test_graph_schema_contract(check):
     or on a chain of them; Memory never estimates an offset, never assumes an unstated validity open, and never
     re-times a claim. A later-starting mapping of one clock pair holds from its start, and the earlier one's
     claims end there ([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)).
-15. **Calibration is never converted or judged.** `memory.calibration` ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md))
+15. **Episodes are stated attempts, never inferred** ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md)).
+    A run with stated task evidence holds one episode (`episode_of`, its `executes_task`), bounded on each clock by
+    the span its records state (`starts_at`, `ends_at`, only on a clock the records state it on, never on a
+    mapping's projection); a run with none, or with no time placement, holds no episode. A stated stop
+    (`incident_record`) inside the episode makes the end `ends_at_candidate` readings. `intervened` names an
+    `Intervention` that names the run, or names its machine and surely overlaps it on one clock; an overlap that
+    holds only within a projection's error is `intervened_candidate`. No record declares an outcome yet, so
+    `outcome` reads `Unknown`. `consolidate.episodes.episodes_of`, `boundary_of` and `outcome_of` read them back
+    as `Known`, `Ambiguous`, `Unknown` or `NotCovered`.
+16. **Calibration is never converted or judged.** `memory.calibration` ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md))
     places a calibration on a sensor only through its declared machine and subject and the hardware configurations
     the machine declares or its chain places; several readings are `calibration_candidate`s, and so is a calibration
     whose frame binding contradicts its sensor's configuration graph. A `calibrated_with` starts at a stated
@@ -247,7 +263,8 @@ finding. The configuration's hash is the **generation** (`MemoryReader.generatio
 
 ## Not in v1
 
-- `episodes` and `spatial` structure (G3).
+- The `episodes` and `spatial` queries (G3). Episode claims exist from 1.5.0; `MemoryReader.episodes` still
+  answers `NotCovered`.
 - Cross-clock comparison inside the resolver: claims on two clocks are still never compared there
   (`clock_mismatch`). A consumer relates them with `schema.clocks.convert`; no claim is ever re-timed.
 - A Postgres-backed `MemoryReader`. `MemoryStore` stays provisional (ADR 0004 §5); G2 maps its rows to `Claim`,
