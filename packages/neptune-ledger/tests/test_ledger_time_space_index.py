@@ -46,7 +46,7 @@ from ledger_thread_packages import Record, files, resourced, subset
 from neptune.model.time import INT64_MAX, INT64_MIN
 from neptune.store.package import series_path, write_package
 from neptune_ledger.api import CatalogUnavailable
-from neptune_ledger.api.types import TimeWindow
+from neptune_ledger.api.types import CrsReference, FrameReference, TimeWindow
 from neptune_ledger.catalog.check import check_package, open_root
 from neptune_ledger.catalog.manifest import Manifest
 from neptune_ledger.catalog.migrate import apply_migrations
@@ -54,8 +54,6 @@ from neptune_ledger.catalog.rebuild import rebuild
 from neptune_ledger.catalog.registry import PostgresCatalog
 from neptune_ledger.lake.indexes import MAX_CLOCKS, MAX_ENTRIES_LIMIT, IndexCatalog
 from neptune_ledger.lake.space_index import (
-    CrsReference,
-    FrameReference,
     SpatialBox,
     SpatialResult,
 )

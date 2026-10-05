@@ -1,0 +1,778 @@
+{
+  "predicates": [
+    {
+      "cardinality": "one",
+      "description": "the site a run or event took place at, as declared",
+      "domain": [
+        "event",
+        "run"
+      ],
+      "name": "at_site",
+      "range": [
+        "site"
+      ],
+      "version": 2
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the evidence names several sites; which is undecided",
+      "domain": [
+        "event",
+        "run"
+      ],
+      "name": "at_site_candidate",
+      "range": [
+        "site"
+      ],
+      "version": 2
+    },
+    {
+      "cardinality": "many",
+      "description": "an authorisation envelope approves this configuration at the site over the interval",
+      "domain": [
+        "site"
+      ],
+      "name": "authorised_configuration",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a maps_to's parameters as the evidence states them, or the chain it composes",
+      "domain": [
+        "clock"
+      ],
+      "name": "clock_map",
+      "range": [
+        "clock_map"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "both events began inside the claim's valid interval, which is the configured window on that clock; from different sources; co-occurrence, never a cause",
+      "domain": [
+        "event"
+      ],
+      "name": "co_occurs_within",
+      "range": [
+        "event"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a configuration the run ran with, over the bound part of the run (a snapshot binding)",
+      "domain": [
+        "run"
+      ],
+      "name": "configuration_active_during",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the configuration in force could be this one; one claim per reading",
+      "domain": [
+        "machine",
+        "run"
+      ],
+      "name": "configuration_candidate",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "no configuration is stated over the interval; the record leaves it open, never filled",
+      "domain": [
+        "machine",
+        "run"
+      ],
+      "name": "configuration_unknown",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a later part of one recording: the next part of a run its assembly states",
+      "domain": [
+        "run"
+      ],
+      "name": "continues",
+      "range": [
+        "run"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: may be a later part of the same recording; the evidence does not order them",
+      "domain": [
+        "run"
+      ],
+      "name": "continues_candidate",
+      "range": [
+        "run"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the event's kind exactly as its source declares it: a level, a code, a mode",
+      "domain": [
+        "event"
+      ],
+      "name": "declared_kind",
+      "range": [
+        "integer",
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "where a deployment takes place",
+      "domain": [
+        "deployment"
+      ],
+      "name": "deployed_at",
+      "range": [
+        "site"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "where an episode ends, as its records state it: one claim per clock, never two on one",
+      "domain": [
+        "episode"
+      ],
+      "name": "ends_at",
+      "range": [
+        "instant"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: may end here (a stated end, or a stop event inside it); which is undecided",
+      "domain": [
+        "episode"
+      ],
+      "name": "ends_at_candidate",
+      "range": [
+        "instant"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the run an episode segments",
+      "domain": [
+        "episode"
+      ],
+      "name": "episode_of",
+      "range": [
+        "run"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "a registered event kind (EVENT_KINDS), through a vendor mapping the config declares",
+      "domain": [
+        "event"
+      ],
+      "name": "event_kind",
+      "range": [
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a Ledger record about the node (Episode tier, by id)",
+      "domain": [
+        "asset",
+        "clock",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "event",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "name": "evidenced_by",
+      "range": [
+        "record"
+      ],
+      "version": 4
+    },
+    {
+      "cardinality": "many",
+      "description": "a task attempted",
+      "domain": [
+        "episode",
+        "run"
+      ],
+      "name": "executes_task",
+      "range": [
+        "task"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the evidence names several tasks; which is undecided",
+      "domain": [
+        "episode",
+        "run"
+      ],
+      "name": "executes_task_candidate",
+      "range": [
+        "task"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "an operating rule or control policy that applies",
+      "domain": [
+        "deployment",
+        "fleet",
+        "machine",
+        "site"
+      ],
+      "name": "governed_by",
+      "range": [
+        "policy"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the calibration in force",
+      "domain": [
+        "sensor"
+      ],
+      "name": "has_calibration",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a clock the machine's records carry, over the interval they observe it",
+      "domain": [
+        "machine"
+      ],
+      "name": "has_clock",
+      "range": [
+        "clock"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a parameter set, description file or other configuration in force",
+      "domain": [
+        "deployment",
+        "machine",
+        "sensor"
+      ],
+      "name": "has_configuration",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "what the record says happened, verbatim: a message, a description, a reason",
+      "domain": [
+        "event"
+      ],
+      "name": "has_description",
+      "range": [
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a source file the compiler's run assembly places in the run (its SourceRevision)",
+      "domain": [
+        "run"
+      ],
+      "name": "has_member",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "a declared display name, verbatim; never an identifier",
+      "domain": [
+        "asset",
+        "clock",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "event",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "name": "has_name",
+      "range": [
+        "text"
+      ],
+      "version": 3
+    },
+    {
+      "cardinality": "one",
+      "description": "a context node's summary",
+      "domain": [
+        "deployment",
+        "fleet",
+        "programme"
+      ],
+      "name": "has_summary",
+      "range": [
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the zone an event took place in, as declared",
+      "domain": [
+        "event"
+      ],
+      "name": "in_zone",
+      "range": [
+        "zone"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the record names several zones; which is undecided",
+      "domain": [
+        "event"
+      ],
+      "name": "in_zone_candidate",
+      "range": [
+        "zone"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a human intervention during the episode (an Intervention record, by id)",
+      "domain": [
+        "episode"
+      ],
+      "name": "intervened",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the intervention may have been during the episode; the evidence does not say",
+      "domain": [
+        "episode"
+      ],
+      "name": "intervened_candidate",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a machine or asset the record names as involved, or the machine whose log it is",
+      "domain": [
+        "event"
+      ],
+      "name": "involves",
+      "range": [
+        "asset",
+        "machine"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the record names several possible machines or assets; which is undecided",
+      "domain": [
+        "event"
+      ],
+      "name": "involves_candidate",
+      "range": [
+        "asset",
+        "machine"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "where it is",
+      "domain": [
+        "asset",
+        "machine"
+      ],
+      "name": "located_at",
+      "range": [
+        "site",
+        "zone"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "serviceability as a record states it, verbatim",
+      "domain": [
+        "asset",
+        "machine",
+        "sensor"
+      ],
+      "name": "maintenance_state",
+      "range": [
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a declared or estimated mapping, or a chain of them, takes its ticks to another clock's",
+      "domain": [
+        "clock"
+      ],
+      "name": "maps_to",
+      "range": [
+        "clock"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the fleet a machine belongs to",
+      "domain": [
+        "machine"
+      ],
+      "name": "member_of_fleet",
+      "range": [
+        "fleet"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "what a sensor is attached to",
+      "domain": [
+        "sensor"
+      ],
+      "name": "mounted_on",
+      "range": [
+        "asset",
+        "machine"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "observed: no authorisation envelope in the Ledger names the configuration then",
+      "domain": [
+        "run"
+      ],
+      "name": "not_covered_by_authorisation",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a declared operator or supervisor",
+      "domain": [
+        "run"
+      ],
+      "name": "operated_by",
+      "range": [
+        "person"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the outcome a record declares for the episode, verbatim; never inferred",
+      "domain": [
+        "episode"
+      ],
+      "name": "outcome",
+      "range": [
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the owning programme",
+      "domain": [
+        "deployment",
+        "fleet"
+      ],
+      "name": "part_of_programme",
+      "range": [
+        "programme"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "rated payload, unit as declared",
+      "domain": [
+        "machine"
+      ],
+      "name": "rated_payload",
+      "range": [
+        "quantity"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the machine whose log a run is",
+      "domain": [
+        "run"
+      ],
+      "name": "recorded_by",
+      "range": [
+        "machine"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the evidence names several machines for the run; which is undecided",
+      "domain": [
+        "run"
+      ],
+      "name": "recorded_by_candidate",
+      "range": [
+        "machine"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a learned model it runs",
+      "domain": [
+        "machine"
+      ],
+      "name": "runs_model",
+      "range": [
+        "model_version"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "installed software",
+      "domain": [
+        "machine",
+        "sensor"
+      ],
+      "name": "runs_software",
+      "range": [
+        "software_version"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "the same real-world thing: declared identifier, configuration lineage or operator",
+      "domain": [
+        "asset",
+        "clock",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "event",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "name": "same_as",
+      "range": [
+        "asset",
+        "clock",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "event",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "version": 4
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the evidence could mean either; whether they are one thing is undecided",
+      "domain": [
+        "asset",
+        "clock",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "event",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "name": "same_as_candidate",
+      "range": [
+        "asset",
+        "clock",
+        "configuration",
+        "deployment",
+        "document",
+        "episode",
+        "event",
+        "fleet",
+        "machine",
+        "model_version",
+        "person",
+        "policy",
+        "programme",
+        "run",
+        "sensor",
+        "site",
+        "software_version",
+        "stream",
+        "task",
+        "zone"
+      ],
+      "version": 4
+    },
+    {
+      "cardinality": "many",
+      "description": "where an episode starts, as its records state it: one claim per clock, never two on one",
+      "domain": [
+        "episode"
+      ],
+      "name": "starts_at",
+      "range": [
+        "instant"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the severity a record states, verbatim; never ranked or compared",
+      "domain": [
+        "event"
+      ],
+      "name": "stated_severity",
+      "range": [
+        "integer",
+        "text"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "took over from the object on a machine's chain; valid while the subject is in force",
+      "domain": [
+        "configuration"
+      ],
+      "name": "succeeds",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "one",
+      "description": "the site a zone belongs to",
+      "domain": [
+        "zone"
+      ],
+      "name": "zone_of",
+      "range": [
+        "site"
+      ],
+      "version": 1
+    }
+  ]
+}

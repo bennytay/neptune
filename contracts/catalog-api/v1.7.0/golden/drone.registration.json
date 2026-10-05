@@ -1,0 +1,80 @@
+{
+  "api_version": "1.7.0",
+  "findings": [],
+  "ledger_version": "0.0.1",
+  "outcome": "registered",
+  "package_id": {
+    "knowledge": "known",
+    "value": "sha256:50704acd9675ecb3d5b1f3876884135cf6f34807e125fb7721eaeb9ac71bea25"
+  },
+  "record_counts": [
+    {
+      "count": 1,
+      "kind": "calibration"
+    },
+    {
+      "count": 2,
+      "kind": "hardware_component"
+    },
+    {
+      "count": 1,
+      "kind": "hardware_configuration"
+    },
+    {
+      "count": 2,
+      "kind": "ingest_finding"
+    },
+    {
+      "count": 1,
+      "kind": "machine"
+    },
+    {
+      "count": 1,
+      "kind": "run"
+    },
+    {
+      "count": 1,
+      "kind": "run_assembly"
+    },
+    {
+      "count": 3,
+      "kind": "snapshot_binding"
+    },
+    {
+      "count": 1,
+      "kind": "software_configuration"
+    },
+    {
+      "count": 1,
+      "kind": "source_artifact"
+    },
+    {
+      "count": 1,
+      "kind": "source_revision"
+    },
+    {
+      "count": 2,
+      "kind": "stream"
+    },
+    {
+      "count": 3,
+      "kind": "timestamp_domain"
+    },
+    {
+      "count": 1,
+      "kind": "transform_record"
+    }
+  ],
+  "registration_key": {
+    "knowledge": "known",
+    "value": {
+      "tx_seq": 1,
+      "tx_time": "2026-10-02T00:00:01.000000Z"
+    }
+  },
+  "root_locator": "/srv/neptune/packages/drone",
+  "schema_version": {
+    "knowledge": "known",
+    "value": 3
+  }
+}

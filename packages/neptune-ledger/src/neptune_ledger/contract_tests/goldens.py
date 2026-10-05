@@ -18,17 +18,23 @@ from typing import Any
 from neptune.model.knowledge import Known, NotApplicable, NotCovered
 from neptune_ledger.api import codec
 from neptune_ledger.api.types import (
+    BudgetReport,
     CatalogFinding,
     ClockMerge,
     DeclaredKey,
     EvidenceAnchor,
+    FrameReference,
+    FrameWindow,
     History,
+    LatestTransform,
     LineageEdge,
     LineageGraph,
     LineageNode,
     LineageSet,
     MappingPath,
     Partition,
+    PlanStep,
+    QueryBudget,
     QueryCursor,
     QueryMeta,
     QueryRow,
@@ -38,6 +44,7 @@ from neptune_ledger.api.types import (
     Registration,
     Resolution,
     ResolveRequest,
+    SeriesJoin,
     SourceLocation,
     Thread,
     ThreadEntry,
@@ -291,6 +298,66 @@ def goldens() -> dict[str, dict[str, Any]]:
             after=QueryCursor(run.kind, run.record_id, run.package_id),
         )
         documents["query_meta.json"] = QueryMeta(Known(tx(last)), ())
+        # 1.7.0 (Ledger ADR 0016): a thread in a window under the current view, projected and
+        # budgeted; a box in a declared frame; a series join; and an answer the deadline cut.
+        documents["query_spec.thread_window_current.json"] = QuerySpec(
+            kinds=("calibration", "run"),
+            window=TimeWindow(clock, 0, 2**40),
+            thread_id=request.key.thread_id,
+            as_of=last,
+            lineage=LatestTransform(),
+            columns=("world_clock", "world_first", "world_last"),
+            budget=QueryBudget(max_rows=10_000, max_millis=500),
+            explain=True,
+        )
+        (graph,) = packages[1].records("frame_graph")
+        documents["query_spec.frame.json"] = QuerySpec(
+            kinds=("frame_transform",),
+            as_of=last,
+            frame=FrameWindow(
+                FrameReference(graph["id"], "base_link"), "m", (-1.0, -1.0, 0.0), (1.0, 1.0, 0.5)
+            ),
+        )
+        stream = packages[1].records("stream")[0]
+        documents["query_spec.series.json"] = QuerySpec(
+            kinds=("stream",),
+            window=TimeWindow(stream["clocks"][0], 0, 2**40),
+            packages=(packages[1].package_id,),
+            as_of=last,
+            series=SeriesJoin(("value/position",)),
+            budget=QueryBudget(max_rows=1_000_000, max_bytes=256 * 2**20),
+        )
+        documents["query_meta.partial.json"] = QueryMeta(
+            Known(tx(last)),
+            (
+                CatalogFinding(
+                    "budget_exceeded",
+                    "time",
+                    "the time budget of 500 ms ran out; the first 1 rows of the answer are"
+                    " returned, and which rows depends on the wall clock",
+                ),
+            ),
+            budget=BudgetReport(
+                QueryBudget(max_rows=10_000, max_bytes=512 * 2**20, max_millis=500),
+                rows=1,
+                bytes=1_024,
+                exceeded=("time",),
+                reproducible=False,
+            ),
+            plan=(
+                PlanStep(
+                    "postgres",
+                    "candidates.thread",
+                    "candidates from thread_member by (thread_id, registration_key)",
+                ),
+                PlanStep(
+                    "postgres",
+                    "lineage",
+                    "resolve each lineage set the rows touch under latest_transform",
+                ),
+                PlanStep("arrow", "budget", "the longest prefix that fits, as one chunk"),
+            ),
+        )
         # Error cases: a tampered package refused; an unknown package; unresolvable evidence.
         documents["error.registration_refused.json"] = Registration(
             outcome="refused",

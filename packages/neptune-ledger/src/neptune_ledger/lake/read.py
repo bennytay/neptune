@@ -12,6 +12,8 @@ a partition by ``(ticks, package_id, stream_id, seq)``, unknown ticks last. Rows
 are never interleaved; adjacency means something only within one ``clock`` value.
 """
 
+import threading
+import time
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Final, Protocol
@@ -34,6 +36,10 @@ _PREFIXES: Final = ("value/", "state/value/", "locator/")
 
 class LakeRequestError(ValueError):
     """A read request outside the lake's contract: a caller error, not a package's fault."""
+
+
+class ScanInterrupted(RuntimeError):
+    """A read's ``timeout`` ran out and the engine stopped the scan; no row is returned."""
 
 
 @dataclass(frozen=True)
@@ -63,6 +69,7 @@ class SeriesPlan:
     columns: tuple[str, ...]
     schema: Any  # pyarrow.Schema
     findings: tuple[CatalogFinding, ...]
+    limit: int | None = None  # the first rows of the result only (ADR 0016 §6)
 
 
 def _check_windows(windows: Sequence[TimeWindow]) -> dict[str, TimeWindow]:
@@ -90,6 +97,7 @@ def plan_series(
     *,
     windows: Sequence[TimeWindow] | None = None,
     columns: Sequence[str] | None = None,
+    limit: int | None = None,
 ) -> SeriesPlan:
     """Plan a read of ``files``.
 
@@ -99,9 +107,12 @@ def plan_series(
     ticks on it lie in the window; a file carrying none of them is not scanned and is reported
     (``unknown_clock``), and one carrying two is a request error. ``columns`` are the value,
     state and locator columns to keep, each in every scanned file with one type; by default,
-    every such column all of them share.
+    every such column all of them share. ``limit`` keeps only the first rows of the result, in its
+    order; the engines stop sorting once they have them.
     """
     files = list(files)
+    if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or limit < 1):
+        raise LakeRequestError(f"limit is a positive integer: {limit!r}")
     if windows is not None and not windows:
         raise LakeRequestError("windows is None for whole files, or at least one window")
     by_clock = _check_windows(windows) if windows is not None else None
@@ -157,7 +168,7 @@ def plan_series(
         for file, clock, window in readable
     )
     out = _output_schema([schemas[s.file.stream_id] for s in scans], kept)
-    return SeriesPlan(scans, kept, out, tuple(findings))
+    return SeriesPlan(scans, kept, out, tuple(findings), limit)
 
 
 def _unchanged(file: SeriesFile) -> bool:
@@ -266,9 +277,10 @@ def series_sql(plan: SeriesPlan, tables: Sequence[str]) -> str:
         branches.append(branch)
     keep = ", ".join([_SCAN, "ticks", "ticks_state", "seq", *(_ident(c) for c in plan.columns)])
     union = " UNION ALL ".join(branches)
+    limit = "" if plan.limit is None else f" LIMIT {int(plan.limit)}"
     return (
         f"SELECT {keep} FROM ({union}) AS rows"
-        f" ORDER BY {_PARTITION}, ticks NULLS LAST, {_SCAN}, seq"
+        f" ORDER BY {_PARTITION}, ticks NULLS LAST, {_SCAN}, seq{limit}"
     )
 
 
@@ -286,7 +298,7 @@ class SeriesReader(Protocol):
 
     name: str
 
-    def read(self, plan: SeriesPlan) -> SeriesRead: ...
+    def read(self, plan: SeriesPlan, *, timeout: float | None = None) -> SeriesRead: ...
 
     def explain(self, plan: SeriesPlan, *, analyze: bool = False) -> str: ...
 
@@ -310,7 +322,7 @@ def _isolating(
         return SeriesRead(plan.schema.empty_table(), plan.findings)
     try:
         raw = run(plan)
-    except LakeRequestError:
+    except (LakeRequestError, ScanInterrupted):
         raise
     except errors:
         raw = None
@@ -322,7 +334,7 @@ def _isolating(
     for scan in plan.scans:
         try:
             part = run(replace(plan, scans=(scan,)))
-        except LakeRequestError:
+        except (LakeRequestError, ScanInterrupted):
             raise
         except errors:
             detail = f"{scan.file.location.url} has pages {engine} cannot decode"
@@ -366,6 +378,8 @@ def _merge(parts: list[Any], plan: SeriesPlan) -> Any:
     merged = pa.concat_tables(tables)
     keys = [(name, "ascending", "at_end") for name in (_PARTITION, "ticks", _SCAN, "seq")]
     order = pc.sort_indices(merged, sort_keys=keys)
+    if plan.limit is not None:
+        order = order.slice(0, plan.limit)
     return _conform(merged.take(order).drop_columns([_PARTITION]), plan)
 
 
@@ -436,19 +450,41 @@ class DuckDBReader:
             tables.append(name)
         return con, tables
 
-    def _run(self, plan: SeriesPlan) -> Any:
-        con, tables = self._connect(plan)
-        try:
-            return con.execute(series_sql(plan, tables)).to_arrow_table()
-        finally:
-            con.close()
-
-    def read(self, plan: SeriesPlan) -> SeriesRead:
-        """The plan's rows; a file the engine cannot decode is left out and named in the
-        read's findings, never raised (ADR 0013 §4)."""
+    def _run(self, plan: SeriesPlan, timeout: float | None = None) -> Any:
         import duckdb
 
-        return _isolating(self.name, self._run, plan, (duckdb.Error, pa.ArrowException, OSError))
+        if timeout is not None and timeout <= 0:
+            raise ScanInterrupted("the read's time ran out before it started")
+        con, tables = self._connect(plan)
+        # The watchdog interrupts the statement at the deadline (ADR 0016 §6); an interrupted
+        # read returns nothing, never the rows that happened to be sorted by then. An interrupt
+        # that comes before the statement starts is lost, so callers check their deadline after
+        # the read too.
+        watchdog = None if timeout is None else threading.Timer(max(timeout, 0.0), con.interrupt)
+        try:
+            if watchdog is not None:
+                watchdog.start()
+            return con.execute(series_sql(plan, tables)).to_arrow_table()
+        except duckdb.InterruptException as exc:
+            raise ScanInterrupted("the read's time ran out") from exc
+        finally:
+            if watchdog is not None:
+                watchdog.cancel()
+            con.close()
+
+    def read(self, plan: SeriesPlan, *, timeout: float | None = None) -> SeriesRead:
+        """The plan's rows; a file the engine cannot decode is left out and named in the
+        read's findings, never raised (ADR 0013 §4). With ``timeout`` (seconds), a read still
+        running then is stopped and raises ``ScanInterrupted``."""
+        import duckdb
+
+        deadline = None if timeout is None else time.monotonic() + timeout
+
+        def run(part: SeriesPlan) -> Any:
+            # One deadline for the whole read, the per-file retries of ``_isolating`` included.
+            return self._run(part, None if deadline is None else deadline - time.monotonic())
+
+        return _isolating(self.name, run, plan, (duckdb.Error, pa.ArrowException, OSError))
 
     def explain(self, plan: SeriesPlan, *, analyze: bool = False) -> str:
         """DuckDB's physical plan as JSON: an operator tree whose scans list their filters."""
@@ -504,9 +540,11 @@ class DataFusionReader:
         ctx, tables = self._context(plan)
         return ctx.sql(series_sql(plan, tables)).to_arrow_table()
 
-    def read(self, plan: SeriesPlan) -> SeriesRead:
+    def read(self, plan: SeriesPlan, *, timeout: float | None = None) -> SeriesRead:
         """The plan's rows; a file the engine cannot decode is left out and named in the
-        read's findings, never raised (ADR 0013 §4)."""
+        read's findings, never raised (ADR 0013 §4). DataFusion 54 cannot be interrupted from
+        Python, so ``timeout`` is not enforced here; callers check their deadline before the
+        read (ADR 0016 §6)."""
         # DataFusion raises plain Exception for every execution error, Parquet decoding included.
         return _isolating(self.name, self._run, plan, (Exception,))
 

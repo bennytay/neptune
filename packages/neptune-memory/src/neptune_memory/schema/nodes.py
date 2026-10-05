@@ -45,6 +45,7 @@ class NodeType(StrEnum):
     DOCUMENT = "document"  # a declared document: a manual, an SOP, a datasheet, a register
     EPISODE = "episode"  # an entity: a bounded segment of a run, not the Episode tier
     CLOCK = "clock"  # one declared clock, keyed by its compiler TimestampDomain record id
+    EVENT = "event"  # something one record states happened: an e-stop, a fault, an incident
     # Context tier
     DEPLOYMENT = "deployment"
     FLEET = "fleet"
