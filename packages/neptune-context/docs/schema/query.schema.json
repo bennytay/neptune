@@ -271,6 +271,7 @@
                   "calibrated_by",
                   "calibrated_with",
                   "calibration_candidate",
+                  "clock_map",
                   "configuration_active_during",
                   "configuration_candidate",
                   "configuration_unknown",
@@ -284,12 +285,14 @@
                   "executes_task_candidate",
                   "governed_by",
                   "has_calibration",
+                  "has_clock",
                   "has_configuration",
                   "has_member",
                   "has_name",
                   "has_summary",
                   "located_at",
                   "maintenance_state",
+                  "maps_to",
                   "member_of_fleet",
                   "mounted_on",
                   "not_covered_by_authorisation",
@@ -307,7 +310,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 39,
+              "maxItems": 42,
               "minItems": 1,
               "type": "array",
               "uniqueItems": true
@@ -541,6 +544,7 @@
         "kind": {
           "enum": [
             "asset",
+            "clock",
             "configuration",
             "deployment",
             "document",

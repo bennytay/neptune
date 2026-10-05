@@ -5,15 +5,19 @@ This page states what Context, Deploy and Learn may rely on when they read Memor
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
 ([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6). 1.2.0 (minor) adds the
 configuration lineage predicates ([ADR 0010](adr/0010-configuration-lineage-consolidator.md) §6); 1.3.0 (minor) adds the
-run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6); 1.7.0 (minor) adds the
+run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6); 1.4.0 (minor) adds the `clock` node
+type, the `clock_map` value type and `has_clock`, `maps_to` and `clock_map`
+([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)); 1.7.0 (minor) adds the
 calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md)
-§4, §6). Earlier goldens still validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
+§4, §6). Earlier goldens still
+validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
 ## Nodes
 
 A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and every edge is a claim (ADR 0002 §1).
-`node_id` is opaque: a Ledger thread's declared logical id `<namespace>:<value>` (ADR 0003 §1).
+`node_id` is opaque: a Ledger thread's declared logical id `<namespace>:<value>` (ADR 0003 §1), or for a `clock`
+the record id of the `TimestampDomain` that declares it (ADR 0011 §1).
 
 | Tier | Node type | What it is |
 |---|---|---|
@@ -32,6 +36,7 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 | entity | `stream` | one recorded stream of a run: a topic, a channel, a log message type |
 | entity | `document` | a declared document: a manual, an SOP, a datasheet, a register |
 | entity | `episode` | a bounded segment of a run (an entity, not the Episode tier) |
+| entity | `clock` | one declared clock; `node_id` is its compiler `TimestampDomain` record id |
 | context | `deployment` | a deployment, with a summary |
 | context | `fleet` | a fleet, with a summary |
 | context | `programme` | a programme, with a summary |
@@ -53,6 +58,7 @@ major version (ADR 0002 §5).
 | `calibrated_by` | configuration | record | many | the maintenance or requalification record that states the calibration resulted from it |
 | `calibrated_with` | sensor | configuration | many | a calibration of the sensor, from its valid_from to its stated end or the next one |
 | `calibration_candidate` | sensor | configuration | many | ambiguous: the calibration could be the sensor's over the interval; one claim per reading |
+| `clock_map` | clock | clock_map | many | a `maps_to`'s parameters as the evidence states them, or the chain it composes |
 | `configuration_active_during` | run | configuration | many | a configuration the run ran with, over the bound part of the run (a snapshot binding) |
 | `configuration_candidate` | machine, run | configuration | many | ambiguous: the configuration in force could be this one; one claim per reading |
 | `configuration_unknown` | machine, run | record | many | no configuration is stated over the interval; the record leaves it open, never filled |
@@ -66,12 +72,14 @@ major version (ADR 0002 §5).
 | `executes_task_candidate` | episode, run | task | many | ambiguous: the evidence names several tasks |
 | `governed_by` | deployment, fleet, machine, site | policy | many | an operating rule or control policy that applies |
 | `has_calibration` | sensor | configuration | one | the calibration in force |
+| `has_clock` | machine | clock | many | a clock the machine's records carry, over the interval they observe it |
 | `has_configuration` | deployment, machine, sensor | configuration | many | a parameter set, description file or other configuration in force |
 | `has_member` | run | record | many | a source file the compiler's run assembly places in the run (its `SourceRevision`) |
 | `has_name` | any node | text | one | a declared display name, verbatim; never an identifier |
 | `has_summary` | deployment, fleet, programme | text | one | a context node's summary |
 | `located_at` | asset, machine | site, zone | one | where it is |
 | `maintenance_state` | asset, machine, sensor | text | one | serviceability as a record states it, verbatim |
+| `maps_to` | clock | clock | many | a declared or estimated mapping, or a chain of them, takes its ticks to another clock's |
 | `member_of_fleet` | machine | fleet | one | the fleet a machine belongs to |
 | `mounted_on` | sensor | asset, machine | one | what a sensor is attached to |
 | `not_covered_by_authorisation` | run | configuration | many | observed: no authorisation envelope in the Ledger names the configuration then |
@@ -88,7 +96,10 @@ major version (ADR 0002 §5).
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
-`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `delta` and `record`. A `delta`
+`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record`, `delta` and `clock_map` (`#/$defs/ClockMap`:
+a mapping's `anchor`, `rate` and `residual_bound` exactly as stated, each a `Knowledge` state inheriting the
+claim's provenance, with `method` `stated` or `co_sampled`; or a `composed` chain naming its mapping records in
+`chain` and the clocks between in `via`, with no parameters of its own). A `delta`
 (`#/$defs/Delta`) is `later - earlier`, component by component, between two calibration records (`earlier`,
 `later`): a parameter by its declared `name`, or the `translation` or `rotation` of the transforms both bind to one
 edge (`parent`, `child`), in the `representation` both declare. Its unit is the one both declare (`Known`), or
@@ -126,6 +137,15 @@ Identity is followed, never merged, with `schema.traverse.same_as_closure(reader
 include_candidates=False, include_inferred=True)`: every node `same_as` reaches in either direction within `depth`
 hops, each once at its shortest depth with the claims of one shortest path. It follows `same_as_candidate` only
 when asked, works over any `MemoryReader`, and compares no clocks.
+
+Clocks are related, never coerced, with `schema.clocks.convert(reader, ticks, from_clock, to_clock, as_of, *,
+include_inferred=True, max_hops=8)`: exact ticks of `to_clock` (a `Fraction`) with the error bound the mappings
+state, through `clock_map` claims that hold at that instant, forward or inverted, along every route of every
+length. Declared mappings are tried first, estimated ones only if the declared ones decide nothing. The result is
+`Known` (every route agrees), `Ambiguous` (routes or mappings that hold disagree) or `Unknown` with a
+`MissingHop`: nothing arrives, or some branch is undecided (a mapping in force without parameters, a conflict a
+later hop's validity would settle, too many readings); it names the clocks reached, the mappings that do not
+apply, and the readings that did arrive (ADR 0011 §5).
 
 Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, `ClaimsResult`,
 `NeighboursResult`, `EpisodesResult`, `SpatialResult`). A `Knowledge`-wrapped result is
@@ -198,7 +218,12 @@ def test_graph_schema_contract(check):
     and `at_site` are `Known` only when every ground names one id, and `executes_task` holds every task stated;
     otherwise each reading is a `*_candidate` claim. `consolidate.runs.involvement` reads a role back as `Known`,
     `Ambiguous`, `Unknown` or `NotCovered`.
-14. **Calibration is never converted or judged.** `memory.calibration` ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md))
+14. **No clock mapping is invented.** `maps_to` and `clock_map` rest only on a compiler `ClockMapping` (declared:
+    `observed` or `stated`, from `memory.time`) or a compiler estimate (`inferred`, from `memory.time_estimates`),
+    or on a chain of them; Memory never estimates an offset, never assumes an unstated validity open, and never
+    re-times a claim. A later-starting mapping of one clock pair holds from its start, and the earlier one's
+    claims end there ([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)).
+15. **Calibration is never converted or judged.** `memory.calibration` ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md))
     places a calibration on a sensor only through its declared machine and subject and the hardware configurations
     the machine declares or its chain places; several readings are `calibration_candidate`s, and so is a calibration
     whose frame binding contradicts its sensor's configuration graph. A `calibrated_with` starts at a stated
@@ -219,14 +244,17 @@ finding. The configuration's hash is the **generation** (`MemoryReader.generatio
 ## Not in v1
 
 - `episodes` and `spatial` structure (G3).
-- Cross-clock comparison, which waits for the compiler's `ClockMapping` records (root ADR 0050 §5; Memory MVL-130).
+- Cross-clock comparison inside the resolver: claims on two clocks are still never compared there
+  (`clock_mismatch`). A consumer relates them with `schema.clocks.convert`; no claim is ever re-timed.
 - A Postgres-backed `MemoryReader`. `MemoryStore` stays provisional (ADR 0004 §5); G2 maps its rows to `Claim`,
   masks `superseded_at`, joins findings and runs this suite.
 - Withdrawal ([ADR 0007](adr/0007-g1-gate-withdrawal-names-evidence-status-and-the-final-store.md) §5, MVL-132).
   Until it lands, a claim a consolidator stops emitting stays current: an operator cannot retract a `many`
   fact such as `same_as`, and an upgrade that emits nothing retires nothing. A `one` fact is corrected by a new
   stated claim, which supersedes it. The identity consolidator already stops emitting a retracted `same_as`
-  (ADR 0008 §3); withdrawal makes that end it.
+  (ADR 0008 §3); withdrawal makes that end it. Likewise a revised clock mapping: the build after the revision
+  emits the old mapping's claims closed at the revision, but the version emitted open before stays current
+  beside them until withdrawal ends it (ADR 0011 §5).
 - Evidence status beside claims (ADR 0007 §6, MVL-132): a `Knowledge[EvidenceStatus]` for every cited source,
   `NotCovered` until the Ledger catalog emits a retention signal. v1 results carry no status map, which never
   means "available".

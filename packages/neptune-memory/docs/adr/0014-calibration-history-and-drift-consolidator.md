@@ -118,7 +118,7 @@ configuration naming one is `ambiguous_producer`; no `performed` is `untimed_pro
 `calibrated_with` and `calibration_candidate` (sensor → configuration), `calibrated_by` (configuration → record)
 and `drift` (sensor → delta) join `CORE_PREDICATES`, all `many`. `has_calibration` (`one`) stays for a single
 calibration in force; it cannot widen to `many`, and a sensor holds several series at once. `ValueType.DELTA` and
-`#/$defs/Delta` join the schema. `VOCABULARY_VERSION = 9` (5 is the run threads', ADR 0009; 6 to 8 are taken by vocabularies released first) and
+`#/$defs/Delta` join the schema. `VOCABULARY_VERSION = 9` (5 and 6 are the run threads' and the time-domain registry's, ADR 0009 and 0011; 7 and 8 are taken by vocabularies released first) and
 graph-schema **1.7.0**, a minor release: every earlier golden validates and passes the suite, and the golden plan is
 unchanged.
 
