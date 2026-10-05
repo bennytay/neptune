@@ -42,9 +42,11 @@ placement is `episodes.no_run_claims` (info) and builds nothing.
 ### 2. What an episode is
 
 An episode is a stated attempt at a task within a run. While the run's declared task is the only statement of an
-attempt, **a run node with task evidence (`Known` or candidates) holds exactly one episode**, and a run with none
-holds **no episode** (the issue's third archetype): `episodes_of(claims, run)` reads `Unknown` for it and
-`NotCovered` for a run no claim names. An episode with nothing stated about it would be a second node for the run.
+attempt, **a run node with task evidence (`Known` or candidates) and a time placement holds one episode**, and a
+run with no task evidence holds **no episode** (the issue's third archetype), nor does a tasked run `memory.runs`
+could not place in time (it states no interval, so it has no claims to segment): `episodes_of(claims, run)` reads
+`Unknown` for either and `NotCovered` for a run no claim names. An episode with nothing stated about it would be a
+second node for the run.
 
 ### 3. Boundaries and identity
 
@@ -55,6 +57,14 @@ records that state it: `starts_at` is the earliest stated start; `ends_at` the l
 (`Unknown`). Placements of one run node that do not coincide are parts of it (a bag split in two, ADR 0009's one
 declared id across packages) or two statements of it, never two attempts, so they widen the span rather than
 compete.
+
+**Boundaries are emitted only on a clock the run's records state them on.** A placement `memory.runs` projects
+through a `clock_mapping` (it cites the mapping) is a valid-time envelope: rounded out and widened by the
+mapping's residual bound (ADR 0009 §2), not the run's start and end. Such a clock gets no `starts_at` / `ends_at`,
+and neither does a clock where a projection reaches past every stated placement; claims there still hold over the
+envelope. A projected boundary is skipped rather than made a candidate: a lone candidate reads `Unknown` anyway,
+and a consumer that needs civil boundaries projects the stated ones through MVL-130's conversions, with their
+error.
 
 The end is `Ambiguous`, every reading an `ends_at_candidate` on every clock, when a stated stop lies strictly
 inside the episode: an `incident_record` that names the run in `related` (`stated`) or names its machine
@@ -71,8 +81,12 @@ clock mapping) does.
 ### 4. Interventions
 
 `intervened(episode, <Intervention record>)` when the intervention names the run in `related` (`stated`), or
-names the run's one stated machine and its `[start, end]` (or its one stated instant) overlaps the episode on one
-clock (`observed`). It is `intervened_candidate` when the machine is ambiguous on either side, or when an
+names the run's one stated machine and its `[start, end]` (or its one stated instant) surely overlaps the episode
+on one clock (`observed`). On a stated placement any overlap is sure. On a projection it is sure only inside the
+envelope shrunk by `2 × bound + 1` ticks on each side (the rounding, the widening and the error the other way);
+with no stated bound, never. An overlap that holds only within that margin is `intervened_candidate`: an operator
+action a second after a cycle's stated end, inside a 2 s mapping bound, is not part of the attempt for certain.
+It is also `intervened_candidate` when the machine is ambiguous on either side, or when an
 intervention names the run but its stated times fall outside the episode (`episodes.intervention_outside`). An
 intervention naming the run with no time on the episode's clocks is held as stated and reported
 (`episodes.event_unplaced`, info). An intervention never cuts an episode: it states that it happened, not that
@@ -83,9 +97,13 @@ the attempt ended (the manipulator archetype). Intervention topics are not read.
 - `episode_of(episode, run)` is the issue's `part_of`; `executes_task` / `executes_task_candidate` (already
   `episode`-domained) are `performs`, copied from the run's grounds with their kinds and evidence.
 - New (vocabulary **7**, graph-schema **1.5.0**, a minor release after MVL-130's 1.4.0 / 6): `starts_at`,
-  `ends_at` (`one`, `instant`), `ends_at_candidate`, `intervened`, `intervened_candidate` (`many`; an
-  `intervened` object is a `record`, as ADR 0002 §1 keeps Episode-tier records out of the nodes), and `outcome`
-  (`one`, `text`, verbatim, never inferred). The issue's `episode_interval` is the start and end pair.
+  `ends_at` (`instant`), `ends_at_candidate`, `intervened`, `intervened_candidate` (an `intervened` object is a
+  `record`, as ADR 0002 §1 keeps Episode-tier records out of the nodes), all `many`, and `outcome` (`one`,
+  `text`, verbatim, never inferred). The issue's `episode_interval` is the start and end pair.
+- `starts_at` and `ends_at` are `many`, one claim per clock: each object is an instant on its claim's own clock,
+  so as `one` predicates every episode on two clocks would be a resolver `clock_mismatch`, a contradiction the
+  evidence does not contain. The consolidator emits at most one of each per clock; two instants on one clock
+  (from two consolidator versions, say) disagree, and `boundary_of` reads them as `Ambiguous`.
 - `outcome` is registered so consumers can traverse it, and **v1 never emits it**: no record declares one.
   `outcome_of` reads `Known` (one declared text), `Ambiguous`, `Unknown` (nothing declares one) or `NotCovered`.
   A success is never inferred from an intervention's text, an incident or a run that ended.
@@ -100,6 +118,10 @@ the attempt ended (the manipulator archetype). Intervention topics are not read.
 - **Memory-local stand-ins for task entries and outcomes**, as ADR 0009 did for `run_declaration`: would let
   missions and declared outcomes be tested now, but the coordinator ruled out new kinds; the gap is reported for
   the compiler (MVL-33's task family) instead.
+- **Projected boundaries as `*_candidate` claims**: as informative as nothing once read back (a lone candidate
+  is `Unknown`), and it needs a `starts_at_candidate` predicate for no reading.
+- **`one` boundaries with a resolver exemption for instants on their own clock**: a resolver change for one
+  vocabulary's needs.
 - **Records of one run that state different starts or ends as competing readings**: a split recording's parts
   would read as a disagreement about where one attempt starts.
 - **One `Unknown`-bounded episode per run with no task evidence**: a node per run that states nothing the run

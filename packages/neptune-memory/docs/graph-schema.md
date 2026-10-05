@@ -51,7 +51,7 @@ major version (ADR 0002 §5).
 | `continues` | run | run | many | a later part of one recording: the next part of a run its assembly states |
 | `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
-| `ends_at` | episode | instant | one | where an episode ends on a clock (half-open, as `valid_to`), as its evidence states |
+| `ends_at` | episode | instant | many | where an episode ends (half-open, as `valid_to`), as its records state it: one claim per clock |
 | `ends_at_candidate` | episode | instant | many | ambiguous: may end here (a stated end, or a stop event inside it) |
 | `episode_of` | episode | run | one | the run an episode segments |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
@@ -79,7 +79,7 @@ major version (ADR 0002 §5).
 | `runs_software` | machine, sensor | software_version | many | installed software |
 | `same_as` | any node | same type | many | the same real-world thing: declared identifier, configuration lineage or operator |
 | `same_as_candidate` | any node | same type | many | ambiguous: the evidence could mean either; one claim each way |
-| `starts_at` | episode | instant | one | where an episode starts on a clock, as its evidence states |
+| `starts_at` | episode | instant | many | where an episode starts, as its records state it: one claim per clock |
 | `zone_of` | zone | site | one | the site a zone belongs to |
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
@@ -184,9 +184,11 @@ def test_graph_schema_contract(check):
     `Ambiguous`, `Unknown` or `NotCovered`.
 13. **Episodes are stated attempts, never inferred** ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md)).
     A run with stated task evidence holds one episode (`episode_of`, its `executes_task`), bounded on each clock by
-    the span its records state (`starts_at`, `ends_at`); a run with none holds no episode. A stated stop
+    the span its records state (`starts_at`, `ends_at`, only on a clock the records state it on, never on a
+    mapping's projection); a run with none, or with no time placement, holds no episode. A stated stop
     (`incident_record`) inside the episode makes the end `ends_at_candidate` readings.
-    `intervened` names an `Intervention` that names the run, or names its machine and overlaps it on one clock.
+    `intervened` names an `Intervention` that names the run, or names its machine and surely overlaps it on one
+    clock; an overlap that holds only within a projection's error is `intervened_candidate`.
     No record declares an outcome yet, so `outcome` reads `Unknown`. `consolidate.episodes.episodes_of`,
     `boundary_of` and `outcome_of` read them back as `Known`, `Ambiguous`, `Unknown` or `NotCovered`.
 

@@ -29,6 +29,8 @@ from neptune_memory.consolidate.runs import RunConsolidator
 from neptune_memory.schema.claim import Claim, LedgerRecordRef, TypedLiteral, ValueType
 from neptune_memory.schema.interval import CivilClock, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
+from neptune_memory.schema.predicates import CORE_PREDICATES
+from neptune_memory.schema.supersede import resolve
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -209,31 +211,43 @@ ARM: Final = LogicalId("asset-tag", "UR10-CELL3")
 BIN_PICK: Final = LogicalId("task", "bin-pick-7")
 
 
-def _cell(*, with_intervention: bool = True) -> tuple[dict[str, list[Record]], RecordId, RecordId]:
+SECOND: Final = 1_000_000_000
+CYCLE: Final = LogicalId("cell-3.cycle", "0412")
+
+
+def _cell(
+    *,
+    with_intervention: bool = True,
+    action: tuple[int, int] = (25 * SECOND, 31 * SECOND),
+    bound: int | None = 2 * SECOND,
+) -> tuple[dict[str, list[Record]], RecordId, RecordId]:
+    """A pick cycle stated on the arm's boot clock over [T+5 s, T+65 s], mapped to the console's
+    civil clock by a stated PTP mapping with a residual ``bound``; an operator action at
+    ``action`` (offsets from T, on the console clock)."""
     boot_record, boot = domain("cell-3 arm boot", civil=False)
     console_record, console = domain("cell console", civil=True)
     cycle, _ = run(
         "cell-3/cycle-0412.bag",
-        first=at(5_000_000_000, boot),
-        last=at(65_000_000_000, boot),
+        first=at(5 * SECOND, boot),
+        last=at(65 * SECOND, boot),
         machine=ARM,
-        logical_id=LogicalId("cell-3.cycle", "0412"),
+        logical_id=CYCLE,
     )
     records = [
         boot_record,
         console_record,
         cycle,
-        mapping("cell-3 ptp", boot, console, anchor=(0, EPOCH_NS)),
-        declaration("cycle 0412", LogicalId("cell-3.cycle", "0412"), task=BIN_PICK),
+        mapping("cell-3 ptp", boot, console, anchor=(0, EPOCH_NS), bound=bound),
+        declaration("cycle 0412", CYCLE, task=BIN_PICK),
     ]
     held = None
     if with_intervention:
-        # The operator reached in to free a jammed part 20 s into the cycle (console clock).
+        # The operator reached in to free a jammed part (console clock).
         stop, held = intervention(
             "OP-77",
             machines=[ARM],
-            start=Timestamp(EPOCH_NS + 25_000_000_000, console),
-            end=Timestamp(EPOCH_NS + 31_000_000_000, console),
+            start=Timestamp(EPOCH_NS + action[0], console),
+            end=Timestamp(EPOCH_NS + action[1], console),
         )
         records.append(stop)
     return {"cell-3": records}, boot, held or boot
@@ -243,26 +257,84 @@ def test_a_human_intervention_mid_task_stays_inside_one_episode() -> None:
     packages, boot, held = _cell()
     runs, episodes = build(packages)
     claims = every(runs, episodes)
-    episode = only_episode(claims, run_node(LogicalId("cell-3.cycle", "0412")))
+    episode = only_episode(claims, run_node(CYCLE))
     intervened = about(episodes, episode, "intervened")
-    # One claim per clock the episode is on: the arm's boot clock and civil time.
+    # One claim per clock the episode is on: the arm's boot clock and civil time. The action is
+    # inside the cycle by more than the mapping's 2 s error, so it surely overlaps it.
     assert {c.valid_from.domain_id for c in intervened} == {boot, CIVIL.domain_id}
     assert {c.object for c in intervened} == {LedgerRecordRef(held)}
     assert all(c.assertion_kind == "observed" for c in intervened)
-    # Not cut: one start and one end on each clock.
-    assert boundary_of(claims, episode, "start", boot) == Known(at(5_000_000_000, boot))
-    assert boundary_of(claims, episode, "end", boot) == Known(at(65_000_000_001, boot))
-    assert boundary_of(claims, episode, "start", CIVIL.domain_id) == Known(
-        CIVIL.at(EPOCH_NS + 5_000_000_000)
-    )
+    # Not cut: one start and one end, on the clock the bag states them on.
+    assert boundary_of(claims, episode, "start", boot) == Known(at(5 * SECOND, boot))
+    assert boundary_of(claims, episode, "end", boot) == Known(at(65 * SECOND + 1, boot))
     assert outcome_of(claims, episode) == Unknown()
     assert codes(episodes) == []
+
+
+def test_a_projected_envelope_never_becomes_a_boundary() -> None:
+    packages, boot, _ = _cell()
+    runs, episodes = build(packages)
+    claims = every(runs, episodes)
+    episode = only_episode(claims, run_node(CYCLE))
+    # The civil placement is the mapping's envelope [T+3 s, T+67 s], not the cycle's stated span:
+    # claims hold over it, but it states no boundary.
+    civil = [c for c in about(episodes, episode, "episode_of") if c.valid_from.domain_id != boot]
+    assert [c.valid_from for c in civil] == [CIVIL.at(EPOCH_NS + 3 * SECOND)]
+    assert boundary_of(claims, episode, "start", CIVIL.domain_id) == Unknown()
+    assert boundary_of(claims, episode, "end", CIVIL.domain_id) == Unknown()
+    for predicate in ("starts_at", "ends_at"):
+        assert {c.valid_from.domain_id for c in about(episodes, episode, predicate)} == {boot}
+
+
+def test_an_action_inside_the_mapping_error_is_only_a_candidate() -> None:
+    # The cycle's stated end is T+65 s; the action at T+66 s..T+66.5 s is inside the 2 s bound.
+    packages, _, held = _cell(action=(66 * SECOND, 66 * SECOND + SECOND // 2))
+    runs, episodes = build(packages)
+    episode = only_episode(every(runs, episodes), run_node(CYCLE))
+    assert about(episodes, episode, "intervened") == []
+    assert {c.object for c in about(episodes, episode, "intervened_candidate")} == {
+        LedgerRecordRef(held)
+    }
+
+
+def test_with_no_stated_mapping_error_no_projected_overlap_is_sure() -> None:
+    packages, _, held = _cell(bound=None)
+    runs, episodes = build(packages)
+    episode = only_episode(every(runs, episodes), run_node(CYCLE))
+    assert about(episodes, episode, "intervened") == []
+    assert {c.object for c in about(episodes, episode, "intervened_candidate")} == {
+        LedgerRecordRef(held)
+    }
+
+
+def test_a_two_clock_episode_raises_no_contradiction_in_the_resolver() -> None:
+    # An exact mapping (bound 0) projects the bag's span onto civil time as stated; the cell
+    # controller's log states the same cycle on that clock too. The episode then has a stated
+    # start and end on each of two clocks: one boundary claim per clock.
+    packages, boot, _ = _cell(bound=0)
+    _, console = domain("cell console", civil=True)
+    stated, _ = run(
+        "cell-3/controller-0412.json",
+        first=Timestamp(EPOCH_NS + 5 * SECOND, console),
+        last=Timestamp(EPOCH_NS + 65 * SECOND, console),
+        logical_id=CYCLE,
+    )
+    runs, episodes = build({**packages, "controller": [stated]})
+    claims = every(runs, episodes)
+    episode = only_episode(claims, run_node(CYCLE))
+    for predicate in ("starts_at", "ends_at"):
+        assert {c.valid_from.domain_id for c in about(episodes, episode, predicate)} == {
+            boot,
+            CIVIL.domain_id,
+        }
+    resolution = resolve(claims, CORE_PREDICATES, {"memory.runs": 1, "memory.episodes": 2})
+    assert [f.code for f in resolution.findings] == []
 
 
 def test_the_intervention_never_changes_the_episode_id() -> None:
     packages, _, _ = _cell()
     bare, _, _ = _cell(with_intervention=False)
-    cycle = run_node(LogicalId("cell-3.cycle", "0412"))
+    cycle = run_node(CYCLE)
     assert only_episode(every(*build(packages)), cycle) == only_episode(every(*build(bare)), cycle)
 
 

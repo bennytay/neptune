@@ -389,3 +389,30 @@ def test_the_episode_id_follows_its_run_and_stated_boundaries() -> None:
     moved, _ = _base(last=2_000)
     runs_b, three = build({"p": moved})
     assert _episode(every(*build({"p": base}))) != _episode(every(runs_b, three))
+
+
+def test_two_definite_boundaries_on_one_clock_read_as_ambiguous() -> None:
+    from memory_schema_builders import BOOT_CLOCK, SECONDS, claim
+
+    episode = NodeRef(NodeType.EPISODE, "episode:sha256:" + "c" * 64)
+
+    def end(ticks: int, clock: object, ev: int) -> Claim:
+        stamp = Timestamp(ticks, clock if isinstance(clock, str) else SECONDS.domain_id)  # type: ignore[arg-type]
+        return claim(
+            episode,
+            "ends_at",
+            TypedLiteral(ValueType.INSTANT, stamp),
+            0,
+            tx=1,
+            ev=ev,
+            clock=clock,  # type: ignore[arg-type]
+        )
+
+    # One end per clock agrees with itself on each clock.
+    per_clock = [end(900, SECONDS, 1), end(70, BOOT_CLOCK, 2)]
+    assert boundary_of(per_clock, episode, "end", SECONDS.domain_id) == Known(SECONDS.at(900))
+    assert boundary_of(per_clock, episode, "end", BOOT_CLOCK) == Known(Timestamp(70, BOOT_CLOCK))
+    # Two definite ends on one clock (two consolidator versions, say) disagree: never one picked.
+    clash = [*per_clock, end(950, SECONDS, 3)]
+    assert _ticks(boundary_of(clash, episode, "end", SECONDS.domain_id)) == {900, 950}
+    assert boundary_of(clash, episode, "end", BOOT_CLOCK) == Known(Timestamp(70, BOOT_CLOCK))

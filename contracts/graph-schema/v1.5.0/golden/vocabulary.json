@@ -61,8 +61,8 @@
       "version": 1
     },
     {
-      "cardinality": "one",
-      "description": "where an episode ends on a clock, as its evidence states",
+      "cardinality": "many",
+      "description": "where an episode ends, as its records state it: one claim per clock, never two on one",
       "domain": [
         "episode"
       ],
@@ -515,8 +515,8 @@
       "version": 2
     },
     {
-      "cardinality": "one",
-      "description": "where an episode starts on a clock, as its evidence states",
+      "cardinality": "many",
+      "description": "where an episode starts, as its records state it: one claim per clock, never two on one",
       "domain": [
         "episode"
       ],

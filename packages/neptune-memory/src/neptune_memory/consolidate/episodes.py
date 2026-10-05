@@ -3,8 +3,9 @@
 An episode is a stated attempt at a task within a run. The only statement of a task attempt the
 Ledger holds today is a run's declared task, which ``memory.runs`` grounds as ``executes_task``
 (or ``executes_task_candidate``); no compiler kind states a task, a mission or a job of its own,
-or an outcome (root ADR 0047 §9). So a run with task evidence holds one episode, bounded by what
-bounds the run, and a run with none holds no episode.
+or an outcome (root ADR 0047 §9). So a run with task evidence and a time placement holds one
+episode, bounded by what bounds the run; a run with none (or one ``memory.runs`` cannot place in
+time) holds no episode.
 
 The consolidator reads ``memory.runs``' claims (it runs after it in a plan, ADR 0003 §4) for each
 run's placements, machine and tasks, and the Ledger's ``run``, ``timestamp_domain``,
@@ -12,11 +13,13 @@ run's placements, machine and tasks, and the Ledger's ``run``, ``timestamp_domai
 
 - ``episode_of(episode, run)`` (the issue's ``part_of``) and ``executes_task`` /
   ``executes_task_candidate`` (``performs``) copy the run's task grounds onto the episode.
-- ``starts_at`` / ``ends_at`` (``episode_interval``): the instants the run's records state, per
-  clock, each citing them. Records that disagree, or a stated stop (an ``incident_record``)
-  inside the episode, leave the boundary ``Ambiguous``: every reading is a ``*_candidate``.
+- ``starts_at`` / ``ends_at`` (``episode_interval``): the span the run's records state, on each
+  clock they state it on, citing them. A clock the run is only projected onto (a clock mapping's
+  envelope) gets no boundary. A stated stop (an ``incident_record``) inside the episode leaves the
+  end ``Ambiguous``: every reading is an ``ends_at_candidate``.
 - ``intervened`` / ``intervened_candidate``: an ``Intervention`` that names the run, or names its
-  machine and overlaps the episode on one clock.
+  machine and surely overlaps the episode on one clock (on a projection, only beyond the
+  mapping's stated error); an overlap that only might hold is a candidate.
 - ``outcome`` is never emitted: no record declares one, and none is inferred. It reads ``Unknown``.
 
 Every claim about an episode holds over the episode's interval on each clock the run is placed on.
@@ -122,6 +125,9 @@ def _malformed(kind: str, package_id: str, index: int, reason: str) -> Consolida
 class _View:
     runs: set[RecordId] = field(default_factory=set)  # every Run record id the Ledger holds
     clocks: dict[RecordId, CivilClock] = field(default_factory=dict)  # civil-declared domains
+    # Each clock mapping's stated residual bound in ticks (None: unstated), to tell a run's
+    # projected placement from a stated one and to know how far a projection may be off.
+    bounds: dict[RecordId, int | None] = field(default_factory=dict)
     interventions: list[events.Event] = field(default_factory=list)  # by record id
     incidents: list[events.Event] = field(default_factory=list)  # by record id
     findings: list[ConsolidationFinding] = field(default_factory=list)
@@ -160,6 +166,13 @@ def _read(ledger: LedgerReader) -> _View:
                 continue
             if clocks.setdefault(clock.record, clock) != clock:
                 clocks[clock.record] = None
+        for record in ledger.read_records(ref.package_id, run_records.CLOCK_MAPPING) or ():
+            try:
+                found = run_records.mapping(record)
+            except (run_records.Malformed, run_records.Inferred):
+                continue
+            bound = found.residual_bound
+            view.bounds[found.id] = bound.value.ticks if isinstance(bound, Known) else None
         for kind, parser in _EVENTS.items():
             for index, record in enumerate(ledger.read_records(ref.package_id, kind) or ()):
                 try:
@@ -362,14 +375,17 @@ def _stated(instant: Timestamp, grounds: Sequence[Claim]) -> _Boundary:
 
 @dataclass
 class _Episode:
-    """A run's one episode: its window on each clock, its stated start and end there, and the
-    stops inside it (each an end reading)."""
+    """A run's one episode: its window on each clock, its stated start and end there, the stops
+    inside it (each an end reading), and where the run surely was."""
 
     run: _Run
     windows: dict[RecordId, _Window]
     starts: dict[RecordId, _Boundary]
     ends: dict[RecordId, _Boundary]  # only where every placement on the clock states its end
     stops: dict[RecordId, list[_Boundary]]
+    # Where the run surely was on each clock: stated placements, and projections shrunk by
+    # their mapping's stated error (none where the error is unstated).
+    certain: dict[RecordId, list[_Window]]
     node: NodeRef = field(init=False)
 
     def __post_init__(self) -> None:
@@ -487,7 +503,7 @@ class EpisodeConsolidator:
                 )
             )
         episodes = [
-            _episode(runs[node])
+            _episode(view, runs[node])
             for node in sorted(runs, key=lambda n: n.node_id)
             if runs[node].spans and runs[node].tasks
         ]
@@ -510,20 +526,55 @@ class EpisodeConsolidator:
         return ConsolidatorOutput(tuple(build.drafts), tuple(view.findings))
 
 
-def _episode(run: _Run) -> _Episode:
+def _projection(view: _View, span: Claim) -> tuple[bool, int | None]:
+    """``(projected, bound)``: whether a placement is a projection through a stated clock mapping
+    (it cites one), and that mapping's residual bound in ticks (``None``: unstated)."""
+    for record in span.provenance.records:
+        if record in view.bounds:
+            return True, view.bounds[record]
+    return False, 0
+
+
+def _certain(window: _Window, bound: int) -> _Window | None:
+    """The part of a projected placement the run surely covers. ``memory.runs`` rounds a
+    projection out by up to a tick and widens it by the bound on each side, and the true instant
+    may sit a bound the other way: ``2 * bound + 1`` ticks in from each edge."""
+    margin = 2 * bound + 1
+    start = Timestamp(window.start.ticks + margin, window.start.domain_id)
+    if isinstance(window.end, Open):
+        return _Window(start, OPEN)
+    end = Timestamp(window.end.ticks - margin, window.end.domain_id)
+    return _Window(start, end) if start < end else None
+
+
+def _episode(view: _View, run: _Run) -> _Episode:
     """The run's one episode: the span of its placements on each clock. The start is the earliest
     stated start, cited by every placement that states it; the end likewise, but only when every
     placement there states its end (one that does not may run on). Placements of one run that do
-    not coincide are parts of it, or statements of the same run, never two attempts."""
+    not coincide are parts of it, or statements of the same run, never two attempts. A boundary
+    is only ever one the run's records state on that clock: where a projection reaches past every
+    stated placement (or there is none), the clock has no boundary."""
     windows = {clock: _window(run.on(clock)) for clock in run.clocks()}
     starts: dict[RecordId, _Boundary] = {}
     ends: dict[RecordId, _Boundary] = {}
+    certain: dict[RecordId, list[_Window]] = {}
     for clock, window in windows.items():
         spans = run.on(clock)
-        starts[clock] = _stated(window.start, [c for c in spans if c.valid_from == window.start])
-        if isinstance(window.end, Timestamp):
-            ends[clock] = _stated(window.end, [c for c in spans if c.valid_to == window.end])
-    return _Episode(run, windows, starts, ends, {clock: [] for clock in windows})
+        stated = [c for c in spans if not _projection(view, c)[0]]
+        certain[clock] = []
+        for span in spans:
+            projected, bound = _projection(view, span)
+            whole = _Window(span.valid_from, span.valid_to)
+            core = whole if not projected else None if bound is None else _certain(whole, bound)
+            if core is not None:
+                certain[clock].append(core)
+        first = [c for c in stated if c.valid_from == window.start]
+        if first:
+            starts[clock] = _stated(window.start, first)
+        last = [c for c in stated if c.valid_to == window.end]
+        if isinstance(window.end, Timestamp) and last:
+            ends[clock] = _stated(window.end, last)
+    return _Episode(run, windows, starts, ends, {clock: [] for clock in windows}, certain)
 
 
 def _stop(
@@ -638,8 +689,9 @@ def _intervened(
     span: tuple[Timestamp, Timestamp] | None,
 ) -> None:
     """``intervened`` when an intervention names the run, or names its one stated machine and
-    overlaps the episode on one clock; ``intervened_candidate`` when either side's machine is
-    ambiguous, or the intervention names the run but its stated times fall outside it."""
+    surely overlaps the episode on one clock; ``intervened_candidate`` when either side's machine
+    is ambiguous, when the overlap holds only within a projection's error (or one whose error is
+    unstated), or when the intervention names the run but its stated times fall outside it."""
     view = build.view
     window = None if span is None else episode.windows.get(span[0].domain_id)
     overlaps = window is not None and span is not None and window.holds(*span)
@@ -659,7 +711,8 @@ def _intervened(
             )
         definite, kind = link.decided and not outside, STATED
     elif overlaps:
-        definite, kind = link.decided, OBSERVED
+        surely = any(c.holds(*span) for c in episode.certain[span[0].domain_id]) if span else False
+        definite, kind = link.decided and surely, OBSERVED
     else:
         return
     build.emit(
