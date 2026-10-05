@@ -90,15 +90,19 @@ fourth:
 ## Consequences
 
 - Measured with `tests/fixtures/store/make_scale_package.py`, one process per case, at 100,000
-  rows. Main's `read_package` plus validation peaks at OLD_READ MiB and takes OLD_READ_S s. The
-  streaming read peaks at NEW_READ MiB and takes NEW_READ_S s, with the same package id and the
-  same findings. At 1,000,000 rows it stays under the same 256 MiB cap
-  (`tests/integration/test_package_write_scale.py`, `@slow`).
+  rows (a loaded 20-core host). Main's `read_package`, one pass over the records and validation
+  peak at 594 MiB and take 20 s. On this branch the same work peaks at 103 MiB and takes 35 s,
+  with the same package id and the same findings. The time goes to parsing: validation now
+  re-reads its tables instead of indexing them. At 1,000,000 rows the read stays under the same
+  256 MiB cap (`tests/integration/test_package_write_scale.py`, `@slow`).
 - `scripts/bench_d1_package_write.py` reproduces Deploy's D1 case: 100,000 work orders mapped by
-  the `cmms_generic` preset. On this branch: `package_files` + `write_package` D1_MEMORY;
-  `write_package_stream` D1_STREAM (ADR 0065 quoted 746 MiB; the reviewer measured 756 MiB); the
-  streaming read and validation D1_READ. The stream case's peak is mostly the mapper's input and
-  output, which it holds as lists. That is Deploy's to stream.
+  the `cmms_generic` preset, 470 MiB of tables and 69,257 findings, all with one package id.
+  On the same host, `package_files` + `write_package` maps in 19 s, writes in 68 s and peaks at
+  1,987 MiB. `write_package_stream` maps in 20 s, writes in 69 s and peaks at 853 MiB. ADR 0065
+  quoted 746 MiB and the reviewer measured 756 MiB; this script holds the mapper's output as a
+  list, so it includes that list. Reading the streamed package back and validating it peaks at
+  104 MiB and takes 109 s. The stream case's peak is mostly the mapper's input and output, held
+  as lists: that is Deploy's to stream.
 - A `PackageRecords` pass costs a parse of every line. A consumer that iterates the records many
   times should hold what it needs, or read one kind with `of(kind)`.
 - What stays bounded only per item: one line of a table is held whole as it is parsed (ADR
