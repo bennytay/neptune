@@ -60,6 +60,12 @@ def test_the_template_hash_binds_prompt_vocabularies_and_schema() -> None:
 
 
 def test_a_changed_vocabulary_is_a_changed_template(monkeypatch: object) -> None:
+    template_sha256.cache_clear()
     before = template_sha256()
     monkeypatch.setattr(prompt_module, "PREDICATES", PREDICATES | {"novel_predicate"})  # type: ignore[attr-defined]
-    assert template_sha256() != before
+    template_sha256.cache_clear()
+    try:
+        assert template_sha256() != before
+    finally:
+        monkeypatch.undo()  # type: ignore[attr-defined]
+        template_sha256.cache_clear()

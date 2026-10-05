@@ -49,20 +49,28 @@ cannot know. Each of those is exactly what the layers below refuse.
    question and the resolver and states or blocks, as `PlanFinding`s (`info` or `blocking`):
    - *Entities*: every declared id must exist and have the stated kind; a name with several candidates is an
      `ambiguous_entity` blocker listing every candidate (the model is told to use the first as a placeholder;
-     `choose(plan, mention, declared_id)` settles it without a second model call). A name that resolves
+     `choose(plan, mention, declared_id)` settles a `NEEDS_CHOICE` plan without a second model call,
+     rewriting the draft's subjects and diff subjects to the chosen id). A name that resolves
      to nothing is not given an id: the model selects by kind and puts the words in the text clause.
-   - *Clocks*: `during` and diff instants may use only a civil clock whose timescale the question names (and
-     that equals the caller's declared civil time, if any), an entity's declared primary clock, or the caller's
-     default clock; the last two are stated (`clock_defaulted_to_primary` / `_to_caller`) unless the question
+   - *Clocks*: `during` and diff instants may use only the caller's declared civil clock when the question
+     names its timescale (a civil clock's epoch and tick length are never the model's to choose), an entity's
+     declared primary clock, or the caller's default clock; the last two are stated (`clock_defaulted_to_primary` / `_to_caller`) unless the question
      says "its own clock". Anything else is `clock_not_stated` or `clock_not_declared` and is removed from the
      draft. A relative phrase ("overnight", "last week") with no explicit date or tick is
      `time_phrase_unresolved`: the planner has no clock reading (determinism).
-   - *Frames and units*: a region needs a frame declared for an entity or the caller and a unit the question
-     (or the caller) states; bridges must be declared for an entity. Otherwise `frame_not_declared`,
+   - *Frames and units*: a region needs a frame declared for an entity or the caller and a unit written in
+     the question (next to a number, or spelled out; the bare word "in" is not inches) or declared by the
+     caller (stated back as `unit_defaulted_to_caller`, and `frame_defaulted_to_caller` for a caller frame); bridges must be declared for an entity. Otherwise `frame_not_declared`,
      `unit_not_stated`, `bridge_not_declared`, and the region is removed.
-   - *Claims*: a `Why` needs its claim id quoted in the question (`claim_not_quoted`).
-   - *Defaults applied*: `as_of_default`, `as_of_overridden` (the model's `as_of` differs from the caller's and
-     the question states no transaction: the caller's wins), `include_inferred_default`, `budget_default`.
+   - *Claims*: a `Why` needs its claim id quoted in the question as a whole token (`claim_not_quoted`);
+     finding pointers index the model's own `explain` tuple.
+   - *Defaults applied and overrides*: `as_of_default`, `include_inferred_default`, `budget_default`; and
+     where the model departs from the caller's value without the question saying so, the caller's value
+     wins and the departure is stated: `as_of_overridden` (no transaction stated), `include_inferred_overridden`
+     (the question does not mention inference), `budget_overridden` (a limit the question does not state).
+     A model cannot loosen a control policy's evidence-only default silently.
+   - Parts removed for a blocker take their dependents with them (regions take frame bridges, a removed
+     `during` or diff takes the clock bridges that related its clock), so the draft stays editable.
 7. **Status and execution.** `READY` (nothing blocks), `NEEDS_CHOICE` (only ambiguity blocks), `NEEDS_INPUT`
    (something the question did not state; the draft with the unsupported parts removed is shown, or none if
    no valid draft remains: `draft_withdrawn`), `INVALID`, `FAILED` (unavailable, refused, truncated, bad

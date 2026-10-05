@@ -153,7 +153,7 @@ def test_choose_settles_an_ambiguity_without_asking_the_model_again() -> None:
     assert settled.lineage == first.lineage
     with pytest.raises(ValueError, match="not a candidate"):
         choose(first, "AMR-09", "asset_tag:AMR-05")
-    with pytest.raises(ValueError, match="not an ambiguous mention"):
+    with pytest.raises(ValueError, match="only a needs_choice plan"):
         choose(settled, "AMR-09", "asset_tag:AMR-09")
 
 
@@ -173,12 +173,20 @@ def test_a_primary_clock_default_is_stated() -> None:
 def test_a_civil_clock_needs_its_timescale_named() -> None:
     civil = CivilTime("utc", "unix", Fraction(1, 10**9))
     query = Query(True, Budget(100), frozenset({AMR07}), during=During(civil, 1, 2), graph=RUNS)
-    named = planned("AMR-07 runs between 1 and 2 UTC?", ScriptedModel(query))
+    named = planned("AMR-07 runs between 1 and 2 UTC?", ScriptedModel(query), profile="agent_utc")
     assert named.executable and named.query is not None and named.query.during is not None
-    unnamed = planned("AMR-07 runs between 1 and 2?", ScriptedModel(query))
+    unnamed = planned("AMR-07 runs between 1 and 2?", ScriptedModel(query), profile="agent_utc")
     # AMR-07's primary clock is its own domain clock, so a UTC guess is blocked.
     assert "clock_not_stated" in codes(unnamed, Severity.BLOCKING)
     assert unnamed.query is not None and unnamed.query.during is None
+
+
+def test_a_civil_clock_the_caller_did_not_declare_is_never_assumed() -> None:
+    civil = CivilTime("gps", "gps", Fraction(1, 10**9))
+    query = Query(True, Budget(100), frozenset({AMR07}), during=During(civil, 1, 2), graph=RUNS)
+    result = planned("GPS dropouts of AMR-07 between 1000 and 2000", ScriptedModel(query))
+    assert "clock_not_declared" in codes(result, Severity.BLOCKING)
+    assert result.query is not None and result.query.during is None
 
 
 def test_a_caller_civil_default_must_match_exactly() -> None:
@@ -265,3 +273,158 @@ def test_a_different_model_answer_is_a_different_lineage() -> None:
     assert a.lineage.model_id != b.lineage.model_id
     assert a.lineage.request_sha256 == b.lineage.request_sha256
     assert a.lineage.response_sha256 == b.lineage.response_sha256
+
+
+def test_choose_refuses_failed_plans_and_rewrites_diff_subjects() -> None:
+    failed = planned("Which runs does AMR-09 appear in?", ScriptedModel(None, fail="down"))
+    with pytest.raises(ValueError, match="only a needs_choice plan"):
+        choose(failed, "AMR-09", "asset_tag:AMR-09")
+    other = Subject("machine", "asset_tag:AMR-09")
+    query = Query(
+        True,
+        Budget(100),
+        frozenset({Subject("asset", "cmms_asset:AMR-09")}),
+        explain=(Diff(Subject("asset", "cmms_asset:AMR-09"), 1, 2),),
+    )
+    first = planned("What changed about AMR-09 between transactions 1 and 2?", ScriptedModel(query))
+    settled = choose(first, "AMR-09", "asset_tag:AMR-09")
+    assert settled.query is not None
+    assert settled.query.explain == (Diff(other, 1, 2),)
+    assert settled.query.subjects == frozenset({other})
+
+
+def test_choose_adds_the_chosen_entity_when_the_draft_named_none() -> None:
+    query = Query(True, Budget(100), frozenset({Subject("run")}))
+    first = planned("Which runs of AMR-09 are there?", ScriptedModel(query))
+    assert first.status is PlanStatus.NEEDS_CHOICE
+    settled = choose(first, "AMR-09", "cmms_asset:AMR-09")
+    assert settled.query is not None
+    assert Subject("asset", "cmms_asset:AMR-09") in settled.query.subjects
+
+
+def region(unit: str) -> FrameRegion:
+    frame = world()[0].lookup("asset_tag:ARM-3A", as_of=None)
+    assert frame is not None
+    return FrameRegion(frame.frames[0], unit, Box((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)))
+
+
+@pytest.mark.parametrize(
+    ("question", "unit", "stated"),
+    [
+        ("Was ARM-3A in the base_link frame?", "in", False),  # a preposition is not inches
+        ("ARM-3A in a 3 in box in base_link", "in", True),
+        ("ARM-3A, I'm asking about base_link", "m", False),
+        ("ARM-3A within 2 m in base_link", "m", True),
+        ("ARM-3A within 2 metres in base_link", "m", True),
+        ("ARM-3A within 40 inches in base_link", "in", True),
+    ],
+)
+def test_a_unit_must_be_written_not_just_a_word_that_spells_it(
+    question: str, unit: str, stated: bool
+) -> None:
+    query = Query(
+        True,
+        Budget(100),
+        frozenset({Subject("machine", "asset_tag:ARM-3A")}),
+        regions=frozenset({region(unit)}),
+    )
+    result = planned(question, ScriptedModel(query))
+    assert ("unit_not_stated" not in codes(result, Severity.BLOCKING)) is stated
+
+
+def test_caller_unit_and_frame_defaults_are_stated() -> None:
+    frame = world()[1]["agent_geo"].frames[0]
+    query = Query(
+        True,
+        Budget(100),
+        regions=frozenset({FrameRegion(frame, "m", Box((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)))}),
+    )
+    result = planned(
+        "what is in that corner of the site?", ScriptedModel(query), profile="agent_geo"
+    )
+    assert result.executable
+    assert {"unit_defaulted_to_caller", "frame_defaulted_to_caller"} <= codes(result, Severity.INFO)
+
+
+def test_clock_bridges_are_dropped_with_the_clock_they_related() -> None:
+    entity = world()[0].lookup("asset_tag:AMR-07", as_of=None)
+    assert entity is not None and entity.primary_clock is not None
+    query = Query(
+        True,
+        Budget(100),
+        frozenset({AMR07}),
+        during=During(entity.primary_clock, 5, 9),
+        clock_bridges=frozenset(entity.clock_bridges),
+        graph=RUNS,
+    )
+    result = planned("What did AMR-07 do last week?", ScriptedModel(query))
+    assert result.query is not None, "the draft stays editable"
+    assert result.query.during is None and result.query.clock_bridges == frozenset()
+    assert "draft_withdrawn" not in codes(result)
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["Was AMR-07 past the dock earlier than tick 500 between 10 and 20?"],
+)
+def test_ordinary_words_do_not_trip_the_relative_time_check(question: str) -> None:
+    entity = world()[0].lookup("asset_tag:AMR-07", as_of=None)
+    assert entity is not None and entity.primary_clock is not None
+    query = Query(
+        True, Budget(100), frozenset({AMR07}), during=During(entity.primary_clock, 10, 20)
+    )
+    result = planned(question + " on its own clock", ScriptedModel(query))
+    assert "time_phrase_unresolved" not in codes(result)
+
+
+def test_an_unrelated_number_does_not_anchor_a_relative_phrase() -> None:
+    entity = world()[0].lookup("asset_tag:AMR-07", as_of=None)
+    assert entity is not None and entity.primary_clock is not None
+    query = Query(
+        True, Budget(100), frozenset({AMR07}), during=During(entity.primary_clock, 10, 20)
+    )
+    result = planned(
+        "what happened yesterday, as of transaction 1234 on its own clock", ScriptedModel(query)
+    )
+    assert "time_phrase_unresolved" in codes(result, Severity.BLOCKING)
+
+
+def test_a_model_cannot_loosen_include_inferred_or_the_budget_silently() -> None:
+    query = Query(True, Budget(9000), frozenset({AMR07}), graph=RUNS)
+    result = planned("Which runs does AMR-07 appear in?", ScriptedModel(query), profile="policy")
+    assert result.query is not None
+    assert result.query.include_inferred is False and result.query.budget == Budget(
+        32, 2048, None, 50
+    )
+    assert {"include_inferred_overridden", "budget_overridden"} <= codes(result, Severity.INFO)
+
+
+def test_a_stated_budget_and_inference_request_are_kept() -> None:
+    query = Query(True, Budget(7), frozenset({AMR07}), graph=RUNS)
+    result = planned(
+        "Include inferred claims: runs of AMR-07, at most 7 items",
+        ScriptedModel(query),
+        profile="policy",
+    )
+    assert result.query == query and "budget_overridden" not in codes(result)
+
+
+def test_a_claim_id_must_be_quoted_as_a_whole_token() -> None:
+    from neptune_context.query.model import Why
+
+    claim = "claim:sha256:" + "ab" * 32
+    query = Query(True, Budget(100), frozenset({AMR07}), explain=(Why(claim),))
+    glued = planned(f"why x{claim}", ScriptedModel(query))
+    assert "claim_not_quoted" in codes(glued, Severity.BLOCKING)
+    assert planned(f"why {claim}?", ScriptedModel(query)).executable
+
+
+def test_explain_pointers_name_the_models_own_indices() -> None:
+    from neptune_context.query.model import Why
+
+    good_claim = "claim:sha256:" + "cd" * 32
+    bad_claim = "claim:sha256:" + "ef" * 32
+    query = Query(True, Budget(100), frozenset({AMR07}), explain=(Why(bad_claim), Why(good_claim)))
+    result = planned(f"explain {good_claim}", ScriptedModel(query))
+    (finding,) = (f for f in result.findings if f.code.value == "claim_not_quoted")
+    assert finding.at == "/explain/0"

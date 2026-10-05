@@ -47,6 +47,10 @@ class PlanFindingCode(StrEnum):
     CLOCK_DEFAULTED_TO_PRIMARY = "clock_defaulted_to_primary"
     CLOCK_DEFAULTED_TO_CALLER = "clock_defaulted_to_caller"
     ENTITY_CHOSEN = "entity_chosen"
+    INCLUDE_INFERRED_OVERRIDDEN = "include_inferred_overridden"
+    BUDGET_OVERRIDDEN = "budget_overridden"
+    UNIT_DEFAULTED_TO_CALLER = "unit_defaulted_to_caller"
+    FRAME_DEFAULTED_TO_CALLER = "frame_defaulted_to_caller"
     # Needs the user (blocking).
     AMBIGUOUS_ENTITY = "ambiguous_entity"
     UNKNOWN_ENTITY = "unknown_entity"

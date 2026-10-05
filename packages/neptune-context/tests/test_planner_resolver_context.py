@@ -73,3 +73,14 @@ def test_regex_metacharacters_in_names_are_literal() -> None:
     odd = Entity("person", "person:j.alvarez", aliases=("J. Alvarez (night)",))
     assert idx(odd).find("ask J. Alvarez (night) and jXalvarez", as_of=None)[0].candidates == (odd,)
     assert len(idx(odd).find("jXalvarez", as_of=None)) == 0
+
+
+def test_a_value_and_label_differing_only_in_case_are_one_candidate() -> None:
+    entity = Entity("machine", "asset_tag:amr-07", label="AMR-07")
+    (mention,) = idx(entity).find("AMR-07?", as_of=None)
+    assert mention.candidates == (entity,) and not mention.ambiguous
+
+
+def test_case_folding_that_changes_length_does_not_shift_spans() -> None:
+    (mention,) = idx(AMR7).find("Straße crew: did AMR-07 stop?", as_of=None)
+    assert mention.text == "AMR-07"

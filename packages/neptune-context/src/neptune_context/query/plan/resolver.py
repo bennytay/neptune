@@ -109,7 +109,7 @@ class EntityResolver(Protocol):
 
 def _surface_pattern(surface: str) -> re.Pattern[str]:
     # Whole-token match: not glued to a word character or a hyphen on either side.
-    return re.compile(rf"(?<![\w-]){re.escape(surface.casefold())}(?![\w-])")
+    return re.compile(rf"(?<![\w-]){re.escape(surface)}(?![\w-])", re.IGNORECASE)
 
 
 class DeclaredIdentifierIndex:
@@ -130,14 +130,16 @@ class DeclaredIdentifierIndex:
         surfaces: dict[str, list[Entity]] = {}
         for entity in sorted(by_id.values(), key=lambda e: (e.kind, e.declared_id)):
             for name in {entity.value, *(n for n in (entity.label, *entity.aliases) if n)}:
-                surfaces.setdefault(name.casefold(), []).append(entity)
+                bucket = surfaces.setdefault(name.casefold(), [])
+                if entity not in bucket:
+                    bucket.append(entity)
         self._surfaces = sorted(surfaces.items(), key=lambda kv: (-len(kv[0]), kv[0]))
 
     def lookup(self, declared_id: str, *, as_of: int | None) -> Entity | None:
         return self._by_id.get(declared_id)
 
     def find(self, text: str, *, as_of: int | None) -> tuple[Mention, ...]:
-        working = text.casefold()
+        working = text
         hits: list[tuple[int, Mention]] = []
         for surface, entities in self._surfaces:
             pattern = _surface_pattern(surface)

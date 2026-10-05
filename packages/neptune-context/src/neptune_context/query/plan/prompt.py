@@ -11,6 +11,7 @@ query decoder, which is the authority on what a valid query is.
 from __future__ import annotations
 
 import hashlib
+from functools import cache
 from typing import TYPE_CHECKING, Any, Final
 
 from neptune.identity import canonical_json
@@ -139,6 +140,7 @@ def system_prompt() -> str:
     return text
 
 
+@cache
 def template_sha256() -> str:
     """The lineage's template hash: the system prompt and the output schema it is bound to."""
     payload: JsonObject = {

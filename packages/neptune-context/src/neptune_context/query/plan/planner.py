@@ -30,6 +30,7 @@ from neptune_context.query.model import (
     Clock,
     Diff,
     DomainClock,
+    Explain,
     FrameRef,
     Instant,
     Query,
@@ -90,10 +91,12 @@ class Defaults:
 
 _RELATIVE_TIME: Final = re.compile(
     r"\b(?:yesterday|today|tonight|overnight|last\s+(?:night|week|month|year|hour|\d+\s+\w+)"
-    r"|this\s+(?:morning|afternoon|evening|week|month)|past\s+(?:\d+\s+)?\w+|recently|earlier)\b",
+    r"|this\s+(?:morning|afternoon|evening|week|month)"
+    r"|past\s+(?:\d+\s+)?(?:minutes?|hours?|days?|weeks?|months?|years?)|recently)\b",
     re.IGNORECASE,
 )
-_ANCHOR: Final = re.compile(r"\d{4}")  # an explicit year, date or tick count
+_ANCHOR: Final = re.compile(r"\d{4}-\d{2}-\d{2}|\d{6,}")  # an explicit ISO date or a tick count
+_INFERENCE: Final = re.compile(r"infer|evidence only|observed only", re.IGNORECASE)
 _TIMESCALES: Final = {"utc": "utc", "tai": "tai", "gps": "gps", "posix": "posix", "unix": "posix"}
 _OWN_CLOCK: Final = re.compile(
     r"\b(?:own|native|primary|source|device|vehicle|robot|machine|onboard|its)\s+clock\b",
@@ -123,15 +126,19 @@ def _clock_name(clock: Clock) -> str:
     return f"civil {clock.timescale}/{clock.epoch} at {clock.resolution} s per tick"
 
 
-def _words(text: str, word: str) -> bool:
-    return re.search(rf"(?<![A-Za-z]){re.escape(word)}(?![A-Za-z])", text) is not None
-
-
-def _unit_stated(text: str, unit: str, defaults: Defaults) -> bool:
-    if unit == defaults.length_unit:
+def _unit_stated(text: str, unit: str) -> bool:
+    """The unit is written next to a number (``15 m``) or spelled out (``metres``)."""
+    pattern = rf"\d\s*{re.escape(unit)}(?![A-Za-z])"
+    if re.search(pattern, text):
         return True
-    lowered = text.casefold()
-    return _words(text, unit) or any(_words(lowered, w) for w in _UNIT_WORDS.get(unit, ()))
+    return any(
+        re.search(rf"(?<![A-Za-z]){word}(?![A-Za-z])", text, re.IGNORECASE)
+        for word in _UNIT_WORDS.get(unit, ())
+    )
+
+
+def _quoted(text: str, token: str) -> bool:
+    return re.search(rf"(?<![0-9A-Za-z]){re.escape(token)}(?![0-9A-Za-z])", text) is not None
 
 
 class _Review:
@@ -231,14 +238,19 @@ class _Review:
         """True when ``clock`` is the question's, an entity's declared one or the caller's."""
         if isinstance(clock, CivilTime) and clock.timescale in self.named:
             declared = self.defaults.civil_time
-            if declared is None or clock == declared:
+            if clock == declared:
                 return True
+            have = (
+                "declares no civil clock"
+                if declared is None
+                else f"declares {_clock_name(declared)}"
+            )
             self.findings.append(
                 _block(
                     Code.CLOCK_NOT_DECLARED,
                     at,
-                    f"the model used {_clock_name(clock)} but the caller declares "
-                    f"{_clock_name(declared)} for {clock.timescale} times",
+                    f"the model used {_clock_name(clock)} but the caller {have}; a civil "
+                    "clock's epoch and tick length are never guessed",
                     clock.timescale,
                 )
             )
@@ -303,11 +315,18 @@ class _Review:
 
     def run(self, query: Query) -> Query:
         """Checks ``query``; returns it with every blocked part removed (findings explain each)."""
+        out = self._review_defaults(query)
+        self.entities_of(out)
+        explain = self._review_explain(out)
+        out = dataclasses.replace(out, explain=tuple(item for _, item in explain))
+        out = self._review_time(out)
+        return self._review_space(out)
+
+    def _review_defaults(self, query: Query) -> Query:
         out = query
+        defaults = self.defaults
         if query.as_of != self.as_of:
-            stated = isinstance(query.as_of, int) and re.search(
-                rf"(?<!\d){query.as_of}(?!\d)", self.text
-            )
+            stated = isinstance(query.as_of, int) and _quoted(self.text, str(query.as_of))
             if not stated:
                 self.findings.append(
                     _info(
@@ -326,15 +345,39 @@ class _Review:
                     "as_of is the reader's head; the packet records the transaction it resolved to",
                 )
             )
-        if out.include_inferred == self.defaults.include_inferred:
+        if out.include_inferred != defaults.include_inferred and not _INFERENCE.search(self.text):
+            self.findings.append(
+                _info(
+                    Code.INCLUDE_INFERRED_OVERRIDDEN,
+                    "/include_inferred",
+                    f"the model set include_inferred {out.include_inferred} but the question does "
+                    f"not mention inference; used the {defaults.caller} default",
+                )
+            )
+            out = dataclasses.replace(out, include_inferred=defaults.include_inferred)
+        if out.include_inferred == defaults.include_inferred:
             self.findings.append(
                 _info(
                     Code.INCLUDE_INFERRED_DEFAULT,
                     "/include_inferred",
-                    f"include_inferred is {out.include_inferred} ({self.defaults.caller} default)",
+                    f"include_inferred is {out.include_inferred} ({defaults.caller} default)",
                 )
             )
-        if out.budget == self.defaults.budget:
+        limits = [
+            v
+            for v in (out.budget.items, out.budget.tokens, out.budget.bytes, out.budget.latency_ms)
+            if v is not None
+        ]
+        if out.budget != defaults.budget and not all(_quoted(self.text, str(v)) for v in limits):
+            self.findings.append(
+                _info(
+                    Code.BUDGET_OVERRIDDEN,
+                    "/budget",
+                    "the model set a budget the question does not state; used the caller's default",
+                )
+            )
+            out = dataclasses.replace(out, budget=defaults.budget)
+        if out.budget == defaults.budget:
             self.findings.append(
                 _info(
                     Code.BUDGET_DEFAULT,
@@ -342,50 +385,63 @@ class _Review:
                     f"budget is the caller's default: {out.budget.items} items",
                 )
             )
-        self.entities_of(out)
-        out = self._review_time(out)
-        out = self._review_space(out)
-        return self._review_explain(out)
+        return out
+
+    def _review_explain(self, query: Query) -> list[tuple[int, Explain]]:
+        """Each explain item with its index in the model's tuple (pointers stay meaningful)."""
+        kept: list[tuple[int, Explain]] = []
+        relative = self._unresolved_phrase()
+        for index, item in enumerate(query.explain):
+            at = f"/explain/{index}"
+            if isinstance(item, Why) and not _quoted(self.text, item.claim_id):
+                self.findings.append(
+                    _block(
+                        Code.CLAIM_NOT_QUOTED,
+                        at,
+                        "a claim id must be quoted in the question; it cannot be inferred",
+                        item.claim_id,
+                    )
+                )
+                continue
+            if isinstance(item, Diff):
+                clocks = [p.clock for p in (item.before, item.after) if isinstance(p, Instant)]
+                if clocks and relative is not None:
+                    self._unresolved(relative, at)
+                    continue
+                if not all([self.classify_clock(c, at) for c in clocks]):
+                    continue
+            kept.append((index, item))
+        return kept
+
+    def _unresolved_phrase(self) -> str | None:
+        """A relative time phrase with no explicit date or tick count to anchor it, if any."""
+        bare = self.text
+        for mention in self.mentions:
+            bare = bare.replace(mention.text, " ")
+        match = _RELATIVE_TIME.search(bare)
+        return match.group(0) if match and not _ANCHOR.search(bare) else None
+
+    def _unresolved(self, phrase: str, at: str) -> None:
+        self.findings.append(
+            _block(
+                Code.TIME_PHRASE_UNRESOLVED,
+                at,
+                f"{phrase!r} is relative to now, which the planner does not read; "
+                "state the interval",
+                phrase,
+            )
+        )
 
     def _review_time(self, query: Query) -> Query:
         out = query
-        spans = [m.text for m in self.mentions]
-        bare = self.text
-        for span in spans:
-            bare = bare.replace(span, " ")
-        if (
-            _RELATIVE_TIME.search(bare)
-            and not _ANCHOR.search(bare)
-            and (out.during is not None or any(isinstance(e, Diff) for e in out.explain))
-        ):
-            match = _RELATIVE_TIME.search(bare)
-            assert match is not None
-            self.findings.append(
-                _block(
-                    Code.TIME_PHRASE_UNRESOLVED,
-                    "/during",
-                    f"{match.group(0)!r} is relative to now, which the planner does not read; "
-                    "state the interval",
-                    match.group(0),
-                )
-            )
-            out = dataclasses.replace(
-                out,
-                during=None,
-                explain=tuple(
-                    e for e in out.explain if not (isinstance(e, Diff) and _has_instant(e))
-                ),
-            )
-        if out.during is not None and not self.classify_clock(out.during.clock, "/during/clock"):
-            out = dataclasses.replace(out, during=None)
-        kept = []
-        for index, item in enumerate(out.explain):
-            if isinstance(item, Diff):
-                clocks = [p.clock for p in (item.before, item.after) if isinstance(p, Instant)]
-                if not all(self.classify_clock(c, f"/explain/{index}") for c in clocks):
-                    continue
-            kept.append(item)
-        out = dataclasses.replace(out, explain=tuple(kept))
+        phrase = self._unresolved_phrase()
+        during = out.during
+        if during is not None:
+            if phrase is not None:
+                self._unresolved(phrase, "/during")
+                out = dataclasses.replace(out, during=None)
+            elif not self.classify_clock(during.clock, "/during/clock"):
+                out = dataclasses.replace(out, during=None)
         known = {b for e in self.pool() for b in e.clock_bridges}
         declared = {b for b in out.clock_bridges if b in known}
         for bridge in sorted(out.clock_bridges - declared, key=lambda b: b.mapping_id):
@@ -397,15 +453,21 @@ class _Review:
                     bridge.mapping_id,
                 )
             )
+        used: set[Clock] = {out.during.clock} if out.during is not None else set()
+        for item in out.explain:
+            if isinstance(item, Diff):
+                used |= {p.clock for p in (item.before, item.after) if isinstance(p, Instant)}
+        # A bridge exists to place one used clock on another; with its clocks gone it is dropped.
+        declared = {b for b in declared if b.source in used or b.target in used}
         return dataclasses.replace(out, clock_bridges=frozenset(declared))
 
     def _review_space(self, query: Query) -> Query:
-        known = {f for e in self.pool() for f in e.frames} | set(self.defaults.frames)
+        pooled = {f for e in self.pool() for f in e.frames}
         keep = []
         for region in sorted(
             query.regions, key=lambda r: (r.frame.graph_id, r.frame.frame_id, r.unit)
         ):
-            if region.frame not in known:
+            if region.frame not in pooled and region.frame not in self.defaults.frames:
                 self.findings.append(
                     _block(
                         Code.FRAME_NOT_DECLARED,
@@ -415,7 +477,9 @@ class _Review:
                         region.frame.frame_id,
                     )
                 )
-            elif not _unit_stated(self.text, region.unit, self.defaults):
+                continue
+            stated = _unit_stated(self.text, region.unit)
+            if not stated and region.unit != self.defaults.length_unit:
                 self.findings.append(
                     _block(
                         Code.UNIT_NOT_STATED,
@@ -424,8 +488,27 @@ class _Review:
                         region.unit,
                     )
                 )
-            else:
-                keep.append(region)
+                continue
+            if not stated:
+                self.findings.append(
+                    _info(
+                        Code.UNIT_DEFAULTED_TO_CALLER,
+                        "/regions",
+                        f"the question states no unit; used the caller's {region.unit!r}",
+                        region.unit,
+                    )
+                )
+            if region.frame not in pooled:
+                self.findings.append(
+                    _info(
+                        Code.FRAME_DEFAULTED_TO_CALLER,
+                        "/regions",
+                        f"frame {region.frame.frame_id!r} is the caller's declared frame, not "
+                        "one declared for the query's entities",
+                        region.frame.frame_id,
+                    )
+                )
+            keep.append(region)
         out = dataclasses.replace(query, regions=frozenset(keep))
         known_bridges = {b for e in self.pool() for b in e.frame_bridges}
         bridges = {b for b in out.frame_bridges if b in known_bridges}
@@ -442,29 +525,9 @@ class _Review:
             bridges = set()  # bridges existed to relate the regions that were removed
         return dataclasses.replace(out, frame_bridges=frozenset(bridges))
 
-    def _review_explain(self, query: Query) -> Query:
-        kept = []
-        for index, item in enumerate(query.explain):
-            if isinstance(item, Why) and item.claim_id not in self.text:
-                self.findings.append(
-                    _block(
-                        Code.CLAIM_NOT_QUOTED,
-                        f"/explain/{index}",
-                        "a claim id must be quoted in the question; it cannot be inferred",
-                        item.claim_id,
-                    )
-                )
-                continue
-            kept.append(item)
-        return dataclasses.replace(query, explain=tuple(kept))
-
 
 def _subject_key(subject: Subject) -> tuple[str, str, int]:
     return (subject.kind, subject.declared_id or "", subject.same_as_depth)
-
-
-def _has_instant(diff: Diff) -> bool:
-    return isinstance(diff.before, Instant) or isinstance(diff.after, Instant)
 
 
 def _failed(
@@ -581,7 +644,6 @@ def plan(
     query = review.run(decoded)
     findings = list(review.findings)
     blocking = [f for f in findings if f.severity is Severity.BLOCKING]
-    refusal = None
     result: Query | None = query
     if blocking:
         invalid = validate(query)
@@ -596,13 +658,8 @@ def plan(
             )
             result = None
     findings.sort(key=_finding_order)
-    status = PlanStatus.READY
-    if any(f.severity is Severity.BLOCKING for f in findings):
-        only_ambiguity = all(
-            f.code is Code.AMBIGUOUS_ENTITY for f in findings if f.severity is Severity.BLOCKING
-        )
-        status = PlanStatus.NEEDS_CHOICE if only_ambiguity else PlanStatus.NEEDS_INPUT
-    return PlannedQuery(status, text, result, lineage, mentions, tuple(findings), refusal)
+    status = _status(findings)
+    return PlannedQuery(status, text, result, lineage, mentions, tuple(findings))
 
 
 def _finding_order(finding: PlanFinding) -> tuple[int, str, str, str]:
@@ -617,32 +674,43 @@ def _finding_order(finding: PlanFinding) -> tuple[int, str, str, str]:
 def choose(planned: PlannedQuery, mention_text: str, declared_id: str) -> PlannedQuery:
     """Settle one ambiguous mention with the user's choice, without asking the model again.
 
-    The subject the draft carries for any candidate of that mention becomes ``declared_id`` (which
-    must be one of the candidates), the ambiguity finding gives way to an info finding that the
-    user chose, and the status is recomputed. The lineage is unchanged: the plan is still the
-    model's, edited by a person.
+    Only a ``NEEDS_CHOICE`` plan can be settled. Every subject the draft carries for a candidate of
+    that mention (in ``subjects`` and in a ``Diff``) becomes ``declared_id`` (which must be one of
+    the candidates), or the chosen subject is added when the draft had none; the ambiguity finding
+    gives way to an info finding that the user chose, and the status is recomputed. The lineage is
+    unchanged: the plan is still the model's, edited by a person.
     """
+    if planned.status is not PlanStatus.NEEDS_CHOICE or planned.query is None:
+        raise ValueError(f"only a needs_choice plan can be settled, not {planned.status}")
     mention = next((m for m in planned.mentions if m.text == mention_text and m.ambiguous), None)
     if mention is None:
         raise ValueError(f"{mention_text!r} is not an ambiguous mention of this plan")
     chosen = next((c for c in mention.candidates if c.declared_id == declared_id), None)
     if chosen is None:
         raise ValueError(f"{declared_id!r} is not a candidate for {mention_text!r}")
-    others = {c.declared_id for c in mention.candidates}
+    candidates = tuple(c.declared_id for c in mention.candidates)
+
+    def swap(subject: Subject) -> Subject:
+        if subject.declared_id in candidates:
+            return Subject(chosen.kind, chosen.declared_id, subject.same_as_depth)
+        return subject
+
     query = planned.query
-    if query is not None:
-        subjects = frozenset(
-            Subject(chosen.kind, chosen.declared_id, s.same_as_depth)
-            if s.declared_id in others
-            else s
-            for s in query.subjects
-        )
-        query = dataclasses.replace(query, subjects=subjects)
-    gone = {Code.AMBIGUOUS_ENTITY}
+    explain = tuple(
+        dataclasses.replace(item, subject=swap(item.subject)) if isinstance(item, Diff) else item
+        for item in query.explain
+    )
+    subjects = frozenset(swap(s) for s in query.subjects)
+    named = {s.declared_id for s in subjects} | {
+        i.subject.declared_id for i in explain if isinstance(i, Diff)
+    }
+    if chosen.declared_id not in named:
+        subjects |= {Subject(chosen.kind, chosen.declared_id)}
+    query = dataclasses.replace(query, subjects=subjects, explain=explain)
     findings = [
         f
         for f in planned.findings
-        if not (f.code in gone and f.details == tuple(c.declared_id for c in mention.candidates))
+        if not (f.code is Code.AMBIGUOUS_ENTITY and f.details == candidates)
     ]
     findings.append(
         _info(
@@ -652,15 +720,28 @@ def choose(planned: PlannedQuery, mention_text: str, declared_id: str) -> Planne
             declared_id,
         )
     )
+    invalid = validate(query)
+    result: Query | None = query
+    if invalid:
+        codes = ", ".join(sorted({str(f.code) for f in invalid}))
+        findings.append(
+            _block(Code.DRAFT_WITHDRAWN, "/", f"the chosen entity leaves no valid draft: {codes}")
+        )
+        result = None
     findings.sort(key=_finding_order)
     mentions = tuple(Mention(m.text, (chosen,)) if m is mention else m for m in planned.mentions)
-    blocking = [f for f in findings if f.severity is Severity.BLOCKING]
-    status = PlanStatus.READY
-    if blocking:
-        only = all(f.code is Code.AMBIGUOUS_ENTITY for f in blocking)
-        status = PlanStatus.NEEDS_CHOICE if only else PlanStatus.NEEDS_INPUT
-    if query is not None and validate(query):
-        query, status = None, PlanStatus.NEEDS_INPUT
     return dataclasses.replace(
-        planned, status=status, query=query, mentions=mentions, findings=tuple(findings)
+        planned,
+        status=_status(findings),
+        query=result,
+        mentions=mentions,
+        findings=tuple(findings),
     )
+
+
+def _status(findings: list[PlanFinding]) -> PlanStatus:
+    blocking = [f for f in findings if f.severity is Severity.BLOCKING]
+    if not blocking:
+        return PlanStatus.READY
+    only_ambiguity = all(f.code is Code.AMBIGUOUS_ENTITY for f in blocking)
+    return PlanStatus.NEEDS_CHOICE if only_ambiguity else PlanStatus.NEEDS_INPUT
