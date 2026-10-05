@@ -67,7 +67,7 @@ def test_twenty_thousand_rows_stream_under_the_cap_to_the_in_memory_bytes(tmp_pa
 
 
 @pytest.mark.slow
-def test_a_hundred_thousand_and_a_million_rows_stay_under_the_cap_in_linear_time(
+def test_a_hundred_thousand_and_a_million_rows_write_and_read_under_the_cap_in_linear_time(
     tmp_path: Path,
 ) -> None:
     small = write(100_000, tmp_path)
@@ -78,17 +78,8 @@ def test_a_hundred_thousand_and_a_million_rows_stay_under_the_cap_in_linear_time
     # one more merge level are the slack); an in-memory sort or a quadratic step would not pass.
     per_row = (small["seconds"] / 100_000, large["seconds"] / 1_000_000)
     assert per_row[1] < 2 * per_row[0], per_row
-
-
-@pytest.mark.slow
-def test_reading_and_validating_a_hundred_thousand_and_a_million_rows_stay_under_the_cap(
-    tmp_path: Path,
-) -> None:
-    """ADR 0070: reading, verifying and validating hold no more than writing does."""
-    write(100_000, tmp_path)
-    write(1_000_000, tmp_path)
-    small = read(100_000, tmp_path)
-    large = read(1_000_000, tmp_path)
+    # ADR 0070: reading, verifying and validating the same packages hold no more than writing.
+    small, large = read(100_000, tmp_path), read(1_000_000, tmp_path)
     assert small["peak_mib"] < PEAK_CAP_MIB
     assert large["peak_mib"] < PEAK_CAP_MIB
     per_row = (small["seconds"] / 100_000, large["seconds"] / 1_000_000)
