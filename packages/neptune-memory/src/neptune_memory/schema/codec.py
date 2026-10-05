@@ -35,6 +35,7 @@ from neptune_memory.schema.claim import (
     ValueType,
     parse_claim_id,
 )
+from neptune_memory.schema.clock_map import clock_map_from_json
 from neptune_memory.schema.interval import OPEN, LedgerTx, Open, ledger_tx
 from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.supersede import (
@@ -109,6 +110,8 @@ def node_from_json(data: JsonValue) -> NodeRef:
 def _literal_value(datatype: ValueType, value: JsonValue) -> LiteralValue:
     if datatype is ValueType.INSTANT:
         return timestamp_from_json(value)
+    if datatype is ValueType.CLOCK_MAP:
+        return clock_map_from_json(value)
     if datatype in (ValueType.REAL, ValueType.QUANTITY) and not (
         isinstance(value, int) and not isinstance(value, bool)
     ):
