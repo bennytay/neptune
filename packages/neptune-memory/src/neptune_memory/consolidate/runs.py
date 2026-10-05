@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
 from neptune.identity import canonical_json
-from neptune.model.alignment import ClockMapping, MemberRole, RunAssembly
+from neptune.model.alignment import ClockMapping, MemberRole, RunAssembly, ValidityWindow
 from neptune.model.finding import Severity
 from neptune.model.ids import LogicalId
 from neptune.model.knowledge import (
@@ -362,18 +362,72 @@ def _hull(placements: Sequence[Placement]) -> Placement | None:
     )
 
 
-def _within(mapping: ClockMapping, placement: Placement) -> bool:
-    """Whether the mapping's window covers the placement; a bound it does not state is open."""
-    if not isinstance(mapping.validity, Known):
-        return True
-    window = mapping.validity.value
-    if isinstance(window.start, Known) and placement.start.ticks < window.start.value.ticks:
+@dataclass(frozen=True)
+class _Window:
+    """The part of a stated window every reading of it agrees on: ``[start, end)`` on ``clock``
+    (``None`` is a bound no reading states). ``ambiguous`` when the window or a bound has several
+    readings: the window is then their intersection, never one reading picked."""
+
+    clock: RecordId
+    start: Timestamp | None
+    end: Timestamp | None
+    ambiguous: bool
+
+
+def _bound(bound: Knowledge[Timestamp]) -> tuple[list[Timestamp], bool]:
+    if isinstance(bound, Known):
+        return [bound.value], False
+    if isinstance(bound, Ambiguous):
+        return [c.value for c in bound.candidates], True
+    return [], False  # unstated: open on that side (ADR 0008 §2)
+
+
+def _definite(validity: Knowledge[ValidityWindow]) -> _Window | None:
+    """``None`` when no window is stated (the relation holds as stated, unbounded). An
+    ``Ambiguous`` window, or one with an ``Ambiguous`` bound, is the intersection of its
+    readings: the latest start and the earliest end any reading states. Readings on different
+    clocks share no instant: the window is then empty."""
+    if isinstance(validity, Known):
+        windows, ambiguous = [validity.value], False
+    elif isinstance(validity, Ambiguous):
+        windows, ambiguous = [c.value for c in validity.candidates], True
+    else:
+        return None
+    clock = windows[0].clock
+    if any(w.clock != clock for w in windows):
+        return _Window(clock, Timestamp(0, clock), Timestamp(0, clock), True)
+    starts: list[Timestamp] = []
+    ends: list[Timestamp] = []
+    for window in windows:
+        found, several = _bound(window.start)
+        starts += found
+        ambiguous |= several
+        found, several = _bound(window.end)
+        ends += found
+        ambiguous |= several
+    return _Window(
+        clock,
+        max(starts, key=lambda t: t.ticks) if starts else None,
+        min(ends, key=lambda t: t.ticks) if ends else None,
+        ambiguous,
+    )
+
+
+def _covers(window: _Window, placement: Placement) -> bool:
+    if window.start is not None and placement.start.ticks < window.start.ticks:
         return False
-    if isinstance(window.end, Known):
-        return isinstance(placement.end, Timestamp) and (
-            placement.end.ticks <= window.end.value.ticks
-        )
+    if window.end is not None:
+        return isinstance(placement.end, Timestamp) and placement.end.ticks <= window.end.ticks
     return True
+
+
+def _ambiguous_window(records: Sequence[RecordId], what: str) -> ConsolidationFinding:
+    return _finding(
+        "ambiguous_window",
+        f"the {what} states its window ambiguously; only the part every reading agrees on is used",
+        records,
+        Severity.INFO,
+    )
 
 
 def _projections(view: _View, placement: Placement) -> list[Placement]:
@@ -389,7 +443,12 @@ def _projections(view: _View, placement: Placement) -> list[Placement]:
         anchor, rate = mapping.anchor, mapping.rate
         if civil is None or not isinstance(anchor, Known) or not isinstance(rate, Known):
             continue
-        if not _within(mapping, placement):
+        window = _definite(mapping.validity)
+        if window is not None and window.ambiguous:
+            view.findings.append(
+                _ambiguous_window((*placement.records, mapping.id), "clock mapping")
+            )
+        if window is not None and not _covers(window, placement):
             continue
         bound = (
             mapping.residual_bound.value.ticks if isinstance(mapping.residual_bound, Known) else 0
@@ -660,15 +719,18 @@ def _place(
             parts = sorted(
                 {link.part.id for _, links in assemblies.get(rid, ()) for link in links} - {rid}
             )
-            placed = [p for p in (primary[part] for part in parts) if p is not None]
-            base = _hull(placed)
+            placed = [primary[part] for part in parts]
+            # An untimed part may lie anywhere: with one, the span's bounds are not stated.
+            timed = [p for p in placed if p is not None]
+            base = _hull(timed) if len(timed) == len(placed) else None
             if base is None:
+                untimed = [part for part, p in zip(parts, placed, strict=True) if p is None]
                 view.findings.append(
                     _finding(
                         "untimed_run",
-                        "the run states no first instant and its parts span no one clock; "
-                        "no claim is placed on it",
-                        (rid,),
+                        "the run states no first instant and its parts span no stated interval "
+                        "on one clock; no claim is placed on it",
+                        (rid, *untimed),
                     )
                 )
         if base is None:
@@ -683,12 +745,17 @@ def _place(
 def _membership(view: _View, assembly: RunAssembly, over: Sequence[Placement]) -> list[Placement]:
     """Where an assembly's membership holds: the run's placements, cut to the assembly's stated
     window where it states one. A window bounds only placements on its own clock; with none
-    there, the window itself when its start is stated."""
-    if not isinstance(assembly.validity, Known):
+    there, the window itself when its start is stated. An ambiguous window is cut to the part
+    every reading agrees on (ADR 0009 §3)."""
+    window = _definite(assembly.validity)
+    if window is None:
         return list(over)
-    window = assembly.validity.value
-    start = view.place(window.start.value) if isinstance(window.start, Known) else None
-    end = view.place(window.end.value) if isinstance(window.end, Known) else None
+    if window.ambiguous:
+        view.findings.append(_ambiguous_window((assembly.id,), "run assembly"))
+    start = None if window.start is None else view.place(window.start)
+    end = None if window.end is None else view.place(window.end)
+    if start is not None and end is not None and not start < end:
+        return []  # readings that share no instant: no membership is certain anywhere
     clock = view.clocks[window.clock].domain_id if window.clock in view.clocks else window.clock
     out: list[Placement] = []
     for place in over:
@@ -788,13 +855,28 @@ def _roles(
                 if g is not None
             ]
             from_parts = False
+            unstated: list[RecordId] = []
             if not grounds and role == "machine":
-                grounds = _part_machines(node, runs, assemblies)
+                grounds, unstated = _part_machines(node, runs, assemblies)
                 from_parts = bool(grounds)
             if not grounds:
                 continue  # Unknown: nothing stated, nothing claimed
             many = CORE_PREDICATES.spec(predicate).cardinality is Cardinality.MANY
             known, candidates, distinct = _decide(grounds, many)
+            if unstated:
+                # A part that states no machine may be another robot's: what the other parts
+                # state is never the run's machine for certain, only a reading of it.
+                known, candidates = [], [*known, *candidates]
+                view.findings.append(
+                    _finding(
+                        "part_machine_unstated",
+                        "a recording part of the run states no machine; the machines its other "
+                        "parts state are candidates, none is the run's for certain",
+                        (*(r for g in grounds for r in g.records), *unstated),
+                        Severity.INFO,
+                        run=node.node_id,
+                    )
+                )
             if distinct > 1 and not many:
                 view.findings.append(
                     _finding(
@@ -835,10 +917,11 @@ def _part_machines(
     node: NodeRef,
     runs: Sequence[Run],
     assemblies: Mapping[RecordId, Sequence[tuple[RunAssembly, list[_Link]]]],
-) -> list[_Ground]:
+) -> tuple[list[_Ground], list[RecordId]]:
     """An assembled run that states no machine: the machines its recording parts declare, each
-    citing the part and the assembly that places it."""
+    citing the part and the assembly that places it, and the parts that state none."""
     grounds: list[_Ground] = []
+    unstated: list[RecordId] = []
     for run in runs:
         for _, links in assemblies.get(run.id, ()):
             for link in links:
@@ -852,7 +935,9 @@ def _part_machines(
                 )
                 if ground is not None:
                     grounds.append(ground)
-    return grounds
+                else:
+                    unstated.append(link.part.id)
+    return grounds, sorted(set(unstated))
 
 
 def _machine(run: Run) -> bytes | None:
@@ -868,7 +953,9 @@ def _continuation(
     """``continues`` between consecutive recording parts of one assembled run on one clock;
     ``continues_candidate`` both ways between parts whose times cannot be compared. Parts that
     overlap are concurrent, and parts that declare different machines are different robots:
-    neither continues the other."""
+    neither continues the other. A part with an open end may have ended before a later part
+    starts, and a part that states no machine may be another robot's: either leaves the link a
+    candidate, never ``continues``."""
     links: dict[RecordId, list[_Link]] = {}
     for run in runs:
         for _, found in assemblies.get(run.id, ()):
@@ -885,6 +972,10 @@ def _continuation(
             return False
         ma, mb = _machine(ra), _machine(rb)
         return ma is None or mb is None or ma == mb
+
+    def sure(a: RecordId, b: RecordId) -> bool:
+        """Both state one machine, or neither does (one recorder's parts, unnamed)."""
+        return (_machine(build.view.runs[a]) is None) == (_machine(build.view.runs[b]) is None)
 
     def cite(*rids: RecordId) -> tuple[list[EvidenceRef], list[RecordId]]:
         evidence = [ref for r in rids for link in links[r] for ref in link.evidence]
@@ -912,18 +1003,28 @@ def _continuation(
     }
 
     def relation(a: RecordId, b: RecordId) -> str:
-        """``before``, ``after``, ``concurrent`` or ``unknown``. Parts on one clock compare there,
-        and overlap means concurrent. Otherwise on a civil clock both reach, where a projection is
-        widened to whole ticks and its residual bound, so overlap there only means unordered."""
+        """``before``, ``after``, ``maybe_before``, ``maybe_after``, ``concurrent`` or
+        ``unknown``. Parts on one clock compare there, and overlap means concurrent, except that
+        a part whose end is open and that starts first may have ended before the other starts.
+        Otherwise on a civil clock both reach, where a projection is widened to whole ticks and
+        its residual bound, so overlap there only means unordered."""
         pa, pb = primary.get(a), primary.get(b)
         if pa is not None and pb is not None and pa.start.domain_id == pb.start.domain_id:
-            return _order(pa, pb) or "concurrent"
+            order = _order(pa, pb)
+            if order is not None:
+                return order
+            if isinstance(pa.end, Open) and pa.start <= pb.start:
+                return "maybe_before"
+            if isinstance(pb.end, Open) and pb.start <= pa.start:
+                return "maybe_after"
+            return "concurrent"
         ca, cb = civil[a], civil[b]
         if ca is not None and cb is not None and ca.start.domain_id == cb.start.domain_id:
             return _order(ca, cb) or "unknown"
         return "unknown"
 
     before: dict[RecordId, set[RecordId]] = {p: set() for p in parts}
+    maybe: dict[RecordId, set[RecordId]] = {p: set() for p in parts}  # possibly before
     for i, a in enumerate(parts):
         for b in parts[i + 1 :]:
             if not compatible(a, b):
@@ -933,16 +1034,23 @@ def _continuation(
                 before[b].add(a)
             elif rel == "after":
                 before[a].add(b)
+            elif rel == "maybe_before":
+                maybe[b].add(a)
+            elif rel == "maybe_after":
+                maybe[a].add(b)
             elif rel == "unknown":
                 emit(CANDIDATE_OF[CONTINUES], a, b)
                 emit(CANDIDATE_OF[CONTINUES], b, a)
-    # A part's nearest predecessors are the compatible earlier parts no other compatible earlier
-    # part follows, skipping parts of other machines and concurrent ones. One: it continues that
-    # part. Several (concurrent logs that all end before it): which it continues is ambiguous.
+    # A part's nearest predecessors are the compatible earlier parts, certain or possible, that
+    # no other one certainly follows; parts of other machines and concurrent ones are skipped.
+    # ``continues`` only when there is one, it certainly ends before, and both parts state their
+    # machine alike. Otherwise (concurrent logs that all end before it, an open end, a part with
+    # no machine) which it continues is ambiguous: a candidate to each.
     for later in parts:
-        earlier = before[later]
+        earlier = before[later] | maybe[later]
         nearest = [p for p in sorted(earlier) if not any(p in before[o] for o in earlier)]
-        predicate = CONTINUES if len(nearest) == 1 else CANDIDATE_OF[CONTINUES]
+        certain = len(nearest) == 1 and nearest[0] in before[later] and sure(nearest[0], later)
+        predicate = CONTINUES if certain else CANDIDATE_OF[CONTINUES]
         for part in nearest:
             emit(predicate, later, part)
 
