@@ -21,7 +21,7 @@ cannot know. Each of those is exactly what the layers below refuse.
    `lineage`, the `mentions` (every name found with all its candidates), `findings` and, when the output was
    refused, the validator's own `refusal`. It never raises for bad input or a bad model: those are plans with
    findings. It builds no SDK, MCP tool or console: Context's SDK and MCP server (MVL-110) call it and expose
-   `neptune.plan` apart from `neptune.query`.
+   `neptune_plan` apart from `neptune_query`.
 2. **The result is inference and says so.** `assertion_kind` is always `"inferred"`. `ModelLineage` carries
    `model_id` (the model the provider reports), `client_id`, `template_sha256` (the system prompt with its
    pinned vocabularies, and the output schema it is bound to), `schema_id`/`schema_version` (ADR 0002's
@@ -107,7 +107,7 @@ cannot know. Each of those is exactly what the layers below refuse.
 ## Consequences
 
 - MVL-110 wraps `plan`, `choose` and `PlannedQuery.to_json` (SDK returns the plan beside the packet; MCP
-  `neptune.plan`); the console shows `query` and the findings and sends an edited query to `neptune.query`.
+  `neptune_plan`); the console shows `query` and the findings and sends an edited query to `neptune_query`.
 - A prompt-template, schema, vocabulary (graph-schema or catalog-api pin) or model change changes
   `template_sha256` and every request hash: re-record, and explain the golden diff in the PR.
 - Live output is not byte-reproducible; determinism is of replay and of everything after the model call.
