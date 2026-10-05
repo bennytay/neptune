@@ -27,7 +27,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any, Final
+from itertools import pairwise
+from typing import TYPE_CHECKING, Any, Final, Literal, TypeAlias
 
 from neptune.identity import canonical_json
 from neptune.model.finding import Severity
@@ -77,6 +78,7 @@ from neptune_memory.consolidate.identity_records import (
     clock,
 )
 from neptune_memory.schema.claim import (
+    MAX_DELTA_VALUES,
     Delta,
     DeltaQuantity,
     LedgerRecordRef,
@@ -190,6 +192,7 @@ class _Placed:
 class _View:
     calibrations: list[CalibrationRecord] = field(default_factory=list)  # sorted by record id
     configurations: list[Configuration] = field(default_factory=list)
+    anchor_keys: dict[RecordId, bytes] = field(default_factory=dict)  # by configuration record
     components: dict[RecordId, list[Component]] = field(default_factory=dict)  # by configuration
     transforms: dict[RecordId, Transform] = field(default_factory=dict)
     bindings: dict[RecordId, list[Binding]] = field(default_factory=dict)  # by calibration
@@ -253,7 +256,7 @@ def _read(ledger: LedgerReader, previous: Sequence[Claim]) -> _View:
                         )
                     )
                     continue
-                if parsed is None:  # a component that is not a sensor, a non-calibration binding
+                if parsed is None:  # a binding of another basis
                     continue
                 rid: RecordId = parsed.record  # type: ignore[attr-defined]
                 if rid in conflicted:
@@ -276,11 +279,6 @@ def _read(ledger: LedgerReader, previous: Sequence[Claim]) -> _View:
             for cited in thread.evidence:
                 view.anchors.setdefault((node.node_type, _key(cited)), set()).add(node)
                 view.cites.setdefault(node, set()).add(_key(cited))
-    for components in view.components.values():
-        for component in components:
-            if component.frame is not None:
-                frame = component.frame
-                view.graph_frames.setdefault(frame.frame_graph_id, set()).add(frame)
     _chains(view, previous)
     return view
 
@@ -290,8 +288,12 @@ def _admit(view: _View, parsed: object) -> None:
         view.calibrations.append(parsed)
     elif isinstance(parsed, Configuration):
         view.configurations.append(parsed)
+        view.anchor_keys[parsed.record] = _key(parsed.anchor)
     elif isinstance(parsed, Component):
-        view.components.setdefault(parsed.configuration, []).append(parsed)
+        if parsed.frame is not None:  # any part's frame is a frame its graph declares
+            view.graph_frames.setdefault(parsed.frame.frame_graph_id, set()).add(parsed.frame)
+        if parsed.sensor:
+            view.components.setdefault(parsed.configuration, []).append(parsed)
     elif isinstance(parsed, Transform):
         view.transforms[parsed.record] = parsed
         graph = parsed.parent.frame_graph_id
@@ -382,15 +384,24 @@ def _revision_fits(calibration: Readings, configuration: Readings) -> bool | Non
     return True
 
 
+_Found: TypeAlias = (
+    "dict[RecordId, tuple[Configuration, bool, tuple[EvidenceRef, ...], tuple[RecordId, ...]]]"
+)
+
+
 def _configurations(
     view: _View, calibration: CalibrationRecord, machine: NodeRef, at: Timestamp | None
-) -> dict[RecordId, tuple[Configuration, bool, tuple[EvidenceRef, ...], tuple[RecordId, ...]]]:
+) -> _Found:
     """The hardware configurations of ``machine`` the calibration may apply to, each with whether
-    it is only one reading, and the chain citations that place it."""
-    found: dict[RecordId, tuple[Configuration, bool, tuple[EvidenceRef, ...], tuple[RecordId, ...]]]
-    found = {}
+    it is only one reading, and the chain citations that place it.
+
+    The configuration chain at the calibration's instant states which configuration the machine
+    was in then; only where it places none that a hardware configuration is anchored on are the
+    configurations that declare the machine (which state no time) read instead (ADR 0014 §2).
+    """
 
     def add(
+        found: _Found,
         configuration: Configuration,
         ambiguous: bool,
         evidence: tuple[EvidenceRef, ...] = (),
@@ -404,19 +415,23 @@ def _configurations(
         if held is None or (held[1] and not ambiguous):
             found[configuration.record] = (configuration, ambiguous, evidence, records)
 
-    for configuration in view.configurations:  # the identity chain: it declares the machine
-        for candidate in configuration.machines:
-            if node_ref(NodeType.MACHINE, candidate) == machine:
-                add(configuration, configuration.machine == "ambiguous")
+    chained: _Found = {}
     if at is not None:  # the configuration chain at the calibration's instant
         for placed in view.chains.get(machine, ()):
             if placed.interval.domain_id != at.domain_id or not placed.interval.contains(at):
                 continue
             cited = view.cites.get(placed.configuration, set())
             for configuration in view.configurations:
-                if _key(configuration.anchor) in cited:
-                    add(configuration, not placed.decided, placed.evidence, placed.records)
-    return found
+                if view.anchor_keys[configuration.record] in cited:
+                    add(chained, configuration, not placed.decided, placed.evidence, placed.records)
+    if chained:
+        return chained
+    declared: _Found = {}
+    for configuration in view.configurations:  # the identity chain: it declares the machine
+        for candidate in configuration.machines:
+            if node_ref(NodeType.MACHINE, candidate) == machine:
+                add(declared, configuration, configuration.machine == "ambiguous")
+    return declared
 
 
 def _named(subject: Readings, name: Readings) -> bool | None:
@@ -608,6 +623,10 @@ def _frame_check(
 
 # --- History ------------------------------------------------------------------------------------
 
+# What follows a calibration in its series: the next definite calibration's stated valid_from,
+# "unstated" when that one states none, or None when no definite calibration follows.
+_Next: TypeAlias = "Timestamp | Literal['unstated'] | None"
+
 
 @dataclass(frozen=True)
 class _Entry:
@@ -623,21 +642,27 @@ class _Entry:
     records: tuple[RecordId, ...]
 
     @property
-    def shape(self) -> tuple[tuple[str, ...], tuple[bytes, ...]]:
-        """Its kind: the parameter names it declares and the edges it binds (ADR 0014 §3)."""
-        names = tuple(p.name for p in self.calibration.parameters)
-        edges = tuple(sorted({_edge_key((b.parent, b.child)) for b in self.bindings}))
-        return names, edges
+    def candidate(self) -> bool:
+        """Only one reading of where it applies: an ambiguous sensor or a contradicted frame."""
+        return not self.placement.definite or not self.frames_agree
+
+    @property
+    def shape(self) -> tuple[str, ...]:
+        """Its kind: the parameter names it declares (ADR 0014 §3). Edges are not part of it: a
+        contradicted binding names another edge, and is still a calibration of the same kind."""
+        return tuple(p.name for p in self.calibration.parameters)
 
 
 def _windows(
-    view: _View, entry: _Entry, after: Timestamp | None
+    view: _View, entry: _Entry, after: _Next
 ) -> tuple[list[tuple[Timestamp, Timestamp | Open, tuple[EvidenceRef, ...]]], bool]:
     """The intervals a calibration is stated over, and whether they are readings of an
-    ``Ambiguous`` end. ``after`` is the next calibration's instant in its series, if any.
+    ``Ambiguous`` end. ``after`` is the next definite calibration of its series: its stated
+    ``valid_from``, ``"unstated"`` when it states none, or ``None`` when none follows.
 
     From a stated ``valid_from`` only; to its stated ``valid_until``, open where it states none
-    (``KnownAbsent``), or else until ``after`` (open when none follows).
+    (``KnownAbsent``), or else until the next calibration's ``valid_from`` (open when none
+    follows). A successor that states no ``valid_from`` leaves the end unstated: no interval.
     """
     calibration = entry.calibration
     record = (calibration.record,)
@@ -669,14 +694,21 @@ def _windows(
                 readings=len(until.candidates),
             )
         )
-        readings = [(view.place(c.value), _cited_evidence(c)) for c in until.candidates]
+        readings = [(view.place(c.value), parse.cited(c)) for c in until.candidates]
     elif isinstance(until, KnownAbsent):
         readings = [(OPEN, ())]
+    elif after == "unstated":
+        view.findings.append(
+            _finding(
+                "end_unstated",
+                "a calibration states no valid_until and the next calibration of its series"
+                " states no valid_from; where it ended is not stated, so no interval is claimed",
+                record,
+            )
+        )
+        return [], False
     else:
-        end: Timestamp | Open = OPEN
-        if after is not None and after.domain_id == start.domain_id and start < after:
-            end = after
-        readings = [(end, ())]
+        readings = [(OPEN if after is None else after, ())]
     windows: list[tuple[Timestamp, Timestamp | Open, tuple[EvidenceRef, ...]]] = []
     for end, cited in readings:
         if isinstance(end, Timestamp) and (end.domain_id != start.domain_id or not start < end):
@@ -693,24 +725,12 @@ def _windows(
     return windows, isinstance(until, Ambiguous)
 
 
-def _cited_evidence(knowledge: object) -> tuple[EvidenceRef, ...]:
-    provenance = getattr(knowledge, "provenance", None)
-    evidence = getattr(provenance, "evidence", None)
-    return () if evidence is None else (evidence,)
-
-
-def _claims(
-    view: _View, entry: _Entry, after: Timestamp | None, candidate: bool
-) -> list[ClaimDraft]:
+def _claims(view: _View, entry: _Entry, after: _Next, candidate: bool) -> list[ClaimDraft]:
     """``calibrated_with`` (or ``calibration_candidate``) claims on each of its sensor's nodes."""
     if entry.configuration is None:
         return []
     windows, ambiguous_end = _windows(view, entry, after)
-    predicate = (
-        CALIBRATION_CANDIDATE
-        if candidate or ambiguous_end or not entry.placement.definite or not entry.frames_agree
-        else CALIBRATED_WITH
-    )
+    predicate = CALIBRATION_CANDIDATE if candidate or ambiguous_end else CALIBRATED_WITH
     return [
         ClaimDraft(
             subject=node,
@@ -769,13 +789,9 @@ def _entry(view: _View, calibration: CalibrationRecord) -> _Entry | None:
 
 
 def _history(view: _View, entries: list[_Entry]) -> list[ClaimDraft]:
-    """Series per sensor node and shape; each ordered on one clock, ties never broken."""
-    drafts: list[ClaimDraft] = []
-    series: dict[tuple[NodeRef, tuple[tuple[str, ...], tuple[bytes, ...]]], list[_Entry]] = {}
+    """Series per sensor node and kind; each ordered on one clock, ties never broken."""
+    series: dict[tuple[NodeRef, tuple[str, ...]], list[_Entry]] = {}
     for entry in entries:
-        if not entry.placement.definite or not entry.frames_agree:
-            drafts.extend(_claims(view, entry, None, candidate=True))
-            continue
         if entry.at is None:
             view.findings.append(
                 _finding(
@@ -785,15 +801,35 @@ def _history(view: _View, entries: list[_Entry]) -> list[ClaimDraft]:
                     (entry.calibration.record,),
                 )
             )
-            # Its validity is not stated (an instant would come from valid_from): the finding
-            # says whether it is unstated or Ambiguous; no interval is claimed.
+            # It states no valid_from: the finding says whether that is unstated or Ambiguous.
             _windows(view, entry, None)
+            continue
         for node in entry.placement.nodes:
             series.setdefault((node, entry.shape), []).append(entry)
+    drafts: list[ClaimDraft] = []
     deltas: dict[tuple[RecordId, RecordId], list[_Delta]] = {}
     for (node, _), members in sorted(series.items(), key=lambda item: item[0][0].node_id):
-        drafts.extend(_series(view, node, members, deltas))
+        clocks: dict[RecordId, list[_Entry]] = {}
+        for entry in members:
+            clocks.setdefault(entry.at.domain_id, []).append(entry)  # type: ignore[union-attr]
+        if len(clocks) > 1:
+            view.findings.append(
+                _finding(
+                    "clock_split",
+                    "a sensor's calibrations state instants on clocks Memory cannot compare; each"
+                    " clock is a history of its own, and no drift is computed across them",
+                    (e.calibration.record for e in members),
+                    sensor=node.node_id,
+                    clocks=sorted(clocks),
+                )
+            )
+        for domain in sorted(clocks):
+            drafts.extend(_series(view, node, clocks[domain], deltas))
     return drafts
+
+
+def _ticks(entry: _Entry) -> int:
+    return entry.at.ticks  # type: ignore[union-attr]
 
 
 def _series(
@@ -802,58 +838,63 @@ def _series(
     members: list[_Entry],
     deltas: dict[tuple[RecordId, RecordId], list[_Delta]],
 ) -> list[ClaimDraft]:
+    """One series on one clock. Definite calibrations are ordered by instant; a candidate is
+    placed in time but orders nothing: it ends no calibration and is never a drift end."""
+    instants: list[list[_Entry]] = []
+    for entry in sorted((e for e in members if not e.candidate), key=_ticks):
+        if instants and instants[-1][0].at == entry.at:
+            instants[-1].append(entry)
+        else:
+            instants.append([entry])
+    candidates = [e for e in members if e.candidate]
     drafts: list[ClaimDraft] = []
-    clocks: dict[RecordId, list[_Entry]] = {}
-    for entry in members:
-        if entry.at is not None:
-            clocks.setdefault(entry.at.domain_id, []).append(entry)
-    if len(clocks) > 1:
-        view.findings.append(
-            _finding(
-                "clock_split",
-                "a sensor's calibrations state instants on clocks Memory cannot compare; each"
-                " clock is a history of its own, and no drift is computed across them",
-                (e.calibration.record for e in members),
-                sensor=node.node_id,
-                clocks=sorted(clocks),
-            )
-        )
-    for domain in sorted(clocks):
-        instants: list[list[_Entry]] = []
-        for entry in sorted(clocks[domain], key=lambda e: (e.at.ticks, e.calibration.record)):  # type: ignore[union-attr]
-            if instants and instants[-1][0].at == entry.at:
-                instants[-1].append(entry)
-            else:
-                instants.append([entry])
-        for index, instant in enumerate(instants):
-            after = instants[index + 1][0].at if index + 1 < len(instants) else None
-            tie = len(instant) > 1
-            if tie:
-                view.findings.append(
-                    _finding(
-                        "same_instant",
-                        "calibrations of one sensor and kind state the same instant; neither is"
-                        " ordered before the other, so each is a candidate and no drift is"
-                        " computed to or from them",
-                        (e.calibration.record for e in instant),
-                        sensor=node.node_id,
-                        at=instant[0].at.to_json(),  # type: ignore[union-attr]
-                    )
+    for entry in sorted(members, key=lambda e: (_ticks(e), e.calibration.record)):
+        later = [group for group in instants if _ticks(group[0]) > _ticks(entry)]
+        after: _Next = None
+        if later:
+            stated = any(isinstance(e.calibration.valid_from, Known) for e in later[0])
+            after = later[0][0].at if stated else "unstated"
+        tie = any(entry in group and len(group) > 1 for group in instants)
+        claims = _claims(view, entry, after, candidate=entry.candidate or tie)
+        drafts.extend(d for d in claims if d.subject == node)
+    for group in instants:
+        if len(group) > 1:
+            view.findings.append(
+                _finding(
+                    "same_instant",
+                    "calibrations of one sensor and kind state the same instant; neither is"
+                    " ordered before the other, so each is a candidate and no drift is computed"
+                    " to or from them",
+                    (e.calibration.record for e in group),
+                    sensor=node.node_id,
+                    at=group[0].at.to_json(),  # type: ignore[union-attr]
                 )
-            for entry in instant:
-                drafts.extend(_on_node(_claims(view, entry, after, candidate=tie), node))
-            if index + 1 < len(instants) and not tie and len(instants[index + 1]) == 1:
-                earlier, later = instant[0], instants[index + 1][0]
-                key = (earlier.calibration.record, later.calibration.record)
-                if key not in deltas:
-                    deltas[key] = _deltas(view, earlier, later)
-                drafts.extend(_drift(node, earlier, later, deltas[key]))
+            )
+    for first, second in pairwise(instants):
+        if len(first) > 1 or len(second) > 1:
+            continue
+        earlier, later_entry = first[0], second[0]
+        between = [
+            c.calibration.record
+            for c in candidates
+            if _ticks(earlier) <= _ticks(c) <= _ticks(later_entry)
+        ]
+        if between:
+            view.findings.append(
+                _finding(
+                    "drift_undecided",
+                    "a calibration that may be this sensor's lies between two of its calibrations;"
+                    " whether they are consecutive is not decided, so no drift is claimed",
+                    (earlier.calibration.record, later_entry.calibration.record, *between),
+                    sensor=node.node_id,
+                )
+            )
+            continue
+        key = (earlier.calibration.record, later_entry.calibration.record)
+        if key not in deltas:
+            deltas[key] = _deltas(view, earlier, later_entry)
+        drafts.extend(_drift(node, earlier, later_entry, deltas[key]))
     return drafts
-
-
-def _on_node(drafts: list[ClaimDraft], node: NodeRef) -> list[ClaimDraft]:
-    """The drafts a series emits for its own node (an entry is in one series per node)."""
-    return [d for d in drafts if d.subject == node]
 
 
 # --- Drift --------------------------------------------------------------------------------------
@@ -882,8 +923,9 @@ _REASONS: Final[Mapping[str, str]] = {
     " declared conversion, so no delta (never converted)",
     "unit_unstated": "a unit is not stated as Known on both sides; no delta",
     "shape_changed": "the two calibrations declare different numbers of components; no delta",
+    "too_many_values": "a value has more components than a delta holds; no delta",
     "value_unstated": "a value is not stated as Known numbers on both sides; no delta",
-    "non_finite": "a value is not finite; no delta",
+    "non_finite": "a value, or its difference, is not finite; no delta",
     "setting_changed": "a declared setting (text) differs, so the numbers may follow another"
     " model; no parameter delta for this pair",
     "incomparable_transform": "the bound transforms are not declared in the same form and"
@@ -923,6 +965,14 @@ def _difference(earlier: Sequence[object], later: Sequence[object]) -> tuple[flo
             return None
         out.append(difference)
     return tuple(out)
+
+
+def _finite(
+    values: tuple[float, ...] | None, refusals: _Refusals, what: JsonValue
+) -> tuple[float, ...] | None:
+    if values is None:
+        refusals.add("non_finite", what)
+    return values
 
 
 def _parameter_deltas(
@@ -970,8 +1020,10 @@ def _parameter_delta(
     if len(values_a) != len(values_b):
         refusals.add("shape_changed", a.name)
         return None
-    if len(values_a) > 100_000:
-        refusals.add("shape_changed", a.name)
+    if not values_a:
+        return None  # two empty lists: nothing to compare
+    if len(values_a) > MAX_DELTA_VALUES:
+        refusals.add("too_many_values", a.name)
         return None
     values = _difference(values_a, values_b)
     if values is None:
@@ -980,8 +1032,8 @@ def _parameter_delta(
     unit = _unit(a.unit, b.unit, refusals, a.name)
     if unit is None:
         return None
-    cited = (*_cited_evidence(a.value), *_cited_evidence(b.value))
-    cited += (*_cited_evidence(a.unit), *_cited_evidence(b.unit))
+    cited = (*parse.cited(a.value), *parse.cited(b.value))
+    cited += (*parse.cited(a.unit), *parse.cited(b.unit))
     return _Delta(
         Delta(earlier.record, later.record, DeltaQuantity.PARAMETER, "values", values, name=a.name),
         unit,
@@ -1028,7 +1080,10 @@ def _transform_deltas(
     view: _View, earlier: _Entry, later: _Entry, refusals: _Refusals
 ) -> list[_Delta]:
     out: list[_Delta] = []
-    edges = sorted({(b.parent, b.child) for b in earlier.bindings}, key=_edge_key)
+    shared = {(b.parent, b.child) for b in earlier.bindings} & {
+        (b.parent, b.child) for b in later.bindings
+    }
+    edges = sorted(shared, key=_edge_key)
     for edge in edges:
         first, second = _bound(view, earlier, edge, refusals), _bound(view, later, edge, refusals)
         if first is None or second is None:
@@ -1072,7 +1127,7 @@ def _parts(
     parts: list[tuple[DeltaQuantity, str, tuple[float, ...], Knowledge[Unit]]] = []
     if isinstance(a, Pose) and isinstance(b, Pose):
         unit = _unit(a.translation.unit, b.translation.unit, refusals, what)
-        values = _difference(a.translation.values, b.translation.values)
+        values = _finite(_difference(a.translation.values, b.translation.values), refusals, what)
         if unit is not None and values is not None:
             parts.append((DeltaQuantity.TRANSLATION, "translation", values, unit))
         form = _rotation_form(a.rotation, b.rotation)
@@ -1083,7 +1138,7 @@ def _parts(
         rotation_unit: Knowledge[Unit] | None = NotApplicable()
         if declared is not None:
             rotation_unit = _unit(declared, b.rotation.unit, refusals, what)  # type: ignore[union-attr]
-        values = _difference(a.rotation.values, b.rotation.values)
+        values = _finite(_difference(a.rotation.values, b.rotation.values), refusals, what)
         if rotation_unit is not None and values is not None:
             parts.append((DeltaQuantity.ROTATION, name, values, rotation_unit))
         return parts
@@ -1092,14 +1147,22 @@ def _parts(
             refusals.add("incomparable_transform", what)
             return parts
         layout: MatrixLayout = a.layout.value  # type: ignore[union-attr]
-        rotation = _difference(
-            [a.values[i] for i in _MATRIX_ROTATION], [b.values[i] for i in _MATRIX_ROTATION]
+        rotation = _finite(
+            _difference(
+                [a.values[i] for i in _MATRIX_ROTATION], [b.values[i] for i in _MATRIX_ROTATION]
+            ),
+            refusals,
+            what,
         )
         if rotation is not None:
             parts.append((DeltaQuantity.ROTATION, "homogeneous_matrix", rotation, NotApplicable()))
         indices = _MATRIX_TRANSLATION[layout]
         unit = _unit(a.translation_unit, b.translation_unit, refusals, what)
-        translation = _difference([a.values[i] for i in indices], [b.values[i] for i in indices])
+        translation = _finite(
+            _difference([a.values[i] for i in indices], [b.values[i] for i in indices]),
+            refusals,
+            what,
+        )
         if unit is not None and translation is not None:
             parts.append((DeltaQuantity.TRANSLATION, "homogeneous_matrix", translation, unit))
         return parts

@@ -314,6 +314,7 @@
               "items": {
                 "type": "number"
               },
+              "maxItems": 100000,
               "minItems": 1,
               "type": "array"
             }
@@ -347,16 +348,55 @@
               "const": "translation"
             },
             "representation": {
-              "enum": [
-                "homogeneous_matrix",
-                "translation"
-              ]
+              "const": "homogeneous_matrix"
             },
             "values": {
               "items": {
                 "type": "number"
               },
-              "minItems": 1,
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            }
+          },
+          "required": [
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "translation"
+            },
+            "representation": {
+              "const": "translation"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
               "type": "array"
             }
           },
@@ -390,19 +430,178 @@
               "const": "rotation"
             },
             "representation": {
-              "enum": [
-                "euler_angles",
-                "homogeneous_matrix",
-                "quaternion",
-                "rotation_matrix",
-                "rotation_vector"
-              ]
+              "const": "euler_angles"
             },
             "values": {
               "items": {
                 "type": "number"
               },
-              "minItems": 1,
+              "maxItems": 3,
+              "minItems": 3,
+              "type": "array"
+            }
+          },
+          "required": [
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "rotation"
+            },
+            "representation": {
+              "const": "homogeneous_matrix"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 9,
+              "minItems": 9,
+              "type": "array"
+            }
+          },
+          "required": [
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "rotation"
+            },
+            "representation": {
+              "const": "quaternion"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "type": "array"
+            }
+          },
+          "required": [
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "rotation"
+            },
+            "representation": {
+              "const": "rotation_matrix"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 9,
+              "minItems": 9,
+              "type": "array"
+            }
+          },
+          "required": [
+            "child",
+            "earlier",
+            "later",
+            "parent",
+            "quantity",
+            "representation",
+            "values"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "child": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "earlier": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "later": {
+              "$ref": "#/$defs/RecordId"
+            },
+            "parent": {
+              "$ref": "#/$defs/FrameRef"
+            },
+            "quantity": {
+              "const": "rotation"
+            },
+            "representation": {
+              "const": "rotation_vector"
+            },
+            "values": {
+              "items": {
+                "type": "number"
+              },
+              "maxItems": 3,
+              "minItems": 3,
               "type": "array"
             }
           },

@@ -57,13 +57,14 @@ FRAME_BINDING: Final = "frame_binding"
 PRODUCER_KINDS: Final = ("maintenance_event", "requalification_record")
 
 
-def _cited(knowledge: object) -> tuple[EvidenceRef, ...]:
+def cited(knowledge: object) -> tuple[EvidenceRef, ...]:
+    """The evidence a value cites of its own; nothing when it inherits its record's."""
     provenance = getattr(knowledge, "provenance", None)
     return (provenance.evidence,) if isinstance(provenance, Provenance) else ()
 
 
 def _evidence(provenance: Provenance, *values: object) -> tuple[EvidenceRef, ...]:
-    return (provenance.evidence, *(ref for value in values for ref in _cited(value)))
+    return (provenance.evidence, *(ref for value in values for ref in cited(value)))
 
 
 def _known(knowledge: Knowledge[Any]) -> Any:
@@ -172,34 +173,33 @@ def hardware_configuration(record: Mapping[str, object]) -> Configuration:
 
 @dataclass(frozen=True)
 class Component:
-    """A ``HardwareComponent`` of category ``sensor``; other categories are not read.
+    """A ``HardwareComponent``. Only a ``sensor`` is a calibration's subject; every part's frame
+    is a frame of its configuration's graph.
 
     ``identifiers``: its ``Known`` declared ids, each a sensor thread's key (Ledger ADR 0003 §2);
-    ``ambiguous_ids`` counts the ``Ambiguous`` ones, which key no thread. ``name``: the readings of
-    its declared name; ``frame``: its declared frame when ``Known``.
+    an ``Ambiguous`` one keys no thread. ``name``: the readings of its declared name; ``frame``: its
+    declared frame when ``Known``.
     """
 
     record: RecordId
     configuration: RecordId
+    sensor: bool
     name: Readings
     identifiers: tuple[LogicalId, ...]
-    ambiguous_ids: int
     frame: FrameRef | None
     evidence: tuple[EvidenceRef, ...]
 
 
-def hardware_component(record: Mapping[str, object]) -> Component | None:
+def hardware_component(record: Mapping[str, object]) -> Component:
     parsed = _strict(hardware_component_from_json, record)
-    if parsed.category is not ComponentCategory.SENSOR:
-        return None
     frame = _known(parsed.frame)
     known = [declared(i.value) for i in parsed.identifiers if isinstance(i, Known)]
     return Component(
         record=parsed.id,
         configuration=parsed.configuration,
+        sensor=parsed.category is ComponentCategory.SENSOR,
         name=readings(parsed.name),
         identifiers=tuple(known),
-        ambiguous_ids=sum(1 for i in parsed.identifiers if isinstance(i, Ambiguous)),
         frame=frame,
         evidence=_evidence(parsed.provenance, parsed.name, parsed.frame),
     )

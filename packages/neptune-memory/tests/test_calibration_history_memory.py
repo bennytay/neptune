@@ -312,3 +312,26 @@ def test_a_recalibration_in_another_unit_gives_no_delta_and_is_never_converted()
     (mismatch,) = [f for f in result.findings if f.code == "calibration.unit_mismatch"]
     compared: Any = mismatch.details["compared"]
     assert [c["of"] for c in compared] == ["gyroscope_noise_density"]
+
+
+def test_after_a_sensor_swap_the_chain_not_the_old_manifest_says_which_sensor() -> None:
+    """Both manifests declare the AMR; the configuration chain says the retrofit was in force."""
+    retrofit = hardware("amr-11-retrofit", machine=AMR)
+    old, new = LogicalId("cfg", "AMR-11-r1"), LogicalId("cfg", "AMR-11-r2")
+    records = [
+        *warehouse_amr(),
+        retrofit,
+        component(retrofit, "front_lidar", serial="LDR-0200", at=LIDAR),
+        sensor_thread("LDR-0200"),
+        thread(old, "hw/amr-11-manifest", node_type=NodeType.CONFIGURATION),
+        thread(new, "hw/amr-11-retrofit", node_type=NodeType.CONFIGURATION),
+        commissioning("commissioning", [AMR], old, at(100)),
+        maintenance("lidar swap", [AMR], new, at(500)),
+    ]
+    first = _lidar_calibration("before-swap", 200, (0.3, 0.0, 0.2))
+    second = _lidar_calibration("after-swap", 800, (0.31, 0.0, 0.2))
+    result = build(records, first, second)
+    placed = [(c.subject.node_id, c.object.node_id) for c in of(result, "calibrated_with")]  # type: ignore[union-attr]
+    assert placed == [("serial:LDR-0090", "cal:before-swap"), ("serial:LDR-0200", "cal:after-swap")]
+    assert not of(result, "calibration_candidate")
+    assert not of(result, "drift")  # two sensors: nothing is consecutive across a swap

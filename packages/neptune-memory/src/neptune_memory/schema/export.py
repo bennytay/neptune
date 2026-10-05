@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from neptune.model.schema import canonical_schema
 from neptune_memory.schema import GRAPH_SCHEMA_VERSION
-from neptune_memory.schema.claim import DELTA_FORMS, DeltaQuantity, ValueType
+from neptune_memory.schema.claim import DELTA_FORMS, MAX_DELTA_VALUES, DeltaQuantity, ValueType
 from neptune_memory.schema.nodes import NodeType
 from neptune_memory.schema.predicates import VOCABULARY_VERSION, Cardinality
 from neptune_memory.schema.supersede import FindingCode
@@ -124,7 +124,7 @@ def _memory_defs() -> dict[str, JsonValue]:
     delta_common: dict[str, JsonValue] = {
         "earlier": _ref("RecordId"),
         "later": _ref("RecordId"),
-        "values": _array(finite, min_items=1),
+        "values": {**_array(finite, min_items=1), "maxItems": MAX_DELTA_VALUES},
     }
     return {
         "ClaimAssertionKind": {"enum": ["inferred", "observed", "stated"]},
@@ -189,10 +189,15 @@ def _memory_defs() -> dict[str, JsonValue]:
                             "child": _ref("FrameRef"),
                             "parent": _ref("FrameRef"),
                             "quantity": _const(str(quantity)),
-                            "representation": {"enum": sorted(DELTA_FORMS[quantity])},
+                            "representation": _const(form),
+                            "values": {
+                                **_array(finite, min_items=count or 1),
+                                "maxItems": count or 1,
+                            },
                         }
                     )
                     for quantity in (DeltaQuantity.TRANSLATION, DeltaQuantity.ROTATION)
+                    for form, (count, _) in sorted(DELTA_FORMS[quantity].items())
                 ),
             ],
             "description": (

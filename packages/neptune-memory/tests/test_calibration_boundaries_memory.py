@@ -29,6 +29,7 @@ from neptune.identity.ids import record_id
 from neptune.model.frames import QuaternionOrder
 from neptune.model.ids import LogicalId
 from neptune.model.knowledge import KnownAbsent, Unknown
+from neptune.model.machine import ComponentCategory
 from neptune.model.provenance import Provenance
 from neptune.model.scalars import NonFinite
 from neptune.model.time import Timestamp
@@ -142,14 +143,14 @@ def test_an_untimed_calibration_is_in_no_order_and_ends_nothing() -> None:
     assert {"calibration.untimed", "calibration.validity_unstated"} <= codes(result)
 
 
-def test_performed_orders_a_calibration_but_never_becomes_its_valid_from() -> None:
+def test_performed_orders_a_calibration_but_never_becomes_a_validity_bound() -> None:
     measured = lidar("measured", None, (0.305, 0.0, 0.2), performed=at(3000))
     result = run(base(), lidar("a", at(1000)), measured)
-    (claim,) = of(result, "calibrated_with")  # none for "measured": its validity is unstated
-    assert (claim.valid_from, claim.valid_to) == (at(1000), at(3000))
-    deltas = drift(result)
+    # "measured" states no valid_from, so neither its interval nor where "a" ended is stated.
+    assert not of(result, "calibrated_with")
+    assert {"calibration.validity_unstated", "calibration.end_unstated"} <= codes(result)
+    deltas = drift(result)  # the measurements are still ordered, and differ
     assert deltas[(DeltaQuantity.TRANSLATION, "translation")].values == (0.305 - 0.3, 0.0, 0.0)
-    assert "calibration.validity_unstated" in codes(result)
 
 
 def test_a_stated_end_is_kept_and_a_stated_open_end_is_open() -> None:
@@ -195,6 +196,49 @@ def test_calibrations_on_two_clocks_are_two_histories_with_no_drift_between() ->
     assert [c.valid_to for c in of(result, "calibrated_with")] == [OPEN, OPEN]
     assert not of(result, "drift")
     assert "calibration.clock_split" in codes(result)
+
+
+def test_a_candidate_ends_at_the_next_definite_calibration_and_blocks_drift_across_it() -> None:
+    mast = frame("mast_link", "amr-urdf")
+    doubtful = lidar("doubtful", at(2000), (0.2, 0.0, 0.9), bound=False)
+    contradicted = [*doubtful, binding("doubtful", mast, LIDAR, doubtful[0], doubtful[1])]
+    result = run(base(), lidar("a", at(1000)), contradicted, lidar("c", at(3000)))
+    (candidate,) = of(result, "calibration_candidate")
+    assert (candidate.valid_from, candidate.valid_to) == (at(2000), at(3000))
+    # The candidate ends nothing: "a" runs to "c"; but a and c may not be consecutive.
+    spans = [(c.object.node_id, c.valid_to) for c in of(result, "calibrated_with")]  # type: ignore[union-attr]
+    assert spans == [("cal:a", at(3000)), ("cal:c", OPEN)]
+    assert not of(result, "drift")
+    assert "calibration.drift_undecided" in codes(result)
+
+
+def test_a_frame_only_a_non_sensor_part_declares_is_still_the_graphs() -> None:
+    tool = frame("tool_flange", "amr-urdf")
+    records = [
+        *base(),
+        component(MANIFEST, "tool_flange", at=tool, category=ComponentCategory.TOOL),
+    ]
+    cal = lidar("flange", at(1000), bound=False)
+    result = run(records, [*cal, binding("flange", tool, LIDAR, cal[0], cal[1])])
+    # The graph declares base_link as the lidar's parent, so the binding still contradicts it,
+    # but not because tool_flange is unknown: its frame is declared by the tool.
+    (finding,) = [f for f in result.findings if f.code == "calibration.frame_disagreement"]
+    assert finding.details["edge"]["parent"]["frame_id"] == "tool_flange"  # type: ignore[index, call-overload]
+
+
+def test_a_frame_the_graph_states_nothing_about_does_not_contradict() -> None:
+    tool = frame("tool_flange", "amr-urdf")
+    sensor = frame("flange_camera", "amr-urdf")
+    records = [
+        *base(),
+        component(MANIFEST, "tool_flange", at=tool, category=ComponentCategory.TOOL),
+        component(MANIFEST, "flange_camera", serial="CAM-1", at=sensor),
+        sensor_thread("CAM-1"),
+    ]
+    cal = lidar("cam", at(1000), bound=False, subject="flange_camera")
+    result = run(records, [*cal, binding("cam", tool, sensor, cal[0], cal[1])])
+    assert [c.subject.node_id for c in of(result, "calibrated_with")] == ["serial:CAM-1"]
+    assert "calibration.frame_disagreement" not in codes(result)
 
 
 # --- Placement ----------------------------------------------------------------------------------

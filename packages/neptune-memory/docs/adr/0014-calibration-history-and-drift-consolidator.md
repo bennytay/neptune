@@ -37,10 +37,11 @@ A calibration's **instant** is its `valid_from`, else its `performed`, when `Kno
 Ledger ADR 0003 §3). The sensor is found in three steps, each through stated values only:
 
 1. **Machine** (identity chain): each machine its `machine` names that a Ledger thread declares.
-2. **Configurations** (configuration chain): the `HardwareConfiguration`s that declare that machine, and those whose
-   anchor is cited by a configuration node that `memory.configuration` places on the machine
-   (`has_configuration`, or one reading of `configuration_candidate`) over an interval containing the calibration's
-   instant on its clock. A configuration whose declared revision shares no reading with the calibration's
+2. **Configurations** (configuration chain): the `HardwareConfiguration`s whose anchor is cited by a configuration
+   node that `memory.configuration` places on the machine (`has_configuration`, or one reading of
+   `configuration_candidate`) over an interval containing the calibration's instant on its clock. Only where the
+   chain places none of them are the `HardwareConfiguration`s that declare the machine read instead: they state no
+   time, so a swapped sensor's old configuration would otherwise make every later calibration ambiguous. A configuration whose declared revision shares no reading with the calibration's
    `hardware_revision` is excluded (root ADR 0019 §3, §6); one where only some readings match is one reading.
 3. **Sensor**: the sensor components of those configurations whose declared name is the calibration's subject,
    verbatim. A name selects only among one machine's configurations; it never keys a node. The sensor's nodes are
@@ -62,17 +63,20 @@ about this one (root ADR 0007). A contradicted calibration is a `calibration_can
 description's own edges, with `calibration.frame_disagreement`. A binding that names the calibration only as one
 `Ambiguous` candidate is `ambiguous_binding` and is not read.
 
-Definite, uncontradicted calibrations form a **series** per sensor node and **kind**: the parameter names they
-declare and the description edges they bind. Recalibrating the same quantities is the same kind; a hand-eye result
-and a camera-intrinsics file for one camera are two series. Each series is ordered by instant on one clock
-(`clock_split` across clocks); calibrations at one instant are `same_instant` candidates and never ordered by
-record id. An untimed calibration is `calibration.untimed` and in no order.
+Placed calibrations form a **series** per sensor node and **kind**: the parameter names they declare.
+Recalibrating the same quantities is the same kind; a hand-eye result and a camera-intrinsics file for one camera
+are two series. Each series is ordered by instant on one clock (`clock_split` across clocks). Definite calibrations
+order it; calibrations at one instant are `same_instant` candidates and never ordered by record id. A candidate is
+placed in time but orders nothing: it ends no calibration, and two definite calibrations with a candidate between
+them are not known to be consecutive (`drift_undecided`). An untimed calibration is `calibration.untimed` and in no
+order.
 
 `calibrated_with(sensor → calibration)` holds from a stated `valid_from` only (`validity_unstated`, or
-`ambiguous_validity`, and no interval otherwise; `performed` never becomes a validity start). It ends at a stated
-`valid_until`, is `open` where the calibration states it has none (`KnownAbsent`), and otherwise ends at the next
-calibration of its series, as a machine's configuration span ends at the next placement (ADR 0010 §2); the last is
-`open`. An `Ambiguous` `valid_until` gives one `calibration_candidate` per reading. An end not after its start is
+`ambiguous_validity`, and no interval otherwise; `performed` never becomes a validity bound). It ends at a stated
+`valid_until`, is `open` where the calibration states it has none (`KnownAbsent`), and otherwise ends at the stated
+`valid_from` of the next definite calibration of its series, as a machine's configuration span ends at the next
+placement (ADR 0010 §2); the last is `open`. A next calibration that states no `valid_from` leaves the end unstated:
+`end_unstated`, and no interval. An `Ambiguous` `valid_until` gives one `calibration_candidate` per reading. An end not after its start is
 `untimeable_window`. `assertion_kind` is the calibration's.
 
 ### 4. Drift
@@ -86,7 +90,7 @@ deterministic), in declared order.
 
 - **Parameters**: same name, `Known` numbers of equal length, finite, and `Known` equal units. The unit is the
   literal's.
-- **Extrinsics**: the transforms both bind to one description edge, with the same frame names, `Known` equal
+- **Extrinsics**: the transforms both bind to one description edge (edges only one binds are not compared), with the same frame names, `Known` equal
   direction and the same form: a `Pose`'s translation (equal `Known` units) and rotation (same kind and `Known` equal
   order and convention, layout, or sequence and mode; equal units for Euler angles and rotation vectors); a
   `HomogeneousMatrix`'s nine rotation entries and three translation entries by its `Known` layout (equal
