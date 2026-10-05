@@ -204,8 +204,9 @@ def test_the_amr_risk_assessment_is_parsed_as_declared() -> None:
     assert risk.approval.decision.value == "Accepted with conditions"
     assert risk.approval.authority.value == "Site safety lead"
     assert risk.approval.time.value.ticks == _days("2026-03-14")
-    assert isinstance(risk.configuration, NotCovered) and isinstance(risk.related.value, tuple)
-    assert risk.related.value == ()
+    assert isinstance(risk.configuration, NotCovered) and isinstance(
+        risk.related, NotCovered
+    )  # no section lists them
     hazards = risk.hazards.value
     assert [h.hazard.value for h in hazards] == [
         "Collision with a pedestrian in a shared aisle",

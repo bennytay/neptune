@@ -9,4 +9,10 @@ schema_export = "neptune.model.schema:canonical_schema"
 # An integer constant is the registry major: raise it for a breaking change.
 version_constant = "neptune.model.record:SCHEMA_VERSION"
 golden_generator = "contracts/package-schema/goldens.py"
-contract_tests = ["tests/unit/model/test_schema.py", "tests/integration/test_worked_examples.py"]
+# test_ingest_package.py validates the manifest and receipt the store writes (X1 gate, MVL-125):
+# the other two cover record lines only, so a renamed manifest key passed them.
+contract_tests = [
+  "tests/unit/model/test_schema.py",
+  "tests/integration/test_worked_examples.py",
+  "tests/unit/store/test_ingest_package.py",
+]
