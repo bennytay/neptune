@@ -18,3 +18,4 @@ this package. Decisions are superseded by a new ADR that links back; never edite
 | [0009](0009-roboto-and-rerun-hub-connectors-with-catalog-metadata-as-stated-records.md) | Roboto and Rerun Hub connectors: files as Sources, catalog metadata as stated records | Accepted |
 | [0010](0010-fleet-ops-connectors-formant-open-rmf-and-ros-2-diagnostics-as-stated-records.md) | Fleet-ops connectors: Formant and Open-RMF as read-only Sources, ROS 2 diagnostics as a declared mapping | Accepted |
 | [0011](0011-d2-gate-one-hostile-proxy-emulator-verification-and-the-deadline.md) | D2 gate: one hostile proxy for every connector, emulator verification, and a socket timeout is the deadline | Accepted |
+| [0012](0012-lifecycle-mapper-writes-unknown-lists-civil-zones-and-a-streamed-package.md) | The lifecycle mapper writes Unknown lists, civil time zones and a streamed package | Accepted |

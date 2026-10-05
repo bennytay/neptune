@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from neptune.model.knowledge import Known, NotCovered, Unknown
-from neptune.model.provenance import EvidenceRef, Span
+from neptune.model.provenance import EvidenceRef, Provenance, Span
 from neptune.store.package import IngestPackage, read_files, read_package
 from neptune_deploy.lifecycle import (
     DOCUMENT_FINDINGS,
@@ -275,9 +275,10 @@ def test_two_documents_stating_one_identifier_are_both_kept_with_a_finding() -> 
 def test_list_findings_are_one_per_value_and_name_the_record_and_the_field() -> None:
     blank = _mapped(_with(_base("warehouse_amr"), _retext("Assets: PAL-5521; RACK-14B", "Assets:")))
     (incident,) = _of(blank, "incident_record")
-    assert incident.assets.value == ()
-    (finding,) = _codes(blank)["list_cell_blank"]
-    assert finding.details["field"] == "/assets" and finding.records == (incident.id,)
+    # A blank list is Unknown, citing the blank value: no finding, the state says it.
+    assert isinstance(incident.assets, Unknown)
+    assert isinstance(incident.assets.provenance, Provenance)
+    assert "list_cell_blank" not in _codes(blank)
     edits = _retext("Assets: PAL-5521; RACK-14B", "Assets: PAL-5521; ; PAL-5521")
     package = _mapped(_with(_base("warehouse_amr"), edits))
     (incident,) = _of(package, "incident_record")
@@ -289,7 +290,7 @@ def test_list_findings_are_one_per_value_and_name_the_record_and_the_field() -> 
     assert empty.records == again.records == (incident.id,)
 
 
-def test_a_table_with_no_rows_gives_an_empty_list_and_a_statement_with_none_gives_none() -> None:
+def test_a_table_with_no_rows_gives_an_unknown_list() -> None:
     base = _base("warehouse_amr")
     table = next(
         t
@@ -301,7 +302,7 @@ def test_a_table_with_no_rows_gives_an_empty_list_and_a_statement_with_none_give
     )
     package = _mapped(replace(base, records=kept))
     (risk,) = _of(package, "risk_assessment")
-    assert risk.hazards.value == ()
+    assert isinstance(risk.hazards, Unknown)
     assert isinstance(risk.configuration, NotCovered)
 
 
