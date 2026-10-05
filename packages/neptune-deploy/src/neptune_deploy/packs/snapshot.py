@@ -296,21 +296,21 @@ def _node(value: JsonValue, pointer: str) -> Node:
     )
 
 
-def _stamp(value: JsonValue, pointer: str) -> Stamp:
-    stamp = _R.obj(value, pointer, ("domain_id", "ticks"))
+def _stamp(value: JsonValue, pointer: str, reader: Reader = _R) -> Stamp:
+    stamp = reader.obj(value, pointer, ("domain_id", "ticks"))
     return Stamp(
-        _R.string(stamp["domain_id"], child(pointer, "domain_id"), RECORD_ID),
-        _R.integer(stamp["ticks"], child(pointer, "ticks")),
+        reader.string(stamp["domain_id"], child(pointer, "domain_id"), RECORD_ID),
+        reader.integer(stamp["ticks"], child(pointer, "ticks")),
     )
 
 
 def read_interval(value: JsonValue, pointer: str, reader: Reader = _R) -> Interval:
     """An ``Interval``: ``start`` a timestamp, ``end`` a timestamp or ``"open"``."""
     interval = reader.obj(value, pointer, ("end", "start"))
-    start = _stamp(interval["start"], child(pointer, "start"))
+    start = _stamp(interval["start"], child(pointer, "start"), reader)
     end: End = OPEN
     if interval["end"] != OPEN:
-        end = _stamp(interval["end"], child(pointer, "end"))
+        end = _stamp(interval["end"], child(pointer, "end"), reader)
     return Interval(start, end)
 
 

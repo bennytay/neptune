@@ -5,6 +5,53 @@
       "confidence": {
         "knowledge": "not_applicable"
       },
+      "id": "claim:sha256:0856e6a61b2186c1121760d1f3af2e77605b08075ab2a2354b4553cae5a790ce",
+      "object": {
+        "kind": "node",
+        "node_id": "site-code:CELL-3",
+        "node_type": "site"
+      },
+      "predicate": "located_at",
+      "provenance": {
+        "config_hash": "sha256:8bbaa117cfc4d1220926c2114a3d30ccffc83029219133c18e3e4fc73a3b2a00",
+        "consolidator_id": "memory.identity",
+        "consolidator_version": "1",
+        "evidence": [
+          {
+            "locator": [
+              {
+                "kind": "row",
+                "row": 4
+              }
+            ],
+            "source": "sha256:488d96410c240f33f3ea25b9ab44f27ee2624458511e33bbebdef98c43a11d42"
+          }
+        ],
+        "records": [
+          "rec:sha256:39e6cd92173a0e97a0d8ecc071ee20dcda6e778001f706f8f1ad76fceedb4f08"
+        ]
+      },
+      "recorded_at": 1,
+      "subject": {
+        "kind": "node",
+        "node_id": "asset-tag:ARM-06",
+        "node_type": "machine"
+      },
+      "superseded_at": "open",
+      "supersedes": [],
+      "valid": {
+        "end": "open",
+        "start": {
+          "domain_id": "rec:sha256:5b0d772f4aaf5303756211431f190d81179755a037b6c38163617aa4a404db16",
+          "ticks": 1790000000000000000
+        }
+      }
+    },
+    {
+      "assertion_kind": "stated",
+      "confidence": {
+        "knowledge": "not_applicable"
+      },
       "id": "claim:sha256:14ae0236df769478ce72c70a459172681852d256012c97ae0736a3b9c2a4344e",
       "object": {
         "datatype": "text",

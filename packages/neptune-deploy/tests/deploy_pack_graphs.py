@@ -581,6 +581,17 @@ def arm_cell_events() -> dict[str, Any]:
             ("at_site", SITE),
         ],
     )
+    claims.append(
+        claim(
+            ARM,
+            "located_at",
+            SITE,
+            (at(CIVIL, T0), "open"),
+            records=("asset register ARM-06",),
+            evidence=(row("assets.csv", 4),),
+            consolidator="memory.identity",
+        )
+    )
     window = (at(CIVIL, c_estop - 5), at(CIVIL, c_estop - 5 + 5 * 10**9))
     for a, b in ((estop, fault), (fault, estop)):
         claims.append(
