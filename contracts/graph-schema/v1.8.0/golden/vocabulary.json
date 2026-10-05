@@ -26,6 +26,56 @@
     },
     {
       "cardinality": "many",
+      "description": "an authorisation envelope approves this configuration at the site over the interval",
+      "domain": [
+        "site"
+      ],
+      "name": "authorised_configuration",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "a configuration the run ran with, over the bound part of the run (a snapshot binding)",
+      "domain": [
+        "run"
+      ],
+      "name": "configuration_active_during",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "ambiguous: the configuration in force could be this one; one claim per reading",
+      "domain": [
+        "machine",
+        "run"
+      ],
+      "name": "configuration_candidate",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "no configuration is stated over the interval; the record leaves it open, never filled",
+      "domain": [
+        "machine",
+        "run"
+      ],
+      "name": "configuration_unknown",
+      "range": [
+        "record"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
       "description": "a later part of one recording: the next part of a run its assembly states",
       "domain": [
         "run"
@@ -303,6 +353,18 @@
     },
     {
       "cardinality": "many",
+      "description": "observed: no authorisation envelope in the Ledger names the configuration then",
+      "domain": [
+        "run"
+      ],
+      "name": "not_covered_by_authorisation",
+      "range": [
+        "configuration"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
       "description": "a declared operator or supervisor",
       "domain": [
         "run"
@@ -548,6 +610,18 @@
       "name": "sensor_recorded",
       "range": [
         "sensor"
+      ],
+      "version": 1
+    },
+    {
+      "cardinality": "many",
+      "description": "took over from the object on a machine's chain; valid while the subject is in force",
+      "domain": [
+        "configuration"
+      ],
+      "name": "succeeds",
+      "range": [
+        "configuration"
       ],
       "version": 1
     },

@@ -163,3 +163,36 @@ was a tautology.
   of resident memory per mapped row (2.9 GB for 100,000 work orders), and writing is about 1 ms per
   row. A multi-million-row export needs streaming package writes from the compiler's store. Coordinator
   to file it against the compiler.
+
+## Note, 2026-10-05: R3 re-measured after the streamed package write (MVL-113 follow-up)
+
+Deploy ADR 0012 makes `map_package` write through the compiler's `write_package_stream` (root ADR
+0065) from a lazy record iterator, and writes blank lists as `Unknown`. The stress script now
+measures the whole path (map and write to a temporary directory) and, where `iter_records` does not
+exist, runs the old path (`map_records`, `package_files`, `write_package`), so one script gives both
+columns. Same machine and cases as above (Linux 7.0, x86_64, Python 3.12 in the workspace `.venv`),
+`python tests/fixtures/archetypes/stress_lifecycle_mapper.py 10000 100000`, each case in its own
+process. "Before" is `origin/main` at `399104c`. Peak RSS includes the grown base package, which is
+read whole in both columns.
+
+```
+                                            before (main)                       after (ADR 0012)
+CMMS export, 10,000 work orders       8.45 s   281 MiB  46.94 MiB out   6949 findings   7.43 s  127 MiB  41.14 MiB out    794 findings
+CMMS export, 100,000 work orders     83.42 s  2002 MiB 469.74 MiB out  69257 findings  73.68 s  189 MiB 411.77 MiB out   7717 findings
+incident report, 32,000 paragraphs    0.40 s   144 MiB                                   0.37 s  142 MiB   (documents are still mapped as a list)
+register cell, 1 MiB of ';'           0.12 s    88 MiB                                   0.12 s   88 MiB
+```
+
+- Peak RSS at 100,000 work orders falls from 2,002 MiB to 189 MiB (the 2,891 MiB recorded above was
+  `package_files` alone, before root ADR 0065 lowered it; root ADR 0065 measured 746 MiB with
+  `write_package_stream` over lists). Time falls 12%, from 83 s to 74 s. Memory is now the base
+  package's rows plus the grouped findings and one first holder per identifier.
+- The 61,540 fewer findings are `list_cell_blank`: each blank `Related` or part cell is now an
+  `Unknown` list citing its cell. Output is smaller by 58 MiB even with 12 `civil_time_zone`
+  records and the `Unknown` states.
+- R3 (package size in memory) is closed for the mapper's output. What remains is the input: the base
+  package is read whole, so a multi-million-row export still needs a streaming reader from the
+  compiler's store.
+- The three `Compiler gaps` rows and L3 above that name MVL-202 are closed by root ADR 0061: a civil
+  zone is a `civil_time_zone` record (`Unknown` where the mapping says `unstated`), and a blank list
+  is `Unknown`. The D1 text above is historical and is not edited.

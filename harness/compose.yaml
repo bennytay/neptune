@@ -1,6 +1,7 @@
 # The services a real stage may need (MVL-123, platform ADR 0004). Nothing in the harness starts
-# this file unless a stage that runs for real declares `needs_services`: today every stage is the
-# real compiler (in process) or a contract stub, so CI and `python -m harness` need no Docker.
+# this file unless a stage that runs for real declares `needs_services`: today the real stages run in
+# process (the compiler; the ledger on an embedded PostgreSQL, platform ADR 0006) and memory and
+# context are contract stubs, so CI and `python -m harness` need no Docker.
 #
 #   docker compose -f harness/compose.yaml up -d --wait     # or: python -m harness --compose
 #
