@@ -265,17 +265,23 @@
             {
               "items": {
                 "enum": [
+                  "at_site",
+                  "at_site_candidate",
                   "authorised_configuration",
                   "configuration_active_during",
                   "configuration_candidate",
                   "configuration_unknown",
+                  "continues",
+                  "continues_candidate",
                   "deployed_at",
                   "episode_of",
                   "evidenced_by",
                   "executes_task",
+                  "executes_task_candidate",
                   "governed_by",
                   "has_calibration",
                   "has_configuration",
+                  "has_member",
                   "has_name",
                   "has_summary",
                   "located_at",
@@ -287,6 +293,7 @@
                   "part_of_programme",
                   "rated_payload",
                   "recorded_by",
+                  "recorded_by_candidate",
                   "runs_model",
                   "runs_software",
                   "same_as",
@@ -296,7 +303,7 @@
                 ],
                 "type": "string"
               },
-              "maxItems": 28,
+              "maxItems": 35,
               "minItems": 1,
               "type": "array",
               "uniqueItems": true
