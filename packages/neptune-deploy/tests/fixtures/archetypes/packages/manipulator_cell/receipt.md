@@ -1,6 +1,6 @@
 # Ingest receipt
 
-Receipt `rec:sha256:e28fdb597cb271a290292dc3668bdbd991d1bd14ce7d5691ed381b93c0578c2e`. Every id below is shortened; `receipt.json` has them whole.
+Receipt `rec:sha256:a42a843aef284da07943e6560298173d89578fb2df35b098ed79633078839d1c`. Every id below is shortened; `receipt.json` has them whole.
 
 ## Summary
 
@@ -40,7 +40,6 @@ Receipt `rec:sha256:e28fdb597cb271a290292dc3668bdbd991d1bd14ce7d5691ed381b93c057
 | `neptune.grouping` | `0.2.0` | `sha256:aeddaa6f335f` | none | `rec:5a4dc4d9d1f4` |
 | `neptune.introspection` | `0.1.0` | `sha256:c9bc334a3ccc` | none | `rec:a4c22d1acf45` |
 | `neptune.manifest` | `0.1.0` | `sha256:3bedd387c711` | none | `rec:8a63ca51c7d3` |
-| `neptune.plugins` | `0.1.0` | `sha256:44136fa355b3` | neptune-deploy 0.0.1 | `rec:c97e34263879` |
 | `pdf` | `0.1.0` | `sha256:87c0d8dbca90` | pypdf 6.19.0 | `rec:fa2a9216e840` |
 | `rosbag2` | `0.2.0` | `sha256:6407455961dc` | none | `rec:4df8cd116009` |
 | `tabular` | `0.2.0` | `sha256:f3ca9581546a` | pyarrow 25.0.1 | `rec:a849dd895889` |
@@ -63,7 +62,7 @@ Receipt `rec:sha256:e28fdb597cb271a290292dc3668bdbd991d1bd14ce7d5691ed381b93c057
 | `structured_record` | 46 |
 | `structured_table` | 15 |
 | `timestamp_domain` | 5 |
-| `transform_record` | 13 |
+| `transform_record` | 12 |
 
 ## Runs
 

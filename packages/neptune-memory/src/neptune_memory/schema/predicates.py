@@ -29,16 +29,32 @@ if TYPE_CHECKING:
 
 # Bumped whenever CORE_PREDICATES changes. 2: ``same_as`` and ``same_as_candidate`` joined the
 # core (ADR 0006 §4). 3: ``has_name`` joined (ADR 0007 §2), and the predicates that hold for every
-# node type widened to ``stream`` and ``document`` (ADR 0008 §6). The vocabulary is part of
-# graph-schema (``GRAPH_SCHEMA_VERSION``). 4: the configuration lineage predicates (ADR 0010,
-# MVL-127). 5: the run thread predicates joined (ADR 0009 §6). 6: MVL-130's clock predicates.
-# 7: the episode predicates joined (ADR 0012 §5).
+# node type widened to ``stream`` and ``document`` (ADR 0008 §6). 4: the configuration lineage
+# predicates joined (ADR 0010 §6). 5: the run thread predicates joined (ADR 0009 §6). 6: the
+# time-domain registry's ``has_clock``, ``maps_to`` and ``clock_map`` joined, and the predicates
+# that hold for every node type widened to ``clock`` (ADR 0011 §1). 7: the episode predicates
+# joined (ADR 0012 §5). The vocabulary is part of graph-schema (``GRAPH_SCHEMA_VERSION``).
 VOCABULARY_VERSION: Final = 7
+
+# Time-domain registry predicates (ADR 0011). Only declared or estimated mappings, and chains of
+# them, ground ``maps_to`` and ``clock_map``; no consolidator estimates an offset.
+HAS_CLOCK: Final = "has_clock"
+MAPS_TO: Final = "maps_to"
+CLOCK_MAP: Final = "clock_map"
 
 # Identity predicates (ADR 0003 §1). Only ``memory.identity`` grounds ``same_as``, never by
 # inference; ``same_as_candidate`` is pairwise, one claim each way. The runner enforces both.
 SAME_AS: Final = "same_as"
 SAME_AS_CANDIDATE: Final = "same_as_candidate"
+
+# Configuration lineage predicates (ADR 0010). Missingness is the predicate, as for identity (ADR
+# 0003 §1.3): a claim object is never ``Unknown`` or ``Ambiguous``.
+SUCCEEDS: Final = "succeeds"
+CONFIGURATION_ACTIVE_DURING: Final = "configuration_active_during"
+CONFIGURATION_CANDIDATE: Final = "configuration_candidate"
+CONFIGURATION_UNKNOWN: Final = "configuration_unknown"
+AUTHORISED_CONFIGURATION: Final = "authorised_configuration"
+NOT_COVERED_BY_AUTHORISATION: Final = "not_covered_by_authorisation"
 
 # Run threads (ADR 0009). A ``<predicate>_candidate`` claim is one reading of an ``Ambiguous``
 # value of ``<predicate>``: a claim object cannot be ``Ambiguous`` (ADR 0003 §1.3), so the
@@ -74,6 +90,7 @@ EPISODE_CANDIDATE_OF: Final[Mapping[str, str]] = MappingProxyType(
         INTERVENED: "intervened_candidate",
     }
 )
+
 
 
 class Cardinality(StrEnum):
@@ -320,6 +337,48 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
     ),
     _p("runs_model", {_N.MACHINE}, {_N.MODEL_VERSION}, _MANY, "a learned model it runs"),
     _p(
+        SUCCEEDS,
+        {_N.CONFIGURATION},
+        {_N.CONFIGURATION},
+        _MANY,
+        "took over from the object on a machine's chain; valid while the subject is in force",
+    ),
+    _p(
+        CONFIGURATION_ACTIVE_DURING,
+        {_N.RUN},
+        {_N.CONFIGURATION},
+        _MANY,
+        "a configuration the run ran with, over the bound part of the run (a snapshot binding)",
+    ),
+    _p(
+        CONFIGURATION_CANDIDATE,
+        {_N.MACHINE, _N.RUN},
+        {_N.CONFIGURATION},
+        _MANY,
+        "ambiguous: the configuration in force could be this one; one claim per reading",
+    ),
+    _p(
+        CONFIGURATION_UNKNOWN,
+        {_N.MACHINE, _N.RUN},
+        {_V.RECORD},
+        _MANY,
+        "no configuration is stated over the interval; the record leaves it open, never filled",
+    ),
+    _p(
+        AUTHORISED_CONFIGURATION,
+        {_N.SITE},
+        {_N.CONFIGURATION},
+        _MANY,
+        "an authorisation envelope approves this configuration at the site over the interval",
+    ),
+    _p(
+        NOT_COVERED_BY_AUTHORISATION,
+        {_N.RUN},
+        {_N.CONFIGURATION},
+        _MANY,
+        "observed: no authorisation envelope in the Ledger names the configuration then",
+    ),
+    _p(
         "governed_by",
         {_N.MACHINE, _N.SITE, _N.DEPLOYMENT, _N.FLEET},
         {_N.POLICY},
@@ -435,7 +494,7 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_V.RECORD},
         _MANY,
         "a Ledger record about the node (Episode tier, by id)",
-        version=2,  # 2: every node type includes stream and document
+        version=3,  # 2: every node type includes stream and document; 3: and clock
     ),
     _p(
         "has_name",
@@ -443,6 +502,7 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         {_V.TEXT},
         _ONE,
         "a declared display name, verbatim; never an identifier",
+        version=2,  # 2: every node type includes clock
     ),
     _p(
         SAME_AS,
@@ -450,7 +510,7 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         set(NodeType),
         _MANY,
         "the same real-world thing: declared identifier, configuration lineage or operator",
-        version=2,  # 2: every node type includes stream and document
+        version=3,  # 2: every node type includes stream and document; 3: and clock
     ),
     _p(
         SAME_AS_CANDIDATE,
@@ -458,6 +518,27 @@ CORE_PREDICATES: Final = PredicateRegistry(()).extend(
         set(NodeType),
         _MANY,
         "ambiguous: the evidence could mean either; whether they are one thing is undecided",
-        version=2,  # 2: every node type includes stream and document; ambiguous identity links
+        version=3,  # 2: stream and document, ambiguous identity links; 3: every type incl. clock
+    ),
+    _p(
+        HAS_CLOCK,
+        {_N.MACHINE},
+        {_N.CLOCK},
+        _MANY,
+        "a clock the machine's records carry, over the interval they observe it",
+    ),
+    _p(
+        MAPS_TO,
+        {_N.CLOCK},
+        {_N.CLOCK},
+        _MANY,
+        "a declared or estimated mapping, or a chain of them, takes its ticks to another clock's",
+    ),
+    _p(
+        CLOCK_MAP,
+        {_N.CLOCK},
+        {_V.CLOCK_MAP},
+        _MANY,
+        "a maps_to's parameters as the evidence states them, or the chain it composes",
     ),
 )

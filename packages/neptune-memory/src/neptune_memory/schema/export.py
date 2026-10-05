@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Final
 from neptune.model.schema import canonical_schema
 from neptune_memory.schema import GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.claim import ValueType
+from neptune_memory.schema.clock_map import MapMethod
 from neptune_memory.schema.nodes import NodeType
 from neptune_memory.schema.predicates import VOCABULARY_VERSION, Cardinality
 from neptune_memory.schema.supersede import FindingCode
@@ -28,8 +29,11 @@ DIALECT: Final = "https://json-schema.org/draft/2020-12/schema"
 SCHEMA_ID: Final = f"urn:neptune:schema:graph:{GRAPH_SCHEMA_VERSION}"
 # Compiler definitions a claim embeds; their transitive references come along.
 COMPILER_DEFS: Final = (
+    "ClockAnchor",
     "ConfigHash",
+    "Duration",
     "EvidenceRef",
+    "Fraction",
     "FrameRef",
     "NonFinite",
     "RecordId",
@@ -96,6 +100,22 @@ def _literal(datatype: ValueType, value: JsonObject, unit: JsonObject) -> JsonOb
     )
 
 
+def _inherited(value: JsonObject) -> JsonObject:
+    """A ``Knowledge`` state whose provenance is the claim's: no state carries its own."""
+    return {
+        "anyOf": [
+            _obj({"knowledge": _const("known"), "value": value}),
+            _obj({"knowledge": {"enum": ["not_applicable", "not_covered", "unknown"]}}),
+            _obj(
+                {
+                    "candidates": _array(_obj({"value": value}), min_items=2),
+                    "knowledge": _const("ambiguous"),
+                }
+            ),
+        ]
+    }
+
+
 def _memory_defs() -> dict[str, JsonValue]:
     not_applicable = _obj({"knowledge": _const("not_applicable")})
     number = {"anyOf": [{"type": "number"}, _ref("NonFinite")]}
@@ -114,6 +134,25 @@ def _memory_defs() -> dict[str, JsonValue]:
     }
     na: JsonObject = _ref("NotApplicable")
     return {
+        "ClockMap": {
+            **_obj(
+                {
+                    "anchor": _inherited(_ref("ClockAnchor")),
+                    "chain": _array(_ref("RecordId")),
+                    "method": {"enum": sorted(str(m) for m in MapMethod)},
+                    "rate": _inherited(_ref("Fraction")),
+                    "residual_bound": _inherited(_ref("Duration")),
+                    "target": _ref("RecordId"),
+                    "via": _array(_ref("RecordId")),
+                }
+            ),
+            "description": (
+                "a clock mapping onto target as the evidence states it: target(t) = anchor.target"
+                " + rate * (t - anchor.source), within residual_bound target ticks; or, composed,"
+                " the chain of mapping records it follows (via: the clocks between) and no"
+                " parameters of its own (ADR 0011 §2)"
+            ),
+        },
         "ClaimAssertionKind": {"enum": ["inferred", "observed", "stated"]},
         "Cardinality": {"enum": sorted(str(c) for c in Cardinality)},
         "Claim": {
@@ -291,6 +330,7 @@ def _memory_defs() -> dict[str, JsonValue]:
                 _literal(ValueType.BOOLEAN, {"type": "boolean"}, na),
                 _literal(ValueType.QUANTITY, number, quantity_unit),
                 _literal(ValueType.INSTANT, _ref("Timestamp"), na),
+                _literal(ValueType.CLOCK_MAP, _ref("ClockMap"), na),
             ]
         },
         "ValueType": {"enum": sorted(str(t) for t in ValueType)},
