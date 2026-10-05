@@ -10,14 +10,16 @@ structure around claims and the explicit states that say why there are none:
 - ``unknown``: Memory states that nothing is stated (``*_unknown`` claims naming the record that
   leaves it open).
 - ``conflict``: claims that cannot all hold disagree (a ``one`` predicate with two objects, or a
-  timeline event placed at two times on the pack clock); every one is shown, none is chosen.
+  timeline event placed at two times on the pack clock, where an event is a node or the nodes a
+  section's ``same_event`` claims join, ADR 0014); every one is shown, none is chosen.
 - A section with no entries is ``not_covered`` with its reason (what was looked for, about which
   nodes, in which snapshot, and what was left out); a section the template does not hold for the
   subject's type is ``not_applicable``.
 
 Claims on a clock other than the pack interval's are never compared with it: they are listed
-under ``other_clocks``. Inferred claims are left out unless the spec includes them, and are then
-marked on every statement.
+under ``other_clocks`` (in a timeline, "not placed"), or counted as ``other_clock_restated`` when a
+pack-clock claim restates them. Inferred claims are left out unless the spec includes them, and
+are then marked on every statement.
 """
 
 import dataclasses
