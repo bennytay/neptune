@@ -144,6 +144,68 @@ def test_a_window_on_an_unmapped_clock_is_refused_with_a_finding() -> None:
     assert not gaps(placed, GapCode.OTHER_CLOCK)
 
 
+def placed_through(packet: ContextPacket) -> list[str]:
+    return sorted(
+        i.claim.id
+        for i in packet.items
+        if isinstance(i, ClaimItem) and i.claim.predicate == "clock_map"
+    )
+
+
+def test_a_mapping_is_never_extended_past_where_it_holds() -> None:
+    # The coordinator's repro: the only piece holds for device ticks [0, 50); the reading starts
+    # at tick 100. Carrying the March window through that piece past tick 50 would be a silent
+    # clock assumption, so the reading stays apart and the uncovered part is named.
+    reading = claim_id("maintenance_state", "brake check due")
+    bridge = ClockBridge(F.MAPPING, DomainClock(F.DEVICE), UTC)
+    short = F.mapping_piece(0, 50, 0, F.MAR_1)
+    packet = ask(
+        q(subjects=frozenset({AMR}), during=MARCH, clock_bridges=frozenset({bridge})),
+        reader=F.reader_with_mapping(short),
+    )
+    assert reading not in packet.claim_ids
+    assert ("/during", (reading,)) not in gaps(packet, GapCode.OTHER_CLOCK)
+    ((at, refs),) = gaps(packet, GapCode.UNKNOWN)
+    assert (at, refs) == ("/clock_bridges/0", (F.MAPPING,))
+    detail = next(g.detail for g in packet.gaps if g.code is GapCode.UNKNOWN)
+    assert f"[{F.MAR_1 + 50}, {F.APR_1})" in detail
+    assert placed_through(packet) == []
+
+
+def test_each_piece_carries_only_its_own_part_of_the_window() -> None:
+    reading = claim_id("maintenance_state", "brake check due")  # device ticks [100, open)
+    bridge = ClockBridge(F.MAPPING, DomainClock(F.DEVICE), UTC)
+    early = F.mapping_piece(0, 50, 0, F.MAR_1)
+    late = F.mapping_piece(50, None, 50, F.MAR_1 + 1_000)  # a step: the clock was re-anchored
+    packet = ask(
+        q(subjects=frozenset({AMR}), during=MARCH, clock_bridges=frozenset({bridge})),
+        reader=F.reader_with_mapping(early, late),
+    )
+    assert reading in packet.claim_ids
+    assert placed_through(packet) == [late.id]  # the piece it was placed through, only
+    # Between the pieces' coverage on UTC ([MAR_1, MAR_1+50) and [MAR_1+1000, open)) lies a hole.
+    ((at, _),) = gaps(packet, GapCode.UNKNOWN)
+    detail = next(g.detail for g in packet.gaps if g.code is GapCode.UNKNOWN)
+    assert at == "/clock_bridges/0" and f"[{F.MAR_1 + 50}, {F.MAR_1 + 1000})" in detail
+
+
+def test_a_window_on_the_source_clock_is_clipped_to_the_piece_too() -> None:
+    # Forward: the window is on the controller clock, claims on UTC are placed through the map.
+    device = DomainClock(F.DEVICE)
+    bridge = ClockBridge(F.MAPPING, device, UTC)
+    short = F.mapping_piece(0, 50, 0, F.MAR_1)
+    window = During(device, 0, 100)
+    packet = ask(
+        q(subjects=frozenset({AMR}), during=window, clock_bridges=frozenset({bridge})),
+        reader=F.reader_with_mapping(short),
+    )
+    facts = said(packet)
+    assert ("asset-tag:AMR-07", "has_configuration", "cfg:AMR-07-B") in facts  # holds at MAR_1
+    assert placed_through(packet) == [short.id]
+    detail = next(g.detail for g in packet.gaps if g.code is GapCode.UNKNOWN)
+    assert "[50, 100)" in detail
+
+
 def test_a_bridged_reading_outside_the_window_stays_out() -> None:
     bridge = ClockBridge(F.MAPPING, DomainClock(F.DEVICE), UTC)
     february = During(UTC, F.FEB_1, F.MAR_1)  # the reading starts 100 ns after 1 March
@@ -333,6 +395,51 @@ def test_a_kind_wide_subject_filters_what_a_site_walk_keeps() -> None:
         )
     )
     assert said(packet) == {("zone-code:AISLE-3", "zone_of", "site-code:S-007")}
+
+
+def test_a_site_check_cut_short_is_named_at_the_site() -> None:
+    reader = F.reader()
+    engine = LocalEngine(reader, channels=[GraphChannel(reader, max_nodes=1)])
+    packet = Client(engine).query(q(subjects=frozenset({AMR}), site=SiteScope("site-code:S-007")))
+    truncations = [g for g in packet.gaps if "stopped after" in g.detail]
+    assert [(g.at, g.detail.split(" stopped")[0]) for g in truncations] == [
+        ("/site", "the site check")
+    ]
+
+
+def test_a_crowded_node_is_followed_only_so_far_and_says_so() -> None:
+    reader = F.reader()
+    engine = LocalEngine(reader, channels=[GraphChannel(reader, max_edges=2)])
+    packet = Client(engine).query(
+        q(subjects=frozenset({AMR}), graph=GraphClause(None, 1, Direction.BOTH))
+    )
+    assert len(packet.items) <= 2
+    crowded = [g for g in packet.gaps if "more than 2 claims" in g.detail]
+    assert [(g.at, g.refs) for g in crowded] == [("/graph", ("asset-tag:AMR-07",))]
+
+
+def test_a_stale_snapshot_reads_a_busy_subject_once_per_group_not_once_per_claim() -> None:
+    class Counting:
+        def __init__(self) -> None:
+            self.inner = F.reader()
+            self.calls = 0
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self.inner, name)
+
+        def claims(self, *args: object, **kwargs: object) -> object:
+            self.calls += 1
+            return self.inner.claims(*args, **kwargs)  # type: ignore[arg-type]
+
+    reader = Counting()
+    packet = ask(q(as_of=2, subjects=frozenset({AMR})), reader=reader)
+    groups = {
+        (i.claim.subject, i.claim.predicate) for i in packet.items if isinstance(i, ClaimItem)
+    }
+    # One read at head per group, plus a bisection (log2 of 2 transactions) for the one claim
+    # Memory superseded since: never one bisection per claim.
+    assert reader.calls <= len(groups) + 3
+    assert len(packet.superseded_since) == 1
 
 
 def test_the_walk_stops_at_its_node_limit_and_says_so() -> None:

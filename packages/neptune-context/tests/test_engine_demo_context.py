@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from datetime import timedelta
 from functools import cache
 from typing import TYPE_CHECKING
 
+import pytest
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
 from mcp.shared.memory import create_connected_server_and_client_session
@@ -34,8 +36,6 @@ from neptune_context.sdk import AsyncClient, Client
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
     from neptune_context.packets.model import ContextPacket
 
@@ -173,6 +173,21 @@ def test_the_cli_refuses_an_unreadable_graph(
     not_a_number.write_text('{"head": NaN}', encoding="utf-8")
     deep = tmp_path / "deep.json"
     deep.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
-    for path in (broken, duplicated, not_a_number, deep, tmp_path / "missing.json"):
+    fifo = tmp_path / "graph.fifo"
+    os.mkfifo(fifo)  # a FIFO would block a reader forever: refused before it is opened
+    for path in (broken, duplicated, not_a_number, deep, tmp_path / "missing.json", fifo):
         assert main(["--memory", str(path)]) == 2
-    assert capsys.readouterr().err.count("neptune mcp:") == 5
+    assert capsys.readouterr().err.count("neptune mcp:") == 6
+
+
+def test_a_graph_larger_than_the_cap_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import neptune_context.engine as engine
+
+    assert engine.MAX_GRAPH_BYTES == 256 * 1024 * 1024
+    big = tmp_path / "graph.json"
+    big.write_text(json.dumps(F.demo_document().to_json()), encoding="utf-8")
+    monkeypatch.setattr(engine, "MAX_GRAPH_BYTES", 1024)
+    with pytest.raises(ValueError, match="larger than 1024 bytes"):
+        read_graph(big)

@@ -70,11 +70,16 @@ Three upstream facts shape it:
      used to widen identity. Only claims whose object is a node extend the walk.
    - **Snapshot and window.** Memory is read at `memory_as_of`. With a `during`, a claim on the
      window's clock is kept when its valid interval overlaps the window. A claim on a clock a query
-     bridge joins to the window's clock is kept when Memory holds the bridge's mapping (a `clock_map`
-     claim citing the bridge's `mapping_id`, active at the snapshot) and the window, carried exactly
-     through that map, overlaps it; the mapping claim is carried as a hit. A bridge Memory does not
-     hold is refused with an `unknown` gap at that bridge. Any other clock is an `other_clock` gap
-     naming the claims, and they are not walked through.
+     bridge joins to the window's clock is placed only through the bridge's mapping as Memory holds
+     it: the `clock_map` claims citing the bridge's `mapping_id`, active at the snapshot. Memory
+     splits a mapping into time-bounded pieces, so each piece is used only where it holds: its
+     validity (on the source clock, carried onto the window's clock when the window is on the
+     target) is clipped to the window, only that part is carried exactly through that piece's map
+     (widened by its residual bound), and on the source clock the result is clipped to the piece's
+     validity again. The pieces a carried claim was placed through are carried as hits. Any part of
+     the window no piece covers, a composed or unknown map, or a bridge Memory does not hold at all
+     is an `unknown` gap at that bridge: a map is never extended past where its evidence says it
+     holds. Any other clock is an `other_clock` gap naming the claims, not walked through.
    - **Inference.** Memory is always read with inferred claims; with `include_inferred = false`
      they are named in one `inferred_withheld` gap and never walked through or carried.
    - **Beyond the pin.** A claim with a predicate, node type or value type the pinned graph-schema
@@ -90,13 +95,17 @@ Three upstream facts shape it:
      `observed`. A Ledger read that fails is a gap; the claims stay. A bridged window is not carried to the Ledger: a
      `not_covered` gap cites Ledger ADR 0016 §9. Without a catalog, a window or region is a
      `not_covered` gap; site and zones are graph seeds and need no catalog.
+   - **Bounds.** A walk expands at most `max_nodes` (4096) nodes and follows at most `max_edges`
+     (1024) claims from one node, by claim id; either cut is a `not_covered` gap at the walk it cut
+     (`/graph`, or `/site` for the site check), naming the crowded nodes.
    - **Scores.** A claim's distance is the walk level at which it was reached (1 for a claim touching a
      seed). Its weight is 1 for observed and stated claims and its confidence for inferred ones
      (`Unknown`: 0.5). Raw score = weight × 0.5^(distance − 1). A series window or frame scores half its
      best citing claim. Ties break on item id.
-   - **Supersessions and findings.** `superseded` is found per hit claim by bisecting
-     `(memory_as_of, head]` for the transaction its version stops being current, then naming the
-     versions recorded then that list it in `supersedes`. Findings are the reader's, filtered to hit
+   - **Supersessions and findings.** Hit claims are checked at head with one Memory read per
+     subject and predicate; only a claim gone by then is bisected over `(memory_as_of, head]` (reads
+     shared by its group) for the transaction its version stopped being current, and the versions
+     current then that list it in `supersedes` are named. Findings are the reader's, filtered to hit
      claims and to codes at the pin.
 4. **Fusion and cut, v0** (`retrieve.fusion`, replaced by MVL-145 behind the same signatures).
    Reciprocal-rank fusion (k = 60) by item id: ranks, not raw scores, are summed, so no channel's score
@@ -110,8 +119,8 @@ Three upstream facts shape it:
    members no channel serves yet (`text`: MVL-142/143; `explain`: MVL-149) are `not_covered` gaps.
    `produced_by` is `neptune-context.local`, version `1`, config hash over the channel list and
    fusion settings. `hydrate` is the catalog's `resolve`; without a catalog it is `unavailable`. The
-   MCP CLI gains `--memory GRAPH.json` (a Memory graph document read by Memory's codec into its
-   reference reader). A Ledger catalog plugs in programmatically
+   MCP CLI gains `--memory GRAPH.json`: a regular file of at most 256 MiB, read strictly (no duplicate
+   keys, no NaN) and decoded by Memory's codec into its reference reader. A Ledger catalog plugs in programmatically
    (`build_server(AsyncClient(LocalEngine(reader, catalog)))`): Context may not construct the Ledger's
    PostgreSQL catalog (import boundary), so Platform wires it.
 6. **Values beyond the pin are refused by the reader too.** `packets.codec.decode` checks every

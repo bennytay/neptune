@@ -183,8 +183,9 @@ def claim(
     )
 
 
-def _clock_map() -> ClockMap:
-    anchor = ClockAnchor(Timestamp(0, DEVICE), Timestamp(MAR_1, UTC))  # type: ignore[arg-type]
+def _clock_map(device_ticks: int = 0, utc_ticks: int = MAR_1) -> ClockMap:
+    """The controller clock onto UTC: ``device_ticks`` is ``utc_ticks``, at rate 1."""
+    anchor = ClockAnchor(Timestamp(device_ticks, DEVICE), Timestamp(utc_ticks, UTC))  # type: ignore[arg-type]
     return ClockMap(
         target=UTC,  # type: ignore[arg-type]
         method=MapMethod.STATED,
@@ -281,6 +282,28 @@ def document() -> GraphDocument:
 
 def reader() -> ReferenceReader:
     return ReferenceReader(document())
+
+
+def mapping_piece(start: int, end: int | None, device_ticks: int, utc_ticks: int) -> Claim:
+    """One time-bounded piece of the controller-to-UTC mapping, valid on device ticks
+    ``[start, end)``, as Memory splits a mapping (Memory ADR 0011)."""
+    return claim(
+        DEVICE_CLOCK,
+        "clock_map",
+        TypedLiteral(ValueType.CLOCK_MAP, _clock_map(device_ticks, utc_ticks)),
+        start,
+        end,
+        clock=DEVICE,
+        records=(RecordId(MAPPING),),
+    )
+
+
+def reader_with_mapping(*pieces: Claim) -> ReferenceReader:
+    """The fixture graph with its one open-ended mapping replaced by ``pieces``."""
+    kept = [c for c in claims() if c.predicate != "clock_map"] + list(pieces)
+    ordered_claims = sorted(kept, key=lambda c: (c.recorded_at, c.id))
+    history = History(tuple(ordered_claims), (finding(ordered_claims),))
+    return ReferenceReader(GraphDocument(history, RESOLVER_CONFIG, HEAD))
 
 
 # --- A Ledger catalog over a few rows -------------------------------------------------------
@@ -387,7 +410,9 @@ DEMO_SNAPSHOT: Final = (
 
 
 def demo_document() -> GraphDocument:
-    """Deploy's frozen Memory graph of the acceptance corpus (Platform ADR 0007; Deploy ADR 0014),
+    """NORMALISING A NON-CONFORMANT DEPLOY SNAPSHOT.
+
+    Deploy's frozen Memory graph of the acceptance corpus (Platform ADR 0007; Deploy ADR 0014),
     with each claim id recomputed under Memory's claim-id scheme and the generation recomputed
     from its resolver configuration, then read by Memory's strict codec.
 
@@ -402,6 +427,9 @@ def demo_document() -> GraphDocument:
     from neptune.identity.canonical_json import dumps
 
     data = json.loads(DEMO_SNAPSHOT.read_bytes())
+    # Normalising a non-conformant Deploy snapshot: the file is not a valid Memory graph
+    # document (the coordinator raised it with Deploy and Platform). Each fix-up below exists only
+    # so Memory's strict codec accepts it; drop them when the snapshot conforms.
     # The two ``drift`` claims hold a ``delta`` value (graph-schema 1.7.0, unmerged); Memory's codec
     # at this commit cannot read them at all, so they are left out. The snapshot's other values
     # newer than Context's pin (``calibrated_with``, ``calibrated_by``) stay and must surface as
