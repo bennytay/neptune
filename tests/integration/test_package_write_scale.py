@@ -1,9 +1,10 @@
-"""The streaming package writer at scale: peak memory capped whatever the record count, time
-linear in it (ADR 0065).
+"""The streaming package writer and reader at scale: peak memory capped whatever the record
+count, time linear in it (ADR 0065, ADR 0070).
 
 Each write runs in a child process (``tests/fixtures/store/make_scale_package.py``), so its peak
 resident memory is its own: the records are generated lazily inside it, so the peak is the
-writer's, not the input's. The cap is ADR 0065's bound with room for allocator slack.
+writer's, not the input's. Each read (verify, every record once, validation) runs in a child of
+its own too. The cap is ADR 0065's bound with room for allocator slack.
 """
 
 import importlib.util
@@ -37,6 +38,22 @@ def write(rows: int, tmp_path: Path, *extra: str) -> dict[str, Any]:
     return result
 
 
+def read(rows: int, tmp_path: Path) -> dict[str, Any]:
+    """Read, verify and validate the package ``write(rows, ...)`` wrote, in a child process."""
+    scratch = tmp_path / f"scratch-{rows}"
+    out = tmp_path / f"package-{rows}"
+    done = subprocess.run(
+        [sys.executable, str(SCRIPT), str(rows), str(out), str(scratch), "--read"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert list(scratch.iterdir()) == []  # every spilled run was removed
+    result: dict[str, Any] = json.loads(done.stdout)
+    assert result["records"] > rows  # every row and its findings were read
+    return result
+
+
 def test_twenty_thousand_rows_stream_under_the_cap_to_the_in_memory_bytes(tmp_path: Path) -> None:
     streamed = write(20_000, tmp_path)
     assert streamed["peak_mib"] < PEAK_CAP_MIB
@@ -45,10 +62,12 @@ def test_twenty_thousand_rows_stream_under_the_cap_to_the_in_memory_bytes(tmp_pa
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     assert streamed["id"] == package_id(package_files(module.scale_records(20_000)))
+    read_back = read(20_000, tmp_path)
+    assert read_back["id"] == streamed["id"] and read_back["peak_mib"] < PEAK_CAP_MIB
 
 
 @pytest.mark.slow
-def test_a_hundred_thousand_and_a_million_rows_stay_under_the_cap_in_linear_time(
+def test_a_hundred_thousand_and_a_million_rows_write_and_read_under_the_cap_in_linear_time(
     tmp_path: Path,
 ) -> None:
     small = write(100_000, tmp_path)
@@ -57,5 +76,11 @@ def test_a_hundred_thousand_and_a_million_rows_stay_under_the_cap_in_linear_time
     assert large["peak_mib"] < PEAK_CAP_MIB
     # Roughly linear: ten times the rows takes at most twice as long per row (a loaded machine and
     # one more merge level are the slack); an in-memory sort or a quadratic step would not pass.
+    per_row = (small["seconds"] / 100_000, large["seconds"] / 1_000_000)
+    assert per_row[1] < 2 * per_row[0], per_row
+    # ADR 0070: reading, verifying and validating the same packages hold no more than writing.
+    small, large = read(100_000, tmp_path), read(1_000_000, tmp_path)
+    assert small["peak_mib"] < PEAK_CAP_MIB
+    assert large["peak_mib"] < PEAK_CAP_MIB
     per_row = (small["seconds"] / 100_000, large["seconds"] / 1_000_000)
     assert per_row[1] < 2 * per_row[0], per_row

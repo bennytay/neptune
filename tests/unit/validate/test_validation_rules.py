@@ -765,9 +765,10 @@ def test_validation_is_deterministic_and_idempotent(tmp_path: Path) -> None:
     assert report.transform == again.transform
     # The package with its findings added validates to the same findings: rules ignore their own.
     staged = StagedPackage(tmp_path / "a" / "package", tmp_path / "out", package.id)
+    held = len(package.receipt.findings)  # read before amend moves the package's files away
     amended = read_package(amend(staged, package, report.records()).path)
     assert validate_package(amended).findings == report.findings
-    assert len(amended.receipt.findings) == len(package.receipt.findings) + len(report.findings)
+    assert len(amended.receipt.findings) == held + len(report.findings)
 
 
 def test_findings_are_ranked_by_a_fixed_severity_order(tmp_path: Path) -> None:
