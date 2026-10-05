@@ -18,7 +18,7 @@ from neptune.model.schema import canonical_schema
 from neptune_memory.schema import GRAPH_SCHEMA_VERSION
 from neptune_memory.schema.claim import ValueType
 from neptune_memory.schema.nodes import NodeType
-from neptune_memory.schema.predicates import Cardinality
+from neptune_memory.schema.predicates import VOCABULARY_VERSION, Cardinality
 from neptune_memory.schema.supersede import FindingCode
 
 if TYPE_CHECKING:
@@ -268,7 +268,17 @@ def _memory_defs() -> dict[str, JsonValue]:
                     "type": "object",
                 },
                 "vocabulary": _ref("PredicateRegistry"),
-                "vocabulary_version": {"minimum": 1, "type": "integer"},
+                # An annotation, never a bound: a newer vocabulary still validates here. Naming
+                # the version makes a vocabulary change a schema change, so it is published
+                # (ADR 0010 §6).
+                "vocabulary_version": {
+                    "description": (
+                        f"the core vocabulary's version: {VOCABULARY_VERSION} when this schema"
+                        " was exported (VOCABULARY_VERSION)"
+                    ),
+                    "minimum": 1,
+                    "type": "integer",
+                },
             }
         ),
         "Token": {"pattern": "^[a-z][a-z0-9_.\\-]*$", "type": "string"},
