@@ -1,0 +1,5 @@
+asset_id,name,category,site_id,parent_id,aliases,serial_number,cmms_id
+AMR-07,Tugger 7,autonomous mobile robot,WH-3,,Otto 7; T7,OTTO-1500-0042,EQ-4410
+AMR-09,Tugger 9,autonomous mobile robot,WH-3,,,OTTO-1500-0057,EQ-4411
+RACK-A1,Rack A1,pallet rack,WH-3,AISLE-14,,,
+,,unlabelled,WH-3,,,,

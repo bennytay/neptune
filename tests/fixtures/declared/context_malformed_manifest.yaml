@@ -1,0 +1,11 @@
+site:
+  id: FIELD-7
+  name: North paddock
+  location:
+    latitude: 51°30'N
+    longitude: -0.12
+assets: not a list
+work_orders:
+  - status: Open
+  - id: WO-1
+    title: Clear the fence line
