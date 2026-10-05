@@ -11,10 +11,12 @@ sources, tenant roots, paging, merge order). The gate's review is
 [reviews/l1-stress-test.md](reviews/l1-stress-test.md). How the real catalog serves `thread`,
 `threads_of` and `lineage` (the derived thread index, request checks, how `IdentityLink` and
 `ClockMapping` records become links and merges) is
-[ADR 0010](adr/0010-entity-thread-index-and-lineage-reads.md).
+[ADR 0010](adr/0010-entity-thread-index-and-lineage-reads.md). How it serves `query` (the planner,
+lineage preferences, series joins, budgets, explain, and the SQL passthrough outside this contract)
+is [ADR 0016](adr/0016-query-engine-planner-budgets-and-sql-passthrough.md).
 
-- **Version:** `1.6.0`, `neptune_ledger.api.CATALOG_API_VERSION`, **stable**, in
-  `contracts/catalog-api/v1.6.0/`. 1.0.0 was the pre-gate draft; 1.1.0 adds the `unsafe_entry`
+- **Version:** `1.7.0`, `neptune_ledger.api.CATALOG_API_VERSION`, **stable**, in
+  `contracts/catalog-api/v1.7.0/`. 1.0.0 was the pre-gate draft; 1.1.0 adds the `unsafe_entry`
   finding, the `unreachable` verdict and `QuerySpec.after`, and accepts every 1.0.0 document;
   1.2.0 adds package schema 2's `configuration_snapshot` and `configuration_value` record kinds
   (root ADR 0037) and accepts every 1.1.0 document; 1.3.0 adds package schema 3's alignment
@@ -23,8 +25,10 @@ sources, tenant roots, paging, merge order). The gate's review is
   1.5.0 adds `ThreadLink.entity_kind` (ADR 0010 §8) and accepts every 1.4.0 document; 1.6.0
   stops listing record kinds and references the package-schema contract for them instead (below,
   [ADR 0011](adr/0011-schema-version-registry-and-record-kinds-by-package-schema-version.md)),
-  and accepts every 1.5.0 document. A package-schema version that adds kinds changes no
-  catalog-api version.
+  and accepts every 1.5.0 document; 1.7.0 adds the optional `QuerySpec` fields `frame`,
+  `lineage`, `columns`, `series`, `budget` and `explain`, the `QueryMeta` fields `budget` and
+  `plan`, and the `budget_exceeded` and `ambiguous_lineage` finding codes (ADR 0016), and accepts
+  every 1.6.0 document. A package-schema version that adds kinds changes no catalog-api version.
 - **Code:** `neptune_ledger.api`. It holds the `CatalogApi` protocol, the request and response
   records, `catalog_schema()` (JSON Schema 2020-12, one `$defs` entry per record),
   `QUERY_RESULT_SCHEMA` (Arrow), `to_json` / `from_json` / `dumps` / `loads`, and `StubCatalog`.
@@ -67,7 +71,7 @@ sources, tenant roots, paging, merge order). The gate's review is
 | `thread(key, order, preference)` | `Thread` | ADR 0003. `History()` returns every entry and leaves lineage sets `NotApplicable`. `LatestTransform()`, `Pinned(t)` or `AsRegisteredBy(p)` returns the current view: one transform per lineage set, resolved to `Known`, `Ambiguous` or `NotCovered`; only `Known` sets contribute entries. An entry's `world` has a `TimePoint` start and its end exactly as the package states it (open unless `Known` on the start's clock). `world` order gives per-clock partitions with the untimed partition last. `transaction` order gives one partition. Optional `merge` takes a reference clock and `ClockMapping` ids. | Defaults the preference (a missing one gives `preference_required`). Unions threads. Relates clocks without named mappings. Converts ticks. Orders by wall clock. |
 | `threads_of(record_id)` | `ThreadsOf` | Every thread the record is a member of, per registering package, with its roles, plus the threads an `Ambiguous` field names (`unresolved`). | Merges co-declared keys into one thread. |
 | `lineage(record_id)` | `LineageGraph` | The record's kind and transform, every package holding it, the transform DAG upstream of it (an unregistered upstream is a node with `NotCovered` info), and lineage siblings (same kind and anchor, other transforms). | Picks a "current" transform; that is `thread` with a preference. |
-| `query(spec)` | `pyarrow.Table` | Columns are exactly `QUERY_RESULT_SCHEMA` (`QueryRow`): the catalog's nullable index columns (ADR 0002 §5), where NULL means "not Known in the record" (`world_last`: the end is open), never "absent". Metadata `neptune.catalog_api` holds `QueryMeta` (`as_of`, findings). Filters on kinds (required; a kind no package-schema version the Ledger reads declares is `invalid_request`), a `TimeWindow` on one clock (inclusive; records without world time never match), a `thread_id` (history entries) and packages, combined with AND. Rows are sorted by `(kind, record_id, package_id)` as UTF-8 bytes; `after` (a `QueryCursor`, 1.1.0) keeps the rows strictly after it and `limit` the first rows, so the last row of a page is the next page's cursor. | Accepts SQL. Applies a window across clocks. Returns record bodies (read the package). |
+| `query(spec)` | `pyarrow.Table` | Columns are `QUERY_RESULT_SCHEMA` (`QueryRow`): the catalog's nullable index columns (ADR 0002 §5), where NULL means "not Known in the record" (`world_last`: the end is open), never "absent". Metadata `neptune.catalog_api` holds `QueryMeta`: `as_of`, findings, the `budget` report on every answered query, and the `plan` when `explain` is set. Filters, combined with AND: kinds (required; a kind no package-schema version the Ledger reads declares is `invalid_request`), a `TimeWindow` on one clock (inclusive; records without world time never match), a `FrameWindow` box in one declared frame or CRS and one unit (1.7.0; records without an extent there in that unit never match), a `thread_id` (history entries), packages, and a `lineage` preference (1.7.0), resolved over each whole lineage set and never over what the other filters kept. An `Ambiguous` set returns none of its rows and one `ambiguous_lineage` finding. Rows are sorted by `(kind, record_id, package_id)` as UTF-8 bytes. `after` (a `QueryCursor`, 1.1.0) keeps the rows strictly after it, and `limit` the first rows, so the last row of a page is the next page's cursor. `columns` (1.7.0) projects, always keeping the key columns. `series` (1.7.0, `kinds` exactly `stream`, a window, no paging) returns instead the window's series rows of the selected streams, in `(ticks, package_id, stream_id, seq)` order on that clock, each with its stream's record columns (strings dictionary-encoded) then `clock`, `ticks`, `ticks_state`, `seq` and the series columns. `budget` (1.7.0) bounds rows, Arrow bytes and wall time. A cut answer is the longest prefix that fits, with one `budget_exceeded` finding per limit that cut it. Only a time cut is `reproducible: false`. | Accepts SQL (the Ledger's SQL passthrough is outside this contract, ADR 0016 §7). Applies a window across clocks. Returns record bodies (read the package). Truncates without a finding. |
 
 ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 `current(thread, preference, order)` is `thread(key, order, preference)`.
@@ -106,6 +110,8 @@ ADR 0003's `history(thread, order)` is `thread(key, order, History())`, and its
 | `unknown_clock`, `unknown_mapping` | thread | The merge names a clock, or a `clock_mapping` record id, that no package registered by the catalog point holds (ADR 0010 §5) |
 | `unsupported_mapping`, `mapping_out_of_range` | thread | ADR 0003 §3: a mapping that is not usable, or an entry that no usable path covers; `mapping_out_of_range` lists the paths it tried in `paths_tried` |
 | `as_of_out_of_range` | read calls | `as_of` is beyond the latest committed point |
+| `budget_exceeded` | query | A `QueryBudget` limit (subject `rows`, `bytes` or `time`) cut the answer to the prefix returned (1.7.0) |
+| `ambiguous_lineage` | query | A lineage set the rows touch resolves to `Ambiguous` under the spec's preference; none of its rows is returned (subject: the source content id; 1.7.0) |
 | `invalid_request` | any | An argument outside the contract, for example a window with `first > last`, or a merge on `transaction` order |
 
 ## Running the contract tests against an implementation
@@ -137,6 +143,9 @@ The suite contains:
   `already_registered` at the new root), the same bytes at two chunk sizes, tenant-root escapes
   by symlink and `..` (through `make_tenant_catalog`), two timed clocks in one thread with no
   mapping (across packages and within one), and paging `query` by cursor;
+- `query` 1.7.0: the budget report, projection, row and byte budgets cutting a flagged prefix, a
+  thread with a lineage preference equal to the thread's current view, an `Ambiguous` set
+  reported, deterministic explain, and specs outside the contract refused;
 - determinism checks: the same call twice gives identical bytes, and `as_of` replays an earlier
   point.
 
@@ -148,16 +157,15 @@ tested over registered packages there (`test_ledger_thread_alignment.py`). The s
 
 This package runs the suite twice (`tests/contract/test_ledger_catalog_contract.py`): against
 `StubCatalog` as strict expected failures, where each test must fail with `NotImplementedError`,
-and against the real `neptune_ledger.catalog.registry.PostgresCatalog`. There, `register`,
-`verify`, `resolve`, `thread`, `threads_of` and `lineage` pass. Each test that reaches a call not
-implemented yet is listed by name with its owning issue (`query`: MVL-98) and is a strict
-expected failure until that call lands. `make_catalog` must return a catalog
-with no package-root limit, because the tests register from `tmp_path`.
+and against the real `neptune_ledger.catalog.registry.PostgresCatalog`, where every test passes.
+`make_catalog` must return a catalog with no package-root limit, because the tests register from
+`tmp_path`. Series joins, frame windows and the SQL passthrough are tested over registered
+packages with series files inside the Ledger (`test_ledger_query.py`).
 
 Referenced sources are re-hashed on request by `PostgresCatalog.verify_sources`, outside this
 contract, because catalog-api has no finding code for a source location
 ([ADR 0007](adr/0007-registration-implementation-boundaries-and-source-checks.md)). The `ledger`
 command (`ledger register <root>`, `ledger verify <id> [--source-root DIR]`) is a thin front end
 over it. The registry goldens in
-`contracts/catalog-api/v1.6.0/golden/` come from `contract_tests/goldens.py`. They are example
+`contracts/catalog-api/v1.7.0/golden/` come from `contract_tests/goldens.py`. They are example
 documents valued from the worked examples, with fixed illustrative transaction keys.

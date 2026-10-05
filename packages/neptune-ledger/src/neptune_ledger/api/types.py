@@ -22,7 +22,7 @@ from neptune.model.knowledge import AssertionKind, Knowledge, Known, NotCovered
 
 # The catalog API's registry version (contracts/catalog-api). It equals the registry version
 # exactly (platform ADR 0002 §3); a reader-incompatible change raises the major (ADR 0004 §5).
-CATALOG_API_VERSION: Final = "1.6.0"
+CATALOG_API_VERSION: Final = "1.7.0"
 API_MAJOR: Final = int(CATALOG_API_VERSION.split(".", 1)[0])
 
 
@@ -42,6 +42,7 @@ class Constraint:
     maximum: int | None = None
     min_length: int | None = None
     min_items: int | None = None
+    max_items: int | None = None
     unique_items: bool = False
     required: tuple[str, ...] = ()
     # On a ``Knowledge[T]`` field: the state restates a package field verbatim, so it keeps the
@@ -125,7 +126,9 @@ LocatorStep: TypeAlias = Annotated[
 Locator: TypeAlias = Annotated[tuple[LocatorStep, ...], Constraint(min_items=1)]
 
 FindingCode: TypeAlias = Literal[
+    "ambiguous_lineage",
     "as_of_out_of_range",
+    "budget_exceeded",
     "conflicting_id",
     "file_digest_mismatch",
     "file_missing",
@@ -765,6 +768,93 @@ class TimeWindow:
 
 
 @dataclass(frozen=True)
+class FrameReference:
+    """A frame by its declared id in one frame graph (a ``FrameRef``), named verbatim (1.7.0)."""
+
+    tag_field: ClassVar[str] = "reference"
+    tag: ClassVar[str] = "frame"
+    frame_graph_id: TierTwoId
+    frame_id: Text
+
+
+@dataclass(frozen=True)
+class CrsReference:
+    """A coordinate reference system as an authority and a code, verbatim (1.7.0).
+
+    ``OGC:CRS84`` is not ``EPSG:4326``: a query names the one the records state."""
+
+    tag_field: ClassVar[str] = "reference"
+    tag: ClassVar[str] = "crs"
+    authority: Text
+    code: Text
+
+
+Corner: TypeAlias = Annotated[tuple[float, ...], Constraint(min_items=2, max_items=3)]
+
+
+@dataclass(frozen=True)
+class FrameWindow:
+    """A box in one declared frame or CRS and one unit (1.7.0; Ledger ADR 0015 §5, ADR 0016 §1).
+
+    ``low`` and ``high`` are 2 or 3 coordinates, ``low[i] <= high[i]``, both ends inclusive; a
+    2-axis box holds any z. ``unit`` is a canonical unit symbol. A record matches when it states
+    an extent in exactly this reference and unit that meets the box; coordinates are never
+    converted, reprojected or carried between frames, and there is no default frame.
+    """
+
+    reference: FrameReference | CrsReference
+    unit: Text
+    low: Corner
+    high: Corner
+
+
+QueryColumn: TypeAlias = Literal[
+    "kind",
+    "record_id",
+    "package_id",
+    "line",
+    "registration_seq",
+    "transform_id",
+    "source_content_id",
+    "source_locator",
+    "assertion_kind",
+    "world_clock",
+    "world_first",
+    "world_last",
+]
+SeriesColumnName: TypeAlias = Annotated[
+    str,
+    Constraint(
+        "SeriesColumnName",
+        "A series file's value, value-state or locator column (root ADR 0018), by its name.",
+        r"^(value/|state/value/|locator/).+$",
+    ),
+]
+
+
+@dataclass(frozen=True)
+class SeriesJoin:
+    """Join each selected stream's series rows in the spec's window (1.7.0; ADR 0016 §4).
+
+    ``columns`` are the series' value, state and locator columns to keep, each in every scanned
+    file with one type; absent, every such column all scanned files share."""
+
+    columns: Annotated[tuple[SeriesColumnName, ...], Constraint(unique_items=True)] | None = None
+
+
+@dataclass(frozen=True)
+class QueryBudget:
+    """Limits on one answer (1.7.0; ADR 0016 §6): its rows, its Arrow bytes, its wall time.
+
+    An absent limit takes the Ledger's default. Exceeding one returns the longest prefix of the
+    answer that fits, with a ``budget_exceeded`` finding per limit that cut it."""
+
+    max_rows: Annotated[int, Constraint(minimum=1)] | None = None
+    max_bytes: Annotated[int, Constraint(minimum=1)] | None = None
+    max_millis: Annotated[int, Constraint(minimum=1)] | None = None
+
+
+@dataclass(frozen=True)
 class QueryCursor:
     """A ``query`` row's sort key; ``QuerySpec.after`` returns the rows strictly after it."""
 
@@ -775,15 +865,21 @@ class QueryCursor:
 
 @dataclass(frozen=True)
 class QuerySpec:
-    """The filter contract ``query`` implements (MVL-98): kinds, a window, a thread, packages.
+    """The filter contract ``query`` implements (Ledger ADR 0016): kinds, windows, a thread,
+    packages, a lineage preference, a projection, a series join and a budget.
 
     Filters combine with AND. ``kinds`` is required. ``window`` keeps records whose world clock
-    is ``window.clock`` and whose stated extent ``[world_first, world_last or world_first]``
-    meets it; records without world time never match a window. ``thread_id`` keeps the thread's
-    history entries. ``packages`` absent means every registered package. Rows are sorted by
-    ``(kind, record_id, package_id)`` as UTF-8 bytes; ``after`` (1.1.0) keeps the rows whose key
-    is strictly greater than the cursor, and ``limit`` keeps the first rows, so the last row of
-    one page is the next page's cursor (Ledger ADR 0006 §6).
+    is ``window.clock`` and whose stated extent ``[world_first, world_last or world_first]`` meets
+    it; records without world time never match a window. ``frame`` (1.7.0) keeps records with an
+    extent in its reference and unit that meets its box. ``thread_id`` keeps the thread's history
+    entries. ``packages`` absent means every registered package. ``lineage`` (1.7.0) keeps the
+    rows of the transform each lineage set resolves to, resolved over the whole set (ADR 0016
+    §3). Rows are sorted by ``(kind, record_id, package_id)`` as UTF-8 bytes; ``after`` (1.1.0)
+    keeps the rows whose key is strictly greater than the cursor, and ``limit`` keeps the first
+    rows, so the last row of one page is the next page's cursor (Ledger ADR 0006 §6).
+    ``columns`` (1.7.0) projects the row; the key columns are always kept. ``series`` (1.7.0)
+    returns the window's series rows of the selected streams instead, each with its stream's
+    record columns. ``budget`` (1.7.0) bounds the answer; ``explain`` (1.7.0) returns the plan.
     """
 
     kinds: Annotated[tuple[RecordKind, ...], Constraint(min_items=1, unique_items=True)]
@@ -793,6 +889,12 @@ class QuerySpec:
     as_of: TxSeq | None = None
     limit: Annotated[int, Constraint(minimum=1)] | None = None
     after: QueryCursor | None = None
+    frame: FrameWindow | None = None
+    lineage: Preference | None = None
+    columns: Annotated[tuple[QueryColumn, ...], Constraint(unique_items=True)] | None = None
+    series: SeriesJoin | None = None
+    budget: QueryBudget | None = None
+    explain: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -824,13 +926,52 @@ class QueryRow:
     world_last: Ticks | None = None
 
 
+BudgetLimit: TypeAlias = Literal["bytes", "rows", "time"]
+
+
+@dataclass(frozen=True)
+class BudgetReport:
+    """The budget an answered ``query`` ran under and what it returned (1.7.0; ADR 0016 §6).
+
+    ``limits`` are the limits that applied: the spec's, with the Ledger's defaults for those it
+    left out (an absent ``max_millis`` means no time limit). ``rows`` and ``bytes`` are the
+    returned table's rows and Arrow bytes. ``exceeded`` names each limit that cut the answer to
+    a prefix, in name order. ``reproducible`` is false exactly when the time limit cut it: which
+    prefix came back then depends on the wall clock, and the same spec with
+    ``max_rows = rows`` and no time limit returns the same rows.
+    """
+
+    limits: QueryBudget
+    rows: Count
+    bytes: Count
+    exceeded: Annotated[tuple[BudgetLimit, ...], Constraint(unique_items=True)]
+    reproducible: bool
+
+
+@dataclass(frozen=True)
+class PlanStep:
+    """One step of a ``query`` plan, in execution order (1.7.0; ADR 0016 §2).
+
+    ``detail`` is text the planner wrote (the statement it ran, with parameter names and no
+    values, or the rule it applied), never an engine's cost estimate, so it is deterministic."""
+
+    engine: Literal["arrow", "datafusion", "duckdb", "postgres"]
+    operation: Token
+    detail: Text
+
+
 @dataclass(frozen=True)
 class QueryMeta:
-    """What a ``query`` result's Arrow schema metadata carries besides its rows."""
+    """What a ``query`` result's Arrow schema metadata carries besides its rows.
+
+    ``budget`` (1.7.0) is present on every answered query and absent on a rejected one;
+    ``plan`` (1.7.0) is present when the spec asked to ``explain``."""
 
     as_of: Knowledge[TransactionKey]
     findings: tuple[CatalogFinding, ...]
     api_version: ApiVersion = CATALOG_API_VERSION
+    budget: BudgetReport | None = None
+    plan: tuple[PlanStep, ...] | None = None
 
 
 REQUEST_TYPES: Final = (

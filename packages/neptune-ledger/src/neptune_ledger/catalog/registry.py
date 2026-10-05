@@ -6,9 +6,10 @@ registration-log row, the package row and every index row in one READ COMMITTED 
 holds the ``tx_clock`` row lock from before the package lookup to commit (ADR 0004 §4).
 ``resolve`` reads the source and record indexes registration wrote (ADR 0006 §5). ``thread``,
 ``threads_of`` and ``lineage`` read the derived thread index registration writes in the same
-transaction (ADR 0003, ADR 0010). ``query`` belongs to MVL-98 and raises ``NotImplementedError``
-until it lands. With a ``manifest`` path, every registration rewrites the registry manifest, and
-``replay`` re-registers a package at its logged tick on a rebuild (ADR 0012).
+transaction (ADR 0003, ADR 0010). ``query`` and the SQL passthrough ``sql`` run in the query
+engine (ADR 0016) on the same tenant, through a read-only connection of its own. With a
+``manifest`` path, every registration rewrites the registry manifest, and ``replay``
+re-registers a package at its logged tick on a rebuild (ADR 0012).
 """
 
 import hashlib
@@ -69,6 +70,7 @@ from neptune_ledger.catalog.sources import SourceReport, SourceStore, Stated, ch
 from neptune_ledger.lake.space_index import ExtentRow, extent_rows
 from neptune_ledger.lake.time_index import IntervalRow, record_intervals, series_intervals
 from neptune_ledger.lineage.graph import read_lineage, unknown_record
+from neptune_ledger.query.engine import QueryEngine
 from neptune_ledger.threads.alignment import clock_mapping
 from neptune_ledger.threads.membership import MembershipError, ThreadRows, thread_rows
 from neptune_ledger.threads.merge import ClockMapping
@@ -188,6 +190,7 @@ class PostgresCatalog:
         self._manifest = manifest
         self._borrowed = connection
         self._conn: Conn | None = None
+        self._engine: QueryEngine | None = None
 
     def __enter__(self) -> "PostgresCatalog":
         return self
@@ -196,6 +199,9 @@ class PostgresCatalog:
         self.close()
 
     def close(self) -> None:
+        if self._engine is not None:
+            self._engine.close()
+            self._engine = None
         if self._conn is not None:
             self._conn.close()
             self._conn = None  # a borrowed connection is never closed here: its owner ends it
@@ -1066,7 +1072,18 @@ class PostgresCatalog:
         return self._run(body)
 
     def query(self, spec: QuerySpec) -> Any:
-        raise NotImplementedError("catalog API query() is not implemented yet (MVL-98)")
+        """The answer to ``spec`` (ADR 0016): a ``pyarrow.Table`` with ``QueryMeta`` metadata."""
+        return self._query_engine().query(spec)
+
+    def sql(self, statement: str, scope: QuerySpec) -> Any:
+        """One SELECT over the views of ``scope``'s answer, sealed (ADR 0016 §7). Not a
+        catalog-API call: ``query`` never accepts SQL."""
+        return self._query_engine().sql(statement, scope)
+
+    def _query_engine(self) -> QueryEngine:
+        if self._engine is None:
+            self._engine = QueryEngine(self._conninfo, self._tenant)
+        return self._engine
 
     # --- transactions --------------------------------------------------------------------------
 
