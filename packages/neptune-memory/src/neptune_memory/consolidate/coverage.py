@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import TYPE_CHECKING, Final, TypeVar
 
-from neptune.model.alignment import RunAssembly, SnapshotBinding, SnapshotKind
+from neptune.model.alignment import MemberRole, RunAssembly, SnapshotBinding, SnapshotKind
 from neptune.model.finding import FindingCategory, IngestFinding, Severity
 from neptune.model.ids import LogicalId
 from neptune.model.knowledge import Ambiguous, AssertionKind, Known
@@ -146,12 +146,20 @@ class _View:
     revisions: dict[tuple[str, RecordId], ContentId] = field(default_factory=dict)
     series: dict[tuple[RecordId, RecordId], parse.SeriesInterval] = field(default_factory=dict)
     findings: list[ConsolidationFinding] = field(default_factory=list)
+    # A run's file, stream or finding the Ledger holds but this build could not read: a run may
+    # have more data than the records show, so no sensor of any run is known absent.
+    unreadable: set[str] = field(default_factory=set)
 
     def place(self, stamp: Timestamp) -> Timestamp:
         """A stamp on a clock that declares itself civil, on that ``CivilClock``; any other stamp
         as declared (ADR 0002 §3, as runs and identity place instants)."""
         found = self.domains.get(stamp.domain_id)
         return stamp if found is None or found.civil is None else found.civil.at(stamp.ticks)
+
+    def same_clock(self, a: RecordId, b: RecordId) -> bool:
+        """Whether ticks on clocks ``a`` and ``b`` are on one timeline: one clock, or both civil
+        on one ``CivilClock`` (as ``place`` puts them)."""
+        return self.place(Timestamp(0, a)).domain_id == self.place(Timestamp(0, b)).domain_id
 
     def resolution(self, clock: RecordId) -> Fraction | None:
         found = self.domains.get(clock)
@@ -173,6 +181,21 @@ _PARSERS: Final[Mapping[str, Callable[[Mapping[str, object]], object]]] = {
     parse.IMAGE: parse.media,
     parse.VIDEO: parse.media,
 }
+
+
+# Kinds that say what a run holds or what went wrong with it: one the build cannot read leaves
+# every run's content incomplete as far as sensor presence is concerned.
+_RUN_CONTENT: Final = frozenset(
+    {
+        run_records.RUN,
+        run_records.RUN_ASSEMBLY,
+        run_records.SOURCE_REVISION,
+        parse.STREAM,
+        parse.INGEST_FINDING,
+        parse.IMAGE,
+        parse.VIDEO,
+    }
+)
 
 
 def _admission_key(package_id: str, parsed: object) -> tuple[str, ...]:
@@ -241,12 +264,16 @@ def _read(ledger: LedgerReader) -> _View:
                     continue
                 except parse.Malformed as exc:
                     view.findings.append(_malformed(kind, ref.package_id, index, str(exc)))
+                    if kind in _RUN_CONTENT:
+                        view.unreadable.add(kind)
                     continue
                 key = _admission_key(ref.package_id, parsed)
                 if key in conflicted:
                     continue
                 if seen.setdefault(key, parsed) != parsed:
                     conflicted.add(key)
+                    if kind in _RUN_CONTENT:
+                        view.unreadable.add(kind)
                     view.findings.append(
                         _finding(
                             "record_conflict",
@@ -319,7 +346,7 @@ def _run_span(view: _View, run: Run) -> _Span | None:
     evidence = [run.provenance.evidence, *_cited(run.first)]
     last = _known(run.last)
     after = _after(last) if last is not None else None
-    if last is None or after is None or last.domain_id != first.domain_id:
+    if last is None or after is None or not view.same_clock(last.domain_id, first.domain_id):
         return _Span(start, OPEN, tuple(evidence), (run.id,), closed=False)
     if last.ticks < first.ticks:
         return None
@@ -386,8 +413,10 @@ def _hertz(samples: int, ticks: int, resolution: Fraction | None) -> TypedLitera
     the rate is not determined."""
     if resolution is None:
         return "clock_resolution_unstated"
-    if samples < 2 or ticks <= 0:
-        return "fewer_than_two_instants"
+    if samples < 2:
+        return "fewer_than_two_samples"
+    if ticks <= 0:
+        return "zero_span"
     rate = Fraction(samples - 1) / (ticks * resolution)
     return TypedLiteral(ValueType.QUANTITY, float(rate), Known(HERTZ))
 
@@ -405,7 +434,7 @@ def _declared(view: _View, stream: Stream) -> _Declared | None:
     first, last = _known(stream.first), _known(stream.last)
     if first is None or last is None:
         return None
-    if first.domain_id != last.domain_id or last.ticks < first.ticks:
+    if not view.same_clock(first.domain_id, last.domain_id) or last.ticks < first.ticks:
         view.findings.append(
             _finding(
                 "declared_extent_unusable",
@@ -433,6 +462,18 @@ def _undetermined(stream: Stream, what: str, reason: str) -> ConsolidationFindin
 
 def _streams(build: _Build) -> None:
     view = build.view
+    for (sid, clock), row in sorted(view.series.items()):
+        found = view.streams.get(sid)
+        if found is None or clock not in found.clocks:
+            view.findings.append(
+                _finding(
+                    "dangling_series",
+                    "a series coverage row names a stream the Ledger does not hold, or a clock "
+                    "the stream does not carry; it places nothing",
+                    (row.stream,),
+                    clock=clock,
+                )
+            )
     for sid in sorted(view.streams):
         stream = view.streams[sid]
         run = view.runs.get(stream.run)
@@ -454,7 +495,7 @@ def _streams(build: _Build) -> None:
         for clock in stream.clocks:
             covered = view.series.get((sid, clock))
             if covered is None:
-                if declared is not None and declared.first.domain_id == clock:
+                if declared is not None and view.same_clock(declared.first.domain_id, clock):
                     view.findings.append(
                         _finding(
                             "series_not_indexed",
@@ -498,7 +539,7 @@ def _streams(build: _Build) -> None:
                 build.emit(subject, RATE_OBSERVED, rate, base, records, start, end)
             else:
                 view.findings.append(_undetermined(stream, "observed", rate))
-            if declared is not None and declared.first.domain_id == clock:
+            if declared is not None and view.same_clock(declared.first.domain_id, clock):
                 _gaps(build, stream, declared, covered, subject, run_ref, records)
 
 
@@ -556,21 +597,40 @@ def _gaps(
                 clock=clock,
             )
         )
+    # Each gap is clamped to the declared extent: outside it the source predicts nothing.
+    after = _after(declared.last)
+    if after is None:
+        view.findings.append(
+            _finding(
+                "end_unrepresentable",
+                "the stream's declared last instant is the clock's last tick; no gap is placed",
+                (stream.id,),
+                Severity.INFO,
+            )
+        )
+        return
     if covered.first > lo:
-        start = view.place(Timestamp(lo, clock))
+        end = min(covered.first, after.ticks)
         build.emit(
             subject,
             GAP,
             run_ref,
             evidence,
             records,
-            start,
-            view.place(Timestamp(covered.first, clock)),
+            view.place(Timestamp(lo, clock)),
+            view.place(Timestamp(end, clock)),
         )
-    after = _after(declared.last)
-    if covered.last < hi and after is not None:
-        start = view.place(Timestamp(covered.last + 1, clock))
-        build.emit(subject, GAP, run_ref, evidence, records, start, view.place(after))
+    if covered.last < hi:
+        start = max(covered.last + 1, lo)
+        build.emit(
+            subject,
+            GAP,
+            run_ref,
+            evidence,
+            records,
+            view.place(Timestamp(start, clock)),
+            view.place(Timestamp(after.ticks, clock)),
+        )
 
 
 # --- Integrity findings -------------------------------------------------------------------------
@@ -593,6 +653,23 @@ def _members(view: _View) -> dict[RecordId, set[ContentId]]:
     return contents
 
 
+def _data_files(view: _View) -> dict[RecordId, set[ContentId]]:
+    """The files that hold each run's samples: its assemblies' ``recording`` members, or, for a
+    run no assembly names, the bytes that declare it (a lone recording declares itself)."""
+    files: dict[RecordId, set[ContentId]] = {}
+    for package_id, assembly in view.assemblies:
+        held = files.setdefault(assembly.run, set())
+        for member in assembly.members:
+            content = view.revisions.get((package_id, member.revision))
+            if member.role is MemberRole.RECORDING and content is not None:
+                held.add(content)
+    for rid, run in view.runs.items():
+        source = run.provenance.evidence.source
+        if rid not in files and isinstance(source, str):
+            files[rid] = {source}
+    return files
+
+
 def _unresolved(view: _View) -> set[RecordId]:
     """Runs with an assembly member whose revision the assembly's package does not hold: what
     that file is, and whose sensor it recorded, is not known."""
@@ -612,13 +689,14 @@ def _integrity(build: _Build, contents: Mapping[RecordId, set[ContentId]]) -> se
     for rid, held in contents.items():
         for content in held:
             holders.setdefault(content, set()).add(rid)
+    run_ids, stream_ids = set(view.runs), set(view.streams)
     for fid in sorted(view.ingest):
         found = view.ingest[fid]
         severity = TypedLiteral(ValueType.TEXT, str(found.severity))
         cited = (found.subject,) if isinstance(found.subject, EvidenceRef) else ()
         evidence = (*cited, *found.related)
         named = set(found.records)
-        runs = named & set(view.runs)
+        runs = named & run_ids
         about = found.subject
         if (
             found.category in BYTES_LOST
@@ -629,7 +707,7 @@ def _integrity(build: _Build, contents: Mapping[RecordId, set[ContentId]]) -> se
         targets: list[tuple[NodeRef, Run, tuple[RecordId, ...]]] = [
             (run_node(view.runs[rid]), view.runs[rid], (fid, rid)) for rid in sorted(runs)
         ]
-        for sid in sorted(named & set(view.streams)):
+        for sid in sorted(named & stream_ids):
             stream = view.streams[sid]
             parent = view.runs.get(stream.run)
             if parent is not None:  # a stream without its run is ``dangling_stream`` already
@@ -699,6 +777,10 @@ def _presence(
 ) -> None:
     view = build.view
     unresolved = _unresolved(view)
+    data = _data_files(view)
+    by_source: dict[object, list[Media]] = {}
+    for found in view.media:
+        by_source.setdefault(found.provenance.evidence.source, []).append(found)
     streams_of: dict[RecordId, list[RecordId]] = {}
     for sid, stream in sorted(view.streams.items()):
         streams_of.setdefault(stream.run, []).append(sid)
@@ -707,7 +789,12 @@ def _presence(
         span = build.span(run)
         if span is None:
             continue
-        artifacts = [m for m in view.media if m.provenance.evidence.source in contents[rid]]
+        artifacts = sorted(
+            (m for content in contents[rid] for m in by_source.get(content, ())),
+            key=lambda m: m.id,
+        )
+        # A file that holds the run's samples and is no image or video: whose they are is unknown.
+        opaque = sorted(c for c in data.get(rid, ()) if c not in by_source)
         cites = {m.id: _ids(m.capture.device_identifiers) for m in artifacts}
         own = {c.id: _ids(c.identifiers)[0] for _, c in configured}
         for bound, component in configured:
@@ -727,6 +814,8 @@ def _presence(
                     cites,
                     own,
                     has_streams=rid in streams_of,
+                    opaque=bool(opaque),
+                    unreadable=bool(view.unreadable),
                     unresolved=rid in unresolved,
                     closed=span.closed,
                     flagged=rid in flagged,
@@ -767,6 +856,8 @@ def _undecided(
     own: Mapping[RecordId, set[LogicalId]],
     *,
     has_streams: bool,
+    opaque: bool,
+    unreadable: bool,
     unresolved: bool,
     closed: bool,
     flagged: bool,
@@ -785,7 +876,7 @@ def _undecided(
     reasons: list[str] = []
     if has_streams:
         reasons.append("streams_declare_no_sensor")
-    if any(not elsewhere(m) for m in artifacts):
+    if opaque or any(not elsewhere(m) for m in artifacts):
         reasons.append("files_not_attributed")
     if unresolved:
         reasons.append("members_unresolved")
@@ -793,6 +884,8 @@ def _undecided(
         reasons.append("recording_not_closed")
     if flagged:
         reasons.append("integrity_findings")
+    if unreadable:
+        reasons.append("ledger_records_unreadable")
     return tuple(reasons)
 
 

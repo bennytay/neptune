@@ -21,8 +21,9 @@ from memory_coverage_records import (
     stream,
 )
 from memory_identity_records import Record, at, ledger
-from memory_run_records import domain, run
+from memory_run_records import assembly, domain, revision, run
 from neptune.identity import canonical_json
+from neptune.model.alignment import MemberRole
 from neptune.model.ids import LogicalId
 from neptune.model.time import INT64_MAX
 from neptune_memory.consolidate.base import (
@@ -183,8 +184,8 @@ def test_unknown_config_is_reported_and_ignored() -> None:
 @pytest.mark.parametrize(
     ("count", "rows", "first", "last", "reason"),
     [
-        (1, 1, T0, T0, "fewer_than_two_instants"),
-        (2, 2, T0, T0, "fewer_than_two_instants"),
+        (1, 1, T0, T0, "fewer_than_two_samples"),
+        (2, 2, T0, T0, "zero_span"),
     ],
 )
 def test_too_few_instants_determine_no_rate(
@@ -295,18 +296,31 @@ def test_a_run_last_on_another_clock_is_open_and_not_closed() -> None:
     (claim,) = result.claims
     assert claim.predicate == "sensor_presence_unknown"
     (undecided,) = [f for f in result.findings if f.code == "coverage.presence_undecided"]
-    assert undecided.details["reasons"] == ["recording_not_closed"]
+    assert undecided.details["reasons"] == ["files_not_attributed", "recording_not_closed"]
 
 
 def test_a_run_with_nothing_unattributed_and_closed_makes_a_configured_sensor_absent() -> None:
-    """The smallest known absence: a closed run with no streams and no files of any sensor."""
+    """The smallest known absence: a closed run a manifest declares, whose assembly holds no
+    recording, no stream and no file of any sensor."""
     clock_record, clock = domain("boot", civil=False)
     run_record, run_id = run("w.yaml", first=at(T0, clock), last=at(T0 + SECOND, clock))
+    files = assembly("w.yaml", run_id, [("w.yaml", MemberRole.DESCRIPTION)])[0]
     config, config_id = configuration("w.urdf", LogicalId("asset-tag", "W"))
     cam, cam_id = component("w.urdf", config_id, "cam", LogicalId("serial", "C"))
     nameless = component("w.urdf", config_id, "imu")[0]
     result = consolidate(
-        {"p": [clock_record, run_record, config, cam, nameless, binding("b", run_id, config_id)]}
+        {
+            "p": [
+                clock_record,
+                run_record,
+                files,
+                revision("w.yaml")[0],
+                config,
+                cam,
+                nameless,
+                binding("b", run_id, config_id),
+            ]
+        }
     )
     assert predicates(result) == ["sensor_not_recorded", "sensor_not_recorded"]
     assert {c.object.node_id for c in result.claims} == {  # type: ignore[union-attr]
@@ -367,3 +381,114 @@ def test_rebuild_is_byte_identical() -> None:
         "integrity_finding",
         "sensor_presence_unknown",
     }
+
+
+# --- Review findings, pinned ---------------------------------------------------------------------
+
+
+def test_a_series_wholly_past_the_declared_extent_gaps_only_the_extent() -> None:
+    records, ids = base()
+    row = series(ids["stream"], ids["clock"], T0 + 5 * SECOND, T0 + 6 * SECOND, 101)
+    result = consolidate({"p": [*records, row]})
+    (gap,) = [c for c in result.claims if c.predicate == "gap"]
+    assert (gap.valid_from.ticks, gap.valid_to.ticks) == (T0, T0 + SECOND + 1)  # type: ignore[union-attr]
+    assert "coverage.extent_disagrees" in codes(result)
+
+
+def test_a_recording_that_is_no_image_or_video_withholds_known_absence() -> None:
+    clock_record, clock = domain("boot", civil=False)
+    run_record, run_id = run("scan.yaml", first=at(T0, clock), last=at(T0 + SECOND, clock))
+    files = assembly(
+        "scan.yaml",
+        run_id,
+        [("scan.yaml", MemberRole.DESCRIPTION), ("cloud.pcd", MemberRole.RECORDING)],
+    )[0]
+    config, config_id = configuration("s.urdf", LogicalId("asset-tag", "S"))
+    lidar = component("s.urdf", config_id, "lidar", LogicalId("serial", "L"))[0]
+    result = consolidate(
+        {
+            "p": [
+                clock_record,
+                run_record,
+                files,
+                revision("scan.yaml")[0],
+                revision("cloud.pcd")[0],
+                config,
+                lidar,
+                binding("b", run_id, config_id),
+            ]
+        }
+    )
+    assert predicates(result) == ["sensor_presence_unknown"]
+    (undecided,) = [f for f in result.findings if f.code == "coverage.presence_undecided"]
+    assert undecided.details["reasons"] == ["files_not_attributed"]
+
+
+def test_an_unreadable_run_record_anywhere_withholds_known_absence() -> None:
+    clock_record, clock = domain("boot", civil=False)
+    run_record, run_id = run("w.yaml", first=at(T0, clock), last=at(T0 + SECOND, clock))
+    files = assembly("w.yaml", run_id, [("w.yaml", MemberRole.DESCRIPTION)])[0]
+    config, config_id = configuration("w.urdf", LogicalId("asset-tag", "W"))
+    cam = component("w.urdf", config_id, "cam", LogicalId("serial", "C"))[0]
+    scene = [clock_record, run_record, files, revision("w.yaml")[0], config, cam]
+    scene.append(binding("b", run_id, config_id))
+    broken_records: list[Record] = [
+        {"kind": "run_assembly", "run": run_id},
+        {"kind": "stream", "run": run_id},
+    ]
+    for broken in broken_records:
+        result = consolidate({"p": scene, "q": [broken]})
+        assert predicates(result) == ["sensor_presence_unknown"], broken
+        (undecided,) = [f for f in result.findings if f.code == "coverage.presence_undecided"]
+        assert undecided.details["reasons"] == ["ledger_records_unreadable"]
+
+
+def test_a_run_ending_on_another_clock_of_one_civil_timeline_is_closed() -> None:
+    a_record, a = domain("ntp a", civil=True)
+    b_record, b = domain("ntp b", civil=True)
+    run_record, run_id = run("v.yaml", first=at(T0, a), last=at(T0 + SECOND, b))
+    files = assembly("v.yaml", run_id, [("v.yaml", MemberRole.DESCRIPTION)])[0]
+    config, config_id = configuration("v.urdf", LogicalId("asset-tag", "V"))
+    cam = component("v.urdf", config_id, "cam", LogicalId("serial", "C"))[0]
+    result = consolidate(
+        {
+            "p": [
+                a_record,
+                b_record,
+                run_record,
+                files,
+                revision("v.yaml")[0],
+                config,
+                cam,
+                binding("b", run_id, config_id),
+            ]
+        }
+    )
+    (claim,) = result.claims
+    assert claim.predicate == "sensor_not_recorded"
+    assert claim.valid_to.ticks == T0 + SECOND + 1  # type: ignore[union-attr]
+
+
+def test_series_rows_naming_no_stream_or_clock_are_findings() -> None:
+    records, ids = base()
+    other_record, other = domain("other", civil=False)
+    rows = [
+        series("rec:sha256:" + "3" * 64, ids["clock"], 0, 9, 10),  # type: ignore[arg-type]
+        series(ids["stream"], other, 0, 9, 10),
+    ]
+    result = consolidate({"p": [*records, other_record, *rows]})
+    assert codes(result).count("coverage.dangling_series") == 2
+    assert "recorded" not in predicates(result)
+
+
+def test_a_declared_last_at_the_clocks_last_tick_places_no_gap() -> None:
+    clock_record, clock = domain("boot", civil=False)
+    run_record, run_id = run("u.mcap", first=at(T0, clock), last=at(T0 + SECOND, clock))
+    edge, edge_id = stream(
+        "/edge", run_id, (clock,), count=3, first=at(T0, clock), last=at(INT64_MAX, clock),
+        recording="u.mcap",
+    )  # fmt: skip
+    row = series(edge_id, clock, T0 + 1, T0 + 2, 2)
+    result = consolidate({"p": [clock_record, run_record, edge, row]})
+    assert "gap" not in predicates(result)
+    assert "coverage.end_unrepresentable" in codes(result)

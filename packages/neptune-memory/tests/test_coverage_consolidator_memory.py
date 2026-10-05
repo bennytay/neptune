@@ -174,7 +174,11 @@ def test_a_camera_configured_with_no_stream_naming_it_is_unknown_not_absent() ->
         f for f in result.findings if f.code == "coverage.presence_undecided"
         and ids["camera"] in f.records
     ]  # fmt: skip
-    assert undecided and undecided[0].details["reasons"] == ["streams_declare_no_sensor"]
+    # The bag itself is no image or video: whose samples it holds is not declared either.
+    assert undecided and undecided[0].details["reasons"] == [
+        "streams_declare_no_sensor",
+        "files_not_attributed",
+    ]
 
 
 # --- A truncated bag -----------------------------------------------------------------------------
@@ -258,6 +262,7 @@ def test_drone_dropout_is_an_integrity_finding_on_each_stream_it_names() -> None
     (undecided,) = [f for f in result.findings if f.code == "coverage.presence_undecided"]
     assert undecided.details["reasons"] == [
         "streams_declare_no_sensor",
+        "files_not_attributed",
         "recording_not_closed",
         "integrity_findings",
     ]

@@ -54,15 +54,18 @@ itself civil are placed on that `CivilClock`, as runs and identity place them.
   (`coverage.end_unrepresentable`).
 - `gap(stream → run)`, `observed`, only where the stream's declared extent predicts samples: the source declares
   samples at its `first` and `last` instants, so `[declared first, series first)` and `[series last + 1, declared
-  last + 1)` on the declared extent's clock. Never when any row of the stream lacks a known tick on that clock
+  last + 1)` on the declared extent's clock, each clamped to the declared extent (outside it the source predicts
+  nothing). Two clocks that declare one civil timeline are one clock here, as `place` puts them. Never when any row of the stream lacks a known tick on that clock
   (`coverage.untimed_samples`: an untimed sample may lie in the hole); never on a side where the series reaches
   past the declared extent (`coverage.extent_disagrees`); never inside the span, which a min/max row cannot see. A
   declared extent on two clocks or inverted predicts nothing (`coverage.declared_extent_unusable`); a declared
-  extent whose clock has no series row is `coverage.series_not_indexed`.
+  extent whose clock has no series row is `coverage.series_not_indexed`; a series row naming a stream or clock the
+  Ledger does not hold is `coverage.dangling_series`.
 - `rate_declared` and `rate_observed` (stream → `quantity` in Hz): `(n − 1)` sample intervals over the first-to-last
   span times the clock's stated resolution, over that span. Declared: `n` the `Known` `message_count` with a usable
   declared extent, with the count's `assertion_kind`. Observed: `n = rows_known`, only when `rows_unknown = 0`. No
-  stated resolution, fewer than two instants or a zero span: no claim, `coverage.rate_undetermined` with the reason.
+  stated resolution, fewer than two samples or a zero span: no claim, `coverage.rate_undetermined` with the reason
+  (`clock_resolution_unstated`, `fewer_than_two_samples`, `zero_span`, `end_unrepresentable`).
   The value is the exact ratio rounded once to binary64. **Both claims stand side by side; nothing compares
   them**: no source declares a tolerance, so a "rate mismatch" would be Memory's judgement.
 
@@ -85,12 +88,15 @@ For each run and each `sensor` component of each hardware configuration a `Snaps
 - `sensor_recorded(run → sensor)` when a file of the run (an `Image` or `Video` whose bytes are the run's or a
   member's) declares one of the sensor's `Known` identifiers among its capture's device identifiers, citing it.
 - `sensor_not_recorded(run → sensor)` (**KnownAbsent**) only when nothing in the run could be the sensor's: the run
-  has no `Stream` (streams declare no sensor), every file of it definitely declares another configured sensor and
-  not possibly this one, every member's revision is in the Ledger, the run's span is closed on one clock, and no
-  integrity finding names the run or its streams.
+  has no `Stream` (streams declare no sensor); every image or video of it definitely declares another configured
+  sensor and not possibly this one; every file holding its samples (its assemblies' `recording` members, or, with no
+  assembly, the bytes that declare it) is such an image or video; every member's revision is in the Ledger; the
+  run's span is closed on one clock; no integrity finding names the run or its streams; and no `run`,
+  `run_assembly`, `source_revision`, `stream`, `ingest_finding`, `image` or `video` record anywhere in the Ledger
+  was unreadable or in conflict (it could be this run's).
 - `sensor_presence_unknown(run → sensor)` (**Unknown**) otherwise, with `coverage.presence_undecided` naming each
   reason: `streams_declare_no_sensor`, `files_not_attributed`, `members_unresolved`, `recording_not_closed`,
-  `integrity_findings`. An `Ambiguous` device identifier that includes the sensor's is never a record.
+  `integrity_findings`, `ledger_records_unreadable`. An `Ambiguous` device identifier that includes the sensor's is never a record.
 
 Presence is about the run: a binding's validity window is not used, because whether a sensor recorded in the run
 and whether nothing in the run could be its data do not depend on when within the run the configuration applied
