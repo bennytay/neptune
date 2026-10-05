@@ -30,8 +30,9 @@ if TYPE_CHECKING:
 # Bumped whenever CORE_PREDICATES changes. 2: ``same_as`` and ``same_as_candidate`` joined the
 # core (ADR 0006 §4). 3: ``has_name`` joined (ADR 0007 §2), and the predicates that hold for every
 # node type widened to ``stream`` and ``document`` (ADR 0008 §6). The vocabulary is part of
-# graph-schema (``GRAPH_SCHEMA_VERSION``). 4: the run thread predicates joined (ADR 0009 §6).
-VOCABULARY_VERSION: Final = 4
+# graph-schema (``GRAPH_SCHEMA_VERSION``). 4: the configuration lineage predicates (ADR 0010,
+# MVL-127). 5: the run thread predicates joined (ADR 0009 §6).
+VOCABULARY_VERSION: Final = 5
 
 # Identity predicates (ADR 0003 §1). Only ``memory.identity`` grounds ``same_as``, never by
 # inference; ``same_as_candidate`` is pairwise, one claim each way. The runner enforces both.

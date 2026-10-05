@@ -104,10 +104,12 @@ alone are a reading too, so a lone `continues_candidate` reads as "this part, or
 `recorded_by` and `executes_task` are reused: they already mean "the machine whose log a run is" and "a task
 attempted". New: `at_site` (`one`), `has_member`, `continues`, and `recorded_by_candidate`, `at_site_candidate`,
 `executes_task_candidate`, `continues_candidate` (all `many`). A claim object cannot be `Ambiguous`, so the ambiguity
-is the predicate, as for identity. `VOCABULARY_VERSION = 4`. The JSON Schema gains `CorePredicate`, the core names:
-a vocabulary-only change exported an identical schema, which the registry cannot publish, and ADR 0006 §4 requires
-predicates consumers traverse to be published. graph-schema **1.2.0** is a minor release; 1.0.0 and 1.1.0 still load
-and pass the suite. The golden plan is unchanged; only its resolver generation moves.
+is the predicate, as for identity. `VOCABULARY_VERSION = 5`, after MVL-127's configuration lineage predicates
+(4, graph-schema 1.2.0, ADR 0010). A vocabulary-only change exports an identical schema, which the registry cannot
+publish, while ADR 0006 §4 requires predicates consumers traverse to be published; the schema therefore names the
+vocabulary version in `vocabulary_version`'s description, an annotation and never a bound, as ADR 0010 §6 does.
+graph-schema **1.3.0** is a minor release; earlier versions still load and pass the suite. The golden plan is
+unchanged; only its resolver generation moves.
 
 ## Alternatives considered
 
@@ -122,6 +124,8 @@ and pass the suite. The golden plan is unchanged; only its resolver generation m
   through a chain here would duplicate it.
 - **Pick the run record's machine over a manifest's** when they disagree: a priority the evidence does not state.
 - **Drop a site the register does not declare**: loses a stated fact for a missing register row.
+- **A `CorePredicate` enum of the core names in the schema** (this PR's first draft): also publishable, but a
+  second mechanism beside ADR 0010's annotation for one problem.
 - **Read the compiler's inferred session proposals**: inferred input belongs to a `derived/` consolidator with a model.
 
 ## Consequences

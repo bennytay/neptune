@@ -290,40 +290,6 @@
       "pattern": "^sha256:[0-9a-f]{64}$",
       "type": "string"
     },
-    "CorePredicate": {
-      "description": "a predicate of the core vocabulary, version 4",
-      "enum": [
-        "at_site",
-        "at_site_candidate",
-        "continues",
-        "continues_candidate",
-        "deployed_at",
-        "episode_of",
-        "evidenced_by",
-        "executes_task",
-        "executes_task_candidate",
-        "governed_by",
-        "has_calibration",
-        "has_configuration",
-        "has_member",
-        "has_name",
-        "has_summary",
-        "located_at",
-        "maintenance_state",
-        "member_of_fleet",
-        "mounted_on",
-        "operated_by",
-        "part_of_programme",
-        "rated_payload",
-        "recorded_by",
-        "recorded_by_candidate",
-        "runs_model",
-        "runs_software",
-        "same_as",
-        "same_as_candidate",
-        "zone_of"
-      ]
-    },
     "EpisodeView": {
       "additionalProperties": false,
       "properties": {
@@ -1095,6 +1061,7 @@
           "$ref": "#/$defs/PredicateRegistry"
         },
         "vocabulary_version": {
+          "description": "the core vocabulary's version: 5 when this schema was exported (VOCABULARY_VERSION)",
           "minimum": 1,
           "type": "integer"
         }

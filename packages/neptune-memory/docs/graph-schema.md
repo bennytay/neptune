@@ -1,9 +1,9 @@
 # Graph schema v1
 
 This page states what Context, Deploy and Learn may rely on when they read Memory. The contract is
-`contracts/graph-schema/v1.2.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
+`contracts/graph-schema/v1.3.0/` (`GRAPH_SCHEMA_VERSION = 1`); [ADR 0006](adr/0006-graph-schema-v1-contract-surface-and-memory-reader.md)
 records the decisions behind it. 1.1.0 (minor) adds the `stream` and `document` node types and `has_name`
-([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6); 1.2.0 (minor) adds the
+([ADR 0008](adr/0008-identity-consolidator-on-compiler-identity-links-and-assertions.md) §6); 1.3.0 (minor) adds the
 run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continuation.md) §6). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
@@ -37,7 +37,7 @@ A node is `NodeRef(node_type, node_id)` and nothing else; every attribute and ev
 The Episode tier is the Ledger's records and evidence refs. They are not nodes: a claim points into the tier with
 a `LedgerRecordRef` object and `EvidenceRef`s in its provenance.
 
-## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 4`)
+## Predicates (`CORE_PREDICATES`, `VOCABULARY_VERSION = 5`)
 
 A `one` predicate holds at most one object per subject at any valid instant on one clock, so a different object
 over an overlapping interval supersedes. A `many` predicate never contradicts. The vocabulary only widens within a
@@ -119,7 +119,7 @@ Each result has a `to_json` and a JSON Schema definition (`#/$defs/NodeResult`, 
 ```python
 from neptune_memory.contract.suite import CHECKS, load_golden
 
-GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.2.0/golden/graph.json")
+GOLDEN = load_golden(REPO / "contracts/graph-schema/v1.3.0/golden/graph.json")
 
 @pytest.mark.parametrize("check", CHECKS, ids=lambda c: c.__name__)
 def test_graph_schema_contract(check):
