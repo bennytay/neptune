@@ -30,6 +30,7 @@ flowchart LR
   CAT --> THR
   CAT --> LIN
   CAT --> LAKE
+  CAT --> QRY
   THR --> QRY
   LIN --> QRY
   LAKE --> QRY
@@ -49,9 +50,9 @@ flowchart LR
   classDef partial fill:#c09a5b26,stroke:#c09a5b,stroke-width:2px
   classDef todo fill:none,stroke:#8b949e,stroke-width:1.5px,stroke-dasharray:5 4
   classDef ext fill:none,stroke:#8b949e,stroke-width:1px
-  class LIN,K1 built
+  class LIN,QRY,K1 built
   class CAT,THR,CLI,LAKE,K2 partial
-  class QRY,ACC,K3 todo
+  class ACC,K3 todo
   class PKG,SRC,CON,MEM,CTX,DEP,LRN ext
   style L fill:#8b949e0f,stroke:#8b949e
   style UP fill:none,stroke:#8b949e

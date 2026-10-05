@@ -14,6 +14,7 @@ cannot be added to a record without appearing in its schema. The rules (ADR 0004
 """
 
 import dataclasses
+import math
 import re
 import types
 import typing
@@ -137,11 +138,28 @@ def _check(value: Any, constraints: tuple[Constraint, ...], where: str) -> None:
             raise CodecError(f"{where}: shorter than {c.min_length}")
         if c.min_items is not None and len(value) < c.min_items:
             raise CodecError(f"{where}: fewer than {c.min_items} items")
+        if c.max_items is not None and len(value) > c.max_items:
+            raise CodecError(f"{where}: more than {c.max_items} items")
         if c.unique_items and len({canonical_json.dumps(_plain(v)) for v in value}) != len(value):
             raise CodecError(f"{where}: items must be unique")
         for key in c.required:
             if not isinstance(value.get(key), str) or not value[key]:
                 raise CodecError(f"{where}: needs a non-empty string {key!r}")
+
+
+def _number(value: Any, where: str) -> float:
+    """A ``float`` field: any finite JSON number (an integer reads as its float), never a bool."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise CodecError(f"{where}: expected a number, got {type(value).__name__}")
+    try:
+        number = float(value)
+    except OverflowError:
+        raise CodecError(f"{where}: {value!r} is not a finite number") from None
+    if not math.isfinite(number):
+        raise CodecError(f"{where}: {value!r} is not a finite number")
+    if isinstance(value, int) and int(number) != value:
+        raise CodecError(f"{where}: {value!r} has no exact float64 value; it would be rounded")
+    return number
 
 
 def _plain(value: Any) -> JsonValue:
@@ -231,6 +249,8 @@ def _encode(hint: Any, value: Any, where: str) -> JsonValue:
         if not isinstance(value, int) or isinstance(value, bool):
             raise CodecError(f"{where}: expected an int, got {type(value).__name__}")
         out = value
+    elif hint is float:
+        out = _number(value, where)
     elif hint is str:
         if not isinstance(value, str):
             raise CodecError(f"{where}: expected a str, got {type(value).__name__}")
@@ -365,6 +385,8 @@ def _decode(hint: Any, data: Any, where: str) -> Any:
         if not isinstance(data, int) or isinstance(data, bool):
             raise CodecError(f"{where}: expected an integer")
         value = data
+    elif hint is float:
+        value = _number(data, where)
     elif hint is str:
         if not isinstance(data, str):
             raise CodecError(f"{where}: expected a string")
@@ -395,6 +417,8 @@ def _constraint_keywords(constraints: tuple[Constraint, ...]) -> dict[str, Any]:
             out["minLength"] = c.min_length
         if c.min_items is not None:
             out["minItems"] = c.min_items
+        if c.max_items is not None:
+            out["maxItems"] = c.max_items
         if c.unique_items:
             out["uniqueItems"] = True
         if c.required:
@@ -415,7 +439,7 @@ def _type_name(hint: Any) -> str:
         return named[-1]
     if _is_record(base):
         return base.__name__
-    return {str: "String", int: "Integer", bool: "Boolean"}.get(base, "Value")
+    return {str: "String", int: "Integer", bool: "Boolean", float: "Number"}.get(base, "Value")
 
 
 class _SchemaBuilder:
@@ -459,7 +483,7 @@ class _SchemaBuilder:
             return {"items": self.schema(get_args(hint)[0]), "type": "array", **keywords}
         if _is_json_object(hint):
             return {"type": "object", **keywords}
-        primitive = {bool: "boolean", int: "integer", str: "string"}.get(hint)
+        primitive = {bool: "boolean", int: "integer", float: "number", str: "string"}.get(hint)
         if primitive is None:
             raise CodecError(f"no JSON Schema for {hint!r}")
         return {"type": primitive, **keywords}

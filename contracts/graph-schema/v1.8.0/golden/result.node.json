@@ -105,7 +105,7 @@
         "confidence": {
           "knowledge": "not_applicable"
         },
-        "id": "claim:sha256:1450b612ab6dbf671c3b953d88beb033b6e9de8ce82b6b47f0fba61925d4a04c",
+        "id": "claim:sha256:3f430715f85cda18d3242ddabcf433c9c2edb42e745aa7f9d23a28d9907712d7",
         "object": {
           "kind": "node",
           "node_id": "asset-tag:UAV-0042",
@@ -113,7 +113,7 @@
         },
         "predicate": "recorded_by",
         "provenance": {
-          "config_hash": "sha256:f5db3cd361fd93d1feb0b4fdc392e9dadc4e17291220b2889efa261db2d44eac",
+          "config_hash": "sha256:bf3c67dfc369cdbff0ca5372a2bdbf775a13c5e1ebe148800792981a4f1f6a06",
           "consolidator_id": "memory.supersede",
           "consolidator_version": "2",
           "evidence": [
@@ -265,12 +265,12 @@
       {
         "claim": "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a",
         "code": "clock_mismatch",
-        "id": "finding:sha256:81428cdcad60f0693c6d0afc49ce24f42cabcfb246b8c2fa789c50ced3bfc09f",
+        "id": "finding:sha256:7103b1fd07d01b7a9bfd795bc9d7098d972e277730a88e63c9b3e34fbd060b99",
         "others": [
           "claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097"
         ],
         "provenance": {
-          "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
+          "config_hash": "sha256:32894b9cd83a97fa143f78314211eca253bcbce6de49dc48073de412c8505fa7",
           "resolver_id": "memory.supersede",
           "resolver_version": "2"
         },
@@ -280,12 +280,12 @@
       {
         "claim": "claim:sha256:03ef80551292669e368d326b22bd44b2a3c5a6461298c94469f16ad71110ad4a",
         "code": "clock_mismatch",
-        "id": "finding:sha256:d447155cf3edb4192ad880452f131e19949d871a5b047a562ded7e7830ba89a1",
+        "id": "finding:sha256:d148c905b24947107b785ae73bc50ab4b9114904f72ed019e7e0f13543af7435",
         "others": [
           "claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf"
         ],
         "provenance": {
-          "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
+          "config_hash": "sha256:32894b9cd83a97fa143f78314211eca253bcbce6de49dc48073de412c8505fa7",
           "resolver_id": "memory.supersede",
           "resolver_version": "2"
         },
@@ -293,14 +293,14 @@
         "superseded_at": "open"
       },
       {
-        "claim": "claim:sha256:1450b612ab6dbf671c3b953d88beb033b6e9de8ce82b6b47f0fba61925d4a04c",
+        "claim": "claim:sha256:3f430715f85cda18d3242ddabcf433c9c2edb42e745aa7f9d23a28d9907712d7",
         "code": "clock_mismatch",
-        "id": "finding:sha256:5320d37802fde0a5e3478aeef1f2eb5e9174b06d89b6b92265a1e39824962b72",
+        "id": "finding:sha256:05ea151a3806afd51cd1b0f2d4663a06a8f12146459acbff1261561af8316a5c",
         "others": [
           "claim:sha256:80b6babc7be736fb25f9fd13fa692baafcb0078251bd041944773b20c1af4097"
         ],
         "provenance": {
-          "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
+          "config_hash": "sha256:32894b9cd83a97fa143f78314211eca253bcbce6de49dc48073de412c8505fa7",
           "resolver_id": "memory.supersede",
           "resolver_version": "2"
         },
@@ -308,14 +308,14 @@
         "superseded_at": "open"
       },
       {
-        "claim": "claim:sha256:1450b612ab6dbf671c3b953d88beb033b6e9de8ce82b6b47f0fba61925d4a04c",
+        "claim": "claim:sha256:3f430715f85cda18d3242ddabcf433c9c2edb42e745aa7f9d23a28d9907712d7",
         "code": "clock_mismatch",
-        "id": "finding:sha256:2dbf843986aca747c04736502a5c509c1b7719135f33c41818b8f456418b600f",
+        "id": "finding:sha256:4487c87ea2aaf920157afbdec0cf291a1d07e75792427c86fefa03184eed6606",
         "others": [
           "claim:sha256:d0cef0a6fa6e7dec3027869045f5f5f6d37c43955eca9773029c5ebd01e8f8cf"
         ],
         "provenance": {
-          "config_hash": "sha256:b34039a137c332a246ab40fb63a4f01807494750dd9d2444dcd75f0d4f96d2b7",
+          "config_hash": "sha256:32894b9cd83a97fa143f78314211eca253bcbce6de49dc48073de412c8505fa7",
           "resolver_id": "memory.supersede",
           "resolver_version": "2"
         },

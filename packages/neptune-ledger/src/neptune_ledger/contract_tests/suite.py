@@ -28,17 +28,21 @@ from neptune_ledger.api.types import (
     CATALOG_API_VERSION,
     AsRegisteredBy,
     ClockMerge,
+    CrsReference,
     DeclaredKey,
     EvidenceAnchor,
+    FrameWindow,
     History,
     LatestTransform,
     MappedInterval,
     Pinned,
+    QueryBudget,
     QueryCursor,
     QueryRow,
     QuerySpec,
     RecordRef,
     Registration,
+    SeriesJoin,
     ThreadKey,
     TimeWindow,
     TransformInfo,
@@ -1038,6 +1042,178 @@ class CatalogContract:
         table = catalog.query(QuerySpec(kinds=("run", "telepathy")))
         assert table.num_rows == 0
         assert _codes(arrow.query_meta(table).findings) == {"invalid_request"}
+
+    # --- query 1.7.0: projection, budgets, lineage, explain (Ledger ADR 0016) -------------------
+
+    def test_query_reports_the_budget_it_ran_under(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        registered = self.register_all(catalog, packages)
+        table = catalog.query(QuerySpec(kinds=("stream",)))
+        meta = arrow.query_meta(table)
+        _validate(meta)
+        assert meta.budget is not None
+        assert (
+            meta.budget.rows
+            == table.num_rows
+            == len(self._expected_rows(packages, registered, "stream"))
+        )
+        assert meta.budget.bytes == table.nbytes
+        assert (meta.budget.exceeded, meta.budget.reproducible) == ((), True)
+        assert meta.plan is None, "the plan is returned only when asked for"
+
+    def test_query_projection_keeps_the_key_columns(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        registered = self.register_all(catalog, packages)
+        table = catalog.query(QuerySpec(kinds=("run",), columns=("world_first", "line")))
+        assert table.schema.names == ["kind", "record_id", "package_id", "line", "world_first"]
+        expected = self._expected_rows(packages, registered, "run")
+        assert table.to_pylist() == [
+            {
+                "kind": r.kind,
+                "record_id": r.record_id,
+                "package_id": r.package_id,
+                "line": r.line,
+                "world_first": r.world_first,
+            }
+            for r in expected
+        ]
+
+    def test_query_over_the_row_budget_returns_a_flagged_prefix(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        registered = self.register_all(catalog, packages)
+        expected = self._expected_rows(packages, registered, "stream")
+        assert len(expected) > 3
+        spec = QuerySpec(kinds=("stream",), budget=QueryBudget(max_rows=3))
+        table = catalog.query(spec)
+        assert list(arrow.query_rows(table)) == expected[:3], "a prefix, never a sample"
+        meta = arrow.query_meta(table)
+        _validate(meta)
+        assert [(f.code, f.subject) for f in meta.findings] == [("budget_exceeded", "rows")]
+        assert meta.budget is not None
+        assert (meta.budget.rows, meta.budget.exceeded) == (3, ("rows",))
+        assert meta.budget.reproducible, "a row cut depends on the catalog alone"
+        assert arrow.ipc_bytes(table) == arrow.ipc_bytes(catalog.query(spec))
+        # A page size is not a budget: limit cuts silently, as it always has.
+        paged = catalog.query(QuerySpec(kinds=("stream",), limit=3))
+        assert arrow.query_meta(paged).findings == ()
+
+    def test_query_over_the_byte_budget_returns_a_flagged_prefix(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        registered = self.register_all(catalog, packages)
+        expected = self._expected_rows(packages, registered, "stream")
+        whole = catalog.query(QuerySpec(kinds=("stream",)))
+        limit = whole.nbytes // 2
+        table = catalog.query(QuerySpec(kinds=("stream",), budget=QueryBudget(max_bytes=limit)))
+        rows = list(arrow.query_rows(table))
+        assert 0 < len(rows) < len(expected)
+        assert rows == expected[: len(rows)]
+        assert table.nbytes <= limit
+        meta = arrow.query_meta(table)
+        assert [(f.code, f.subject) for f in meta.findings] == [("budget_exceeded", "bytes")]
+        assert meta.budget is not None and meta.budget.exceeded == ("bytes",)
+
+    def test_query_with_a_thread_and_a_preference_is_the_threads_current_view(
+        self, catalog: CatalogApi, siblings: dict[str, WorkedPackage]
+    ) -> None:
+        for name in ("v1a", "v1b", "v2"):
+            assert catalog.register(siblings[name].root).outcome == "registered"
+        thread, entries = self._current(catalog, siblings["v2"], LatestTransform())
+        kinds = tuple(sorted({e.kind for p in thread.partitions for e in p.entries}))
+        (key,) = machine_threads([siblings["v2"]])
+        spec = QuerySpec(kinds=kinds, thread_id=key.thread_id, lineage=LatestTransform())
+        table = catalog.query(spec)
+        assert arrow.query_meta(table).findings == ()
+        assert {(r.package_id, r.record_id) for r in arrow.query_rows(table)} == entries
+        # Without a thread, a lineage set is every record of its kind and source (ADR 0016 §3).
+        runs = catalog.query(QuerySpec(kinds=("run",), lineage=LatestTransform()))
+        v2 = siblings["v2"]
+        assert {(r.package_id, r.transform_id) for r in arrow.query_rows(runs)} == {
+            (v2.package_id, self._transform(v2))
+        }
+
+    def test_query_reports_an_ambiguous_lineage_set_and_returns_none_of_it(
+        self, catalog: CatalogApi, siblings: dict[str, WorkedPackage]
+    ) -> None:
+        for name in ("v1a", "v1b"):
+            catalog.register(siblings[name].root)
+        table = catalog.query(QuerySpec(kinds=("run",), lineage=LatestTransform()))
+        assert table.num_rows == 0
+        meta = arrow.query_meta(table)
+        _validate(meta)
+        (source,) = {
+            a.source
+            for a in (evidence_anchor(r) for r in siblings["v1a"].records("run"))
+            if a is not None
+        }
+        assert [(f.code, f.subject) for f in meta.findings] == [("ambiguous_lineage", source)]
+        pinned = catalog.query(
+            QuerySpec(kinds=("run",), lineage=Pinned(self._transform(siblings["v1b"])))
+        )
+        assert {r.package_id for r in arrow.query_rows(pinned)} == {siblings["v1b"].package_id}
+
+    def test_query_explains_its_plan_deterministically(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage]
+    ) -> None:
+        self.register_all(catalog, packages)
+        spec = QuerySpec(kinds=("run", "stream"), explain=True)
+        table = catalog.query(spec)
+        meta = arrow.query_meta(table)
+        _validate(meta)
+        assert meta.plan, "explain returns the plan alongside the rows"
+        assert arrow.ipc_bytes(table) == arrow.ipc_bytes(catalog.query(spec))
+        plain = catalog.query(QuerySpec(kinds=("run", "stream")))
+        assert plain.to_pylist() == table.to_pylist()
+
+    @pytest.mark.parametrize(
+        "spec",
+        [
+            QuerySpec(kinds=("stream",), series=SeriesJoin()),
+            QuerySpec(
+                kinds=("run",),
+                window=TimeWindow("rec:" + UNKNOWN_ID, 0, 1),
+                series=SeriesJoin(),
+            ),
+            QuerySpec(
+                kinds=("run",),
+                frame=FrameWindow(CrsReference("OGC", "CRS84"), "deg", (1.0, 0.0), (0.0, 1.0)),
+            ),
+            QuerySpec(
+                kinds=("run",),
+                frame=FrameWindow(CrsReference("OGC", "CRS84"), "metres", (0.0, 0.0), (1.0, 1.0)),
+            ),
+            QuerySpec(
+                kinds=("run",),
+                frame=FrameWindow(CrsReference("OGC", "CRS84"), "deg", (0.0, 0.0), (1.0, 1.0, 1.0)),
+            ),
+            QuerySpec(kinds=("run",), columns=("kind", "body")),  # type: ignore[arg-type]
+            QuerySpec(kinds=("run",), budget=QueryBudget(max_rows=0)),
+            QuerySpec(kinds=("run",), lineage=History()),  # type: ignore[arg-type]
+        ],
+        ids=[
+            "series-without-window",
+            "series-without-stream",
+            "inverted-box",
+            "unit-not-a-symbol",
+            "box-axes-differ",
+            "unknown-column",
+            "zero-budget",
+            "history-is-not-a-preference",
+        ],
+    )
+    def test_query_refuses_a_spec_outside_the_contract(
+        self, catalog: CatalogApi, packages: dict[str, WorkedPackage], spec: QuerySpec
+    ) -> None:
+        catalog.register(packages["drone"].root)
+        table = catalog.query(spec)
+        assert table.num_rows == 0
+        meta = arrow.query_meta(table)
+        _validate(meta)
+        assert meta.findings and _codes(meta.findings) == {"invalid_request"}
+        assert meta.budget is None, "a refused query ran under no budget"
 
     # --- determinism ---------------------------------------------------------------------------
 

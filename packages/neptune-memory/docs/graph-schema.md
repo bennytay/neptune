@@ -9,8 +9,10 @@ run thread predicates ([ADR 0009](adr/0009-run-threads-and-cross-package-continu
 type, the `clock_map` value type and `has_clock`, `maps_to` and `clock_map`
 ([ADR 0011](adr/0011-time-domain-registry-clocks-mappings-and-chains-never-estimated.md)); 1.5.0 (minor) adds the
 episode predicates ([ADR 0012](adr/0012-episodes-from-stated-task-evidence.md) §5); 1.6.0 (minor) adds the
-`event` node type, the event predicates and `EventKind` ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §6); 1.8.0 (minor) adds the
-coverage and health predicates ([ADR 0015](adr/0015-coverage-and-health-consolidator.md) §6). Earlier goldens still
+`event` node type, the event predicates and `EventKind` ([ADR 0013](adr/0013-event-index-evidence-linked-event-claims-and-co-occurrence.md) §6); 1.7.0 (minor) adds the
+calibration history predicates and the `delta` value type ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md)
+§4, §6); 1.8.0 (minor) adds the coverage and health predicates
+([ADR 0015](adr/0015-coverage-and-health-consolidator.md) §6). Earlier goldens still
 validate and their graphs still pass the suite. The code is `neptune_memory.schema`. `tests/test_pins_memory.py` checks that this
 page names every node type, predicate and finding code.
 
@@ -57,6 +59,9 @@ major version (ADR 0002 §5).
 | `at_site` | event, run | site | one | the site a run or event took place at, as declared |
 | `at_site_candidate` | event, run | site | many | ambiguous: the evidence names several sites |
 | `authorised_configuration` | site | configuration | many | an authorisation envelope approves this configuration at the site over the interval |
+| `calibrated_by` | configuration | record | many | the maintenance or requalification record that states the calibration resulted from it |
+| `calibrated_with` | sensor | configuration | many | a calibration of the sensor, from its valid_from to its stated end or the next one |
+| `calibration_candidate` | sensor | configuration | many | ambiguous: the calibration could be the sensor's over the interval; one claim per reading |
 | `clock_map` | clock | clock_map | many | a `maps_to`'s parameters as the evidence states them, or the chain it composes |
 | `co_occurs_within` | event | event | many | both events began inside the claim's valid interval, which is the configured window on that clock; different sources; never a cause |
 | `configuration_active_during` | run | configuration | many | a configuration the run ran with, over the bound part of the run (a snapshot binding) |
@@ -66,8 +71,9 @@ major version (ADR 0002 §5).
 | `continues_candidate` | run | run | many | ambiguous: may be a later part; the evidence does not order them |
 | `declared_kind` | event | text, integer | one | the event's kind exactly as its source declares it: a level, a code, a mode |
 | `deployed_at` | deployment | site | one | where a deployment takes place |
-| `ends_at` | episode | instant | many | where an episode ends (half-open, as `valid_to`), as its records state it: one claim per clock |
+| `drift` | sensor | delta | many | observed: two consecutive calibrations' declared values differ by the delta; no judgement |
 | `ends_at_candidate` | episode | instant | many | ambiguous: may end here (a stated end, or a stop event inside it) |
+| `ends_at` | episode | instant | many | where an episode ends (half-open, as `valid_to`), as its records state it: one claim per clock |
 | `episode_of` | episode | run | one | the run an episode segments |
 | `event_kind` | event | text | one | a registered event kind (`EventKind`), through a vendor mapping the config declares |
 | `evidenced_by` | any node | record | many | a Ledger record about the node (Episode tier, by id) |
@@ -122,10 +128,16 @@ major version (ADR 0002 §5).
 version and never renamed or removed within a major.
 
 Object value types are `text`, `integer`, `real`, `boolean`, `quantity` (a unit exactly as declared: `Known`,
-`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record` and `clock_map` (`#/$defs/ClockMap`:
+`Unknown` or `Ambiguous`), `instant` (a `Timestamp` on its own clock), `record`, `delta` and `clock_map` (`#/$defs/ClockMap`:
 a mapping's `anchor`, `rate` and `residual_bound` exactly as stated, each a `Knowledge` state inheriting the
 claim's provenance, with `method` `stated` or `co_sampled`; or a `composed` chain naming its mapping records in
-`chain` and the clocks between in `via`, with no parameters of its own).
+`chain` and the clocks between in `via`, with no parameters of its own). A `delta`
+(`#/$defs/Delta`) is `later - earlier`, component by component, between two calibration records (`earlier`,
+`later`): a parameter by its declared `name`, or the `translation` or `rotation` of the transforms both bind to one
+edge (`parent`, `child`), in the `representation` both declare, with the transforms' own frames and direction
+(`transform`). A rotation states its `adjustment`: a quaternion negated when the two point opposite ways
+(`later_negated`), Euler angles wrapped into a half turn (`wrapped`), else `none`. Its unit is the one both declare
+(`Known`), or `not_applicable` for a form without one (a quaternion, a rotation matrix); it is never converted.
 
 ## The claim and the finding
 
@@ -264,7 +276,15 @@ def test_graph_schema_contract(check):
     its valid interval is the window. Events on clocks no mapping relates are never compared. A mapping that is
     too coarse to decide, or that states no residual bound, gives a finding, never a claim. An end that is
     declared but not stated (blank or ambiguous) leaves the event open and is never an instant.
-17. **Coverage is never inferred** ([ADR 0015](adr/0015-coverage-and-health-consolidator.md)). `recorded` spans and
+17. **Calibration is never converted or judged.** `memory.calibration` ([ADR 0014](adr/0014-calibration-history-and-drift-consolidator.md))
+    places a calibration on a sensor only through its declared machine and subject and the hardware configurations
+    the machine declares or its chain places; several readings are `calibration_candidate`s, and so is a calibration
+    whose frame binding contradicts its sensor's configuration graph. A `calibrated_with` starts at a stated
+    `valid_from` only, and its unstated end is the next calibration's stated start only where no calibration whose
+    start or placement is in doubt may come first; otherwise it is candidates or no interval, and no drift is
+    claimed across the doubt. `drift` exists only between equal declared units (or forms without one) and equal declared
+    interpretations; anything else is a finding, never a converted value, and no threshold is applied.
+18. **Coverage is never inferred** ([ADR 0015](adr/0015-coverage-and-health-consolidator.md)). `recorded` spans and
     `rate_observed` come from the Ledger's series coverage; `gap` only where the stream's declared first or last
     instant predicts samples the series does not reach, and never while a sample lacks a tick on that clock.
     `rate_declared` and `rate_observed` stand side by side; nothing judges a tolerance. `integrity_finding` carries
