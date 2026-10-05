@@ -3,6 +3,7 @@
 ```mermaid
 flowchart LR
   PKG[("compiler packages<br/>(ingest packages)")]
+  SRC[("sources<br/>(ingest roots)")]
   CON[("contracts/")]
 
   subgraph L["neptune-ledger"]
@@ -23,7 +24,8 @@ flowchart LR
   end
 
   PKG -->|read via package schema| CAT
-  PKG -->|series Parquet, read in place| LAKE
+  PKG -->|series Parquet and blobs, read in place| LAKE
+  SRC -->|cited bytes, verified per chunk| LAKE
   CON -->|published interfaces| CAT
   CAT --> THR
   CAT --> LIN
@@ -50,7 +52,7 @@ flowchart LR
   class LIN,K1 built
   class CAT,THR,CLI,LAKE,K2 partial
   class QRY,ACC,K3 todo
-  class PKG,CON,MEM,CTX,DEP,LRN ext
+  class PKG,SRC,CON,MEM,CTX,DEP,LRN ext
   style L fill:#8b949e0f,stroke:#8b949e
   style UP fill:none,stroke:#8b949e
   style KEY fill:none,stroke:none

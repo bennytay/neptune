@@ -109,7 +109,7 @@
     "warehouse_amr.record.transform_record.json": "#"
   },
   "owner_version": 7,
-  "schema_sha256": "sha256:2ce1ae8442d6d85daeb650658644dc956fab82a50df98e48d286fd2045dff4c1",
+  "schema_sha256": "sha256:566b6997fd5cebc530089605c5cd88a979ab8a86524f404398adc6eab6ec92d5",
   "status": "stable",
   "version": "7.0.0"
 }

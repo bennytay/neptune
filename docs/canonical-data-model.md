@@ -4,13 +4,14 @@ Status: **authoritative**; frozen at `SCHEMA_VERSION` 1 by the M1 gate (MVL-56, 
 `docs/reviews/m1-stress-test.md`) and grown only by addition since: version 2 adds configuration snapshots
 (MVL-23, ADR 0037), version 3 alignment records (MVL-82, ADR 0050), version 4 deployment lifecycle records
 (MVL-83, ADR 0051), version 5 human assertions (MVL-183, ADR 0062), version 6 declared civil time zones and
-list states (MVL-202, ADR 0061), version 7 robot descriptions (MVL-24, ADR 0039). Primitives are specified by
+list states (MVL-202, ADR 0061), version 7 task records (MVL-33, ADR 0063) and version 8 robot descriptions
+(MVL-24, ADR 0039). Primitives are specified by
 MVL-2 / MVL-40 / MVL-4 / MVL-3, the record envelope by MVL-66 (ADR 0017), runs, streams and series by MVL-67
 (ADR 0018), machine context by MVL-68 (ADR 0019) and world context by MVL-69 (ADR 0020). The JSON Schema
 (`docs/schema/canonical.schema.json`) and the worked examples are MVL-70's (ADR 0021). Any change here needs
 an ADR and a schema-version bump, and must be an addition (ADR 0023 §1).
 
-## Record kinds (schema version 7)
+## Record kinds (schema version 8)
 
 Every record kind belongs to one family (ADR 0017 §4). The last four families are the design contract's source
 domains.
@@ -22,9 +23,9 @@ domains.
 | `finding` | `IngestFinding` | `model/finding.py` |
 | `reference` | `TimestampDomain`, `FrameGraph`, `Frame`, `FrameTransform`; since version 6 `CivilTimeZone` | `model/reference.py` (ADR 0061) |
 | `run` | `Run`, `Stream` | `model/run.py`, series contract in `model/series.py` (ADR 0018) |
-| `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration`; since version 2 `ConfigurationSnapshot`, `ConfigurationValue`; since version 7 `HardwareSpecification`, `DescriptionExtension`, `DescriptionExpansion` | `model/machine.py` (ADRs 0019, 0039), `model/configuration.py` (ADR 0037) |
+| `machine` | `Machine`, `HardwareConfiguration`, `HardwareComponent`, `SoftwareConfiguration`, `Calibration`; since version 2 `ConfigurationSnapshot`, `ConfigurationValue`; since version 8 `HardwareSpecification`, `DescriptionExtension`, `DescriptionExpansion` | `model/machine.py` (ADRs 0019, 0039), `model/configuration.py` (ADR 0037) |
 | `world` | `Site`, `Asset`, `SpatialArtifact`, `Image`, `Video`, `DocumentRecord`, `DocumentBlock`, `StructuredTable`, `StructuredRecord`; since version 4 `CommissioningBaseline`, `AuthorisationEnvelope`, `Intervention`, `MaintenanceEvent`, `RequalificationRecord`, `IncidentRecord`, `ChangeRecord`, `RiskAssessment` | `model/world.py` (ADR 0020), `model/lifecycle.py` (ADR 0051) |
-| `task` | `TaskBrief`, `SOPSection`, `Requirement`, `WorkOrder` | reserved for MVL-33 |
+| `task` | `TaskBrief`, `Requirement`, `SOPSection`, `WorkOrder` (since 7) | `model/task.py` (ADR 0063) |
 | `alignment` | `IdentityLink`, `ClockMapping`, `FrameBinding`, `RunAssembly`, `SnapshotBinding` (since 3) | `model/alignment.py` (ADR 0050) |
 | `assertion` | `Assertion` (since 5) | `model/assertion.py` (ADR 0062) |
 
@@ -50,8 +51,9 @@ boundary to the memory learner.
 - A value defined by a format specification (MCAP `log_time` is ns) cites the bytes that establish the format
   plus the transform that applies the spec. When the source carries the definition itself (a ROS message
   definition in an MCAP schema record), it cites that instead.
-- `SCHEMA_VERSION` is 7 (2: configuration, ADR 0037; 3: alignment, ADR 0050; 4: deployment lifecycle, ADR 0051;
-  5: assertion, ADR 0062; 6: civil time zones and list states, ADR 0061; 7: robot descriptions, ADR 0039).
+- `SCHEMA_VERSION` is 8 (2: configuration, ADR 0037; 3: alignment, ADR 0050; 4: deployment lifecycle, ADR 0051;
+  5: assertion, ADR 0062; 6: civil time zones and list states, ADR 0061; 7: task, ADR 0063; 8: robot
+  descriptions, ADR 0039).
   It became 1 at the M1 gate (ADR 0023), and a record kind's fields never change from then on. The model grows
   only by addition (new record kinds, including companion kinds naming the record they
   extend, new enum members, new locator steps, new states a list field may hold), each through an ADR and a
@@ -225,15 +227,15 @@ a bug, not a value.
 - `SoftwareConfiguration`: the software one declaration says ran: `machine` plus items. Each item has
   `name`, `device` (firmware per device) and one field per identity: `commit`, `release`, `build`,
   `digest`. A missing identity is `Unknown` or `NotCovered` plus a finding, never blank.
-- `HardwareSpecification` (since version 7, ADR 0039): what a declaration states about one `subject` (a
+- `HardwareSpecification` (since version 8, ADR 0039): what a declaration states about one `subject` (a
   component or a configuration) beyond its name, category and frame: a joint's type, axis and limits, a link's
   inertia and geometry, a sensor's settings. `parameters` are `DeclaredParameter`s (`CalibrationParameter`'s
   generalisation): path-named, numbers or text as declared, each with its unit and citation. Only what the file
   states; format defaults are never written.
-- `DescriptionExtension` (since version 7, ADR 0039): a block a robot description declares for another tool
+- `DescriptionExtension` (since version 8, ADR 0039): a block a robot description declares for another tool
   (`<gazebo>`, `<ros2_control>`), kept opaque: its `configuration`, `element` and own attributes and plugin
   names as text.
-- `DescriptionExpansion` (since version 7, ADR 0039): the document a macro source (Xacro) expands to, by
+- `DescriptionExpansion` (since version 8, ADR 0039): the document a macro source (Xacro) expands to, by
   `digest` and `size`, with the declared `arguments` and the values used. Records read from it cite into it
   through the adapter's expansion step.
 - `Calibration`: what one declaration states about one `subject`, for which `machine` and
@@ -325,6 +327,23 @@ a bug, not a value.
   one row, cells in their source's types (a CSV's text stays text). Blank is `Unknown`; a defined
   "none" is `KnownAbsent` citing the definition. A row cited as `Row(r)` hoists its cells' citations:
   cell `c` is `RowCell(r, c, header[c])` (`cell_evidence`).
+- Sites and assets are written by the declared-records pass (`neptune.declared`, ADR 0063) from registers whose
+  header is declared and from site manifests' `site` / `assets` sections; never from prose.
+
+## Task context (ADR 0063; `model/task.py`)
+
+- Every task record is one explicit declaration that an adapter already parsed, `stated`, written by the
+  declared-records pass (`neptune.declared`, one transform per upstream adapter transform). `declared_in` names the
+  `DocumentRecord`, `StructuredTable` or `ConfigurationSnapshot` holding it: its spans and cells are in
+  that record's transform's text. References (`site`, `assets`, `machines`, `task`, `procedure`) are
+  declared `LogicalId`s, never record ids; MVL-35 links them.
+- `TaskBrief`: `identifiers`, `name`, `objective`, `site`, `assets`, `machines`. `Requirement`:
+  `identifiers`, `text` (verbatim, modal verb kept; wrapped lines joined by one space, citing the whole span) and the `task` its declaration states it for.
+  `SOPSection`: a `Step <n>:` block with `procedure`, `number` (as written), `title`, `order` and the
+  `blocks` it spans. `WorkOrder`: the request (`identifiers`, `name`, `status` verbatim, `site`,
+  `assets`, `task`); the work done is a lifecycle record (ADR 0051).
+- What only looks like a declaration (a numbered heading, an unlabelled "shall", an undeclared header
+  naming an id column) is a `declared_candidate` in `derived/`, never a task record.
 
 ## Deployment lifecycle records (ADR 0051; `model/lifecycle.py`)
 

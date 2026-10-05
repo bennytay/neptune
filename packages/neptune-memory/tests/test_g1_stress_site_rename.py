@@ -7,11 +7,12 @@ one keeps its interval as a closure, and ``as_of`` before the rename still shows
 When the identifier *is* the name, the rename is a new thread, so a new node: it joins the old
 one only through a declared ground (here a lineage record), never by resemblance.
 
-Verdict: HOLDS for identity and the claim mechanics. GAP: ``has_name`` is not in the core
-vocabulary (owner MVL-126; ADR 0007 §2 fixes its shape), so this test registers it locally.
+Verdict: HOLDS. ``has_name`` joined the core vocabulary with MVL-126 in ADR 0007 §2's shape.
 """
 
 from __future__ import annotations
+
+from dataclasses import replace
 
 from memory_g1_harness import (
     JUN_01_2025,
@@ -37,7 +38,7 @@ from neptune_memory.schema.nodes import NodeRef, NodeType
 from neptune_memory.schema.predicates import CORE_PREDICATES, Cardinality, PredicateSpec
 from neptune_memory.schema.supersede import is_closure
 
-# ADR 0007 §2: the shape MVL-126 adds to the core vocabulary (a minor graph-schema release).
+# ADR 0007 §2: the shape MVL-126 added to the core vocabulary (a minor graph-schema release).
 HAS_NAME = PredicateSpec(
     "has_name",
     1,
@@ -46,7 +47,7 @@ HAS_NAME = PredicateSpec(
     Cardinality.ONE,
     "a declared display name, verbatim; never an identifier",
 )
-VOCABULARY = CORE_PREDICATES.extend(HAS_NAME)
+VOCABULARY = CORE_PREDICATES
 SITE = NodeRef(NodeType.SITE, "site-register:WH-07")
 AMR = NodeRef(NodeType.MACHINE, "serial:AMR-0042")
 REGISTER_2025 = cite(source("site-register-2025.csv"))
@@ -66,9 +67,12 @@ def _name(text: str, when: int, register: str) -> ClaimDraft:
     )
 
 
-def test_has_name_is_not_core_yet() -> None:
-    """GAP pin (MVL-126): flip this test when the core vocabulary gains ``has_name``."""
-    assert "has_name" not in CORE_PREDICATES
+def test_has_name_is_core_in_adr_0007_s_shape() -> None:
+    """The GAP pin flipped (MVL-126): the core vocabulary holds ``has_name`` as fixed, at version
+    2 since every node type grew ``clock`` (ADR 0011 §1), which only widens it."""
+    spec = CORE_PREDICATES.spec("has_name")
+    assert spec == replace(HAS_NAME, version=2)
+    assert spec.widens(HAS_NAME)
 
 
 def test_a_rename_that_keeps_the_identifier_keeps_the_node_and_supersedes_only_the_name() -> None:

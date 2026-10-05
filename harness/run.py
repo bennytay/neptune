@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
-from harness import contracts, corpus, report, services
+from harness import acceptance, contracts, corpus, report, services
 from harness.stages import STAGES, Context, Json, Outcome, Stage, resolve
 
 if TYPE_CHECKING:
@@ -69,6 +69,7 @@ def run(
     contracts_root: Path | None = None,
     owner_tests: bool = True,
     corpus_root: Path | None = None,
+    corpus_name: str = corpus.ACCEPTANCE,
     stages: Sequence[Stage] = STAGES,
 ) -> tuple[dict[str, Any], int]:
     """Run everything; returns (report, exit code) and writes the report files."""
@@ -78,7 +79,10 @@ def run(
     work.mkdir(parents=True)
     code, notes, problems, tail = contracts.run_check_all(contracts_root, owner_tests=owner_tests)
     registry = contracts.registry(contracts_root)
-    corpus_name, cases = corpus.select(corpus_root)
+    corpus_label, cases = corpus.select(corpus_root, name=corpus_name, into=work / "corpus")
+    corpus_doc: Json = {"name": corpus_label, "cases": [case.id for case in cases]}
+    if corpus_root is None and corpus_name == corpus.ACCEPTANCE:
+        corpus_doc.update(acceptance.lock_status())
     ctx = Context(registry=registry, work=work, cases=cases)
     up = not services.unreachable()  # only read when a real stage needs the services
     entries: list[Json] = []
@@ -104,7 +108,7 @@ def run(
     contracts_ok = code == 0
     document: dict[str, Any] = {
         "report_version": report.REPORT_VERSION,
-        "ok": contracts_ok and healthy and smoke["ok"],
+        "ok": contracts_ok and healthy and smoke["ok"] and corpus_doc.get("locked", True),
         "contracts": {
             "command": "scripts/contracts.py check --all" + ("" if owner_tests else " --no-tests"),
             "ok": contracts_ok,
@@ -113,7 +117,7 @@ def run(
             "problems": problems,
             **({"output_tail": _scrub(tail, work)} if tail else {}),
         },
-        "corpus": {"name": corpus_name, "cases": [case.id for case in cases]},
+        "corpus": corpus_doc,
         "stages": entries,
         "smoke": smoke,
     }
@@ -139,6 +143,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--contracts", type=Path, help="a contracts/ dir other than the repo's")
     parser.add_argument("--corpus", type=Path, help="a folder of case folders to ingest")
+    parser.add_argument(
+        "--corpus-name",
+        choices=corpus.NAMES,
+        default=corpus.ACCEPTANCE,
+        help="the built-in corpus to ingest when --corpus is not given (default: acceptance)",
+    )
     parser.add_argument("--no-owner-tests", action="store_true", help="skip owners' contract tests")
     parser.add_argument(
         "--compose", action="store_true", help="start the compose stack, then stop it"
@@ -154,6 +164,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             contracts_root=args.contracts,
             owner_tests=not args.no_owner_tests,
             corpus_root=args.corpus,
+            corpus_name=args.corpus_name,
         )
     finally:
         if args.compose:

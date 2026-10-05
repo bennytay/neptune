@@ -667,7 +667,7 @@ def calibration_from_json(data: JsonValue) -> Calibration:
 
 # The schema version that added the robot-description kinds; their records are written at it
 # (ADR 0037 §1).
-DESCRIPTION_SINCE: Final = 7
+DESCRIPTION_SINCE: Final = 8
 
 
 @dataclass(frozen=True)

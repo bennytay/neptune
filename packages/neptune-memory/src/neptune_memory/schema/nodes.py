@@ -41,7 +41,10 @@ class NodeType(StrEnum):
     CONFIGURATION = "configuration"  # calibrations, parameter sets, URDF revisions
     POLICY = "policy"  # an operating rule or a control policy
     RUN = "run"
+    STREAM = "stream"  # one recorded stream of a run: a topic, a channel, a log message type
+    DOCUMENT = "document"  # a declared document: a manual, an SOP, a datasheet, a register
     EPISODE = "episode"  # an entity: a bounded segment of a run, not the Episode tier
+    CLOCK = "clock"  # one declared clock, keyed by its compiler TimestampDomain record id
     # Context tier
     DEPLOYMENT = "deployment"
     FLEET = "fleet"

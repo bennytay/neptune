@@ -348,7 +348,7 @@
         },
         "parameters": {
           "items": {
-            "$ref": "#/$defs/DeclaredParameter"
+            "$ref": "#/$defs/CalibrationParameter"
           },
           "type": "array"
         },
@@ -384,6 +384,26 @@
         "subject",
         "valid_from",
         "valid_until"
+      ],
+      "type": "object"
+    },
+    "CalibrationParameter": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "unit": {
+          "$ref": "#/$defs/Knowledge_Unit"
+        },
+        "value": {
+          "$ref": "#/$defs/Knowledge_string_or_list_of_number_or_NonFinite"
+        }
+      },
+      "required": [
+        "name",
+        "unit",
+        "value"
       ],
       "type": "object"
     },
@@ -1049,26 +1069,6 @@
       ],
       "type": "object"
     },
-    "DeclaredParameter": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "unit": {
-          "$ref": "#/$defs/Knowledge_Unit"
-        },
-        "value": {
-          "$ref": "#/$defs/Knowledge_string_or_list_of_number_or_NonFinite"
-        }
-      },
-      "required": [
-        "name",
-        "unit",
-        "value"
-      ],
-      "type": "object"
-    },
     "DeclaredVersion": {
       "additionalProperties": false,
       "properties": {
@@ -1082,88 +1082,6 @@
       "required": [
         "kind",
         "value"
-      ],
-      "type": "object"
-    },
-    "DescriptionExpansion": {
-      "additionalProperties": false,
-      "properties": {
-        "arguments": {
-          "items": {
-            "$ref": "#/$defs/DeclaredParameter"
-          },
-          "type": "array"
-        },
-        "digest": {
-          "$ref": "#/$defs/ContentId"
-        },
-        "id": {
-          "$ref": "#/$defs/RecordId"
-        },
-        "kind": {
-          "const": "description_expansion"
-        },
-        "language": {
-          "type": "string"
-        },
-        "provenance": {
-          "$ref": "#/$defs/Provenance"
-        },
-        "schema_version": {
-          "const": 7
-        },
-        "size": {
-          "type": "integer"
-        }
-      },
-      "required": [
-        "arguments",
-        "digest",
-        "id",
-        "kind",
-        "language",
-        "provenance",
-        "schema_version",
-        "size"
-      ],
-      "type": "object"
-    },
-    "DescriptionExtension": {
-      "additionalProperties": false,
-      "properties": {
-        "configuration": {
-          "$ref": "#/$defs/RecordId"
-        },
-        "element": {
-          "type": "string"
-        },
-        "id": {
-          "$ref": "#/$defs/RecordId"
-        },
-        "kind": {
-          "const": "description_extension"
-        },
-        "parameters": {
-          "items": {
-            "$ref": "#/$defs/DeclaredParameter"
-          },
-          "type": "array"
-        },
-        "provenance": {
-          "$ref": "#/$defs/Provenance"
-        },
-        "schema_version": {
-          "const": 7
-        }
-      },
-      "required": [
-        "configuration",
-        "element",
-        "id",
-        "kind",
-        "parameters",
-        "provenance",
-        "schema_version"
       ],
       "type": "object"
     },
@@ -1869,41 +1787,6 @@
         "provenance",
         "revision",
         "schema_version"
-      ],
-      "type": "object"
-    },
-    "HardwareSpecification": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/RecordId"
-        },
-        "kind": {
-          "const": "hardware_specification"
-        },
-        "parameters": {
-          "items": {
-            "$ref": "#/$defs/DeclaredParameter"
-          },
-          "type": "array"
-        },
-        "provenance": {
-          "$ref": "#/$defs/Provenance"
-        },
-        "schema_version": {
-          "const": 7
-        },
-        "subject": {
-          "$ref": "#/$defs/RecordId"
-        }
-      },
-      "required": [
-        "id",
-        "kind",
-        "parameters",
-        "provenance",
-        "schema_version",
-        "subject"
       ],
       "type": "object"
     },
@@ -8406,6 +8289,49 @@
       ],
       "type": "object"
     },
+    "Requirement": {
+      "additionalProperties": false,
+      "properties": {
+        "declared_in": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "requirement"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 7
+        },
+        "task": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "text": {
+          "$ref": "#/$defs/Knowledge_string"
+        }
+      },
+      "required": [
+        "declared_in",
+        "id",
+        "identifiers",
+        "kind",
+        "provenance",
+        "schema_version",
+        "task",
+        "text"
+      ],
+      "type": "object"
+    },
     "RiskAssessment": {
       "additionalProperties": false,
       "properties": {
@@ -8654,6 +8580,57 @@
         "evidence",
         "revision",
         "role"
+      ],
+      "type": "object"
+    },
+    "SOPSection": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/$defs/RecordId"
+          },
+          "type": "array"
+        },
+        "declared_in": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "kind": {
+          "const": "sop_section"
+        },
+        "number": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "order": {
+          "type": "integer"
+        },
+        "procedure": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 7
+        },
+        "title": {
+          "$ref": "#/$defs/Knowledge_string"
+        }
+      },
+      "required": [
+        "blocks",
+        "declared_in",
+        "id",
+        "kind",
+        "number",
+        "order",
+        "procedure",
+        "provenance",
+        "schema_version",
+        "title"
       ],
       "type": "object"
     },
@@ -9306,6 +9283,67 @@
       ],
       "type": "object"
     },
+    "TaskBrief": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "declared_in": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "task_brief"
+        },
+        "machines": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "objective": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 7
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        }
+      },
+      "required": [
+        "assets",
+        "declared_in",
+        "id",
+        "identifiers",
+        "kind",
+        "machines",
+        "name",
+        "objective",
+        "provenance",
+        "schema_version",
+        "site"
+      ],
+      "type": "object"
+    },
     "TestResult": {
       "additionalProperties": false,
       "properties": {
@@ -9619,6 +9657,64 @@
       ],
       "type": "object"
     },
+    "WorkOrder": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "declared_in": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "id": {
+          "$ref": "#/$defs/RecordId"
+        },
+        "identifiers": {
+          "items": {
+            "$ref": "#/$defs/Knowledge_LogicalId"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "work_order"
+        },
+        "name": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Provenance"
+        },
+        "schema_version": {
+          "const": 7
+        },
+        "site": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        },
+        "status": {
+          "$ref": "#/$defs/Knowledge_string"
+        },
+        "task": {
+          "$ref": "#/$defs/Knowledge_LogicalId"
+        }
+      },
+      "required": [
+        "assets",
+        "declared_in",
+        "id",
+        "identifiers",
+        "kind",
+        "name",
+        "provenance",
+        "schema_version",
+        "site",
+        "status",
+        "task"
+      ],
+      "type": "object"
+    },
     "ZoneLimit": {
       "additionalProperties": false,
       "properties": {
@@ -9697,15 +9793,6 @@
       "$ref": "#/$defs/ConfigurationValue"
     },
     {
-      "$ref": "#/$defs/HardwareSpecification"
-    },
-    {
-      "$ref": "#/$defs/DescriptionExtension"
-    },
-    {
-      "$ref": "#/$defs/DescriptionExpansion"
-    },
-    {
       "$ref": "#/$defs/Site"
     },
     {
@@ -9731,6 +9818,18 @@
     },
     {
       "$ref": "#/$defs/StructuredRecord"
+    },
+    {
+      "$ref": "#/$defs/TaskBrief"
+    },
+    {
+      "$ref": "#/$defs/Requirement"
+    },
+    {
+      "$ref": "#/$defs/SOPSection"
+    },
+    {
+      "$ref": "#/$defs/WorkOrder"
     },
     {
       "$ref": "#/$defs/IdentityLink"

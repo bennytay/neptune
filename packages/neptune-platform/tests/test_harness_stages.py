@@ -12,6 +12,7 @@ from harness.stages import STAGES, Context, Outcome, Stage, resolve
 
 REPO: Final = Path(__file__).resolve().parents[3]
 COMPILER: Final = STAGES[0]
+LEDGER: Final = STAGES[1]
 
 
 def _ok(_: Context) -> Outcome:
@@ -19,32 +20,40 @@ def _ok(_: Context) -> Outcome:
 
 
 def _context(tmp_path: Path, registry: object | None = None) -> Context:
-    _, cases = corpus.select()
+    _, cases = corpus.select(name="worked-examples")
     return Context(registry=registry or contracts.registry(), work=tmp_path, cases=cases)
 
 
 def test_the_stage_order_and_service_flags() -> None:
+    # The real ledger runs on an embedded PostgreSQL (platform ADR 0006), so it needs no services.
     assert [(s.id, s.needs_services) for s in STAGES] == [
         ("compiler", False),
-        ("ledger", True),
+        ("ledger", False),
         ("memory", True),
         ("context", True),
     ]
-    assert STAGES[0].real is not None and all(s.real is None for s in STAGES[1:])
+    assert [s.real is not None for s in STAGES] == [True, True, False, False]
 
 
-def test_today_only_the_compiler_resolves_to_real() -> None:
+def test_today_the_compiler_and_the_ledger_resolve_to_real() -> None:
     registry = contracts.registry()
     resolved = {stage.id: resolve(stage, registry) for stage in STAGES}
+
+    def latest(contract_id: str) -> str:
+        # Read from the registry, not pinned: a contract bump must not have to edit this test.
+        version = registry.latest(contract_id, stable=True)
+        assert version is not None
+        return ".".join(map(str, version.version))
+
     assert resolved["compiler"].mode == "real"
-    assert resolved["compiler"].contract_version == "7.0.0"
-    assert resolved["ledger"].mode == "stub"
-    # neptune_ledger.api is importable (MVL-88) but only as a contract and stub: no real driver.
-    assert "no real driver for neptune-ledger" in resolved["ledger"].reason
-    assert resolved["ledger"].contract_version == "1.6.0"
+    assert resolved["compiler"].contract_version == latest("package-schema")
+    assert resolved["ledger"].mode == "real"
+    catalog = latest("catalog-api")
+    assert resolved["ledger"].reason == f"neptune_ledger.api is importable and matches {catalog}"
+    assert resolved["ledger"].contract_version == catalog
     assert resolved["context"].mode == "stub"
-    assert resolved["memory"].mode == "stub"  # graph-schema 1.0.0 is published; no driver yet
-    assert resolved["memory"].contract_version == "1.0.0"
+    assert resolved["memory"].mode == "stub"  # graph-schema 1.5.0 published; no driver yet
+    assert resolved["memory"].contract_version == "1.5.0"
 
 
 def test_an_importable_package_without_a_driver_is_still_a_stub() -> None:
@@ -144,3 +153,90 @@ def test_the_context_stub_serves_a_published_query_packet_golden(tmp_path: Path)
     assert smoke["packet"] == {"packet": "golden"}
     assert smoke["packet_source"] == "golden query-packet packet.json"
     assert outcome.output["contract_version"] == "0.0.1"
+
+
+def _compiled(tmp_path: Path, registry: object | None = None) -> Context:
+    """A context whose compiler stage has run for real over the worked examples."""
+    ctx = _context(tmp_path, registry)
+    entry = run_stage(COMPILER, ctx, services_up=False, upstream_ok=True)
+    assert entry["status"] == "ok"
+    return ctx
+
+
+def test_a_tampered_package_is_refused_by_the_real_ledger(tmp_path: Path) -> None:
+    ctx = _compiled(tmp_path)
+    manifest = json.loads((tmp_path / "packages" / "drone" / "manifest.json").read_text())
+    victim = tmp_path / "packages" / "drone" / manifest["files"][0]["path"]
+    victim.write_bytes(victim.read_bytes() + b" ")  # the manifest's hash no longer matches
+    entry = run_stage(LEDGER, ctx, services_up=False, upstream_ok=True)
+    assert entry["mode"] == "real" and entry["status"] == "failed"
+    rows = {row["case"]: row for row in entry["output"]["cases"]}
+    assert rows["drone"]["registration"] == "refused"
+    assert rows["drone"]["responses_valid"] is True  # a refusal is still a valid catalog answer
+    # One problem: a refused package is not re-registered, verified or checked against the lock.
+    assert len(entry["problems"]) == 1
+    assert entry["problems"][0].startswith("drone: register was refused (")
+    assert "verify" not in rows["drone"] and "reregistration" not in rows["drone"]
+    assert {rows[c]["registration"] for c in ("manipulator", "mobile_robot", "quadruped")} == {
+        "registered"
+    }  # partial success: one tampered package does not stop the others
+
+
+def test_a_package_newer_than_the_ledger_lock_fails_the_real_ledger(tmp_path: Path) -> None:
+    copy = tmp_path / "contracts"
+    shutil.copytree(REPO / "contracts", copy)
+    registry = contracts.registry(copy)
+    lock = registry.lock()
+    lock["neptune-ledger"]["package-schema"] = "1.0.0"
+    registry.write_lock(lock)
+    ctx = _compiled(tmp_path / "work", registry)
+    assert LEDGER.real is not None
+    outcome = LEDGER.real(ctx)  # resolve() would make it a stub: a lock a major behind
+    # The manipulator package needs package-schema 2 (compiler ADR 0037); the quadruped's
+    # robot.urdf gives robot-description records, which need package-schema 8 (compiler ADR 0039).
+    assert outcome.problems == (
+        "manipulator: the package needs package-schema 2, neptune-ledger locks 1.0.0",
+        "quadruped: the package needs package-schema 8, neptune-ledger locks 1.0.0",
+    )
+
+
+def test_a_ledger_a_major_behind_falls_back_to_the_catalog_api_goldens(tmp_path: Path) -> None:
+    copy = tmp_path / "contracts"
+    shutil.copytree(REPO / "contracts", copy)
+    registry = contracts.registry(copy)
+    lock = registry.lock()
+    lock["neptune-ledger"]["package-schema"] = "1.0.0"
+    registry.write_lock(lock)
+    entry = run_stage(
+        LEDGER, _context(tmp_path / "work", registry), services_up=False, upstream_ok=True
+    )
+    assert entry["mode"] == "stub" and entry["status"] == "ok"
+    assert entry["reason"] == "neptune-ledger locks package-schema 1.0.0, a major behind"
+    served = registry.latest("catalog-api")
+    assert entry["output"]["served"] == "goldens"
+    assert len(entry["output"]["goldens"]) == len(served.goldens)
+
+
+def test_a_real_ledger_with_nothing_compiled_upstream_fails(tmp_path: Path) -> None:
+    # A stub compiler serves goldens, not cases: registering nothing must not read as green.
+    assert LEDGER.real is not None
+    outcome = LEDGER.real(_context(tmp_path))
+    assert outcome.problems == ("the compiler stage compiled no case to register",)
+    assert outcome.output["cases"] == []
+
+
+def test_a_ledger_without_a_package_schema_lock_fails_the_real_ledger(tmp_path: Path) -> None:
+    copy = tmp_path / "contracts"
+    shutil.copytree(REPO / "contracts", copy)
+    registry = contracts.registry(copy)
+    lock = registry.lock()
+    del lock["neptune-ledger"]["package-schema"]
+    registry.write_lock(lock)
+    ctx = _compiled(tmp_path / "work", registry)
+    assert LEDGER.real is not None
+    outcome = LEDGER.real(ctx)  # the run-time lock check has nothing to honour: never silent
+    assert outcome.problems == (
+        "neptune-ledger has no package-schema entry in contracts/lock.toml",
+    )
+    assert outcome.output["locked_package_schema"] is None
+    assert {row["registration"] for row in outcome.output["cases"]} == {"registered"}

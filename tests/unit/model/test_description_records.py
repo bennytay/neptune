@@ -1,4 +1,4 @@
-"""The robot-description kinds of schema version 7 (ADR 0039): shape, rules, JSON and schema."""
+"""The robot-description kinds of schema version 8 (ADR 0039): shape, rules, JSON and schema."""
 
 from dataclasses import replace
 from typing import Any, Final
@@ -13,6 +13,7 @@ from neptune.model.ids import ContentId, RecordId
 from neptune.model.kinds import kinds_at, package_version
 from neptune.model.knowledge import AssertionKind, Known, NotApplicable, NotCovered, Unknown
 from neptune.model.machine import (
+    DESCRIPTION_SINCE,
     CalibrationParameter,
     DeclaredParameter,
     DescriptionExpansion,
@@ -112,8 +113,8 @@ def test_each_kind_round_trips_and_validates_against_the_schema(record: Any, rea
     data = canonical_json.loads(canonical_json.dumps(record.to_json()))
     assert read(data) == record
     assert isinstance(data, dict)
-    assert (data["kind"], data["schema_version"]) == (record.kind, 7)
-    assert type(record).family is Family.MACHINE and type(record).since == 7
+    assert (data["kind"], data["schema_version"]) == (record.kind, DESCRIPTION_SINCE)
+    assert type(record).family is Family.MACHINE and type(record).since == DESCRIPTION_SINCE
     assert not list(VALIDATOR.iter_errors(data))
 
 
@@ -121,18 +122,20 @@ def test_each_kind_round_trips_and_validates_against_the_schema(record: Any, rea
 def test_a_newer_record_is_refused_by_its_version(record: Any, read: Any) -> None:
     with pytest.raises(SchemaVersionError):
         read({**record.to_json(), "schema_version": SCHEMA_VERSION + 1, "added_later": 1})
-    with pytest.raises(SchemaVersionError, match="from schema version 7"):
-        read({**record.to_json(), "schema_version": 6})  # no version 6 reader ever wrote one
+    older = DESCRIPTION_SINCE - 1  # no reader of an older version ever wrote one
+    with pytest.raises(SchemaVersionError, match=f"from schema version {DESCRIPTION_SINCE}"):
+        read({**record.to_json(), "schema_version": older})
 
 
-def test_a_package_with_description_records_is_a_version_7_package() -> None:
-    assert set(kinds_at(7)) - set(kinds_at(6)) == {
+def test_a_package_with_description_records_is_a_version_8_package() -> None:
+    assert DESCRIPTION_SINCE == 8
+    assert set(kinds_at(DESCRIPTION_SINCE)) - set(kinds_at(DESCRIPTION_SINCE - 1)) == {
         "description_expansion",
         "description_extension",
         "hardware_specification",
     }
     assert package_version(["frame", "hardware_component"]) == 1
-    assert package_version(["frame", "hardware_specification"]) == 7
+    assert package_version(["frame", "hardware_specification"]) == DESCRIPTION_SINCE
 
 
 def test_schema_version_2_still_reads_version_1_records() -> None:
