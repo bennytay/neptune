@@ -20,7 +20,7 @@ from neptune.model.jsonvalue import JsonObject, JsonValue
 from neptune_deploy.packs.snapshot import Claim
 
 CATALOG_API: Final = "catalog-api"
-CATALOG_API_VERSION: Final = "1.6.0"
+CATALOG_API_VERSION: Final = "1.7.0"
 
 
 @dataclass(frozen=True)

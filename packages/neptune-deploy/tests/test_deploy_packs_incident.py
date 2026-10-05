@@ -55,17 +55,17 @@ THIRTY_TWO_SECONDS = 32 * corpus.SECOND  # ticks of the S-007 CMMS clock (nanose
 # explain it in the PR, and raise COMPILER_VERSION when a pack's content changes.
 GOLDEN = {
     "amr-07.claims": "sha256:65a6bb91fc9908b8947e3785e8311d48c05ae3ceb78e25c6adaafe2b1f176157",
-    "amr-07.json": "sha256:b45895703384fb860f3e455597417449a0bd047bdcf638622f07a6b856e5d91f",
-    "amr-07.pdf": "sha256:d9f158e34a1990f1bf356ba2e9690985ab41699221ed6128d4dfcfa924494d25",
+    "amr-07.json": "sha256:f5446bce61fc18e1c0d2aebce577a111c6b7f495f74e5c8cd4afd1baf3841f76",
+    "amr-07.pdf": "sha256:6dce34f8ea013b368aa6f325c50631eba40c2e29c5e0de79fa6ea936f004b234",
     "arm-3a.claims": "sha256:32205f5979ad0fb5c806b5f526bc4747e2db412dad0f2378001230f51c7c19d3",
-    "arm-3a.json": "sha256:0cb5d214ede4c65d540c4358ac223313ef66082b867773a7131a2775c282b1f7",
-    "arm-3a.pdf": "sha256:6d06cf07c1ada9b4186495812be91317b91f3a65a75bcec52fc342525d0524e6",
+    "arm-3a.json": "sha256:330a779cd54197fcbdbd846996886d493b0317458e37f930d356e234399b1a25",
+    "arm-3a.pdf": "sha256:49e282e91c9c3cf80a730cea9b69a70b5f68306c827b8f195e158c90556f4e56",
     "inc-0007.claims": "sha256:67614743a92ba167c4df171e51a11dcd5400d4c180f88d837ac55559b8754c06",
-    "inc-0007.json": "sha256:d1002a505fff73d97785437dfbe132de6162472af0b72ca925335934e42c89a9",
-    "inc-0007.pdf": "sha256:e55d094bd54dfc2d08bc7daf578b5dd82aff120b824067ef76e7b10844eaea5c",
+    "inc-0007.json": "sha256:16552c8ffbd2d7bb4eebc98692820f4e57ddd2bfd374df88023c143dea048664",
+    "inc-0007.pdf": "sha256:ecd53540abe4780d0d78298a220cdeb2507f77242bf6196ed2698af397ead6ef",
     "inc-c3-0011.claims": "sha256:b24e459163cec09af8ce619f1e33e6a6ff2f1cf5794edbbe3746d34518e5283a",
-    "inc-c3-0011.json": "sha256:0e7815449db07ac509313fa1c4358c2f032992569b8568189ff0dfceb135d6a1",
-    "inc-c3-0011.pdf": "sha256:df2300a270dab18403570df50dfeac6cfc16992cb65d25e60d9279ee67d27972",
+    "inc-c3-0011.json": "sha256:087e296aac98ed79c151a4832a266fe4903c24f805035091fbb8a1624fb47f65",
+    "inc-c3-0011.pdf": "sha256:9d1f07b723e270286813b3d0f739339b9ef1c83ed422ad7fe2888fd22c868f4e",
 }
 RENDERERS = (("claims", render_claims), ("json", render_json), ("pdf", render_pdf))
 

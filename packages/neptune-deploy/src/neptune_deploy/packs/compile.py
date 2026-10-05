@@ -41,7 +41,7 @@ from neptune_deploy.packs.templates import Hop, SectionTemplate, Template, Templ
 
 PACK_SCHEMA: Final = "neptune-deploy.evidence-pack/1"
 COMPILER_ID: Final = "neptune-deploy.packs"
-COMPILER_VERSION: Final = "2"
+COMPILER_VERSION: Final = "3"
 PACK_PREFIX: Final = "pack:"
 _OPEN_END: Final = 2**64  # past every int64 tick: an open end in the overlap sweep
 
