@@ -310,7 +310,7 @@ def _steps(view: _View) -> dict[NodeRef, list[_Step]]:
                 _finding("untimed_record", f"a {event.kind} states no instant; not placed", record)
             )
             continue
-        if not event.machines:
+        if event.machines is None or not (event.machines or event.unread_machines):
             view.findings.append(
                 _finding(
                     "unplaced_record",
@@ -318,8 +318,7 @@ def _steps(view: _View) -> dict[NodeRef, list[_Step]]:
                     record,
                 )
             )
-            if event.machines is None:
-                continue
+            continue
         if event.unread_machines:
             view.findings.append(
                 _finding(

@@ -13,11 +13,15 @@ from datetime import datetime
 from fractions import Fraction
 
 from memory_configuration_records import (
+    binding,
     change,
     commissioning,
     configuration_thread,
+    hardware,
     maintenance,
     requalification,
+    run,
+    run_thread,
     threads,
     worked_example,
 )
@@ -104,7 +108,8 @@ def warehouse() -> list[Record]:
         *worked_example("warehouse_amr"),
         *threads(NodeType.MACHINE, AMR),
         *threads(NodeType.SITE, S007),
-        *(configuration_thread(c) for c in (R3, R4, R5)),
+        # Each revision's thread is anchored on its parameter file, as the Ledger keys it.
+        *(configuration_thread(c, f"threads/{c.value}", f"{c.value}.yaml") for c in (R3, R4, R5)),
         SITE_CLOCK,
         change("CHG-0040 firmware V01.04.00", [AMR], R5, stated("2026-10-01T06:00:00+10:00")),
         requalification("RQ-0040", [AMR], R5, stated("2026-10-01T15:00:00+10:00")),
@@ -157,6 +162,61 @@ def test_warehouse_authorisation_is_a_site_claim_on_the_envelope_window() -> Non
     assert (authorised.valid_from, authorised.valid_to) == (
         civil("2026-09-22T00:00:00+10:00"),
         civil("2027-03-22T00:00:00+10:00"),
+    )
+
+
+def test_warehouse_runs_after_the_incident_change_are_not_covered_by_the_envelope() -> None:
+    """The demo question: what changed before the incident, and was it authorised?"""
+    controller, controller_id = civil_domain("AMR-07 controller clock")
+
+    def shift(name: str, first: str, last: str) -> Record:
+        return run(
+            f"{name}.bag",
+            LogicalId("fleet.run", name),
+            Timestamp(posix(first), controller_id),
+            Timestamp(posix(last), controller_id),
+            AMR,
+        )
+
+    before = shift("AMR-07/2026-09-23", "2026-09-23T10:00:00+10:00", "2026-09-23T10:59:59+10:00")
+    after = shift("AMR-07/2026-09-28", "2026-09-28T10:00:00+10:00", "2026-09-28T10:59:59+10:00")
+    unbound = shift("AMR-07/2026-09-29", "2026-09-29T10:00:00+10:00", "2026-09-29T10:59:59+10:00")
+    records = [
+        *warehouse(),
+        controller,
+        *(
+            run_thread(LogicalId("fleet.run", r), f"threads/{r}")
+            for r in ("AMR-07/2026-09-23", "AMR-07/2026-09-28", "AMR-07/2026-09-29")
+        ),
+        before,
+        after,
+        unbound,
+        hardware("CFG-AMR07-r3.yaml", AMR),
+        hardware("CFG-AMR07-r4.yaml", AMR),
+        binding("09-23", before, hardware("CFG-AMR07-r3.yaml", AMR)),
+        binding("09-28", after, hardware("CFG-AMR07-r4.yaml", AMR)),
+    ]
+    result = consolidate(records)
+    assert result.findings == ()
+    active = {
+        (c.subject.node_id, c.object.node_id)  # type: ignore[union-attr]
+        for c in of(result, "configuration_active_during")
+    }
+    assert active == {
+        ("fleet.run:AMR-07/2026-09-23", "siteops.configuration:CFG-AMR07-r3"),
+        ("fleet.run:AMR-07/2026-09-28", "siteops.configuration:CFG-AMR07-r4"),
+    }
+    (uncovered,) = of(result, "not_covered_by_authorisation")
+    assert uncovered.subject.node_id == "fleet.run:AMR-07/2026-09-28"
+    assert (uncovered.valid_from, uncovered.valid_to) == (
+        civil("2026-09-28T10:00:00+10:00"),
+        civil("2026-09-28T11:00:00+10:00"),
+    )
+    assert uncovered.assertion_kind == "observed"
+    (unknown,) = of(result, "configuration_unknown")
+    assert (unknown.subject.node_id, unknown.object) == (
+        "fleet.run:AMR-07/2026-09-29",
+        LedgerRecordRef(record_id_of(unbound)),
     )
 
 
