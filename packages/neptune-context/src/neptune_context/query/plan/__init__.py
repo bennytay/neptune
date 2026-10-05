@@ -17,6 +17,7 @@ from neptune_context.query.plan.client import (
     RecordingClient,
     RecordingMissing,
     ReplayClient,
+    anthropic_arguments,
     dump_recordings,
     load_recordings,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "RecordingMissing",
     "ReplayClient",
     "Severity",
+    "anthropic_arguments",
     "build_request",
     "choose",
     "dump_recordings",

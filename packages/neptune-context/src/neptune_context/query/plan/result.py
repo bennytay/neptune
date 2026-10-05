@@ -17,7 +17,7 @@ from neptune.identity import canonical_json
 from neptune_context.query.codec import query_id, to_json
 
 if TYPE_CHECKING:
-    from neptune.model.jsonvalue import JsonObject
+    from neptune.model.jsonvalue import JsonObject, JsonValue
     from neptune_context.query.findings import Refused
     from neptune_context.query.model import Query
     from neptune_context.query.plan.resolver import Mention
@@ -107,7 +107,7 @@ class ModelLineage:
     response_sha256: str | None = None
 
     def to_json(self) -> JsonObject:
-        out: JsonObject = {
+        out: dict[str, JsonValue] = {
             "client_id": self.client_id,
             "model_id": self.model_id,
             "schema_id": self.schema_id,
@@ -157,7 +157,7 @@ class PlannedQuery:
         return tuple(f for f in self.findings if f.severity is Severity.BLOCKING)
 
     def to_json(self) -> JsonObject:
-        out: JsonObject = {
+        out: dict[str, JsonValue] = {
             "assertion_kind": self.assertion_kind,
             "findings": [f.to_json() for f in self.findings],
             "format_version": PLAN_FORMAT_VERSION,

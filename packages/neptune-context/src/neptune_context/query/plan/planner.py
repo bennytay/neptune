@@ -14,11 +14,10 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final
 
 from neptune_context.query import decode
-from neptune_context.query.codec import clock_to_json
 from neptune_context.query.model import (
     HEAD,
     INT64_MAX,
@@ -45,15 +44,17 @@ from neptune_context.query.plan.client import (
     ModelClient,
     ModelUnavailable,
 )
-from neptune_context.query.plan.resolver import EntityResolver, Entity, Mention
+from neptune_context.query.plan.resolver import Entity, EntityResolver, Mention
 from neptune_context.query.plan.result import (
     ModelLineage,
     PlanFinding,
-    PlanFindingCode as Code,
     PlannedQuery,
     PlanStatus,
     Severity,
     response_sha256,
+)
+from neptune_context.query.plan.result import (
+    PlanFindingCode as Code,
 )
 from neptune_context.query.schema import SCHEMA_ID
 from neptune_context.query.validate import validate
@@ -76,7 +77,7 @@ class Defaults:
     """
 
     caller: Caller
-    budget: Budget = Budget(items=100)
+    budget: Budget = field(default_factory=lambda: Budget(items=100))
     clock: Clock | None = None
     civil_time: CivilTime | None = None
     frames: tuple[FrameRef, ...] = ()
@@ -153,7 +154,11 @@ class _Review:
         self.snapshot = snapshot
         self.findings: list[PlanFinding] = []
         self.entities: dict[str, Entity] = {}
-        self.named = {_TIMESCALES[w.lower()] for w in re.findall(r"[A-Za-z]+", text) if w.lower() in _TIMESCALES}
+        self.named = {
+            _TIMESCALES[w.lower()]
+            for w in re.findall(r"[A-Za-z]+", text)
+            if w.lower() in _TIMESCALES
+        }
 
     # -- entities -----------------------------------------------------------------------------
 
@@ -192,9 +197,10 @@ class _Review:
         if query.site is not None:
             for declared in (query.site.site, *sorted(query.site.zones)):
                 at = "/site"
-                if declared not in self.entities and self.resolver.lookup(
-                    declared, as_of=self.snapshot
-                ) is None:
+                if (
+                    declared not in self.entities
+                    and self.resolver.lookup(declared, as_of=self.snapshot) is None
+                ):
                     self.findings.append(
                         _block(
                             Code.UNKNOWN_ENTITY,
@@ -240,7 +246,9 @@ class _Review:
         if _OWN_CLOCK.search(self.text) and clock in self._primary_clocks():
             return True
         primary = [
-            e for e in self.entities.values() if e.primary_clock is not None and e.primary_clock == clock
+            e
+            for e in self.entities.values()
+            if e.primary_clock is not None and e.primary_clock == clock
         ]
         if primary:
             who = ", ".join(sorted(e.declared_id for e in primary))
@@ -259,7 +267,7 @@ class _Review:
                 _info(
                     Code.CLOCK_DEFAULTED_TO_CALLER,
                     at,
-                    f"the question names no clock; used the caller's default ({_clock_name(clock)})",
+                    f"no clock named; used the caller's default {_clock_name(clock)}",
                 )
             )
             return True
@@ -323,12 +331,16 @@ class _Review:
                 _info(
                     Code.INCLUDE_INFERRED_DEFAULT,
                     "/include_inferred",
-                    f"include_inferred is {out.include_inferred} (the {self.defaults.caller} default)",
+                    f"include_inferred is {out.include_inferred} ({self.defaults.caller} default)",
                 )
             )
         if out.budget == self.defaults.budget:
             self.findings.append(
-                _info(Code.BUDGET_DEFAULT, "/budget", f"budget is the caller's default: {out.budget.items} items")
+                _info(
+                    Code.BUDGET_DEFAULT,
+                    "/budget",
+                    f"budget is the caller's default: {out.budget.items} items",
+                )
             )
         self.entities_of(out)
         out = self._review_time(out)
@@ -381,7 +393,7 @@ class _Review:
                 _block(
                     Code.BRIDGE_NOT_DECLARED,
                     "/clock_bridges",
-                    f"clock mapping {bridge.mapping_id} is not declared for any entity in the query",
+                    f"clock mapping {bridge.mapping_id} is not declared for the query's entities",
                     bridge.mapping_id,
                 )
             )
@@ -390,14 +402,16 @@ class _Review:
     def _review_space(self, query: Query) -> Query:
         known = {f for e in self.pool() for f in e.frames} | set(self.defaults.frames)
         keep = []
-        for region in sorted(query.regions, key=lambda r: (r.frame.graph_id, r.frame.frame_id, r.unit)):
+        for region in sorted(
+            query.regions, key=lambda r: (r.frame.graph_id, r.frame.frame_id, r.unit)
+        ):
             if region.frame not in known:
                 self.findings.append(
                     _block(
                         Code.FRAME_NOT_DECLARED,
                         "/regions",
                         f"frame {region.frame.frame_id!r} of {region.frame.graph_id} is not "
-                        "declared for any entity in the query or by the caller; frames are never guessed",
+                        "declared for the query's entities or the caller; frames are never guessed",
                         region.frame.frame_id,
                     )
                 )
@@ -406,7 +420,7 @@ class _Review:
                     _block(
                         Code.UNIT_NOT_STATED,
                         "/regions",
-                        f"the question states no length unit {region.unit!r}; units are never guessed",
+                        f"the question states no unit {region.unit!r}; units are never guessed",
                         region.unit,
                     )
                 )
@@ -420,7 +434,7 @@ class _Review:
                 _block(
                     Code.BRIDGE_NOT_DECLARED,
                     "/frame_bridges",
-                    f"frame transform {bridge.transform_id} is not declared for any entity in the query",
+                    f"frame transform {bridge.transform_id} is not declared for the entities",
                     bridge.transform_id,
                 )
             )
@@ -472,7 +486,7 @@ def _bad_input(text: str, as_of: object) -> str | None:
         return "the question is blank"
     if len(text) > MAX_QUESTION_CHARS:
         return f"the question is longer than {MAX_QUESTION_CHARS} characters"
-    if any(ord(ch) < 32 and ch not in "\n\t" or ord(ch) == 127 for ch in text):
+    if any((ord(ch) < 32 and ch not in "\n\t") or ord(ch) == 127 for ch in text):
         return "the question has control characters"
     try:
         text.encode("utf-8")
@@ -501,35 +515,67 @@ def plan(
     never resolves ``"head"`` itself. Failure is a ``PlannedQuery`` with findings, not an exception;
     only a programming error (a resolver or client that raises something else) propagates.
     """
-    lineage = ModelLineage(model, client.client_id, prompt.template_sha256(), SCHEMA_ID, QUERY_VERSION)
+    lineage = ModelLineage(
+        model, client.client_id, prompt.template_sha256(), SCHEMA_ID, QUERY_VERSION
+    )
     problem = _bad_input(text, as_of)
     if problem is not None:
         return _failed(PlanStatus.FAILED, str(text), lineage, (), Code.BAD_INPUT, problem)
     snapshot = None if as_of == HEAD else int(as_of)
     mentions = tuple(resolver.find(text, as_of=snapshot))
-    request = prompt.build_request(text, as_of, defaults, mentions, model=model, max_tokens=max_tokens)
+    request = prompt.build_request(
+        text, as_of, defaults, mentions, model=model, max_tokens=max_tokens
+    )
     lineage = dataclasses.replace(lineage, request_sha256=request.sha256)
     try:
         response = client.complete(request)
     except ModelUnavailable as error:
-        return _failed(PlanStatus.FAILED, text, lineage, mentions, Code.MODEL_UNAVAILABLE, str(error))
+        return _failed(
+            PlanStatus.FAILED, text, lineage, mentions, Code.MODEL_UNAVAILABLE, str(error)
+        )
     lineage = dataclasses.replace(
         lineage,
         model_id=response.model,
         response_sha256=None if response.text is None else response_sha256(response.text),
     )
     if response.stop == "refusal":
-        return _failed(PlanStatus.FAILED, text, lineage, mentions, Code.MODEL_REFUSED, "the model declined to plan this question")
+        return _failed(
+            PlanStatus.FAILED,
+            text,
+            lineage,
+            mentions,
+            Code.MODEL_REFUSED,
+            "the model declined to plan this question",
+        )
     if response.stop == "max_tokens":
-        return _failed(PlanStatus.FAILED, text, lineage, mentions, Code.MODEL_TRUNCATED, f"the model's output was cut off at {max_tokens} tokens")
+        return _failed(
+            PlanStatus.FAILED,
+            text,
+            lineage,
+            mentions,
+            Code.MODEL_TRUNCATED,
+            f"the model's output was cut off at {max_tokens} tokens",
+        )
     if response.text is None or not response.text.strip():
-        return _failed(PlanStatus.INVALID, text, lineage, mentions, Code.MODEL_OUTPUT_INVALID, "the model returned no query")
+        return _failed(
+            PlanStatus.INVALID,
+            text,
+            lineage,
+            mentions,
+            Code.MODEL_OUTPUT_INVALID,
+            "the model returned no query",
+        )
     decoded = decode.loads(response.text)
     if not isinstance(decoded, Query):
         codes = ", ".join(sorted({str(f.code) for f in decoded.findings}))
         return _failed(
-            PlanStatus.INVALID, text, lineage, mentions, Code.MODEL_OUTPUT_INVALID,
-            f"the model's output is not a valid query ({codes}); it was not re-planned", decoded,
+            PlanStatus.INVALID,
+            text,
+            lineage,
+            mentions,
+            Code.MODEL_OUTPUT_INVALID,
+            f"the model's output is not a valid query ({codes}); it was not re-planned",
+            decoded,
         )
     review = _Review(text, as_of, defaults, mentions, resolver, snapshot)
     query = review.run(decoded)
@@ -542,19 +588,30 @@ def plan(
         if invalid:
             codes = ", ".join(sorted({str(f.code) for f in invalid}))
             findings.append(
-                _block(Code.DRAFT_WITHDRAWN, "/", f"after removing what the question does not support, no valid draft remains ({codes})")
+                _block(
+                    Code.DRAFT_WITHDRAWN,
+                    "/",
+                    f"no valid draft remains once unsupported parts are removed: {codes}",
+                )
             )
             result = None
     findings.sort(key=_finding_order)
     status = PlanStatus.READY
     if any(f.severity is Severity.BLOCKING for f in findings):
-        only_ambiguity = all(f.code is Code.AMBIGUOUS_ENTITY for f in findings if f.severity is Severity.BLOCKING)
+        only_ambiguity = all(
+            f.code is Code.AMBIGUOUS_ENTITY for f in findings if f.severity is Severity.BLOCKING
+        )
         status = PlanStatus.NEEDS_CHOICE if only_ambiguity else PlanStatus.NEEDS_INPUT
     return PlannedQuery(status, text, result, lineage, mentions, tuple(findings), refusal)
 
 
 def _finding_order(finding: PlanFinding) -> tuple[int, str, str, str]:
-    return (finding.severity is Severity.INFO, finding.at, str(finding.code), "\0".join(finding.details))
+    return (
+        finding.severity is Severity.INFO,
+        finding.at,
+        str(finding.code),
+        "\0".join(finding.details),
+    )
 
 
 def choose(planned: PlannedQuery, mention_text: str, declared_id: str) -> PlannedQuery:
@@ -596,9 +653,7 @@ def choose(planned: PlannedQuery, mention_text: str, declared_id: str) -> Planne
         )
     )
     findings.sort(key=_finding_order)
-    mentions = tuple(
-        Mention(m.text, (chosen,)) if m is mention else m for m in planned.mentions
-    )
+    mentions = tuple(Mention(m.text, (chosen,)) if m is mention else m for m in planned.mentions)
     blocking = [f for f in findings if f.severity is Severity.BLOCKING]
     status = PlanStatus.READY
     if blocking:

@@ -10,9 +10,10 @@ import json
 from collections import Counter
 
 import pytest
-from planner_golden_context import ENTITIES, GOLDEN, build
+
 from neptune_context.eval import planner_golden as pg
 from neptune_context.query.plan import PlanStatus, load_recordings
+from planner_golden_context import ENTITIES, GOLDEN, build
 
 
 @pytest.fixture(scope="module")
@@ -77,10 +78,21 @@ def test_the_corpus_spans_the_embodiments_and_the_failure_modes(report: pg.Repor
     assert set(statuses) == {"ready", "needs_choice", "needs_input", "invalid", "failed"}
     blocking = {code for o in report.outcomes for code in o.case.blocking}
     assert {
-        "ambiguous_entity", "unknown_entity", "clock_not_stated", "clock_not_declared",
-        "time_phrase_unresolved", "frame_not_declared", "unit_not_stated", "bridge_not_declared",
-        "claim_not_quoted", "entity_kind_mismatch", "draft_withdrawn", "model_output_invalid",
-        "model_refused", "model_truncated", "model_unavailable",
+        "ambiguous_entity",
+        "unknown_entity",
+        "clock_not_stated",
+        "clock_not_declared",
+        "time_phrase_unresolved",
+        "frame_not_declared",
+        "unit_not_stated",
+        "bridge_not_declared",
+        "claim_not_quoted",
+        "entity_kind_mismatch",
+        "draft_withdrawn",
+        "model_output_invalid",
+        "model_refused",
+        "model_truncated",
+        "model_unavailable",
     } <= blocking
 
 
@@ -95,6 +107,13 @@ def test_a_wrong_expectation_is_a_visible_failure() -> None:
 
 def test_the_world_declares_every_kind_of_embodiment() -> None:
     ids = {e["declared_id"] for e in ENTITIES}
-    assert {"asset_tag:AMR-07", "asset_tag:ARM-3A", "asset_tag:hx-02", "airframe:uav-21",
-            "asset_tag:rov-3", "asset_tag:quad-12", "vin:5yj3e1ea7kf317000"} <= ids
+    assert {
+        "asset_tag:AMR-07",
+        "asset_tag:ARM-3A",
+        "asset_tag:hx-02",
+        "airframe:uav-21",
+        "asset_tag:rov-3",
+        "asset_tag:quad-12",
+        "vin:5yj3e1ea7kf317000",
+    } <= ids
     assert json.loads((GOLDEN / "world.json").read_text())["entities"]

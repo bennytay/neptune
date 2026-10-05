@@ -6,7 +6,8 @@ profile), spends real tokens (one request per ``model`` case, about 90) and its 
 not byte-reproducible. Run it from the repository root when the prompt template, the query schema
 or the model changes, and commit the result with an explanation::
 
-    uv run --all-packages --extra anthropic python packages/neptune-context/scripts/record_planner_golden.py
+    uv run --all-packages --extra anthropic python \
+        packages/neptune-context/scripts/record_planner_golden.py
 
 Cases whose ``source`` is ``model`` get a fresh live response and are recorded ``live``; cases
 whose ``source`` is ``scripted`` keep their fixed bad response (they test the planner's checks,
@@ -14,6 +15,7 @@ which a good model would not trigger). The script rewrites ``recordings.jsonl`` 
 pass rate; a live pass rate below the synthetic one is the number to read.
 """
 
+# ruff: noqa: T201  (a command-line script: its output is the print)
 from __future__ import annotations
 
 import sys
@@ -21,8 +23,6 @@ from pathlib import Path
 
 PACKAGE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PACKAGE / "tests"))
-
-from planner_golden_context import GOLDEN  # noqa: E402
 
 from neptune_context.eval import planner_golden as pg  # noqa: E402
 from neptune_context.query.plan import (  # noqa: E402
@@ -32,8 +32,8 @@ from neptune_context.query.plan import (  # noqa: E402
     build_request,
     dump_recordings,
     load_recordings,
-    plan,
 )
+from planner_golden_context import GOLDEN  # noqa: E402
 
 
 def main() -> int:
@@ -46,7 +46,9 @@ def main() -> int:
         return 2
     cases = pg.load_cases(GOLDEN)
     stale = {
-        build_request(c.question, c.as_of, profiles[c.profile], index.find(c.question, as_of=None)).sha256
+        build_request(
+            c.question, c.as_of, profiles[c.profile], index.find(c.question, as_of=None)
+        ).sha256
         for c in cases
         if c.source == "model"
     }

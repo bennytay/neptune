@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any
 
 from neptune_context.query.codec import to_json
 from neptune_context.query.model import (
@@ -39,13 +39,14 @@ from neptune_context.query.plan import (
     load_recordings,
     plan,
 )
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
     from neptune.model.jsonvalue import JsonObject
-    from neptune_context.query.plan.client import Recording
     from neptune_context.query.model import AsOf
+    from neptune_context.query.plan.client import Recording
 
 
 def clock_from_json(value: Any) -> Clock:
@@ -72,7 +73,9 @@ def entity_from_json(value: Any) -> Entity:
             for b in value.get("clock_bridges", ())
         ),
         frame_bridges=tuple(
-            FrameBridge(b["transform_id"], frame_from_json(b["parent"]), frame_from_json(b["child"]))
+            FrameBridge(
+                b["transform_id"], frame_from_json(b["parent"]), frame_from_json(b["child"])
+            )
             for b in value.get("frame_bridges", ())
         ),
     )
@@ -140,7 +143,9 @@ class Report:
             f"planner golden: {self.passed}/{self.total} passed ({self.pass_rate:.1%}); "
             f"recordings: {self.live} live, {self.synthetic} synthetic"
         ]
-        lines += [f"  FAIL {o.case.id}: {'; '.join(o.problems)}" for o in self.outcomes if not o.passed]
+        lines += [
+            f"  FAIL {o.case.id}: {'; '.join(o.problems)}" for o in self.outcomes if not o.passed
+        ]
         return "\n".join(lines)
 
 
@@ -159,8 +164,15 @@ def load_cases(directory: Path) -> list[Case]:
         e = v["expected"]
         cases.append(
             Case(
-                v["id"], v["question"], v["as_of"], v["profile"], e["status"], e["query"],
-                tuple(e["blocking"]), tuple(e["info"]), v["source"],
+                v["id"],
+                v["question"],
+                v["as_of"],
+                v["profile"],
+                e["status"],
+                e["query"],
+                tuple(e["blocking"]),
+                tuple(e["info"]),
+                v["source"],
             )
         )
     return cases
@@ -190,7 +202,9 @@ def run(directory: Path, recordings: Mapping[str, Recording] | None = None) -> R
     client = ReplayClient(recorded)
     outcomes = []
     for case in load_cases(directory):
-        planned = plan(case.question, case.as_of, profiles[case.profile], resolver=index, client=client)
+        planned = plan(
+            case.question, case.as_of, profiles[case.profile], resolver=index, client=client
+        )
         outcomes.append(Outcome(case, planned, grade(case, planned)))
     live = sum(r.recorded_by == "live" for r in recorded.values())
     return Report(tuple(outcomes), live, len(recorded) - live)

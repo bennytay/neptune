@@ -11,7 +11,8 @@ All recordings written here are ``synthetic``: they were authored with this file
 model. ``packages/neptune-context/scripts/record_planner_golden.py`` replaces them with live
 responses; the report always says how many of each there are.
 
-``python packages/neptune-context/tests/planner_golden_context.py`` rewrites ``tests/golden/planner/``;
+``python packages/neptune-context/tests/planner_golden_context.py`` rewrites
+``tests/golden/planner/``;
 ``test_planner_golden_context.py`` fails when the files drift from what this module builds.
 """
 
@@ -19,7 +20,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from fractions import Fraction
@@ -276,7 +276,7 @@ def case(
     status: str = "ready",
     blocking: tuple[str, ...] = (),
     info: tuple[str, ...] = (),
-    output: Query | str | None | tuple[()] = (),
+    output: Query | str | tuple[()] | None = (),
     stop: str = "end",
     recorded: bool = True,
 ) -> None:
@@ -290,7 +290,9 @@ def case(
     else:
         text = output  # type: ignore[assignment]
     source = "none" if not recorded else ("model" if output == () else "scripted")
-    SPECS.append(Spec(question, expected, status, blocking, info, profile, as_of, text, stop, source))
+    SPECS.append(
+        Spec(question, expected, status, blocking, info, profile, as_of, text, stop, source)
+    )
 
 
 def m(declared_id: str, kind: str = "machine", depth: int = 0) -> Subject:
@@ -313,10 +315,12 @@ S007 = "site_registry:S-007"
 PLANT7 = "site_registry:plant-7"
 
 
-def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
+def build_cases() -> None:
     # Subjects and graph.
     case("Which runs does AMR-07 appear in?", q(subjects=(AMR07,), graph=g("recorded_by", d=IN)))
-    case("What configuration is AMR-08 running?", q(subjects=(AMR08,), graph=g("has_configuration")))
+    case(
+        "What configuration is AMR-08 running?", q(subjects=(AMR08,), graph=g("has_configuration"))
+    )
     case("What software version does AMR-05 run?", q(subjects=(AMR05,), graph=g("runs_software")))
     case("Which fleet is AMR-06 a member of?", q(subjects=(AMR06,), graph=g("member_of_fleet")))
     case(
@@ -357,7 +361,10 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
     case("Where is the cell arm deployed?", q(subjects=(ARM,), graph=g("deployed_at")))
     case(
         "Which machines does the zone a speed limit govern?",
-        q(subjects=(m("policy_register:speed-limit-zone-a", "policy"),), graph=g("governed_by", d=IN)),
+        q(
+            subjects=(m("policy_register:speed-limit-zone-a", "policy"),),
+            graph=g("governed_by", d=IN),
+        ),
     )
     # Time on a named clock.
     case(
@@ -384,7 +391,11 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
     )
     case(
         "Which calibrations did the cell arm hold from tick 7200000000 on its own clock?",
-        q(subjects=(ARM,), during=During(ARM_CLOCK, 7_200_000_000, None), graph=g("has_calibration")),
+        q(
+            subjects=(ARM,),
+            during=During(ARM_CLOCK, 7_200_000_000, None),
+            graph=g("has_calibration"),
+        ),
     )
     case(
         "What did the drone record between 2026-09-14 10:00 and 2026-09-14 10:05 UTC?",
@@ -397,7 +408,11 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
     )
     case(
         "For quad-12, take ticks 0 to 2700000000000 on its own clock: what configuration held?",
-        q(subjects=(QUAD,), during=During(QUAD_CLOCK, 0, 2_700_000_000_000), graph=g("has_configuration")),
+        q(
+            subjects=(QUAD,),
+            during=During(QUAD_CLOCK, 0, 2_700_000_000_000),
+            graph=g("has_configuration"),
+        ),
     )
     case(
         "Where was the humanoid between 2026-08-01 09:00 and 2026-08-01 10:00 UTC?",
@@ -415,7 +430,11 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
     )
     case(
         "Everything about the drone from tick 3600000000 on its own clock.",
-        q(subjects=(UAV,), during=During(UAV_CLOCK, 3_600_000_000, None), graph=GraphClause(None, 1, BOTH)),
+        q(
+            subjects=(UAV,),
+            during=During(UAV_CLOCK, 3_600_000_000, None),
+            graph=GraphClause(None, 1, BOTH),
+        ),
     )
     case(
         "Which findings were recorded for sensor imu-0042 between ticks 10 and 20?",
@@ -438,7 +457,11 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
     )
     case(
         "What did the north fleet look like as of transaction 15?",
-        q(subjects=(m("fleet_registry:amr-north", "fleet"),), as_of=15, graph=g("member_of_fleet", d=IN)),
+        q(
+            subjects=(m("fleet_registry:amr-north", "fleet"),),
+            as_of=15,
+            graph=g("member_of_fleet", d=IN),
+        ),
     )
     case(
         "Which runs did AMR-06 record?",
@@ -466,15 +489,26 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
     case(
         "Obstacles for the drone: a 15 m sphere at (120, 48.5, 30) in map, and the odom box "
         "(-5,-5,-2) to (5,5,2) m.",
-        q(subjects=(UAV,), regions=frozenset({r_map, r_odom}), frame_bridges=frozenset({UAV_BRIDGE})),
+        q(
+            subjects=(UAV,),
+            regions=frozenset({r_map, r_odom}),
+            frame_bridges=frozenset({UAV_BRIDGE}),
+        ),
     )
     case(
-        "What is in the workspace of ARM-3A: the base_link box from (-0.2, -0.6, 0) to (0.9, 0.6, 1.1) metres?",
-        q(subjects=(ARM,), regions=frozenset({FrameRegion(BASE, "m", Box((-0.2, -0.6, 0.0), (0.9, 0.6, 1.1)))})),
+        "What is in the workspace of ARM-3A: the base_link box from (-0.2, -0.6, 0) "
+        "to (0.9, 0.6, 1.1) metres?",
+        q(
+            subjects=(ARM,),
+            regions=frozenset({FrameRegion(BASE, "m", Box((-0.2, -0.6, 0.0), (0.9, 0.6, 1.1)))}),
+        ),
     )
     case(
         "Anything within 2 m of (0, 0, 0.1) in the tool0 frame of the cell arm?",
-        q(subjects=(ARM,), regions=frozenset({FrameRegion(TOOL0, "m", Sphere((0.0, 0.0, 0.1), 2.0))})),
+        q(
+            subjects=(ARM,),
+            regions=frozenset({FrameRegion(TOOL0, "m", Sphere((0.0, 0.0, 0.1), 2.0))}),
+        ),
     )
     case(
         "What is within 30 metres of (10, 20, 0) in the site_map frame?",
@@ -492,14 +526,20 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
         q(subjects=(AMR07,)),
         status="needs_input",
         blocking=("frame_not_declared",),
-        output=q(subjects=(AMR07,), regions=frozenset({FrameRegion(lidar, "m", Sphere((0.0, 0.0, 0.0), 5.0))})),
+        output=q(
+            subjects=(AMR07,),
+            regions=frozenset({FrameRegion(lidar, "m", Sphere((0.0, 0.0, 0.0), 5.0))}),
+        ),
     )
     case(
         "What is within 5 of (0, 0, 0) in the base_link frame of ARM-3A?",
         q(subjects=(ARM,)),
         status="needs_input",
         blocking=("unit_not_stated",),
-        output=q(subjects=(ARM,), regions=frozenset({FrameRegion(BASE, "m", Sphere((0.0, 0.0, 0.0), 5.0))})),
+        output=q(
+            subjects=(ARM,),
+            regions=frozenset({FrameRegion(BASE, "m", Sphere((0.0, 0.0, 0.0), 5.0))}),
+        ),
     )
     fake_bridge = FrameBridge(rec("invented-transform"), UAV_MAP, UAV_ODOM)
     case(
@@ -509,7 +549,9 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
         status="needs_input",
         blocking=("bridge_not_declared", "draft_withdrawn"),
         output=q(
-            subjects=(UAV,), regions=frozenset({r_map, r_odom}), frame_bridges=frozenset({fake_bridge})
+            subjects=(UAV,),
+            regions=frozenset({r_map, r_odom}),
+            frame_bridges=frozenset({fake_bridge}),
         ),
     )
     # Text.
@@ -551,11 +593,7 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
     )
     case(
         "Semantic search only for 'unexpected stop near dock' in findings.",
-        q(
-            text=TextClause(
-                "unexpected stop near dock", finding, frozenset({TextChannel.VECTOR})
-            )
-        ),
+        q(text=TextClause("unexpected stop near dock", finding, frozenset({TextChannel.VECTOR}))),
     )
     case(
         "Search records for requalification.",
@@ -577,7 +615,9 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
         "Mentions of battery brownout in the rov pool.",
         q(
             subjects=(m("fleet_registry:rov-pool", "fleet"),),
-            text=TextClause("battery brownout", frozenset({TextField.FINDING, TextField.CLAIM_TEXT}), both),
+            text=TextClause(
+                "battery brownout", frozenset({TextField.FINDING, TextField.CLAIM_TEXT}), both
+            ),
         ),
     )
     case(
@@ -599,7 +639,7 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
         q(subjects=(AMR07,), explain=(Diff(AMR07, 1500, 1842),)),
     )
     case(
-        "What changed about ARM-3A between transaction 10 and transaction 20, as of transaction 20?",
+        "What changed about ARM-3A between transaction 10 and 20, as of transaction 20?",
         q(subjects=(ARM,), as_of=20, explain=(Diff(ARM, 10, 20),)),
     )
     case(
@@ -610,12 +650,17 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
         ),
     )
     case(
-        "What held about the truck between 2026-08-30 09:00 UTC and tick 912345678000 on its own clock?",
+        "What held about the truck between 2026-08-30 09:00 UTC and tick 912345678000 "
+        "on its own clock?",
         q(
             subjects=(TRUCK,),
             clock_bridges=frozenset({TRUCK_UTC}),
             explain=(
-                Diff(TRUCK, Instant(UTC_NS, ns(2026, 8, 30, 9)), Instant(TRUCK_CLOCK, 912_345_678_000)),
+                Diff(
+                    TRUCK,
+                    Instant(UTC_NS, ns(2026, 8, 30, 9)),
+                    Instant(TRUCK_CLOCK, 912_345_678_000),
+                ),
             ),
         ),
         profile="agent_utc",
@@ -656,7 +701,11 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
     )
     case(
         "Where was the humanoid located in aisle-3 of plant-7?",
-        q(subjects=(HX,), site=SiteScope(PLANT7, frozenset({"zone_map:aisle-3"})), graph=g("located_at")),
+        q(
+            subjects=(HX,),
+            site=SiteScope(PLANT7, frozenset({"zone_map:aisle-3"})),
+            graph=g("located_at"),
+        ),
     )
     case("Which zones does S-007 have?", q(site=SiteScope(S007), graph=g("zone_of", d=IN)))
     case(
@@ -682,13 +731,23 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
     )
     case(
         "What calibrations does ARM-3A have?",
-        q(inf=False, budget=Budget(32, 2048, None, 50), subjects=(ARM,), graph=g("has_calibration")),
+        q(
+            inf=False,
+            budget=Budget(32, 2048, None, 50),
+            subjects=(ARM,),
+            graph=g("has_calibration"),
+        ),
         profile="policy",
         info=("include_inferred_default", "budget_default"),
     )
     case(
         "Which software does AMR-06 run?",
-        q(inf=False, budget=Budget(32, 2048, None, 50), subjects=(AMR06,), graph=g("runs_software")),
+        q(
+            inf=False,
+            budget=Budget(32, 2048, None, 50),
+            subjects=(AMR06,),
+            graph=g("runs_software"),
+        ),
         profile="policy",
     )
     case(
@@ -697,7 +756,12 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
     )
     case(
         "Allow inferred claims: which fleet is AMR-08 in?",
-        q(inf=True, budget=Budget(32, 2048, None, 50), subjects=(AMR08,), graph=g("member_of_fleet")),
+        q(
+            inf=True,
+            budget=Budget(32, 2048, None, 50),
+            subjects=(AMR08,),
+            graph=g("member_of_fleet"),
+        ),
         profile="policy",
     )
     case(
@@ -830,9 +894,18 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
         None,
         status="invalid",
         blocking=("model_output_invalid",),
-        output=json.dumps({**to_json(q(subjects=(AMR07,))), "answer": "AMR-07 completed 3 missions"}),
+        output=json.dumps(
+            {**to_json(q(subjects=(AMR07,))), "answer": "AMR-07 completed 3 missions"}
+        ),
     )
-    case("Which runs did AMR-06 do?", None, status="failed", blocking=("model_refused",), output=None, stop="refusal")
+    case(
+        "Which runs did AMR-06 do?",
+        None,
+        status="failed",
+        blocking=("model_refused",),
+        output=None,
+        stop="refusal",
+    )
     case(
         "Which runs did AMR-06 do, with every detail?",
         None,
@@ -841,7 +914,13 @@ def build_cases() -> None:  # noqa: PLR0915  (a table of cases)
         output='{"as_of":"head","budget":{"items":',
         stop="max_tokens",
     )
-    case("What is AMR-06 doing?", None, status="invalid", blocking=("model_output_invalid",), output=None)
+    case(
+        "What is AMR-06 doing?",
+        None,
+        status="invalid",
+        blocking=("model_output_invalid",),
+        output=None,
+    )
     case(
         "What is AMR-05 doing?",
         None,
@@ -858,7 +937,8 @@ def build() -> dict[str, str]:
     build_cases()
     index = DeclaredIdentifierIndex(entity_from_json(e) for e in ENTITIES)
     profiles = {name: defaults_from_json(p) for name, p in PROFILES.items()}
-    cases, recordings = [], []
+    cases: list[dict[str, Any]] = []
+    recordings: list[Recording] = []
     for number, spec in enumerate(SPECS, start=1):
         if spec.expected is not None:
             assert not validate(spec.expected), (number, spec.question, validate(spec.expected))
@@ -900,4 +980,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

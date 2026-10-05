@@ -7,6 +7,7 @@ API cannot enforce are removed from what the model sees and are still enforced a
 query decoder, which is the authority on what a valid query is.
 """
 
+# ruff: noqa: E501  (the system prompt is prose, wrapped for the model, not for the editor)
 from __future__ import annotations
 
 import hashlib
@@ -76,7 +77,9 @@ def output_schema() -> JsonObject:
     root_name = str(schema["$ref"]).rsplit("/", 1)[1]
     root = defs[root_name]
     assert isinstance(root, dict)
-    reduced: JsonObject = _reduce({**root, "$defs": {k: v for k, v in defs.items() if k != root_name}})
+    reduced: JsonObject = _reduce(
+        {**root, "$defs": {k: v for k, v in defs.items() if k != root_name}}
+    )
     return reduced
 
 
@@ -138,7 +141,11 @@ def system_prompt() -> str:
 
 def template_sha256() -> str:
     """The lineage's template hash: the system prompt and the output schema it is bound to."""
-    payload: JsonObject = {"schema": output_schema(), "schema_id": SCHEMA_ID, "system": system_prompt()}
+    payload: JsonObject = {
+        "schema": output_schema(),
+        "schema_id": SCHEMA_ID,
+        "system": system_prompt(),
+    }
     return hashlib.sha256(canonical_json.dumps(payload)).hexdigest()
 
 

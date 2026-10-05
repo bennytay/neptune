@@ -1,4 +1,4 @@
-"""Entity resolution for the planner (ADR 0005 §3): names in a question against declared identifiers.
+"""Entity resolution for the planner (ADR 0005 §3): question names to declared identifiers.
 
 The planner never picks an entity itself. ``EntityResolver`` is the injected seam to whatever
 holds the Ledger's declared identifiers (``<namespace>:<value>``): ``find`` returns every name in
@@ -26,7 +26,7 @@ from neptune_context.query.codec import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-    from neptune.model.jsonvalue import JsonObject
+    from neptune.model.jsonvalue import JsonObject, JsonValue
     from neptune_context.query.model import Clock, ClockBridge, FrameBridge, FrameRef
 
 
@@ -53,7 +53,7 @@ class Entity:
         return self.declared_id.split(":", 1)[1]
 
     def to_json(self) -> JsonObject:
-        out: JsonObject = {"declared_id": self.declared_id, "kind": self.kind}
+        out: dict[str, JsonValue] = {"declared_id": self.declared_id, "kind": self.kind}
         if self.label is not None:
             out["label"] = self.label
         if self.primary_clock is not None:
@@ -133,10 +133,10 @@ class DeclaredIdentifierIndex:
                 surfaces.setdefault(name.casefold(), []).append(entity)
         self._surfaces = sorted(surfaces.items(), key=lambda kv: (-len(kv[0]), kv[0]))
 
-    def lookup(self, declared_id: str, *, as_of: int | None) -> Entity | None:  # noqa: ARG002
+    def lookup(self, declared_id: str, *, as_of: int | None) -> Entity | None:
         return self._by_id.get(declared_id)
 
-    def find(self, text: str, *, as_of: int | None) -> tuple[Mention, ...]:  # noqa: ARG002
+    def find(self, text: str, *, as_of: int | None) -> tuple[Mention, ...]:
         working = text.casefold()
         hits: list[tuple[int, Mention]] = []
         for surface, entities in self._surfaces:

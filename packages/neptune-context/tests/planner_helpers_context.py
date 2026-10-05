@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from functools import cache
 from typing import TYPE_CHECKING
 
-from planner_golden_context import GOLDEN
 from neptune_context.eval import planner_golden as pg
 from neptune_context.query import Query, to_json
 from neptune_context.query.model import HEAD, AsOf
@@ -20,10 +19,12 @@ from neptune_context.query.plan import (
     PlannedQuery,
     plan,
 )
-from neptune_context.query.plan.client import Stop
+from planner_golden_context import GOLDEN
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from neptune_context.query.plan.client import Stop
 
 
 @cache

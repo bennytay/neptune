@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
     from pathlib import Path
 
-    from neptune.model.jsonvalue import JsonObject
+    from neptune.model.jsonvalue import JsonObject, JsonValue
 
 DEFAULT_MODEL: Final = "claude-sonnet-5-5"
 DEFAULT_MAX_TOKENS: Final = 4096
@@ -29,7 +29,7 @@ Stop = Literal["end", "max_tokens", "refusal", "other"]
 RECORDED_BY = ("live", "synthetic")
 
 
-class ModelUnavailable(Exception):  # noqa: N818  (a domain condition, not an error class)
+class ModelUnavailable(Exception):
     """The model could not be asked or did not answer (network, auth, quota, no recording)."""
 
 
@@ -92,7 +92,7 @@ class Recording:
 
     def to_json(self) -> JsonObject:
         """No ``null`` (canonical JSON has none): a response without text omits ``text``."""
-        out: JsonObject = {
+        out: dict[str, JsonValue] = {
             "model": self.model,
             "recorded_by": self.recorded_by,
             "request_sha256": self.request_sha256,

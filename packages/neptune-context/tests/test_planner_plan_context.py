@@ -1,28 +1,31 @@
-"""``plan`` end to end against a scripted model: lineage, defaults, ambiguity, blockers, failures."""
+"""``plan`` against a scripted model: lineage, defaults, ambiguity, blockers and failures."""
 
 from __future__ import annotations
 
 import json
 from fractions import Fraction
+from typing import Any
 
 import pytest
-from planner_helpers_context import ScriptedModel, planned, world
+
 from neptune_context.query import Budget, Query, query_id, to_json
 from neptune_context.query.model import (
+    AsOf,
     Box,
     CivilTime,
+    Diff,
+    Direction,
     DomainClock,
     During,
     FrameRef,
     FrameRegion,
     GraphClause,
-    Direction,
-    Subject,
     Instant,
-    Diff,
+    Subject,
 )
-from neptune_context.query.plan import PlanStatus, Severity, choose
+from neptune_context.query.plan import PlannedQuery, PlanStatus, Severity, choose
 from neptune_context.query.plan.planner import MAX_QUESTION_CHARS
+from planner_helpers_context import ScriptedModel, planned, world
 
 AMR07 = Subject("machine", "asset_tag:AMR-07")
 RUNS = GraphClause(frozenset({"recorded_by"}), 1, Direction.IN)
@@ -32,7 +35,7 @@ def good() -> Query:
     return Query(include_inferred=True, budget=Budget(100), subjects=frozenset({AMR07}), graph=RUNS)
 
 
-def codes(result, severity: Severity | None = None) -> set[str]:  # noqa: ANN001
+def codes(result: PlannedQuery, severity: Severity | None = None) -> set[str]:
     return {f.code.value for f in result.findings if severity is None or f.severity is severity}
 
 
@@ -62,7 +65,9 @@ def test_the_model_is_asked_exactly_once_and_failure_is_never_replanned() -> Non
 
 
 def test_an_answer_smuggled_into_the_output_is_refused_not_returned() -> None:
-    result = planned("How many runs?", ScriptedModel(json.dumps({**to_json(good()), "answer": "3"})))
+    result = planned(
+        "How many runs?", ScriptedModel(json.dumps({**to_json(good()), "answer": "3"}))
+    )
     assert result.query is None and result.refusal is not None
     assert any(f.at == "/answer" for f in result.refusal.findings)
 
@@ -77,7 +82,9 @@ def test_an_answer_smuggled_into_the_output_is_refused_not_returned() -> None:
         ({"text": "   "}, PlanStatus.INVALID, "model_output_invalid"),
     ],
 )
-def test_model_failures_are_visible_plans_not_exceptions(kwargs, status, code) -> None:  # noqa: ANN001
+def test_model_failures_are_visible_plans_not_exceptions(
+    kwargs: dict[str, Any], status: PlanStatus, code: str
+) -> None:
     result = planned("Which runs does AMR-07 appear in?", ScriptedModel(**kwargs))
     assert result.status is status and result.query is None and not result.executable
     assert codes(result, Severity.BLOCKING) == {code}
@@ -99,14 +106,14 @@ def test_the_question_length_boundary() -> None:
 
 
 @pytest.mark.parametrize("as_of", [-1, 2**63, True, "now", 1.5, None])
-def test_a_bad_as_of_is_refused_before_the_model(as_of) -> None:  # noqa: ANN001
+def test_a_bad_as_of_is_refused_before_the_model(as_of: Any) -> None:
     model = ScriptedModel(good())
     result = planned("Which runs does AMR-07 appear in?", model, as_of=as_of)
     assert codes(result) == {"bad_input"} and model.requests == []
 
 
 @pytest.mark.parametrize("as_of", [0, 2**63 - 1, "head"])
-def test_as_of_boundaries_are_accepted(as_of) -> None:  # noqa: ANN001
+def test_as_of_boundaries_are_accepted(as_of: AsOf) -> None:
     query = Query(True, Budget(100), frozenset({AMR07}), as_of=as_of, graph=RUNS)
     result = planned("Which runs does AMR-07 appear in?", ScriptedModel(query), as_of=as_of)
     assert result.status is PlanStatus.READY and result.query is not None
@@ -152,8 +159,11 @@ def test_choose_settles_an_ambiguity_without_asking_the_model_again() -> None:
 
 def test_a_primary_clock_default_is_stated() -> None:
     query = Query(
-        True, Budget(100), frozenset({AMR07}),
-        during=During(DomainClock("rec:sha256:" + "0" * 64), 1, 2), graph=RUNS,
+        True,
+        Budget(100),
+        frozenset({AMR07}),
+        during=During(DomainClock("rec:sha256:" + "0" * 64), 1, 2),
+        graph=RUNS,
     )
     result = planned("What did AMR-07 do between ticks 1 and 2?", ScriptedModel(query))
     assert "clock_not_declared" in codes(result, Severity.BLOCKING)
@@ -191,17 +201,24 @@ def test_a_relative_time_phrase_is_never_resolved() -> None:
 def test_an_explicit_date_anchors_a_relative_word() -> None:
     clock = world()[0].lookup("asset_tag:AMR-07", as_of=None)
     assert clock is not None and clock.primary_clock is not None
-    query = Query(True, Budget(100), frozenset({AMR07}), during=During(clock.primary_clock, 5, 9), graph=RUNS)
-    result = planned("What did AMR-07 do overnight on 2026-09-14 on its own clock?", ScriptedModel(query))
+    query = Query(
+        True, Budget(100), frozenset({AMR07}), during=During(clock.primary_clock, 5, 9), graph=RUNS
+    )
+    result = planned(
+        "What did AMR-07 do overnight on 2026-09-14 on its own clock?", ScriptedModel(query)
+    )
     assert result.executable
 
 
 def test_undeclared_frames_units_and_bridges_are_blocked_and_removed() -> None:
     arm = Subject("machine", "asset_tag:ARM-3A")
-    bad_frame = FrameRegion(FrameRef("tcp", "rec:sha256:" + "1" * 64), "m", Box((0, 0, 0), (1, 1, 1)))
-    result = planned("ARM-3A within a box in the tcp frame, in m", ScriptedModel(
-        Query(True, Budget(100), frozenset({arm}), regions=frozenset({bad_frame}))
-    ))
+    bad_frame = FrameRegion(
+        FrameRef("tcp", "rec:sha256:" + "1" * 64), "m", Box((0, 0, 0), (1, 1, 1))
+    )
+    result = planned(
+        "ARM-3A within a box in the tcp frame, in m",
+        ScriptedModel(Query(True, Budget(100), frozenset({arm}), regions=frozenset({bad_frame}))),
+    )
     assert "frame_not_declared" in codes(result, Severity.BLOCKING)
     assert result.query is not None and not result.query.regions
 
@@ -217,9 +234,14 @@ def test_explain_diffs_on_an_undeclared_clock_are_dropped() -> None:
 
 
 def test_a_withdrawn_draft_offers_no_query() -> None:
-    query = Query(True, Budget(100), frozenset(), regions=frozenset({
-        FrameRegion(FrameRef("tcp", "rec:sha256:" + "1" * 64), "m", Box((0, 0, 0), (1, 1, 1)))
-    }))
+    query = Query(
+        True,
+        Budget(100),
+        frozenset(),
+        regions=frozenset(
+            {FrameRegion(FrameRef("tcp", "rec:sha256:" + "1" * 64), "m", Box((0, 0, 0), (1, 1, 1)))}
+        ),
+    )
     result = planned("anything in a box in the tcp frame, in m", ScriptedModel(query))
     assert result.query is None and result.status is PlanStatus.NEEDS_INPUT
     assert {"frame_not_declared", "draft_withdrawn"} <= codes(result, Severity.BLOCKING)
@@ -237,7 +259,9 @@ def test_plans_are_deterministic_and_their_bytes_are_canonical() -> None:
 
 def test_a_different_model_answer_is_a_different_lineage() -> None:
     a = planned("Which runs does AMR-07 appear in?", ScriptedModel(good()))
-    b = planned("Which runs does AMR-07 appear in?", ScriptedModel(good(), model="claude-sonnet-5-6"))
+    b = planned(
+        "Which runs does AMR-07 appear in?", ScriptedModel(good(), model="claude-sonnet-5-6")
+    )
     assert a.lineage.model_id != b.lineage.model_id
     assert a.lineage.request_sha256 == b.lineage.request_sha256
     assert a.lineage.response_sha256 == b.lineage.response_sha256
