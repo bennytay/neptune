@@ -499,6 +499,8 @@ def _drop_record_indexes(conn: Conn) -> list[str]:
     bulk load; return the DDL that recreates them exactly as the migrations made them."""
     restore: list[str] = []
     for table in (
+        "time_interval",
+        "spatial_extent",
         "thread_clock_mapping",
         "thread_identity_link",
         "thread_unresolved",

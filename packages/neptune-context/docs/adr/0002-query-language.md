@@ -98,8 +98,8 @@ the query also needs one canonical encoding and a stable id.
    encoding, a removed or renamed finding code. A new optional member is additive (an old reader refuses a
    document that uses it as `shape`, never misreads it, and no existing id changes); so is a new finding
    code. The registry contract `query-packet` stays `planned` until the
-   context packet lands (MVL-109 and its implementation); its first published version then registers
-   `neptune_context.contract` as owner module with the query and packet schemas together.
+   C1 gate (MVL-111) publishes its first version with the query and packet halves together (ADR 0003 §9),
+   registering `neptune_context.contract` as owner module.
 
 ## Worked queries
 
@@ -329,7 +329,8 @@ over a kind-wide fleet selector (`graph_without_anchor`); a `during` in naive lo
 - **Hash the dataclass `repr` or pickled bytes for the id.** Not stable across Python versions or field
   order. Canonical JSON is already the compiler's identity encoding. Lost.
 - **Publish the registry contract now with the query only.** The registry contract is the query *and*
-  packet; publishing half would force an immediate bump. The schema is exported and tested here now. Lost.
+  packet; publishing half would force an immediate bump. The schema is exported and tested here now, and
+  published with the packet's at the C1 gate. Lost.
 
 ## Consequences
 
