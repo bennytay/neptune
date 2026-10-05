@@ -24,9 +24,14 @@ import pytest
 from conftest import new_database
 from ledger_catalog_rows import add_package
 from neptune.identity import canonical_json
+from neptune.identity.provenance import evidence_record_id, transform_record
+from neptune.model.ids import LogicalId
 from neptune.model.kinds import kinds_at
-from neptune.model.knowledge import Known
+from neptune.model.knowledge import AssertionKind, Known, NotCovered
+from neptune.model.provenance import Provenance
 from neptune.model.record import SCHEMA_VERSION
+from neptune.model.task import WorkOrder
+from neptune.store.package import package_files, read_package
 from neptune_ledger.api import codec
 from neptune_ledger.catalog import check, projection
 from neptune_ledger.catalog.index import (
@@ -521,19 +526,43 @@ def test_a_package_of_a_version_the_registry_lacks_is_refused_and_writes_nothing
         assert rows(pg, f"SELECT count(*) FROM tenant_acme.{table}") == [(0,)]
 
 
+def newest_package(tmp_path: Path) -> WorkedPackage:
+    """A package of package-schema 7: the schema-4 manipulator cell plus one work order (root
+    ADR 0063), stated by a declared-records transform over the cell's risk-assessment transform.
+    No worked example holds a version-7 kind, and a package is written at the lowest version that
+    holds its records, so the newest version needs a record of its own."""
+    cell = materialise("manipulator_cell", tmp_path / "manipulator_cell-4")
+    records = list(read_package(cell.root).records)
+    assessment = next(record for record in records if record.kind == "risk_assessment")
+    declared = transform_record(
+        adapter_id="neptune.declared",
+        adapter_version="0.1.0",
+        config={},
+        upstream=[assessment.provenance.transform],
+    )
+    evidence = assessment.provenance.evidence
+    stated = Provenance(evidence, declared.id, AssertionKind.STATED)
+    order = WorkOrder(
+        evidence_record_id("work_order", evidence, declared),
+        stated,
+        assessment.id,
+        (Known(LogicalId("work_order", "WO-1"), stated),),
+        NotCovered(),
+        NotCovered(),
+        NotCovered(),
+        (),
+        NotCovered(),
+    )
+    files = package_files([*records, declared, order])
+    return write("manipulator_cell", tmp_path / "manipulator_cell", files)
+
+
 def test_the_newest_version_is_read_and_the_next_is_refused(
     catalog: PostgresCatalog, tmp_path: Path
 ) -> None:
-    """Boundary: the registry's newest version registers; the same package one version past it is
-    a future version. No worked example reaches schema 6 (root ADR 0061 §7), so the newest is the
-    manipulator cell with one maintenance event's parts left blank: an ``Unknown`` list, which
-    writes that record, and so the package, at version 6 (root ADR 0061 §6)."""
-    blank = with_changed_body(
-        "manipulator_cell",
-        "maintenance_event",
-        lambda record: {**record, "parts": {"knowledge": "unknown"}, "schema_version": 6},
-    )
-    cell = write("manipulator_cell", tmp_path / "manipulator_cell", blank)
+    """Boundary: the registry's newest version (the manipulator cell with a work order, version
+    7) registers; the same package one version past it is a future version."""
+    cell = newest_package(tmp_path)
     assert cell.schema_version == shipped_registry().latest.version == SCHEMA_VERSION
     manifest = dict(cell.manifest)
     manifest["schema_version"] = shipped_registry().latest.version + 1
@@ -546,6 +575,22 @@ def test_the_newest_version_is_read_and_the_next_is_refused(
         )
     refused = catalog.register(future)
     assert [f.code for f in refused.findings] == ["unsupported_schema_version"]
+    assert catalog.register(cell.root).outcome == "registered"
+
+
+def test_a_version_6_package_with_a_blank_list_registers(
+    catalog: PostgresCatalog, tmp_path: Path
+) -> None:
+    """No worked example reaches schema 6 (root ADR 0061 §7): the manipulator cell with one
+    maintenance event's parts left blank, an ``Unknown`` list, writes that record, and so the
+    package, at version 6 (root ADR 0061 §6); the registry reads it."""
+    blank = with_changed_body(
+        "manipulator_cell",
+        "maintenance_event",
+        lambda record: {**record, "parts": {"knowledge": "unknown"}, "schema_version": 6},
+    )
+    cell = write("manipulator_cell", tmp_path / "manipulator_cell", blank)
+    assert cell.schema_version == 6
     assert catalog.register(cell.root).outcome == "registered"
 
 
